@@ -1,0 +1,17 @@
+# Independent sibling repos staged locally inside this folder
+sdks/
+org/
+
+# Internal planning and design material — private, never committed
+design/
+docs/
+
+# OS / editor
+.DS_Store
+
+# Dependencies & builds (for when code lands)
+node_modules/
+dist/
+build/
+.env
+.env.*
