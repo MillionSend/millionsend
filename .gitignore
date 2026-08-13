@@ -18,3 +18,4 @@ build/
 
 # Turborepo cache
 .turbo/
+!.env.example
