@@ -18,10 +18,5 @@
     "@biomejs/biome": "^2.3.2",
     "turbo": "^2.10.9",
     "typescript": "^5.9.3"
-  },
-  "pnpm": {
-    "overrides": {
-      "esbuild@<0.25.0": ">=0.25.0"
-    }
   }
 }
