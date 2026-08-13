@@ -20,6 +20,7 @@ export {
   type IdempotencyBegin,
   purgeExpiredIdempotencyKeys,
 } from "./idempotency.js";
+export { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
 export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";
 export { extractAddrSpec, findSuppressed, hashRecipient } from "./suppressions.js";

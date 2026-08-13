@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { canonicalBodyHash } from "../src/canonical-json.js";
@@ -10,7 +11,6 @@ import { beginIdempotent, completeIdempotent } from "../src/idempotency.js";
 import { releaseDailyQuota, reserveDailyQuota } from "../src/quota.js";
 import { applyStatusCas, transitionQueueState } from "../src/status.js";
 import { findSuppressed, hashRecipient } from "../src/suppressions.js";
-import { createTeam, createTestDb } from "./helpers/test-db.js";
 
 let db: Db;
 let close: () => Promise<void>;

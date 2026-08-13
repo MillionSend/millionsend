@@ -6,7 +6,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { drizzle } from "drizzle-orm/pglite";
 
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "../../../db/drizzle");
+const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "../../db/drizzle");
 
 /**
  * Fresh in-memory Postgres with the real generated migrations applied —

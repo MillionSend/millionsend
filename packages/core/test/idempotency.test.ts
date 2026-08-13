@@ -1,11 +1,11 @@
 import type { Db } from "@millionsend/db";
+import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   beginIdempotent,
   completeIdempotent,
   purgeExpiredIdempotencyKeys,
 } from "../src/idempotency.js";
-import { createTeam, createTestDb } from "./helpers/test-db.js";
 
 let db: Db;
 let close: () => Promise<void>;

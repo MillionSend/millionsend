@@ -1,5 +1,5 @@
 {
-  "name": "@millionsend/core",
+  "name": "@millionsend/test-utils",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,18 +10,15 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.3.14",
     "@millionsend/db": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.3.14",
     "@types/node": "^22.20.1",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.4",
-    "@millionsend/test-utils": "workspace:*"
+    "typescript": "^5.9.3"
   }
 }
