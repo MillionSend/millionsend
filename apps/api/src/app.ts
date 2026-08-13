@@ -15,6 +15,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull } from "drizzle-orm";
+import { createMiddleware } from "hono/factory";
 import {
   errorSchema,
   getEmailResponseSchema,
@@ -37,8 +38,8 @@ interface AuthContext {
 
 type Env = { Variables: { auth: AuthContext } };
 
-function apiError(status: 401 | 403 | 404 | 422, name: string, message: string) {
-  return { json: { statusCode: status, name, message }, status } as const;
+function errorBody(status: number, name: string, message: string) {
+  return { statusCode: status, name, message };
 }
 
 export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
@@ -66,16 +67,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   });
 
   // Bearer auth for the /emails collection and everything under it.
-  const requireApiKey = async (
-    c: Parameters<Parameters<typeof app.use>[1]>[0],
-    next: () => Promise<void>,
-  ) => {
+  const requireApiKey = createMiddleware<Env>(async (c, next) => {
     const header = c.req.header("authorization") ?? "";
     const token = header.startsWith("Bearer ") ? header.slice(7) : null;
     const prefix = token ? extractTokenPrefix(token) : null;
     if (!token || !prefix) {
-      const e = apiError(401, "missing_api_key", "Missing or malformed API key");
-      return c.json(e.json, e.status);
+      return c.json(errorBody(401, "missing_api_key", "Missing or malformed API key"), 401);
     }
     const candidates = await deps.db
       .select({
@@ -89,8 +86,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       .where(and(eq(schema.apiKeys.tokenPrefix, prefix), isNull(schema.apiKeys.revokedAt)));
     const match = candidates.find((k) => verifyApiKey(token, k.keyHash));
     if (!match) {
-      const e = apiError(401, "invalid_api_key", "API key is invalid");
-      return c.json(e.json, e.status);
+      return c.json(errorBody(401, "invalid_api_key", "API key is invalid"), 401);
     }
     c.set("auth", { teamId: match.teamId, plan: match.plan, apiKeyId: match.id });
     deps.db
@@ -102,7 +98,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         () => undefined,
       );
     await next();
-  };
+  });
   app.use("/emails", requireApiKey);
   app.use("/emails/*", requireApiKey);
 
@@ -130,8 +126,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
 
     const suppressed = await findSuppressed(deps.db, auth.teamId, body.to);
     if (suppressed.size === body.to.length) {
-      const e = apiError(422, "validation_error", "All recipients are suppressed");
-      return c.json(e.json, e.status);
+      return c.json(errorBody(422, "validation_error", "All recipients are suppressed"), 422);
     }
 
     const idemKey = c.req.header("idempotency-key") ?? null;
@@ -147,14 +142,16 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         if (first) return c.json({ id: first }, 200);
       }
       if (begin.kind === "conflict" || begin.kind === "in_flight") {
-        const e = apiError(
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            begin.kind === "conflict"
+              ? "Idempotency key reused with a different payload"
+              : "A request with this idempotency key is still processing",
+          ),
           422,
-          "validation_error",
-          begin.kind === "conflict"
-            ? "Idempotency key reused with a different payload"
-            : "A request with this idempotency key is still processing",
         );
-        return c.json(e.json, e.status);
       }
     }
 
@@ -229,8 +226,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       .from(schema.emails)
       .where(and(eq(schema.emails.id, id), eq(schema.emails.teamId, auth.teamId)));
     if (!email) {
-      const e = apiError(404, "not_found", "Email not found");
-      return c.json(e.json, e.status);
+      return c.json(errorBody(404, "not_found", "Email not found"), 404);
     }
     let html: string | null = null;
     let text: string | null = null;
