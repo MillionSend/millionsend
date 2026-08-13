@@ -23,7 +23,9 @@ export const apiKeys = pgTable(
     last4: text("last4").notNull(),
     permission: apiKeyPermissionEnum("permission").notNull().default("full_access"),
     // Null = all domains; set = key restricted to one sending domain.
-    domainId: uuid("domain_id").references(() => domains.id, { onDelete: "set null" }),
+    // restrict, never set-null: deleting a domain must not silently widen a
+    // scoped key into an all-domains key — the delete flow revokes such keys first.
+    domainId: uuid("domain_id").references(() => domains.id, { onDelete: "restrict" }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),

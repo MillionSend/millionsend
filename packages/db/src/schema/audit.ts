@@ -2,8 +2,9 @@ import { index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-cor
 import { teams } from "./teams.js";
 
 /**
- * Append-only by policy AND by database grants: the migration revokes
- * UPDATE/DELETE from the application role on this table.
+ * Append-only, enforced in the database by a trigger that rejects
+ * UPDATE/DELETE (see the audit_log_append_only custom migration) — grants
+ * alone can't enforce this until dedicated roles exist.
  */
 export const auditLog = pgTable(
   "audit_log",

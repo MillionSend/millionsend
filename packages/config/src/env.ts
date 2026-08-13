@@ -6,13 +6,26 @@ const boolFromString = z
   .default("false")
   .transform((v) => v === "true" || v === "1");
 
+// Canonical base64 only: Buffer.from silently skips foreign characters, so a
+// mangled key could pass a length check yet decode differently elsewhere —
+// which would make previously encrypted bodies unrecoverable.
+const canonicalBase64Key = z.string().refine(
+  (v) => {
+    const decoded = Buffer.from(v, "base64");
+    return decoded.length === 32 && decoded.toString("base64") === v;
+  },
+  { message: "must be 32 bytes of canonical base64 (`openssl rand -base64 32`)" },
+);
+
 /**
- * Process environment, validated at boot. Every process (web, api, worker, smtp)
- * imports this and crashes early on misconfiguration instead of at first use.
+ * Process environment, validated at import so every process (web, api,
+ * worker, smtp) crashes at boot on misconfiguration instead of at first use.
+ * Tests set SKIP_ENV_VALIDATION=1 to construct partial environments.
  *
  * IS_CLOUD is the single seam between the hosted SaaS and self-host:
- * cloud-only variables must stay optional here and be refined below, so a
- * self-host boot never demands Stripe/KMS configuration.
+ * cloud-only variables stay optional per-field and are enforced by the
+ * cross-field rules below, so a self-host boot never demands Stripe/KMS
+ * configuration.
  */
 export const env = createEnv({
   server: {
@@ -22,14 +35,8 @@ export const env = createEnv({
     IS_CLOUD: boolFromString,
 
     // Envelope-encryption KEK for email bodies at rest.
-    // Self-host: required, 32 bytes base64 (`openssl rand -base64 32`).
-    // Cloud: omitted in favor of AWS KMS (KMS_KEY_ID below).
-    MASTER_ENCRYPTION_KEY: z
-      .string()
-      .refine((v) => Buffer.from(v, "base64").length === 32, {
-        message: "MASTER_ENCRYPTION_KEY must be 32 bytes, base64-encoded",
-      })
-      .optional(),
+    // Self-host: required. Cloud: omitted in favor of KMS_KEY_ID.
+    MASTER_ENCRYPTION_KEY: canonicalBase64Key.optional(),
     KMS_KEY_ID: z.string().optional(),
 
     // BYO-SES for self-host; cloud uses the platform account.
@@ -47,26 +54,29 @@ export const env = createEnv({
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
+  skipValidation: process.env.SKIP_ENV_VALIDATION === "1",
 });
 
 export type Env = typeof env;
 
-/**
- * Cross-field rules that createEnv cannot express per-field.
- * Called from process entrypoints after import so tests can construct
- * partial environments without tripping boot checks.
- */
+/** Cross-field rules that per-field schemas cannot express. */
 export function assertEnvConsistency(e: Env): void {
   if (e.IS_CLOUD) {
-    if (!e.KMS_KEY_ID) {
-      throw new Error("IS_CLOUD=true requires KMS_KEY_ID (cloud KEK lives in KMS)");
-    }
-    if (!e.STRIPE_SECRET_KEY) {
-      throw new Error("IS_CLOUD=true requires STRIPE_SECRET_KEY");
+    for (const key of [
+      "KMS_KEY_ID",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "APP_BASE_URL",
+    ] as const) {
+      if (!e[key]) throw new Error(`IS_CLOUD=true requires ${key}`);
     }
   } else if (!e.MASTER_ENCRYPTION_KEY) {
     throw new Error(
       "Self-host requires MASTER_ENCRYPTION_KEY (32 bytes base64; generate with `openssl rand -base64 32`)",
     );
   }
+}
+
+if (process.env.SKIP_ENV_VALIDATION !== "1") {
+  assertEnvConsistency(env);
 }

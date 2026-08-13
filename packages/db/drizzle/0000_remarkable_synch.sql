@@ -1,9 +1,10 @@
 CREATE TYPE "public"."api_key_permission" AS ENUM('full_access', 'sending_access');--> statement-breakpoint
 CREATE TYPE "public"."domain_status" AS ENUM('pending', 'verified', 'temporary_failure', 'failed');--> statement-breakpoint
 CREATE TYPE "public"."tls_mode" AS ENUM('opportunistic', 'enforced');--> statement-breakpoint
+CREATE TYPE "public"."email_event_type" AS ENUM('queued', 'queued_quota', 'sent', 'delivery_delayed', 'delivered', 'opened', 'clicked', 'bounced', 'complained', 'suppressed', 'rendering_failure', 'failed');--> statement-breakpoint
 CREATE TYPE "public"."email_status" AS ENUM('queued_quota', 'queued', 'sent', 'delivery_delayed', 'delivered', 'opened', 'clicked', 'bounced', 'complained', 'suppressed', 'failed');--> statement-breakpoint
 CREATE TYPE "public"."suppression_reason" AS ENUM('hard_bounce', 'complaint', 'manual', 'one_click_unsubscribe');--> statement-breakpoint
-CREATE TYPE "public"."plan" AS ENUM('free', 'pro', 'scale', 'self_hosted');--> statement-breakpoint
+CREATE TYPE "public"."plan" AS ENUM('free', 'pro', 'scale');--> statement-breakpoint
 CREATE TYPE "public"."webhook_delivery_status" AS ENUM('pending', 'success', 'failed', 'exhausted');--> statement-breakpoint
 CREATE TYPE "public"."webhook_status" AS ENUM('enabled', 'disabled', 'auto_disabled');--> statement-breakpoint
 CREATE TABLE "api_keys" (
@@ -54,7 +55,7 @@ CREATE TABLE "domains" (
 CREATE TABLE "email_events" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"email_id" uuid NOT NULL,
-	"type" "email_status" NOT NULL,
+	"type" "email_event_type" NOT NULL,
 	"occurred_at" timestamp with time zone NOT NULL,
 	"data" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
@@ -151,7 +152,7 @@ CREATE TABLE "webhook_endpoints" (
 );
 --> statement-breakpoint
 ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_domain_id_domains_id_fk" FOREIGN KEY ("domain_id") REFERENCES "public"."domains"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_domain_id_domains_id_fk" FOREIGN KEY ("domain_id") REFERENCES "public"."domains"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "domains" ADD CONSTRAINT "domains_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "email_events" ADD CONSTRAINT "email_events_email_id_emails_id_fk" FOREIGN KEY ("email_id") REFERENCES "public"."emails"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -167,8 +168,9 @@ CREATE INDEX "audit_log_team_idx" ON "audit_log" USING btree ("team_id","created
 CREATE UNIQUE INDEX "domains_team_name_idx" ON "domains" USING btree ("team_id","name");--> statement-breakpoint
 CREATE INDEX "email_events_email_idx" ON "email_events" USING btree ("email_id","occurred_at");--> statement-breakpoint
 CREATE INDEX "emails_team_created_idx" ON "emails" USING btree ("team_id","created_at");--> statement-breakpoint
-CREATE INDEX "emails_ses_message_id_idx" ON "emails" USING btree ("ses_message_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "emails_ses_message_id_idx" ON "emails" USING btree ("ses_message_id") WHERE "emails"."ses_message_id" is not null;--> statement-breakpoint
 CREATE INDEX "emails_body_unpurged_idx" ON "emails" USING btree ("created_at") WHERE "emails"."body_purged_at" is null;--> statement-breakpoint
 CREATE INDEX "idempotency_expiry_idx" ON "idempotency_keys" USING btree ("expires_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "suppressions_team_hash_idx" ON "suppressions" USING btree ("team_id","email_hash");--> statement-breakpoint
-CREATE INDEX "webhook_deliveries_endpoint_idx" ON "webhook_deliveries" USING btree ("endpoint_id","created_at");
+CREATE INDEX "webhook_deliveries_endpoint_idx" ON "webhook_deliveries" USING btree ("endpoint_id","created_at");--> statement-breakpoint
+CREATE INDEX "webhook_deliveries_open_idx" ON "webhook_deliveries" USING btree ("created_at") WHERE "webhook_deliveries"."status" in ('pending', 'failed');

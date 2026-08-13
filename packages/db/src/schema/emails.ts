@@ -1,6 +1,5 @@
-import { isNull } from "drizzle-orm";
+import { isNull, sql } from "drizzle-orm";
 import {
-  customType,
   index,
   integer,
   jsonb,
@@ -8,21 +7,21 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { bytea } from "./custom-types.js";
 import { domains } from "./domains.js";
 import { teams } from "./teams.js";
-
-const bytea = customType<{ data: Buffer }>({
-  dataType() {
-    return "bytea";
-  },
-});
 
 /**
  * Status values are ordered: updates apply only when the incoming status ranks
  * higher than the stored one (compare-and-set in @millionsend/core), so
  * out-of-order SES events can never regress a delivered email to "sent".
+ *
+ * "failed" is strictly terminal: retryable send errors keep the email in
+ * "queued" (the job requeues); only permanent, non-retryable failure sets
+ * "failed" — a failed email can therefore never later be delivered.
  */
 export const emailStatusEnum = pgEnum("email_status", [
   "queued_quota",
@@ -35,6 +34,26 @@ export const emailStatusEnum = pgEnum("email_status", [
   "bounced",
   "complained",
   "suppressed",
+  "failed",
+]);
+
+/**
+ * Event vocabulary is deliberately a separate, unordered enum: it grows with
+ * provider events (e.g. rendering_failure) that have no place in the ordered
+ * status ladder above.
+ */
+export const emailEventTypeEnum = pgEnum("email_event_type", [
+  "queued",
+  "queued_quota",
+  "sent",
+  "delivery_delayed",
+  "delivered",
+  "opened",
+  "clicked",
+  "bounced",
+  "complained",
+  "suppressed",
+  "rendering_failure",
   "failed",
 ]);
 
@@ -73,7 +92,10 @@ export const emails = pgTable(
   },
   (t) => [
     index("emails_team_created_idx").on(t.teamId, t.createdAt),
-    index("emails_ses_message_id_idx").on(t.sesMessageId),
+    // The SES event join key must be unique when present.
+    uniqueIndex("emails_ses_message_id_idx")
+      .on(t.sesMessageId)
+      .where(sql`${t.sesMessageId} is not null`),
     // Partial index drives the retention purge scan (rows whose body still exists).
     index("emails_body_unpurged_idx").on(t.createdAt).where(isNull(t.bodyPurgedAt)),
   ],
@@ -86,7 +108,7 @@ export const emailEvents = pgTable(
     emailId: uuid("email_id")
       .notNull()
       .references(() => emails.id, { onDelete: "cascade" }),
-    type: emailStatusEnum("type").notNull(),
+    type: emailEventTypeEnum("type").notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     // Raw provider payload subset (bounce diagnostics, click URL, user agent...).
     data: jsonb("data").$type<Record<string, unknown>>(),

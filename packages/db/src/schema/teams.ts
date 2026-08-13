@@ -1,6 +1,8 @@
 import { pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
-export const planEnum = pgEnum("plan", ["free", "pro", "scale", "self_hosted"]);
+// Billing concept only — deployment mode lives exclusively in env.IS_CLOUD;
+// self-host ignores plan entirely (quota code guards on IS_CLOUD first).
+export const planEnum = pgEnum("plan", ["free", "pro", "scale"]);
 
 export const teams = pgTable("teams", {
   id: uuid("id").primaryKey().defaultRandom(),

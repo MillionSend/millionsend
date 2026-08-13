@@ -5,8 +5,15 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1786661312335,
-      "tag": "0000_motionless_loa",
+      "when": 1786662206039,
+      "tag": "0000_remarkable_synch",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786662206552,
+      "tag": "0001_audit_log_append_only",
       "breakpoints": true
     }
   ]

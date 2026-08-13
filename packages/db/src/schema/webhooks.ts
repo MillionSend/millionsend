@@ -1,21 +1,7 @@
-import {
-  customType,
-  index,
-  integer,
-  jsonb,
-  pgEnum,
-  pgTable,
-  text,
-  timestamp,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bytea } from "./custom-types.js";
 import { teams } from "./teams.js";
-
-const bytea = customType<{ data: Buffer }>({
-  dataType() {
-    return "bytea";
-  },
-});
 
 export const webhookStatusEnum = pgEnum("webhook_status", ["enabled", "disabled", "auto_disabled"]);
 
@@ -58,5 +44,12 @@ export const webhookDeliveries = pgTable(
     lastResponseCode: integer("last_response_code"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.createdAt)],
+  (t) => [
+    index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.createdAt),
+    // The retry worker polls non-terminal rows; keep that scan on a small
+    // partial index that rows exit as soon as they reach a terminal status.
+    index("webhook_deliveries_open_idx")
+      .on(t.createdAt)
+      .where(sql`${t.status} in ('pending', 'failed')`),
+  ],
 );

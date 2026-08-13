@@ -1,6 +1,6 @@
 {
-  "id": "b753c3d6-b062-4741-83a9-ff181b1b6cf8",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "55f8cea5-eff9-474b-af92-9eda3bf4d233",
+  "prevId": "b753c3d6-b062-4741-83a9-ff181b1b6cf8",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -91,47 +91,47 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "api_keys_team_id_teams_id_fk": {
           "name": "api_keys_team_id_teams_id_fk",
           "tableFrom": "api_keys",
-          "tableTo": "teams",
           "columnsFrom": [
             "team_id"
           ],
+          "tableTo": "teams",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "api_keys_domain_id_domains_id_fk": {
           "name": "api_keys_domain_id_domains_id_fk",
           "tableFrom": "api_keys",
-          "tableTo": "domains",
           "columnsFrom": [
             "domain_id"
           ],
+          "tableTo": "domains",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "restrict"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "api_keys_key_hash_unique": {
           "name": "api_keys_key_hash_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "key_hash"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -217,24 +217,24 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "audit_log_team_id_teams_id_fk": {
           "name": "audit_log_team_id_teams_id_fk",
           "tableFrom": "audit_log",
-          "tableTo": "teams",
           "columnsFrom": [
             "team_id"
           ],
+          "tableTo": "teams",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -365,24 +365,24 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "domains_team_id_teams_id_fk": {
           "name": "domains_team_id_teams_id_fk",
           "tableFrom": "domains",
-          "tableTo": "teams",
           "columnsFrom": [
             "team_id"
           ],
+          "tableTo": "teams",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -453,24 +453,24 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "email_events_email_id_emails_id_fk": {
           "name": "email_events_email_id_emails_id_fk",
           "tableFrom": "email_events",
-          "tableTo": "emails",
           "columnsFrom": [
             "email_id"
           ],
+          "tableTo": "emails",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -632,9 +632,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "emails_ses_message_id_idx": {
           "name": "emails_ses_message_id_idx",
@@ -647,10 +647,10 @@
             }
           ],
           "isUnique": true,
-          "where": "\"emails\".\"ses_message_id\" is not null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"emails\".\"ses_message_id\" is not null",
+          "concurrently": false
         },
         "emails_body_unpurged_idx": {
           "name": "emails_body_unpurged_idx",
@@ -663,38 +663,38 @@
             }
           ],
           "isUnique": false,
-          "where": "\"emails\".\"body_purged_at\" is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"emails\".\"body_purged_at\" is null",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "emails_team_id_teams_id_fk": {
           "name": "emails_team_id_teams_id_fk",
           "tableFrom": "emails",
-          "tableTo": "teams",
           "columnsFrom": [
             "team_id"
           ],
+          "tableTo": "teams",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         },
         "emails_domain_id_domains_id_fk": {
           "name": "emails_domain_id_domains_id_fk",
           "tableFrom": "emails",
-          "tableTo": "domains",
           "columnsFrom": [
             "domain_id"
           ],
+          "tableTo": "domains",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -757,24 +757,24 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "idempotency_keys_team_id_teams_id_fk": {
           "name": "idempotency_keys_team_id_teams_id_fk",
           "tableFrom": "idempotency_keys",
-          "tableTo": "teams",
           "columnsFrom": [
             "team_id"
           ],
+          "tableTo": "teams",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -859,24 +859,24 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "suppressions_team_id_teams_id_fk": {
           "name": "suppressions_team_id_teams_id_fk",
           "tableFrom": "suppressions",
-          "tableTo": "teams",
           "columnsFrom": [
             "team_id"
           ],
+          "tableTo": "teams",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -936,10 +936,10 @@
       "uniqueConstraints": {
         "teams_slug_unique": {
           "name": "teams_slug_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "slug"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -1003,15 +1003,15 @@
         "usage_counters_team_id_teams_id_fk": {
           "name": "usage_counters_team_id_teams_id_fk",
           "tableFrom": "usage_counters",
-          "tableTo": "teams",
           "columnsFrom": [
             "team_id"
           ],
+          "tableTo": "teams",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {
@@ -1116,9 +1116,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "webhook_deliveries_open_idx": {
           "name": "webhook_deliveries_open_idx",
@@ -1131,25 +1131,25 @@
             }
           ],
           "isUnique": false,
-          "where": "\"webhook_deliveries\".\"status\" in ('pending', 'failed')",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "\"webhook_deliveries\".\"status\" in ('pending', 'failed')",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "webhook_deliveries_endpoint_id_webhook_endpoints_id_fk": {
           "name": "webhook_deliveries_endpoint_id_webhook_endpoints_id_fk",
           "tableFrom": "webhook_deliveries",
-          "tableTo": "webhook_endpoints",
           "columnsFrom": [
             "endpoint_id"
           ],
+          "tableTo": "webhook_endpoints",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1226,15 +1226,15 @@
         "webhook_endpoints_team_id_teams_id_fk": {
           "name": "webhook_endpoints_team_id_teams_id_fk",
           "tableFrom": "webhook_endpoints",
-          "tableTo": "teams",
           "columnsFrom": [
             "team_id"
           ],
+          "tableTo": "teams",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
@@ -1346,10 +1346,10 @@
     }
   },
   "schemas": {},
+  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},
