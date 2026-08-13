@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { sql } from "drizzle-orm";
+import { firstRow } from "./driver-result.js";
 
 export type QuotaResult =
   | { reserved: true; acceptedToday: number }
@@ -40,7 +41,7 @@ export async function reserveDailyQuota(
     returning accepted
   `);
 
-  const row = Array.isArray(rows) ? rows[0] : rows.rows?.[0];
+  const row = firstRow<{ accepted: number }>(rows);
   if (row) return { reserved: true, acceptedToday: Number(row.accepted) };
 
   const existing = await db

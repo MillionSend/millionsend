@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { sql } from "drizzle-orm";
+import { firstRow } from "./driver-result.js";
 
 export type EmailStatus = (typeof schema.emailStatusEnum.enumValues)[number];
 
@@ -19,6 +20,6 @@ export async function applyStatusCas(db: Db, emailId: string, next: EmailStatus)
       and ${t.latestStatus} < ${next}
     returning id
   `);
-  const row = Array.isArray(rows) ? rows[0] : rows.rows?.[0];
+  const row = firstRow<{ id: string }>(rows);
   return row !== undefined;
 }

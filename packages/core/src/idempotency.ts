@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
+import { firstRow, resultRows } from "./driver-result.js";
 
 export type IdempotencyBegin =
   | { kind: "new" }
@@ -28,7 +29,7 @@ export async function beginIdempotent(
     on conflict (team_id, key) do nothing
     returning key
   `);
-  const claimed = Array.isArray(inserted) ? inserted[0] : inserted.rows?.[0];
+  const claimed = firstRow<{ key: string }>(inserted);
   if (claimed) return { kind: "new" };
 
   const existing = (
@@ -66,5 +67,5 @@ export async function purgeExpiredIdempotencyKeys(db: Db, now = new Date()): Pro
   const rows = await db.execute<{ key: string }>(
     sql`delete from ${t} where ${t.expiresAt} < ${now} returning key`,
   );
-  return Array.isArray(rows) ? rows.length : (rows.rows?.length ?? 0);
+  return resultRows<{ key: string }>(rows).length;
 }
