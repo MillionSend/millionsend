@@ -1,0 +1,22 @@
+{
+  "name": "millionsend-monorepo",
+  "private": true,
+  "packageManager": "pnpm@11.11.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:generate": "pnpm --filter @millionsend/db db:generate"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.2",
+    "turbo": "^2.10.9",
+    "typescript": "^5.9.3"
+  }
+}

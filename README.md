@@ -7,8 +7,9 @@ means changing two environment variables, not rewriting your integration.
 
 ## Status
 
-Pre-code — building in the open. Watch this repo or join the
-[Discussions](https://github.com/orgs/MillionSend/discussions) to follow along.
+Early development — the monorepo is taking shape in the open (pnpm + Turborepo; Drizzle
+schema and typed environment config first, product surfaces next). Watch this repo or join
+the [Discussions](https://github.com/orgs/MillionSend/discussions) to follow along.
 
 ## License
 
