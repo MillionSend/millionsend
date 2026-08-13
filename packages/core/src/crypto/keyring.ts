@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { GCM_IV_LENGTH, GCM_TAG_LENGTH } from "./constants.js";
 
 /**
  * Wraps/unwraps per-email data-encryption keys. Implementations:
@@ -10,9 +11,6 @@ export interface Keyring {
   wrapDek(dek: Buffer): Promise<{ wrapped: Buffer; keyVersion: number }>;
   unwrapDek(wrapped: Buffer, keyVersion: number): Promise<Buffer>;
 }
-
-const GCM_IV_LENGTH = 12;
-const GCM_TAG_LENGTH = 16;
 
 export class EnvKeyring implements Keyring {
   readonly #keys: ReadonlyMap<number, Buffer>;
@@ -39,25 +37,32 @@ export class EnvKeyring implements Keyring {
     return new EnvKeyring(new Map([[1, Buffer.from(kekBase64, "base64")]]), 1);
   }
 
-  wrapDek(dek: Buffer): Promise<{ wrapped: Buffer; keyVersion: number }> {
+  // async so every failure path rejects — callers' .catch must never be
+  // bypassed by a synchronous throw.
+  async wrapDek(dek: Buffer): Promise<{ wrapped: Buffer; keyVersion: number }> {
     const kek = this.#keys.get(this.#currentVersion);
     if (!kek) throw new Error("unreachable: current KEK missing");
     const iv = randomBytes(GCM_IV_LENGTH);
     const cipher = createCipheriv("aes-256-gcm", kek, iv);
     const encrypted = Buffer.concat([cipher.update(dek), cipher.final()]);
     // wrapped layout: iv || ciphertext || authTag
-    const wrapped = Buffer.concat([iv, encrypted, cipher.getAuthTag()]);
-    return Promise.resolve({ wrapped, keyVersion: this.#currentVersion });
+    return {
+      wrapped: Buffer.concat([iv, encrypted, cipher.getAuthTag()]),
+      keyVersion: this.#currentVersion,
+    };
   }
 
-  unwrapDek(wrapped: Buffer, keyVersion: number): Promise<Buffer> {
+  async unwrapDek(wrapped: Buffer, keyVersion: number): Promise<Buffer> {
     const kek = this.#keys.get(keyVersion);
-    if (!kek) return Promise.reject(new Error(`unknown KEK version ${keyVersion}`));
+    if (!kek) throw new Error(`unknown KEK version ${keyVersion}`);
+    if (wrapped.length < GCM_IV_LENGTH + GCM_TAG_LENGTH + 1) {
+      throw new Error(`wrapped DEK too short: ${wrapped.length} bytes`);
+    }
     const iv = wrapped.subarray(0, GCM_IV_LENGTH);
     const tag = wrapped.subarray(wrapped.length - GCM_TAG_LENGTH);
     const ciphertext = wrapped.subarray(GCM_IV_LENGTH, wrapped.length - GCM_TAG_LENGTH);
     const decipher = createDecipheriv("aes-256-gcm", kek, iv);
     decipher.setAuthTag(tag);
-    return Promise.resolve(Buffer.concat([decipher.update(ciphertext), decipher.final()]));
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   }
 }

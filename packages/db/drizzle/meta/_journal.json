@@ -15,6 +15,13 @@
       "when": 1786662206552,
       "tag": "0001_audit_log_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786663627268,
+      "tag": "0002_lovely_absorbing_man",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { sha256Hex } from "./hash.js";
 
 export type ApiKeyMode = "live" | "test";
 
@@ -27,7 +28,7 @@ export function generateApiKey(mode: ApiKeyMode): GeneratedApiKey {
 }
 
 export function hashApiKey(token: string): string {
-  return createHash("sha256").update(token, "utf8").digest("hex");
+  return sha256Hex(token);
 }
 
 /** Lookup handle for a presented token; null when the shape is not ours. */

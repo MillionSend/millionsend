@@ -20,6 +20,6 @@ export {
   type IdempotencyBegin,
   purgeExpiredIdempotencyKeys,
 } from "./idempotency.js";
-export { type QuotaResult, reserveDailyQuota } from "./quota.js";
-export { applyStatusCas, type EmailStatus } from "./status.js";
-export { findSuppressed, hashRecipient } from "./suppressions.js";
+export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
+export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";
+export { extractAddrSpec, findSuppressed, hashRecipient } from "./suppressions.js";

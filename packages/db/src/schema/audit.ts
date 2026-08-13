@@ -1,5 +1,4 @@
 import { index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
-import { teams } from "./teams.js";
 
 /**
  * Append-only, enforced in the database by a trigger that rejects
@@ -10,7 +9,9 @@ export const auditLog = pgTable(
   "audit_log",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    teamId: uuid("team_id").references(() => teams.id, { onDelete: "set null" }),
+    // Deliberately no FK: audit rows must survive team deletion unchanged
+    // (a SET NULL referential update would also trip the append-only trigger).
+    teamId: uuid("team_id"),
     actorId: text("actor_id"),
     action: text("action").notNull(),
     target: text("target"),

@@ -13,6 +13,11 @@ export type QuotaResult =
  * concurrent requests can never overshoot the cap — no cached aggregates.
  * `limit === null` means unlimited (Scale plan / self-host): counts are still
  * recorded for metrics but never rejected.
+ *
+ * CONTRACT: call inside the same transaction that inserts the email rows —
+ * a crash between reserve and insert otherwise burns quota with nothing
+ * sent. Callers that cannot share a transaction must compensate failures
+ * with releaseDailyQuota.
  */
 export async function reserveDailyQuota(
   db: Db,
@@ -49,4 +54,22 @@ export async function reserveDailyQuota(
     .from(t)
     .where(sql`${t.teamId} = ${teamId} and ${t.day} = ${day}`);
   return { reserved: false, acceptedToday: existing[0]?.accepted ?? 0 };
+}
+
+/**
+ * Compensating release for non-transactional callers whose work failed after
+ * a successful reservation. Floors at zero.
+ */
+export async function releaseDailyQuota(
+  db: Db,
+  params: { teamId: string; count: number; day?: string },
+): Promise<void> {
+  if (params.count <= 0) throw new Error("count must be positive");
+  const day = params.day ?? new Date().toISOString().slice(0, 10);
+  const t = schema.usageCounters;
+  await db.execute(sql`
+    update ${t}
+    set accepted = greatest(accepted - ${params.count}, 0)
+    where ${t.teamId} = ${params.teamId} and ${t.day} = ${day}
+  `);
 }

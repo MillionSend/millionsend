@@ -1,15 +1,25 @@
-import { createHash } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, inArray } from "drizzle-orm";
+import { sha256Hex } from "./hash.js";
 
 /**
- * Normalization before hashing: trim + lowercase. The hash — not the address —
- * is the stable identity, because erasure nulls the address column while the
- * suppression must keep working.
+ * Reduce an RFC 5322 recipient to its bare addr-spec: `Bob <bob@x.com>` and
+ * `bob@x.com` must hash identically, or a display-name send would slip past
+ * a suppression recorded from SES's bare-address bounce report.
+ */
+export function extractAddrSpec(recipient: string): string {
+  const angle = /<([^<>]+)>\s*$/.exec(recipient.trim());
+  return (angle?.[1] ?? recipient).trim();
+}
+
+/**
+ * Normalization before hashing: addr-spec + trim + lowercase. The hash — not
+ * the address — is the stable identity, because erasure nulls the address
+ * column while the suppression must keep working.
  */
 export function hashRecipient(email: string): string {
-  return createHash("sha256").update(email.trim().toLowerCase(), "utf8").digest("hex");
+  return sha256Hex(extractAddrSpec(email).toLowerCase());
 }
 
 /** Returns the subset of `recipients` that are suppressed for this team. */
