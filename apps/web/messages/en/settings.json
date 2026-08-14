@@ -7,6 +7,19 @@
   "ses": {
     "title": "Connect your AWS SES",
     "subtitle": "Your instance sends through your own SES account.",
+    "setup": {
+      "scriptTitle": "Fastest: run this script",
+      "scriptNote": "Paste into a terminal where the AWS CLI has admin credentials. It creates the IAM user, policy, SNS topic, and configuration set, then prints your .env lines.",
+      "eventsSkipped": "APP_BASE_URL is not a public https URL, so the event ingestion part is left out. Set it and reload to include it.",
+      "cfnNote": "IaC instead? The same setup ships as CloudFormation in infra/millionsend-ses.cfn.yaml — see SELF_HOSTING.md.",
+      "manualTitle": "Manual: console steps",
+      "step1": "Create a policy: IAM console → Policies → Create policy → JSON — paste this document.",
+      "step1Link": "Open the policy editor",
+      "step2": "Create a user named millionsend and attach the policy.",
+      "step2Link": "Open user creation",
+      "step3": "Create an access key for the user and paste it into .env.",
+      "step4": "Optional events: SNS topic + configuration set — the script above automates this part; see SELF_HOSTING.md."
+    },
     "credentials": {
       "title": "Credentials",
       "set": "set",
@@ -15,9 +28,7 @@
       "keysChain": "not set — the default provider chain will be attempted",
       "snsNote": "not set — event ingestion is disabled",
       "configSetNote": "not set — SES publishes no events",
-      "envTemplate": ".env template",
-      "policyTitle": "iam-policy.json",
-      "policyNote": "Minimal IAM policy for this instance."
+      "envTemplate": ".env template"
     },
     "test": {
       "title": "Test connection",

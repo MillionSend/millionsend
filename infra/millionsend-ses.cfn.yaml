@@ -1,0 +1,139 @@
+# MillionSend AWS setup as CloudFormation — same resources as the setup script
+# on /settings/ses: IAM policy + user + access key, SNS event topic, and the
+# SESv2 configuration set with an SNS event destination.
+#
+# Deploy:
+#   aws cloudformation deploy --template-file infra/millionsend-ses.cfn.yaml \
+#     --stack-name millionsend --capabilities CAPABILITY_NAMED_IAM \
+#     --parameter-overrides AppBaseUrl=https://your-host
+#
+# Then read the .env values from the stack outputs:
+#   aws cloudformation describe-stacks --stack-name millionsend \
+#     --query "Stacks[0].Outputs" --output table
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  MillionSend sending resources: IAM user + minimal SES policy, SNS event
+  topic, and SES configuration set. Outputs map 1:1 to .env keys.
+
+Parameters:
+  AppBaseUrl:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(https://.+)?$"
+    Description: >-
+      Public https base URL of the deployment (e.g. https://mail.example.com).
+      Leave empty to skip the event subscription; sends still work, but no
+      delivery/bounce events reach the app.
+
+Conditions:
+  HasAppBaseUrl: {"Fn::Not": [{"Fn::Equals": [{Ref: AppBaseUrl}, ""]}]}
+
+Resources:
+  SendPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: millionsend-ses
+      # Every SES action the instance issues — mirrors SES_IAM_POLICY in
+      # apps/web/src/lib/aws-setup-script.ts.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ses:SendEmail
+              - ses:SendRawEmail
+              - ses:CreateEmailIdentity
+              - ses:GetEmailIdentity
+              - ses:DeleteEmailIdentity
+              - ses:PutEmailIdentityMailFromAttributes
+              - ses:GetAccount
+            Resource: "*"
+
+  SendUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: millionsend
+      ManagedPolicyArns:
+        - {Ref: SendPolicy}
+
+  SendUserKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: {Ref: SendUser}
+
+  EventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: millionsend-events
+
+  # SES cannot publish to the topic without this; the event destination below
+  # is rejected at creation time if the topic policy is missing.
+  EventsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - {Ref: EventsTopic}
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ses.amazonaws.com
+            Action: sns:Publish
+            Resource: {Ref: EventsTopic}
+            Condition:
+              StringEquals:
+                AWS:SourceAccount: {Ref: AWS::AccountId}
+
+  # Pending until the app confirms it — automatic once the app runs with
+  # SNS_TOPIC_ARNS set to this topic's ARN.
+  EventsSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAppBaseUrl
+    Properties:
+      TopicArn: {Ref: EventsTopic}
+      Protocol: https
+      Endpoint: {"Fn::Sub": "${AppBaseUrl}/ses/events"}
+
+  ConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name: millionsend
+
+  EventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    DependsOn: EventsTopicPolicy
+    Properties:
+      ConfigurationSetName: {Ref: ConfigurationSet}
+      EventDestination:
+        Name: millionsend-events
+        Enabled: true
+        MatchingEventTypes:
+          - send
+          - delivery
+          - deliveryDelay
+          - bounce
+          - complaint
+          - open
+          - click
+          - reject
+          - renderingFailure
+        SnsDestination:
+          TopicARN: {Ref: EventsTopic}
+
+Outputs:
+  AwsRegion:
+    Description: AWS_REGION
+    Value: {Ref: AWS::Region}
+  AwsAccessKeyId:
+    Description: AWS_ACCESS_KEY_ID
+    Value: {Ref: SendUserKey}
+  AwsSecretAccessKey:
+    Description: AWS_SECRET_ACCESS_KEY
+    Value: {"Fn::GetAtt": [SendUserKey, SecretAccessKey]}
+  SnsTopicArns:
+    Description: SNS_TOPIC_ARNS
+    Value: {Ref: EventsTopic}
+  SesConfigurationSet:
+    Description: SES_CONFIGURATION_SET
+    Value: {Ref: ConfigurationSet}

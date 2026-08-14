@@ -7,6 +7,19 @@
   "ses": {
     "title": "Conecte seu AWS SES",
     "subtitle": "Sua instância envia pela sua própria conta SES.",
+    "setup": {
+      "scriptTitle": "Mais rápido: execute este script",
+      "scriptNote": "Cole em um terminal onde o AWS CLI tenha credenciais de administrador. Ele cria o usuário IAM, a política, o tópico SNS e o conjunto de configuração, e então imprime as linhas do seu .env.",
+      "eventsSkipped": "APP_BASE_URL não é uma URL https pública, então a parte de ingestão de eventos ficou de fora. Defina-a e recarregue para incluí-la.",
+      "cfnNote": "Prefere IaC? A mesma configuração existe como CloudFormation em infra/millionsend-ses.cfn.yaml — veja SELF_HOSTING.md.",
+      "manualTitle": "Manual: passos no console",
+      "step1": "Crie uma política: console IAM → Policies → Create policy → JSON — cole este documento.",
+      "step1Link": "Abrir o editor de políticas",
+      "step2": "Crie um usuário chamado millionsend e anexe a política.",
+      "step2Link": "Abrir criação de usuário",
+      "step3": "Crie uma chave de acesso para o usuário e cole no .env.",
+      "step4": "Eventos opcionais: tópico SNS + conjunto de configuração — o script acima automatiza esta parte; veja SELF_HOSTING.md."
+    },
     "credentials": {
       "title": "Credenciais",
       "set": "definido",
@@ -15,9 +28,7 @@
       "keysChain": "não definidas — a cadeia padrão de provedores será tentada",
       "snsNote": "não definido — a ingestão de eventos está desativada",
       "configSetNote": "não definido — o SES não publica eventos",
-      "envTemplate": "modelo de .env",
-      "policyTitle": "iam-policy.json",
-      "policyNote": "Política IAM mínima para esta instância."
+      "envTemplate": "modelo de .env"
     },
     "test": {
       "title": "Testar conexão",

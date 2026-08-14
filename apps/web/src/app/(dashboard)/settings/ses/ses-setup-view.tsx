@@ -5,34 +5,18 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { BtnSpinner } from "@/components/spinner";
+import {
+  buildAwsSetupScript,
+  CFN_DEPLOY_COMMAND,
+  httpsOrigin,
+  SES_IAM_POLICY_JSON,
+} from "@/lib/aws-setup-script";
 import { useTRPC } from "@/lib/trpc";
 
 const PRODUCTION_ACCESS_DOCS_URL =
   "https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html";
-
-/** Every SES action the instance issues — SELF_HOSTING.md documents the same set. */
-const IAM_POLICY = JSON.stringify(
-  {
-    Version: "2012-10-17",
-    Statement: [
-      {
-        Effect: "Allow",
-        Action: [
-          "ses:SendEmail",
-          "ses:SendRawEmail",
-          "ses:CreateEmailIdentity",
-          "ses:GetEmailIdentity",
-          "ses:DeleteEmailIdentity",
-          "ses:PutEmailIdentityMailFromAttributes",
-          "ses:GetAccount",
-        ],
-        Resource: "*",
-      },
-    ],
-  },
-  null,
-  2,
-);
+const IAM_CREATE_POLICY_URL = "https://console.aws.amazon.com/iam/home#/policies/create";
+const IAM_CREATE_USER_URL = "https://console.aws.amazon.com/iam/home#/users/create";
 
 function envTemplate(region: string): string {
   return [
@@ -57,6 +41,57 @@ function SectionCard({ title, children }: { title: string; children: React.React
       </h2>
       {children}
     </section>
+  );
+}
+
+function MonoBlock({
+  title,
+  value,
+  maxHeight,
+}: {
+  title: string;
+  value: string;
+  maxHeight?: number;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--ms-inset)",
+        border: "1px solid var(--ms-line)",
+        borderRadius: "var(--ms-r-input)",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "7px 12px",
+          borderBottom: "1px solid var(--ms-line)",
+        }}
+      >
+        <span className="ms-mono" style={{ fontSize: 11.5, color: "var(--ms-muted)" }}>
+          {title}
+        </span>
+        <span style={{ marginLeft: "auto" }}>
+          <CopyGlyph value={value} />
+        </span>
+      </div>
+      <pre
+        className="ms-mono"
+        style={{
+          margin: 0,
+          padding: "13px 16px",
+          fontSize: 12,
+          lineHeight: 1.65,
+          color: "var(--ms-bone)",
+          overflow: "auto",
+          maxHeight,
+        }}
+      >
+        {value}
+      </pre>
+    </div>
   );
 }
 
@@ -108,6 +143,13 @@ function QuotaFigure({ label, value, unit }: { label: string; value: string; uni
   );
 }
 
+const stepBodyStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: 13,
+  lineHeight: 1.55,
+  color: "var(--ms-bone)",
+};
+
 export function SesSetupView() {
   const t = useTranslations("settings.ses");
   const locale = useLocale();
@@ -122,9 +164,91 @@ export function SesSetupView() {
 
   const fmt = new Intl.NumberFormat(locale);
   const result = test.data;
+  const eventsIncluded = httpsOrigin(sesEnv.data.appBaseUrl) !== null;
+  const setupScript = buildAwsSetupScript({
+    region: readiness.data.region,
+    appBaseUrl: sesEnv.data.appBaseUrl,
+    includeEvents: true,
+  });
 
   return (
     <div style={{ display: "grid", gap: 20, maxWidth: 880 }}>
+      <SectionCard title={t("setup.scriptTitle")}>
+        <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--ms-muted)" }}>
+          {t("setup.scriptNote")}
+        </p>
+        {eventsIncluded ? null : (
+          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--ms-warn)" }}>
+            {t("setup.eventsSkipped")}
+          </p>
+        )}
+        <MonoBlock title="millionsend-aws-setup.sh" value={setupScript} maxHeight={300} />
+        <p
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            margin: "12px 0 0",
+            fontSize: 12.5,
+            color: "var(--ms-muted)",
+          }}
+        >
+          {t("setup.cfnNote")}
+          <CopyChip value={CFN_DEPLOY_COMMAND} display="aws cloudformation deploy …" />
+        </p>
+      </SectionCard>
+
+      <section className="ms-card" style={{ padding: 24 }}>
+        <details>
+          <summary
+            className="ms-display"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              cursor: "pointer",
+              listStyle: "none",
+              fontSize: "var(--ms-fs-h2)",
+              color: "var(--ms-bone)",
+            }}
+          >
+            <span>{t("setup.manualTitle")}</span>
+            <span style={{ color: "var(--ms-muted)" }}>⌄</span>
+          </summary>
+          <ol
+            style={{
+              margin: "18px 0 0",
+              padding: "0 0 0 22px",
+              display: "grid",
+              gap: 16,
+            }}
+          >
+            <li style={stepBodyStyle}>
+              {t("setup.step1")}
+              <div style={{ margin: "10px 0" }}>
+                <MonoBlock title="iam-policy.json" value={SES_IAM_POLICY_JSON} />
+              </div>
+              <a
+                href={IAM_CREATE_POLICY_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="ms-btn ms-btn-secondary"
+              >
+                {t("setup.step1Link")} ↗
+              </a>
+            </li>
+            <li style={stepBodyStyle}>
+              {t("setup.step2")}{" "}
+              <a href={IAM_CREATE_USER_URL} target="_blank" rel="noreferrer">
+                {t("setup.step2Link")} ↗
+              </a>
+            </li>
+            <li style={stepBodyStyle}>{t("setup.step3")}</li>
+            <li style={stepBodyStyle}>{t("setup.step4")}</li>
+          </ol>
+        </details>
+      </section>
+
       <SectionCard title={t("credentials.title")}>
         <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--ms-muted)" }}>
           {t("subtitle")}
@@ -167,47 +291,6 @@ export function SesSetupView() {
             display={t("credentials.envTemplate")}
           />
         </div>
-        <div
-          style={{
-            background: "var(--ms-inset)",
-            border: "1px solid var(--ms-line)",
-            borderRadius: "var(--ms-r-input)",
-            overflow: "hidden",
-            marginTop: 14,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              padding: "7px 12px",
-              borderBottom: "1px solid var(--ms-line)",
-            }}
-          >
-            <span className="ms-mono" style={{ fontSize: 11.5, color: "var(--ms-muted)" }}>
-              {t("credentials.policyTitle")}
-            </span>
-            <span style={{ marginLeft: "auto" }}>
-              <CopyGlyph value={IAM_POLICY} />
-            </span>
-          </div>
-          <pre
-            className="ms-mono"
-            style={{
-              margin: 0,
-              padding: "13px 16px",
-              fontSize: 12,
-              lineHeight: 1.65,
-              color: "var(--ms-bone)",
-              overflowX: "auto",
-            }}
-          >
-            {IAM_POLICY}
-          </pre>
-        </div>
-        <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
-          {t("credentials.policyNote")}
-        </p>
       </SectionCard>
 
       <SectionCard title={t("test.title")}>
