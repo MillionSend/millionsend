@@ -143,7 +143,12 @@ function RateCard(props: {
   );
 }
 
-/** Mirrors the loaded page: KPI card (3 figures + bar chart), then the two rate cards. */
+/**
+ * Mirrors the loaded page: KPI card (3 figures + bar chart), then the two
+ * rate cards — same containers and type wrappers, 1lh bars for text lines
+ * (the KPI figure line is 40px × 1.1 = 44px; a guessed bar height would
+ * shift the cards when the numbers land).
+ */
 function MetricsSkeleton() {
   return (
     <>
@@ -151,29 +156,53 @@ function MetricsSkeleton() {
         <div className="ms-kpi-row" style={{ display: "flex", gap: 56, alignItems: "flex-start" }}>
           {[90, 110, 130].map((width) => (
             <div key={width}>
-              <Skeleton width={width} height={10} />
-              <div style={{ marginTop: 8 }}>
-                <Skeleton width={100} height={30} />
+              <div className="ms-microlabel" style={{ display: "flex" }}>
+                <Skeleton width={width} height="1lh" />
+              </div>
+              <div
+                className="ms-digits"
+                style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1, display: "flex" }}
+              >
+                <Skeleton width={100} height="1lh" />
               </div>
             </div>
           ))}
         </div>
-        <div style={{ marginTop: 18 }}>
+        <div style={{ marginTop: 18, display: "flex" }}>
           <Skeleton width="100%" height={228} radius="var(--ms-r-input)" />
         </div>
       </div>
       <div className="ms-card-row" style={{ display: "flex", gap: 18, marginTop: 18 }}>
         {[0, 1].map((card) => (
           <div key={card} className="ms-kpi-card" style={{ flex: 1 }}>
-            <Skeleton width={110} height={10} />
-            <div style={{ marginTop: 8 }}>
-              <Skeleton width={80} height={26} />
+            <div className="ms-microlabel" style={{ display: "flex" }}>
+              <Skeleton width={110} height="1lh" />
             </div>
-            <div style={{ marginTop: 16 }}>
+            <div
+              className="ms-digits"
+              style={{
+                fontSize: "var(--ms-fs-kpi)",
+                lineHeight: 1.1,
+                marginTop: 6,
+                display: "flex",
+              }}
+            >
+              <Skeleton width={80} height="1lh" />
+            </div>
+            <div style={{ marginTop: 16, display: "flex" }}>
               <Skeleton width="100%" height={BAR_AREA} radius="var(--ms-r-input)" />
             </div>
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--ms-line)" }}>
-              <Skeleton width={120} />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                fontSize: 13,
+                padding: "7px 0",
+                borderTop: "1px solid var(--ms-line)",
+                marginTop: 12,
+              }}
+            >
+              <Skeleton width={120} height="1lh" />
             </div>
           </div>
         ))}

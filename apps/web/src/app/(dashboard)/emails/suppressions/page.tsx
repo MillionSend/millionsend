@@ -183,6 +183,7 @@ export default function SuppressionsPage() {
       {query.isPending ? (
         <ListSkeleton
           headers={[t("suppressions.email"), t("suppressions.origin"), t("suppressions.added"), ""]}
+          action
         />
       ) : query.isError ? (
         <StateCard
