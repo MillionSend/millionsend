@@ -867,3 +867,13 @@ svg:focus {
 :root[data-theme="light"] .ms-dark-only {
   display: none;
 }
+
+/* Inline code pill — method/env names inside running copy (t.rich code tag) */
+.ms-code {
+  font-family: var(--ms-font-mono);
+  font-size: 0.9em;
+  background: var(--ms-inset);
+  border: 1px solid var(--ms-line);
+  border-radius: var(--ms-r-chip);
+  padding: 1px 5px;
+}

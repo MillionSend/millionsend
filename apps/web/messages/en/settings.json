@@ -8,9 +8,11 @@
     "title": "Connect your AWS SES",
     "subtitle": "Your instance sends through your own SES account.",
     "setup": {
+      "stepTitle": "Create AWS resources",
+      "recommended": "Recommended",
       "scriptTitle": "Fastest: run this script",
       "scriptNote": "Paste into a terminal where the AWS CLI has admin credentials. It creates the IAM user, policy, SNS topic, and configuration set, then prints your .env lines.",
-      "eventsSkipped": "APP_BASE_URL is not a public https URL, so the event ingestion part is left out. Set it and reload to include it.",
+      "eventsSkipped": "<code>APP_BASE_URL</code> is not a public https URL, so the event ingestion part is left out. Set it and reload to include it.",
       "cfnNote": "IaC instead? The same setup ships as CloudFormation in infra/millionsend-ses.cfn.yaml — see SELF_HOSTING.md.",
       "manualTitle": "Manual: console steps",
       "step1": "Create a policy: IAM console → Policies → Create policy → JSON — paste this document.",
@@ -27,13 +29,12 @@
       "keysConfigured": "configured",
       "keysChain": "not set — the default provider chain will be attempted",
       "snsNote": "not set — event ingestion is disabled",
-      "configSetNote": "not set — SES publishes no events",
-      "envTemplate": ".env template"
+      "configSetNote": "not set — SES publishes no events"
     },
     "test": {
       "title": "Test connection",
       "button": "Test connection",
-      "note": "runs GetAccount from the instance — read-only, nothing is sent",
+      "note": "runs <code>GetAccount</code> from the instance — read-only, nothing is sent",
       "sendingEnabled": "Sending enabled",
       "sendingDisabled": "Sending disabled",
       "production": "Production access",
@@ -47,14 +48,18 @@
       "sandboxLink": "Request production access",
       "rateHint": "SES_MAX_SEND_RATE={envRate} in .env · account max {accountRate}/s — these disagree.",
       "errors": {
-        "credentials": "AWS rejected the credentials — check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env.",
-        "unreachable": "SES did not respond — check AWS_REGION and the network path."
-      }
+        "credentials": "AWS rejected the credentials — check <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in .env.",
+        "unreachable": "SES did not respond — check <code>AWS_REGION</code> and the network path."
+      },
+      "disabledHint": "Set your AWS credentials first."
     },
     "next": {
       "title": "Next steps",
       "addDomain": "Add a sending domain",
       "selfHosting": "Event ingestion and the full checklist live in SELF_HOSTING.md."
+    },
+    "events": {
+      "title": "Events"
     }
   },
   "team": {

@@ -25,7 +25,7 @@ function CircleInfoGlyph() {
  * touch, and Esc or an outside tap dismisses. The panel is wired to the
  * trigger via aria-describedby while visible.
  */
-export function Tooltip({ text }: { text: string }) {
+export function Tooltip({ text }: { text: React.ReactNode }) {
   const t = useTranslations("common");
   const [hover, setHover] = useState(false);
   const [pinned, setPinned] = useState(false);
