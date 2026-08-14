@@ -4,12 +4,13 @@ import { lineReader } from "../src/setup-cli.js";
 import { bannerLines, selectPrompt } from "../src/tty-ui.js";
 
 describe("bannerLines", () => {
-  it("stacks MILLION over SEND, every row the same width, under the 80-col gate", () => {
+  it("renders MILLIONSEND on one line, every row the same width, echo included ≤ 78", () => {
     const lines = bannerLines();
-    // 5 art rows + 1 echo row per word, plus the spacer row between words.
-    expect(lines).toHaveLength(13);
-    expect(lines[0]?.length).toBe(71);
-    for (const line of lines) expect(line.length).toBe(71);
+    // 4 art rows + 1 echo row.
+    expect(lines).toHaveLength(5);
+    expect(lines[0]?.length).toBe(48);
+    expect(lines[0]?.length).toBeLessThanOrEqual(78);
+    for (const line of lines) expect(line.length).toBe(48);
   });
 
   it("draws full-shade bodies with a light-shade echo", () => {
