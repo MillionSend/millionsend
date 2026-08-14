@@ -13,24 +13,23 @@ export const dim = (s: string): string => (colorOn() ? `\x1b[90m${s}\x1b[39m` : 
 export const bone = (s: string): string => (colorOn() ? `\x1b[97m${s}\x1b[39m` : s);
 
 /**
- * Five-row cell maps for the banner letters ('#' = filled cell). Every row of
+ * Four-row cell maps for the banner letters ('#' = filled cell). Every row of
  * a letter must be the same width — banner rows are assembled cell by cell and
- * the tests pin that all banner lines come out the same visual width.
+ * the tests pin that all banner lines come out the same visual width. Glyphs
+ * are 3-4 cells wide so the full one-line word plus echo stays under 80 cols.
  */
 const LETTERS: Record<string, string[]> = {
-  M: ["#...#", "##.##", "#.#.#", "#...#", "#...#"],
-  I: ["###", ".#.", ".#.", ".#.", "###"],
-  L: ["#...", "#...", "#...", "#...", "####"],
-  O: [".###.", "#...#", "#...#", "#...#", ".###."],
-  N: ["#...#", "##..#", "#.#.#", "#..##", "#...#"],
-  S: [".###", "#...", ".##.", "...#", "###."],
-  E: ["####", "#...", "###.", "#...", "####"],
-  D: ["###.", "#..#", "#..#", "#..#", "###."],
+  M: ["#..#", "####", "#..#", "#..#"],
+  I: ["###", ".#.", ".#.", "###"],
+  L: ["#..", "#..", "#..", "###"],
+  O: [".##.", "#..#", "#..#", ".##."],
+  N: ["#..#", "##.#", "#.##", "#..#"],
+  S: [".##", "#..", "..#", "##."],
+  E: ["###", "##.", "#..", "###"],
+  D: ["##.", "#.#", "#.#", "##."],
 };
 
-const ART_ROWS = 5;
-/** Each cell renders as two characters so the letters read chunky, not spindly. */
-const CELL_W = 2;
+const ART_ROWS = 4;
 
 /**
  * Block art for `text`: full-shade body cells with a light-shade echo offset
@@ -46,16 +45,14 @@ function art(text: string): string[] {
       if (gi < glyphs.length - 1) grid[r]?.push(false);
     }
   });
-  const width = (grid[0]?.length ?? 0) * CELL_W + 1;
+  const width = (grid[0]?.length ?? 0) + 1;
   const canvas = Array.from({ length: ART_ROWS + 1 }, () => Array<string>(width).fill(" "));
   const paint = (dr: number, dc: number, ch: string): void => {
     for (let r = 0; r < ART_ROWS; r++) {
       for (let c = 0; c < (grid[r]?.length ?? 0); c++) {
         if (!grid[r]?.[c]) continue;
-        for (let k = 0; k < CELL_W; k++) {
-          const row = canvas[r + dr];
-          if (row) row[c * CELL_W + k + dc] = ch;
-        }
+        const row = canvas[r + dr];
+        if (row) row[c + dc] = ch;
       }
     }
   };
@@ -65,13 +62,12 @@ function art(text: string): string[] {
 }
 
 /**
- * Plain (uncolored) banner art: MILLION stacked over SEND — "Send one. Send a
- * million." Every line is the same visual width. Pure so it is testable.
+ * Plain (uncolored) banner art: MILLIONSEND on a single line, narrow enough
+ * (echo included) to never wrap at 80 columns. Every line is the same visual
+ * width. Pure so it is testable.
  */
 export function bannerLines(): string[] {
-  const lines = [...art("MILLION"), "", ...art("SEND")];
-  const width = Math.max(...lines.map((l) => l.length));
-  return lines.map((l) => l.padEnd(width));
+  return art("MILLIONSEND");
 }
 
 /** Banner art with the echo dimmed — grays only, no-op when piped/NO_COLOR. */
