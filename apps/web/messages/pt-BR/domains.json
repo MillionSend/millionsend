@@ -37,6 +37,8 @@
   "new": {
     "title": "Adicionar domínio",
     "stepLine": "passo 1 de 2 · domínio e região → registros DNS",
+    "stepLine2": "passo 2 de 2 · adicione os registros no seu provedor de DNS",
+    "viewDomain": "Abrir página do domínio",
     "cardTitle": "Domínio",
     "name": "Nome",
     "namePlaceholder": "updates.seudominio.com",
@@ -75,15 +77,7 @@
     "eyebrow": "Detalhes do domínio",
     "created": "Criado",
     "status": "Status",
-    "providerLabel": "Provedor",
     "region": "Região",
-    "subline": {
-      "added": "adicionado {time}",
-      "verified": "verificado {time}",
-      "provider": "provedor: {name}",
-      "recordsFound": "{found} de {total} registros encontrados",
-      "sent": "{count, number} enviados deste domínio"
-    },
     "dnsTitle": "Registros DNS",
     "recordsHeading": "Adicione estes registros em {provider}",
     "recordsHeadingGeneric": "Adicione estes registros no seu provedor de DNS",
@@ -103,9 +97,8 @@
       "status": "Status"
     },
     "ttlAuto": "Auto",
-    "verify": "Já adicionei os registros",
+    "verify": "Verificar registros DNS",
     "goToProvider": "Ir para {provider}",
-    "honestNote": "Valores SES mostrados com honestidade — nada intermediado ou oculto",
     "moreActions": "Mais ações",
     "forwardInstructions": "Encaminhar instruções",
     "forwardSubject": "Registros DNS de {domain}",

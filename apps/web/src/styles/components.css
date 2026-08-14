@@ -239,6 +239,13 @@ table.ms-table {
 .ms-table td:last-child {
   color: var(--ms-muted);
 }
+/* Dense variant — DNS record tables at Resend density: slim header, ~8px rows. */
+.ms-table.dense thead th {
+  padding: 6px 12px;
+}
+.ms-table.dense td {
+  padding: 8px 12px;
+}
 .ms-table tbody tr.hoverable:hover td {
   background: var(--ms-panel-raised);
   cursor: pointer;
@@ -297,6 +304,7 @@ table.ms-table {
   font-family: var(--ms-font-mono);
   font-size: var(--ms-fs-label);
   color: var(--ms-muted);
+  max-width: 100%;
 }
 .ms-chip button {
   background: none;
@@ -314,6 +322,10 @@ table.ms-table {
 }
 .ms-chip button:hover {
   color: var(--ms-bone);
+}
+/* Inside dense tables the pill matches the table's 13px mono. */
+.ms-table.dense .ms-chip {
+  font-size: inherit;
 }
 
 /* Tabs */

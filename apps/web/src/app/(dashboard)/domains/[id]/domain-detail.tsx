@@ -4,42 +4,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
-import { CopyChip, CopyGlyph } from "@/components/copy-chip";
+import { CopyChip } from "@/components/copy-chip";
+import { type DnsRecord, DnsRecordsTable } from "@/components/dns-records-table";
 import { Modal } from "@/components/modal";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
-import { BtnSpinner } from "@/components/spinner";
-import { Table } from "@/components/table";
-import { formatRelative, formatUtcMinute, midTruncateParts } from "@/lib/format";
+import { BtnSpinner, Spinner } from "@/components/spinner";
+import { formatRelative, formatUtcMinute } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { DomainStatusBadge } from "../domain-status";
 import { RegionLabel } from "../region-label";
-import { regionFlag } from "../regions";
-
-const GROUPS = ["verification", "sending", "dmarc"] as const;
-
-type RecordRow = {
-  group: (typeof GROUPS)[number];
-  type: string;
-  name: string;
-  value: string;
-  priority?: number;
-  status: "verified" | "pending" | "failed" | null;
-};
-
-/** Mid-truncation with the dim […] token preserving both ends of the value. */
-function MidTruncated({ value }: { value: string }) {
-  const parts = midTruncateParts(value);
-  if (!parts) return <>{value}</>;
-  return (
-    <>
-      {parts.head}
-      <span style={{ color: "var(--ms-faint)" }}>[…]</span>
-      {parts.tail}
-    </>
-  );
-}
 
 /**
  * Status-tinted gradient banner (canvas: near-black ground, glow rising from
@@ -72,56 +47,6 @@ function GradientBanner({
       }}
     >
       {children}
-    </div>
-  );
-}
-
-function RecordsGroup({
-  group,
-  records,
-}: {
-  group: (typeof GROUPS)[number];
-  records: RecordRow[];
-}) {
-  const t = useTranslations("domains");
-  return (
-    <div style={{ maxWidth: 1000 }}>
-      <p className="ms-microlabel" style={{ margin: "0 0 10px" }}>
-        {t(`detail.groups.${group}`)}
-      </p>
-      {/* Fully monospace — headers included — at the canvas's 12.5px. */}
-      <Table className="ms-mono" style={{ fontSize: 12.5 }}>
-        <thead>
-          <tr className="ms-mono">
-            <th>{t("detail.columns.type")}</th>
-            <th>{t("detail.columns.name")}</th>
-            <th>{t("detail.columns.value")}</th>
-            <th>{t("detail.columns.ttl")}</th>
-            <th>{t("detail.columns.priority")}</th>
-            <th>{t("detail.columns.status")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {records.map((record) => (
-            <tr key={`${record.type}-${record.name}-${record.value}`}>
-              <td style={{ width: 70 }}>{record.type}</td>
-              <td style={{ width: 230 }}>
-                <MidTruncated value={record.name} />
-                <CopyGlyph value={record.name} />
-              </td>
-              <td>
-                <MidTruncated value={record.value} />
-                <CopyGlyph value={record.value} />
-              </td>
-              <td style={{ width: 60 }}>{t("detail.ttlAuto")}</td>
-              <td style={{ width: 64 }}>{record.priority ?? "—"}</td>
-              <td style={{ width: 96 }}>
-                {record.status ? <DomainStatusBadge status={record.status} /> : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
     </div>
   );
 }
@@ -220,28 +145,9 @@ export function DomainDetail({ id }: { id: string }) {
 
   const data = domain.data;
   const provider = records.data?.provider ?? null;
-  const rows = (records.data?.records ?? []) as RecordRow[];
+  const rows = (records.data?.records ?? []) as DnsRecord[];
   const checkable = rows.filter((r) => r.status !== null);
   const foundCount = checkable.filter((r) => r.status === "verified").length;
-
-  const sublineParts = [
-    status === "verified" && data.verifiedAt
-      ? t("detail.subline.verified", { time: formatRelative(data.verifiedAt, locale) })
-      : t("detail.subline.added", { time: formatRelative(data.createdAt, locale) }),
-    `${regionFlag(data.region)} ${data.region}`,
-    ...(provider
-      ? [
-          status === "verified"
-            ? provider.name
-            : t("detail.subline.provider", { name: provider.name }),
-        ]
-      : []),
-    ...(status === "verified"
-      ? [t("detail.subline.sent", { count: data.sentCount })]
-      : checkable.length > 0
-        ? [t("detail.subline.recordsFound", { found: foundCount, total: checkable.length })]
-        : []),
-  ];
 
   function recordsText(): string {
     return rows
@@ -264,7 +170,6 @@ export function DomainDetail({ id }: { id: string }) {
     <>
       <PageHeader
         title={data.name}
-        subtitle={sublineParts.join(" · ")}
         breadcrumb={
           <>
             <Crumb href="/domains" label={nav("domains")} />
@@ -272,68 +177,85 @@ export function DomainDetail({ id }: { id: string }) {
           </>
         }
         actions={
-          <div style={{ position: "relative" }}>
-            <PopoverMenu
-              ariaLabel={t("detail.moreActions")}
-              items={[
-                {
-                  label: t("detail.forwardInstructions"),
-                  onSelect: () => {
-                    window.location.href = `mailto:?subject=${encodeURIComponent(
-                      t("detail.forwardSubject", { domain: data.name }),
-                    )}&body=${encodeURIComponent(recordsText())}`;
-                  },
-                },
-                {
-                  label: t("detail.copyInstructions"),
-                  disabled: !records.isSuccess,
-                  onSelect: () => void copyToClipboard(recordsText(), "instructions"),
-                },
-                {
-                  label: t("detail.copyAsPrompt"),
-                  disabled: !records.isSuccess,
-                  onSelect: () => void copyToClipboard(aiPrompt(), "prompt"),
-                },
-                null,
-                ...(
-                  [
-                    ["openInCursor", "cursor://anysphere.cursor-deeplink/prompt?text="],
-                    ["openInClaude", "https://claude.ai/new?q="],
-                    ["openInChatgpt", "https://chatgpt.com/?q="],
-                  ] as const
-                ).map(([key, base]) => ({
-                  label: t(`detail.${key}`),
-                  trailing: "↗",
-                  onSelect: () => {
-                    window.open(`${base}${encodeURIComponent(aiPrompt())}`, "_blank", "noreferrer");
-                  },
-                })),
-                null,
-                {
-                  label: t("detail.deleteDomain"),
-                  danger: true,
-                  onSelect: () => {
-                    setConfirmText("");
-                    setConfirmingDelete(true);
-                  },
-                },
-              ]}
-            />
-            {copiedKey ? (
-              <span
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 6px)",
-                  right: 0,
-                  whiteSpace: "nowrap",
-                  color: "var(--ms-muted)",
-                  fontSize: "var(--ms-fs-label)",
-                }}
+          <>
+            {status !== "verified" ? (
+              <button
+                type="button"
+                className="ms-btn ms-btn-primary"
+                disabled={verify.isPending}
+                onClick={() => verify.mutate({ id })}
               >
-                ✓ {common("copied")}
-              </span>
+                <BtnSpinner on={verify.isPending} />
+                {t("detail.verify")}
+              </button>
             ) : null}
-          </div>
+            <div style={{ position: "relative" }}>
+              <PopoverMenu
+                ariaLabel={t("detail.moreActions")}
+                items={[
+                  {
+                    label: t("detail.forwardInstructions"),
+                    onSelect: () => {
+                      window.location.href = `mailto:?subject=${encodeURIComponent(
+                        t("detail.forwardSubject", { domain: data.name }),
+                      )}&body=${encodeURIComponent(recordsText())}`;
+                    },
+                  },
+                  {
+                    label: t("detail.copyInstructions"),
+                    disabled: !records.isSuccess,
+                    onSelect: () => void copyToClipboard(recordsText(), "instructions"),
+                  },
+                  {
+                    label: t("detail.copyAsPrompt"),
+                    disabled: !records.isSuccess,
+                    onSelect: () => void copyToClipboard(aiPrompt(), "prompt"),
+                  },
+                  null,
+                  ...(
+                    [
+                      ["openInCursor", "cursor://anysphere.cursor-deeplink/prompt?text="],
+                      ["openInClaude", "https://claude.ai/new?q="],
+                      ["openInChatgpt", "https://chatgpt.com/?q="],
+                    ] as const
+                  ).map(([key, base]) => ({
+                    label: t(`detail.${key}`),
+                    trailing: "↗",
+                    onSelect: () => {
+                      window.open(
+                        `${base}${encodeURIComponent(aiPrompt())}`,
+                        "_blank",
+                        "noreferrer",
+                      );
+                    },
+                  })),
+                  null,
+                  {
+                    label: t("detail.deleteDomain"),
+                    danger: true,
+                    onSelect: () => {
+                      setConfirmText("");
+                      setConfirmingDelete(true);
+                    },
+                  },
+                ]}
+              />
+              {copiedKey ? (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    right: 0,
+                    whiteSpace: "nowrap",
+                    color: "var(--ms-muted)",
+                    fontSize: "var(--ms-fs-label)",
+                  }}
+                >
+                  ✓ {common("copied")}
+                </span>
+              ) : null}
+            </div>
+          </>
         }
       />
 
@@ -341,7 +263,7 @@ export function DomainDetail({ id }: { id: string }) {
         className="ms-meta-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: "repeat(3, 1fr)",
           gap: 22,
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
@@ -349,23 +271,13 @@ export function DomainDetail({ id }: { id: string }) {
           maxWidth: 1000,
         }}
       >
-        <MetaItem label={t("detail.created")}>{formatUtcMinute(data.createdAt)}</MetaItem>
+        <MetaItem label={t("detail.created")}>
+          <span title={formatUtcMinute(data.createdAt)}>
+            {formatRelative(data.createdAt, locale)}
+          </span>
+        </MetaItem>
         <MetaItem label={t("detail.status")}>
           <DomainStatusBadge status={status} />
-        </MetaItem>
-        <MetaItem label={t("detail.providerLabel")}>
-          {provider ? (
-            <span
-              style={{
-                textDecoration: "underline dotted var(--ms-faint)",
-                textUnderlineOffset: 3,
-              }}
-            >
-              {provider.name}
-            </span>
-          ) : (
-            "—"
-          )}
         </MetaItem>
         <MetaItem label={t("detail.region")}>
           <RegionLabel region={data.region} variant="meta" />
@@ -374,7 +286,7 @@ export function DomainDetail({ id }: { id: string }) {
 
       {checking ? (
         <GradientBanner variant="warn">
-          <span className="ms-spinner" />
+          <Spinner size={16} />
           <span style={{ fontSize: 13.5, color: "var(--ms-warn)" }}>
             {t("detail.bannerLooking")}
           </span>
@@ -432,14 +344,8 @@ export function DomainDetail({ id }: { id: string }) {
             </button>
           </div>
         ) : records.isSuccess ? (
-          <div style={{ display: "grid", gap: 20, marginTop: 22 }}>
-            {GROUPS.map((group) => (
-              <RecordsGroup
-                key={group}
-                group={group}
-                records={rows.filter((r) => r.group === group)}
-              />
-            ))}
+          <div style={{ marginTop: 22 }}>
+            <DnsRecordsTable records={rows} showStatus />
           </div>
         ) : (
           <div
@@ -452,37 +358,17 @@ export function DomainDetail({ id }: { id: string }) {
           />
         )}
 
-        {status !== "verified" ? (
-          <div
-            className="ms-wrap-row"
-            style={{ display: "flex", gap: 10, marginTop: 24, alignItems: "center" }}
-          >
-            {provider?.url ? (
-              <a
-                className="ms-btn ms-btn-secondary"
-                style={{ textDecoration: "none" }}
-                href={provider.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {t("detail.goToProvider", { provider: provider.name })} ↗
-              </a>
-            ) : null}
-            <button
-              type="button"
+        {status !== "verified" && provider?.url ? (
+          <div style={{ display: "flex", gap: 10, marginTop: 24, alignItems: "center" }}>
+            <a
               className="ms-btn ms-btn-secondary"
-              disabled={verify.isPending}
-              onClick={() => verify.mutate({ id })}
+              style={{ textDecoration: "none" }}
+              href={provider.url}
+              target="_blank"
+              rel="noreferrer"
             >
-              <BtnSpinner on={verify.isPending} />
-              {t("detail.verify")}
-            </button>
-            <span
-              className="ms-mono"
-              style={{ fontSize: 12, color: "var(--ms-muted)", marginLeft: "auto" }}
-            >
-              {t("detail.honestNote")}
-            </span>
+              {t("detail.goToProvider", { provider: provider.name })} ↗
+            </a>
           </div>
         ) : null}
       </section>
