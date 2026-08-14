@@ -98,12 +98,9 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
         padding: "16px 12px 12px",
       }}
     >
-      <div style={{ padding: "4px 10px 14px", display: "flex", alignItems: "flex-end", gap: 1 }}>
+      <div style={{ padding: "4px 10px 14px" }}>
         {/* biome-ignore lint/performance/noImgElement: static SVG logo, nothing for next/image to optimize */}
-        <img src="/logo/millionsend-mark.svg" alt="M" style={{ height: 15, marginBottom: 3.5 }} />
-        <span className="ms-display" style={{ fontSize: 20, lineHeight: 1.15 }}>
-          illionSend
-        </span>
+        <img src="/logo/millionsend-wordmark.svg" alt={tCommon("appName")} style={{ height: 15, display: "block" }} />
       </div>
       <div
         style={{
