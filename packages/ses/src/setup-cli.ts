@@ -182,15 +182,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           }
           const choice = await selectPrompt(rl, {
             label: "Not authenticated",
-            initial: "sso",
+            // aws login (browser sign-in for IAM users) is the common case;
+            // aws sso login only works for Identity Center profiles with
+            // sso_start_url configured.
+            initial: "login",
             options: [
-              { value: "sso", label: "Run aws sso login" },
-              { value: "configure", label: "Run aws configure" },
+              { value: "login", label: "Run aws login", hint: "browser sign-in" },
+              { value: "sso", label: "Run aws sso login", hint: "Identity Center profiles" },
+              { value: "configure", label: "Run aws configure", hint: "paste access keys" },
               { value: "exit", label: "Exit" },
             ],
           });
           if (choice === "exit") return 1;
-          runAws(choice === "sso" ? ["sso", "login"] : ["configure"]);
+          runAws(choice === "sso" ? ["sso", "login"] : [choice]);
         }
       }
     }
