@@ -323,6 +323,31 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.1)(tsx@4.23.12)(yaml@2.9.0)
 
+  packages/setup:
+    dependencies:
+      '@aws-sdk/client-iam':
+        specifier: ^3.750.0
+        version: 3.1109.0
+      '@aws-sdk/client-sesv2':
+        specifier: ^3.750.0
+        version: 3.1109.0
+      '@aws-sdk/client-sns':
+        specifier: ^3.750.0
+        version: 3.1109.0
+      '@aws-sdk/client-sts':
+        specifier: ^3.750.0
+        version: 3.1109.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/test-utils:
     dependencies:
       '@electric-sql/pglite':
@@ -2674,7 +2699,7 @@ snapshots:
 
   '@esbuild-kit/core-utils@3.3.2':
     dependencies:
-      esbuild: 0.28.2
+      esbuild: 0.25.12
       source-map-support: 0.5.21
 
   '@esbuild-kit/esm-loader@2.6.5':

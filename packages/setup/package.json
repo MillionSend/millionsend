@@ -1,0 +1,39 @@
+{
+  "name": "@millionsend/setup",
+  "version": "0.1.0",
+  "description": "Self-hosting setup tool: provisions the AWS resources (IAM, SNS, SES) a MillionSend instance needs",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "bin": {
+    "millionsend-setup": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MillionSend/millionsend.git",
+    "directory": "packages/setup"
+  },
+  "homepage": "https://github.com/MillionSend/millionsend/blob/main/SELF_HOSTING.md",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/index.js --banner:js='#!/usr/bin/env node' '--external:@aws-sdk/*'",
+    "prepublishOnly": "pnpm build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-iam": "^3.750.0",
+    "@aws-sdk/client-sesv2": "^3.750.0",
+    "@aws-sdk/client-sns": "^3.750.0",
+    "@aws-sdk/client-sts": "^3.750.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.3"
+  }
+}

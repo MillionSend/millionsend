@@ -11,7 +11,7 @@
       "stepTitle": "Criar recursos AWS",
       "recommended": "Recomendado",
       "cliTitle": "Execute o CLI de configuração",
-      "cliNote": "Execute <code>pnpm setup:aws</code> a partir de um clone deste repositório — ou <code>docker compose run --rm millionsend setup</code> no servidor. Ele roda com as SUAS credenciais AWS, cria tudo e imprime as linhas do <code>.env</code> para colar se o MillionSend rodar em outro lugar.",
+      "cliNote": "Execute em qualquer lugar com Node 18+ e as SUAS credenciais AWS de administrador — seu laptop ou o servidor. Ele cria tudo e imprime as linhas do <code>.env</code> para colar se o MillionSend rodar em outro lugar.",
       "cfnButton": "Criar a stack no CloudFormation",
       "scriptTitle": "Alternativa: cole este script",
       "scriptNote": "Cole em um terminal onde o AWS CLI tenha credenciais de administrador. Ele cria o usuário IAM, a política, o tópico SNS e o conjunto de configuração, e então imprime as linhas do seu <code>.env</code>.",
