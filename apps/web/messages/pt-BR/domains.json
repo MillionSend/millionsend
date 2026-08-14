@@ -54,7 +54,17 @@
       "toMe": "para mim",
       "subject": "Pedido #4821 confirmado",
       "snippet": "Olá Ana, recebemos seu pedido…",
-      "caption": "Prévia ao vivo — composta a partir do domínio enquanto você digita."
+      "caption": "Prévia ao vivo — composta a partir do domínio enquanto você digita.",
+      "details": {
+        "from": "de:",
+        "to": "para:",
+        "date": "data:",
+        "subject": "assunto:",
+        "mailedBy": "enviado por:",
+        "signedBy": "assinado por:",
+        "security": "segurança:",
+        "securityValue": "Criptografia padrão (TLS)"
+      }
     },
     "submit": "Adicionar domínio",
     "conflict": "Este domínio já foi adicionado.",

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
+import { PopoverMenu } from "@/components/popover-menu";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { formatRelative, formatUtcMinute, midTruncateParts } from "@/lib/format";
@@ -125,25 +126,6 @@ function RecordsGroup({
   );
 }
 
-const menuItemStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 12,
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "7px 12px",
-  fontSize: 13,
-  color: "var(--ms-bone)",
-  background: "none",
-  border: 0,
-  borderRadius: 8,
-  cursor: "pointer",
-  textAlign: "left",
-  textDecoration: "none",
-  font: "inherit",
-};
-
 function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -187,7 +169,6 @@ export function DomainDetail({ id }: { id: string }) {
     }),
   );
 
-  const [menuOpen, setMenuOpen] = useState(false);
   const [copiedKey, setCopiedKey] = useState<"instructions" | "prompt" | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmText, setConfirmText] = useState("");
@@ -275,14 +256,9 @@ export function DomainDetail({ id }: { id: string }) {
 
   async function copyToClipboard(text: string, key: "instructions" | "prompt") {
     await navigator.clipboard.writeText(text);
-    setMenuOpen(false);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 1600);
   }
-
-  const menuDivider = (
-    <div style={{ height: 1, background: "var(--ms-line)", margin: "6px 4px" }} />
-  );
 
   return (
     <>
@@ -297,94 +273,52 @@ export function DomainDetail({ id }: { id: string }) {
         }
         actions={
           <div style={{ position: "relative" }}>
-            <button
-              type="button"
-              className="ms-btn ms-btn-icon"
-              aria-label={t("detail.moreActions")}
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((open) => !open)}
-            >
-              …
-            </button>
-            {menuOpen ? (
-              <div
-                role="menu"
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 6px)",
-                  right: 0,
-                  width: 230,
-                  background: "var(--ms-panel)",
-                  border: "1px solid var(--ms-line-strong)",
-                  borderRadius: 14,
-                  padding: 6,
-                  zIndex: 10,
-                }}
-              >
-                <a
-                  role="menuitem"
-                  style={menuItemStyle}
-                  href={`mailto:?subject=${encodeURIComponent(
-                    t("detail.forwardSubject", { domain: data.name }),
-                  )}&body=${encodeURIComponent(recordsText())}`}
-                  onClick={() => setMenuOpen(false)}
-                >
-                  {t("detail.forwardInstructions")}
-                </a>
-                <button
-                  type="button"
-                  role="menuitem"
-                  style={menuItemStyle}
-                  disabled={!records.isSuccess}
-                  onClick={() => copyToClipboard(recordsText(), "instructions")}
-                >
-                  {t("detail.copyInstructions")}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  style={menuItemStyle}
-                  disabled={!records.isSuccess}
-                  onClick={() => copyToClipboard(aiPrompt(), "prompt")}
-                >
-                  {t("detail.copyAsPrompt")}
-                </button>
-                {menuDivider}
-                {(
+            <PopoverMenu
+              ariaLabel={t("detail.moreActions")}
+              items={[
+                {
+                  label: t("detail.forwardInstructions"),
+                  onSelect: () => {
+                    window.location.href = `mailto:?subject=${encodeURIComponent(
+                      t("detail.forwardSubject", { domain: data.name }),
+                    )}&body=${encodeURIComponent(recordsText())}`;
+                  },
+                },
+                {
+                  label: t("detail.copyInstructions"),
+                  disabled: !records.isSuccess,
+                  onSelect: () => void copyToClipboard(recordsText(), "instructions"),
+                },
+                {
+                  label: t("detail.copyAsPrompt"),
+                  disabled: !records.isSuccess,
+                  onSelect: () => void copyToClipboard(aiPrompt(), "prompt"),
+                },
+                null,
+                ...(
                   [
-                    ["openInCursor", `cursor://anysphere.cursor-deeplink/prompt?text=`],
+                    ["openInCursor", "cursor://anysphere.cursor-deeplink/prompt?text="],
                     ["openInClaude", "https://claude.ai/new?q="],
                     ["openInChatgpt", "https://chatgpt.com/?q="],
                   ] as const
-                ).map(([key, base]) => (
-                  <a
-                    key={key}
-                    role="menuitem"
-                    style={menuItemStyle}
-                    href={`${base}${encodeURIComponent(aiPrompt())}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => setMenuOpen(false)}
-                  >
-                    {t(`detail.${key}`)}
-                    <span style={{ color: "var(--ms-muted)" }}>↗</span>
-                  </a>
-                ))}
-                {menuDivider}
-                <button
-                  type="button"
-                  role="menuitem"
-                  style={{ ...menuItemStyle, color: "var(--ms-danger)" }}
-                  onClick={() => {
-                    setMenuOpen(false);
+                ).map(([key, base]) => ({
+                  label: t(`detail.${key}`),
+                  trailing: "↗",
+                  onSelect: () => {
+                    window.open(`${base}${encodeURIComponent(aiPrompt())}`, "_blank", "noreferrer");
+                  },
+                })),
+                null,
+                {
+                  label: t("detail.deleteDomain"),
+                  danger: true,
+                  onSelect: () => {
                     setConfirmText("");
                     setConfirmingDelete(true);
-                  }}
-                >
-                  {t("detail.deleteDomain")}
-                </button>
-              </div>
-            ) : null}
+                  },
+                },
+              ]}
+            />
             {copiedKey ? (
               <span
                 style={{

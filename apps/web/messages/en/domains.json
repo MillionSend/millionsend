@@ -54,7 +54,17 @@
       "toMe": "to me",
       "subject": "Order #4821 confirmed",
       "snippet": "Hi Ana, we've received your order…",
-      "caption": "Live preview — composes from the domain as you type."
+      "caption": "Live preview — composes from the domain as you type.",
+      "details": {
+        "from": "from:",
+        "to": "to:",
+        "date": "date:",
+        "subject": "subject:",
+        "mailedBy": "mailed-by:",
+        "signedBy": "signed-by:",
+        "security": "security:",
+        "securityValue": "Standard encryption (TLS)"
+      }
     },
     "submit": "Add domain",
     "conflict": "This domain is already added.",
