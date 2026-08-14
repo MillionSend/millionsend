@@ -50,12 +50,10 @@ describe("banner coloring", () => {
     }
   }
 
-  it("renders the ▓ accent steel-bright and the ░ shadow dim", () => {
-    onColorTty(undefined, () => {
-      const text = banner("full").join("\n");
-      expect(text).toContain("\x1b[1;96m▓");
-      expect(text).toContain("\x1b[90m░");
-    });
+  it("is uncolored — art carries its tones through character density", () => {
+    for (const line of banner("full")) {
+      expect(line).not.toContain("\x1b");
+    }
   });
 
   it("NO_COLOR strips every escape", () => {

@@ -13,7 +13,6 @@ export const dim = (s: string): string => (colorOn() ? `\x1b[90m${s}\x1b[39m` : 
 export const bone = (s: string): string => (colorOn() ? `\x1b[97m${s}\x1b[39m` : s);
 
 /** Steel-bright bold — the M's stem accent. No-op when piped or NO_COLOR is set. */
-const steel = (s: string): string => (colorOn() ? `\x1b[1;96m${s}\x1b[22;39m` : s);
 
 /**
  * Final hand-tuned banner art, stored verbatim — ▓ marks the M's stem accent,
@@ -52,11 +51,13 @@ export function bannerLines(tier: "full" | "compact" = "full"): string[] {
   return tier === "full" ? FULL_ART : COMPACT_ART;
 }
 
-/** Banner art with the ▓ stem accent steel-bright and the ░ shadow dimmed. */
+/**
+ * Banner art, uncolored: the ▓ stem and ░ shadow carry the tones through
+ * character density alone — terminal color themes made ANSI tinting read
+ * wrong more often than right.
+ */
 export function banner(tier: "full" | "compact" = "full"): string[] {
-  return bannerLines(tier).map((line) =>
-    line.replace(/░+/g, (run) => dim(run)).replace(/▓+/g, (run) => steel(run)),
-  );
+  return bannerLines(tier);
 }
 
 export interface SelectOption {
