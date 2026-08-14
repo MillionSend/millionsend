@@ -695,9 +695,10 @@ svg:focus {
   }
 }
 
-/* Empty states — centered app-icon tile with layered "3D" depth (see empty-state.tsx).
-   The tile floats and tilts on a slow loop; glyph parts drift on a stagger.
-   All color is token-derived (color-mix) so a future light theme lands free. */
+/* Empty states — centered 3D app-icon tile render (see empty-state.tsx).
+   The tile image carries its own face, bevel and depth; CSS adds only the
+   glow, the float/tilt loop and the drop shadow. The dark tile is intentional
+   on a future light theme too (app-icon look). */
 .ms-empty {
   padding: 88px 24px;
   display: flex;
@@ -725,48 +726,13 @@ svg:focus {
 }
 .ms-empty-tile {
   position: relative;
+  display: block;
   width: 96px;
   height: 96px;
-  border-radius: var(--ms-r-modal);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ms-bone);
-  background: linear-gradient(150deg, var(--ms-panel-raised), var(--ms-panel) 45%, var(--ms-inset));
-  border: 1px solid var(--ms-line-strong);
-  /* Inner bevel (1px light top / dark bottom edge) + drop under the float */
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--ms-bone) 9%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, var(--ms-void) 55%, transparent),
-    0 18px 34px -18px color-mix(in srgb, var(--ms-void) 85%, transparent);
-  transform-style: preserve-3d;
+  /* Matches the baked alpha corner radius of the tile renders (155/820) */
+  border-radius: 19%;
+  box-shadow: 0 18px 34px -18px color-mix(in srgb, var(--ms-void) 85%, transparent);
   animation: ms-empty-float 7s var(--ms-ease) infinite;
-}
-/* Faint metallic sheen sweeping from the top-left of the face */
-.ms-empty-tile::after {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  border-radius: calc(var(--ms-r-modal) - 1px);
-  background: radial-gradient(
-    120% 90% at 30% 0%,
-    color-mix(in srgb, var(--ms-bone) 5%, transparent),
-    transparent 55%
-  );
-  pointer-events: none;
-}
-/* Glyph rides above the face so the tilt loop reads as depth */
-.ms-empty-glyph {
-  transform: translateZ(14px);
-}
-.ms-empty-glyph g {
-  animation: ms-empty-drift 7s var(--ms-ease) infinite;
-}
-.ms-empty-glyph g:nth-child(2) {
-  animation-delay: -2.3s;
-}
-.ms-empty-glyph g:nth-child(3) {
-  animation-delay: -4.6s;
 }
 .ms-empty-headline {
   margin: 0;
@@ -792,18 +758,8 @@ svg:focus {
     transform: translateY(3px) rotateX(-3deg) rotateY(5deg);
   }
 }
-@keyframes ms-empty-drift {
-  0%,
-  100% {
-    transform: translateY(-0.4px);
-  }
-  50% {
-    transform: translateY(0.4px);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
-  .ms-empty-tile,
-  .ms-empty-glyph g {
+  .ms-empty-tile {
     animation: none;
   }
 }
