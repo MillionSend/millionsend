@@ -125,13 +125,17 @@ signup deliberately.
 <details>
 <summary><b>Operations</b></summary>
 
+- Send rate and email retention are managed in the dashboard: Settings → Instance
+  (owner/admin). The env vars `SES_MAX_SEND_RATE` and `EMAIL_RETENTION_DAYS` are the
+  boot defaults; a value saved in the dashboard overrides them (the worker picks up a
+  rate change within a minute, retention on the next purge run).
 - One worker container only: the SES rate limiter is in-memory, so N worker replicas
-  send at N × `SES_MAX_SEND_RATE`. Scale the worker vertically, or divide the rate by
-  the replica count.
+  send at N × the configured send rate. Scale the worker vertically, or divide the
+  rate by the replica count.
 - To run processes in separate containers, set `PROCESS` to `api`, `worker`, or `web`
   per container (default `all`).
 - Email bodies are encrypted at rest with `MASTER_ENCRYPTION_KEY` and purged after
-  `EMAIL_RETENTION_DAYS`. Back up the key with the database.
+  the retention window. Back up the key with the database.
 
 </details>
 

@@ -57,6 +57,7 @@
       "title": "Invite your team",
       "body": "Members manage emails, domains, and webhooks.",
       "link": "Team →"
-    }
+    },
+    "instance": "Send rate and email retention are instance settings — set them in <link>Settings</link>."
   }
 }

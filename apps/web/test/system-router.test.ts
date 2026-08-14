@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import type { SesAccountClient } from "@millionsend/ses";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTestDb } from "@millionsend/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCaller } from "@/server/routers";
 import { createSystemRouter } from "@/server/routers/system";
 import { type Context, createCallerFactory, router } from "@/server/trpc";
@@ -124,6 +125,88 @@ describe("system.sesAccount", () => {
     expect(await sesCaller(client).system.sesAccount()).toMatchObject({
       ok: false,
       kind: "unreachable",
+    });
+  });
+});
+
+describe("system.instanceSettings", () => {
+  let db: Db;
+  let close: () => Promise<void>;
+  beforeEach(async () => {
+    ({ db, close } = await createTestDb());
+  });
+  afterEach(() => close());
+
+  function dbCaller(role: "owner" | "admin" | "member") {
+    return createCaller({
+      db,
+      session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
+      teamId: "team-1",
+      role,
+    });
+  }
+
+  it("resolves precedence db > env > built-in default, reporting the source", async () => {
+    vi.stubEnv("SES_MAX_SEND_RATE", "");
+    vi.stubEnv("EMAIL_RETENTION_DAYS", "");
+    const owner = dbCaller("owner");
+    expect(await owner.system.instanceSettings.get()).toMatchObject({
+      sesMaxSendRate: { value: 14, source: "default" },
+      emailRetentionDays: { value: 30, source: "default" },
+    });
+
+    vi.stubEnv("SES_MAX_SEND_RATE", "5");
+    vi.stubEnv("EMAIL_RETENTION_DAYS", "60");
+    expect(await owner.system.instanceSettings.get()).toMatchObject({
+      sesMaxSendRate: { value: 5, source: "env" },
+      emailRetentionDays: { value: 60, source: "env" },
+    });
+
+    await owner.system.instanceSettings.update({ sesMaxSendRate: 9, emailRetentionDays: 7 });
+    expect(await owner.system.instanceSettings.get()).toMatchObject({
+      sesMaxSendRate: { value: 9, source: "db" },
+      emailRetentionDays: { value: 7, source: "db" },
+    });
+  });
+
+  it("null clears an override back to env, field by field", async () => {
+    vi.stubEnv("SES_MAX_SEND_RATE", "5");
+    vi.stubEnv("EMAIL_RETENTION_DAYS", "");
+    const owner = dbCaller("owner");
+    await owner.system.instanceSettings.update({ sesMaxSendRate: 9, emailRetentionDays: 7 });
+    await owner.system.instanceSettings.update({ sesMaxSendRate: null, emailRetentionDays: 7 });
+    expect(await owner.system.instanceSettings.get()).toMatchObject({
+      sesMaxSendRate: { value: 5, source: "env" },
+      emailRetentionDays: { value: 7, source: "db" },
+    });
+  });
+
+  it("rejects out-of-range values", async () => {
+    const owner = dbCaller("owner");
+    await expect(
+      owner.system.instanceSettings.update({ sesMaxSendRate: 0, emailRetentionDays: 7 }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      owner.system.instanceSettings.update({ sesMaxSendRate: 201, emailRetentionDays: 7 }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      owner.system.instanceSettings.update({ sesMaxSendRate: 1, emailRetentionDays: 3651 }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("members may read but never write; admins may write", async () => {
+    const member = dbCaller("member");
+    expect(await member.system.instanceSettings.get()).toMatchObject({ canEdit: false });
+    await expect(
+      member.system.instanceSettings.update({ sesMaxSendRate: 9, emailRetentionDays: 7 }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await dbCaller("admin").system.instanceSettings.update({
+      sesMaxSendRate: 9,
+      emailRetentionDays: 7,
+    });
+    expect(await member.system.instanceSettings.get()).toMatchObject({
+      sesMaxSendRate: { value: 9, source: "db" },
     });
   });
 });

@@ -216,4 +216,22 @@ describe("setupEnvEntries / upsertEnv", () => {
     const next = upsertEnv(content, { AWS_REGION: "us-east-1" });
     expect(next).toBe("# AWS_REGION=old\nAWS_REGION_EXTRA=keep\nAWS_REGION=us-east-1\n");
   });
+
+  it("replaces an empty-value line in place instead of appending", () => {
+    const content = "AWS_REGION=\nDATABASE_URL=postgres://x\n";
+    const next = upsertEnv(content, { AWS_REGION: "us-east-1" });
+    expect(next).toBe("AWS_REGION=us-east-1\nDATABASE_URL=postgres://x\n");
+  });
+
+  it("tolerates whitespace, export, and spaces around =", () => {
+    const content = "  export AWS_REGION = eu-west-1\nOTHER=keep\n";
+    const next = upsertEnv(content, { AWS_REGION: "us-east-1" });
+    expect(next).toBe("AWS_REGION=us-east-1\nOTHER=keep\n");
+  });
+
+  it("replaces the first duplicate and removes the rest", () => {
+    const content = "AWS_REGION=old\n# note\nAWS_REGION=older\nOTHER=keep\nAWS_REGION=\n";
+    const next = upsertEnv(content, { AWS_REGION: "us-east-1" });
+    expect(next).toBe("AWS_REGION=us-east-1\n# note\nOTHER=keep\n");
+  });
 });

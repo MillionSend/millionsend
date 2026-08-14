@@ -1,11 +1,28 @@
-import { env } from "@millionsend/config";
+import { EMAIL_RETENTION_DAYS_DEFAULT, env, SES_MAX_SEND_RATE_DEFAULT } from "@millionsend/config";
+import { getInstanceSettings } from "@millionsend/core";
+import { schema } from "@millionsend/db";
 import {
   createSesAccountClient,
   getAccountOverview,
   type SesAccountClient,
 } from "@millionsend/ses";
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import { isAwsCredentialError } from "@/lib/aws-errors";
 import { router, teamProcedure } from "../trpc";
+
+/**
+ * Effective value + where it came from (db > env > default). Derived from
+ * the raw process.env entry rather than the parsed env proxy: under
+ * SKIP_ENV_VALIDATION the proxy is raw process.env (strings, no defaults),
+ * and boot validation already guarantees the raw value is numeric. ""
+ * counts as unset, matching emptyStringAsUndefined.
+ */
+function effectiveSetting(dbValue: number | null, envRaw: string | undefined, fallback: number) {
+  if (dbValue !== null) return { value: dbValue, source: "db" as const };
+  if (envRaw) return { value: Number(envRaw), source: "env" as const };
+  return { value: fallback, source: "default" as const };
+}
 
 /**
  * SES access seam, mirroring DomainsSesDeps: tests inject a fake via
@@ -70,6 +87,50 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
           message,
         };
       }
+    }),
+
+    /**
+     * Instance-wide (NOT team-scoped) operator settings. Reads are open to
+     * any member; writes are owner/admin only — on self-host these steer the
+     * whole deployment's SES throughput and retention compliance.
+     */
+    instanceSettings: router({
+      get: teamProcedure.query(async ({ ctx }) => {
+        const stored = await getInstanceSettings(ctx.db);
+        return {
+          sesMaxSendRate: effectiveSetting(
+            stored.sesMaxSendRate,
+            process.env.SES_MAX_SEND_RATE,
+            SES_MAX_SEND_RATE_DEFAULT,
+          ),
+          emailRetentionDays: effectiveSetting(
+            stored.emailRetentionDays,
+            process.env.EMAIL_RETENTION_DAYS,
+            EMAIL_RETENTION_DAYS_DEFAULT,
+          ),
+          canEdit: ctx.role !== "member",
+        };
+      }),
+
+      update: teamProcedure
+        .input(
+          z.object({
+            // null clears the override — the env value (then built-in
+            // default) applies again.
+            sesMaxSendRate: z.number().int().min(1).max(200).nullable(),
+            emailRetentionDays: z.number().int().min(1).max(3650).nullable(),
+          }),
+        )
+        .mutation(async ({ ctx, input }) => {
+          if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
+          await ctx.db
+            .insert(schema.instanceSettings)
+            .values({ id: 1, ...input })
+            .onConflictDoUpdate({
+              target: schema.instanceSettings.id,
+              set: { ...input, updatedAt: new Date() },
+            });
+        }),
     }),
   });
 }

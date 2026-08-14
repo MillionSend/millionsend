@@ -21,6 +21,7 @@ export {
   purgeExpiredIdempotencyKeys,
   releaseIdempotent,
 } from "./idempotency.js";
+export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
 export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";

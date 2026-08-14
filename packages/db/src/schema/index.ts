@@ -4,6 +4,7 @@ export * from "./auth.js";
 export * from "./domains.js";
 export * from "./emails.js";
 export * from "./idempotency.js";
+export * from "./instance-settings.js";
 export * from "./suppressions.js";
 export * from "./teams.js";
 export * from "./usage.js";

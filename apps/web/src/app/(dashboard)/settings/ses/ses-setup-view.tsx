@@ -11,6 +11,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import { buildAwsSetupScript, CFN_DEPLOY_COMMAND, cfnQuickCreateUrl } from "@/lib/aws-setup-script";
 import { codeRichTags } from "@/lib/code-rich-tags";
+import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
 const PRODUCTION_ACCESS_DOCS_URL =
@@ -221,9 +222,62 @@ const stepBodyStyle: React.CSSProperties = {
   color: "var(--ms-bone)",
 };
 
+/** Compact card shown once a step's env vars are in place; the toggle reveals
+    the full instruction stack the step would otherwise show. */
+function StepDoneCard({
+  message,
+  toggleLabel,
+  open,
+  onToggle,
+  small = false,
+}: {
+  message: string;
+  toggleLabel: string;
+  open: boolean;
+  onToggle: () => void;
+  small?: boolean;
+}) {
+  return (
+    <section
+      style={{
+        ...stepCardStyle,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        backgroundColor: "var(--ms-ground)",
+        backgroundImage: statusGlow("success", 15),
+        border: "1px solid var(--ms-success-border)",
+        borderRadius: 14,
+        padding: small ? "12px 16px" : "16px 22px",
+      }}
+    >
+      <span
+        className="ms-mono"
+        aria-hidden="true"
+        style={{ fontSize: 11, color: "var(--ms-success)" }}
+      >
+        ✓
+      </span>
+      <span style={{ fontSize: small ? 13 : 13.5, color: "var(--ms-bone)" }}>{message}</span>
+      <button
+        type="button"
+        className="ms-btn ms-btn-ghost"
+        aria-expanded={open}
+        style={{ marginLeft: "auto" }}
+        onClick={onToggle}
+      >
+        {toggleLabel}
+      </button>
+    </section>
+  );
+}
+
 export function SesSetupView() {
   const t = useTranslations("settings.ses");
   const [manualOpen, setManualOpen] = useState(false);
+  // Collapsed on every load: the done cards only remember the toggle in-page.
+  const [setupDetailsOpen, setSetupDetailsOpen] = useState(false);
+  const [eventsDetailsOpen, setEventsDetailsOpen] = useState(false);
   const locale = useLocale();
   const trpc = useTRPC();
   // Poll while credentials are missing so the step markers flip live once the
@@ -267,116 +321,130 @@ export function SesSetupView() {
 
   return (
     <div style={{ maxWidth: 880 }}>
-      <Step marker="01" title={t("setup.stepTitle")}>
-        <section className="ms-card" style={{ ...stepCardStyle, padding: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
-              {t("setup.cliTitle")}
-            </span>
-            <span className="ms-badge ms-badge-success">{t("setup.recommended")}</span>
-          </div>
-          <p style={{ margin: "12px 0 0" }}>
-            <CopyChip value="npx @millionsend/setup" />
-          </p>
-          <p style={{ margin: "10px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
-            {t.rich("setup.cliNote", codeRichTags)}
-          </p>
-        </section>
-
-        <section className="ms-card" style={{ ...stepCardStyle, padding: 22, marginTop: 14 }}>
-          <a
-            href={cfnQuickCreateUrl(readiness.data.region)}
-            target="_blank"
-            rel="noreferrer"
-            className="ms-btn ms-btn-secondary"
-          >
-            {t("setup.cfnButton")} ↗
-          </a>
-          <p
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "wrap",
-              margin: "12px 0 0",
-              fontSize: 12.5,
-              color: "var(--ms-muted)",
-            }}
-          >
-            {t.rich("setup.cfnNote", codeRichTags)}
-            <CopyChip value={CFN_DEPLOY_COMMAND} display="aws cloudformation deploy …" />
-          </p>
-        </section>
-
-        <section className="ms-card" style={{ ...stepCardStyle, padding: 22, marginTop: 14 }}>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>{t("setup.scriptTitle")}</span>
-          <p style={{ margin: "10px 0 14px", fontSize: 13, color: "var(--ms-muted)" }}>
-            {t.rich("setup.scriptNote", codeRichTags)}
-          </p>
-          {eventsIncluded ? null : (
-            <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--ms-warn)" }}>
-              {t.rich("setup.eventsSkipped", codeRichTags)}
-            </p>
-          )}
-          <MonoBlock
-            title="millionsend-aws-setup.sh"
-            value={setupScript}
-            maxHeight={300}
-            collapsible
+      <Step marker="01" done={credentialsOk} title={t("setup.stepTitle")}>
+        {credentialsOk ? (
+          <StepDoneCard
+            message={t("setup.connected")}
+            toggleLabel={t("setup.viewInstructions")}
+            open={setupDetailsOpen}
+            onToggle={() => setSetupDetailsOpen((v) => !v)}
           />
-        </section>
+        ) : null}
+        {!credentialsOk || setupDetailsOpen ? (
+          <div style={{ marginTop: credentialsOk ? 14 : 0 }}>
+            <section className="ms-card" style={{ ...stepCardStyle, padding: 22 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
+                  {t("setup.cliTitle")}
+                </span>
+                <span className="ms-badge ms-badge-success">{t("setup.recommended")}</span>
+              </div>
+              <p style={{ margin: "12px 0 0" }}>
+                <CopyChip value="npx @millionsend/setup" />
+              </p>
+              <p style={{ margin: "10px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
+                {t.rich("setup.cliNote", codeRichTags)}
+              </p>
+            </section>
 
-        <section className="ms-card" style={{ ...stepCardStyle, padding: 24, marginTop: 14 }}>
-          <details onToggle={(e) => setManualOpen(e.currentTarget.open)}>
-            <summary
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                cursor: "pointer",
-                listStyle: "none",
-                fontSize: 13.5,
-                color: "var(--ms-bone)",
-              }}
-            >
-              <span>{t("setup.manualTitle")}</span>
-              <span style={{ display: "flex", alignItems: "center", color: "var(--ms-muted)" }}>
-                <ChevronGlyph direction={manualOpen ? "up" : "down"} />
+            <section className="ms-card" style={{ ...stepCardStyle, padding: 22, marginTop: 14 }}>
+              <a
+                href={cfnQuickCreateUrl(readiness.data.region)}
+                target="_blank"
+                rel="noreferrer"
+                className="ms-btn ms-btn-secondary"
+              >
+                {t("setup.cfnButton")} ↗
+              </a>
+              <p
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  margin: "12px 0 0",
+                  fontSize: 12.5,
+                  color: "var(--ms-muted)",
+                }}
+              >
+                {t.rich("setup.cfnNote", codeRichTags)}
+                <CopyChip value={CFN_DEPLOY_COMMAND} display="aws cloudformation deploy …" />
+              </p>
+            </section>
+
+            <section className="ms-card" style={{ ...stepCardStyle, padding: 22, marginTop: 14 }}>
+              <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
+                {t("setup.scriptTitle")}
               </span>
-            </summary>
-            <ol
-              style={{
-                margin: "18px 0 0",
-                padding: "0 0 0 22px",
-                display: "grid",
-                gap: 16,
-              }}
-            >
-              <li style={stepBodyStyle}>
-                {t("setup.step1")}
-                <div style={{ margin: "10px 0" }}>
-                  <MonoBlock title="iam-policy.json" value={SES_IAM_POLICY_JSON} />
-                </div>
-                <a
-                  href={IAM_CREATE_POLICY_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ms-btn ms-btn-secondary"
+              <p style={{ margin: "10px 0 14px", fontSize: 13, color: "var(--ms-muted)" }}>
+                {t.rich("setup.scriptNote", codeRichTags)}
+              </p>
+              {eventsIncluded ? null : (
+                <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--ms-warn)" }}>
+                  {t.rich("setup.eventsSkipped", codeRichTags)}
+                </p>
+              )}
+              <MonoBlock
+                title="millionsend-aws-setup.sh"
+                value={setupScript}
+                maxHeight={300}
+                collapsible
+              />
+            </section>
+
+            <section className="ms-card" style={{ ...stepCardStyle, padding: 24, marginTop: 14 }}>
+              <details onToggle={(e) => setManualOpen(e.currentTarget.open)}>
+                <summary
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    cursor: "pointer",
+                    listStyle: "none",
+                    fontSize: 13.5,
+                    color: "var(--ms-bone)",
+                  }}
                 >
-                  {t("setup.step1Link")} ↗
-                </a>
-              </li>
-              <li style={stepBodyStyle}>
-                {t.rich("setup.step2", codeRichTags)}{" "}
-                <a href={IAM_CREATE_USER_URL} target="_blank" rel="noreferrer">
-                  {t("setup.step2Link")} ↗
-                </a>
-              </li>
-              <li style={stepBodyStyle}>{t.rich("setup.step3", codeRichTags)}</li>
-              <li style={stepBodyStyle}>{t.rich("setup.step4", codeRichTags)}</li>
-            </ol>
-          </details>
-        </section>
+                  <span>{t("setup.manualTitle")}</span>
+                  <span style={{ display: "flex", alignItems: "center", color: "var(--ms-muted)" }}>
+                    <ChevronGlyph direction={manualOpen ? "up" : "down"} />
+                  </span>
+                </summary>
+                <ol
+                  style={{
+                    margin: "18px 0 0",
+                    padding: "0 0 0 22px",
+                    display: "grid",
+                    gap: 16,
+                  }}
+                >
+                  <li style={stepBodyStyle}>
+                    {t("setup.step1")}
+                    <div style={{ margin: "10px 0" }}>
+                      <MonoBlock title="iam-policy.json" value={SES_IAM_POLICY_JSON} />
+                    </div>
+                    <a
+                      href={IAM_CREATE_POLICY_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ms-btn ms-btn-secondary"
+                    >
+                      {t("setup.step1Link")} ↗
+                    </a>
+                  </li>
+                  <li style={stepBodyStyle}>
+                    {t.rich("setup.step2", codeRichTags)}{" "}
+                    <a href={IAM_CREATE_USER_URL} target="_blank" rel="noreferrer">
+                      {t("setup.step2Link")} ↗
+                    </a>
+                  </li>
+                  <li style={stepBodyStyle}>{t.rich("setup.step3", codeRichTags)}</li>
+                  <li style={stepBodyStyle}>{t.rich("setup.step4", codeRichTags)}</li>
+                </ol>
+              </details>
+            </section>
+          </div>
+        ) : null}
       </Step>
 
       <Step marker="02" done={credentialsOk} title={t("credentials.title")}>
@@ -502,24 +570,38 @@ export function SesSetupView() {
       </Step>
 
       <Step marker="03" done={eventsOk} last title={t("events.title")}>
-        <section className="ms-card" style={{ ...stepCardStyle, padding: 24 }}>
-          <CheckRow
-            ok={sesEnv.data.snsTopicsConfigured}
-            name="SNS_TOPIC_ARNS"
-            detail={
-              sesEnv.data.snsTopicsConfigured ? t("credentials.set") : t("credentials.snsNote")
-            }
+        {eventsOk ? (
+          <StepDoneCard
+            small
+            message={t("events.connected")}
+            toggleLabel={t("setup.viewInstructions")}
+            open={eventsDetailsOpen}
+            onToggle={() => setEventsDetailsOpen((v) => !v)}
           />
-          <CheckRow
-            ok={sesEnv.data.configurationSetConfigured}
-            name="SES_CONFIGURATION_SET"
-            detail={
-              sesEnv.data.configurationSetConfigured
-                ? t("credentials.set")
-                : t("credentials.configSetNote")
-            }
-          />
-        </section>
+        ) : null}
+        {!eventsOk || eventsDetailsOpen ? (
+          <section
+            className="ms-card"
+            style={{ ...stepCardStyle, padding: 24, marginTop: eventsOk ? 14 : 0 }}
+          >
+            <CheckRow
+              ok={sesEnv.data.snsTopicsConfigured}
+              name="SNS_TOPIC_ARNS"
+              detail={
+                sesEnv.data.snsTopicsConfigured ? t("credentials.set") : t("credentials.snsNote")
+              }
+            />
+            <CheckRow
+              ok={sesEnv.data.configurationSetConfigured}
+              name="SES_CONFIGURATION_SET"
+              detail={
+                sesEnv.data.configurationSetConfigured
+                  ? t("credentials.set")
+                  : t("credentials.configSetNote")
+              }
+            />
+          </section>
+        ) : null}
       </Step>
 
       {credentialsOk || result?.ok ? (

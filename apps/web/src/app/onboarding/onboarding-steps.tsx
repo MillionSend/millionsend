@@ -245,10 +245,13 @@ export function OnboardingSteps({
   userEmail,
   accountCreatedAt,
   apiUrl,
+  showInstanceHint,
 }: {
   userEmail: string;
   accountCreatedAt: string;
   apiUrl: string;
+  /** Instance settings exist only on self-host; cloud hides the pointer. */
+  showInstanceHint: boolean;
 }) {
   const t = useTranslations("onboarding");
   const common = useTranslations("common");
@@ -536,6 +539,17 @@ export function OnboardingSteps({
                 </Link>
               ))}
             </div>
+            {showInstanceHint ? (
+              <p style={{ fontSize: 12.5, color: "var(--ms-muted)", margin: "14px 0 0" }}>
+                {t.rich("explore.instance", {
+                  link: (chunks) => (
+                    <Link href="/settings" style={{ color: "var(--ms-bone)" }}>
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </p>
+            ) : null}
           </div>
         </>
       ) : (
