@@ -1,3 +1,4 @@
+import { env } from "@millionsend/config";
 import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { SettingsSections } from "./settings-sections";
@@ -9,7 +10,9 @@ export default async function SettingsPage() {
     <>
       <PageHeader title={t("tabs.settings")} />
       <SettingsTabs />
-      <SettingsSections />
+      {/* Instance settings steer the whole deployment — an operator concern
+          that exists only on self-host; cloud tenants never see them. */}
+      <SettingsSections showInstance={!env.IS_CLOUD} />
     </>
   );
 }

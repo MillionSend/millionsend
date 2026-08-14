@@ -215,7 +215,7 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
     .returning({ id: schema.emails.id });
   if (!old || !fresh) throw new Error("insert failed");
 
-  expect(await purgeExpiredEmailBodies(db, { retentionDays: 30, now })).toBe(1);
+  expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(1);
 
   const [oldRow] = await db.select().from(schema.emails).where(eq(schema.emails.id, old.id));
   expect(oldRow?.bodyCiphertext).toBeNull();
@@ -245,7 +245,7 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
     })
     .returning({ id: schema.emails.id });
   if (!scheduled) throw new Error("insert failed");
-  expect(await purgeExpiredEmailBodies(db, { retentionDays: 30, now })).toBe(0);
+  expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(0);
   const [scheduledRow] = await db
     .select()
     .from(schema.emails)
@@ -253,5 +253,26 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
   expect(scheduledRow?.bodyCiphertext).not.toBeNull();
 
   // Second run: already-purged rows are not re-stamped.
-  expect(await purgeExpiredEmailBodies(db, { retentionDays: 30, now: new Date() })).toBe(0);
+  expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now: new Date() })).toBe(0);
+});
+
+it("retention purge prefers the instance setting over the env-derived default", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  // 20 days old: kept under the 30-day default, expired under a 10-day override.
+  await db.insert(schema.emails).values({
+    teamId,
+    from: "a@acme.dev",
+    to: ["r@example.com"],
+    subject: "override",
+    latestStatus: "delivered",
+    createdAt: new Date("2026-07-25T00:00:00Z"),
+    bodyCiphertext: Buffer.from("ct"),
+    bodyIv: Buffer.from("iv"),
+    bodyWrappedDek: Buffer.from("dek"),
+    bodyKeyVersion: 1,
+  });
+
+  expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(0);
+  await db.insert(schema.instanceSettings).values({ emailRetentionDays: 10 });
+  expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(1);
 });

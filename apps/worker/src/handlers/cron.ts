@@ -1,5 +1,6 @@
 import {
   DAY_MS,
+  getInstanceSettings,
   PLAN_DAILY_LIMIT,
   releaseDailyQuota,
   reserveDailyQuota,
@@ -136,10 +137,15 @@ export async function reconcileStalledSends(
  */
 export async function purgeExpiredEmailBodies(
   db: Db,
-  params: { retentionDays: number; now?: Date },
+  params: { defaultRetentionDays: number; now?: Date },
 ): Promise<number> {
+  // Read the instance setting fresh each run so a Settings → Instance change
+  // applies to the next purge without a worker restart; NULL falls back to
+  // the env-derived default.
+  const { emailRetentionDays } = await getInstanceSettings(db);
+  const retentionDays = emailRetentionDays ?? params.defaultRetentionDays;
   const now = params.now ?? new Date();
-  const cutoff = new Date(now.getTime() - params.retentionDays * DAY_MS);
+  const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
   const purged = await db
     .update(schema.emails)
     .set({

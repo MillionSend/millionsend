@@ -9,6 +9,8 @@
     "subtitle": "Sua instância envia pela sua própria conta SES.",
     "setup": {
       "stepTitle": "Criar recursos AWS",
+      "connected": "Recursos AWS conectados.",
+      "viewInstructions": "Ver instruções",
       "recommended": "Recomendado",
       "cliTitle": "Execute o CLI de configuração",
       "cliNote": "Execute em qualquer lugar com Node 18+ e as SUAS credenciais AWS de administrador — seu laptop ou o servidor. Ele cria tudo e imprime as linhas do <code>.env</code> para colar se o MillionSend rodar em outro lugar.",
@@ -64,7 +66,8 @@
       "selfHosting": "A ingestão de eventos e o checklist completo estão em <code>SELF_HOSTING.md</code>."
     },
     "events": {
-      "title": "Eventos"
+      "title": "Eventos",
+      "connected": "Eventos conectados."
     }
   },
   "team": {
@@ -91,6 +94,21 @@
       "admin": "Administrador",
       "member": "Membro"
     }
+  },
+  "instance": {
+    "title": "Instância",
+    "subtitle": "Vale para toda esta implantação, todas as equipes. Campos vazios voltam ao .env e depois ao padrão embutido.",
+    "rateLabel": "Taxa de envio SES (mensagens/segundo)",
+    "retentionLabel": "Retenção de corpos de e-mail (dias)",
+    "effective": "Em vigor: {value} · {source}",
+    "sources": {
+      "db": "definido aqui",
+      "env": "do .env",
+      "default": "padrão embutido"
+    },
+    "save": "Salvar",
+    "saved": "Salvo",
+    "error": "Não foi possível salvar."
   },
   "language": {
     "title": "Idioma",

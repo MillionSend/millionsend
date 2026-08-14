@@ -9,6 +9,8 @@
     "subtitle": "Your instance sends through your own SES account.",
     "setup": {
       "stepTitle": "Create AWS resources",
+      "connected": "AWS resources connected.",
+      "viewInstructions": "View instructions",
       "recommended": "Recommended",
       "cliTitle": "Run the setup CLI",
       "cliNote": "Run it anywhere Node 18+ and YOUR AWS admin credentials live — your laptop or the server. It creates everything and prints the <code>.env</code> lines to paste if MillionSend runs elsewhere.",
@@ -64,7 +66,8 @@
       "selfHosting": "Event ingestion and the full checklist live in <code>SELF_HOSTING.md</code>."
     },
     "events": {
-      "title": "Events"
+      "title": "Events",
+      "connected": "Events connected."
     }
   },
   "team": {
@@ -91,6 +94,21 @@
       "admin": "Admin",
       "member": "Member"
     }
+  },
+  "instance": {
+    "title": "Instance",
+    "subtitle": "Applies to this whole deployment, every team. Empty fields fall back to .env, then the built-in default.",
+    "rateLabel": "SES send rate (messages/second)",
+    "retentionLabel": "Email body retention (days)",
+    "effective": "Effective: {value} · {source}",
+    "sources": {
+      "db": "set here",
+      "env": "from .env",
+      "default": "built-in default"
+    },
+    "save": "Save",
+    "saved": "Saved",
+    "error": "Could not save."
   },
   "language": {
     "title": "Language",

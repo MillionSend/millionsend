@@ -330,21 +330,32 @@ export function setupEnvEntries(region: string, result: SetupResult): Record<str
   return entries;
 }
 
-/** Rewrites `KEY=...` lines in a dotenv file, appending keys it does not have yet. */
+/**
+ * Rewrites `KEY=...` lines in a dotenv file, appending keys it does not have
+ * yet. Matching tolerates the dotenv variants a hand-edited file accumulates —
+ * leading whitespace, `export `, spaces around `=`, an empty value — so an
+ * existing line is always replaced in place instead of duplicated at the end.
+ * The first occurrence of a key wins; later duplicates of a managed key are
+ * removed. Comments and unmanaged lines pass through untouched.
+ */
 export function upsertEnv(content: string, entries: Record<string, string>): string {
-  const pending = new Map(Object.entries(entries));
-  const out = content.split("\n").map((line) => {
-    for (const [key, value] of pending) {
-      if (line.startsWith(`${key}=`)) {
-        pending.delete(key);
-        return `${key}=${value}`;
-      }
+  const wanted = new Map(Object.entries(entries));
+  const replaced = new Set<string>();
+  const out: string[] = [];
+  for (const line of content.split("\n")) {
+    const key = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line)?.[1];
+    const value = key === undefined ? undefined : wanted.get(key);
+    if (key === undefined || value === undefined) {
+      out.push(line);
+    } else if (!replaced.has(key)) {
+      replaced.add(key);
+      out.push(`${key}=${value}`);
     }
-    return line;
-  });
-  if (pending.size > 0) {
+  }
+  const missing = [...wanted].filter(([key]) => !replaced.has(key));
+  if (missing.length > 0) {
     while (out.length > 0 && out[out.length - 1] === "") out.pop();
-    for (const [key, value] of pending) out.push(`${key}=${value}`);
+    for (const [key, value] of missing) out.push(`${key}=${value}`);
     out.push("");
   }
   return out.join("\n");

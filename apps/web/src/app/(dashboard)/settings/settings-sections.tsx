@@ -166,11 +166,149 @@ function LanguageSection() {
   );
 }
 
-export function SettingsSections() {
+/** One numeric override field: empty = no override, hint shows the effective value. */
+function InstanceField({
+  id,
+  label,
+  hint,
+  min,
+  max,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  min: number;
+  max: number;
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="ms-field">
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        type="number"
+        className="ms-input"
+        style={{ maxWidth: 220 }}
+        min={min}
+        max={max}
+        step={1}
+        disabled={disabled}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <p style={{ margin: "6px 0 0", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
+        {hint}
+      </p>
+    </div>
+  );
+}
+
+function InstanceSection() {
+  const t = useTranslations("settings");
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const { data } = useQuery(trpc.system.instanceSettings.get.queryOptions());
+  const [rateDraft, setRateDraft] = useState<string | null>(null);
+  const [retentionDraft, setRetentionDraft] = useState<string | null>(null);
+  const save = useMutation(
+    trpc.system.instanceSettings.update.mutationOptions({
+      onSuccess: async () => {
+        setRateDraft(null);
+        setRetentionDraft(null);
+        await queryClient.invalidateQueries(trpc.system.instanceSettings.get.queryFilter());
+      },
+    }),
+  );
+  if (!data) return null;
+
+  // The input holds only the db override; env/default values live in the
+  // hint, so clearing the field is an honest "back to env" reset.
+  const stored = (s: { value: number; source: string }) =>
+    s.source === "db" ? String(s.value) : "";
+  const rate = rateDraft ?? stored(data.sesMaxSendRate);
+  const retention = retentionDraft ?? stored(data.emailRetentionDays);
+  const hint = (s: { value: number; source: "db" | "env" | "default" }) =>
+    t("instance.effective", { value: s.value, source: t(`instance.sources.${s.source}`) });
+  const clean = rateDraft === null && retentionDraft === null;
+
+  return (
+    <SectionCard title={t("instance.title")}>
+      <p
+        style={{
+          margin: "-8px 0 16px",
+          color: "var(--ms-muted)",
+          fontSize: "var(--ms-fs-label)",
+        }}
+      >
+        {t("instance.subtitle")}
+      </p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate({
+            sesMaxSendRate: rate.trim() === "" ? null : Number(rate),
+            emailRetentionDays: retention.trim() === "" ? null : Number(retention),
+          });
+        }}
+      >
+        <div style={{ display: "grid", gap: 14 }}>
+          <InstanceField
+            id="settings-instance-rate"
+            label={t("instance.rateLabel")}
+            hint={hint(data.sesMaxSendRate)}
+            min={1}
+            max={200}
+            value={rate}
+            disabled={!data.canEdit || save.isPending}
+            onChange={setRateDraft}
+          />
+          <InstanceField
+            id="settings-instance-retention"
+            label={t("instance.retentionLabel")}
+            hint={hint(data.emailRetentionDays)}
+            min={1}
+            max={3650}
+            value={retention}
+            disabled={!data.canEdit || save.isPending}
+            onChange={setRetentionDraft}
+          />
+        </div>
+        {data.canEdit ? (
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 16 }}>
+            <button type="submit" className="ms-btn ms-btn-secondary" disabled={save.isPending}>
+              <BtnSpinner on={save.isPending} />
+              {t("instance.save")}
+            </button>
+            {save.isSuccess && clean ? (
+              <span style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
+                ✓ {t("instance.saved")}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+        {save.isError ? (
+          <p
+            style={{ margin: "8px 0 0", color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}
+          >
+            {t("instance.error")}
+          </p>
+        ) : null}
+      </form>
+    </SectionCard>
+  );
+}
+
+export function SettingsSections({ showInstance }: { showInstance: boolean }) {
   return (
     <div style={{ display: "grid", gap: 20 }}>
       <TeamSection />
       <MembersSection />
+      {showInstance ? <InstanceSection /> : null}
       <LanguageSection />
     </div>
   );

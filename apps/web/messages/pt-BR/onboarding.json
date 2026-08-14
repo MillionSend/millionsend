@@ -57,6 +57,7 @@
       "title": "Convide seu time",
       "body": "Membros gerenciam e-mails, domínios e webhooks.",
       "link": "Time →"
-    }
+    },
+    "instance": "Taxa de envio e retenção de e-mails são configurações da instância — defina em <link>Configurações</link>."
   }
 }

@@ -36,6 +36,13 @@
       "when": 1786671185921,
       "tag": "0004_lucky_red_hulk",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786743024995,
+      "tag": "0005_chemical_romulus",
+      "breakpoints": true
     }
   ]
 }

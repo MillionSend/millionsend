@@ -21,6 +21,12 @@ export function parseSnsTopicArns(value: string | undefined): string[] | undefin
   return arns.length > 0 ? arns : undefined;
 }
 
+// Built-in defaults, exported for the settings screen's "effective value"
+// display — the env proxy is raw process.env under SKIP_ENV_VALIDATION, so
+// consumers needing the default without zod's parsing read these.
+export const SES_MAX_SEND_RATE_DEFAULT = 14;
+export const EMAIL_RETENTION_DAYS_DEFAULT = 30;
+
 // Canonical base64 only: Buffer.from silently skips foreign characters, so a
 // mangled key could pass a length check yet decode differently elsewhere —
 // which would make previously encrypted bodies unrecoverable.
@@ -75,10 +81,12 @@ export const env = createEnv({
     // by N. Until the bucket is shared (Postgres-backed), scale the worker
     // vertically only, or divide this value by the replica count. 14/s is
     // SES's standard production default; sandbox accounts must set 1.
-    SES_MAX_SEND_RATE: z.coerce.number().positive().default(14),
+    // Bootstrap value only — the instance_settings row overrides it.
+    SES_MAX_SEND_RATE: z.coerce.number().positive().default(SES_MAX_SEND_RATE_DEFAULT),
 
     // Days email BODIES are kept; metadata and events are unaffected.
-    EMAIL_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
+    // Bootstrap value only — the instance_settings row overrides it.
+    EMAIL_RETENTION_DAYS: z.coerce.number().int().min(1).default(EMAIL_RETENTION_DAYS_DEFAULT),
 
     // Public base URL of this deployment; SNS subscriptions and hosted
     // unsubscribe pages are derived from it.

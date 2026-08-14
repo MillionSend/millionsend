@@ -1,3 +1,4 @@
+import { env } from "@millionsend/config";
 import { getDb } from "@millionsend/db";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -26,6 +27,7 @@ export default async function OnboardingPage() {
           userEmail={session.user.email}
           accountCreatedAt={new Date(session.user.createdAt).toISOString()}
           apiUrl={apiBaseUrl()}
+          showInstanceHint={!env.IS_CLOUD}
         />
       </main>
     </AppShell>

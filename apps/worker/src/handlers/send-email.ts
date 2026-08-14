@@ -171,24 +171,37 @@ async function buildRawMime(input: MimeInput): Promise<Buffer> {
   return info.message as Buffer;
 }
 
+export interface TokenBucket {
+  take(): Promise<void>;
+  /** Applies from the next refill; accumulated tokens are clamped to the new rate. */
+  setRate(ratePerSecond: number): void;
+}
+
 /**
  * Token bucket pinned to the account's SES send rate — the real
  * messages-per-second control (worker concurrency is NOT a rate limit;
- * that was useSend's bug).
+ * that was useSend's bug). In-memory, so the single-process assumption
+ * holds: N worker replicas would send at N × the configured rate.
  */
-export function createTokenBucket(ratePerSecond: number): () => Promise<void> {
-  let tokens = ratePerSecond;
+export function createTokenBucket(ratePerSecond: number): TokenBucket {
+  let rate = ratePerSecond;
+  let tokens = rate;
   let lastRefill = Date.now();
-  return async function take(): Promise<void> {
-    for (;;) {
-      const now = Date.now();
-      tokens = Math.min(ratePerSecond, tokens + ((now - lastRefill) / 1000) * ratePerSecond);
-      lastRefill = now;
-      if (tokens >= 1) {
-        tokens -= 1;
-        return;
+  return {
+    setRate(next: number): void {
+      rate = next;
+    },
+    async take(): Promise<void> {
+      for (;;) {
+        const now = Date.now();
+        tokens = Math.min(rate, tokens + ((now - lastRefill) / 1000) * rate);
+        lastRefill = now;
+        if (tokens >= 1) {
+          tokens -= 1;
+          return;
+        }
+        await new Promise((r) => setTimeout(r, Math.ceil(((1 - tokens) / rate) * 1000)));
       }
-      await new Promise((r) => setTimeout(r, Math.ceil(((1 - tokens) / ratePerSecond) * 1000)));
-    }
+    },
   };
 }

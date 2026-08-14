@@ -5,7 +5,12 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { type SendDeps, type SesSender, sendEmail } from "../src/handlers/send-email.js";
+import {
+  createTokenBucket,
+  type SendDeps,
+  type SesSender,
+  sendEmail,
+} from "../src/handlers/send-email.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -225,4 +230,15 @@ it("SES failure leaves the email queued for the job retry", async () => {
   expect(row?.sesMessageId).toBeNull();
   // The claim must be released, or the retry would skip and strand the email.
   expect(row?.sentAt).toBeNull();
+});
+
+it("token bucket setRate re-paces the existing bucket", async () => {
+  const bucket = createTokenBucket(1);
+  await bucket.take(); // consumes the single initial token
+  // At 1/s the next 10 takes would need ~10s; at 1000/s they refill almost
+  // instantly. A generous bound keeps this robust on slow CI.
+  bucket.setRate(1000);
+  const start = Date.now();
+  for (let i = 0; i < 10; i++) await bucket.take();
+  expect(Date.now() - start).toBeLessThan(2000);
 });
