@@ -10,8 +10,8 @@
   },
   "list": {
     "title": "Domains",
-    "addDomain": "+ Add domain",
-    "empty": "0 domains.",
+    "addDomain": "Add domain",
+    "empty": "No domains yet.",
     "emptyBody": "Add a domain to start sending.",
     "error": "Couldn't load domains.",
     "retry": "Retry",

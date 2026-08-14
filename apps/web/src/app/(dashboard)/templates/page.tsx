@@ -7,7 +7,7 @@ export default async function TemplatesPage() {
   return (
     <>
       <PageHeader title={nav("templates")} />
-      <EmptyState headline={t("templates.count")} body={t("templates.body")} />
+      <EmptyState area="templates" headline={t("templates.headline")} body={t("templates.body")} />
     </>
   );
 }

@@ -19,7 +19,7 @@
   cursor: pointer;
   transition: opacity var(--ms-dur-fast) var(--ms-ease);
   display: inline-flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   white-space: nowrap;
   flex-shrink: 0;
@@ -76,11 +76,11 @@
   font: 500 var(--ms-fs-micro) var(--ms-font-sans);
   border-radius: var(--ms-r-chip);
   padding: 1px 5px;
-  background: rgba(244, 241, 234, 0.1);
+  background: color-mix(in srgb, var(--ms-bone) 10%, transparent);
   color: var(--ms-muted);
 }
 .ms-btn-primary .ms-keycap {
-  background: rgba(5, 5, 5, 0.14);
+  background: color-mix(in srgb, var(--ms-ground) 14%, transparent);
   color: var(--ms-ground);
 }
 
@@ -341,7 +341,7 @@ table.ms-table {
   color: var(--ms-bone);
   font-size: var(--ms-fs-ui);
   padding: 13px 18px;
-  background-color: #050505;
+  background-color: var(--ms-ground);
   background-repeat: no-repeat;
 }
 .ms-toast-icon {
@@ -362,8 +362,8 @@ table.ms-table {
   border-color: var(--ms-success-border);
   background-image: radial-gradient(
     130% 170% at 10% 130%,
-    rgba(95, 206, 139, 0.17),
-    rgba(95, 206, 139, 0) 62%
+    color-mix(in srgb, var(--ms-success) 17%, transparent),
+    transparent 62%
   );
 }
 .ms-toast-success .ms-toast-icon {
@@ -373,8 +373,8 @@ table.ms-table {
   border-color: var(--ms-info-border);
   background-image: radial-gradient(
     130% 170% at 10% 130%,
-    rgba(126, 166, 219, 0.17),
-    rgba(126, 166, 219, 0) 62%
+    color-mix(in srgb, var(--ms-info) 17%, transparent),
+    transparent 62%
   );
 }
 .ms-toast-info .ms-toast-icon {
@@ -384,8 +384,8 @@ table.ms-table {
   border-color: var(--ms-warn-border);
   background-image: radial-gradient(
     130% 170% at 10% 130%,
-    rgba(217, 174, 95, 0.17),
-    rgba(217, 174, 95, 0) 62%
+    color-mix(in srgb, var(--ms-warn) 17%, transparent),
+    transparent 62%
   );
 }
 .ms-toast-warn .ms-toast-icon {
@@ -395,8 +395,8 @@ table.ms-table {
   border-color: var(--ms-danger-border);
   background-image: radial-gradient(
     130% 170% at 10% 130%,
-    rgba(224, 127, 118, 0.17),
-    rgba(224, 127, 118, 0) 62%
+    color-mix(in srgb, var(--ms-danger) 17%, transparent),
+    transparent 62%
   );
 }
 .ms-toast-danger .ms-toast-icon {
@@ -406,8 +406,8 @@ table.ms-table {
   border-color: var(--ms-neutral-border);
   background-image: radial-gradient(
     130% 170% at 10% 130%,
-    rgba(181, 179, 173, 0.14),
-    rgba(181, 179, 173, 0) 62%
+    color-mix(in srgb, var(--ms-neutral) 14%, transparent),
+    transparent 62%
   );
 }
 .ms-toast-neutral .ms-toast-icon {
@@ -507,14 +507,14 @@ svg:focus {
   border: 1.5px solid var(--ms-faint);
 }
 
-/* Menu / popover — panel on line-strong, 12px radius, 6px inner padding,
-   ~36px rows with a quiet raised hover, hairline separators running the full
+/* Menu / popover — panel on line-strong, 10px radius, 6px inner padding,
+   ~28px rows with a quiet raised hover, hairline separators running the full
    panel width between groups. Grammar shared by row menus, the account menu
    and the team switcher. */
 .ms-menu {
   background: var(--ms-panel);
   border: 1px solid var(--ms-line-strong);
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 6px;
   min-width: 180px;
   box-sizing: border-box;
@@ -527,7 +527,7 @@ svg:focus {
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  min-height: 36px;
+  min-height: 28px;
   box-sizing: border-box;
   padding: 4px 10px;
   font: 400 13px var(--ms-font-sans);
@@ -585,6 +585,51 @@ svg:focus {
 }
 .ms-menu-search::placeholder {
   color: var(--ms-faint);
+}
+/* Non-interactive menu row (e.g. the Appearance row): keeps the item metrics,
+   drops the hover affordance. */
+.ms-menu-item.static {
+  cursor: default;
+}
+.ms-menu-item.static:hover {
+  background: none;
+}
+/* Appearance switcher — segmented sun/moon pair; the active side sits raised. */
+.ms-theme-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--ms-inset);
+  border: 1px solid var(--ms-line);
+  border-radius: var(--ms-r-pill);
+}
+.ms-theme-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ms-r-pill);
+  background: none;
+  color: var(--ms-faint);
+  cursor: pointer;
+  transition:
+    color var(--ms-dur-fast) var(--ms-ease),
+    background var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-theme-toggle button:hover {
+  color: var(--ms-muted);
+}
+.ms-theme-toggle button.active {
+  background: var(--ms-panel-raised);
+  color: var(--ms-bone);
+  box-shadow: inset 0 0 0 1px var(--ms-line-strong);
+}
+.ms-theme-toggle button:focus-visible {
+  outline: none;
+  box-shadow: var(--ms-focus-ring);
 }
 
 /* Scrollbars — thin and dark in every in-app scroll container (popovers,
@@ -648,4 +693,123 @@ svg:focus {
   50% {
     opacity: 0.3;
   }
+}
+
+/* Empty states — centered app-icon tile with layered "3D" depth (see empty-state.tsx).
+   The tile floats and tilts on a slow loop; glyph parts drift on a stagger.
+   All color is token-derived (color-mix) so a future light theme lands free. */
+.ms-empty {
+  padding: 88px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.ms-empty-scene {
+  position: relative;
+  margin-bottom: 28px;
+  perspective: 700px;
+}
+/* Soft radial glow behind the tile */
+.ms-empty-scene::before {
+  content: "";
+  position: absolute;
+  inset: -70px;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--ms-steel) 13%, transparent),
+    transparent 72%
+  );
+  pointer-events: none;
+}
+.ms-empty-tile {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  border-radius: var(--ms-r-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ms-bone);
+  background: linear-gradient(150deg, var(--ms-panel-raised), var(--ms-panel) 45%, var(--ms-inset));
+  border: 1px solid var(--ms-line-strong);
+  /* Inner bevel (1px light top / dark bottom edge) + drop under the float */
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--ms-bone) 9%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--ms-void) 55%, transparent),
+    0 18px 34px -18px color-mix(in srgb, var(--ms-void) 85%, transparent);
+  transform-style: preserve-3d;
+  animation: ms-empty-float 7s var(--ms-ease) infinite;
+}
+/* Faint metallic sheen sweeping from the top-left of the face */
+.ms-empty-tile::after {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: calc(var(--ms-r-modal) - 1px);
+  background: radial-gradient(
+    120% 90% at 30% 0%,
+    color-mix(in srgb, var(--ms-bone) 5%, transparent),
+    transparent 55%
+  );
+  pointer-events: none;
+}
+/* Glyph rides above the face so the tilt loop reads as depth */
+.ms-empty-glyph {
+  transform: translateZ(14px);
+}
+.ms-empty-glyph g {
+  animation: ms-empty-drift 7s var(--ms-ease) infinite;
+}
+.ms-empty-glyph g:nth-child(2) {
+  animation-delay: -2.3s;
+}
+.ms-empty-glyph g:nth-child(3) {
+  animation-delay: -4.6s;
+}
+.ms-empty-headline {
+  margin: 0;
+  color: var(--ms-bone);
+  font: 500 var(--ms-fs-h2) var(--ms-font-display);
+}
+.ms-empty-body {
+  margin: 8px 0 0;
+  max-width: 420px;
+  color: var(--ms-muted);
+  font-size: var(--ms-fs-ui);
+  line-height: 1.5;
+}
+.ms-empty-cta {
+  margin-top: 24px;
+}
+@keyframes ms-empty-float {
+  0%,
+  100% {
+    transform: translateY(-3px) rotateX(4deg) rotateY(-5deg);
+  }
+  50% {
+    transform: translateY(3px) rotateX(-3deg) rotateY(5deg);
+  }
+}
+@keyframes ms-empty-drift {
+  0%,
+  100% {
+    transform: translateY(-0.4px);
+  }
+  50% {
+    transform: translateY(0.4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-empty-tile,
+  .ms-empty-glyph g {
+    animation: none;
+  }
+}
+
+/* Wordmark — the SVG's fills are bone-on-transparent, invisible on paper;
+   light theme swaps in the ink variant of the same lockup. */
+:root[data-theme="light"] .ms-wordmark {
+  content: url("/logo/millionsend-wordmark-light.svg");
 }

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
-import { CodeGlyph } from "@/components/icons/nav-icons";
+import { CodeGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
@@ -134,6 +134,7 @@ export default function SuppressionsPage() {
               className="ms-btn ms-btn-primary"
               onClick={() => setAddOpen(true)}
             >
+              <PlusGlyph size={14} />
               {t("suppressions.add")}
             </button>
           </>
@@ -185,7 +186,11 @@ export default function SuppressionsPage() {
             onAction={clearFilters}
           />
         ) : (
-          <EmptyState headline={t("suppressions.empty")} body={t("suppressions.emptyHint")} />
+          <EmptyState
+            area="emails"
+            headline={t("suppressions.empty")}
+            body={t("suppressions.emptyHint")}
+          />
         )
       ) : (
         <>

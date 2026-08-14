@@ -186,7 +186,7 @@ export default function MetricsPage() {
       {data === undefined ? (
         <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>{t("loading")}</p>
       ) : neverSent ? (
-        <EmptyState headline={t("empty")} body={t("emptyHint")} />
+        <EmptyState area="metrics" headline={t("empty")} body={t("emptyHint")} />
       ) : (
         <>
           <div className="ms-kpi-card">

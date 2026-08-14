@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { PlusGlyph } from "@/components/icons/nav-icons";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
@@ -97,6 +98,7 @@ export function DomainsView() {
         {...(summary ? { subtitle: summary } : {})}
         actions={
           <Link href="/domains/new" className="ms-btn ms-btn-primary">
+            <PlusGlyph size={14} />
             {t("list.addDomain")}
           </Link>
         }
@@ -119,7 +121,17 @@ export function DomainsView() {
           </button>
         </div>
       ) : domains.isSuccess && rows.length === 0 ? (
-        <EmptyState headline={t("list.empty")} body={t("list.emptyBody")} />
+        <EmptyState
+          area="domains"
+          headline={t("list.empty")}
+          body={t("list.emptyBody")}
+          cta={
+            <Link href="/domains/new" className="ms-btn ms-btn-primary">
+              <PlusGlyph />
+              {t("list.addDomain")}
+            </Link>
+          }
+        />
       ) : (
         <>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}>

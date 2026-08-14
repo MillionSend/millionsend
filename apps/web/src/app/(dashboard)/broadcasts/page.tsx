@@ -7,7 +7,11 @@ export default async function BroadcastsPage() {
   return (
     <>
       <PageHeader title={nav("broadcasts")} />
-      <EmptyState headline={t("broadcasts.count")} body={t("broadcasts.body")} />
+      <EmptyState
+        area="broadcasts"
+        headline={t("broadcasts.headline")}
+        body={t("broadcasts.body")}
+      />
     </>
   );
 }

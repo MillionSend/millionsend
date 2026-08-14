@@ -17,6 +17,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
       {/* biome-ignore lint/performance/noImgElement: static SVG logo, nothing for next/image to optimize */}
       <img
         src="/logo/millionsend-wordmark.svg"
+        className="ms-wordmark"
         alt={t("appName")}
         height={22}
         style={{ marginBottom: 28 }}

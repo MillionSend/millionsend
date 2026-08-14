@@ -3,6 +3,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
+import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { useDismiss } from "@/components/popover-menu";
 import { useTRPC } from "@/lib/trpc";
@@ -73,8 +74,9 @@ function ChevronStack() {
 }
 
 /**
- * Sidebar team switcher — avatar tile + name + plan on the trigger, popover
- * listing every membership with a ✓ on the active one, then "+ Create team".
+ * Sidebar team switcher — avatar tile + name on the trigger (the plan pill
+ * lives only in the popover rows), popover listing every membership with a ✓
+ * on the active one, then a "Create team" row.
  * Switching/creating sets the server-side selection cookie, so the follow-up
  * is a full navigation: every query cache belongs to the previous team.
  */
@@ -145,7 +147,6 @@ export function TeamSwitcher({ teamName }: { teamName: string }) {
         >
           {active?.teamName ?? teamName}
         </span>
-        {active ? <PlanBadge plan={active.plan} /> : null}
         <span style={{ marginLeft: "auto", display: "inline-flex", flex: "none" }}>
           <ChevronStack />
         </span>
@@ -207,8 +208,8 @@ export function TeamSwitcher({ teamName }: { teamName: string }) {
             }}
           >
             <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-              <span aria-hidden="true" style={{ color: "var(--ms-muted)" }}>
-                +
+              <span style={{ color: "var(--ms-muted)", display: "inline-flex", flex: "none" }}>
+                <PlusGlyph size={13} />
               </span>
               {t("create")}
             </span>

@@ -3,9 +3,11 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/700.css";
 import "@/styles/globals.css";
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import { Providers } from "@/components/providers";
+import { THEME_INIT_SCRIPT, THEME_KEY } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: "MillionSend",
@@ -14,9 +16,18 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();
+  // Cookie mirror of the localStorage preference lets SSR paint the right
+  // theme; the inline script below corrects any stale cookie pre-paint.
+  const theme = (await cookies()).get(THEME_KEY)?.value;
   return (
-    <html lang={locale}>
+    <html
+      lang={locale}
+      {...(theme === "light" ? { "data-theme": "light" } : {})}
+      suppressHydrationWarning
+    >
       <body className="ms">
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static theme bootstrap, no user input */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         {/* Erode loads from the Fontshare CDN — the Fontshare EULA forbids
             vendoring the font files into this repository. */}
         <link

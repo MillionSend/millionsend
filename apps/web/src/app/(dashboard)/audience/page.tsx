@@ -7,7 +7,7 @@ export default async function AudiencePage() {
   return (
     <>
       <PageHeader title={nav("audience")} />
-      <EmptyState headline={t("audience.count")} body={t("audience.body")} />
+      <EmptyState area="audience" headline={t("audience.headline")} body={t("audience.body")} />
     </>
   );
 }

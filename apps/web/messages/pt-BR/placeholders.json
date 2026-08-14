@@ -1,30 +1,30 @@
 {
   "broadcasts": {
-    "count": "0 transmissões.",
-    "body": "Transmissões ainda não estão disponíveis."
+    "headline": "Nenhuma transmissão ainda.",
+    "body": "Uma mensagem para toda a sua audiência. Ainda não disponível."
   },
   "audience": {
-    "count": "0 contatos.",
-    "body": "Audiência ainda não está disponível."
+    "headline": "Nenhum contato ainda.",
+    "body": "Contatos, segmentos e estado de inscrição. Ainda não disponível."
   },
   "metrics": {
-    "count": "0 pontos de dados.",
-    "body": "Métricas ainda não estão disponíveis."
+    "headline": "Nenhuma métrica ainda.",
+    "body": "Entrega e engajamento ao longo do tempo. Ainda não disponível."
   },
   "logs": {
-    "count": "0 registros.",
-    "body": "Logs ainda não estão disponíveis."
+    "headline": "Nenhum log ainda.",
+    "body": "Cada requisição à API, registrada. Ainda não disponível."
   },
   "webhooks": {
-    "count": "0 webhooks.",
-    "body": "Webhooks ainda não estão disponíveis."
+    "headline": "Nenhum webhook ainda.",
+    "body": "Notificações de eventos enviadas ao seu endpoint. Ainda não disponível."
   },
   "templates": {
-    "count": "0 modelos.",
-    "body": "Modelos ainda não estão disponíveis."
+    "headline": "Nenhum modelo ainda.",
+    "body": "Layouts de e-mail reutilizáveis. Ainda não disponível."
   },
   "generic": {
-    "count": "0 itens.",
+    "headline": "Nada aqui ainda.",
     "body": "Esta página ainda não foi construída."
   }
 }

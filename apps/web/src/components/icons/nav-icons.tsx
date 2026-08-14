@@ -31,7 +31,9 @@ function Svg({ size, children }: { size: number; children: React.ReactNode }) {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      style={{ flex: "none" }}
+      // display:block — inline SVGs sit on the text baseline and drift ~3px
+      // below flex-centered labels; block removes the baseline entirely.
+      style={{ flex: "none", display: "block" }}
     >
       {children}
     </svg>
@@ -243,6 +245,16 @@ export function CodeGlyph({ size = 16 }: { size?: number }) {
       <path d="m18 16 4-4-4-4" />
       <path d="m6 8-4 4 4 4" />
       <path d="m14.5 4-5 16" />
+    </Svg>
+  );
+}
+
+/** Static plus glyph for "add / create" buttons — never a text "+" in labels. */
+export function PlusGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <Svg size={size}>
+      <path d="M5 12h14" />
+      <path d="M12 5v14" />
     </Svg>
   );
 }
