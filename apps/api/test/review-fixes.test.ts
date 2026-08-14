@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey, hashRecipient } from "@millionsend/core";
+import { DAY_MS, EnvKeyring, generateApiKey, hashRecipient } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -140,7 +140,7 @@ describe("resend-compat error surfaces", () => {
 
   it("stores and echoes scheduled_at", async () => {
     // Within the 30-day scheduling cap.
-    const when = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const when = new Date(Date.now() + DAY_MS).toISOString();
     const res = await post({ ...base, to: ["later@example.com"], scheduled_at: when });
     expect(res.status).toBe(200);
     const { id } = (await res.json()) as { id: string };

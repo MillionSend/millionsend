@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+import { StatusBadge } from "@/components/status-badge";
+import { jsSingleQuote, shellSingleQuote } from "@/lib/escape";
 import { formatUtcMinute, maskApiKey } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
@@ -35,11 +37,11 @@ function nodeSegs(p: SnippetParams): Seg[] {
     { text: " " },
     { text: "fetch", color: "w" },
     { text: "(" },
-    { text: `'${p.apiUrl}/emails'`, color: "s" },
+    { text: jsSingleQuote(`${p.apiUrl}/emails`), color: "s" },
     { text: ", {\n  method: " },
     { text: "'POST'", color: "s" },
     { text: ",\n  headers: {\n    Authorization: " },
-    { text: `'Bearer ${p.apiKey}'`, color: "s" },
+    { text: jsSingleQuote(`Bearer ${p.apiKey}`), color: "s" },
     { text: "," },
     ...(p.comment ? [{ text: `  // ${p.comment}`, color: "f" as const }] : []),
     { text: "\n    " },
@@ -49,13 +51,13 @@ function nodeSegs(p: SnippetParams): Seg[] {
     { text: "\n  },\n  body: JSON." },
     { text: "stringify", color: "w" },
     { text: "({\n    from: " },
-    { text: `'${p.from}'`, color: "s" },
+    { text: jsSingleQuote(p.from), color: "s" },
     { text: ",\n    to: " },
-    { text: `'${p.to}'`, color: "s" },
+    { text: jsSingleQuote(p.to), color: "s" },
     { text: ",\n    subject: " },
-    { text: `'${p.subject}'`, color: "s" },
+    { text: jsSingleQuote(p.subject), color: "s" },
     { text: ",\n    html: " },
-    { text: `'${p.html}'`, color: "s" },
+    { text: jsSingleQuote(p.html), color: "s" },
     { text: "\n  })\n});" },
   ];
 }
@@ -63,14 +65,17 @@ function nodeSegs(p: SnippetParams): Seg[] {
 function curlSegs(p: SnippetParams): Seg[] {
   const body = JSON.stringify({ from: p.from, to: p.to, subject: p.subject, html: p.html });
   return [
+    // The comment lives on its own line so any selection of the command
+    // itself is valid shell — an inline comment after a trailing "\" breaks
+    // the continuation when copied.
+    ...(p.comment ? [{ text: `# ${p.comment}\n`, color: "f" as const }] : []),
     { text: "curl", color: "w" },
     { text: ` -X POST ${p.apiUrl}/emails \\\n  -H ` },
-    { text: `'Authorization: Bearer ${p.apiKey}'`, color: "s" },
-    ...(p.comment ? [{ text: ` \\  # ${p.comment}`, color: "f" as const }] : [{ text: " \\" }]),
-    { text: "\n  -H " },
+    { text: shellSingleQuote(`Authorization: Bearer ${p.apiKey}`), color: "s" },
+    { text: " \\\n  -H " },
     { text: "'Content-Type: application/json'", color: "s" },
     { text: " \\\n  -d " },
-    { text: `'${body}'`, color: "s" },
+    { text: shellSingleQuote(body), color: "s" },
   ];
 }
 
@@ -137,7 +142,7 @@ function CopyGlyphButton({ text, label }: { text: string; label: string }) {
 function OdometerBoxes({ value }: { value: number }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  // ponytail: display caps at the fetched page size; fine for a first-send flow.
+  // ponytail: 7 fixed boxes cap the display at 9,999,999; fine for a first-send flow.
   const digits = String(Math.min(value, 9_999_999)).padStart(7, "0").split("").map(Number);
   return (
     <div className="ms-odometer" style={{ gap: 8 }}>
@@ -179,6 +184,9 @@ function OdometerBoxes({ value }: { value: number }) {
     </div>
   );
 }
+
+/** Statuses that can still progress to delivered (see emailStatusEnum). */
+const IN_FLIGHT_STATUSES = new Set(["queued_quota", "queued", "sent", "delivery_delayed"]);
 
 const stepCard: React.CSSProperties = {
   flex: 1,
@@ -257,17 +265,30 @@ export function OnboardingSteps({
   const domainsQuery = useQuery(trpc.domains.list.queryOptions());
   const verifiedDomain = domainsQuery.data?.find((d) => d.status === "verified")?.name;
 
+  // Oldest-first so the team's true first email is found even past 50 sends.
   const emailsQuery = useQuery({
-    ...trpc.emails.list.queryOptions({ limit: 50 }),
+    ...trpc.emails.list.queryOptions({ limit: 1, order: "asc" }),
     enabled: hasKey,
     refetchInterval: (query) => (query.state.data?.items.length ? false : 5000),
   });
-  const emails = emailsQuery.data?.items ?? [];
-  const firstEmail = emails[emails.length - 1];
+  const firstEmail = emailsQuery.data?.items[0];
+
+  const metricsQuery = useQuery({
+    ...trpc.metrics.window.queryOptions({}),
+    enabled: firstEmail !== undefined,
+    // Keep counting until the first delivery lands.
+    refetchInterval: (query) => ((query.state.data?.allTimeDelivered ?? 0) > 0 ? false : 5000),
+  });
+  const deliveredCount = metricsQuery.data?.allTimeDelivered ?? 0;
 
   const detailQuery = useQuery({
     ...trpc.emails.get.queryOptions({ id: firstEmail?.id ?? "" }),
     enabled: firstEmail !== undefined,
+    // Poll while the first email is still in flight so its status stays honest.
+    refetchInterval: (query) => {
+      const status = query.state.data?.latestStatus;
+      return status === undefined || IN_FLIGHT_STATUSES.has(status) ? 5000 : false;
+    },
   });
   const detail = detailQuery.data;
   const deliveredEvent = detail?.events.find((e) => e.type === "delivered");
@@ -293,7 +314,6 @@ export function OnboardingSteps({
     : bankedKey
       ? maskApiKey(bankedKey.tokenPrefix, bankedKey.last4)
       : "ms_live_…";
-  const keyForCopy = token ?? maskedKey;
 
   const snippetBase = {
     apiUrl,
@@ -302,9 +322,16 @@ export function OnboardingSteps({
     subject: t("step2.subject"),
     html: t("step2.html"),
   };
-  const comment = hasKey || token ? t("step2.keyComment") : t("step2.keyCommentLocked");
+  // Honest key handling: only while the real token is in memory may the
+  // snippet promise (and deliver) the real key on copy. Otherwise both the
+  // display and the copy carry the mask plus a replace-it instruction.
+  const comment = token
+    ? t("step2.keyComment")
+    : hasKey
+      ? t("step2.keyCommentReplace")
+      : t("step2.keyCommentLocked");
   const displayParams: SnippetParams = { ...snippetBase, apiKey: maskedKey, comment };
-  const copyParams: SnippetParams = { ...snippetBase, apiKey: keyForCopy };
+  const copyParams: SnippetParams = token ? { ...snippetBase, apiKey: token } : displayParams;
   const displaySegs = tab === "node" ? nodeSegs(displayParams) : curlSegs(displayParams);
   const copyText = segsText(tab === "node" ? nodeSegs(copyParams) : curlSegs(copyParams));
 
@@ -312,6 +339,8 @@ export function OnboardingSteps({
 
   const success = firstEmail !== undefined;
   const toDisplay = firstEmail?.to.join(", ") ?? userEmail;
+  // detail is polled while in flight, so it is the fresher status source.
+  const firstStatus = detail?.latestStatus ?? firstEmail?.latestStatus;
 
   const snippetBox = (
     <div
@@ -408,13 +437,26 @@ export function OnboardingSteps({
                 borderBottom: "1px solid var(--ms-line)",
               }}
             >
-              <span style={{ fontSize: 13.5, color: "var(--ms-muted)" }}>
-                <span style={{ color: "var(--ms-success)" }}>✓</span>
-                {"  "}
-                {deliveredSeconds
-                  ? t("success.emailDelivered", { to: toDisplay, seconds: deliveredSeconds })
-                  : t("success.emailSent", { to: toDisplay })}
-              </span>
+              {deliveredSeconds ? (
+                <span style={{ fontSize: 13.5, color: "var(--ms-muted)" }}>
+                  <span style={{ color: "var(--ms-success)" }}>✓</span>
+                  {"  "}
+                  {t("success.emailDelivered", { to: toDisplay, seconds: deliveredSeconds })}
+                </span>
+              ) : (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 13.5,
+                    color: "var(--ms-muted)",
+                  }}
+                >
+                  {firstStatus ? <StatusBadge status={firstStatus} /> : null}
+                  {t("success.emailPending", { to: toDisplay })}
+                </span>
+              )}
               {firstEmail ? (
                 <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-faint)" }}>
                   {formatUtcMinute(firstEmail.createdAt)}
@@ -424,9 +466,9 @@ export function OnboardingSteps({
           </div>
 
           <div style={{ maxWidth: 860, textAlign: "center", marginTop: 64 }}>
-            <OdometerBoxes value={emails.length} />
+            <OdometerBoxes value={deliveredCount} />
             <div style={{ fontSize: 15, color: "var(--ms-bone)", marginTop: 22 }}>
-              {t("success.counting", { count: emails.length })}
+              {t("success.counting", { count: deliveredCount })}
             </div>
             {deliveredSeconds ? (
               <div

@@ -2,6 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { firstRow, resultRows } from "./driver-result.js";
+import { DAY_MS } from "./utc-day.js";
 
 export type IdempotencyBegin =
   | { kind: "new" }
@@ -9,7 +10,7 @@ export type IdempotencyBegin =
   | { kind: "in_flight" }
   | { kind: "conflict" };
 
-const TTL_MS = 24 * 60 * 60 * 1000;
+const TTL_MS = DAY_MS;
 /** An incomplete claim older than this is treated as a dead owner and taken over. */
 const IN_FLIGHT_LEASE_MS = 10 * 60 * 1000;
 

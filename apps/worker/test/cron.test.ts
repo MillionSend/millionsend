@@ -1,4 +1,4 @@
-import { PLAN_DAILY_LIMIT } from "@millionsend/core";
+import { DAY_MS, PLAN_DAILY_LIMIT, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -21,7 +21,7 @@ beforeEach(async () => {
 });
 afterEach(() => close());
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => utcDay();
 
 const FREE_LIMIT = PLAN_DAILY_LIMIT.free;
 if (FREE_LIMIT === null) throw new Error("free plan is expected to have a daily cap");
@@ -120,7 +120,7 @@ it("one enqueue failure re-parks that email, releases its reservation, and does 
 });
 
 it("drain passes a scheduled email's due time through to the queue", async () => {
-  const due = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const due = new Date(Date.now() + DAY_MS);
   const [row] = await db
     .insert(schema.emails)
     .values({

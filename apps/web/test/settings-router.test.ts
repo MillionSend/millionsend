@@ -1,3 +1,4 @@
+import { DAY_MS, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -6,16 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 
-const DAY_MS = 86_400_000;
-
 // SKIP_ENV_VALIDATION leaves env reads live, so stubbing IS_CLOUD here
 // switches the routers between cloud and self-host behavior per test.
 function stubCloud(): void {
   vi.stubEnv("IS_CLOUD", "true");
 }
 
-function utcDay(offsetDays: number): string {
-  return new Date(Date.now() - offsetDays * DAY_MS).toISOString().slice(0, 10);
+function dayAgo(offsetDays: number): string {
+  return utcDay(Date.now() - offsetDays * DAY_MS);
 }
 
 let db: Db;
@@ -104,14 +103,14 @@ describe("settings.usage", () => {
     stubCloud();
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "owner");
-    await insertCounter(teamId, utcDay(0), 42);
-    await insertCounter(teamId, utcDay(1), 7);
-    await insertCounter(teamId, utcDay(16), 99); // outside the default 15-day window
+    await insertCounter(teamId, dayAgo(0), 42);
+    await insertCounter(teamId, dayAgo(1), 7);
+    await insertCounter(teamId, dayAgo(16), 99); // outside the default 15-day window
 
     const usage = await callerFor("u1", teamId, "owner").settings.usage.recent();
     expect(usage.rows.map((r) => [r.day, r.accepted])).toEqual([
-      [utcDay(0), 42],
-      [utcDay(1), 7],
+      [dayAgo(0), 42],
+      [dayAgo(1), 7],
     ]);
     expect(usage.today).toEqual({ accepted: 42, limit: 100 });
   });
@@ -119,10 +118,10 @@ describe("settings.usage", () => {
   it("widens the window when days is passed", async () => {
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "owner");
-    await insertCounter(teamId, utcDay(16), 99);
+    await insertCounter(teamId, dayAgo(16), 99);
 
     const usage = await callerFor("u1", teamId, "owner").settings.usage.recent({ days: 30 });
-    expect(usage.rows.map((r) => r.day)).toEqual([utcDay(16)]);
+    expect(usage.rows.map((r) => r.day)).toEqual([dayAgo(16)]);
     expect(usage.today.accepted).toBe(0);
   });
 
@@ -147,7 +146,7 @@ describe("settings.usage", () => {
     const teamB = await createTeam(db, "team-b");
     await addMember(teamA, "alice", "owner");
     await addMember(teamB, "carol", "owner");
-    await insertCounter(teamB, utcDay(0), 55);
+    await insertCounter(teamB, dayAgo(0), 55);
 
     const usage = await callerFor("alice", teamA, "owner").settings.usage.recent();
     expect(usage.rows).toEqual([]);

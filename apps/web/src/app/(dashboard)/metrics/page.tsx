@@ -4,9 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { Odometer } from "@/components/odometer";
 import { PageHeader } from "@/components/page-header";
 import { useTRPC } from "@/lib/trpc";
-import { Odometer } from "./odometer";
 
 const RANGES = [7, 15, 30] as const;
 type Range = (typeof RANGES)[number];

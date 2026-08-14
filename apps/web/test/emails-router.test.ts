@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, encryptEmailBody, hashRecipient } from "@millionsend/core";
+import { EnvKeyring, encryptEmailBody, hashRecipient, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -146,6 +146,35 @@ describe("emails.list", () => {
     expect(all.items).toHaveLength(1);
   });
 
+  it("returns oldest-first with order asc, team-scoped, paging forward", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const ids = [];
+    for (let i = 0; i < 3; i++) {
+      ids.push(
+        await insertEmail({
+          ...baseEmail(teamA),
+          subject: `email ${i}`,
+          createdAt: new Date(Date.UTC(2026, 7, 1 + i)),
+        }),
+      );
+    }
+    await insertEmail({ ...baseEmail(teamB), createdAt: new Date(Date.UTC(2026, 6, 1)) });
+
+    const page1 = await caller(teamA).emails.list({ limit: 1, order: "asc" });
+    expect(page1.items.map((r) => r.id)).toEqual([ids[0]]);
+    expect(page1.total).toBe(3);
+    if (!page1.nextCursor) throw new Error("expected a next cursor");
+
+    const page2 = await caller(teamA).emails.list({
+      limit: 2,
+      order: "asc",
+      cursor: page1.nextCursor,
+    });
+    expect(page2.items.map((r) => r.id)).toEqual([ids[1], ids[2]]);
+    expect(page2.nextCursor).toBeNull();
+  });
+
   it("does not skip same-millisecond rows differing only in microseconds", async () => {
     const teamA = await createTeam(db, "team-a");
     // timestamptz keeps microseconds; a JS Date cannot represent these two
@@ -231,7 +260,7 @@ describe("emails.stats", () => {
   it("aggregates usage counters, queued backlog, and p50 delivery time per team", async () => {
     const teamA = await createTeam(db, "team-a");
     const teamB = await createTeam(db, "team-b");
-    const today = new Date().toISOString().slice(0, 10);
+    const today = utcDay();
 
     await db.insert(schema.usageCounters).values([
       { teamId: teamA, day: today, accepted: 87, delivered: 40 },

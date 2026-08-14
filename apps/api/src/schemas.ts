@@ -1,5 +1,5 @@
 import { z } from "@hono/zod-openapi";
-import { extractAddrSpec } from "@millionsend/core";
+import { DAY_MS, extractAddrSpec } from "@millionsend/core";
 
 /**
  * Wire-compatible with Resend's documented /emails surface
@@ -29,7 +29,7 @@ export const sendEmailRequestSchema = z
     // send from outliving the default body-retention window.
     scheduled_at: z.iso
       .datetime({ offset: true })
-      .refine((v) => new Date(v).getTime() <= Date.now() + 30 * 24 * 60 * 60 * 1000, {
+      .refine((v) => new Date(v).getTime() <= Date.now() + 30 * DAY_MS, {
         message: "scheduled_at cannot be more than 30 days in the future",
       })
       .optional(),

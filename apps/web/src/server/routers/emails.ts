@@ -1,9 +1,15 @@
 import { env } from "@millionsend/config";
 import type { Keyring } from "@millionsend/core";
-import { decryptEmailBody, type EmailBody, EnvKeyring, hashRecipient } from "@millionsend/core";
+import {
+  decryptEmailBody,
+  type EmailBody,
+  EnvKeyring,
+  hashRecipient,
+  utcDay,
+} from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
@@ -31,6 +37,17 @@ function beforeCursor(
   );
 }
 
+/** Mirror of beforeCursor for ascending (createdAt asc, id asc) pages. */
+function afterCursor(
+  t: { createdAt: AnyPgColumn; id: AnyPgColumn },
+  cursor: Cursor,
+): SQL | undefined {
+  return or(
+    sql`${t.createdAt} > ${cursor.createdAt}::timestamptz`,
+    and(sql`${t.createdAt} = ${cursor.createdAt}::timestamptz`, gt(t.id, cursor.id)),
+  );
+}
+
 /** Full-precision cursor value for a row's createdAt (see cursorSchema). */
 function createdAtCursorField(t: { createdAt: AnyPgColumn }): SQL<string> {
   return sql<string>`${t.createdAt}::text`;
@@ -38,8 +55,9 @@ function createdAtCursorField(t: { createdAt: AnyPgColumn }): SQL<string> {
 
 /**
  * Splits a limit+1 fetch into the page and its next-page cursor. Rows must
- * already be ordered (createdAt desc, id desc); the cursorCreatedAt field
- * feeds the cursor and is stripped from the returned items.
+ * already be ordered on (createdAt, id) in the direction the cursor filter
+ * walks; the cursorCreatedAt field feeds the cursor and is stripped from
+ * the returned items.
  */
 function paginate<T extends { id: string; cursorCreatedAt: string }>(
   rows: T[],
@@ -79,6 +97,8 @@ export const emailsRouter = router({
         since: z.coerce.date().optional(),
         cursor: cursorSchema.optional(),
         limit: z.number().int().min(1).max(50).default(25),
+        // "asc" reads oldest-first (e.g. a team's very first email).
+        order: z.enum(["asc", "desc"]).default("desc"),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -96,7 +116,10 @@ export const emailsRouter = router({
         .select({ total: sql<number>`count(*)::int` })
         .from(t)
         .where(and(...filters));
-      if (input.cursor) filters.push(beforeCursor(t, input.cursor));
+      const ascending = input.order === "asc";
+      if (input.cursor) {
+        filters.push(ascending ? afterCursor(t, input.cursor) : beforeCursor(t, input.cursor));
+      }
       const rows = await ctx.db
         .select({
           id: t.id,
@@ -109,14 +132,14 @@ export const emailsRouter = router({
         })
         .from(t)
         .where(and(...filters))
-        .orderBy(desc(t.createdAt), desc(t.id))
+        .orderBy(...(ascending ? [asc(t.createdAt), asc(t.id)] : [desc(t.createdAt), desc(t.id)]))
         .limit(input.limit + 1);
       return { ...paginate(rows, input.limit), total: totalRow?.total ?? 0 };
     }),
 
   /** Masthead proof strip + cap banner: today's sends, all-time deliveries, p50, queued backlog. */
   stats: teamProcedure.query(async ({ ctx }) => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = utcDay();
     const c = schema.usageCounters;
     const [usage] = await ctx.db
       .select({

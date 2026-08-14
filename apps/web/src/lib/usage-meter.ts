@@ -7,11 +7,11 @@ export function meterClass(ratio: number): string {
   return "";
 }
 
-const DAY_MS = 86_400_000;
-
 /** "6h 12m" until the next UTC midnight — when daily quota counters reset. */
 export function formatUtcDayReset(now = Date.now()): string {
-  const left = DAY_MS - (now % DAY_MS);
+  const next = new Date(now);
+  next.setUTCHours(24, 0, 0, 0);
+  const left = next.getTime() - now;
   const h = Math.floor(left / 3_600_000);
   const m = Math.floor((left % 3_600_000) / 60_000);
   return `${h}h ${m}m`;

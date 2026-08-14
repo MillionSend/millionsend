@@ -13,7 +13,10 @@ describe("api keys", () => {
   it("verifies the original token and rejects others", () => {
     const key = generateApiKey("test");
     expect(verifyApiKey(key.token, key.keyHash)).toBe(true);
-    expect(verifyApiKey(`${key.token.slice(0, -1)}x`, key.keyHash)).toBe(false);
+    // Flip the last char to one guaranteed different — a fixed "x" collides
+    // with tokens that already end in "x".
+    const flipped = key.token.endsWith("x") ? "y" : "x";
+    expect(verifyApiKey(`${key.token.slice(0, -1)}${flipped}`, key.keyHash)).toBe(false);
     expect(verifyApiKey(generateApiKey("test").token, key.keyHash)).toBe(false);
   });
 

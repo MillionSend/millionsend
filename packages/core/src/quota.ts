@@ -2,6 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { sql } from "drizzle-orm";
 import { firstRow } from "./driver-result.js";
+import { utcDay } from "./utc-day.js";
 
 export type QuotaResult =
   | { reserved: true; acceptedToday: number }
@@ -25,7 +26,7 @@ export async function reserveDailyQuota(
 ): Promise<QuotaResult> {
   const { teamId, count, limit } = params;
   if (count <= 0) throw new Error("count must be positive");
-  const day = params.day ?? new Date().toISOString().slice(0, 10);
+  const day = params.day ?? utcDay();
   const t = schema.usageCounters;
 
   if (limit !== null && count > limit) {
@@ -65,7 +66,7 @@ export async function releaseDailyQuota(
   params: { teamId: string; count: number; day?: string },
 ): Promise<void> {
   if (params.count <= 0) throw new Error("count must be positive");
-  const day = params.day ?? new Date().toISOString().slice(0, 10);
+  const day = params.day ?? utcDay();
   const t = schema.usageCounters;
   await db.execute(sql`
     update ${t}

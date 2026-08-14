@@ -1,13 +1,12 @@
+import { utcDay as coreUtcDay, DAY_MS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCaller } from "@/server/routers";
 
-const DAY_MS = 86_400_000;
-
 function utcDay(offsetDays: number): string {
-  return new Date(Date.now() - offsetDays * DAY_MS).toISOString().slice(0, 10);
+  return coreUtcDay(Date.now() - offsetDays * DAY_MS);
 }
 
 let db: Db;
@@ -102,6 +101,17 @@ describe("metrics.window", () => {
 
     expect(result.totals.delivered).toBe(100);
     expect(result.allTimeDelivered).toBe(350);
+  });
+
+  it("sums all-time delivered past int4 range without overflowing", async () => {
+    const teamId = await createTeam(db, "acme");
+    // Two near-max int4 rows push the SUM past 2^31 - 1.
+    await insertCounter(teamId, utcDay(0), { delivered: 2_000_000_000 });
+    await insertCounter(teamId, utcDay(1), { delivered: 2_000_000_000 });
+
+    const result = await callerFor(teamId).metrics.window();
+
+    expect(result.allTimeDelivered).toBe(4_000_000_000);
   });
 
   it("scopes both the window and the all-time sum to the caller's team", async () => {

@@ -1,12 +1,10 @@
 import { env } from "@millionsend/config";
-import { PLAN_DAILY_LIMIT, type Plan } from "@millionsend/core";
+import { DAY_MS, PLAN_DAILY_LIMIT, type Plan, utcDay } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import { router, teamProcedure } from "../trpc";
-
-const DAY_MS = 86_400_000;
 
 /**
  * The API enforces plan caps only when IS_CLOUD; self-host has no daily
@@ -15,11 +13,6 @@ const DAY_MS = 86_400_000;
  */
 function planDailyLimit(plan: Plan): number | null {
   return env.IS_CLOUD ? PLAN_DAILY_LIMIT[plan] : null;
-}
-
-/** UTC day string ("YYYY-MM-DD") — must match the day key quota reservation writes. */
-function utcDay(epochMs: number): string {
-  return new Date(epochMs).toISOString().slice(0, 10);
 }
 
 export const settingsRouter = router({

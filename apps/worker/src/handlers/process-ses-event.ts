@@ -1,4 +1,4 @@
-import { applyStatusCas, type EmailStatus, hashRecipient } from "@millionsend/core";
+import { applyStatusCas, type EmailStatus, hashRecipient, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
@@ -74,7 +74,7 @@ export async function processSesEvent(
 
   await applyStatusCas(db, email.id, status);
 
-  const day = new Date(event.occurredAt).toISOString().slice(0, 10);
+  const day = utcDay(new Date(event.occurredAt));
   const counter =
     event.eventType === "Delivery"
       ? "delivered"

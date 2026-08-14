@@ -27,6 +27,7 @@
     "html": "<p>0000001 and counting.</p>",
     "fromPlaceholder": "you@yourdomain.com",
     "keyComment": "real key on copy",
+    "keyCommentReplace": "replace with your API key",
     "keyCommentLocked": "your key, once created"
   },
   "step3": {
@@ -35,7 +36,7 @@
   },
   "success": {
     "keyAdded": "API key added",
-    "emailSent": "Email sent to {to}",
+    "emailPending": "Email to {to} — not delivered yet",
     "emailDelivered": "Email sent · delivered to {to} in {seconds} s",
     "counting": "{count, plural, one {1 delivered. Counting.} other {# delivered. Counting.}}",
     "deliveredIn": "delivered in {seconds} s"

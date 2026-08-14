@@ -26,6 +26,9 @@ export function CommandPalette() {
         setOpen((wasOpen) => !wasOpen);
         setQuery("");
         setIndex(0);
+      } else if (event.key === "Escape") {
+        // Window-level so Esc closes no matter where focus sits in the dialog.
+        setOpen(false);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -74,8 +77,6 @@ export function CommandPalette() {
     } else if (event.key === "Enter") {
       event.preventDefault();
       go(flat[index]);
-    } else if (event.key === "Escape") {
-      setOpen(false);
     }
   }
 

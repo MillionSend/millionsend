@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey, PLAN_DAILY_LIMIT } from "@millionsend/core";
+import { DAY_MS, EnvKeyring, generateApiKey, PLAN_DAILY_LIMIT, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -81,7 +81,7 @@ it("a scheduled email's job carries its due time", async () => {
 it("scheduled_at beyond 30 days is rejected loudly", async () => {
   const res = await post({
     ...base,
-    scheduled_at: new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString(),
+    scheduled_at: new Date(Date.now() + 31 * DAY_MS).toISOString(),
   });
   expect(res.status).toBe(422);
   const body = (await res.json()) as { name: string; message: string };
@@ -91,7 +91,7 @@ it("scheduled_at beyond 30 days is rejected loudly", async () => {
 });
 
 it("a quota-parked email is NOT enqueued — the midnight drain owns it", async () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = utcDay();
   const limit = PLAN_DAILY_LIMIT.free;
   if (limit === null) throw new Error("free plan is expected to have a daily cap");
   await db

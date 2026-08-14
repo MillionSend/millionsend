@@ -4,9 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavGlyph, type NavIconName } from "@/components/icons/nav-icons";
 import { authClient } from "@/lib/auth-client";
+import { isActive } from "@/lib/nav";
 import { useTRPC } from "@/lib/trpc";
 import { formatUtcDayReset, meterClass } from "@/lib/usage-meter";
 
@@ -24,8 +25,30 @@ export const NAV_ITEMS: ReadonlyArray<{ key: string; href: string; icon: NavIcon
   { key: "settings", href: "/settings", icon: "settings" },
 ];
 
-function isActive(pathname: string, href: string): boolean {
-  return pathname === href || pathname.startsWith(`${href}/`);
+// Hover state lives per link so a hover repaints one glyph, not the whole nav.
+function NavItem({
+  item,
+  active,
+  label,
+}: {
+  item: (typeof NAV_ITEMS)[number];
+  active: boolean;
+  label: string;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Link
+      href={item.href}
+      className={active ? "active" : undefined}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setHovered(true)}
+      onBlur={() => setHovered(false)}
+    >
+      <NavGlyph name={item.icon} hovered={hovered} />
+      {label}
+    </Link>
+  );
 }
 
 export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: string }) {
@@ -37,8 +60,16 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
   const trpc = useTRPC();
   const { data: team } = useQuery(trpc.settings.team.get.queryOptions());
   const { data: usage } = useQuery(trpc.settings.usage.recent.queryOptions({}));
-  const [hoveredNav, setHoveredNav] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   async function signOut() {
     await authClient.signOut();
@@ -128,18 +159,12 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
       </div>
       <nav className="ms-nav" style={{ marginTop: 10, minHeight: 0, overflowY: "auto" }}>
         {NAV_ITEMS.map((item) => (
-          <Link
+          <NavItem
             key={item.key}
-            href={item.href}
-            className={isActive(pathname, item.href) ? "active" : undefined}
-            onMouseEnter={() => setHoveredNav(item.key)}
-            onMouseLeave={() => setHoveredNav((cur) => (cur === item.key ? null : cur))}
-            onFocus={() => setHoveredNav(item.key)}
-            onBlur={() => setHoveredNav((cur) => (cur === item.key ? null : cur))}
-          >
-            <NavGlyph name={item.icon} hovered={hoveredNav === item.key} />
-            {t(item.key)}
-          </Link>
+            item={item}
+            active={isActive(pathname, item.href)}
+            label={t(item.key)}
+          />
         ))}
       </nav>
       <div style={{ flex: 1 }} />

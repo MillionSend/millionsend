@@ -27,6 +27,7 @@
     "html": "<p>0000001 e contando.</p>",
     "fromPlaceholder": "voce@seudominio.com.br",
     "keyComment": "chave real ao copiar",
+    "keyCommentReplace": "substitua pela sua chave de API",
     "keyCommentLocked": "sua chave, após a criação"
   },
   "step3": {
@@ -35,7 +36,7 @@
   },
   "success": {
     "keyAdded": "Chave de API adicionada",
-    "emailSent": "E-mail enviado para {to}",
+    "emailPending": "E-mail para {to} — ainda não entregue",
     "emailDelivered": "E-mail enviado · entregue para {to} em {seconds} s",
     "counting": "{count, plural, one {1 entregue. Contando.} other {# entregues. Contando.}}",
     "deliveredIn": "entregue em {seconds} s"

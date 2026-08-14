@@ -1,4 +1,5 @@
 import {
+  DAY_MS,
   PLAN_DAILY_LIMIT,
   releaseDailyQuota,
   reserveDailyQuota,
@@ -138,7 +139,7 @@ export async function purgeExpiredEmailBodies(
   params: { retentionDays: number; now?: Date },
 ): Promise<number> {
   const now = params.now ?? new Date();
-  const cutoff = new Date(now.getTime() - params.retentionDays * 24 * 60 * 60 * 1000);
+  const cutoff = new Date(now.getTime() - params.retentionDays * DAY_MS);
   const purged = await db
     .update(schema.emails)
     .set({
