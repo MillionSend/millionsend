@@ -97,15 +97,9 @@
   },
   "instance": {
     "title": "Instance",
-    "subtitle": "Applies to this whole deployment, every team. Empty fields fall back to .env, then the built-in default.",
+    "subtitle": "Applies to this whole deployment, every team.",
     "rateLabel": "SES send rate (messages/second)",
     "retentionLabel": "Email body retention (days)",
-    "effective": "Effective: {value} · {source}",
-    "sources": {
-      "db": "set here",
-      "env": "from .env",
-      "default": "built-in default"
-    },
     "save": "Save",
     "saved": "Saved",
     "error": "Could not save."

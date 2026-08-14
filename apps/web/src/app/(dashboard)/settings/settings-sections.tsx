@@ -59,7 +59,7 @@ function TeamSection() {
           rename.mutate({ name });
         }}
       >
-        <div className="ms-field">
+        <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
           <label htmlFor="settings-team-name">{t("team.name")}</label>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input
@@ -147,7 +147,7 @@ function LanguageSection() {
 
   return (
     <SectionCard title={t("language.title")}>
-      <div className="ms-field">
+      <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
         <label htmlFor="settings-locale">{t("language.label")}</label>
         <Select
           id="settings-locale"
@@ -170,7 +170,6 @@ function LanguageSection() {
 function InstanceField({
   id,
   label,
-  hint,
   min,
   max,
   value,
@@ -179,7 +178,6 @@ function InstanceField({
 }: {
   id: string;
   label: string;
-  hint: string;
   min: number;
   max: number;
   value: string;
@@ -187,13 +185,13 @@ function InstanceField({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="ms-field">
+    <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
       <label htmlFor={id}>{label}</label>
       <input
         id={id}
         type="number"
-        className="ms-input"
-        style={{ maxWidth: 220 }}
+        className="ms-input ms-number"
+        style={{ width: "100%" }}
         min={min}
         max={max}
         step={1}
@@ -201,9 +199,6 @@ function InstanceField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-      <p style={{ margin: "6px 0 0", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
-        {hint}
-      </p>
     </div>
   );
 }
@@ -226,14 +221,10 @@ function InstanceSection() {
   );
   if (!data) return null;
 
-  // The input holds only the db override; env/default values live in the
-  // hint, so clearing the field is an honest "back to env" reset.
-  const stored = (s: { value: number; source: string }) =>
-    s.source === "db" ? String(s.value) : "";
-  const rate = rateDraft ?? stored(data.sesMaxSendRate);
-  const retention = retentionDraft ?? stored(data.emailRetentionDays);
-  const hint = (s: { value: number; source: "db" | "env" | "default" }) =>
-    t("instance.effective", { value: s.value, source: t(`instance.sources.${s.source}`) });
+  // Fields show the EFFECTIVE value (db, env, or default) — saving writes
+  // what is shown, so what you see is always what runs.
+  const rate = rateDraft ?? String(data.sesMaxSendRate.value);
+  const retention = retentionDraft ?? String(data.emailRetentionDays.value);
   const clean = rateDraft === null && retentionDraft === null;
 
   return (
@@ -256,11 +247,10 @@ function InstanceSection() {
           });
         }}
       >
-        <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
           <InstanceField
             id="settings-instance-rate"
             label={t("instance.rateLabel")}
-            hint={hint(data.sesMaxSendRate)}
             min={1}
             max={200}
             value={rate}
@@ -270,7 +260,6 @@ function InstanceSection() {
           <InstanceField
             id="settings-instance-retention"
             label={t("instance.retentionLabel")}
-            hint={hint(data.emailRetentionDays)}
             min={1}
             max={3650}
             value={retention}

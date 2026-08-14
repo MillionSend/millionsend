@@ -97,15 +97,9 @@
   },
   "instance": {
     "title": "Instância",
-    "subtitle": "Vale para toda esta implantação, todas as equipes. Campos vazios voltam ao .env e depois ao padrão embutido.",
+    "subtitle": "Vale para toda esta instalação, todos os times.",
     "rateLabel": "Taxa de envio SES (mensagens/segundo)",
     "retentionLabel": "Retenção de corpos de e-mail (dias)",
-    "effective": "Em vigor: {value} · {source}",
-    "sources": {
-      "db": "definido aqui",
-      "env": "do .env",
-      "default": "padrão embutido"
-    },
     "save": "Salvar",
     "saved": "Salvo",
     "error": "Não foi possível salvar."
