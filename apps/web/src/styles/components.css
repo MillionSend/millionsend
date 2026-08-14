@@ -697,8 +697,8 @@ svg:focus {
 
 /* Empty states — centered 3D app-icon tile render (see empty-state.tsx).
    The tile image carries its own face, bevel and depth; CSS adds only the
-   glow, the float/tilt loop and the drop shadow. The dark tile is intentional
-   on a future light theme too (app-icon look). */
+   glow, the float/tilt loop and the drop shadow. Each area ships a dark and
+   a light render, swapped per theme by ms-dark-only/ms-light-only below. */
 .ms-empty {
   padding: 88px 24px;
   display: flex;
@@ -731,7 +731,8 @@ svg:focus {
   height: 96px;
   /* Matches the baked alpha corner radius of the tile renders (155/820) */
   border-radius: 19%;
-  box-shadow: 0 18px 34px -18px color-mix(in srgb, var(--ms-void) 85%, transparent);
+  /* Ink-based, not void-based: the shadow must survive the light theme (void is paper there). */
+  box-shadow: 0 18px 34px -18px rgba(0, 0, 0, 0.55);
   animation: ms-empty-float 7s var(--ms-ease) infinite;
 }
 .ms-empty-headline {
@@ -768,4 +769,17 @@ svg:focus {
    light theme swaps in the ink variant of the same lockup. */
 :root[data-theme="light"] .ms-wordmark {
   content: url("/logo/millionsend-wordmark-light.svg");
+}
+
+/* Theme-scoped visibility — elements that ship one render per theme (e.g. the
+   empty-state tiles). Both stay in the DOM; display alone flips so a theme
+   toggle swaps them with no fetch or reflow of siblings. */
+.ms-light-only {
+  display: none;
+}
+:root[data-theme="light"] .ms-light-only {
+  display: block;
+}
+:root[data-theme="light"] .ms-dark-only {
+  display: none;
 }
