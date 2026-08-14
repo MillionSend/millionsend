@@ -95,10 +95,12 @@ export async function verifySnsMessage(
   if (msg.SignatureVersion !== "1" && msg.SignatureVersion !== "2") {
     return { ok: false, reason: `unsupported signature version ${msg.SignatureVersion}` };
   }
-  let publicKey: ReturnType<X509Certificate["publicKey"]["export"]> | string;
+  let publicKey: string;
   try {
     const pem = await opts.fetchCert(msg.SigningCertURL);
-    publicKey = new X509Certificate(pem).publicKey.export({ type: "spki", format: "pem" });
+    publicKey = new X509Certificate(pem).publicKey
+      .export({ type: "spki", format: "pem" })
+      .toString();
   } catch {
     return { ok: false, reason: "signing cert unavailable or invalid" };
   }
@@ -106,7 +108,7 @@ export async function verifySnsMessage(
   try {
     const verifier = createVerify(algorithm);
     verifier.update(canonicalString(msg), "utf8");
-    const valid = verifier.verify(publicKey.toString(), msg.Signature, "base64");
+    const valid = verifier.verify(publicKey, msg.Signature, "base64");
     return valid ? { ok: true } : { ok: false, reason: "signature mismatch" };
   } catch {
     return { ok: false, reason: "signature verification failed" };

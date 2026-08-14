@@ -1,0 +1,27 @@
+{
+  "name": "@millionsend/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.750.0",
+    "@millionsend/config": "workspace:*",
+    "@millionsend/core": "workspace:*",
+    "@millionsend/db": "workspace:*",
+    "@millionsend/queue": "workspace:*",
+    "@millionsend/ses": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "nodemailer": "^7.0.9"
+  },
+  "devDependencies": {
+    "@millionsend/test-utils": "workspace:*",
+    "@types/node": "^22.20.1",
+    "@types/nodemailer": "^7.0.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
