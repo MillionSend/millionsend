@@ -14,7 +14,7 @@ import {
   teardownPlan,
   upsertEnv,
 } from "./setup.js";
-import { banner, dim, selectPrompt } from "./tty-ui.js";
+import { banner, dim, pickBannerTier, selectPrompt } from "./tty-ui.js";
 
 const DESCRIPTION = [
   "Creates the IAM user, policy, access key — and, with an https APP_BASE_URL,",
@@ -126,13 +126,13 @@ function runAws(args: string[]): void {
 }
 
 function printHeader(): void {
-  const columns = process.stdout.columns ?? 0;
-  if (process.stdout.isTTY === true && columns >= 80) {
-    for (const line of banner()) console.log(line);
-    console.log(`\n${dim(DESCRIPTION)}\n`);
-  } else {
+  const tier = pickBannerTier(process.stdout.columns ?? 0, process.stdout.isTTY === true);
+  if (tier === "plain") {
     console.log(`${BANNER}\n`);
+    return;
   }
+  for (const line of banner(tier)) console.log(line);
+  console.log(`\n${dim(DESCRIPTION)}\n`);
 }
 
 /**
