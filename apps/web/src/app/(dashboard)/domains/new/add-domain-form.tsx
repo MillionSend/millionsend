@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { Select } from "@/components/select";
 import { useTRPC } from "@/lib/trpc";
 import { DOMAIN_REGIONS, type DomainRegion, regionFlag } from "../regions";
 
@@ -116,19 +117,17 @@ export function AddDomainForm() {
 
         <div className="ms-field" style={{ marginTop: 14 }}>
           <label htmlFor="domain-region">{t("new.region")}</label>
-          <select
+          <Select
             id="domain-region"
-            className="ms-input"
-            style={{ width: "100%" }}
+            width="100%"
             value={region}
-            onChange={(e) => setRegion(e.target.value as DomainRegion)}
-          >
-            {DOMAIN_REGIONS.map((code) => (
-              <option key={code} value={code}>
-                {`${regionFlag(code)} ${t(`regions.${code}`)} (${code})`}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => setRegion(value as DomainRegion)}
+            ariaLabel={t("new.region")}
+            options={DOMAIN_REGIONS.map((code) => ({
+              value: code,
+              label: `${regionFlag(code)} ${t(`regions.${code}`)} (${code})`,
+            }))}
+          />
         </div>
 
         <div

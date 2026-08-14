@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { Select } from "@/components/select";
 
 /** Filter-row chrome shared by the Emails-area list screens (emails + suppressions). */
 
@@ -15,7 +16,7 @@ export function SearchBox({
 }) {
   const ref = useRef<HTMLInputElement>(null);
 
-  // "/" focuses search from anywhere on the page (the keycap is the hint).
+  // "/" focuses search from anywhere on the page.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
@@ -33,66 +34,15 @@ export function SearchBox({
   }, []);
 
   return (
-    <span style={{ position: "relative", width: 250, flexShrink: 0 }}>
+    <span style={{ width: 250, flexShrink: 0 }}>
       <input
         ref={ref}
         className="ms-input"
-        style={{ width: "100%", paddingRight: 32 }}
+        style={{ width: "100%" }}
         placeholder={placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
-      <span className="ms-keycap" style={{ position: "absolute", right: 8, top: 6 }}>
-        /
-      </span>
-    </span>
-  );
-}
-
-export function FilterSelect({
-  value,
-  onChange,
-  width,
-  ariaLabel,
-  children,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  width: number;
-  ariaLabel: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <span style={{ position: "relative", width, flexShrink: 0, display: "inline-block" }}>
-      <select
-        className="ms-input"
-        aria-label={ariaLabel}
-        style={{
-          width: "100%",
-          appearance: "none",
-          paddingRight: 26,
-          color: "var(--ms-muted)",
-          cursor: "pointer",
-        }}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {children}
-      </select>
-      <span
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          right: 10,
-          top: "50%",
-          transform: "translateY(-50%)",
-          color: "var(--ms-faint)",
-          pointerEvents: "none",
-          fontSize: 12,
-        }}
-      >
-        ⌄
-      </span>
     </span>
   );
 }
@@ -188,40 +138,12 @@ export function ListFooter({
       }}
     >
       <span>{left}</span>
-      <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-        <select
-          aria-label={sizeLabel(size)}
-          style={{
-            appearance: "none",
-            background: "none",
-            border: 0,
-            color: "var(--ms-muted)",
-            font: "400 13px var(--ms-font-sans)",
-            paddingRight: 16,
-            cursor: "pointer",
-          }}
-          value={size}
-          onChange={(event) => onSize(Number(event.target.value))}
-        >
-          {PAGE_SIZES.map((s) => (
-            <option key={s} value={s}>
-              {sizeLabel(s)}
-            </option>
-          ))}
-        </select>
-        <span
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            right: 0,
-            color: "var(--ms-muted)",
-            pointerEvents: "none",
-            fontSize: 12,
-          }}
-        >
-          ⌄
-        </span>
-      </span>
+      <Select
+        value={String(size)}
+        onChange={(next) => onSize(Number(next))}
+        options={PAGE_SIZES.map((s) => ({ value: String(s), label: sizeLabel(s) }))}
+        ariaLabel={sizeLabel(size)}
+      />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
+import { Select } from "@/components/select";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { type DomainStatus, DomainStatusBadge } from "./domain-status";
@@ -37,8 +38,6 @@ function SkeletonRows() {
   );
 }
 
-const selectStyle: React.CSSProperties = { color: "var(--ms-muted)" };
-
 export function DomainsView() {
   const t = useTranslations("domains");
   const common = useTranslations("common");
@@ -50,7 +49,7 @@ export function DomainsView() {
   const [region, setRegion] = useState("all");
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // The "/" keycap on the search input is a real shortcut, not decoration.
+  // "/" focuses search from anywhere on the page.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement;
@@ -97,11 +96,7 @@ export function DomainsView() {
         title={t("list.title")}
         {...(summary ? { subtitle: summary } : {})}
         actions={
-          <Link
-            href="/domains/new"
-            className="ms-btn ms-btn-primary"
-            style={{ textDecoration: "none" }}
-          >
+          <Link href="/domains/new" className="ms-btn ms-btn-primary">
             {t("list.addDomain")}
           </Link>
         }
@@ -128,48 +123,38 @@ export function DomainsView() {
       ) : (
         <>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}>
-            <div style={{ position: "relative", width: 250 }}>
+            <div style={{ width: 250 }}>
               <input
                 ref={searchRef}
                 type="text"
                 className="ms-input"
-                style={{ width: "100%", paddingRight: 32 }}
+                style={{ width: "100%" }}
                 placeholder={t("list.searchPlaceholder")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
-              <span className="ms-keycap" style={{ position: "absolute", right: 8, top: 8 }}>
-                /
-              </span>
             </div>
-            <select
-              className="ms-input"
-              style={selectStyle}
-              aria-label={t("list.allStatuses")}
+            <Select
               value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
-              <option value="all">{t("list.allStatuses")}</option>
-              {(["verified", "pending", "failed"] as const).map((key) => (
-                <option key={key} value={key}>
-                  {common(`status.${key}`)}
-                </option>
-              ))}
-            </select>
-            <select
-              className="ms-input"
-              style={selectStyle}
-              aria-label={t("list.allRegions")}
+              onChange={setStatus}
+              ariaLabel={t("list.allStatuses")}
+              options={[
+                { value: "all", label: t("list.allStatuses") },
+                ...(["verified", "pending", "failed"] as const).map((key) => ({
+                  value: key,
+                  label: common(`status.${key}`),
+                })),
+              ]}
+            />
+            <Select
               value={region}
-              onChange={(e) => setRegion(e.target.value)}
-            >
-              <option value="all">{t("list.allRegions")}</option>
-              {regions.map((code) => (
-                <option key={code} value={code}>
-                  {code}
-                </option>
-              ))}
-            </select>
+              onChange={setRegion}
+              ariaLabel={t("list.allRegions")}
+              options={[
+                { value: "all", label: t("list.allRegions") },
+                ...regions.map((code) => ({ value: code, label: code })),
+              ]}
+            />
           </div>
 
           <Table>

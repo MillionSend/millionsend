@@ -6,13 +6,15 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { CodeGlyph } from "@/components/icons/nav-icons";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
+import { Select } from "@/components/select";
 import { StatusBadge } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { formatHoursMinutes } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
-import { FilterSelect, ListFooter, ListSkeleton, SearchBox, StateCard } from "./list-parts";
+import { ListFooter, ListSkeleton, SearchBox, StateCard } from "./list-parts";
 
 // Keep in enum order (packages/db schema.emailStatusEnum) — the router input
 // rejects anything outside it at typecheck time.
@@ -126,7 +128,7 @@ export default function EmailsPage() {
               {t("list.suppressionList")}
             </Link>
             <a className="ms-btn ms-btn-icon" href="#emails-api" aria-label={t("list.apiDocs")}>
-              {"</>"}
+              <CodeGlyph size={14} />
             </a>
           </>
         }
@@ -175,44 +177,33 @@ export default function EmailsPage() {
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}>
         <SearchBox value={search} onChange={setSearch} placeholder={t("list.searchPlaceholder")} />
-        <FilterSelect
+        <Select
           value={range}
           onChange={(value) => setRange(value as RangeKey)}
           width={130}
           ariaLabel={t(`list.range.${range}`)}
-        >
-          {RANGE_KEYS.map((key) => (
-            <option key={key} value={key}>
-              {t(`list.range.${key}`)}
-            </option>
-          ))}
-        </FilterSelect>
-        <FilterSelect
+          options={RANGE_KEYS.map((key) => ({ value: key, label: t(`list.range.${key}`) }))}
+        />
+        <Select
           value={status}
           onChange={(value) => setStatus(value as EmailStatus | "all")}
           width={126}
           ariaLabel={t("list.status")}
-        >
-          <option value="all">{t("list.allStatuses")}</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {common(`status.${s}`)}
-            </option>
-          ))}
-        </FilterSelect>
-        <FilterSelect
+          options={[
+            { value: "all", label: t("list.allStatuses") },
+            ...STATUSES.map((s) => ({ value: s, label: common(`status.${s}`) })),
+          ]}
+        />
+        <Select
           value={apiKeyId}
           onChange={setApiKeyId}
           width={126}
           ariaLabel={t("list.allApiKeys")}
-        >
-          <option value="all">{t("list.allApiKeys")}</option>
-          {(apiKeys.data ?? []).map((key) => (
-            <option key={key.id} value={key.id}>
-              {key.name}
-            </option>
-          ))}
-        </FilterSelect>
+          options={[
+            { value: "all", label: t("list.allApiKeys") },
+            ...(apiKeys.data ?? []).map((key) => ({ value: key.id, label: key.name })),
+          ]}
+        />
       </div>
 
       {query.isPending ? (

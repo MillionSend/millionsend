@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
+import { CodeGlyph } from "@/components/icons/nav-icons";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { formatDurationShort, formatRelative, formatUtcTimestampMs } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
@@ -290,7 +291,7 @@ export default function EmailDetailPage() {
         subtitle={sublineParts.join(" · ")}
         actions={
           <a className="ms-btn ms-btn-icon" href="#emails-api" aria-label={t("list.apiDocs")}>
-            {"</>"}
+            <CodeGlyph size={14} />
           </a>
         }
       />

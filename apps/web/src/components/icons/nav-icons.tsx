@@ -236,6 +236,17 @@ function SettingsGlyph({ on, size }: GlyphProps) {
   );
 }
 
+/** Static code glyph (lucide code-xml) for the square </> icon buttons. */
+export function CodeGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <Svg size={size}>
+      <path d="m18 16 4-4-4-4" />
+      <path d="m6 8-4 4 4 4" />
+      <path d="m14.5 4-5 16" />
+    </Svg>
+  );
+}
+
 const GLYPHS = {
   emails: EmailsGlyph,
   broadcasts: BroadcastsGlyph,

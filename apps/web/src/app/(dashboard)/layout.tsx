@@ -13,7 +13,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <AppShell teamName={membership.teamName} userEmail={session.user.email}>
-      <main style={{ flex: 1, minWidth: 0, padding: "48px 75px" }}>
+      {/* Canvas main-block padding: 32px 40px (DESIGN.md Layout). */}
+      <main style={{ flex: 1, minWidth: 0, padding: "32px 40px" }}>
         <div style={{ maxWidth: 1120, margin: "0 auto" }}>{children}</div>
       </main>
     </AppShell>

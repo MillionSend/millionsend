@@ -57,7 +57,33 @@ other icon fonts or icon libraries. Logos in
 
 ## Layout
 
-Fixed 240px sidebar on `--ms-panel`; content column on void with 75px
-gutters. Cards: panel fill, 1px line, 14px radius, 24px padding. Controls
-compact: buttons/inputs ≈34px. Modals drop from top (14vh offset), overlay
-`rgba(0,0,0,.72)`, no blur.
+Fixed 240px sidebar on `--ms-panel`; content column on void with the canvas
+main-block padding: `32px 40px` (40px gutters — never wider). Cards: panel
+fill, 1px line, 14px radius, 24px padding. Controls compact per the canvas
+overrides: `.ms-btn` 6px 12px, `.ms-input` 6px 10px / line-height 1.4,
+`.ms-btn-icon` an exact 30×30 square — everything lands ≈30px tall. Modals
+are **centered in the viewport** (both axes), overlay `rgba(0,0,0,.72)`, no
+blur.
+
+## Controls
+
+- Buttons never show a text underline — `.ms-btn` sets
+  `text-decoration: none` so Link-rendered buttons don't inherit the dotted
+  link treatment.
+- **Focus-outline policy:** interactive controls (`.ms-btn`, `.ms-input`,
+  `.ms-menu-item`) show the steel `--ms-focus-ring` on `:focus-visible`
+  only — a11y non-negotiable. Everything else — dialog panels, chart/svg
+  containers, anything focused programmatically via `tabindex="-1"` — gets
+  `outline: none`. No browser-blue outline anywhere, ever.
+- **Select:** never render native `<select>`. Use `<Select>` from
+  `src/components/select.tsx` — compact `.ms-input` trigger with a `.ms-chev`
+  chevron, `.ms-menu` listbox popover, built-in search when there are more
+  than 6 options, full keyboard + ARIA combobox support, ✓ on the selected
+  row. Options are `{ value, label, hint? }`; controlled `value` +
+  `onChange`.
+- **Menus/popovers** use the `.ms-menu` grammar (canvas "…" dropdowns): panel
+  bg, 1px `--ms-line-strong`, 14px radius, 6px padding; 13px item rows at
+  7px 12px that raise to `--ms-panel-raised` (8px radius); `.ms-menu-sep`
+  hairline separators. `<PopoverMenu>` in `src/components/popover-menu.tsx`
+  is the "…" overflow menu.
+- Search inputs carry no "/" keycap for now (removed in visual QA).

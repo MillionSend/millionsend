@@ -6,6 +6,7 @@ import { useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { Odometer } from "@/components/odometer";
 import { PageHeader } from "@/components/page-header";
+import { Select } from "@/components/select";
 import { useTRPC } from "@/lib/trpc";
 
 const RANGES = [7, 15, 30] as const;
@@ -173,17 +174,12 @@ export default function MetricsPage() {
       <PageHeader
         title={t("title")}
         actions={
-          <select
-            className="ms-input"
-            value={days}
-            onChange={(event) => setDays(Number(event.target.value) as Range)}
-          >
-            {RANGES.map((r) => (
-              <option key={r} value={r}>
-                {t(`range.${r}`)}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={String(days)}
+            onChange={(value) => setDays(Number(value) as Range)}
+            ariaLabel={t(`range.${days}`)}
+            options={RANGES.map((r) => ({ value: String(r), label: t(`range.${r}`) }))}
+          />
         }
       />
 

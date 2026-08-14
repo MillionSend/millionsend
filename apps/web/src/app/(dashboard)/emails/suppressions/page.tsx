@@ -5,12 +5,14 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { CodeGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
+import { Select } from "@/components/select";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
-import { FilterSelect, ListFooter, ListSkeleton, SearchBox, StateCard } from "../list-parts";
+import { ListFooter, ListSkeleton, SearchBox, StateCard } from "../list-parts";
 
 const REASONS = ["hard_bounce", "complaint", "manual", "one_click_unsubscribe"] as const;
 type Reason = (typeof REASONS)[number];
@@ -116,7 +118,7 @@ export default function SuppressionsPage() {
         actions={
           <>
             <a className="ms-btn ms-btn-icon" href="#emails-api" aria-label={t("list.apiDocs")}>
-              {"</>"}
+              <CodeGlyph size={14} />
             </a>
             <button
               type="button"
@@ -135,31 +137,23 @@ export default function SuppressionsPage() {
           onChange={setSearch}
           placeholder={t("suppressions.searchPlaceholder")}
         />
-        <FilterSelect
+        <Select
           value={reason}
           onChange={(value) => setReason(value as Reason | "all")}
           width={120}
           ariaLabel={t("suppressions.origin")}
-        >
-          <option value="all">{t("suppressions.allOrigins")}</option>
-          {REASONS.map((r) => (
-            <option key={r} value={r}>
-              {t(`suppressions.reason.${r}`)}
-            </option>
-          ))}
-        </FilterSelect>
-        <FilterSelect
+          options={[
+            { value: "all", label: t("suppressions.allOrigins") },
+            ...REASONS.map((r) => ({ value: r, label: t(`suppressions.reason.${r}`) })),
+          ]}
+        />
+        <Select
           value={range}
           onChange={(value) => setRange(value as RangeKey)}
           width={110}
           ariaLabel={t(`list.range.${range === "all" ? "all" : range}`)}
-        >
-          {RANGE_KEYS.map((key) => (
-            <option key={key} value={key}>
-              {t(`list.range.${key}`)}
-            </option>
-          ))}
-        </FilterSelect>
+          options={RANGE_KEYS.map((key) => ({ value: key, label: t(`list.range.${key}`) }))}
+        />
       </div>
 
       {query.isPending ? (

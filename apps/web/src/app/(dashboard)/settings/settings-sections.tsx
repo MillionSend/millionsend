@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
+import { Select } from "@/components/select";
 import { Table } from "@/components/table";
 import type { AppLocale } from "@/i18n/request";
 import { useTRPC } from "@/lib/trpc";
@@ -145,23 +146,18 @@ function LanguageSection() {
     <SectionCard title={t("language.title")}>
       <div className="ms-field">
         <label htmlFor="settings-locale">{t("language.label")}</label>
-        <select
+        <Select
           id="settings-locale"
-          className="ms-input"
-          style={{ maxWidth: 260 }}
+          width={260}
           value={locale}
-          onChange={(e) => {
+          onChange={(value) => {
             // biome-ignore lint/suspicious/noDocumentCookie: Cookie Store API is unavailable in Safari.
-            document.cookie = `${LOCALE_COOKIE}=${e.target.value}; path=/; max-age=${LOCALE_COOKIE_MAX_AGE}`;
+            document.cookie = `${LOCALE_COOKIE}=${value}; path=/; max-age=${LOCALE_COOKIE_MAX_AGE}`;
             router.refresh();
           }}
-        >
-          {LOCALE_OPTIONS.map((value) => (
-            <option key={value} value={value}>
-              {t(`language.${value}`)}
-            </option>
-          ))}
-        </select>
+          ariaLabel={t("language.label")}
+          options={LOCALE_OPTIONS.map((value) => ({ value, label: t(`language.${value}`) }))}
+        />
       </div>
     </SectionCard>
   );

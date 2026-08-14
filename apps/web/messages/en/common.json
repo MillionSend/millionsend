@@ -5,6 +5,10 @@
   "close": "Close",
   "cancel": "Cancel",
   "signOut": "Sign out",
+  "select": {
+    "searchPlaceholder": "Search…",
+    "noResults": "No results."
+  },
   "plan": {
     "free": "Free",
     "pro": "Pro",

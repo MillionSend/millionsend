@@ -209,35 +209,17 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
               onMouseDown={() => setMenuOpen(false)}
             />
             <div
+              className="ms-menu"
               style={{
                 position: "absolute",
                 bottom: "calc(100% + 6px)",
                 left: 4,
                 right: 4,
+                minWidth: 0,
                 zIndex: 6,
-                background: "var(--ms-panel)",
-                border: "1px solid var(--ms-line-strong)",
-                borderRadius: 14,
-                padding: 6,
               }}
             >
-              <button
-                type="button"
-                onClick={signOut}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "8px 12px",
-                  fontSize: 13.5,
-                  color: "var(--ms-bone)",
-                  background: "none",
-                  border: 0,
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  font: "inherit",
-                }}
-              >
+              <button type="button" className="ms-menu-item" onClick={signOut}>
                 {tCommon("signOut")}
               </button>
             </div>

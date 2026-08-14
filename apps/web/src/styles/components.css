@@ -6,13 +6,17 @@
 .ms-btn {
   font: 600 var(--ms-fs-ui) var(--ms-font-sans);
   border-radius: var(--ms-r-input);
-  padding: 8px 14px;
+  padding: 6px 12px;
   border: 1px solid transparent;
   cursor: pointer;
   transition: opacity var(--ms-dur-fast) var(--ms-ease);
   display: inline-flex;
   gap: 8px;
   align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
+  /* Buttons rendered as <Link> would otherwise inherit the global dotted link underline. */
+  text-decoration: none;
 }
 .ms-btn:hover {
   opacity: 0.88;
@@ -46,8 +50,13 @@
   background: var(--ms-panel-raised);
   color: var(--ms-muted);
   border-color: var(--ms-line-strong);
-  padding: 8px 10px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  justify-content: center;
+  font-size: 12px;
   font-family: var(--ms-font-mono);
+  box-sizing: border-box;
 }
 .ms-btn-ghost {
   background: none;
@@ -239,7 +248,8 @@ table.ms-table {
   border-radius: var(--ms-r-input);
   color: var(--ms-bone);
   font: 400 var(--ms-fs-ui) var(--ms-font-sans);
-  padding: 8px 10px;
+  padding: 6px 10px;
+  line-height: 1.4;
   outline: none;
   box-sizing: border-box;
   transition: box-shadow var(--ms-dur-fast) var(--ms-ease);
@@ -269,7 +279,7 @@ table.ms-table {
   background: var(--ms-inset);
   border: 1px solid var(--ms-line);
   border-radius: var(--ms-r-input);
-  padding: 5px 9px;
+  padding: 3px 8px;
   font-family: var(--ms-font-mono);
   font-size: var(--ms-fs-label);
   color: var(--ms-muted);
@@ -427,15 +437,15 @@ table.ms-table {
   }
 }
 
-/* Modal — tokens define --ms-r-modal + --ms-dur-drawer; ⌘↵-confirm modals per the brief */
+/* Modal — tokens define --ms-r-modal + --ms-dur-drawer; ⌘↵-confirm modals per the brief.
+   Dialog is centered in the viewport on both axes. */
 .ms-modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.72);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding-top: 14vh;
   z-index: 100;
   animation: ms-fade var(--ms-dur-base) var(--ms-ease);
 }
@@ -463,6 +473,72 @@ table.ms-table {
   to {
     opacity: 1;
   }
+}
+
+/* Focus policy: the steel --ms-focus-ring belongs to interactive controls on
+   :focus-visible only. Programmatically focused containers (dialog panels,
+   chart wrappers — anything reached via tabindex="-1") and svg roots must
+   never show the browser's default blue outline. */
+[tabindex="-1"]:focus,
+.ms-modal:focus,
+.ms-menu:focus,
+svg:focus {
+  outline: none;
+}
+
+/* Chevron glyph inside select triggers / disclosure buttons (canvas .ms-chev) */
+.ms-chev {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+/* Menu / popover — the canvas's "…" dropdown grammar: panel on line-strong,
+   14px radius, 6px inner padding, 13px rows that raise on hover. */
+.ms-menu {
+  background: var(--ms-panel);
+  border: 1px solid var(--ms-line-strong);
+  border-radius: var(--ms-r-card);
+  padding: 6px;
+  min-width: 180px;
+  box-sizing: border-box;
+  z-index: 110;
+  animation: ms-fade var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 12px;
+  font: 400 13px var(--ms-font-sans);
+  color: var(--ms-bone);
+  background: none;
+  border: 0;
+  border-radius: 8px; /* canvas menu rows use 8px, between r-chip and r-input */
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.ms-menu-item:hover,
+.ms-menu-item.active {
+  background: var(--ms-panel-raised);
+}
+.ms-menu-item.danger {
+  color: var(--ms-danger);
+}
+.ms-menu-item:focus-visible {
+  outline: none;
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-menu-sep {
+  height: 1px;
+  border: 0; /* rendered as <hr> */
+  background: var(--ms-line);
+  margin: 6px 4px;
 }
 
 /* The product's only rotation: the DNS-check spinner ring (1s linear per the brief) */

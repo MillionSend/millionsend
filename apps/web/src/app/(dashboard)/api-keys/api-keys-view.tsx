@@ -7,70 +7,12 @@ import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { Modal } from "@/components/modal";
 import { PageHeader } from "@/components/page-header";
+import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
+import { Select } from "@/components/select";
 import { Table } from "@/components/table";
 import { maskApiKey } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
-
-function RowMenu({
-  menuLabel,
-  revokeLabel,
-  onRevoke,
-}: {
-  menuLabel: string;
-  revokeLabel: string;
-  onRevoke: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: blur delegation only closes the menu; the button is the interactive control
-    <div
-      style={{ position: "relative", display: "inline-block" }}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
-      }}
-    >
-      <button
-        type="button"
-        className="ms-btn ms-btn-ghost"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={menuLabel}
-        onClick={() => setOpen((v) => !v)}
-      >
-        …
-      </button>
-      {open ? (
-        <div
-          role="menu"
-          className="ms-card"
-          style={{
-            position: "absolute",
-            right: 0,
-            top: "calc(100% + 4px)",
-            zIndex: 10,
-            minWidth: 140,
-            padding: 4,
-            background: "var(--ms-panel-raised)",
-          }}
-        >
-          <button
-            role="menuitem"
-            type="button"
-            className="ms-btn ms-btn-ghost"
-            style={{ width: "100%", justifyContent: "flex-start", color: "var(--ms-danger)" }}
-            onClick={() => {
-              setOpen(false);
-              onRevoke();
-            }}
-          >
-            {revokeLabel}
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 export function ApiKeysView() {
   const t = useTranslations("api-keys");
@@ -158,10 +100,15 @@ export function ApiKeysView() {
                   <RelativeTime date={key.createdAt} />
                 </td>
                 <td className="right">
-                  <RowMenu
-                    menuLabel={t("table.menu")}
-                    revokeLabel={t("revoke")}
-                    onRevoke={() => setRevokeTarget({ id: key.id, name: key.name })}
+                  <PopoverMenu
+                    ariaLabel={t("table.menu")}
+                    items={[
+                      {
+                        label: t("revoke"),
+                        danger: true,
+                        onSelect: () => setRevokeTarget({ id: key.id, name: key.name }),
+                      },
+                    ]}
                   />
                 </td>
               </tr>
@@ -209,16 +156,17 @@ export function ApiKeysView() {
             </div>
             <div className="ms-field">
               <label htmlFor="api-key-mode">{t("create.mode")}</label>
-              <select
+              <Select
                 id="api-key-mode"
-                className="ms-input"
-                style={{ width: "100%" }}
+                width="100%"
                 value={mode}
-                onChange={(event) => setMode(event.target.value === "test" ? "test" : "live")}
-              >
-                <option value="live">{t("create.modeLive")}</option>
-                <option value="test">{t("create.modeTest")}</option>
-              </select>
+                onChange={(value) => setMode(value === "test" ? "test" : "live")}
+                ariaLabel={t("create.mode")}
+                options={[
+                  { value: "live", label: t("create.modeLive") },
+                  { value: "test", label: t("create.modeTest") },
+                ]}
+              />
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeCreate}>
