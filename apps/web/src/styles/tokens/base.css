@@ -1,0 +1,45 @@
+/* Base surface + canonical helper classes (verbatim from source tokens.css). */
+.ms-root,
+body.ms {
+  background: var(--ms-void);
+  color: var(--ms-bone);
+  font-family: var(--ms-font-sans);
+  font-size: var(--ms-fs-body);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+/* Display type: Erode 500, headings ≥20px only */
+.ms-display {
+  font-family: var(--ms-font-display);
+  font-weight: 500;
+  line-height: 1.15;
+}
+/* Every number that counts: tabular grotesque, weight 800. Never Erode. */
+.ms-digits {
+  font-family: var(--ms-font-sans);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+/* Data is data: monospace */
+.ms-mono {
+  font-family: var(--ms-font-mono);
+  font-size: 0.93em;
+}
+/* Uppercase metadata micro-label */
+.ms-microlabel {
+  font-size: var(--ms-fs-micro);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ms-muted);
+}
+/* Links — bone with dotted faint underline (table link treatment generalized) */
+a {
+  color: var(--ms-bone);
+  text-decoration: underline dotted var(--ms-faint);
+  text-underline-offset: 3px;
+}
+a:hover {
+  text-decoration-color: var(--ms-muted);
+}

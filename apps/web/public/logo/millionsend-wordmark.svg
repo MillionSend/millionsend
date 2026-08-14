@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -326 5400 1150" role="img" aria-label="MillionSend">
+<title>MillionSend wordmark — Erode 500, bone, lit stem. Requires the Erode font (see fonts/) to be loaded.</title>
+<defs><clipPath id="ms-mcut-w"><rect x="222" y="0" width="613" height="604"></rect></clipPath></defs>
+<g transform="matrix(1 0 0 -1 0 604)"><path d="M704 508 747 101Q752 45 804 35V0H610V35Q639 43 647.5 57.5Q656 72 652 113L612 511L434 0H369L188 513L150 107Q147 73 159.5 58.0Q172 43 204 35V0H29V35Q58 40 73.0 53.5Q88 67 91 97L128 500Q131 533 121.0 549.0Q111 565 84 569V604H251L420 119L587 604H751V569Q699 562 704 508Z" fill="#F4F1EA" clip-path="url(#ms-mcut-w)"></path><path d="M174 604 L232 604 L232 386 L174 551 Z" fill="#F4F1EA"></path><path d="M212 97Q212 67 228.0 54.0Q244 41 280 35V0H51V35Q88 42 104.0 54.0Q120 66 120 96V471H42V510Q125 527 171 586H212Z" fill="#7F8791" transform="translate(-40 0) scale(1.0307)"></path></g>
+<text x="835" y="604" font-family="Erode, Georgia, serif" font-weight="500" font-size="1000" fill="#F4F1EA">illionSend</text>
+</svg>

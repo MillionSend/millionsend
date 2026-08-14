@@ -1,0 +1,10 @@
+/* MillionSend motion — everything is a 120–180ms fade; the odometer digit-roll is the only flourish. */
+:root {
+  --ms-dur-fast: 120ms; /* hovers, dropdowns in */
+  --ms-dur-base: 160ms; /* fades, transforms */
+  --ms-dur-drawer: 240ms; /* drawers, modals */
+  --ms-dur-digit: 400ms; /* odometer roll per digit-cascade step (300–500ms) */
+  --ms-ease: cubic-bezier(0.25, 0, 0.15, 1);
+  --ms-focus-border: var(--ms-line-strong);
+  --ms-focus-ring: 0 0 0 2px rgba(127, 135, 145, 0.35); /* steel-tinted — the only glow */
+}

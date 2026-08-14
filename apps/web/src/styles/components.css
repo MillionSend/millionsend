@@ -1,0 +1,466 @@
+/* MillionSend component classes — ported from design-system/components.html (reference implementations).
+   React components apply these classes; values come from token custom properties.
+   Hover/press opacity steps are inferred from the source's `transition: opacity` spec (see design-system readme). */
+
+/* Buttons — one primary (bone) per view; keycaps ride inside modal buttons */
+.ms-btn {
+  font: 600 var(--ms-fs-ui) var(--ms-font-sans);
+  border-radius: var(--ms-r-input);
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: opacity var(--ms-dur-fast) var(--ms-ease);
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.ms-btn:hover {
+  opacity: 0.88;
+}
+.ms-btn:active {
+  opacity: 0.76;
+}
+.ms-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ms-btn-primary {
+  background: var(--ms-bone);
+  color: var(--ms-ground);
+}
+.ms-btn-secondary {
+  background: var(--ms-panel-raised);
+  color: var(--ms-bone);
+  border-color: var(--ms-line-strong);
+}
+.ms-btn-destructive {
+  background: var(--ms-danger-bg);
+  color: var(--ms-danger);
+  border-color: var(--ms-danger-border);
+}
+.ms-btn-icon {
+  background: var(--ms-panel-raised);
+  color: var(--ms-muted);
+  border-color: var(--ms-line-strong);
+  padding: 8px 10px;
+  font-family: var(--ms-font-mono);
+}
+.ms-btn-ghost {
+  background: none;
+  color: var(--ms-muted);
+}
+.ms-btn-ghost:hover {
+  opacity: 1;
+  color: var(--ms-bone);
+}
+.ms-keycap {
+  font: 500 var(--ms-fs-micro) var(--ms-font-sans);
+  border-radius: var(--ms-r-chip);
+  padding: 1px 5px;
+  background: rgba(244, 241, 234, 0.1);
+  color: var(--ms-muted);
+}
+.ms-btn-primary .ms-keycap {
+  background: rgba(5, 5, 5, 0.14);
+  color: var(--ms-ground);
+}
+
+/* Status badges — semantic, dim, always labelled */
+.ms-badge {
+  font: 500 var(--ms-fs-badge) var(--ms-font-sans);
+  border-radius: var(--ms-r-chip);
+  padding: 3px 8px;
+  border: 1px solid;
+  display: inline-block;
+  line-height: 1.4;
+}
+.ms-badge-success {
+  color: var(--ms-success);
+  background: var(--ms-success-bg);
+  border-color: var(--ms-success-border);
+}
+.ms-badge-info {
+  color: var(--ms-info);
+  background: var(--ms-info-bg);
+  border-color: var(--ms-info-border);
+}
+.ms-badge-warn {
+  color: var(--ms-warn);
+  background: var(--ms-warn-bg);
+  border-color: var(--ms-warn-border);
+}
+.ms-badge-danger {
+  color: var(--ms-danger);
+  background: var(--ms-danger-bg);
+  border-color: var(--ms-danger-border);
+}
+.ms-badge-neutral {
+  color: var(--ms-neutral);
+  background: var(--ms-neutral-bg);
+  border-color: var(--ms-neutral-border);
+}
+
+/* Sidebar nav */
+.ms-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ms-nav a,
+.ms-nav button.ms-nav-item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: var(--ms-r-input);
+  color: var(--ms-muted);
+  font: 400 var(--ms-fs-ui) var(--ms-font-sans);
+  text-decoration: none;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+  transition: color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-nav a:hover,
+.ms-nav button.ms-nav-item:hover {
+  color: var(--ms-bone);
+}
+.ms-nav a.active,
+.ms-nav button.ms-nav-item.active {
+  background: var(--ms-panel-raised);
+  color: var(--ms-bone);
+}
+
+/* Cards */
+.ms-card {
+  background: var(--ms-panel);
+  border: 1px solid var(--ms-line);
+  border-radius: var(--ms-r-card);
+}
+.ms-kpi-card {
+  background: var(--ms-panel);
+  border: 1px solid var(--ms-line);
+  border-radius: var(--ms-r-card);
+  padding: 24px;
+}
+.ms-kpi-value {
+  font-size: var(--ms-fs-kpi);
+  color: var(--ms-bone);
+  margin-top: 6px;
+}
+
+/* Usage meter */
+.ms-meter-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--ms-fs-label);
+  color: var(--ms-muted);
+  margin-bottom: 6px;
+}
+.ms-meter-track {
+  height: 4px;
+  border-radius: var(--ms-r-pill);
+  background: var(--ms-inset);
+  overflow: hidden;
+}
+.ms-meter-fill {
+  height: 100%;
+  border-radius: var(--ms-r-pill);
+  background: var(--ms-muted);
+  transition: width var(--ms-dur-base) var(--ms-ease);
+}
+.ms-meter-warn .ms-meter-fill {
+  background: var(--ms-warn);
+}
+.ms-meter-danger .ms-meter-fill {
+  background: var(--ms-danger);
+}
+
+/* Table */
+table.ms-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: var(--ms-fs-ui);
+}
+.ms-table thead th {
+  background: var(--ms-panel-raised);
+  color: var(--ms-muted);
+  font-weight: 500;
+  font-size: var(--ms-fs-label);
+  text-align: left;
+  padding: 8px 14px;
+}
+.ms-table thead th:first-child {
+  border-radius: var(--ms-r-input) 0 0 var(--ms-r-input);
+}
+.ms-table thead th:last-child {
+  border-radius: 0 var(--ms-r-input) var(--ms-r-input) 0;
+}
+.ms-table thead th.right,
+.ms-table td.right {
+  text-align: right;
+}
+.ms-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--ms-line);
+  color: var(--ms-bone);
+}
+.ms-table td:last-child {
+  color: var(--ms-muted);
+}
+.ms-table tbody tr.hoverable:hover td {
+  background: var(--ms-panel-raised);
+  cursor: pointer;
+}
+.ms-table a {
+  color: var(--ms-bone);
+  text-decoration: underline dotted var(--ms-faint);
+  text-underline-offset: 3px;
+}
+
+/* Inputs */
+.ms-field label {
+  display: block;
+  font-size: var(--ms-fs-label);
+  color: var(--ms-muted);
+  margin-bottom: 6px;
+}
+.ms-input {
+  background: var(--ms-inset);
+  border: 1px solid var(--ms-line-strong);
+  border-radius: var(--ms-r-input);
+  color: var(--ms-bone);
+  font: 400 var(--ms-fs-ui) var(--ms-font-sans);
+  padding: 8px 10px;
+  outline: none;
+  box-sizing: border-box;
+  transition: box-shadow var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-input:focus {
+  border-color: var(--ms-focus-border);
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-input.error {
+  background: var(--ms-danger-bg);
+  border-color: var(--ms-danger-border);
+  color: var(--ms-danger);
+}
+.ms-input::placeholder {
+  color: var(--ms-faint);
+}
+.ms-input.mono {
+  font-family: var(--ms-font-mono);
+  font-size: var(--ms-fs-ui);
+}
+
+/* Mono chip — everything an engineer would paste gets a copy affordance */
+.ms-chip {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  background: var(--ms-inset);
+  border: 1px solid var(--ms-line);
+  border-radius: var(--ms-r-input);
+  padding: 5px 9px;
+  font-family: var(--ms-font-mono);
+  font-size: var(--ms-fs-label);
+  color: var(--ms-muted);
+}
+.ms-chip button {
+  background: none;
+  border: 0;
+  color: var(--ms-muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  width: 1.2em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-chip button:hover {
+  color: var(--ms-bone);
+}
+
+/* Tabs */
+.ms-tabs {
+  display: flex;
+  gap: 6px;
+}
+.ms-tabs button {
+  font: 500 var(--ms-fs-ui) var(--ms-font-sans);
+  color: var(--ms-muted);
+  background: none;
+  border: 0;
+  padding: 7px 12px;
+  border-radius: var(--ms-r-input);
+  cursor: pointer;
+  transition: color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-tabs button:hover {
+  color: var(--ms-bone);
+}
+.ms-tabs button.active {
+  background: var(--ms-panel-raised);
+  color: var(--ms-bone);
+}
+
+/* Toast — near-black ground with a faint status-tinted glow (the system's one gradient) */
+.ms-toast {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid;
+  border-radius: var(--ms-r-tile);
+  color: var(--ms-bone);
+  font-size: var(--ms-fs-ui);
+  padding: 13px 18px;
+  background-color: #050505;
+  background-repeat: no-repeat;
+}
+.ms-toast-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  box-sizing: border-box;
+}
+.ms-toast-success {
+  border-color: var(--ms-success-border);
+  background-image: radial-gradient(
+    130% 170% at 10% 130%,
+    rgba(95, 206, 139, 0.17),
+    rgba(95, 206, 139, 0) 62%
+  );
+}
+.ms-toast-success .ms-toast-icon {
+  color: var(--ms-success);
+}
+.ms-toast-info {
+  border-color: var(--ms-info-border);
+  background-image: radial-gradient(
+    130% 170% at 10% 130%,
+    rgba(126, 166, 219, 0.17),
+    rgba(126, 166, 219, 0) 62%
+  );
+}
+.ms-toast-info .ms-toast-icon {
+  color: var(--ms-info);
+}
+.ms-toast-warn {
+  border-color: var(--ms-warn-border);
+  background-image: radial-gradient(
+    130% 170% at 10% 130%,
+    rgba(217, 174, 95, 0.17),
+    rgba(217, 174, 95, 0) 62%
+  );
+}
+.ms-toast-warn .ms-toast-icon {
+  color: var(--ms-warn);
+}
+.ms-toast-danger {
+  border-color: var(--ms-danger-border);
+  background-image: radial-gradient(
+    130% 170% at 10% 130%,
+    rgba(224, 127, 118, 0.17),
+    rgba(224, 127, 118, 0) 62%
+  );
+}
+.ms-toast-danger .ms-toast-icon {
+  color: var(--ms-danger);
+}
+.ms-toast-neutral {
+  border-color: var(--ms-neutral-border);
+  background-image: radial-gradient(
+    130% 170% at 10% 130%,
+    rgba(181, 179, 173, 0.14),
+    rgba(181, 179, 173, 0) 62%
+  );
+}
+.ms-toast-neutral .ms-toast-icon {
+  color: var(--ms-neutral);
+}
+
+/* Odometer — the product's only flourish; reduced-motion degrades to a plain swap */
+.ms-odometer {
+  display: inline-flex;
+  line-height: 1;
+}
+.ms-odometer .ms-odo-col {
+  height: 1em;
+  overflow: hidden;
+}
+.ms-odometer .ms-odo-strip {
+  display: block;
+  transition:
+    transform var(--ms-dur-digit) var(--ms-ease) var(--odo-d, 0ms),
+    color var(--ms-dur-base),
+    filter 90ms linear var(--odo-fd, 0ms);
+}
+.ms-odometer .ms-odo-strip span {
+  display: block;
+  height: 1em;
+}
+.ms-newborn {
+  color: var(--ms-steel);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-odometer .ms-odo-strip {
+    transition: none;
+  }
+}
+
+/* Modal — tokens define --ms-r-modal + --ms-dur-drawer; ⌘↵-confirm modals per the brief */
+.ms-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  z-index: 100;
+  animation: ms-fade var(--ms-dur-base) var(--ms-ease);
+}
+.ms-modal {
+  background: var(--ms-panel);
+  border: 1px solid var(--ms-line-strong);
+  border-radius: var(--ms-r-modal);
+  padding: 28px;
+  width: 480px;
+  max-width: calc(100vw - 48px);
+  animation: ms-fade var(--ms-dur-drawer) var(--ms-ease);
+}
+.ms-modal h2 {
+  font-family: var(--ms-font-display);
+  font-weight: 500;
+  font-size: var(--ms-fs-h2);
+  color: var(--ms-bone);
+  margin: 0 0 6px;
+  line-height: 1.15;
+}
+@keyframes ms-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

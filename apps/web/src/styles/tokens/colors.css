@@ -1,0 +1,34 @@
+/* MillionSend colors — canonical values from design-system/tokens.css ("Rollover"). Dark theme only. */
+:root {
+  /* Ground & surfaces — separation comes from darkness + 1px lines, never shadows */
+  --ms-void: #000000; /* app/page ground */
+  --ms-ground: #050505; /* alternate ground (large editorial surfaces) */
+  --ms-panel: #0c0c0d; /* sidebar, cards, drawers, modals */
+  --ms-panel-raised: #131316; /* table header strips, hover rows, active nav pill */
+  --ms-inset: #18181b; /* inputs, code blocks, token chips */
+  /* Lines */
+  --ms-line: #1f1f22; /* all borders, dividers, table rules — 1px, never heavier */
+  --ms-line-strong: #2a2a2e; /* menu/modal borders, focused-input border */
+  /* Text */
+  --ms-bone: #f4f1ea; /* primary text — warm off-white, never pure white */
+  --ms-muted: #918f89; /* secondary text, labels, timestamps (≥6:1 on panel) */
+  --ms-faint: #5a5854; /* DISABLED/DECORATIVE ONLY — 2.8:1, never readable copy */
+  /* The accent — spent exactly once per view: primary CTA, live dot, or the newborn digit */
+  --ms-steel: #7f8791;
+  /* Status families — dim + desaturated so steel keeps authority; always carry a text label */
+  --ms-success: #5fce8b;
+  --ms-success-bg: #0f2519;
+  --ms-success-border: #1c3a28;
+  --ms-info: #7ea6db;
+  --ms-info-bg: #121d2e;
+  --ms-info-border: #1f3050;
+  --ms-warn: #d9ae5f;
+  --ms-warn-bg: #271f0e;
+  --ms-warn-border: #403014;
+  --ms-danger: #e07f76;
+  --ms-danger-bg: #271312;
+  --ms-danger-border: #47201d;
+  --ms-neutral: #b5b3ad;
+  --ms-neutral-bg: #1a1a1c;
+  --ms-neutral-border: #2a2a2e;
+}

@@ -1,0 +1,21 @@
+/* MillionSend spacing (4px base) + radii. */
+:root {
+  --ms-sp-1: 4px;
+  --ms-sp-2: 8px;
+  --ms-sp-3: 12px;
+  --ms-sp-4: 16px;
+  --ms-sp-5: 20px;
+  --ms-sp-6: 24px;
+  --ms-sp-8: 32px;
+  --ms-sp-10: 40px;
+  --ms-sp-12: 48px;
+  --ms-sp-16: 64px;
+  --ms-gutter: 75px; /* content column horizontal padding */
+  --ms-sidebar-w: 300px;
+  --ms-r-chip: 6px; /* badges, keycaps, tag chips */
+  --ms-r-input: 10px; /* inputs, buttons, selects */
+  --ms-r-card: 14px; /* cards, tables, code panels */
+  --ms-r-tile: 16px; /* hero icon tiles, empty-state panels */
+  --ms-r-modal: 22px; /* modals, popovers, drawers */
+  --ms-r-pill: 999px;
+}

@@ -79,6 +79,10 @@ export const env = createEnv({
     // unsubscribe pages are derived from it.
     APP_BASE_URL: z.url().optional(),
 
+    // Dashboard session signing secret (`openssl rand -base64 32`).
+    // Required only by the web process, which asserts it at boot.
+    BETTER_AUTH_SECRET: z.string().min(32).optional(),
+
     // Cloud-only (billing).
     STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),

@@ -29,6 +29,13 @@
       "when": 1786669661575,
       "tag": "0003_adorable_doctor_spectrum",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786671185921,
+      "tag": "0004_lucky_red_hulk",
+      "breakpoints": true
     }
   ]
 }
