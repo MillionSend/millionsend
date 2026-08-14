@@ -19,6 +19,12 @@ npx @millionsend/setup --dry-run  # print the plan, touch nothing
 npx @millionsend/setup teardown   # delete everything it created
 ```
 
+In a terminal the setup is interactive: the SES region is an arrow-key list
+(with an "Other…" escape hatch), and a failed credential check offers to run
+`aws sso login` or `aws configure` for you when the aws CLI is installed.
+Piped input still works the same as ever — answers one per line, empty line
+accepts the default — so scripted runs need no changes.
+
 Run it anywhere Node 18+ and your AWS admin credentials live — laptop or
 server; the MillionSend server never needs admin credentials. It verifies your
 AWS identity, shows the plan, creates everything, and prints the `.env` lines

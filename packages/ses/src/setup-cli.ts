@@ -1,7 +1,9 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
+import { SES_REGIONS, type SesRegion } from "./domain-identity.js";
 import {
   createSetupClients,
   httpsOrigin,
@@ -12,15 +14,27 @@ import {
   teardownPlan,
   upsertEnv,
 } from "./setup.js";
+import { banner, dim, selectPrompt } from "./tty-ui.js";
 
-const BANNER = [
-  "millionsend · aws setup",
+const DESCRIPTION = [
   "Creates the IAM user, policy, access key — and, with an https APP_BASE_URL,",
   "the SNS event topic and SES configuration set. Run it where YOUR admin AWS",
   "credentials live: this machine, or the server. It never needs the app running.",
 ].join("\n");
 
+const BANNER = `millionsend · aws setup\n${DESCRIPTION}`;
+
 const REGION_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+const REGION_HINTS: Record<SesRegion, string> = {
+  "us-east-1": "N. Virginia",
+  "eu-west-1": "Ireland",
+  "sa-east-1": "São Paulo",
+  "ap-northeast-1": "Tokyo",
+};
+
+/** selectPrompt value for the free-form region escape hatch (TTY only). */
+const OTHER_REGION = "__other__";
 
 /**
  * readline/promises' question() drops lines that arrive while no question is
@@ -72,6 +86,43 @@ export function lineReader(
 
 type LineReader = ReturnType<typeof lineReader>;
 
+export type AuthAction = "proceed" | "offer-login" | "hint-exit";
+
+/**
+ * What to do after the STS identity probe. Interactive terminals with the aws
+ * CLI installed get offered a login; pipes and CLI-less machines get the
+ * manual hint and exit, exactly as before the interactive flow existed.
+ */
+export function authAction(state: {
+  identityOk: boolean;
+  hasAwsCli: boolean;
+  isTTY: boolean;
+}): AuthAction {
+  if (state.identityOk) return "proceed";
+  return state.hasAwsCli && state.isTTY ? "offer-login" : "hint-exit";
+}
+
+function hasAwsCli(): boolean {
+  return spawnSync("aws", ["--version"], { stdio: "ignore" }).error === undefined;
+}
+
+function runAws(args: string[]): void {
+  // The prompt UI holds the terminal in raw mode; hand the child a sane tty.
+  if (process.stdin.isTTY) process.stdin.setRawMode(false);
+  spawnSync("aws", args, { stdio: "inherit" });
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
+}
+
+function printHeader(): void {
+  const columns = process.stdout.columns ?? 0;
+  if (process.stdout.isTTY === true && columns >= 80) {
+    for (const line of banner(columns)) console.log(line);
+    console.log(`\n${dim(DESCRIPTION)}\n`);
+  } else {
+    console.log(`${BANNER}\n`);
+  }
+}
+
 /**
  * Interactive entry point behind `pnpm setup:aws` and the container's
  * `setup` argv mode (scripts/aws-setup/index.ts wires it up).
@@ -81,7 +132,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const dryRun = argv.includes("--dry-run");
   const rl = lineReader();
   try {
-    console.log(`${BANNER}\n`);
+    printHeader();
 
     // Identity first: everything else is pointless without working credentials.
     // STS is global; the probe region does not constrain the region prompted below.
@@ -90,23 +141,59 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     if (dryRun) {
       console.log("--dry-run: skipping the AWS credential check.\n");
     } else {
-      const sts = new STSClient({ region: process.env.AWS_REGION ?? "us-east-1" });
-      try {
-        const identity = await sts.send(new GetCallerIdentityCommand({}));
-        if (!identity.Account) throw new Error("GetCallerIdentity returned no account");
-        accountId = identity.Account;
-        console.log(`AWS identity: ${identity.Arn ?? "?"} (account ${accountId})\n`);
-      } catch (error) {
-        console.error(`Could not verify AWS credentials: ${(error as Error).message}`);
-        console.error(
-          "Run this where the AWS CLI/SDK finds admin credentials — `aws configure`, AWS_PROFILE, or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY in the environment.",
-        );
-        return 1;
+      const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+      // Two login attempts, then the manual hint — a third rarely goes better.
+      for (let attempt = 0; ; attempt++) {
+        // Fresh client per attempt: a login may have just minted credentials,
+        // and the SDK caches its credential provider per client.
+        const sts = new STSClient({ region: process.env.AWS_REGION ?? "us-east-1" });
+        try {
+          const identity = await sts.send(new GetCallerIdentityCommand({}));
+          if (!identity.Account) throw new Error("GetCallerIdentity returned no account");
+          accountId = identity.Account;
+          console.log(`${dim(`aws: ${identity.Arn ?? "?"} (account ${accountId})`)}\n`);
+          break;
+        } catch (error) {
+          console.error(`Could not verify AWS credentials: ${(error as Error).message}`);
+          const action = authAction({
+            identityOk: false,
+            // Pipes never get the offer, so skip probing for the CLI there.
+            hasAwsCli: interactive && hasAwsCli(),
+            isTTY: interactive,
+          });
+          if (action !== "offer-login" || attempt >= 2) {
+            console.error(
+              "Run this where the AWS CLI/SDK finds admin credentials — `aws configure`, AWS_PROFILE, or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY in the environment.",
+            );
+            return 1;
+          }
+          const choice = await selectPrompt(rl, {
+            label: "Not authenticated",
+            initial: "sso",
+            options: [
+              { value: "sso", label: "Run aws sso login" },
+              { value: "configure", label: "Run aws configure" },
+              { value: "exit", label: "Exit" },
+            ],
+          });
+          if (choice === "exit") return 1;
+          runAws(choice === "sso" ? ["sso", "login"] : ["configure"]);
+        }
       }
     }
 
     const defaultRegion = process.env.AWS_REGION ?? "us-east-1";
-    const region = (await rl.question(`AWS region [${defaultRegion}]: `)).trim() || defaultRegion;
+    let region = await selectPrompt(rl, {
+      label: "AWS region",
+      initial: defaultRegion,
+      options: [
+        ...SES_REGIONS.map((r) => ({ value: r, label: r, hint: REGION_HINTS[r] })),
+        { value: OTHER_REGION, label: "Other…", hint: "type any region" },
+      ],
+    });
+    if (region === OTHER_REGION) {
+      region = (await rl.question(`AWS region [${defaultRegion}]: `)).trim() || defaultRegion;
+    }
     if (!REGION_RE.test(region)) {
       console.error(`Not an AWS region name: ${region}`);
       return 1;
