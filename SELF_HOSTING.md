@@ -11,14 +11,18 @@ app container running the api (port 3001), worker, and web dashboard (port 3000)
 3. A sending domain you control. Domain verification (DKIM records) is done from the
    dashboard after boot — you do not need to pre-verify it in the SES console.
 
-## Quickstart
+## Quickstart (no clone)
 
-1. Clone and configure:
+Runs the prebuilt image `ghcr.io/millionsend/millionsend:edge` (multi-arch,
+published on every push to main). Pin a version tag in the compose file for
+production; `:edge` is a moving head.
+
+1. Fetch the compose file and env template:
 
    ```sh
-   git clone https://github.com/MillionSend/millionsend.git
-   cd millionsend
-   cp .env.example .env
+   mkdir millionsend && cd millionsend
+   curl -O https://raw.githubusercontent.com/MillionSend/millionsend/main/deploy/docker-compose.yml
+   curl -o .env https://raw.githubusercontent.com/MillionSend/millionsend/main/.env.example
    ```
 
 2. Generate the two secrets in `.env` (everything else defaults to a working local setup; set `APP_BASE_URL` when deploying to a real host — sign-in is only accepted from that origin):
@@ -37,11 +41,41 @@ app container running the api (port 3001), worker, and web dashboard (port 3000)
 3. Start:
 
    ```sh
-   docker compose up --build -d
+   docker compose up -d
    ```
 
    Migrations run automatically on boot. Dashboard: http://localhost:3000.
    API: http://localhost:3001.
+
+No AWS resources yet? The AWS setup CLI ships inside the image, so it also
+needs no clone:
+
+```sh
+# On the server, next to the compose file:
+docker compose run --rm millionsend setup
+
+# Or on your laptop, wherever your AWS admin credentials live — it prints
+# the .env lines to copy to the server. --user root because the image runs
+# as an unprivileged user whose home is not /root:
+docker run --rm -it --user root -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:edge setup
+```
+
+See "One-command AWS setup" below for what it creates.
+
+## From source
+
+For contributors, or when you want to modify the code:
+
+```sh
+git clone https://github.com/MillionSend/millionsend.git
+cd millionsend
+cp .env.example .env   # fill it as in the quickstart
+docker compose up --build -d
+```
+
+The root `docker-compose.yml` builds the image locally from the `Dockerfile`.
+To run a clone against the published image instead, layer the prebuilt
+override: `docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml up -d`.
 
 ## One-command AWS setup
 
@@ -53,7 +87,10 @@ the console:
   your AWS admin credentials live; the MillionSend server never needs them.
 
   ```sh
-  # On your own machine (repo clone; admin credentials via profile or env):
+  # On your own machine, no clone (admin credentials via ~/.aws):
+  docker run --rm -it --user root -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:edge setup
+
+  # On your own machine, repo clone (admin credentials via profile or env):
   pnpm install && pnpm setup:aws
 
   # Or on the server, inside the container:
@@ -118,7 +155,7 @@ of bounced addresses. Requires a publicly reachable `APP_BASE_URL` (HTTPS).
 
 1. In SNS (same region as SES), create a standard topic, e.g. `millionsend-events`.
 2. Put the topic ARN in `.env` as `SNS_TOPIC_ARNS` and restart
-   (`docker compose up --build -d`).
+   (`docker compose up -d`).
 3. Subscribe the topic to `https://<your-host>/ses/events`, protocol HTTPS. The
    endpoint confirms the subscription automatically when the topic ARN matches
    `SNS_TOPIC_ARNS`.
