@@ -137,6 +137,7 @@ export default function EmailsPage() {
 
       {capReached && usage.data?.today.limit != null ? (
         <div
+          className="ms-wrap-row"
           style={{
             display: "flex",
             alignItems: "center",
@@ -175,7 +176,10 @@ export default function EmailsPage() {
         </div>
       ) : null}
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}>
+      <div
+        className="ms-filter-row"
+        style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
+      >
         <SearchBox value={search} onChange={setSearch} placeholder={t("list.searchPlaceholder")} />
         <Select
           value={range}

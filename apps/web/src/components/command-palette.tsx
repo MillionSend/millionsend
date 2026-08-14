@@ -96,6 +96,7 @@ export function CommandPalette() {
       <div
         role="dialog"
         aria-modal="true"
+        className="ms-cmdk"
         style={{
           position: "absolute",
           left: "50%",
@@ -142,7 +143,7 @@ export function CommandPalette() {
           />
           <span className="ms-keycap">Esc</span>
         </div>
-        <div style={{ padding: 10, maxHeight: 420, overflowY: "auto" }}>
+        <div className="ms-cmdk-list" style={{ padding: 10, maxHeight: 420, overflowY: "auto" }}>
           {flat.length === 0 ? (
             <div style={{ padding: "9px 12px", fontSize: 14, color: "var(--ms-muted)" }}>
               {t("noResults")}
@@ -197,6 +198,7 @@ export function CommandPalette() {
           )}
         </div>
         <div
+          className="ms-cmdk-hints"
           style={{
             display: "flex",
             gap: 16,

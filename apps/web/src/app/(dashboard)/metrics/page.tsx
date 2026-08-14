@@ -190,7 +190,10 @@ export default function MetricsPage() {
       ) : (
         <>
           <div className="ms-kpi-card">
-            <div style={{ display: "flex", gap: 56, alignItems: "flex-start" }}>
+            <div
+              className="ms-kpi-row"
+              style={{ display: "flex", gap: 56, alignItems: "flex-start" }}
+            >
               <KpiValue label={t("kpi.emails")}>{fmt.format(data.totals.sent)}</KpiValue>
               <KpiValue label={t("kpi.deliverability")}>
                 {data.totals.sent > 0 ? pct1.format(data.totals.delivered / data.totals.sent) : "—"}
@@ -224,7 +227,7 @@ export default function MetricsPage() {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 18, marginTop: 18 }}>
+          <div className="ms-card-row" style={{ display: "flex", gap: 18, marginTop: 18 }}>
             <RateCard
               label={t("bounce.title")}
               headline={

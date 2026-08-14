@@ -114,7 +114,19 @@ function AppearanceRow() {
   );
 }
 
-export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: string }) {
+export function Sidebar({
+  teamName,
+  userEmail,
+  className,
+  onNavigate,
+}: {
+  teamName: string;
+  userEmail: string;
+  /** Hook for the responsive drawer treatment (see components.css .ms-sidebar). */
+  className?: string;
+  /** Fired when a nav link is chosen, so the mobile drawer can close. */
+  onNavigate?: () => void;
+}) {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
   const locale = useLocale();
@@ -148,6 +160,7 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
 
   return (
     <aside
+      className={className}
       style={{
         width: 240,
         flexShrink: 0,
@@ -172,7 +185,18 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
         />
       </div>
       <TeamSwitcher teamName={teamName} />
-      <nav className="ms-nav" style={{ marginTop: 10, minHeight: 0, overflowY: "auto" }}>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: delegated close-drawer hook; links stay the interactive elements and keyboard activation bubbles the same click */}
+      <nav
+        className="ms-nav"
+        style={{ marginTop: 10, minHeight: 0, overflowY: "auto" }}
+        onClick={
+          onNavigate
+            ? (event) => {
+                if ((event.target as HTMLElement).closest("a")) onNavigate();
+              }
+            : undefined
+        }
+      >
         {NAV_ITEMS.map((item) => (
           <NavItem
             key={item.key}

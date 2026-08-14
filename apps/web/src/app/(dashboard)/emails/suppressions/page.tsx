@@ -148,7 +148,10 @@ export default function SuppressionsPage() {
         }
       />
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}>
+      <div
+        className="ms-filter-row"
+        style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
+      >
         <SearchBox
           value={search}
           onChange={setSearch}

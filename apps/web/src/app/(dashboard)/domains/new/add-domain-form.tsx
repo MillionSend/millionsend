@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
@@ -30,6 +31,7 @@ function StepRail() {
   return (
     <div
       aria-hidden="true"
+      className="ms-stepper-rail"
       style={{
         width: 30,
         flex: "none",
@@ -58,6 +60,7 @@ export function AddDomainForm() {
   const [name, setName] = useState("");
   const [region, setRegion] = useState<DomainRegion>("us-east-1");
   const [returnPath, setReturnPath] = useState("send");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [touched, setTouched] = useState(false);
 
   const create = useMutation(
@@ -81,7 +84,7 @@ export function AddDomainForm() {
   return (
     <>
       <AwsCredentialsBanner />
-      <div style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
+      <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
         <StepRail />
 
         <form
@@ -149,10 +152,12 @@ export function AddDomainForm() {
               borderTop: "1px solid var(--ms-line)",
               paddingTop: 14,
             }}
+            onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
           >
             <summary
               style={{
                 display: "flex",
+                alignItems: "center",
                 justifyContent: "space-between",
                 cursor: "pointer",
                 listStyle: "none",
@@ -161,7 +166,9 @@ export function AddDomainForm() {
               }}
             >
               <span>{t("new.advanced")}</span>
-              <span style={{ color: "var(--ms-muted)" }}>⌄</span>
+              <span style={{ display: "flex", alignItems: "center", color: "var(--ms-muted)" }}>
+                <ChevronGlyph direction={advancedOpen ? "up" : "down"} />
+              </span>
             </summary>
             <div className="ms-field" style={{ marginTop: 14 }}>
               <label htmlFor="domain-return-path">{t("new.returnPath")}</label>
@@ -206,7 +213,7 @@ export function AddDomainForm() {
           </button>
         </form>
 
-        <div style={{ flex: 1, minWidth: 0 }} aria-hidden="true">
+        <div className="ms-stepper-side" style={{ flex: 1, minWidth: 0 }} aria-hidden="true">
           <p className="ms-microlabel" style={{ margin: "0 0 10px" }}>
             {t("new.preview.title")}
           </p>
@@ -236,8 +243,16 @@ export function AddDomainForm() {
                     {`<${t("new.preview.user")}@${previewDomain}>`}
                   </span>
                 </div>
-                <div style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
-                  {t("new.preview.toMe")} ⌄
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 3,
+                    fontSize: 12.5,
+                    color: "var(--ms-muted)",
+                  }}
+                >
+                  {t("new.preview.toMe")} <ChevronGlyph size={10} />
                 </div>
               </div>
             </div>

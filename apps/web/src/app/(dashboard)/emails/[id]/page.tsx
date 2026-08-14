@@ -322,6 +322,7 @@ export default function EmailDetailPage() {
       ) : null}
 
       <div
+        className="ms-meta-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, 1fr)",
@@ -669,7 +670,7 @@ export default function EmailDetailPage() {
         onClose={() => setDrawer(null)}
         title={t("bouncedDrawer.title")}
       >
-        <div style={{ display: "flex", gap: 36, marginTop: 18 }}>
+        <div className="ms-wrap-row" style={{ display: "flex", gap: 36, marginTop: 18 }}>
           <div>
             <Microlabel>{t("bouncedDrawer.type")}</Microlabel>
             <div style={{ fontSize: 14, marginTop: 4 }}>{bounce?.bounceType ?? "—"}</div>
@@ -716,7 +717,7 @@ export default function EmailDetailPage() {
         onClose={() => setDrawer(null)}
         title={t("suppressedDrawer.title")}
       >
-        <div style={{ display: "flex", gap: 32, marginTop: 16 }}>
+        <div className="ms-wrap-row" style={{ display: "flex", gap: 32, marginTop: 16 }}>
           <div>
             <Microlabel>{t("suppressedDrawer.origin")}</Microlabel>
             <div style={{ fontSize: 14, marginTop: 4 }}>

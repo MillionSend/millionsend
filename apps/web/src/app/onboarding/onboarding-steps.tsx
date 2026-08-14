@@ -147,13 +147,14 @@ function OdometerBoxes({ value }: { value: number }) {
   // ponytail: 7 fixed boxes cap the display at 9,999,999; fine for a first-send flow.
   const digits = String(Math.min(value, 9_999_999)).padStart(7, "0").split("").map(Number);
   return (
-    <div className="ms-odometer" style={{ gap: 8 }}>
+    <div className="ms-odometer ms-odo-boxes" style={{ gap: 8 }}>
       {digits.map((digit, i) => {
         const last = i === digits.length - 1;
         return (
           <span
             // biome-ignore lint/suspicious/noArrayIndexKey: fixed 7 odometer positions, position is identity
             key={i}
+            className="ms-odo-box"
             style={{
               width: 74,
               height: 100,
@@ -221,6 +222,7 @@ function StepRail({
 }) {
   return (
     <div
+      className="ms-stepper-rail"
       style={{
         width: 30,
         flex: "none",
@@ -493,7 +495,10 @@ export function OnboardingSteps({
             <div className="ms-microlabel" style={{ marginBottom: 10 }}>
               {t("explore.label")}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+            <div
+              className="ms-meta-grid"
+              style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}
+            >
               {(
                 [
                   { key: "domains", href: "/domains" },
@@ -540,7 +545,7 @@ export function OnboardingSteps({
           </div>
           <div style={{ marginTop: 32, maxWidth: 860, display: "flex", flexDirection: "column" }}>
             {/* Account created — banked at render */}
-            <div style={{ display: "flex", gap: 18 }}>
+            <div className="ms-step" style={{ display: "flex", gap: 18 }}>
               <StepRail marker="✓" color="var(--ms-success)" />
               <div
                 style={{
@@ -561,7 +566,7 @@ export function OnboardingSteps({
             </div>
 
             {/* Step 01 — add an API key */}
-            <div style={{ display: "flex", gap: 18 }}>
+            <div className="ms-step" style={{ display: "flex", gap: 18 }}>
               <StepRail
                 marker={hasKey ? "✓" : "01"}
                 color={hasKey ? "var(--ms-success)" : "var(--ms-bone)"}
@@ -638,7 +643,7 @@ export function OnboardingSteps({
             </div>
 
             {/* Step 02 — send an email */}
-            <div style={{ display: "flex", gap: 18 }}>
+            <div className="ms-step" style={{ display: "flex", gap: 18 }}>
               <StepRail marker="02" color={hasKey ? "var(--ms-bone)" : "var(--ms-faint)"} />
               <div
                 style={{
@@ -655,7 +660,7 @@ export function OnboardingSteps({
             </div>
 
             {/* Step 03 — watch it arrive */}
-            <div style={{ display: "flex", gap: 18 }}>
+            <div className="ms-step" style={{ display: "flex", gap: 18 }}>
               <StepRail marker="03" color="var(--ms-faint)" line={false} />
               <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
                 <span

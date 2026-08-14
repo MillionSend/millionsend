@@ -23,6 +23,18 @@
       }
     }
   },
+  "overrides": [
+    {
+      "includes": ["apps/web/src/styles/components.css"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noImportantStyles": "off"
+          }
+        }
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "double",

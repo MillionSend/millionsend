@@ -15,6 +15,7 @@ export function PageHeader({
 }) {
   return (
     <header
+      className="ms-page-header"
       style={{
         display: "flex",
         alignItems: breadcrumb || subtitle ? "flex-end" : "center",

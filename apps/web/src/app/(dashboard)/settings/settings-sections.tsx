@@ -92,7 +92,7 @@ function TeamSection() {
           </p>
         ) : null}
       </form>
-      <div style={{ display: "flex", gap: 48, marginTop: 22 }}>
+      <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 22 }}>
         <div>
           <div className="ms-microlabel">{t("team.slug")}</div>
           <div className="ms-mono" style={{ marginTop: 4, color: "var(--ms-bone)" }}>
