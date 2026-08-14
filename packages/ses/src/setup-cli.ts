@@ -22,7 +22,7 @@ const DESCRIPTION = [
   "credentials live: this machine, or the server. It never needs the app running.",
 ].join("\n");
 
-const BANNER = `millionsend · aws setup\n${DESCRIPTION}`;
+const BANNER = `millionsend · aws setup\n\n${DESCRIPTION}`;
 
 const REGION_RE = /^[a-z0-9][a-z0-9-]*$/;
 
