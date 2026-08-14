@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { codeRichTags } from "@/lib/code-rich-tags";
 import { useTRPC } from "@/lib/trpc";
 
 /**
@@ -33,7 +34,7 @@ export function AwsCredentialsBanner() {
         gap: 14,
       }}
     >
-      <span style={{ flex: 1 }}>{t("awsCredentialsWarning")}</span>
+      <span style={{ flex: 1 }}>{t.rich("awsCredentialsWarning", codeRichTags)}</span>
       <Link href="/settings/ses" className="ms-btn ms-btn-secondary" style={{ flex: "none" }}>
         {t("awsCredentialsCta")}
       </Link>

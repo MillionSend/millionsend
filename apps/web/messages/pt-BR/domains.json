@@ -41,13 +41,13 @@
     "name": "Nome",
     "namePlaceholder": "updates.seudominio.com",
     "nameHint": "Use um subdomínio — ele preserva a reputação do seu domínio raiz.",
-    "nameError": "Informe um domínio em minúsculas, como updates.seudominio.com.",
+    "nameError": "Informe um domínio em minúsculas, como <code>updates.seudominio.com</code>.",
     "region": "Região",
     "recommended": "Recomendado",
     "regionHint": "Selecione uma região próxima aos seus usuários para o melhor desempenho.",
     "advanced": "Opções avançadas",
     "returnPath": "Return-Path personalizado",
-    "returnPathHint": "Usado para autenticação SPF, alinhamento DMARC e devoluções. Evite valores que minem a credibilidade (ex.: testing) — eles podem ficar visíveis aos destinatários.",
+    "returnPathHint": "Usado para autenticação SPF, alinhamento DMARC e devoluções. Evite valores que minem a credibilidade (ex.: <code>testing</code>) — eles podem ficar visíveis aos destinatários.",
     "preview": {
       "title": "O que os destinatários verão",
       "user": "pedidos",
@@ -59,7 +59,7 @@
     "submit": "Adicionar domínio",
     "conflict": "Este domínio já foi adicionado.",
     "error": "Não foi possível adicionar o domínio.",
-    "credentialsError": "A AWS rejeitou as credenciais da requisição — verifique AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY no .env. Veja SELF_HOSTING.md."
+    "credentialsError": "A AWS rejeitou as credenciais da requisição — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code>. Veja <code>SELF_HOSTING.md</code>."
   },
   "detail": {
     "eyebrow": "Detalhes do domínio",
@@ -118,6 +118,6 @@
     "recordsError": "Não foi possível carregar os registros DNS.",
     "retry": "Tentar novamente"
   },
-  "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY no .env — veja SELF_HOSTING.md.",
+  "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code> — veja <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Abrir configuração do SES"
 }

@@ -20,7 +20,7 @@
     "sent": "Sent",
     "loadMore": "Load more",
     "empty": "No emails yet.",
-    "emptyHint": "Send your first email through the API — POST /emails.",
+    "emptyHint": "Send your first email through the API — <code>POST /emails</code>.",
     "sentToday": "{count} sent today",
     "deliveredAllTime": "{count} delivered all-time",
     "p50Delivery": "p50 delivery {ms} ms",

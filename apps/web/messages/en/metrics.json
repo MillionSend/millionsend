@@ -22,5 +22,5 @@
     "complained": "Complained"
   },
   "empty": "No metrics yet.",
-  "emptyHint": "Metrics appear after your first send — POST /emails."
+  "emptyHint": "Metrics appear after your first send — <code>POST /emails</code>."
 }

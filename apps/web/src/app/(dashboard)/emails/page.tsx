@@ -12,6 +12,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { StatusBadge, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
+import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatHoursMinutes } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
@@ -231,7 +232,11 @@ export default function EmailsPage() {
             onAction={clearFilters}
           />
         ) : (
-          <EmptyState area="emails" headline={t("list.empty")} body={t("list.emptyHint")} />
+          <EmptyState
+            area="emails"
+            headline={t("list.empty")}
+            body={t.rich("list.emptyHint", codeRichTags)}
+          />
         )
       ) : (
         <>

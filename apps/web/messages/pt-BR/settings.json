@@ -11,16 +11,16 @@
       "stepTitle": "Criar recursos AWS",
       "recommended": "Recomendado",
       "scriptTitle": "Mais rápido: execute este script",
-      "scriptNote": "Cole em um terminal onde o AWS CLI tenha credenciais de administrador. Ele cria o usuário IAM, a política, o tópico SNS e o conjunto de configuração, e então imprime as linhas do seu .env.",
+      "scriptNote": "Cole em um terminal onde o AWS CLI tenha credenciais de administrador. Ele cria o usuário IAM, a política, o tópico SNS e o conjunto de configuração, e então imprime as linhas do seu <code>.env</code>.",
       "eventsSkipped": "<code>APP_BASE_URL</code> não é uma URL https pública, então a parte de ingestão de eventos ficou de fora. Defina-a e recarregue para incluí-la.",
-      "cfnNote": "Prefere IaC? A mesma configuração existe como CloudFormation em infra/millionsend-ses.cfn.yaml — veja SELF_HOSTING.md.",
+      "cfnNote": "Prefere IaC? A mesma configuração existe como CloudFormation em <code>infra/millionsend-ses.cfn.yaml</code> — veja <code>SELF_HOSTING.md</code>.",
       "manualTitle": "Manual: passos no console",
       "step1": "Crie uma política: console IAM → Policies → Create policy → JSON — cole este documento.",
       "step1Link": "Abrir o editor de políticas",
-      "step2": "Crie um usuário chamado millionsend e anexe a política.",
+      "step2": "Crie um usuário chamado <code>millionsend</code> e anexe a política.",
       "step2Link": "Abrir criação de usuário",
-      "step3": "Crie uma chave de acesso para o usuário e cole no .env.",
-      "step4": "Eventos opcionais: tópico SNS + conjunto de configuração — o script acima automatiza esta parte; veja SELF_HOSTING.md."
+      "step3": "Crie uma chave de acesso para o usuário e cole no <code>.env</code>.",
+      "step4": "Eventos opcionais: tópico SNS + conjunto de configuração — o script acima automatiza esta parte; veja <code>SELF_HOSTING.md</code>."
     },
     "credentials": {
       "title": "Credenciais",
@@ -48,7 +48,7 @@
       "sandboxLink": "Solicitar acesso de produção",
       "rateHint": "SES_MAX_SEND_RATE={envRate} no .env · máximo da conta {accountRate}/s — os valores divergem.",
       "errors": {
-        "credentials": "A AWS rejeitou as credenciais — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no .env.",
+        "credentials": "A AWS rejeitou as credenciais — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code>.",
         "unreachable": "O SES não respondeu — verifique <code>AWS_REGION</code> e o caminho de rede."
       },
       "disabledHint": "Defina suas credenciais AWS primeiro."
@@ -56,7 +56,7 @@
     "next": {
       "title": "Próximos passos",
       "addDomain": "Adicionar um domínio de envio",
-      "selfHosting": "A ingestão de eventos e o checklist completo estão em SELF_HOSTING.md."
+      "selfHosting": "A ingestão de eventos e o checklist completo estão em <code>SELF_HOSTING.md</code>."
     },
     "events": {
       "title": "Eventos"
