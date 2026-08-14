@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useTRPC } from "@/lib/trpc";
 
@@ -27,9 +28,15 @@ export function AwsCredentialsBanner() {
         lineHeight: 1.5,
         color: "var(--ms-warn)",
         maxWidth: 1000,
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
       }}
     >
-      {t("awsCredentialsWarning")}
+      <span style={{ flex: 1 }}>{t("awsCredentialsWarning")}</span>
+      <Link href="/settings/ses" className="ms-btn ms-btn-secondary" style={{ flex: "none" }}>
+        {t("awsCredentialsCta")}
+      </Link>
     </div>
   );
 }

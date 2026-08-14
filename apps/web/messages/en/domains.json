@@ -118,5 +118,6 @@
     "recordsError": "Couldn't load DNS records.",
     "retry": "Retry"
   },
-  "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env — see SELF_HOSTING.md."
+  "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env — see SELF_HOSTING.md.",
+  "awsCredentialsCta": "Open SES setup"
 }

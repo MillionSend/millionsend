@@ -1,6 +1,9 @@
 import type { Db } from "@millionsend/db";
+import type { SesAccountClient } from "@millionsend/ses";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCaller } from "@/server/routers";
+import { createSystemRouter } from "@/server/routers/system";
+import { type Context, createCallerFactory, router } from "@/server/trpc";
 
 // awsReadiness never touches the db, so a bare ctx suffices — no test db.
 function caller() {
@@ -63,6 +66,84 @@ describe("system.awsReadiness", () => {
     const anonymous = createCaller({ db: {} as Db, session: null, teamId: null, role: null });
     await expect(anonymous.system.awsReadiness()).rejects.toMatchObject({
       code: "UNAUTHORIZED",
+    });
+  });
+});
+
+/** Caller over a system router with an injected fake SES account client. */
+function sesCaller(client: SesAccountClient) {
+  const factory = createCallerFactory(
+    router({ system: createSystemRouter({ accountClient: () => client }) }),
+  );
+  return factory({
+    db: {} as Db,
+    session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
+    teamId: "team-1",
+    role: "owner",
+  } as Context);
+}
+
+describe("system.sesAccount", () => {
+  it("returns the mapped account overview on success", async () => {
+    const client: SesAccountClient = {
+      async send() {
+        return {
+          SendingEnabled: true,
+          ProductionAccessEnabled: false,
+          SendQuota: { Max24HourSend: 200, SentLast24Hours: 3, MaxSendRate: 1 },
+        };
+      },
+    };
+    expect(await sesCaller(client).system.sesAccount()).toEqual({
+      ok: true,
+      sendingEnabled: true,
+      productionAccess: false,
+      quota: { max24h: 200, sentLast24h: 3, maxSendRate: 1 },
+    });
+  });
+
+  it("maps credential failures to a typed { ok: false, kind: 'credentials' }", async () => {
+    const client: SesAccountClient = {
+      async send() {
+        throw new Error("The security token included in the request is invalid.");
+      },
+    };
+    expect(await sesCaller(client).system.sesAccount()).toEqual({
+      ok: false,
+      kind: "credentials",
+      message: "The security token included in the request is invalid.",
+    });
+  });
+
+  it("maps other failures to kind 'unreachable' instead of throwing", async () => {
+    const client: SesAccountClient = {
+      async send() {
+        throw new Error("getaddrinfo ENOTFOUND email.sa-east-1.amazonaws.com");
+      },
+    };
+    expect(await sesCaller(client).system.sesAccount()).toMatchObject({
+      ok: false,
+      kind: "unreachable",
+    });
+  });
+});
+
+describe("system.sesEnv", () => {
+  it("reports whether SNS topics and the configuration set are configured", async () => {
+    vi.stubEnv("SNS_TOPIC_ARNS", "arn:aws:sns:us-east-1:123456789012:ms-events");
+    vi.stubEnv("SES_CONFIGURATION_SET", "millionsend");
+    expect(await caller().system.sesEnv()).toMatchObject({
+      snsTopicsConfigured: true,
+      configurationSetConfigured: true,
+    });
+  });
+
+  it("reports unset SNS topics and configuration set", async () => {
+    vi.stubEnv("SNS_TOPIC_ARNS", "");
+    vi.stubEnv("SES_CONFIGURATION_SET", "");
+    expect(await caller().system.sesEnv()).toMatchObject({
+      snsTopicsConfigured: false,
+      configurationSetConfigured: false,
     });
   });
 });

@@ -1,7 +1,50 @@
 {
   "tabs": {
     "settings": "Configurações",
-    "usage": "Uso"
+    "usage": "Uso",
+    "ses": "SES"
+  },
+  "ses": {
+    "title": "Conecte seu AWS SES",
+    "subtitle": "Sua instância envia pela sua própria conta SES.",
+    "credentials": {
+      "title": "Credenciais",
+      "set": "definido",
+      "notSet": "não definido",
+      "keysConfigured": "configuradas",
+      "keysChain": "não definidas — a cadeia padrão de provedores será tentada",
+      "snsNote": "não definido — a ingestão de eventos está desativada",
+      "configSetNote": "não definido — o SES não publica eventos",
+      "envTemplate": "modelo de .env",
+      "policyTitle": "iam-policy.json",
+      "policyNote": "Política IAM mínima para esta instância."
+    },
+    "test": {
+      "title": "Testar conexão",
+      "button": "Testar conexão",
+      "note": "executa GetAccount a partir da instância — somente leitura, nada é enviado",
+      "sendingEnabled": "Envio habilitado",
+      "sendingDisabled": "Envio desabilitado",
+      "production": "Acesso de produção",
+      "sandbox": "Sandbox",
+      "quotaMax": "Máx. por 24h",
+      "quotaSent": "Enviados nas últimas 24h",
+      "quotaRate": "Taxa máx. de envio",
+      "ratePerSecond": "msgs/s",
+      "sandboxTitle": "Sua conta SES está em sandbox.",
+      "sandboxBody": "Os destinatários precisam ser verificados até a AWS conceder acesso de produção.",
+      "sandboxLink": "Solicitar acesso de produção",
+      "rateHint": "SES_MAX_SEND_RATE={envRate} no .env · máximo da conta {accountRate}/s — os valores divergem.",
+      "errors": {
+        "credentials": "A AWS rejeitou as credenciais — verifique AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY no .env.",
+        "unreachable": "O SES não respondeu — verifique AWS_REGION e o caminho de rede."
+      }
+    },
+    "next": {
+      "title": "Próximos passos",
+      "addDomain": "Adicionar um domínio de envio",
+      "selfHosting": "A ingestão de eventos e o checklist completo estão em SELF_HOSTING.md."
+    }
   },
   "team": {
     "title": "Equipe",

@@ -1,4 +1,10 @@
 export {
+  createSesAccountClient,
+  getAccountOverview,
+  type SesAccountClient,
+  type SesAccountOverview,
+} from "./account.js";
+export {
   createDomainIdentity,
   createSesv2Client,
   type DkimVerificationStatus,

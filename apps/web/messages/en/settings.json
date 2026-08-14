@@ -1,7 +1,50 @@
 {
   "tabs": {
     "settings": "Settings",
-    "usage": "Usage"
+    "usage": "Usage",
+    "ses": "SES"
+  },
+  "ses": {
+    "title": "Connect your AWS SES",
+    "subtitle": "Your instance sends through your own SES account.",
+    "credentials": {
+      "title": "Credentials",
+      "set": "set",
+      "notSet": "not set",
+      "keysConfigured": "configured",
+      "keysChain": "not set — the default provider chain will be attempted",
+      "snsNote": "not set — event ingestion is disabled",
+      "configSetNote": "not set — SES publishes no events",
+      "envTemplate": ".env template",
+      "policyTitle": "iam-policy.json",
+      "policyNote": "Minimal IAM policy for this instance."
+    },
+    "test": {
+      "title": "Test connection",
+      "button": "Test connection",
+      "note": "runs GetAccount from the instance — read-only, nothing is sent",
+      "sendingEnabled": "Sending enabled",
+      "sendingDisabled": "Sending disabled",
+      "production": "Production access",
+      "sandbox": "Sandbox",
+      "quotaMax": "Per-24h max",
+      "quotaSent": "Sent last 24h",
+      "quotaRate": "Max send rate",
+      "ratePerSecond": "msgs/s",
+      "sandboxTitle": "Your SES account is in sandbox.",
+      "sandboxBody": "Recipients must be verified until AWS grants production access.",
+      "sandboxLink": "Request production access",
+      "rateHint": "SES_MAX_SEND_RATE={envRate} in .env · account max {accountRate}/s — these disagree.",
+      "errors": {
+        "credentials": "AWS rejected the credentials — check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env.",
+        "unreachable": "SES did not respond — check AWS_REGION and the network path."
+      }
+    },
+    "next": {
+      "title": "Next steps",
+      "addDomain": "Add a sending domain",
+      "selfHosting": "Event ingestion and the full checklist live in SELF_HOSTING.md."
+    }
   },
   "team": {
     "title": "Team",
