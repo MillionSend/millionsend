@@ -1,35 +1,45 @@
 # @millionsend/setup
 
-The self-hosting setup tool: provisions the AWS resources a
-[MillionSend](https://github.com/MillionSend/millionsend) instance sends
-through. Deliberately not named `@millionsend/cli` — that name stays reserved
-for a future end-user CLI that talks to the MillionSend API.
-
-## What it creates
-
-- IAM policy + `millionsend` user + access key (least-privilege sending)
-- With an https `APP_BASE_URL`: an SNS event topic and SES configuration set,
-  so bounces, complaints, and deliveries flow back into your instance
-
-## Usage
+The self-hosting setup wizard for
+[MillionSend](https://github.com/MillionSend/millionsend). One command in an
+empty directory takes you from nothing to a running instance. Deliberately not
+named `@millionsend/cli` — that name stays reserved for a future end-user CLI
+that talks to the MillionSend API.
 
 ```sh
-npx @millionsend/setup            # interactive setup
-npx @millionsend/setup --dry-run  # print the plan, touch nothing
-npx @millionsend/setup teardown   # delete everything it created
+npx @millionsend/setup            # the wizard
+npx @millionsend/setup --dry-run  # print the full plan, touch nothing
+npx @millionsend/setup teardown   # delete the AWS resources it created
 ```
 
-In a terminal the setup is interactive: the SES region is an arrow-key list
-(with an "Other…" escape hatch), and a failed credential check offers to run
-`aws sso login` or `aws configure` for you when the aws CLI is installed.
-Piped input still works the same as ever — answers one per line, empty line
-accepts the default — so scripted runs need no changes.
+## What it does
 
-Run it anywhere Node 18+ and your AWS admin credentials live — laptop or
-server; the MillionSend server never needs admin credentials. It verifies your
-AWS identity, shows the plan, creates everything, and prints the `.env` lines
-to paste where MillionSend runs. Re-running is safe, but each run mints a new
-access key — delete stale ones in the IAM console.
+The wizard detects what is already in the current directory (`.env`, a compose
+file, docker) and offers only the missing pieces — every step is skippable,
+and re-running is safe:
+
+1. **env** — creates `.env` from a built-in template (no repo clone needed),
+   or keeps your existing one and only fills gaps. Offers to generate
+   `MASTER_ENCRYPTION_KEY` and `BETTER_AUTH_SECRET` for you, and prompts once
+   for `APP_BASE_URL`.
+2. **AWS** — IAM policy + `millionsend` user + access key (least-privilege
+   sending); with an https `APP_BASE_URL`, also the SNS event topic and SES
+   configuration set so bounces, complaints, and deliveries flow back into
+   your instance. Keys are written into the same `.env`.
+3. **launch** — downloads the standalone `docker-compose.yml` if the
+   directory has none, then runs `docker compose up -d` (`--build` when your
+   compose file builds from source).
+
+In a terminal every choice is interactive (arrow-key lists, Enter accepts the
+default). Piped input still works deterministically — answers one per line;
+on EOF every offer defaults to "skip", so scripted runs never create anything
+by surprise.
+
+Run it anywhere Node 18+ lives; the AWS step wants your admin AWS credentials
+(laptop or server — the MillionSend server itself never needs admin
+credentials) and offers `aws login`/`aws sso login`/`aws configure` when the
+credential check fails on a machine with the aws CLI. Each AWS run mints a
+new access key — delete stale ones in the IAM console.
 
 Full self-hosting guide:
 [SELF_HOSTING.md](https://github.com/MillionSend/millionsend/blob/main/SELF_HOSTING.md).

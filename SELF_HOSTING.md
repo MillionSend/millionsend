@@ -11,9 +11,23 @@ records) is done from the dashboard after boot.
 <details open>
 <summary><b>Quickstart (no clone)</b></summary>
 
-Runs the prebuilt image `ghcr.io/millionsend/millionsend:edge` (multi-arch, published
-on every push to main). Pin a version tag in the compose file for production; `:edge`
-is a moving head.
+One command, in an empty directory (Node 18+):
+
+```sh
+mkdir millionsend && cd millionsend
+npx @millionsend/setup
+```
+
+The wizard detects what is already there and offers each step — create `.env`
+from a built-in template with generated secrets, provision the AWS resources
+(below), download the standalone compose file, and `docker compose up -d`.
+Every step is skippable and safe to re-run; `--dry-run` prints the full plan
+and touches nothing.
+
+Prefer doing it by hand? The manual equivalent runs the same prebuilt image
+`ghcr.io/millionsend/millionsend:edge` (multi-arch, published on every push to
+main; pin a version tag in the compose file for production — `:edge` is a
+moving head):
 
 ```sh
 mkdir millionsend && cd millionsend
@@ -66,18 +80,15 @@ Without Docker (Node 24+, pnpm 11, local Postgres): `pnpm install`, point
 <details>
 <summary><b>AWS setup</b></summary>
 
-One command creates everything MillionSend needs in AWS — IAM policy + user + access
-key, and, with an https `APP_BASE_URL`, the SNS event topic and SES configuration set:
-
-```sh
-npx @millionsend/setup
-```
+The AWS step of `npx @millionsend/setup` creates everything MillionSend needs in
+AWS — IAM policy + user + access key, and, with an https `APP_BASE_URL`, the SNS
+event topic and SES configuration set.
 
 Run it anywhere Node 18+ and your AWS admin credentials live — laptop or server; the
 MillionSend server never needs admin credentials. It verifies your AWS identity,
-shows the plan, prompts for region and `APP_BASE_URL`, creates everything, and prints
-the exact `.env` lines to paste where MillionSend runs (if a `.env` exists where it
-runs, it offers to update it in place). `--dry-run` prints the plan and exits.
+shows the plan, creates everything, and writes the `AWS_*` lines into the `.env` in
+the current directory (no `.env` there → it prints them to paste where MillionSend
+runs). `--dry-run` prints the full plan and exits.
 `teardown` deletes everything the setup created, including all access keys of the
 `millionsend` user, so a running server stops sending. Re-running is safe, but each
 run mints a new access key — delete stale ones in the IAM console.

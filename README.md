@@ -15,18 +15,20 @@ the [Discussions](https://github.com/orgs/MillionSend/discussions) to follow alo
 
 ## Run it locally
 
-No clone needed — the prebuilt image is on GHCR:
+One command, in an empty directory — no clone needed:
 
 ```sh
-curl -O https://raw.githubusercontent.com/MillionSend/millionsend/main/deploy/docker-compose.yml
-curl -o .env https://raw.githubusercontent.com/MillionSend/millionsend/main/.env.example
-docker compose up -d   # after filling the 2 secrets in .env (generation hints inside)
+npx @millionsend/setup
 ```
 
-Dashboard at http://localhost:3000, API at http://localhost:3001. AWS resources
-(IAM user, SNS event topic, SES configuration set): `npx @millionsend/setup`.
-Full setup — from-source build, SES/SNS event pipeline, Docker-less development —
-is in [SELF_HOSTING.md](SELF_HOSTING.md).
+The wizard creates `.env` (secrets generated for you), optionally provisions
+the AWS resources (IAM user, SNS event topic, SES configuration set), and
+starts the prebuilt image with `docker compose up -d`. Every step is offered,
+skippable, and safe to re-run. Prefer doing it by hand? The manual curl path
+and everything else — from-source build, SES/SNS event pipeline, Docker-less
+development — is in [SELF_HOSTING.md](SELF_HOSTING.md).
+
+Dashboard at http://localhost:3000, API at http://localhost:3001.
 
 ## License
 
