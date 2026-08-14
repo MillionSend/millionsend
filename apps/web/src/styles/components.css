@@ -2,6 +2,14 @@
    React components apply these classes; values come from token custom properties.
    Hover/press opacity steps are inferred from the source's `transition: opacity` spec (see design-system readme). */
 
+/* One shared control height: every input, select trigger and button sits on an
+   identical 30px border-box, so paired rows (input + Save) align pixel-exact. */
+.ms-btn,
+.ms-input {
+  height: 30px;
+  box-sizing: border-box;
+}
+
 /* Buttons — one primary (bone) per view; keycaps ride inside modal buttons */
 .ms-btn {
   font: 600 var(--ms-fs-ui) var(--ms-font-sans);
@@ -51,12 +59,10 @@
   color: var(--ms-muted);
   border-color: var(--ms-line-strong);
   width: 30px;
-  height: 30px;
   padding: 0;
   justify-content: center;
   font-size: 12px;
   font-family: var(--ms-font-mono);
-  box-sizing: border-box;
 }
 .ms-btn-ghost {
   background: none;
@@ -486,20 +492,29 @@ svg:focus {
   outline: none;
 }
 
-/* Chevron glyph inside select triggers / disclosure buttons (canvas .ms-chev) */
-.ms-chev {
+/* Status dot — leading adornment in select options and status rows.
+   The ring variant marks the unfiltered "all" row: an empty circle where a
+   status would put its color. */
+.ms-dot {
   display: inline-block;
-  font-size: 10px;
-  line-height: 1;
-  transform: translateY(-1px);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.ms-dot.ring {
+  border: 1.5px solid var(--ms-faint);
 }
 
-/* Menu / popover — the canvas's "…" dropdown grammar: panel on line-strong,
-   14px radius, 6px inner padding, 13px rows that raise on hover. */
+/* Menu / popover — panel on line-strong, 12px radius, 6px inner padding,
+   ~36px rows with a quiet raised hover, hairline separators running the full
+   panel width between groups. Grammar shared by row menus, the account menu
+   and the team switcher. */
 .ms-menu {
   background: var(--ms-panel);
   border: 1px solid var(--ms-line-strong);
-  border-radius: var(--ms-r-card);
+  border-radius: 12px;
   padding: 6px;
   min-width: 180px;
   box-sizing: border-box;
@@ -512,8 +527,9 @@ svg:focus {
   justify-content: space-between;
   gap: 10px;
   width: 100%;
+  min-height: 36px;
   box-sizing: border-box;
-  padding: 7px 12px;
+  padding: 4px 10px;
   font: 400 13px var(--ms-font-sans);
   color: var(--ms-bone);
   background: none;
@@ -522,6 +538,8 @@ svg:focus {
   cursor: pointer;
   text-align: left;
   white-space: nowrap;
+  text-decoration: none; /* menu items rendered as <Link> drop the global dotted underline */
+  transition: background var(--ms-dur-fast) var(--ms-ease);
 }
 .ms-menu-item:hover,
 .ms-menu-item.active {
@@ -538,7 +556,56 @@ svg:focus {
   height: 1px;
   border: 0; /* rendered as <hr> */
   background: var(--ms-line);
-  margin: 6px 4px;
+  margin: 6px -6px; /* full-bleed across the panel, cancelling its 6px padding */
+}
+/* Uppercase group header inside a menu (e.g. the team switcher's "Teams"). */
+.ms-menu-label {
+  padding: 6px 10px 4px;
+  font-size: var(--ms-fs-micro);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ms-muted);
+}
+/* Search row inside a long select popover — a borderless row with a hairline
+   below, never a boxed input. Negative margins span the menu's 6px padding so
+   the hairline runs edge to edge. */
+.ms-menu-search {
+  display: block;
+  width: calc(100% + 12px);
+  margin: -6px -6px 6px;
+  box-sizing: border-box;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--ms-line);
+  color: var(--ms-bone);
+  font: 400 13px var(--ms-font-sans);
+  padding: 9px 12px;
+  outline: none;
+}
+.ms-menu-search::placeholder {
+  color: var(--ms-faint);
+}
+
+/* Scrollbars — thin and dark in every in-app scroll container (popovers,
+   drawers, tables); the native two-tone scrollbar never appears. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ms-line-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  /* Transparent border + padding-box clip slims the visible thumb to 4px. */
+  background: var(--ms-line-strong);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 4px;
 }
 
 /* The product's only rotation: the DNS-check spinner ring (1s linear per the brief) */

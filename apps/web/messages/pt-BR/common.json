@@ -5,6 +5,17 @@
   "close": "Fechar",
   "cancel": "Cancelar",
   "signOut": "Sair",
+  "accountMenu": {
+    "onboarding": "Onboarding"
+  },
+  "teamSwitcher": {
+    "teams": "Times",
+    "switch": "Trocar de time",
+    "create": "Criar time",
+    "nameLabel": "Nome do time",
+    "submit": "Criar",
+    "error": "Falha ao criar o time. Tente de novo."
+  },
   "select": {
     "searchPlaceholder": "Buscar…",
     "noResults": "Nenhum resultado."

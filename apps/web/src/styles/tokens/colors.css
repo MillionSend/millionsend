@@ -31,4 +31,18 @@
   --ms-neutral: #b5b3ad;
   --ms-neutral-bg: #1a1a1c;
   --ms-neutral-border: #2a2a2e;
+  /* Status dots — filter-option adornments. One hue per terminal outcome;
+     the in-flight family stays on grays so chroma always means a delivery
+     event. Tuned to this palette's dimness, deliberately muted. */
+  --ms-dot-queued: #75736d;
+  --ms-dot-queued-quota: #a3874f; /* quota-held — warm, hints at the cap */
+  --ms-dot-sent: #8b8983;
+  --ms-dot-delivery-delayed: #9c8f7d;
+  --ms-dot-delivered: #5fce8b;
+  --ms-dot-opened: #7ea6db;
+  --ms-dot-clicked: #a08fd8;
+  --ms-dot-bounced: #e0897d; /* salmon — soft fail, vs. the harder failed red */
+  --ms-dot-complained: #d9ae5f;
+  --ms-dot-suppressed: #67655f;
+  --ms-dot-failed: #cf5546;
 }

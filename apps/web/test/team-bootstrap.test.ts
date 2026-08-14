@@ -3,6 +3,7 @@ import { schema } from "@millionsend/db";
 import { createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getActiveMembership } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import type { Context } from "@/server/trpc";
 
@@ -60,13 +61,27 @@ describe("team.createTeam", () => {
     expect(team?.slug).toMatch(/^acme-[0-9a-f]{6}$/);
   });
 
-  it("returns the existing team for an already-onboarded user", async () => {
+  it("creates a second, distinct team for an already-onboarded user", async () => {
     await insertUser("u1", "u1@example.com");
     const { teamId } = await callerFor("u1").team.createTeam({ name: "Acme" });
-    const again = await callerFor("u1", { teamId, role: "owner" }).team.createTeam({
+    const second = await callerFor("u1", { teamId, role: "owner" }).team.createTeam({
       name: "Other",
     });
-    expect(again.teamId).toBe(teamId);
+    expect(second.teamId).not.toBe(teamId);
+    const memberships = await db
+      .select()
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.userId, "u1"));
+    expect(memberships).toHaveLength(2);
+  });
+
+  it("selects the new team via the cookie setter", async () => {
+    await insertUser("u1", "u1@example.com");
+    const cookies: string[] = [];
+    const { teamId } = await callerFor("u1", {
+      setActiveTeamCookie: (id) => cookies.push(id),
+    }).team.createTeam({ name: "Acme" });
+    expect(cookies).toEqual([teamId]);
   });
 
   it("rejects unauthenticated callers", async () => {
@@ -74,5 +89,68 @@ describe("team.createTeam", () => {
     await expect(caller.team.createTeam({ name: "Acme" })).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     });
+  });
+});
+
+describe("team.switch", () => {
+  it("round-trips: sets the cookie and the resolver honors it", async () => {
+    await insertUser("u1", "u1@example.com");
+    const a = await callerFor("u1").team.createTeam({ name: "Alpha" });
+    const b = await callerFor("u1").team.createTeam({ name: "Beta" });
+
+    const cookies: string[] = [];
+    await callerFor("u1", { setActiveTeamCookie: (id) => cookies.push(id) }).team.switch({
+      teamId: b.teamId,
+    });
+    expect(cookies).toEqual([b.teamId]);
+    expect((await getActiveMembership(db, "u1", b.teamId))?.teamId).toBe(b.teamId);
+    expect((await getActiveMembership(db, "u1", a.teamId))?.teamId).toBe(a.teamId);
+  });
+
+  it("forbids switching to a team the user is not a member of", async () => {
+    await insertUser("u1", "u1@example.com");
+    await insertUser("u2", "u2@example.com");
+    await callerFor("u1").team.createTeam({ name: "Mine" });
+    const theirs = await callerFor("u2").team.createTeam({ name: "Theirs" });
+
+    const cookies: string[] = [];
+    await expect(
+      callerFor("u1", { setActiveTeamCookie: (id) => cookies.push(id) }).team.switch({
+        teamId: theirs.teamId,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(cookies).toEqual([]);
+  });
+});
+
+describe("team.list", () => {
+  it("lists all memberships with plan and role plus the active team", async () => {
+    await insertUser("u1", "u1@example.com");
+    const a = await callerFor("u1").team.createTeam({ name: "Alpha" });
+    const b = await callerFor("u1").team.createTeam({ name: "Beta" });
+
+    const result = await callerFor("u1", { teamId: a.teamId, role: "owner" }).team.list();
+    expect(result.activeTeamId).toBe(a.teamId);
+    expect(result.teams.map((t) => t.teamId)).toEqual([a.teamId, b.teamId]);
+    expect(result.teams[0]).toMatchObject({ teamName: "Alpha", plan: "free", role: "owner" });
+  });
+});
+
+describe("getActiveMembership cookie fallback", () => {
+  it("ignores a cookie for a team the user is not a member of", async () => {
+    await insertUser("u1", "u1@example.com");
+    await insertUser("u2", "u2@example.com");
+    const mine = await callerFor("u1").team.createTeam({ name: "Mine" });
+    const theirs = await callerFor("u2").team.createTeam({ name: "Theirs" });
+
+    const resolved = await getActiveMembership(db, "u1", theirs.teamId);
+    expect(resolved?.teamId).toBe(mine.teamId);
+  });
+
+  it("ignores a cookie that references no team at all", async () => {
+    await insertUser("u1", "u1@example.com");
+    const mine = await callerFor("u1").team.createTeam({ name: "Mine" });
+    const resolved = await getActiveMembership(db, "u1", "nonexistent-id");
+    expect(resolved?.teamId).toBe(mine.teamId);
   });
 });

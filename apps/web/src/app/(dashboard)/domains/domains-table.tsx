@@ -123,7 +123,8 @@ export function DomainsView() {
       ) : (
         <>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}>
-            <div style={{ width: 250 }}>
+            {/* Search stretches to fill the filter row; the selects keep fixed widths. */}
+            <div style={{ flex: 1, minWidth: 160 }}>
               <input
                 ref={searchRef}
                 type="text"

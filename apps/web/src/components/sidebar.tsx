@@ -4,8 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavGlyph, type NavIconName } from "@/components/icons/nav-icons";
+import { useDismiss } from "@/components/popover-menu";
+import { TeamSwitcher } from "@/components/team-switcher";
 import { authClient } from "@/lib/auth-client";
 import { isActive } from "@/lib/nav";
 import { useTRPC } from "@/lib/trpc";
@@ -58,9 +60,10 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
   const pathname = usePathname();
   const router = useRouter();
   const trpc = useTRPC();
-  const { data: team } = useQuery(trpc.settings.team.get.queryOptions());
   const { data: usage } = useQuery(trpc.settings.usage.recent.queryOptions({}));
   const [menuOpen, setMenuOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
+  useDismiss(accountRef, menuOpen, () => setMenuOpen(false));
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -100,60 +103,13 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
     >
       <div style={{ padding: "4px 10px 14px" }}>
         {/* biome-ignore lint/performance/noImgElement: static SVG logo, nothing for next/image to optimize */}
-        <img src="/logo/millionsend-wordmark.svg" alt={tCommon("appName")} style={{ height: 15, display: "block" }} />
+        <img
+          src="/logo/millionsend-wordmark.svg"
+          alt={tCommon("appName")}
+          style={{ height: 15, display: "block" }}
+        />
       </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 9,
-          padding: "7px 10px",
-          borderRadius: 10,
-        }}
-      >
-        <span
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 8,
-            background: "var(--ms-panel-raised)",
-            border: "1px solid var(--ms-line)",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 12,
-            fontWeight: 600,
-            flex: "none",
-          }}
-        >
-          {teamName.charAt(0).toUpperCase()}
-        </span>
-        <span
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {teamName}
-        </span>
-        {team ? (
-          <span
-            style={{
-              fontSize: 11,
-              color: "var(--ms-muted)",
-              border: "1px solid var(--ms-line)",
-              borderRadius: 999,
-              padding: "1px 8px",
-              flex: "none",
-            }}
-          >
-            {tCommon(`plan.${team.plan}`)}
-          </span>
-        ) : null}
-      </div>
+      <TeamSwitcher teamName={teamName} />
       <nav className="ms-nav" style={{ marginTop: 10, minHeight: 0, overflowY: "auto" }}>
         {NAV_ITEMS.map((item) => (
           <NavItem
@@ -197,30 +153,33 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
           ) : null}
         </div>
       ) : null}
-      <div style={{ position: "relative", borderTop: "1px solid var(--ms-line)" }}>
+      <div ref={accountRef} style={{ position: "relative", borderTop: "1px solid var(--ms-line)" }}>
         {menuOpen ? (
-          <>
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: overlay click-to-dismiss; Esc handles keyboard */}
-            <div
-              style={{ position: "fixed", inset: 0, zIndex: 5 }}
-              onMouseDown={() => setMenuOpen(false)}
-            />
-            <div
-              className="ms-menu"
-              style={{
-                position: "absolute",
-                bottom: "calc(100% + 6px)",
-                left: 4,
-                right: 4,
-                minWidth: 0,
-                zIndex: 6,
-              }}
+          <div
+            role="menu"
+            className="ms-menu"
+            style={{
+              position: "absolute",
+              bottom: "calc(100% + 6px)",
+              left: 4,
+              right: 4,
+              minWidth: 0,
+              zIndex: 6,
+            }}
+          >
+            <Link
+              href="/onboarding"
+              role="menuitem"
+              className="ms-menu-item"
+              onClick={() => setMenuOpen(false)}
             >
-              <button type="button" className="ms-menu-item" onClick={signOut}>
-                {tCommon("signOut")}
-              </button>
-            </div>
-          </>
+              {tCommon("accountMenu.onboarding")}
+            </Link>
+            <hr className="ms-menu-sep" />
+            <button type="button" role="menuitem" className="ms-menu-item" onClick={signOut}>
+              {tCommon("signOut")}
+            </button>
+          </div>
         ) : null}
         <button
           type="button"

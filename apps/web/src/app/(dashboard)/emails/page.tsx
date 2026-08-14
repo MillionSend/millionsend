@@ -10,7 +10,7 @@ import { CodeGlyph } from "@/components/icons/nav-icons";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { formatHoursMinutes } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
@@ -190,8 +190,12 @@ export default function EmailsPage() {
           width={126}
           ariaLabel={t("list.status")}
           options={[
-            { value: "all", label: t("list.allStatuses") },
-            ...STATUSES.map((s) => ({ value: s, label: common(`status.${s}`) })),
+            { value: "all", label: t("list.allStatuses"), adornment: <StatusDot /> },
+            ...STATUSES.map((s) => ({
+              value: s,
+              label: common(`status.${s}`),
+              adornment: <StatusDot status={s} />,
+            })),
           ]}
         />
         <Select
