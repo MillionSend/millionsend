@@ -1,6 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="MillionSend avatar">
-<title>MillionSend avatar — Lit M on black tile</title>
-<defs><clipPath id="ms-mcut-t"><rect x="222" y="0" width="613" height="604"></rect></clipPath></defs>
-<rect width="1024" height="1024" rx="224" fill="#000000"></rect>
-<g transform="translate(252.0 323.9) scale(0.6228)"><g transform="matrix(1 0 0 -1 0 604)"><path d="M704 508 747 101Q752 45 804 35V0H610V35Q639 43 647.5 57.5Q656 72 652 113L612 511L434 0H369L188 513L150 107Q147 73 159.5 58.0Q172 43 204 35V0H29V35Q58 40 73.0 53.5Q88 67 91 97L128 500Q131 533 121.0 549.0Q111 565 84 569V604H251L420 119L587 604H751V569Q699 562 704 508Z" fill="#F4F1EA" clip-path="url(#ms-mcut-t)"></path><path d="M174 604 L232 604 L232 386 L174 551 Z" fill="#F4F1EA"></path><path d="M212 97Q212 67 228.0 54.0Q244 41 280 35V0H51V35Q88 42 104.0 54.0Q120 66 120 96V471H42V510Q125 527 171 586H212Z" fill="#7F8791" transform="translate(-40 0) scale(1.0307)"></path></g></g>
+<title>MillionSend avatar — Machined: Lit M in diagonal steel, lit from the top-left</title>
+<defs>
+<radialGradient id="ms-glow" cx="0.5" cy="0.42" r="0.62">
+<stop offset="0" stop-color="#121316"/><stop offset="0.75" stop-color="#000000"/>
+</radialGradient>
+<linearGradient id="ms-diag" gradientUnits="userSpaceOnUse" x1="0" y1="604" x2="835" y2="0">
+<stop offset="0" stop-color="#F8F5EE"/><stop offset="0.32" stop-color="#CDCFD2"/><stop offset="0.55" stop-color="#949BA5"/><stop offset="0.78" stop-color="#626973"/><stop offset="0.92" stop-color="#4B525B"/><stop offset="1" stop-color="#59606A"/>
+</linearGradient>
+<clipPath id="ms-mcut-t"><rect x="222" y="0" width="613" height="604"/></clipPath>
+</defs>
+<!-- Full-bleed square on purpose: GitHub/npm round the tile themselves; round in CSS elsewhere. -->
+<rect width="1024" height="1024" fill="#000000"/>
+<rect width="1024" height="1024" fill="url(#ms-glow)"/>
+<g transform="translate(252.0 323.9) scale(0.6228)"><g transform="matrix(1 0 0 -1 0 604)">
+<path d="M704 508 747 101Q752 45 804 35V0H610V35Q639 43 647.5 57.5Q656 72 652 113L612 511L434 0H369L188 513L150 107Q147 73 159.5 58.0Q172 43 204 35V0H29V35Q58 40 73.0 53.5Q88 67 91 97L128 500Q131 533 121.0 549.0Q111 565 84 569V604H251L420 119L587 604H751V569Q699 562 704 508Z" fill="url(#ms-diag)" clip-path="url(#ms-mcut-t)"/>
+<path d="M174 604 L232 604 L232 386 L174 551 Z" fill="url(#ms-diag)"/>
+<path d="M212 97Q212 67 228.0 54.0Q244 41 280 35V0H51V35Q88 42 104.0 54.0Q120 66 120 96V471H42V510Q125 527 171 586H212Z" fill="url(#ms-diag)" transform="translate(-40 0) scale(1.0307)"/>
+</g></g>
 </svg>
