@@ -23,9 +23,10 @@ curl -o .env https://raw.githubusercontent.com/MillionSend/millionsend/main/.env
 docker compose up -d   # after filling the 2 secrets in .env (generation hints inside)
 ```
 
-Dashboard at http://localhost:3000, API at http://localhost:3001. Full setup —
-including the from-source build, the SES/SNS event pipeline, and Docker-less
-development — is in [SELF_HOSTING.md](SELF_HOSTING.md).
+Dashboard at http://localhost:3000, API at http://localhost:3001. AWS resources
+(IAM user, SNS event topic, SES configuration set): `npx @millionsend/setup`.
+Full setup — from-source build, SES/SNS event pipeline, Docker-less development —
+is in [SELF_HOSTING.md](SELF_HOSTING.md).
 
 ## License
 

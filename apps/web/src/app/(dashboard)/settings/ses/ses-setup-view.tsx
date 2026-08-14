@@ -275,6 +275,9 @@ export function SesSetupView() {
             </span>
             <span className="ms-badge ms-badge-success">{t("setup.recommended")}</span>
           </div>
+          <p style={{ margin: "12px 0 0" }}>
+            <CopyChip value="npx @millionsend/setup" />
+          </p>
           <p style={{ margin: "10px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
             {t.rich("setup.cliNote", codeRichTags)}
           </p>
