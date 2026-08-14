@@ -6,7 +6,7 @@ import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 import { SES_REGIONS, type SesRegion } from "./domain-identity.js";
 import {
   createSetupClients,
-  httpsOrigin,
+  envTemplate,
   runSetup,
   runTeardown,
   setupEnvEntries,
@@ -14,16 +14,29 @@ import {
   teardownPlan,
   upsertEnv,
 } from "./setup.js";
+import {
+  COMPOSE_DOWNLOAD_URL,
+  composeUpArgs,
+  confirmed,
+  type DirState,
+  detectDirState,
+  envValue,
+  flowPlan,
+  generateSecret,
+  missingSecrets,
+  secretLaterHint,
+  stateSummary,
+} from "./setup-flow.js";
 import { banner, dim, pickBannerTier, selectPrompt, wrapText } from "./tty-ui.js";
 
 // Wrapped at print time to the live terminal width — baked-in line breaks
 // double-wrap on narrow terminals (soft wrap first, then the hard break).
 const DESCRIPTION_TEXT =
-  "Creates the IAM user, policy, access key — and, with an https APP_BASE_URL, the SNS event topic and SES configuration set. Run it where YOUR admin AWS credentials live: this machine, or the server. It never needs the app running.";
+  "Sets up a self-hosted MillionSend end to end: a .env with generated secrets, the AWS resources (IAM user + key, SNS event topic, SES configuration set), and the Docker launch. Run it in the directory MillionSend should live in — an empty one works. Every step is offered, skippable, and safe to re-run.";
 const descriptionWidth = (): number => Math.min(process.stdout.columns || 80, 80) - 2;
 const DESCRIPTION = (): string => wrapText(DESCRIPTION_TEXT, descriptionWidth());
 
-const BANNER = (): string => `millionsend · aws setup\n\n${DESCRIPTION()}`;
+const BANNER = (): string => `millionsend · setup\n\n${DESCRIPTION()}`;
 
 const REGION_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -119,11 +132,26 @@ function hasAwsCli(): boolean {
   return spawnSync("aws", ["--version"], { stdio: "ignore" }).error === undefined;
 }
 
-function runAws(args: string[]): void {
+/** Runs a child on the operator's terminal and reports whether it exited 0. */
+function runInherit(command: string, args: string[]): boolean {
   // The prompt UI holds the terminal in raw mode; hand the child a sane tty.
   if (process.stdin.isTTY) process.stdin.setRawMode(false);
-  spawnSync("aws", args, { stdio: "inherit" });
+  const result = spawnSync(command, args, { stdio: "inherit" });
   if (process.stdin.isTTY) process.stdin.setRawMode(true);
+  return result.error === undefined && result.status === 0;
+}
+
+function probeDocker(): string | null {
+  const result = spawnSync("docker", ["compose", "version"], { encoding: "utf8" });
+  if (result.error || result.status !== 0) return null;
+  // "Docker Compose version v2.32.4" → "docker compose v2.32.4".
+  const version = /v?\d+\.\d+[\w.-]*/.exec(result.stdout ?? "")?.[0];
+  return version === undefined ? "docker compose" : `docker compose ${version}`;
+}
+
+function readCwdFile(name: string): string | null {
+  const path = join(process.cwd(), name);
+  return existsSync(path) ? readFileSync(path, "utf8") : null;
 }
 
 function printHeader(): void {
@@ -137,8 +165,10 @@ function printHeader(): void {
 }
 
 /**
- * Interactive entry point behind `pnpm setup:aws` and the container's
- * `setup` argv mode (scripts/aws-setup/index.ts wires it up).
+ * End-to-end self-host wizard behind `npx @millionsend/setup`, `pnpm
+ * setup:aws`, and the container's `setup` argv mode. Works from an empty
+ * directory: env → secrets → AWS → launch, each step offered, state-aware,
+ * and idempotent on re-runs.
  */
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const teardown = argv[0] === "teardown";
@@ -146,125 +176,309 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const rl = lineReader();
   try {
     printHeader();
+    if (teardown) return await teardownMain(rl, dryRun);
 
-    // Identity first: everything else is pointless without working credentials.
-    // STS is global; the probe region does not constrain the region prompted below.
-    // --dry-run never touches AWS, so the probe (and its client) is skipped too.
-    let accountId = "";
+    const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+    // --dry-run spawns nothing, so the docker probe is skipped there too.
+    const state = detectDirState(readCwdFile, dryRun ? null : probeDocker);
+    console.log(`${dim(stateSummary(state))}\n`);
+
     if (dryRun) {
-      console.log("--dry-run: skipping the AWS credential check.\n");
+      const appBaseUrl =
+        envValue(state.envContent, "APP_BASE_URL") ||
+        process.env.APP_BASE_URL ||
+        "http://localhost:3000";
+      console.log("Plan:");
+      const region = process.env.AWS_REGION ?? "us-east-1";
+      for (const line of flowPlan(state, { appBaseUrl, region })) console.log(`  · ${line}`);
+      console.log("\n--dry-run: nothing was created, written, or started.");
+      return 0;
+    }
+
+    // --- env step ---
+    const envPath = join(process.cwd(), ".env");
+    let env = state.envContent;
+    if (env === null) {
+      if (await offer(rl, "No .env here — create one from the built-in template?", interactive)) {
+        env = envTemplate();
+        writeFileSync(envPath, env);
+        console.log(dim(`Wrote ${envPath}.`));
+      } else {
+        console.log(dim(`Skipped. Manual: curl -o .env ${ENV_EXAMPLE_URL}`));
+      }
     } else {
-      const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
-      // Two login attempts, then the manual hint — a third rarely goes better.
-      for (let attempt = 0; ; attempt++) {
-        // Fresh client per attempt: a login may have just minted credentials,
-        // and the SDK caches its credential provider per client.
-        const sts = new STSClient({ region: process.env.AWS_REGION ?? "us-east-1" });
-        try {
-          const identity = await sts.send(new GetCallerIdentityCommand({}));
-          if (!identity.Account) throw new Error("GetCallerIdentity returned no account");
-          accountId = identity.Account;
-          console.log(`${dim(`aws: ${identity.Arn ?? "?"} (account ${accountId})`)}\n`);
-          break;
-        } catch (error) {
-          console.error(`Could not verify AWS credentials: ${(error as Error).message}`);
-          const action = authAction({
-            identityOk: false,
-            // Pipes never get the offer, so skip probing for the CLI there.
-            hasAwsCli: interactive && hasAwsCli(),
-            isTTY: interactive,
-          });
-          if (action !== "offer-login" || attempt >= 2) {
-            console.error(
-              "Run this where the AWS CLI/SDK finds admin credentials — `aws configure`, AWS_PROFILE, or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY in the environment.",
-            );
-            return 1;
-          }
-          const choice = await selectPrompt(rl, {
-            label: "Not authenticated",
-            // aws login (browser sign-in for IAM users) is the common case;
-            // aws sso login only works for Identity Center profiles with
-            // sso_start_url configured.
-            initial: "login",
-            options: [
-              { value: "login", label: "Run aws login", hint: "browser sign-in" },
-              { value: "sso", label: "Run aws sso login", hint: "Identity Center profiles" },
-              { value: "configure", label: "Run aws configure", hint: "paste access keys" },
-              { value: "exit", label: "Exit" },
-            ],
-          });
-          if (choice === "exit") return 1;
-          runAws(choice === "sso" ? ["sso", "login"] : [choice]);
+      console.log(dim(".env found — existing values are kept, setup only fills gaps."));
+    }
+    // Writes through to disk on every change so an aborted run loses nothing.
+    const writeEnv = (entries: Record<string, string>): boolean => {
+      if (env === null) return false;
+      env = upsertEnv(env, entries);
+      writeFileSync(envPath, env);
+      return true;
+    };
+
+    // One APP_BASE_URL prompt feeds both the .env write and the SES events
+    // decision in the AWS step (events need an https URL, as ever).
+    const defaultBase =
+      envValue(env, "APP_BASE_URL") || process.env.APP_BASE_URL || "http://localhost:3000";
+    const appBaseUrl =
+      (
+        await rl.question(
+          `APP_BASE_URL — the URL the dashboard is opened at (an https URL enables SES event ingestion) [${defaultBase}]: `,
+        )
+      ).trim() || defaultBase;
+    if (env !== null && appBaseUrl !== envValue(env, "APP_BASE_URL")) {
+      writeEnv({ APP_BASE_URL: appBaseUrl });
+    }
+
+    // --- secrets ---
+    if (env !== null) {
+      const missing = missingSecrets(env);
+      if (missing.length === 0) {
+        console.log(dim("Secrets already set (MASTER_ENCRYPTION_KEY, BETTER_AUTH_SECRET)."));
+      }
+      for (const key of missing) {
+        const choice = await selectPrompt(rl, {
+          label: `Generate ${key} for you?`,
+          initial: interactive ? "generate" : "later",
+          options: [
+            { value: "generate", label: "Generate now" },
+            { value: "later", label: "I'll do it later", hint: "openssl rand -base64 32" },
+          ],
+        });
+        if (choice === "generate") {
+          writeEnv({ [key]: generateSecret() });
+          console.log(dim(`${key} written to .env.`));
+        } else {
+          console.log(secretLaterHint(key));
         }
       }
     }
 
-    const defaultRegion = process.env.AWS_REGION ?? "us-east-1";
-    let region = await selectPrompt(rl, {
-      label: "AWS region",
-      initial: defaultRegion,
-      options: [
-        ...SES_REGIONS.map((r) => ({ value: r, label: r, hint: REGION_HINTS[r] })),
-        { value: OTHER_REGION, label: "Other…", hint: "type any region" },
-      ],
-    });
-    if (region === OTHER_REGION) {
-      region = (await rl.question(`AWS region [${defaultRegion}]: `)).trim() || defaultRegion;
-    }
-    if (!REGION_RE.test(region)) {
-      console.error(`Not an AWS region name: ${region}`);
-      return 1;
+    // --- aws step ---
+    const hasKeys = (envValue(env, "AWS_ACCESS_KEY_ID") ?? "") !== "";
+    if (hasKeys) console.log(dim("\nAWS access key already in .env."));
+    const awsPrompt = hasKeys
+      ? "Re-run the AWS setup (mints a NEW access key)?"
+      : "\nCreate the AWS resources now (IAM user + key, SNS events, SES configuration set)?";
+    if (await offer(rl, awsPrompt, interactive && !hasKeys)) {
+      await awsStep(rl, interactive, appBaseUrl, writeEnv);
+    } else {
+      console.log(dim("AWS step skipped."));
     }
 
-    if (teardown) return await teardownFlow(rl, region, accountId, dryRun);
+    return await launchStep(rl, interactive, state, env === null ? [] : missingSecrets(env));
+  } finally {
+    rl.close();
+  }
+}
 
-    const defaultBase = process.env.APP_BASE_URL ?? "";
-    const answer = (
-      await rl.question(
-        `APP_BASE_URL for event ingestion (https URL, empty skips events) [${defaultBase || "skip"}]: `,
-      )
-    ).trim();
-    const appBaseUrl = answer || defaultBase;
-    if (appBaseUrl && !httpsOrigin(appBaseUrl)) {
-      console.log(`Not an https URL (${appBaseUrl}) — the events part is skipped.`);
+/**
+ * Verifies AWS credentials, offering a login on interactive terminals with
+ * the aws CLI installed. Returns the account id, or null after the manual
+ * hint. STS is global; the probe region does not constrain the SES region.
+ */
+async function resolveIdentity(rl: LineReader): Promise<string | null> {
+  const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+  // Two login attempts, then the manual hint — a third rarely goes better.
+  for (let attempt = 0; ; attempt++) {
+    // Fresh client per attempt: a login may have just minted credentials,
+    // and the SDK caches its credential provider per client.
+    const sts = new STSClient({ region: process.env.AWS_REGION ?? "us-east-1" });
+    try {
+      const identity = await sts.send(new GetCallerIdentityCommand({}));
+      if (!identity.Account) throw new Error("GetCallerIdentity returned no account");
+      console.log(`${dim(`aws: ${identity.Arn ?? "?"} (account ${identity.Account})`)}\n`);
+      return identity.Account;
+    } catch (error) {
+      console.error(`Could not verify AWS credentials: ${(error as Error).message}`);
+      const action = authAction({
+        identityOk: false,
+        // Pipes never get the offer, so skip probing for the CLI there.
+        hasAwsCli: interactive && hasAwsCli(),
+        isTTY: interactive,
+      });
+      if (action !== "offer-login" || attempt >= 2) {
+        console.error(
+          "Run this where the AWS CLI/SDK finds admin credentials — `aws configure`, AWS_PROFILE, or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY in the environment.",
+        );
+        return null;
+      }
+      const choice = await selectPrompt(rl, {
+        label: "Not authenticated",
+        // aws login (browser sign-in for IAM users) is the common case;
+        // aws sso login only works for Identity Center profiles with
+        // sso_start_url configured.
+        initial: "login",
+        options: [
+          { value: "login", label: "Run aws login", hint: "browser sign-in" },
+          { value: "sso", label: "Run aws sso login", hint: "Identity Center profiles" },
+          { value: "configure", label: "Run aws configure", hint: "paste access keys" },
+          { value: "exit", label: "Exit" },
+        ],
+      });
+      if (choice === "exit") return null;
+      runInherit("aws", choice === "sso" ? ["sso", "login"] : [choice]);
     }
+  }
+}
 
-    console.log("\nPlan:");
-    for (const line of setupPlan({ region, appBaseUrl })) console.log(`  · ${line}`);
-    if (dryRun) {
-      console.log("\n--dry-run: nothing was created.");
-      return 0;
-    }
+/** SES region prompt; null when the typed free-form region is not a region name. */
+async function chooseRegion(rl: LineReader): Promise<string | null> {
+  const defaultRegion = process.env.AWS_REGION ?? "us-east-1";
+  let region = await selectPrompt(rl, {
+    label: "AWS region",
+    initial: defaultRegion,
+    options: [
+      ...SES_REGIONS.map((r) => ({ value: r, label: r, hint: REGION_HINTS[r] })),
+      { value: OTHER_REGION, label: "Other…", hint: "type any region" },
+    ],
+  });
+  if (region === OTHER_REGION) {
+    region = (await rl.question(`AWS region [${defaultRegion}]: `)).trim() || defaultRegion;
+  }
+  if (!REGION_RE.test(region)) {
+    console.error(`Not an AWS region name: ${region}`);
+    return null;
+  }
+  return region;
+}
 
-    if (!(await confirm(rl, "\nProceed?"))) return 1;
+/**
+ * The AWS provisioning step: identity, region, plan, create, keys into .env.
+ * Failures print their hint and return — the wizard continues to the launch
+ * step, since a stack can boot (not send) without AWS keys.
+ */
+async function awsStep(
+  rl: LineReader,
+  interactive: boolean,
+  appBaseUrl: string,
+  writeEnv: (entries: Record<string, string>) => boolean,
+): Promise<void> {
+  const accountId = await resolveIdentity(rl);
+  if (accountId === null) return;
+  const region = await chooseRegion(rl);
+  if (region === null) return;
 
-    const result = await runSetup(createSetupClients(region), {
+  console.log("\nPlan:");
+  for (const line of setupPlan({ region, appBaseUrl })) console.log(`  · ${line}`);
+  if (!(await offer(rl, "\nProceed?", interactive))) return;
+
+  let result: Awaited<ReturnType<typeof runSetup>>;
+  try {
+    result = await runSetup(createSetupClients(region), {
       region,
       accountId,
       appBaseUrl,
       onStep: (line) => console.log(`==> ${line}`),
     });
+  } catch (error) {
+    console.error(
+      `AWS setup failed: ${(error as Error).message}\nFix that and re-run — resources it already created are adopted, not duplicated.`,
+    );
+    return;
+  }
 
-    const entries = setupEnvEntries(region, result);
+  const entries = setupEnvEntries(region, result);
+  if (writeEnv(entries)) {
+    console.log("\nAWS keys written to .env.");
+  } else {
     const block = Object.entries(entries)
       .map(([key, value]) => `${key}=${value}`)
       .join("\n");
     console.log(`\nDone. Paste into .env where MillionSend runs, then restart it:\n\n${block}\n`);
-    if (result.topicArn) {
-      console.log(
-        "The SNS subscription confirms itself once the app runs with these values;\nif it stays pending, use 'Request confirmation' on it in the SNS console.\n",
-      );
-    }
-
-    const envPath = join(process.cwd(), ".env");
-    if (existsSync(envPath) && (await confirm(rl, `Update ${envPath} in place?`))) {
-      writeFileSync(envPath, upsertEnv(readFileSync(envPath, "utf8"), entries));
-      console.log("Updated. Restart the app to pick it up.");
-    }
-    return 0;
-  } finally {
-    rl.close();
   }
+  if (result.topicArn) {
+    console.log(
+      "The SNS subscription confirms itself once the app runs with these values;\nif it stays pending, use 'Request confirmation' on it in the SNS console.",
+    );
+  }
+}
+
+const ENV_EXAMPLE_URL =
+  "https://raw.githubusercontent.com/MillionSend/millionsend/main/.env.example";
+
+/** The launch step: optional compose download, then docker compose up. */
+async function launchStep(
+  rl: LineReader,
+  interactive: boolean,
+  state: DirState,
+  secretsMissing: string[],
+): Promise<number> {
+  console.log("");
+  if (state.docker === null) {
+    console.log(
+      "docker not found — install it (https://docs.docker.com/get-docker/), then run: docker compose up -d",
+    );
+    return 0;
+  }
+  const choice = await selectPrompt(rl, {
+    label: "Start MillionSend now?",
+    initial: interactive ? "start" : "later",
+    options: [
+      { value: "start", label: "Start", hint: "docker compose up" },
+      { value: "later", label: "Later" },
+    ],
+  });
+
+  let composeContent = state.composeContent;
+  if (choice === "start" && composeContent === null) {
+    if (
+      await offer(
+        rl,
+        "No compose file here — download the standalone deploy/docker-compose.yml?",
+        interactive,
+      )
+    ) {
+      try {
+        const response = await fetch(COMPOSE_DOWNLOAD_URL);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        composeContent = await response.text();
+        writeFileSync(join(process.cwd(), "docker-compose.yml"), composeContent);
+        console.log(dim("Wrote docker-compose.yml."));
+      } catch (error) {
+        console.error(`Download failed (${(error as Error).message}).`);
+      }
+    }
+  }
+
+  const command = `docker ${composeUpArgs(composeContent).join(" ")}`;
+  if (choice !== "start" || composeContent === null) {
+    const curlLine =
+      composeContent === null && state.composeFile === null
+        ? `\n  curl -O ${COMPOSE_DOWNLOAD_URL}`
+        : "";
+    console.log(`Start later with:${curlLine}\n  ${command}`);
+    return 0;
+  }
+
+  if (secretsMissing.length > 0) {
+    console.log(`note: ${secretsMissing.join(", ")} still empty in .env — the app needs them.`);
+  }
+  console.log(`\n$ ${command}`);
+  if (!runInherit("docker", composeUpArgs(composeContent))) {
+    console.error("docker compose failed — fix the error above and re-run the setup.");
+    return 1;
+  }
+  console.log(
+    "\nRunning. Next steps:\n  · http://localhost:3000 — sign up (the first user becomes the owner)\n  · SES sandbox account? Set the send rate to 1 in Settings → Instance\n  · Verify a sending domain in the dashboard, then send",
+  );
+  return 0;
+}
+
+/** The pre-wizard teardown flow, unchanged: identity, region, delete. */
+async function teardownMain(rl: LineReader, dryRun: boolean): Promise<number> {
+  let accountId = "";
+  if (dryRun) {
+    console.log("--dry-run: skipping the AWS credential check.\n");
+  } else {
+    const resolved = await resolveIdentity(rl);
+    if (resolved === null) return 1;
+    accountId = resolved;
+  }
+  const region = await chooseRegion(rl);
+  if (region === null) return 1;
+  return await teardownFlow(rl, region, accountId, dryRun);
 }
 
 async function teardownFlow(
@@ -290,5 +504,13 @@ async function teardownFlow(
 }
 
 async function confirm(rl: LineReader, prompt: string): Promise<boolean> {
-  return /^y(es)?$/i.test((await rl.question(`${prompt} [y/N] `)).trim());
+  return confirmed(await rl.question(`${prompt} [y/N] `), false);
+}
+
+/**
+ * A wizard offer: defaults to yes on interactive terminals (Enter accepts),
+ * to no otherwise — piped/EOF runs skip every offer deterministically.
+ */
+async function offer(rl: LineReader, prompt: string, defaultYes: boolean): Promise<boolean> {
+  return confirmed(await rl.question(`${prompt} ${defaultYes ? "[Y/n]" : "[y/N]"} `), defaultYes);
 }

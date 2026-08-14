@@ -1,7 +1,7 @@
 {
   "name": "@millionsend/setup",
-  "version": "0.5.4",
-  "description": "Self-hosting setup tool: provisions the AWS resources (IAM, SNS, SES) a MillionSend instance needs",
+  "version": "0.6.0",
+  "description": "Self-hosting setup wizard: .env with generated secrets, the AWS resources (IAM, SNS, SES), and the Docker launch — end to end from an empty directory",
   "license": "AGPL-3.0",
   "type": "module",
   "bin": {

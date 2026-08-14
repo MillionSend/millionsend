@@ -46,6 +46,68 @@ export const SES_IAM_POLICY = {
 
 export const SES_IAM_POLICY_JSON = JSON.stringify(SES_IAM_POLICY, null, 2);
 
+/**
+ * The self-host .env template, byte-identical to the repo's root .env.example
+ * (a packages/ses test pins the equivalence) so the wizard can create a .env
+ * in an empty directory with no repo clone. Edit both together.
+ */
+export function envTemplate(): string {
+  return `# MillionSend self-host configuration.
+# Save as .env, generate the two secrets below, and \`docker compose up -d\`.
+# Everything else has working local defaults.
+
+# --- Required ---
+
+# Postgres connection string. The default matches the docker-compose postgres
+# service; for local dev without Docker, point it at your own instance
+# (e.g. postgres://postgres:postgres@localhost:5432/millionsend).
+DATABASE_URL=postgres://millionsend:millionsend@postgres:5432/millionsend
+
+# Encryption key for email bodies at rest. Generate: openssl rand -base64 32
+# Losing it makes stored bodies unrecoverable; changing it orphans old bodies.
+MASTER_ENCRYPTION_KEY=
+
+# Dashboard session signing secret. Generate: openssl rand -base64 32
+BETTER_AUTH_SECRET=
+
+# Public base URL of this deployment — the origin browsers use to reach the
+# dashboard (e.g. https://mail.example.com). Sign-in is only accepted from
+# this origin; SNS subscriptions and hosted unsubscribe pages derive from it.
+# The default matches the docker-compose setup on the host machine.
+APP_BASE_URL=http://localhost:3000
+
+# --- AWS SES (bring your own account) ---
+
+# IAM credentials with ses:SendEmail / ses:SendRawEmail. Omit to use the
+# default AWS credential chain (instance profile, SSO, etc).
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+
+# Comma-separated SNS topic ARNs allowed to deliver SES events (bounces,
+# complaints, deliveries). Unset disables event ingestion entirely.
+# See SELF_HOSTING.md for the SNS setup checklist.
+SNS_TOPIC_ARNS=
+
+# SES configuration set applied to sends that have no per-domain configuration
+# set. Point its event destination at the SNS topic above so delivery events
+# reach MillionSend. Unset sends without a configuration set.
+SES_CONFIGURATION_SET=
+
+# --- Optional ---
+
+# The first user can always register; after that, signup stays closed unless
+# this is true. Keep false when the dashboard is reachable from the internet.
+ALLOW_SIGNUP=false
+
+# API port (the web dashboard is always 3000).
+PORT=3001
+
+# Leave false. true enables hosted-cloud behavior (KMS, Stripe billing).
+IS_CLOUD=false
+`;
+}
+
 /** The https origin of the URL, or null when it is not a valid https URL. */
 export function httpsOrigin(url: string | null | undefined): string | null {
   if (!url) return null;
