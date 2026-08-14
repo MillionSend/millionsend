@@ -41,13 +41,13 @@
     "name": "Name",
     "namePlaceholder": "updates.yourdomain.com",
     "nameHint": "Use a subdomain — it preserves your root domain's reputation.",
-    "nameError": "Enter a lowercase domain like updates.yourdomain.com.",
+    "nameError": "Enter a lowercase domain like <code>updates.yourdomain.com</code>.",
     "region": "Region",
     "recommended": "Recommended",
     "regionHint": "Select a region close to your users for the best performance.",
     "advanced": "Advanced options",
     "returnPath": "Custom Return-Path",
-    "returnPathHint": "Used for SPF authentication, DMARC alignment, and bounces. Avoid values that undermine credibility (e.g. testing) — they may be exposed to recipients.",
+    "returnPathHint": "Used for SPF authentication, DMARC alignment, and bounces. Avoid values that undermine credibility (e.g. <code>testing</code>) — they may be exposed to recipients.",
     "preview": {
       "title": "What recipients will see",
       "user": "orders",
@@ -59,7 +59,7 @@
     "submit": "Add domain",
     "conflict": "This domain is already added.",
     "error": "Couldn't add the domain.",
-    "credentialsError": "AWS rejected the request credentials — check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env. See SELF_HOSTING.md."
+    "credentialsError": "AWS rejected the request credentials — check <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code>. See <code>SELF_HOSTING.md</code>."
   },
   "detail": {
     "eyebrow": "Domain details",
@@ -118,6 +118,6 @@
     "recordsError": "Couldn't load DNS records.",
     "retry": "Retry"
   },
-  "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env — see SELF_HOSTING.md.",
+  "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code> — see <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Open SES setup"
 }

@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Odometer } from "@/components/odometer";
 import { PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
+import { codeRichTags } from "@/lib/code-rich-tags";
 import { useTRPC } from "@/lib/trpc";
 
 const RANGES = [7, 15, 30] as const;
@@ -186,7 +187,7 @@ export default function MetricsPage() {
       {data === undefined ? (
         <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>{t("loading")}</p>
       ) : neverSent ? (
-        <EmptyState area="metrics" headline={t("empty")} body={t("emptyHint")} />
+        <EmptyState area="metrics" headline={t("empty")} body={t.rich("emptyHint", codeRichTags)} />
       ) : (
         <>
           <div className="ms-kpi-card">

@@ -26,7 +26,7 @@ export function EmptyState({
 }: {
   area: EmptyStateArea;
   headline: string;
-  body?: string;
+  body?: ReactNode;
   cta?: ReactNode;
 }) {
   return (

@@ -9,6 +9,7 @@ import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import { isAwsCredentialError } from "@/lib/aws-errors";
+import { codeRichTags } from "@/lib/code-rich-tags";
 import { useTRPC } from "@/lib/trpc";
 import { AwsCredentialsBanner } from "../aws-credentials-banner";
 import { DOMAIN_REGIONS, type DomainRegion, regionFlag } from "../regions";
@@ -119,7 +120,9 @@ export function AddDomainForm() {
               onBlur={() => setTouched(true)}
             />
             {showNameError ? (
-              <p style={{ ...hintStyle, color: "var(--ms-danger)" }}>{t("new.nameError")}</p>
+              <p style={{ ...hintStyle, color: "var(--ms-danger)" }}>
+                {t.rich("new.nameError", codeRichTags)}
+              </p>
             ) : (
               <p style={hintStyle}>{t("new.nameHint")}</p>
             )}
@@ -188,7 +191,7 @@ export function AddDomainForm() {
                   .{previewDomain}
                 </span>
               </div>
-              <p style={hintStyle}>{t("new.returnPathHint")}</p>
+              <p style={hintStyle}>{t.rich("new.returnPathHint", codeRichTags)}</p>
             </div>
           </details>
 
@@ -197,7 +200,7 @@ export function AddDomainForm() {
               {isConflict(create.error)
                 ? t("new.conflict")
                 : isAwsCredentialError(create.error.message)
-                  ? t("new.credentialsError")
+                  ? t.rich("new.credentialsError", codeRichTags)
                   : create.error.message || t("new.error")}
             </p>
           ) : null}

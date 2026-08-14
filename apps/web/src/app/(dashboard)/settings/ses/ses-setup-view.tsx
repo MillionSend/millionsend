@@ -14,17 +14,13 @@ import {
   httpsOrigin,
   SES_IAM_POLICY_JSON,
 } from "@/lib/aws-setup-script";
+import { codeRichTags } from "@/lib/code-rich-tags";
 import { useTRPC } from "@/lib/trpc";
 
 const PRODUCTION_ACCESS_DOCS_URL =
   "https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html";
 const IAM_CREATE_POLICY_URL = "https://console.aws.amazon.com/iam/home#/policies/create";
 const IAM_CREATE_USER_URL = "https://console.aws.amazon.com/iam/home#/users/create";
-
-/* t.rich tag map: <code> in messages renders as an inline code pill. */
-const richTags = {
-  code: (chunks: React.ReactNode) => <code className="ms-code">{chunks}</code>,
-};
 
 /** Left rail of a stepper row: marker (✓ or number) above the connector line. */
 function StepRail({ marker, done, line }: { marker: string; done: boolean; line: boolean }) {
@@ -264,11 +260,11 @@ export function SesSetupView() {
             <span className="ms-badge ms-badge-success">{t("setup.recommended")}</span>
           </div>
           <p style={{ margin: "10px 0 14px", fontSize: 13, color: "var(--ms-muted)" }}>
-            {t("setup.scriptNote")}
+            {t.rich("setup.scriptNote", codeRichTags)}
           </p>
           {eventsIncluded ? null : (
             <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--ms-warn)" }}>
-              {t.rich("setup.eventsSkipped", richTags)}
+              {t.rich("setup.eventsSkipped", codeRichTags)}
             </p>
           )}
           <MonoBlock
@@ -288,7 +284,7 @@ export function SesSetupView() {
               color: "var(--ms-muted)",
             }}
           >
-            {t("setup.cfnNote")}
+            {t.rich("setup.cfnNote", codeRichTags)}
             <CopyChip value={CFN_DEPLOY_COMMAND} display="aws cloudformation deploy …" />
           </p>
         </section>
@@ -334,13 +330,13 @@ export function SesSetupView() {
                 </a>
               </li>
               <li style={stepBodyStyle}>
-                {t("setup.step2")}{" "}
+                {t.rich("setup.step2", codeRichTags)}{" "}
                 <a href={IAM_CREATE_USER_URL} target="_blank" rel="noreferrer">
                   {t("setup.step2Link")} ↗
                 </a>
               </li>
-              <li style={stepBodyStyle}>{t("setup.step3")}</li>
-              <li style={stepBodyStyle}>{t("setup.step4")}</li>
+              <li style={stepBodyStyle}>{t.rich("setup.step3", codeRichTags)}</li>
+              <li style={stepBodyStyle}>{t.rich("setup.step4", codeRichTags)}</li>
             </ol>
           </details>
         </section>
@@ -374,7 +370,7 @@ export function SesSetupView() {
               <BtnSpinner on={test.isFetching} />
               {t("test.button")}
             </button>
-            <Tooltip text={t.rich("test.note", richTags)} />
+            <Tooltip text={t.rich("test.note", codeRichTags)} />
             {credentialsOk ? null : (
               <span style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
                 {t("test.disabledHint")}
@@ -444,7 +440,7 @@ export function SesSetupView() {
           {result && !result.ok ? (
             <>
               <p style={{ margin: "14px 0 0", fontSize: 13, color: "var(--ms-danger)" }}>
-                {t.rich(`test.errors.${result.kind}`, richTags)}
+                {t.rich(`test.errors.${result.kind}`, codeRichTags)}
               </p>
               <p
                 className="ms-mono"
@@ -490,7 +486,9 @@ export function SesSetupView() {
             <Link href="/domains/new" className="ms-btn ms-btn-secondary">
               {t("next.addDomain")} →
             </Link>
-            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>{t("next.selfHosting")}</span>
+            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>
+              {t.rich("next.selfHosting", codeRichTags)}
+            </span>
           </div>
         </section>
       ) : null}
