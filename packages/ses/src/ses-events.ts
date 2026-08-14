@@ -76,17 +76,15 @@ export function parseSesEvent(raw: unknown): ParsedSesEvent | null {
     if (bounceType !== "Permanent" && bounceType !== "Transient" && bounceType !== "Undetermined") {
       return null;
     }
+    const bounced = Array.isArray(b?.bouncedRecipients)
+      ? (b.bouncedRecipients as Record<string, unknown>[])
+      : [];
+    const diagnosticCode = bounced[0]?.diagnosticCode;
     parsed.bounce = {
       bounceType,
       bounceSubType: typeof b?.bounceSubType === "string" ? b.bounceSubType : "Unknown",
       recipients: extractRecipients(b?.bouncedRecipients),
-      ...(typeof (b?.bouncedRecipients as Record<string, unknown>[] | undefined)?.[0]
-        ?.diagnosticCode === "string"
-        ? {
-            diagnosticCode: (b?.bouncedRecipients as Record<string, string>[])[0]
-              ?.diagnosticCode as string,
-          }
-        : {}),
+      ...(typeof diagnosticCode === "string" ? { diagnosticCode } : {}),
     };
     parsed.data.bounce = b;
   }

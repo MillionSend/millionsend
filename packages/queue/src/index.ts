@@ -101,6 +101,6 @@ export class Queue {
   }
 
   async stop(): Promise<void> {
-    await this.#boss.stop({ graceful: true, wait: true });
+    await this.#boss.stop({ graceful: true });
   }
 }

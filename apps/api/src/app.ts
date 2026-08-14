@@ -170,7 +170,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             .where(and(eq(schema.domains.teamId, auth.teamId), eq(schema.domains.name, fromDomain)))
         )[0]
       : undefined;
-    if (!domain || domain.status !== "verified") {
+    if (domain?.status !== "verified") {
       return c.json(
         errorBody(
           422,

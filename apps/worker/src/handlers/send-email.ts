@@ -32,7 +32,7 @@ export async function sendEmail(
     .where(eq(schema.emails.id, payload.emailId));
   // Only queued emails are sendable: quota-parked, already-sent, and failed
   // rows are skipped no matter how the job arrived.
-  if (!email || email.latestStatus !== "queued") return "skipped";
+  if (email?.latestStatus !== "queued") return "skipped";
   if (email.scheduledAt && email.scheduledAt.getTime() > Date.now()) return "skipped";
 
   const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
@@ -53,12 +53,12 @@ export async function sendEmail(
   const mime = await buildRawMime({
     from: email.from,
     to: email.to,
-    cc: email.cc ?? undefined,
-    bcc: email.bcc ?? undefined,
-    replyTo: email.replyTo ?? undefined,
+    ...(email.cc ? { cc: email.cc } : {}),
+    ...(email.bcc ? { bcc: email.bcc } : {}),
+    ...(email.replyTo ? { replyTo: email.replyTo } : {}),
     subject: email.subject,
-    html: body.html ?? undefined,
-    text: body.text ?? undefined,
+    ...(body.html ? { html: body.html } : {}),
+    ...(body.text ? { text: body.text } : {}),
     headers: { "X-MillionSend-Email-ID": email.id },
   });
 
