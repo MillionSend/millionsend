@@ -23,6 +23,7 @@ export interface PopoverMenuItem {
   label: string;
   onSelect: () => void;
   danger?: boolean;
+  disabled?: boolean;
   /** Right-aligned glyph, e.g. "↗" for external destinations. */
   trailing?: string;
 }
@@ -92,6 +93,7 @@ export function PopoverMenu({
                 type="button"
                 role="menuitem"
                 className={item.danger ? "ms-menu-item danger" : "ms-menu-item"}
+                disabled={item.disabled}
                 onClick={() => {
                   setOpen(false);
                   item.onSelect();

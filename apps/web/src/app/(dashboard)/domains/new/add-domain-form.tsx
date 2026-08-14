@@ -2,14 +2,15 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import { Fragment, useState } from "react";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import { isAwsCredentialError } from "@/lib/aws-errors";
 import { codeRichTags } from "@/lib/code-rich-tags";
+import { formatMailDate } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { AwsCredentialsBanner } from "../aws-credentials-banner";
 import { DOMAIN_REGIONS, type DomainRegion, regionFlag } from "../regions";
@@ -53,8 +54,9 @@ function StepRail() {
   );
 }
 
-export function AddDomainForm() {
+export function AddDomainForm({ userEmail }: { userEmail: string }) {
   const t = useTranslations("domains");
+  const locale = useLocale();
   const router = useRouter();
   const trpc = useTRPC();
   const team = useQuery(trpc.settings.team.get.queryOptions());
@@ -62,6 +64,7 @@ export function AddDomainForm() {
   const [region, setRegion] = useState<DomainRegion>("us-east-1");
   const [returnPath, setReturnPath] = useState("send");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [touched, setTouched] = useState(false);
 
   const create = useMutation(
@@ -216,7 +219,7 @@ export function AddDomainForm() {
           </button>
         </form>
 
-        <div className="ms-stepper-side" style={{ flex: 1, minWidth: 0 }} aria-hidden="true">
+        <div className="ms-stepper-side" style={{ flex: 1, minWidth: 0 }}>
           <p className="ms-microlabel" style={{ margin: "0 0 10px" }}>
             {t("new.preview.title")}
           </p>
@@ -246,19 +249,67 @@ export function AddDomainForm() {
                     {`<${t("new.preview.user")}@${previewDomain}>`}
                   </span>
                 </div>
-                <div
+                <button
+                  type="button"
+                  aria-expanded={detailsOpen}
+                  onClick={() => setDetailsOpen((open) => !open)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setDetailsOpen(false);
+                  }}
                   style={{
                     display: "flex",
                     alignItems: "center",
                     gap: 3,
                     fontSize: 12.5,
+                    fontFamily: "inherit",
                     color: "var(--ms-muted)",
+                    background: "none",
+                    border: 0,
+                    padding: 0,
+                    cursor: "pointer",
                   }}
                 >
-                  {t("new.preview.toMe")} <ChevronGlyph size={10} />
-                </div>
+                  {t("new.preview.toMe")}{" "}
+                  <ChevronGlyph size={10} direction={detailsOpen ? "up" : "down"} />
+                </button>
               </div>
             </div>
+            {detailsOpen ? (
+              <div
+                style={{
+                  marginTop: 14,
+                  paddingTop: 12,
+                  borderTop: "1px solid var(--ms-line)",
+                  display: "grid",
+                  gridTemplateColumns: "max-content 1fr",
+                  columnGap: 12,
+                  rowGap: 4,
+                  fontSize: 12.5,
+                  animation: "ms-fade 120ms var(--ms-ease) both",
+                }}
+              >
+                {(
+                  [
+                    ["from", `${teamName} <${t("new.preview.user")}@${previewDomain}>`],
+                    ["to", userEmail],
+                    ["date", formatMailDate(new Date(), locale)],
+                    ["subject", t("new.preview.subject")],
+                    ["mailedBy", `${returnPath || "send"}.${previewDomain}`],
+                    ["signedBy", previewDomain],
+                    ["security", t("new.preview.details.securityValue")],
+                  ] as const
+                ).map(([key, value]) => (
+                  <Fragment key={key}>
+                    <span style={{ color: "var(--ms-muted)", textAlign: "right" }}>
+                      {t(`new.preview.details.${key}`)}
+                    </span>
+                    <span style={{ color: "var(--ms-bone)", overflowWrap: "anywhere" }}>
+                      {value}
+                    </span>
+                  </Fragment>
+                ))}
+              </div>
+            ) : null}
             <div style={{ fontSize: 15, color: "var(--ms-bone)", fontWeight: 600, marginTop: 14 }}>
               {t("new.preview.subject")}
             </div>

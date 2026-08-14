@@ -556,6 +556,13 @@ svg:focus {
 .ms-menu-item.danger {
   color: var(--ms-danger);
 }
+.ms-menu-item:disabled {
+  color: var(--ms-faint);
+  cursor: default;
+}
+.ms-menu-item:disabled:hover {
+  background: none;
+}
 .ms-menu-item:focus-visible {
   outline: none;
   box-shadow: var(--ms-focus-ring);
