@@ -1,19 +1,15 @@
 "use client";
 
+import { httpsOrigin, SES_IAM_POLICY_JSON } from "@millionsend/ses/setup-constants";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
-import {
-  buildAwsSetupScript,
-  CFN_DEPLOY_COMMAND,
-  httpsOrigin,
-  SES_IAM_POLICY_JSON,
-} from "@/lib/aws-setup-script";
+import { buildAwsSetupScript, CFN_DEPLOY_COMMAND, cfnQuickCreateUrl } from "@/lib/aws-setup-script";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { useTRPC } from "@/lib/trpc";
 
@@ -230,17 +226,37 @@ export function SesSetupView() {
   const [manualOpen, setManualOpen] = useState(false);
   const locale = useLocale();
   const trpc = useTRPC();
-  const readiness = useQuery(trpc.system.awsReadiness.queryOptions());
-  const sesEnv = useQuery(trpc.system.sesEnv.queryOptions());
+  // Poll while credentials are missing so the step markers flip live once the
+  // operator's CLI run lands in .env and the server restarts.
+  const readiness = useQuery(
+    trpc.system.awsReadiness.queryOptions(undefined, {
+      refetchInterval: (query) => (query.state.data?.credentialsConfigured ? false : 5000),
+    }),
+  );
+  const credentialsOk = readiness.data?.credentialsConfigured ?? false;
+  const sesEnv = useQuery(
+    trpc.system.sesEnv.queryOptions(undefined, {
+      refetchInterval: credentialsOk ? false : 5000,
+    }),
+  );
   // On demand only: GetAccount runs when the operator clicks "Test connection".
   const test = useQuery(
     trpc.system.sesAccount.queryOptions(undefined, { enabled: false, retry: false }),
   );
+  // Auto-run the connection test once when credentials flip from missing to
+  // configured while the page is open (never on a page that loads configured).
+  const testRefetch = test.refetch;
+  const prevCredentialsOk = useRef<boolean | null>(null);
+  const hasReadiness = readiness.data !== undefined;
+  useEffect(() => {
+    if (!hasReadiness) return;
+    if (prevCredentialsOk.current === false && credentialsOk) void testRefetch();
+    prevCredentialsOk.current = credentialsOk;
+  }, [hasReadiness, credentialsOk, testRefetch]);
   if (!readiness.data || !sesEnv.data) return null;
 
   const fmt = new Intl.NumberFormat(locale);
   const result = test.data;
-  const credentialsOk = readiness.data.credentialsConfigured;
   const eventsOk = sesEnv.data.snsTopicsConfigured && sesEnv.data.configurationSetConfigured;
   const eventsIncluded = httpsOrigin(sesEnv.data.appBaseUrl) !== null;
   const setupScript = buildAwsSetupScript({
@@ -255,24 +271,24 @@ export function SesSetupView() {
         <section className="ms-card" style={{ ...stepCardStyle, padding: 22 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
-              {t("setup.scriptTitle")}
+              {t("setup.cliTitle")}
             </span>
             <span className="ms-badge ms-badge-success">{t("setup.recommended")}</span>
           </div>
-          <p style={{ margin: "10px 0 14px", fontSize: 13, color: "var(--ms-muted)" }}>
-            {t.rich("setup.scriptNote", codeRichTags)}
+          <p style={{ margin: "10px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
+            {t.rich("setup.cliNote", codeRichTags)}
           </p>
-          {eventsIncluded ? null : (
-            <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--ms-warn)" }}>
-              {t.rich("setup.eventsSkipped", codeRichTags)}
-            </p>
-          )}
-          <MonoBlock
-            title="millionsend-aws-setup.sh"
-            value={setupScript}
-            maxHeight={300}
-            collapsible
-          />
+        </section>
+
+        <section className="ms-card" style={{ ...stepCardStyle, padding: 22, marginTop: 14 }}>
+          <a
+            href={cfnQuickCreateUrl(readiness.data.region)}
+            target="_blank"
+            rel="noreferrer"
+            className="ms-btn ms-btn-secondary"
+          >
+            {t("setup.cfnButton")} ↗
+          </a>
           <p
             style={{
               display: "flex",
@@ -287,6 +303,24 @@ export function SesSetupView() {
             {t.rich("setup.cfnNote", codeRichTags)}
             <CopyChip value={CFN_DEPLOY_COMMAND} display="aws cloudformation deploy …" />
           </p>
+        </section>
+
+        <section className="ms-card" style={{ ...stepCardStyle, padding: 22, marginTop: 14 }}>
+          <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>{t("setup.scriptTitle")}</span>
+          <p style={{ margin: "10px 0 14px", fontSize: 13, color: "var(--ms-muted)" }}>
+            {t.rich("setup.scriptNote", codeRichTags)}
+          </p>
+          {eventsIncluded ? null : (
+            <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--ms-warn)" }}>
+              {t.rich("setup.eventsSkipped", codeRichTags)}
+            </p>
+          )}
+          <MonoBlock
+            title="millionsend-aws-setup.sh"
+            value={setupScript}
+            maxHeight={300}
+            collapsible
+          />
         </section>
 
         <section className="ms-card" style={{ ...stepCardStyle, padding: 24, marginTop: 14 }}>
@@ -421,6 +455,17 @@ export function SesSetupView() {
                   <a href={PRODUCTION_ACCESS_DOCS_URL} target="_blank" rel="noreferrer">
                     {t("test.sandboxLink")} ↗
                   </a>
+                  <div style={{ marginTop: 12 }}>
+                    <MonoBlock
+                      title="production-access-request.txt"
+                      value={t("test.requestTemplate")}
+                      maxHeight={260}
+                      collapsible
+                    />
+                  </div>
+                  <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
+                    {t.rich("test.requestTemplateNote", codeRichTags)}
+                  </p>
                 </div>
               )}
               {sesEnv.data.maxSendRate !== result.quota.maxSendRate ? (

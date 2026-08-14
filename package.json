@@ -11,6 +11,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "typecheck": "turbo run typecheck",
+    "setup:aws": "tsx scripts/aws-setup/index.ts",
     "test": "turbo run test",
     "db:generate": "pnpm --filter @millionsend/db db:generate"
   },

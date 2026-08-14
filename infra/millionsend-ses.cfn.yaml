@@ -34,7 +34,7 @@ Resources:
     Properties:
       ManagedPolicyName: millionsend-ses
       # Every SES action the instance issues — mirrors SES_IAM_POLICY in
-      # apps/web/src/lib/aws-setup-script.ts.
+      # packages/ses/src/setup.ts.
       PolicyDocument:
         Version: "2012-10-17"
         Statement:

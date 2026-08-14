@@ -34,6 +34,7 @@ export function EmptyState({
       <div className="ms-empty-scene" aria-hidden="true">
         {/* Both theme variants stay in the DOM (each <20KB); the CSS
             ms-dark-only/ms-light-only swap makes the toggle instant. */}
+        {/* biome-ignore lint/performance/noImgElement: tiny pre-sized webp tile, nothing for next/image to optimize */}
         <img
           className="ms-empty-tile ms-dark-only"
           src={`/empty-states/${area}.webp`}
@@ -41,6 +42,7 @@ export function EmptyState({
           width={96}
           height={96}
         />
+        {/* biome-ignore lint/performance/noImgElement: tiny pre-sized webp tile, nothing for next/image to optimize */}
         <img
           className="ms-empty-tile ms-light-only"
           src={`/empty-states/light/${area}.webp`}

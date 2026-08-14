@@ -1,16 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildAwsSetupScript, httpsOrigin } from "@/lib/aws-setup-script";
+import { buildAwsSetupScript, cfnQuickCreateUrl } from "@/lib/aws-setup-script";
 
-describe("httpsOrigin", () => {
-  it("reduces a valid https URL to its origin", () => {
-    expect(httpsOrigin("https://mail.example.com/some/path?q=1")).toBe("https://mail.example.com");
-  });
-
-  it("rejects http, garbage, and empty input", () => {
-    expect(httpsOrigin("http://mail.example.com")).toBeNull();
-    expect(httpsOrigin("not a url")).toBeNull();
-    expect(httpsOrigin("")).toBeNull();
-    expect(httpsOrigin(null)).toBeNull();
+describe("cfnQuickCreateUrl", () => {
+  it("targets the console review page for the given region", () => {
+    const url = cfnQuickCreateUrl("sa-east-1");
+    expect(url).toContain("region=sa-east-1");
+    expect(url).toContain("stackName=millionsend");
+    expect(url).toContain("millionsend-public.s3.amazonaws.com/millionsend-ses.cfn.yaml");
   });
 });
 
