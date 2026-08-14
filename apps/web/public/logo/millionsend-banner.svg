@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 6043 1444" role="img" aria-label="MillionSend">
-<title>MillionSend — bone wordmark falling into steel at the bottom-right, on black. Text is outlined Erode Medium; no font required.</title>
+<title>MillionSend — bone wordmark falling subtly into steel at the bottom-right, on black. Text is outlined Erode Medium; no font required.</title>
 <defs>
 <radialGradient id="ms-b-glow" cx="0.5" cy="0.45" r="0.62">
 <stop offset="0" stop-color="#121316"/><stop offset="0.75" stop-color="#000000"/>
 </radialGradient>
-<radialGradient id="ms-b-steel-t" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="translate(1100 -100) scale(4600 1250)">
-<stop offset="0" stop-color="#F4F1EA"/><stop offset="0.55" stop-color="#F4F1EA"/><stop offset="0.75" stop-color="#C9CCD1"/><stop offset="0.92" stop-color="#6E757F"/><stop offset="1" stop-color="#565D66"/>
+<radialGradient id="ms-b-steel-t" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="translate(1100 -100) scale(5100 1350)">
+<stop offset="0" stop-color="#F4F1EA"/><stop offset="0.75" stop-color="#F4F1EA"/><stop offset="0.87" stop-color="#C9CCD1"/><stop offset="0.97" stop-color="#666D77"/><stop offset="1" stop-color="#666D77"/>
 </radialGradient>
-<radialGradient id="ms-b-steel-m" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="translate(1100 704) scale(4600 1250)">
-<stop offset="0" stop-color="#F4F1EA"/><stop offset="0.55" stop-color="#F4F1EA"/><stop offset="0.75" stop-color="#C9CCD1"/><stop offset="0.92" stop-color="#6E757F"/><stop offset="1" stop-color="#565D66"/>
+<radialGradient id="ms-b-steel-m" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="translate(1100 704) scale(5100 1350)">
+<stop offset="0" stop-color="#F4F1EA"/><stop offset="0.75" stop-color="#F4F1EA"/><stop offset="0.87" stop-color="#C9CCD1"/><stop offset="0.97" stop-color="#666D77"/><stop offset="1" stop-color="#666D77"/>
 </radialGradient>
 <clipPath id="ms-b-mcut"><rect x="222" y="0" width="613" height="604"/></clipPath>
 </defs>
