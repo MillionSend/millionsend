@@ -1,4 +1,4 @@
-import PgBoss from "pg-boss";
+import { PgBoss } from "pg-boss";
 
 /**
  * Thin, typed wrapper over pg-boss — the seam behind which Redis/BullMQ can
@@ -50,7 +50,7 @@ export class Queue {
 
   static async start(databaseUrl: string): Promise<Queue> {
     const boss = new PgBoss({ connectionString: databaseUrl, schema: "pgboss" });
-    boss.on("error", (err) => console.error("pg-boss error", err));
+    boss.on("error", (err: Error) => console.error("pg-boss error", err));
     await boss.start();
     return new Queue(boss);
   }
@@ -82,7 +82,7 @@ export class Queue {
     await this.#boss.work<JobPayloads[N]>(
       name,
       { batchSize: opts.batchSize ?? 1 },
-      async (jobs) => {
+      async (jobs: { data: JobPayloads[N] }[]) => {
         for (const job of jobs) {
           await handler(job.data);
         }
