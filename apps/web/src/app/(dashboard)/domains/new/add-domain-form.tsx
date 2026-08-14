@@ -1,9 +1,12 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useState } from "react";
+import { CopyChip } from "@/components/copy-chip";
+import { type DnsRecord, DnsRecordsTable } from "@/components/dns-records-table";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
@@ -28,8 +31,8 @@ function isConflict(error: unknown): boolean {
   return (error as { data?: { code?: string } } | null)?.data?.code === "CONFLICT";
 }
 
-/** The canvas stepper rail: lit 01, hairline, faint 02. */
-function StepRail() {
+/** The canvas stepper rail: the current step lit, the other faint, hairline between. */
+function StepRail({ step }: { step: 1 | 2 }) {
   return (
     <div
       aria-hidden="true"
@@ -43,13 +46,123 @@ function StepRail() {
         alignSelf: "stretch",
       }}
     >
-      <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-bone)" }}>
+      <span
+        className="ms-mono"
+        style={{ fontSize: 11, color: step === 1 ? "var(--ms-bone)" : "var(--ms-faint)" }}
+      >
         01
       </span>
       <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />
-      <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-faint)", marginTop: 6 }}>
+      <span
+        className="ms-mono"
+        style={{
+          fontSize: 11,
+          color: step === 2 ? "var(--ms-bone)" : "var(--ms-faint)",
+          marginTop: 6,
+        }}
+      >
         02
       </span>
+    </div>
+  );
+}
+
+/** Wizard step 02: the created domain's DNS records, rendered in-page after create. */
+function DnsRecordsStep({ id }: { id: string }) {
+  const t = useTranslations("domains");
+  const trpc = useTRPC();
+  const domain = useQuery(trpc.domains.get.queryOptions({ id }));
+  const records = useQuery(trpc.domains.records.queryOptions({ id }));
+  const provider = records.data?.provider ?? null;
+  return (
+    <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
+      <StepRail step={2} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            width: 520,
+            maxWidth: "100%",
+            background: "var(--ms-panel)",
+            border: "1px solid var(--ms-line-strong)",
+            borderRadius: "var(--ms-r-card)",
+            padding: "18px 24px",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: 16,
+              fontWeight: 600,
+              color: "var(--ms-bone)",
+            }}
+          >
+            <span>{t("new.cardTitle")}</span>
+            <span style={{ color: "var(--ms-success)", fontWeight: 400 }}>✓</span>
+          </div>
+          {domain.isSuccess ? (
+            <div style={{ marginTop: 10 }}>
+              <CopyChip value={domain.data.name} />
+            </div>
+          ) : null}
+        </div>
+
+        <h2
+          className="ms-display"
+          style={{
+            fontSize: 22,
+            margin: "28px 0 0",
+            fontWeight: 500,
+            color: "var(--ms-bone)",
+          }}
+        >
+          {provider
+            ? t("detail.recordsHeading", { provider: provider.name })
+            : t("detail.recordsHeadingGeneric")}
+        </h2>
+        <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 6 }}>
+          {provider ? t("detail.recordsSublineProvider") : t("detail.recordsSubline")}
+        </div>
+
+        {records.isError ? (
+          <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 20 }}>
+            <p style={{ margin: 0, fontSize: "var(--ms-fs-ui)" }}>{t("detail.recordsError")}</p>
+            <button
+              type="button"
+              className="ms-btn ms-btn-secondary"
+              onClick={() => records.refetch()}
+            >
+              {t("detail.retry")}
+            </button>
+          </div>
+        ) : records.isSuccess ? (
+          <div style={{ marginTop: 22 }}>
+            <DnsRecordsTable records={records.data.records as DnsRecord[]} />
+          </div>
+        ) : (
+          <div
+            style={{
+              height: 120,
+              marginTop: 22,
+              maxWidth: 1000,
+              borderRadius: "var(--ms-r-input)",
+              background: "var(--ms-inset)",
+            }}
+          />
+        )}
+
+        <div style={{ display: "flex", gap: 10, marginTop: 24, alignItems: "center" }}>
+          <Link
+            className="ms-btn ms-btn-primary"
+            style={{ textDecoration: "none" }}
+            href={`/domains/${id}`}
+          >
+            {t("new.viewDomain")}
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
@@ -67,9 +180,12 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [touched, setTouched] = useState(false);
 
+  // Step 02 lives at ?created=<id> so a refresh (or shared link) lands back on
+  // the new domain's records instead of an empty form.
+  const createdId = useSearchParams().get("created");
   const create = useMutation(
     trpc.domains.create.mutationOptions({
-      onSuccess: ({ id }) => router.push(`/domains/${id}`),
+      onSuccess: ({ id }) => router.replace(`/domains/new?created=${id}`),
     }),
   );
 
@@ -85,11 +201,13 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
     create.mutate({ name, region, mailFromSubdomain: returnPath });
   }
 
+  if (createdId) return <DnsRecordsStep id={createdId} />;
+
   return (
     <>
       <AwsCredentialsBanner />
       <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
-        <StepRail />
+        <StepRail step={1} />
 
         <form
           onSubmit={onSubmit}

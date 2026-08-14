@@ -37,6 +37,8 @@
   "new": {
     "title": "Add domain",
     "stepLine": "step 1 of 2 · domain & region → DNS records",
+    "stepLine2": "step 2 of 2 · add the records at your DNS provider",
+    "viewDomain": "Open domain page",
     "cardTitle": "Domain",
     "name": "Name",
     "namePlaceholder": "updates.yourdomain.com",
@@ -75,15 +77,7 @@
     "eyebrow": "Domain details",
     "created": "Created",
     "status": "Status",
-    "providerLabel": "Provider",
     "region": "Region",
-    "subline": {
-      "added": "added {time}",
-      "verified": "verified {time}",
-      "provider": "provider: {name}",
-      "recordsFound": "{found} of {total} records found",
-      "sent": "{count, number} sent from this domain"
-    },
     "dnsTitle": "DNS records",
     "recordsHeading": "Add these records at {provider}",
     "recordsHeadingGeneric": "Add these records at your DNS provider",
@@ -103,9 +97,8 @@
       "status": "Status"
     },
     "ttlAuto": "Auto",
-    "verify": "I've already added the records",
+    "verify": "Verify DNS records",
     "goToProvider": "Go to {provider}",
-    "honestNote": "SES values shown honestly — nothing proxied or hidden",
     "moreActions": "More actions",
     "forwardInstructions": "Forward instructions",
     "forwardSubject": "DNS records for {domain}",

@@ -82,17 +82,6 @@ export function formatDurationShort(ms: number): string {
 }
 
 /**
- * Middle truncation preserving both ends ("p=MIGfMA…QIDAQAB"). Returns null
- * when the value fits — callers render the gap as a dim […] token and must
- * keep the full value behind a copy affordance.
- */
-export function midTruncateParts(value: string, max = 32): { head: string; tail: string } | null {
-  if (value.length <= max) return null;
-  const keep = Math.floor((max - 3) / 2);
-  return { head: value.slice(0, keep), tail: value.slice(-keep) };
-}
-
-/**
  * "ms_live_••••••••abcd" — drops the 6 indexed secret chars the stored
  * tokenPrefix carries; the mask shows only the scheme and the last 4.
  * The scheme is matched structurally, not by splitting on the last "_":

@@ -24,7 +24,10 @@ export function CopyChip({ value, display }: { value: string; display?: React.Re
   const { copied, copy, label } = useCopy(value);
   return (
     <span className="ms-chip">
-      {display ?? value}
+      {/* Width-constrained chips (table cells) end-ellipsize; the full value is copied. */}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {display ?? value}
+      </span>
       <button type="button" onClick={copy} aria-label={label}>
         {copied ? "✓" : "⧉"}
       </button>
