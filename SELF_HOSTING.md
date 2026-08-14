@@ -126,9 +126,10 @@ signup deliberately.
 <summary><b>Operations</b></summary>
 
 - Send rate and email retention are managed in the dashboard: Settings → Instance
-  (owner/admin). The env vars `SES_MAX_SEND_RATE` and `EMAIL_RETENTION_DAYS` are the
-  boot defaults; a value saved in the dashboard overrides them (the worker picks up a
-  rate change within a minute, retention on the next purge run).
+  (owner/admin). Defaults are 14/s and 30 days until changed there; the worker picks
+  up a rate change within a minute, retention on the next purge run. (`SES_MAX_SEND_RATE`
+  and `EMAIL_RETENTION_DAYS` remain honored as boot overrides if set in the
+  environment, but are no longer part of the documented setup.)
 - One worker container only: the SES rate limiter is in-memory, so N worker replicas
   send at N × the configured send rate. Scale the worker vertically, or divide the
   rate by the replica count.
