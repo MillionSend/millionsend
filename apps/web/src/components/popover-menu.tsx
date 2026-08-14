@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { EllipsisGlyph } from "./icons/nav-icons.js";
 
 /** Closes an open popover when the pointer goes down outside `ref`. */
 export function useDismiss(
@@ -35,12 +36,12 @@ export function PopoverMenu({
   ariaLabel,
   items,
   align = "right",
-  triggerGlyph = "…",
+  triggerGlyph,
 }: {
   ariaLabel: string;
   items: (PopoverMenuItem | null)[];
   align?: "left" | "right";
-  triggerGlyph?: string;
+  triggerGlyph?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -68,7 +69,7 @@ export function PopoverMenu({
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        {triggerGlyph}
+        {triggerGlyph ?? <EllipsisGlyph />}
       </button>
       {open ? (
         <div

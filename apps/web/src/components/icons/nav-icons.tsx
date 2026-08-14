@@ -344,3 +344,21 @@ export function NavGlyph({
   const Glyph = GLYPHS[name];
   return <Glyph on={hovered && !(reduced ?? false)} size={size} />;
 }
+
+/** Three-dot overflow glyph — replaces text ellipsis in menu triggers. */
+export function EllipsisGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      style={{ display: "block", flex: "none" }}
+    >
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="19" cy="12" r="2" />
+    </svg>
+  );
+}
