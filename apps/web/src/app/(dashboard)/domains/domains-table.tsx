@@ -137,7 +137,10 @@ export function DomainsView() {
         />
       ) : (
         <>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}>
+          <div
+            className="ms-filter-row"
+            style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
+          >
             {/* Search stretches to fill the filter row; the selects keep fixed widths. */}
             <div style={{ flex: 1, minWidth: 160 }}>
               <input

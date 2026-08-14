@@ -257,6 +257,54 @@ export function CodeGlyph({ size = 16 }: { size?: number }) {
   );
 }
 
+/**
+ * Canonical dropdown/disclosure chevron (the Select trigger's glyph) — never
+ * a text "⌄". Inherits currentColor; `direction="up"` rotates 180° with a
+ * transition so open/close flips animate.
+ */
+export function ChevronGlyph({
+  size = 12,
+  direction = "down",
+}: {
+  size?: number;
+  direction?: "down" | "up";
+}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+      style={{
+        flex: "none",
+        display: "block",
+        transform: direction === "up" ? "rotate(180deg)" : "none",
+        transition: "transform var(--ms-dur-fast) var(--ms-ease)",
+      }}
+    >
+      <path
+        d="M3 4.5 6 7.5 9 4.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Static three-line menu glyph for the mobile nav toggle. */
+export function MenuGlyph({ size = 16 }: { size?: number }) {
+  return (
+    <Svg size={size} strokeWidth={1.8}>
+      <path d="M4 6h16" />
+      <path d="M4 12h16" />
+      <path d="M4 18h16" />
+    </Svg>
+  );
+}
+
 /** Static plus glyph for "add / create" buttons — never a text "+" in labels. */
 export function PlusGlyph({ size = 14 }: { size?: number }) {
   return (

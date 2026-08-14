@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
-import { PlusGlyph } from "@/components/icons/nav-icons";
+import { ChevronGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { useDismiss } from "@/components/popover-menu";
 import { BtnSpinner } from "@/components/spinner";
@@ -55,22 +55,21 @@ function PlanBadge({ plan }: { plan: string }) {
 /** The tiny stacked up/down chevrons on the switcher trigger. */
 function ChevronStack() {
   return (
-    <svg width="9" height="15" viewBox="0 0 9 15" fill="none" aria-hidden="true" role="img">
-      <path
-        d="M1.5 5.25 4.5 2.25 7.5 5.25"
-        stroke="var(--ms-muted)"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M1.5 9.75 4.5 12.75 7.5 9.75"
-        stroke="var(--ms-muted)"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <span
+      aria-hidden="true"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        color: "var(--ms-muted)",
+      }}
+    >
+      <ChevronGlyph size={10} direction="up" />
+      {/* Pull the halves together so the pair reads as one glyph. */}
+      <span style={{ display: "flex", marginTop: -3 }}>
+        <ChevronGlyph size={10} />
+      </span>
+    </span>
   );
 }
 

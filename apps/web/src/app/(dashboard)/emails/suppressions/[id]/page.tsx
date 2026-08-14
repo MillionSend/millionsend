@@ -83,6 +83,7 @@ export default function SuppressionDetailPage() {
       />
 
       <div
+        className="ms-meta-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(3, 1fr)",

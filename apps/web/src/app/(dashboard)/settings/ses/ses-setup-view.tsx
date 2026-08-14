@@ -3,7 +3,9 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+import { useState } from "react";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
+import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import {
@@ -12,7 +14,6 @@ import {
   httpsOrigin,
   SES_IAM_POLICY_JSON,
 } from "@/lib/aws-setup-script";
-import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
 const PRODUCTION_ACCESS_DOCS_URL =
@@ -30,6 +31,7 @@ function StepRail({ marker, done, line }: { marker: string; done: boolean; line:
   return (
     <div
       aria-hidden="true"
+      className="ms-stepper-rail"
       style={{
         width: 30,
         flex: "none",
@@ -65,7 +67,7 @@ function Step({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ display: "flex", gap: 18 }}>
+    <div className="ms-step" style={{ display: "flex", gap: 18 }}>
       <StepRail marker={marker} done={done} line={!last} />
       {/* minWidth 0 so wide <pre> content scrolls inside its block, never the page */}
       <div style={{ flex: 1, minWidth: 0, paddingBottom: last ? 0 : 24 }}>
@@ -97,6 +99,7 @@ function MonoBlock({
   maxHeight?: number;
   collapsible?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const header = (
     <>
       <span className="ms-mono" style={{ fontSize: 11.5, color: "var(--ms-muted)" }}>
@@ -111,8 +114,8 @@ function MonoBlock({
           <CopyGlyph value={value} />
         </span>
         {collapsible ? (
-          <span style={{ color: "var(--ms-muted)" }} aria-hidden="true">
-            ⌄
+          <span style={{ display: "flex", alignItems: "center", color: "var(--ms-muted)" }}>
+            <ChevronGlyph direction={open ? "up" : "down"} />
           </span>
         ) : null}
       </span>
@@ -151,7 +154,7 @@ function MonoBlock({
       }}
     >
       {collapsible ? (
-        <details>
+        <details onToggle={(e) => setOpen(e.currentTarget.open)}>
           <summary style={{ ...headerStyle, cursor: "pointer", listStyle: "none" }}>
             {header}
           </summary>
@@ -215,6 +218,10 @@ function QuotaFigure({ label, value, unit }: { label: string; value: string; uni
   );
 }
 
+/* Cards must span the step content column; border-box because there is no
+   global box-sizing reset, so width:100% + padding would otherwise overflow. */
+const stepCardStyle: React.CSSProperties = { width: "100%", boxSizing: "border-box" };
+
 const stepBodyStyle: React.CSSProperties = {
   margin: 0,
   fontSize: 13,
@@ -224,6 +231,7 @@ const stepBodyStyle: React.CSSProperties = {
 
 export function SesSetupView() {
   const t = useTranslations("settings.ses");
+  const [manualOpen, setManualOpen] = useState(false);
   const locale = useLocale();
   const trpc = useTRPC();
   const readiness = useQuery(trpc.system.awsReadiness.queryOptions());
@@ -248,15 +256,7 @@ export function SesSetupView() {
   return (
     <div style={{ maxWidth: 880 }}>
       <Step marker="01" title={t("setup.stepTitle")}>
-        <section
-          style={{
-            backgroundColor: "var(--ms-ground)",
-            backgroundImage: statusGlow("success", 15),
-            border: "1px solid var(--ms-success-border)",
-            borderRadius: "var(--ms-r-card)",
-            padding: 22,
-          }}
-        >
+        <section className="ms-card" style={{ ...stepCardStyle, padding: 22 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
               {t("setup.scriptTitle")}
@@ -293,11 +293,12 @@ export function SesSetupView() {
           </p>
         </section>
 
-        <section className="ms-card" style={{ padding: 24, marginTop: 14 }}>
-          <details>
+        <section className="ms-card" style={{ ...stepCardStyle, padding: 24, marginTop: 14 }}>
+          <details onToggle={(e) => setManualOpen(e.currentTarget.open)}>
             <summary
               style={{
                 display: "flex",
+                alignItems: "center",
                 justifyContent: "space-between",
                 cursor: "pointer",
                 listStyle: "none",
@@ -306,7 +307,9 @@ export function SesSetupView() {
               }}
             >
               <span>{t("setup.manualTitle")}</span>
-              <span style={{ color: "var(--ms-muted)" }}>⌄</span>
+              <span style={{ display: "flex", alignItems: "center", color: "var(--ms-muted)" }}>
+                <ChevronGlyph direction={manualOpen ? "up" : "down"} />
+              </span>
             </summary>
             <ol
               style={{
@@ -344,7 +347,7 @@ export function SesSetupView() {
       </Step>
 
       <Step marker="02" done={credentialsOk} title={t("credentials.title")}>
-        <section className="ms-card" style={{ padding: 24 }}>
+        <section className="ms-card" style={{ ...stepCardStyle, padding: 24 }}>
           <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--ms-muted)" }}>
             {t("subtitle")}
           </p>
@@ -393,7 +396,7 @@ export function SesSetupView() {
                   {result.productionAccess ? t("test.production") : t("test.sandbox")}
                 </span>
               </div>
-              <div style={{ display: "flex", gap: 48, marginTop: 18 }}>
+              <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 18 }}>
                 <QuotaFigure label={t("test.quotaMax")} value={fmt.format(result.quota.max24h)} />
                 <QuotaFigure
                   label={t("test.quotaSent")}
@@ -455,7 +458,7 @@ export function SesSetupView() {
       </Step>
 
       <Step marker="03" done={eventsOk} last title={t("events.title")}>
-        <section className="ms-card" style={{ padding: 24 }}>
+        <section className="ms-card" style={{ ...stepCardStyle, padding: 24 }}>
           <CheckRow
             ok={sesEnv.data.snsTopicsConfigured}
             name="SNS_TOPIC_ARNS"

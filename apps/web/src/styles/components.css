@@ -807,7 +807,8 @@ svg:focus {
   border: 1px solid var(--ms-line-strong);
   border-radius: 8px;
   padding: 8px 10px;
-  max-width: 260px;
+  /* Wide enough that typical hints render as one line; long text still wraps. */
+  max-width: min(420px, calc(100vw - 32px));
   font-size: 12px;
   line-height: 1.45;
   color: var(--ms-bone);
@@ -876,4 +877,200 @@ svg:focus {
   border: 1px solid var(--ms-line);
   border-radius: var(--ms-r-chip);
   padding: 1px 5px;
+}
+
+/* ============================================================================
+   RESPONSIVE — mobile pass (breakpoint 900px; DESIGN.md Layout).
+   Media queries only: desktop ≥900px keeps every rule above pixel-identical.
+   !important is required only where a rule overrides an inline style. */
+
+@media (max-width: 899px) {
+  /* App shell: topbar over content; sidebar becomes an off-canvas drawer. */
+  .ms-app-shell {
+    flex-direction: column;
+  }
+  .ms-mobile-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 48px;
+    padding: 0 12px;
+    flex: none;
+    box-sizing: border-box;
+    background: var(--ms-panel);
+    border-bottom: 1px solid var(--ms-line);
+  }
+  .ms-drawer-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.72);
+    z-index: var(--ms-z-modal);
+    animation: ms-fade var(--ms-dur-base) var(--ms-ease);
+  }
+  .ms-sidebar {
+    position: fixed !important;
+    height: 100dvh !important;
+    left: 0;
+    top: 0;
+    /* One above the scrim; body-portaled modals mount later in the DOM and
+       still paint over both at the same z token. */
+    z-index: calc(var(--ms-z-modal) + 1);
+    transform: translateX(-104%);
+    visibility: hidden;
+    transition:
+      transform var(--ms-dur-drawer) var(--ms-ease),
+      visibility 0s var(--ms-dur-drawer);
+  }
+  .ms-sidebar.open {
+    transform: none;
+    visibility: visible;
+    transition: transform var(--ms-dur-drawer) var(--ms-ease);
+  }
+
+  /* Content column: canvas 32px 40px collapses to 16px. */
+  .ms-main {
+    padding: 16px !important;
+  }
+
+  /* Page header stacks title over actions only when cramped. */
+  .ms-page-header {
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+  .ms-page-header > div:first-child {
+    min-width: 0;
+  }
+  .ms-page-header h1 {
+    overflow-wrap: anywhere;
+  }
+
+  /* Filter rows wrap; the search field takes the full first line. */
+  .ms-filter-row {
+    flex-wrap: wrap;
+  }
+  .ms-filter-row > :first-child {
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* Generic flex rows that may not fit a phone width. */
+  .ms-wrap-row {
+    flex-wrap: wrap;
+  }
+
+  /* Meta/stat grids: 4-up (or 3-up) collapses to 2-up, then 1-up below. */
+  .ms-meta-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Steppers: the add-domain preview column wraps under the form card
+     instead of being crushed beside it; step content can always shrink. */
+  .ms-stepper {
+    flex-wrap: wrap;
+  }
+  .ms-stepper > form {
+    width: 100% !important;
+    max-width: 520px;
+  }
+  .ms-stepper-side {
+    flex: 1 1 260px !important;
+  }
+  .ms-step > * {
+    min-width: 0;
+  }
+
+  /* Onboarding odometer boxes shrink with the viewport (7 boxes at 320px). */
+  .ms-odo-boxes {
+    gap: clamp(3px, 1vw, 8px) !important;
+  }
+  .ms-odo-box {
+    width: clamp(32px, 11vw, 74px) !important;
+    height: clamp(46px, 15vw, 100px) !important;
+  }
+  .ms-odo-box .ms-odo-col {
+    font-size: clamp(28px, 9.5vw, 60px) !important;
+  }
+
+  /* Command palette sits near the top edge and keeps its list on screen. */
+  .ms-cmdk {
+    top: 16px !important;
+  }
+  .ms-cmdk-list {
+    max-height: min(420px, calc(100dvh - 190px)) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Side-by-side KPI cards (metrics rate cards) stack. */
+  .ms-card-row {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 639px) {
+  /* KPI figure rows wrap instead of overflowing. */
+  .ms-kpi-row {
+    flex-wrap: wrap;
+    gap: 20px 32px !important;
+  }
+  /* Stepper rails: decorative add-domain rail hides; numbered rails shrink. */
+  .ms-stepper > .ms-stepper-rail {
+    display: none;
+  }
+  .ms-stepper {
+    gap: 24px !important;
+  }
+  .ms-step {
+    gap: 10px !important;
+  }
+  .ms-step > .ms-stepper-rail {
+    width: 18px !important;
+  }
+  /* Popover panels never exceed the viewport (12px margins). */
+  .ms-menu {
+    max-width: min(320px, calc(100vw - 24px)) !important;
+  }
+  /* Keyboard hints are meaningless on touch. */
+  .ms-cmdk-hints {
+    display: none;
+  }
+}
+
+@media (max-width: 479px) {
+  .ms-meta-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .ms-modal {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    padding: 20px;
+  }
+  .ms-empty {
+    padding: 56px 16px;
+  }
+  .ms-empty-tile {
+    width: 72px;
+    height: 72px;
+  }
+  .ms-empty-scene::before {
+    inset: -50px;
+  }
+}
+
+@media (min-width: 900px) {
+  /* Mobile-only chrome never renders on desktop. */
+  .ms-mobile-topbar,
+  .ms-drawer-scrim {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ms-sidebar,
+  .ms-sidebar.open {
+    transition: none;
+  }
 }

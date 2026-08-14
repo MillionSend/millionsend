@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChevronGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
 
 export interface SelectOption {
@@ -206,22 +207,9 @@ export function Select({
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {selected?.label ?? ""}
         </span>
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          fill="none"
-          aria-hidden="true"
-          style={{ flexShrink: 0, color: "var(--ms-faint)" }}
-        >
-          <path
-            d="M3 4.5 6 7.5 9 4.5"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <span style={{ flexShrink: 0, display: "flex", color: "var(--ms-faint)" }}>
+          <ChevronGlyph />
+        </span>
       </button>
       {open ? (
         <div

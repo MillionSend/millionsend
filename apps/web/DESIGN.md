@@ -65,6 +65,19 @@ overrides: `.ms-btn` 6px 12px, `.ms-input` 6px 10px / line-height 1.4,
 are **centered in the viewport** (both axes), overlay `rgba(0,0,0,.72)`, no
 blur.
 
+**Mobile (breakpoint 900px).** Below 900px the sidebar becomes an off-canvas
+drawer behind a 48px sticky topbar (hamburger `.ms-btn-icon` + wordmark on
+panel bg, hairline bottom); the drawer slides over content with the modal
+scrim, closes on nav/scrim/Esc, and locks body scroll while open. Content
+padding collapses to 16px. Page headers and filter rows wrap (search takes
+the full first line); meta/stat grids drop to 2-up then 1-up (<480px);
+side-by-side KPI cards stack; stepper rails hide or shrink under 640px.
+Modals go `calc(100vw - 24px)` under 480px; `.ms-menu` popovers clamp to the
+viewport. Tables scroll horizontally **inside their own wrapper** (the shared
+`<Table>`) — the page itself never scrolls horizontally. All rules live in
+the delimited responsive section at the end of `components.css` (media
+queries only; desktop ≥900px is untouched).
+
 ## Controls
 
 - Buttons never show a text underline — `.ms-btn` sets

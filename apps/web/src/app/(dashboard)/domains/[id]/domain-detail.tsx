@@ -56,6 +56,7 @@ function GradientBanner({
   return (
     <div
       role="status"
+      className="ms-wrap-row"
       style={{
         display: "flex",
         alignItems: "center",
@@ -403,6 +404,7 @@ export function DomainDetail({ id }: { id: string }) {
       />
 
       <div
+        className="ms-meta-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, 1fr)",
@@ -517,7 +519,10 @@ export function DomainDetail({ id }: { id: string }) {
         )}
 
         {status !== "verified" ? (
-          <div style={{ display: "flex", gap: 10, marginTop: 24, alignItems: "center" }}>
+          <div
+            className="ms-wrap-row"
+            style={{ display: "flex", gap: 10, marginTop: 24, alignItems: "center" }}
+          >
             {provider?.url ? (
               <a
                 className="ms-btn ms-btn-secondary"

@@ -21,7 +21,7 @@ export default async function OnboardingPage() {
   // itself is the skip affordance — every nav link leads to the dashboard.
   return (
     <AppShell teamName={membership.teamName} userEmail={session.user.email}>
-      <main style={{ flex: 1, minWidth: 0, padding: "34px 40px" }}>
+      <main className="ms-main" style={{ flex: 1, minWidth: 0, padding: "34px 40px" }}>
         <OnboardingSteps
           userEmail={session.user.email}
           accountCreatedAt={new Date(session.user.createdAt).toISOString()}
