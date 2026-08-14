@@ -19,7 +19,15 @@ interface GlyphProps {
   size: number;
 }
 
-function Svg({ size, children }: { size: number; children: React.ReactNode }) {
+function Svg({
+  size,
+  strokeWidth = 1.4,
+  children,
+}: {
+  size: number;
+  strokeWidth?: number;
+  children: React.ReactNode;
+}) {
   return (
     <svg
       width={size}
@@ -27,7 +35,7 @@ function Svg({ size, children }: { size: number; children: React.ReactNode }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.4}
+      strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -252,7 +260,8 @@ export function CodeGlyph({ size = 16 }: { size?: number }) {
 /** Static plus glyph for "add / create" buttons — never a text "+" in labels. */
 export function PlusGlyph({ size = 14 }: { size?: number }) {
   return (
-    <Svg size={size}>
+    // Heavier stroke so the glyph reads as bold as the 600-weight label beside it.
+    <Svg size={size} strokeWidth={2.2}>
       <path d="M5 12h14" />
       <path d="M12 5v14" />
     </Svg>
