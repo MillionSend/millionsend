@@ -569,7 +569,12 @@ export function SesSetupView() {
         </section>
       </Step>
 
-      <Step marker="03" done={eventsOk} last title={t("events.title")}>
+      <Step
+        marker="03"
+        done={eventsOk}
+        last={!(credentialsOk || result?.ok)}
+        title={t("events.title")}
+      >
         {eventsOk ? (
           <StepDoneCard
             small
@@ -605,22 +610,18 @@ export function SesSetupView() {
       </Step>
 
       {credentialsOk || result?.ok ? (
-        <section className="ms-card" style={{ padding: 24, marginTop: 24 }}>
-          <h2
-            className="ms-display"
-            style={{ fontSize: "var(--ms-fs-h2)", color: "var(--ms-bone)", margin: "0 0 18px" }}
-          >
-            {t("next.title")}
-          </h2>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <Link href="/domains/new" className="ms-btn ms-btn-secondary">
-              {t("next.addDomain")} →
-            </Link>
-            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>
-              {t.rich("next.selfHosting", codeRichTags)}
-            </span>
-          </div>
-        </section>
+        <Step marker="04" last title={t("next.title")}>
+          <section className="ms-card" style={{ padding: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <Link href="/domains/new" className="ms-btn ms-btn-secondary">
+                {t("next.addDomain")} →
+              </Link>
+              <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>
+                {t.rich("next.selfHosting", codeRichTags)}
+              </span>
+            </div>
+          </section>
+        </Step>
       ) : null}
     </div>
   );
