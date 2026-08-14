@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { NavGlyph, type NavIconName } from "@/components/icons/nav-icons";
+import { EllipsisGlyph, NavGlyph, type NavIconName } from "@/components/icons/nav-icons";
 import { useDismiss } from "@/components/popover-menu";
 import { TeamSwitcher } from "@/components/team-switcher";
 import { authClient } from "@/lib/auth-client";
@@ -314,7 +314,9 @@ export function Sidebar({
           >
             {userEmail}
           </span>
-          <span style={{ marginLeft: "auto", color: "var(--ms-faint)" }}>…</span>
+          <span style={{ marginLeft: "auto", color: "var(--ms-faint)" }}>
+            <EllipsisGlyph size={13} />
+          </span>
         </button>
       </div>
     </aside>
