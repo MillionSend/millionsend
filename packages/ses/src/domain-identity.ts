@@ -1,9 +1,10 @@
+import { generateKeyPairSync } from "node:crypto";
 import {
   CreateEmailIdentityCommand,
-  type CreateEmailIdentityCommandOutput,
   DeleteEmailIdentityCommand,
   GetEmailIdentityCommand,
   type GetEmailIdentityCommandOutput,
+  PutEmailIdentityDkimSigningAttributesCommand,
   PutEmailIdentityMailFromAttributesCommand,
   SESv2Client,
 } from "@aws-sdk/client-sesv2";
@@ -12,8 +13,12 @@ import {
 export const SES_REGIONS = ["us-east-1", "eu-west-1", "sa-east-1", "ap-northeast-1"] as const;
 export type SesRegion = (typeof SES_REGIONS)[number];
 
+/** Single branded BYODKIM selector: every domain publishes `millionsend._domainkey`. */
+export const DKIM_SELECTOR = "millionsend";
+
 type IdentityCommand =
   | CreateEmailIdentityCommand
+  | PutEmailIdentityDkimSigningAttributesCommand
   | PutEmailIdentityMailFromAttributesCommand
   | GetEmailIdentityCommand
   | DeleteEmailIdentityCommand;
@@ -39,6 +44,23 @@ export function createSesv2Client(options: {
   });
 }
 
+/**
+ * Fresh 2048-bit RSA keypair for BYODKIM. The private key is PKCS#1 DER
+ * base64 — the format SES's DomainSigningPrivateKey expects (the base64 body
+ * of an `openssl genrsa` PEM). The public key is SPKI DER base64, which is
+ * exactly the `p=` value of the DKIM TXT record (RFC 6376 §3.6.1).
+ *
+ * The private key exists only to be handed to SES at identity creation:
+ * callers must not persist or log it.
+ */
+export function generateDkimKeyPair(): { privateKeyB64: string; publicKeyB64: string } {
+  const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  return {
+    privateKeyB64: privateKey.export({ format: "der", type: "pkcs1" }).toString("base64"),
+    publicKeyB64: publicKey.export({ format: "der", type: "spki" }).toString("base64"),
+  };
+}
+
 export type DkimVerificationStatus =
   | "PENDING"
   | "SUCCESS"
@@ -52,31 +74,50 @@ export interface DomainVerification {
   dkimStatus: DkimVerificationStatus;
   verifiedForSending: boolean;
   mailFromStatus: MailFromVerificationStatus;
-  /** Easy DKIM CNAME tokens — the customer's DNS checklist derives from these. */
-  dkimTokens: string[];
 }
 
 /**
- * Registers the domain as an SES identity (Easy DKIM) and points its custom
- * MAIL FROM at `<mailFromSubdomain>.<domain>` for SPF/DMARC alignment.
+ * Registers the domain as an SES identity with BYODKIM signing and points its
+ * custom MAIL FROM at `<mailFromSubdomain>.<domain>` for SPF/DMARC alignment.
  *
  * An identity that already exists is adopted rather than treated as an
  * error: a partial earlier create (identity registered in SES but never
  * recorded by the caller) would otherwise make the domain permanently
  * un-creatable. Safe under the single-operator AWS account assumption —
  * any pre-existing identity for the domain belongs to the same operator.
+ * Adoption re-applies the new signing key so SES signs with the key whose
+ * public half the caller is about to publish.
  */
 export async function createDomainIdentity(
   client: SesIdentityClient,
-  params: { domain: string; mailFromSubdomain: string },
-): Promise<{ dkimTokens: string[] }> {
-  let created: CreateEmailIdentityCommandOutput | undefined;
+  params: {
+    domain: string;
+    mailFromSubdomain: string;
+    dkim: { selector: string; privateKeyB64: string };
+  },
+): Promise<void> {
   try {
-    created = (await client.send(
-      new CreateEmailIdentityCommand({ EmailIdentity: params.domain }),
-    )) as CreateEmailIdentityCommandOutput;
+    await client.send(
+      new CreateEmailIdentityCommand({
+        EmailIdentity: params.domain,
+        DkimSigningAttributes: {
+          DomainSigningSelector: params.dkim.selector,
+          DomainSigningPrivateKey: params.dkim.privateKeyB64,
+        },
+      }),
+    );
   } catch (error) {
     if ((error as { name?: string }).name !== "AlreadyExistsException") throw error;
+    await client.send(
+      new PutEmailIdentityDkimSigningAttributesCommand({
+        EmailIdentity: params.domain,
+        SigningAttributesOrigin: "EXTERNAL",
+        SigningAttributes: {
+          DomainSigningSelector: params.dkim.selector,
+          DomainSigningPrivateKey: params.dkim.privateKeyB64,
+        },
+      }),
+    );
   }
   await client.send(
     new PutEmailIdentityMailFromAttributesCommand({
@@ -85,12 +126,6 @@ export async function createDomainIdentity(
       BehaviorOnMxFailure: "USE_DEFAULT_VALUE",
     }),
   );
-  if (created) return { dkimTokens: created.DkimAttributes?.Tokens ?? [] };
-  // Adopted identity: Create returned nothing, so read the tokens back.
-  const existing = (await client.send(
-    new GetEmailIdentityCommand({ EmailIdentity: params.domain }),
-  )) as GetEmailIdentityCommandOutput;
-  return { dkimTokens: existing.DkimAttributes?.Tokens ?? [] };
 }
 
 export async function getDomainVerification(
@@ -105,7 +140,6 @@ export async function getDomainVerification(
     verifiedForSending: out.VerifiedForSendingStatus ?? false,
     mailFromStatus: (out.MailFromAttributes?.MailFromDomainStatus ??
       "PENDING") as MailFromVerificationStatus,
-    dkimTokens: out.DkimAttributes?.Tokens ?? [],
   };
 }
 
@@ -120,33 +154,32 @@ export type DnsRecordGroup = "verification" | "sending" | "dmarc";
 
 export interface DnsRecord {
   group: DnsRecordGroup;
-  type: "CNAME" | "MX" | "TXT";
+  type: "MX" | "TXT";
   name: string;
   value: string;
   priority?: number;
 }
 
 /**
- * The DNS checklist for a domain identity: 3 Easy-DKIM CNAMEs (verification),
+ * The DNS checklist for a domain identity: one BYODKIM TXT (verification),
  * MAIL FROM MX + SPF TXT (sending), and a recommended p=none DMARC TXT.
  */
 export function dnsRecordsForDomain(params: {
   domain: string;
-  dkimTokens: string[];
+  dkimSelector: string;
+  dkimPublicKey: string;
   mailFromSubdomain: string;
   region: string;
 }): DnsRecord[] {
-  const { domain, dkimTokens, mailFromSubdomain, region } = params;
+  const { domain, dkimSelector, dkimPublicKey, mailFromSubdomain, region } = params;
   const mailFromDomain = `${mailFromSubdomain}.${domain}`;
   return [
-    ...dkimTokens.map(
-      (token): DnsRecord => ({
-        group: "verification",
-        type: "CNAME",
-        name: `${token}._domainkey.${domain}`,
-        value: `${token}.dkim.amazonses.com`,
-      }),
-    ),
+    {
+      group: "verification",
+      type: "TXT",
+      name: `${dkimSelector}._domainkey.${domain}`,
+      value: `"v=DKIM1; k=rsa; p=${dkimPublicKey}"`,
+    },
     {
       group: "sending",
       type: "MX",

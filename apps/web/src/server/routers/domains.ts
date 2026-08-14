@@ -4,9 +4,11 @@ import { type Db, schema } from "@millionsend/db";
 import {
   createDomainIdentity,
   createSesv2Client,
+  DKIM_SELECTOR,
   type DkimVerificationStatus,
   deleteDomainIdentity,
   dnsRecordsForDomain,
+  generateDkimKeyPair,
   getDomainVerification,
   type SesIdentityClient,
 } from "@millionsend/ses";
@@ -193,10 +195,16 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           .where(and(eq(schema.domains.teamId, ctx.teamId), eq(schema.domains.name, input.name)));
         if (existing) throw new TRPCError({ code: "CONFLICT", message: "domain already added" });
 
-        const { dkimTokens } = await createDomainIdentity(deps.clientForRegion(input.region), {
+        // BYODKIM: the private key lives only in this block — handed to SES,
+        // then dereferenced. It must never be stored, returned, or logged.
+        let dkim: ReturnType<typeof generateDkimKeyPair> | null = generateDkimKeyPair();
+        const dkimPublicKey = dkim.publicKeyB64;
+        await createDomainIdentity(deps.clientForRegion(input.region), {
           domain: input.name,
           mailFromSubdomain: input.mailFromSubdomain,
+          dkim: { selector: DKIM_SELECTOR, privateKeyB64: dkim.privateKeyB64 },
         });
+        dkim = null;
 
         let created: { id: string } | undefined;
         try {
@@ -207,7 +215,8 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
               name: input.name,
               region: input.region,
               mailFromSubdomain: input.mailFromSubdomain,
-              dkimTokens,
+              dkimSelector: DKIM_SELECTOR,
+              dkimPublicKey,
             })
             .returning({ id: schema.domains.id });
         } catch (error) {
@@ -225,20 +234,20 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
 
     records: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
-      // Tokens are read live: SES can rotate Easy DKIM tokens, and older rows
-      // may predate token persistence. The stored copy is only a fallback.
+      // The DKIM TXT derives from the stored selector + public key (BYODKIM
+      // keys never rotate behind our back); SES is only asked for statuses.
       const [verification, provider] = await Promise.all([
         getDomainVerification(deps.clientForRegion(domain.region), { domain: domain.name }),
         detectProvider(deps.resolveNs, domain.name),
       ]);
-      const dkimTokens = verification.dkimTokens.length
-        ? verification.dkimTokens
-        : (domain.dkimTokens ?? []);
       return {
         provider,
         records: dnsRecordsForDomain({
           domain: domain.name,
-          dkimTokens,
+          // The columns are nullable only for bare fixture inserts; every row
+          // created through this router carries both values.
+          dkimSelector: domain.dkimSelector ?? DKIM_SELECTOR,
+          dkimPublicKey: domain.dkimPublicKey ?? "",
           mailFromSubdomain: domain.mailFromSubdomain,
           region: domain.region,
         }).map((record) => ({
