@@ -12,68 +12,51 @@ export const dim = (s: string): string => (colorOn() ? `\x1b[90m${s}\x1b[39m` : 
 /** Bone-bright white — the selected row. */
 export const bone = (s: string): string => (colorOn() ? `\x1b[97m${s}\x1b[39m` : s);
 
-/**
- * Five-row cell maps for the banner letters ('#' = filled cell). Every row of
- * a letter must be the same width — banner rows are assembled cell by cell and
- * the tests pin that all banner lines come out the same visual width. Five
- * rows give M its peaks and N its diagonal; at one char per cell the full
- * one-line word plus echo stays under 80 cols.
- */
-const LETTERS: Record<string, string[]> = {
-  M: ["#...#", "##.##", "#.#.#", "#...#", "#...#"],
-  I: ["###", ".#.", ".#.", ".#.", "###"],
-  L: ["#...", "#...", "#...", "#...", "####"],
-  O: [".###.", "#...#", "#...#", "#...#", ".###."],
-  N: ["#...#", "##..#", "#.#.#", "#..##", "#...#"],
-  S: [".###", "#...", ".##.", "...#", "###."],
-  E: ["####", "#...", "###.", "#...", "####"],
-  D: ["###.", "#..#", "#..#", "#..#", "###."],
-};
-
-const ART_ROWS = 5;
+/** Steel-bright bold — the M's stem accent. No-op when piped or NO_COLOR is set. */
+const steel = (s: string): string => (colorOn() ? `\x1b[1;96m${s}\x1b[22;39m` : s);
 
 /**
- * Block art for `text`: full-shade body cells with a light-shade echo offset
- * one character right and one row down — a thin drop shadow along each
- * letter's right and bottom edges. Returns ART_ROWS + 1 equal-width lines.
+ * Final hand-tuned banner art, stored verbatim — ▓ marks the M's stem accent,
+ * ░ the shadow. Every row of an art is the same visual width; the tests pin
+ * 6×74 (full) and 3×44 (compact).
  */
-function art(text: string): string[] {
-  const grid: boolean[][] = Array.from({ length: ART_ROWS }, () => []);
-  const glyphs = [...text].map((c) => LETTERS[c] ?? []);
-  glyphs.forEach((glyph, gi) => {
-    for (let r = 0; r < ART_ROWS; r++) {
-      for (const cell of glyph[r] ?? "") grid[r]?.push(cell === "#");
-      if (gi < glyphs.length - 1) grid[r]?.push(false);
-    }
-  });
-  const width = (grid[0]?.length ?? 0) + 1;
-  const canvas = Array.from({ length: ART_ROWS + 1 }, () => Array<string>(width).fill(" "));
-  const paint = (dr: number, dc: number, ch: string): void => {
-    for (let r = 0; r < ART_ROWS; r++) {
-      for (let c = 0; c < (grid[r]?.length ?? 0); c++) {
-        if (!grid[r]?.[c]) continue;
-        const row = canvas[r + dr];
-        if (row) row[c + dc] = ch;
-      }
-    }
-  };
-  paint(1, 1, "░"); // echo first, body painted over it
-  paint(0, 0, "█");
-  return canvas.map((row) => row.join(""));
+const FULL_ART: string[] = [
+  "▓▓▄ ▄██ ████ ██    ██    ████ ▄█████▄ ██▄  ██ ▄█████ █████ ██▄  ██ █████▄ ",
+  "▓▓▀▄▀██░ ██░░██░   ██░    ██░░██░░░██░██▀▄ ██░██░░░░░██░░░░██▀▄ ██░██░░██░",
+  "▓▓░▀░██░ ██░ ██░   ██░    ██░ ██░  ██░██░▀▄██░▀████▄ ████  ██░▀▄██░██░ ██░",
+  "▓▓░ ░██░ ██░ ██░   ██░    ██░ ██░  ██░██░ ▀██░ ░░░██░██░░░ ██░ ▀██░██░ ██░",
+  "▓▓░  ██░████ █████ █████ ████ ▀█████▀░██░  ██░█████▀░█████ ██░  ██░█████▀░",
+  " ░░   ░░ ░░░░ ░░░░░ ░░░░░ ░░░░ ░░░░░░░ ░░   ░░ ░░░░░░ ░░░░░ ░░   ░░ ░░░░░░",
+];
+
+const COMPACT_ART: string[] = [
+  "▓▄ ▄█ █ █   █   █ ▄▀▀▄ █▄ █ █▀▀ █▀▀ █▄ █ █▀▄",
+  "▓ ▀ █ █ █   █   █ █  █ █ ▀█ ▀▀█ █▀▀ █ ▀█ █ █",
+  "▓   █ █ █▄▄ █▄▄ █ ▀▄▄▀ █  █ ▄▄█ █▄▄ █  █ █▄▀",
+];
+
+export type BannerTier = "full" | "compact" | "plain";
+
+/**
+ * Which banner fits: the full art needs 80 columns, the compact one 48;
+ * anything narrower — or a pipe — gets the plain one-line header, keeping
+ * piped output byte-identical to the pre-banner CLI.
+ */
+export function pickBannerTier(columns: number, isTTY: boolean): BannerTier {
+  if (!isTTY || columns < 48) return "plain";
+  return columns >= 80 ? "full" : "compact";
 }
 
-/**
- * Plain (uncolored) banner art: MILLIONSEND on a single line, narrow enough
- * (echo included) to never wrap at 80 columns. Every line is the same visual
- * width. Pure so it is testable.
- */
-export function bannerLines(): string[] {
-  return art("MILLIONSEND");
+/** Uncolored banner art rows for a tier. Pure so it is testable. */
+export function bannerLines(tier: "full" | "compact" = "full"): string[] {
+  return tier === "full" ? FULL_ART : COMPACT_ART;
 }
 
-/** Banner art with the echo dimmed — grays only, no-op when piped/NO_COLOR. */
-export function banner(): string[] {
-  return bannerLines().map((line) => line.replace(/░+/g, (run) => dim(run)));
+/** Banner art with the ▓ stem accent steel-bright and the ░ shadow dimmed. */
+export function banner(tier: "full" | "compact" = "full"): string[] {
+  return bannerLines(tier).map((line) =>
+    line.replace(/░+/g, (run) => dim(run)).replace(/▓+/g, (run) => steel(run)),
+  );
 }
 
 export interface SelectOption {

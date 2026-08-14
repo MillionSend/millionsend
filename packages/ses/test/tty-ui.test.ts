@@ -1,22 +1,68 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { lineReader } from "../src/setup-cli.js";
-import { bannerLines, selectPrompt } from "../src/tty-ui.js";
+import { banner, bannerLines, pickBannerTier, selectPrompt } from "../src/tty-ui.js";
 
 describe("bannerLines", () => {
-  it("renders MILLIONSEND on one line, every row the same width, echo included ≤ 78", () => {
-    const lines = bannerLines();
-    // 5 art rows + 1 echo row.
+  it("full art: 6 rows, every row 74 wide", () => {
+    const lines = bannerLines("full");
     expect(lines).toHaveLength(6);
-    expect(lines[0]?.length).toBe(57);
-    expect(lines[0]?.length).toBeLessThanOrEqual(78);
-    for (const line of lines) expect(line.length).toBe(57);
+    for (const line of lines) expect([...line].length).toBe(74);
   });
 
-  it("draws full-shade bodies with a light-shade echo", () => {
-    const text = bannerLines().join("\n");
-    expect(text).toContain("█");
-    expect(text).toContain("░");
+  it("compact art: 3 rows, every row 44 wide", () => {
+    const lines = bannerLines("compact");
+    expect(lines).toHaveLength(3);
+    for (const line of lines) expect([...line].length).toBe(44);
+  });
+});
+
+describe("pickBannerTier", () => {
+  it("tiers by width on a TTY", () => {
+    expect(pickBannerTier(120, true)).toBe("full");
+    expect(pickBannerTier(80, true)).toBe("full");
+    expect(pickBannerTier(79, true)).toBe("compact");
+    expect(pickBannerTier(48, true)).toBe("compact");
+    expect(pickBannerTier(47, true)).toBe("plain");
+    expect(pickBannerTier(0, true)).toBe("plain");
+  });
+
+  it("is always plain when piped", () => {
+    expect(pickBannerTier(200, false)).toBe("plain");
+  });
+});
+
+describe("banner coloring", () => {
+  // Colors key off process.stdout.isTTY and NO_COLOR at call time; stub both.
+  function onColorTty(noColor: string | undefined, fn: () => void): void {
+    const stdout = process.stdout as unknown as { isTTY?: boolean | undefined };
+    const prevTty = stdout.isTTY;
+    const prevNoColor = process.env.NO_COLOR;
+    stdout.isTTY = true;
+    if (noColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = noColor;
+    try {
+      fn();
+    } finally {
+      stdout.isTTY = prevTty;
+      if (prevNoColor === undefined) delete process.env.NO_COLOR;
+      else process.env.NO_COLOR = prevNoColor;
+    }
+  }
+
+  it("renders the ▓ accent steel-bright and the ░ shadow dim", () => {
+    onColorTty(undefined, () => {
+      const text = banner("full").join("\n");
+      expect(text).toContain("\x1b[1;96m▓");
+      expect(text).toContain("\x1b[90m░");
+    });
+  });
+
+  it("NO_COLOR strips every escape", () => {
+    onColorTty("1", () => {
+      expect(banner("full")).toEqual(bannerLines("full"));
+      expect(banner("compact")).toEqual(bannerLines("compact"));
+    });
   });
 });
 
