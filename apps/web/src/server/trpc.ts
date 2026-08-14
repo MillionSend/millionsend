@@ -1,9 +1,10 @@
 import type { Db } from "@millionsend/db";
 import { getDb } from "@millionsend/db";
 import { initTRPC, TRPCError } from "@trpc/server";
+import { cookies } from "next/headers";
 import superjson from "superjson";
 import { getAuth } from "./auth";
-import { getActiveMembership, type TeamRole } from "./membership";
+import { ACTIVE_TEAM_COOKIE, getActiveMembership, type TeamRole } from "./membership";
 
 export interface SessionUser {
   id: string;
@@ -25,18 +26,33 @@ export interface Context {
   session: AuthSession | null;
   teamId: string | null;
   role: TeamRole | null;
+  /** Persists the team selection (ACTIVE_TEAM_COOKIE). Absent outside HTTP requests (tests). */
+  setActiveTeamCookie?: (teamId: string) => void;
 }
 
 export async function createContext({ headers }: { headers: Headers }): Promise<Context> {
   const db = getDb();
   const session = await getAuth().api.getSession({ headers });
   if (!session) return { db, session: null, teamId: null, role: null };
-  const membership = await getActiveMembership(db, session.user.id);
+  const cookieStore = await cookies();
+  const membership = await getActiveMembership(
+    db,
+    session.user.id,
+    cookieStore.get(ACTIVE_TEAM_COOKIE)?.value,
+  );
   return {
     db,
     session,
     teamId: membership?.teamId ?? null,
     role: membership?.role ?? null,
+    setActiveTeamCookie: (teamId) =>
+      cookieStore.set(ACTIVE_TEAM_COOKIE, teamId, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60 * 24 * 365,
+      }),
   };
 }
 

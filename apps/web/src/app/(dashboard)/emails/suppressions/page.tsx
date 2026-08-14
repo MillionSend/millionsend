@@ -10,6 +10,7 @@ import { Modal } from "@/components/modal";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
+import { type BadgeStatus, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "../list-parts";
@@ -22,6 +23,14 @@ const REASON_VARIANT: Record<Reason, "warn" | "danger" | "neutral"> = {
   hard_bounce: "danger",
   manual: "neutral",
   one_click_unsubscribe: "neutral",
+};
+
+// Filter-dot hue per reason — borrows the email status each reason stems from.
+const REASON_DOT: Record<Reason, BadgeStatus> = {
+  complaint: "complained",
+  hard_bounce: "bounced",
+  manual: "queued",
+  one_click_unsubscribe: "suppressed",
 };
 
 const RANGE_HOURS = { h24: 24, d7: 168, d30: 720 } as const;
@@ -143,8 +152,12 @@ export default function SuppressionsPage() {
           width={120}
           ariaLabel={t("suppressions.origin")}
           options={[
-            { value: "all", label: t("suppressions.allOrigins") },
-            ...REASONS.map((r) => ({ value: r, label: t(`suppressions.reason.${r}`) })),
+            { value: "all", label: t("suppressions.allOrigins"), adornment: <StatusDot /> },
+            ...REASONS.map((r) => ({
+              value: r,
+              label: t(`suppressions.reason.${r}`),
+              adornment: <StatusDot status={REASON_DOT[r]} />,
+            })),
           ]}
         />
         <Select

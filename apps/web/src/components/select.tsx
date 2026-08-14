@@ -9,10 +9,12 @@ export interface SelectOption {
   label: string;
   /** Muted trailing detail shown after the label in the option row. */
   hint?: string;
+  /** Leading adornment in the option row, e.g. a <StatusDot>. */
+  adornment?: React.ReactNode;
 }
 
 /* Search input appears only when the list is long enough for scanning to hurt. */
-const SEARCH_THRESHOLD = 6;
+const SEARCH_THRESHOLD = 10;
 const TYPEAHEAD_RESET_MS = 500;
 
 /**
@@ -188,9 +190,22 @@ export function Select({
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {selected?.label ?? ""}
         </span>
-        <span className="ms-chev" aria-hidden="true" style={{ color: "var(--ms-faint)" }}>
-          ⌄
-        </span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          aria-hidden="true"
+          style={{ flexShrink: 0, color: "var(--ms-faint)" }}
+        >
+          <path
+            d="M3 4.5 6 7.5 9 4.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </button>
       {open ? (
         <div
@@ -206,7 +221,7 @@ export function Select({
         >
           {searchable ? (
             <input
-              className="ms-input"
+              className="ms-menu-search"
               // Search is the typing surface while the popover is open.
               // biome-ignore lint/a11y/noAutofocus: focus moves into the popover by design, Esc restores the trigger
               autoFocus
@@ -219,7 +234,6 @@ export function Select({
                 setActiveIndex(0);
               }}
               onKeyDown={onKeyDown}
-              style={{ width: "100%", marginBottom: 6, fontSize: 13 }}
             />
           ) : null}
           <div id={listboxId} role="listbox" style={{ maxHeight: 264, overflowY: "auto" }}>
@@ -240,13 +254,18 @@ export function Select({
                   onMouseEnter={() => setActiveIndex(index)}
                   onClick={() => pick(option.value)}
                 >
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {option.label}
-                    {option.hint !== undefined ? (
-                      <span style={{ color: "var(--ms-muted)", marginLeft: 8, fontSize: 12 }}>
-                        {option.hint}
-                      </span>
-                    ) : null}
+                  <span
+                    style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}
+                  >
+                    {option.adornment}
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {option.label}
+                      {option.hint !== undefined ? (
+                        <span style={{ color: "var(--ms-muted)", marginLeft: 8, fontSize: 12 }}>
+                          {option.hint}
+                        </span>
+                      ) : null}
+                    </span>
                   </span>
                   {option.value === value ? <span aria-hidden="true">✓</span> : null}
                 </button>
