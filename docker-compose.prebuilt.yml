@@ -1,0 +1,8 @@
+# Prebuilt-image variant: skips the local build and pulls the published
+# image instead. Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml up
+# :edge tracks main; pin a version tag for production.
+services:
+  millionsend:
+    image: ghcr.io/millionsend/millionsend:edge
+    build: !reset null
