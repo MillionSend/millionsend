@@ -1,0 +1,75 @@
+{
+  "status": {
+    "temporary_failure": "Temporary failure"
+  },
+  "regions": {
+    "us-east-1": "North Virginia",
+    "eu-west-1": "Ireland",
+    "sa-east-1": "São Paulo",
+    "ap-northeast-1": "Tokyo"
+  },
+  "list": {
+    "addDomain": "+ Add domain",
+    "empty": "0 domains.",
+    "emptyBody": "Add a domain to start sending.",
+    "error": "Couldn't load domains.",
+    "retry": "Retry",
+    "columns": {
+      "domain": "Domain",
+      "status": "Status",
+      "region": "Region",
+      "created": "Created"
+    }
+  },
+  "new": {
+    "title": "Add domain",
+    "name": "Name",
+    "namePlaceholder": "updates.yourdomain.com",
+    "nameHint": "Use a subdomain to preserve your root domain's reputation.",
+    "nameError": "Enter a lowercase domain like updates.yourdomain.com.",
+    "region": "Region",
+    "regionHint": "Select a region close to your users for the best performance.",
+    "advanced": "Advanced options",
+    "returnPath": "Return-Path subdomain",
+    "returnPathHint": "Subdomain for the Return-Path address, used for SPF authentication, DMARC alignment, and bounce handling.",
+    "preview": {
+      "title": "Preview",
+      "fromName": "Your Name",
+      "user": "you",
+      "toMe": "to me"
+    },
+    "submit": "Add domain",
+    "conflict": "This domain is already added.",
+    "error": "Couldn't add the domain."
+  },
+  "detail": {
+    "eyebrow": "Domain",
+    "created": "Created",
+    "status": "Status",
+    "region": "Region",
+    "dnsTitle": "DNS records",
+    "groups": {
+      "verification": "Domain verification",
+      "sending": "Enable sending",
+      "dmarc": "DMARC (recommended)"
+    },
+    "columns": {
+      "type": "Type",
+      "name": "Name",
+      "value": "Value",
+      "ttl": "TTL",
+      "priority": "Priority"
+    },
+    "ttlAuto": "Auto",
+    "verify": "I've already added the records",
+    "moreActions": "More actions",
+    "copyInstructions": "Copy instructions",
+    "bannerPending": "Looking for DNS records: this may take a few hours.",
+    "bannerVerified": "Domain verified: your domain is ready to send emails.",
+    "deleteDomain": "Delete domain",
+    "deleteBody": "{domain} stops sending immediately. Remove its DNS records afterwards.",
+    "error": "Couldn't load the domain.",
+    "recordsError": "Couldn't load DNS records.",
+    "retry": "Retry"
+  }
+}

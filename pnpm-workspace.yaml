@@ -2,9 +2,30 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
+  # Both ship prebuilt binaries; their build scripts are unnecessary.
+  '@parcel/watcher': false
+  '@swc/core': false
   esbuild: true
 minimumReleaseAgeExclude:
   - '@hono/zod-openapi@1.5.3'
   - hono@4.13.2
+  - '@better-auth/core@1.6.28'
+  - '@better-auth/drizzle-adapter@1.6.28'
+  - '@better-auth/kysely-adapter@1.6.28'
+  - '@better-auth/memory-adapter@1.6.28'
+  - '@better-auth/mongo-adapter@1.6.28'
+  - '@better-auth/prisma-adapter@1.6.28'
+  - '@better-auth/telemetry@1.6.28'
+  - '@next/env@16.3.1'
+  - '@next/swc-darwin-arm64@16.3.1'
+  - '@next/swc-darwin-x64@16.3.1'
+  - '@next/swc-linux-arm64-gnu@16.3.1'
+  - '@next/swc-linux-arm64-musl@16.3.1'
+  - '@next/swc-linux-x64-gnu@16.3.1'
+  - '@next/swc-linux-x64-musl@16.3.1'
+  - '@next/swc-win32-arm64-msvc@16.3.1'
+  - '@next/swc-win32-x64-msvc@16.3.1'
+  - better-auth@1.6.28
+  - next@16.3.1
 overrides:
   "esbuild@<0.25.0": ">=0.25.0"

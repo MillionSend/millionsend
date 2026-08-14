@@ -1,0 +1,30 @@
+{
+  "broadcasts": {
+    "count": "0 transmissões.",
+    "body": "Transmissões ainda não estão disponíveis."
+  },
+  "audience": {
+    "count": "0 contatos.",
+    "body": "Audiência ainda não está disponível."
+  },
+  "metrics": {
+    "count": "0 pontos de dados.",
+    "body": "Métricas ainda não estão disponíveis."
+  },
+  "logs": {
+    "count": "0 registros.",
+    "body": "Logs ainda não estão disponíveis."
+  },
+  "webhooks": {
+    "count": "0 webhooks.",
+    "body": "Webhooks ainda não estão disponíveis."
+  },
+  "templates": {
+    "count": "0 modelos.",
+    "body": "Modelos ainda não estão disponíveis."
+  },
+  "generic": {
+    "count": "0 itens.",
+    "body": "Esta página ainda não foi construída."
+  }
+}

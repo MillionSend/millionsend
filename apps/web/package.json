@@ -1,0 +1,40 @@
+{
+  "name": "@millionsend/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "SKIP_ENV_VALIDATION=1 next build --webpack",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@millionsend/config": "workspace:*",
+    "@millionsend/core": "workspace:*",
+    "@millionsend/db": "workspace:*",
+    "@millionsend/ses": "workspace:*",
+    "@tanstack/react-query": "^5.101.4",
+    "@trpc/client": "^11.18.0",
+    "@trpc/server": "^11.18.0",
+    "@trpc/tanstack-react-query": "^11.18.0",
+    "better-auth": "^1.6.28",
+    "drizzle-orm": "^0.45.2",
+    "next": "^16.3.1",
+    "next-intl": "^4.13.6",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "superjson": "^2.2.6",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@millionsend/test-utils": "workspace:*",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,21 @@
+.git
+node_modules
+**/node_modules
+**/.next
+**/.turbo
+**/dist
+**/build
+**/*.tsbuildinfo
+.env
+.env.*
+!.env.example
+
+# Sibling repos and private material staged inside this folder (see .gitignore)
+sdks
+org
+design
+docs
+
+Dockerfile
+docker-compose.yml
+.DS_Store

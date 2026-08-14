@@ -1,0 +1,66 @@
+{
+  "loading": "Loading…",
+  "list": {
+    "title": "Emails",
+    "suppressionList": "Suppression list",
+    "apiDocs": "Emails API",
+    "searchPlaceholder": "Search by recipient or subject…",
+    "allStatuses": "All statuses",
+    "to": "To",
+    "status": "Status",
+    "subject": "Subject",
+    "sent": "Sent",
+    "loadMore": "Load more",
+    "empty": "0 emails.",
+    "emptyHint": "Send your first email through the API — POST /emails."
+  },
+  "detail": {
+    "eyebrow": "Email",
+    "notFound": "Email not found.",
+    "from": "From",
+    "subject": "Subject",
+    "to": "To",
+    "id": "ID",
+    "replyTo": "Reply-to",
+    "tags": "Tags",
+    "events": "Email events",
+    "noEvents": "0 events.",
+    "event": {
+      "rendering_failure": "Rendering failure"
+    },
+    "preview": "Preview",
+    "plainText": "Plain text",
+    "html": "HTML",
+    "copyHtml": "Copy HTML",
+    "bodyPurged": "Body purged after retention window.",
+    "noHtml": "No HTML body.",
+    "noText": "No plain-text body."
+  },
+  "suppressions": {
+    "title": "Suppression list",
+    "searchPlaceholder": "Search by email address…",
+    "email": "Email",
+    "origin": "Origin",
+    "added": "Added",
+    "add": "+ Add email address",
+    "addTitle": "Add email address",
+    "addBody": "Emails to this address will not be sent.",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "ada@example.com",
+    "invalidEmail": "Enter a valid email address.",
+    "addConfirm": "Add",
+    "remove": "Remove email address",
+    "removeTitle": "Remove email address",
+    "removeBody": "{email} can receive emails again after removal.",
+    "removeConfirm": "Remove",
+    "empty": "0 suppressed addresses.",
+    "emptyHint": "Hard bounces and complaints are added automatically.",
+    "loadMore": "Load more",
+    "reason": {
+      "hard_bounce": "Hard bounce",
+      "complaint": "Complaint",
+      "manual": "Manual",
+      "one_click_unsubscribe": "Unsubscribe"
+    }
+  }
+}

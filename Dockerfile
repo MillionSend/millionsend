@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+
+FROM node:24-slim AS deps
+WORKDIR /app
+RUN corepack enable pnpm
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# pnpm fetch populates the store from the lockfile alone, so this layer only
+# invalidates when dependencies change, not on every source edit.
+RUN pnpm fetch
+
+FROM deps AS build
+COPY . .
+RUN pnpm install --frozen-lockfile --offline
+RUN pnpm --filter @millionsend/web build
+
+# The runtime keeps the full workspace (source + node_modules): api and worker
+# run TypeScript directly via --experimental-strip-types, and workspace
+# packages export TS source, so there is no pruned "dist" to copy. The image
+# is larger than a bundled build; that is the accepted tradeoff for zero
+# build tooling in the backends.
+FROM node:24-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+RUN groupadd --system millionsend && useradd --system --gid millionsend millionsend
+COPY --from=build --chown=millionsend:millionsend /app /app
+USER millionsend
+EXPOSE 3000 3001
+CMD ["node", "scripts/start.mjs"]

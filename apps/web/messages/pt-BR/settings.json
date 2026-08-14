@@ -1,0 +1,48 @@
+{
+  "tabs": {
+    "settings": "Configurações",
+    "usage": "Uso"
+  },
+  "team": {
+    "title": "Equipe",
+    "name": "Nome da equipe",
+    "save": "Salvar",
+    "saved": "Salvo",
+    "slug": "Slug",
+    "plan": "Plano",
+    "error": "Não foi possível salvar."
+  },
+  "plans": {
+    "free": "Free",
+    "pro": "Pro",
+    "scale": "Scale"
+  },
+  "members": {
+    "title": "Membros",
+    "name": "Nome",
+    "email": "E-mail",
+    "role": "Função",
+    "roles": {
+      "owner": "Proprietário",
+      "admin": "Administrador",
+      "member": "Membro"
+    }
+  },
+  "language": {
+    "title": "Idioma",
+    "label": "Idioma da interface",
+    "en": "English",
+    "pt-BR": "Português (Brasil)"
+  },
+  "usage": {
+    "acceptedToday": "E-mails aceitos hoje",
+    "dailyLimit": "Limite diário",
+    "noLimit": "Sem limite diário.",
+    "empty": "0 dias registrados.",
+    "day": "Dia",
+    "accepted": "Aceitos",
+    "delivered": "Entregues",
+    "bounced": "Devolvidos",
+    "complained": "Reclamações"
+  }
+}

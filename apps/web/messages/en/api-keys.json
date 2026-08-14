@@ -1,0 +1,35 @@
+{
+  "createKey": "+ Create API key",
+  "empty": {
+    "headline": "0 API keys.",
+    "body": "Create a key to authenticate requests to the API."
+  },
+  "table": {
+    "name": "Name",
+    "token": "Token",
+    "lastUsed": "Last used",
+    "created": "Created",
+    "menu": "Key actions"
+  },
+  "neverUsed": "Never",
+  "revoke": "Revoke",
+  "create": {
+    "title": "Create API key",
+    "name": "Name",
+    "namePlaceholder": "Production",
+    "mode": "Mode",
+    "modeLive": "Live",
+    "modeTest": "Test",
+    "submit": "Create key"
+  },
+  "reveal": {
+    "title": "API key created",
+    "warning": "This token is shown once. Store it now.",
+    "done": "Done"
+  },
+  "revokeConfirm": {
+    "title": "Revoke API key",
+    "body": "Requests using {name} fail immediately.",
+    "confirm": "Revoke key"
+  }
+}

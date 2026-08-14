@@ -1,0 +1,66 @@
+{
+  "loading": "Carregando…",
+  "list": {
+    "title": "E-mails",
+    "suppressionList": "Lista de supressão",
+    "apiDocs": "API de e-mails",
+    "searchPlaceholder": "Buscar por destinatário ou assunto…",
+    "allStatuses": "Todos os status",
+    "to": "Para",
+    "status": "Status",
+    "subject": "Assunto",
+    "sent": "Enviado",
+    "loadMore": "Carregar mais",
+    "empty": "0 e-mails.",
+    "emptyHint": "Envie seu primeiro e-mail pela API — POST /emails."
+  },
+  "detail": {
+    "eyebrow": "E-mail",
+    "notFound": "E-mail não encontrado.",
+    "from": "De",
+    "subject": "Assunto",
+    "to": "Para",
+    "id": "ID",
+    "replyTo": "Responder para",
+    "tags": "Tags",
+    "events": "Eventos do e-mail",
+    "noEvents": "0 eventos.",
+    "event": {
+      "rendering_failure": "Falha de renderização"
+    },
+    "preview": "Prévia",
+    "plainText": "Texto simples",
+    "html": "HTML",
+    "copyHtml": "Copiar HTML",
+    "bodyPurged": "Corpo removido após a janela de retenção.",
+    "noHtml": "Sem corpo HTML.",
+    "noText": "Sem corpo em texto simples."
+  },
+  "suppressions": {
+    "title": "Lista de supressão",
+    "searchPlaceholder": "Buscar por endereço de e-mail…",
+    "email": "E-mail",
+    "origin": "Origem",
+    "added": "Adicionado",
+    "add": "+ Adicionar endereço de e-mail",
+    "addTitle": "Adicionar endereço de e-mail",
+    "addBody": "E-mails para este endereço não serão enviados.",
+    "emailLabel": "Endereço de e-mail",
+    "emailPlaceholder": "ada@example.com",
+    "invalidEmail": "Informe um endereço de e-mail válido.",
+    "addConfirm": "Adicionar",
+    "remove": "Remover endereço de e-mail",
+    "removeTitle": "Remover endereço de e-mail",
+    "removeBody": "{email} poderá receber e-mails novamente após a remoção.",
+    "removeConfirm": "Remover",
+    "empty": "0 endereços suprimidos.",
+    "emptyHint": "Bounces permanentes e reclamações são adicionados automaticamente.",
+    "loadMore": "Carregar mais",
+    "reason": {
+      "hard_bounce": "Bounce permanente",
+      "complaint": "Reclamação",
+      "manual": "Manual",
+      "one_click_unsubscribe": "Descadastro"
+    }
+  }
+}

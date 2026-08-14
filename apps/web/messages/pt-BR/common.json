@@ -1,0 +1,23 @@
+{
+  "appName": "MillionSend",
+  "copy": "Copiar",
+  "copied": "Copiado",
+  "close": "Fechar",
+  "cancel": "Cancelar",
+  "signOut": "Sair",
+  "status": {
+    "queued": "Na fila",
+    "queued_quota": "Na fila (cota)",
+    "sent": "Enviado",
+    "delivery_delayed": "Atrasado",
+    "delivered": "Entregue",
+    "opened": "Aberto",
+    "clicked": "Clicado",
+    "bounced": "Devolvido",
+    "complained": "Reclamação",
+    "suppressed": "Suprimido",
+    "failed": "Falhou",
+    "verified": "Verificado",
+    "pending": "Pendente"
+  }
+}

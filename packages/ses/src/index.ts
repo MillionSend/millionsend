@@ -1,4 +1,19 @@
 export {
+  createDomainIdentity,
+  createSesv2Client,
+  type DkimVerificationStatus,
+  type DnsRecord,
+  type DnsRecordGroup,
+  type DomainVerification,
+  deleteDomainIdentity,
+  dnsRecordsForDomain,
+  getDomainVerification,
+  type MailFromVerificationStatus,
+  SES_REGIONS,
+  type SesIdentityClient,
+  type SesRegion,
+} from "./domain-identity.js";
+export {
   type ParsedSesEvent,
   parseSesEvent,
   type SesEventType,

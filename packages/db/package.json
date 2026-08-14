@@ -16,7 +16,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "node --experimental-strip-types src/migrate.ts"
   },
   "dependencies": {
     "@millionsend/config": "workspace:*",

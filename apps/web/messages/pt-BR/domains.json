@@ -1,0 +1,75 @@
+{
+  "status": {
+    "temporary_failure": "Falha temporária"
+  },
+  "regions": {
+    "us-east-1": "Norte da Virgínia",
+    "eu-west-1": "Irlanda",
+    "sa-east-1": "São Paulo",
+    "ap-northeast-1": "Tóquio"
+  },
+  "list": {
+    "addDomain": "+ Adicionar domínio",
+    "empty": "0 domínios.",
+    "emptyBody": "Adicione um domínio para começar a enviar.",
+    "error": "Não foi possível carregar os domínios.",
+    "retry": "Tentar novamente",
+    "columns": {
+      "domain": "Domínio",
+      "status": "Status",
+      "region": "Região",
+      "created": "Criado"
+    }
+  },
+  "new": {
+    "title": "Adicionar domínio",
+    "name": "Nome",
+    "namePlaceholder": "updates.seudominio.com",
+    "nameHint": "Use um subdomínio para preservar a reputação do seu domínio raiz.",
+    "nameError": "Informe um domínio em minúsculas, como updates.seudominio.com.",
+    "region": "Região",
+    "regionHint": "Selecione uma região próxima aos seus usuários para o melhor desempenho.",
+    "advanced": "Opções avançadas",
+    "returnPath": "Subdomínio de Return-Path",
+    "returnPathHint": "Subdomínio do endereço Return-Path, usado para autenticação SPF, alinhamento DMARC e tratamento de devoluções.",
+    "preview": {
+      "title": "Prévia",
+      "fromName": "Seu Nome",
+      "user": "voce",
+      "toMe": "para mim"
+    },
+    "submit": "Adicionar domínio",
+    "conflict": "Este domínio já foi adicionado.",
+    "error": "Não foi possível adicionar o domínio."
+  },
+  "detail": {
+    "eyebrow": "Domínio",
+    "created": "Criado",
+    "status": "Status",
+    "region": "Região",
+    "dnsTitle": "Registros DNS",
+    "groups": {
+      "verification": "Verificação do domínio",
+      "sending": "Habilitar envio",
+      "dmarc": "DMARC (recomendado)"
+    },
+    "columns": {
+      "type": "Tipo",
+      "name": "Nome",
+      "value": "Valor",
+      "ttl": "TTL",
+      "priority": "Prioridade"
+    },
+    "ttlAuto": "Auto",
+    "verify": "Já adicionei os registros",
+    "moreActions": "Mais ações",
+    "copyInstructions": "Copiar instruções",
+    "bannerPending": "Procurando registros DNS: isso pode levar algumas horas.",
+    "bannerVerified": "Domínio verificado: seu domínio está pronto para enviar emails.",
+    "deleteDomain": "Excluir domínio",
+    "deleteBody": "{domain} para de enviar imediatamente. Remova os registros DNS depois.",
+    "error": "Não foi possível carregar o domínio.",
+    "recordsError": "Não foi possível carregar os registros DNS.",
+    "retry": "Tentar novamente"
+  }
+}

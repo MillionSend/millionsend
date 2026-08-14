@@ -1,0 +1,35 @@
+{
+  "createKey": "+ Criar chave de API",
+  "empty": {
+    "headline": "0 chaves de API.",
+    "body": "Crie uma chave para autenticar requisições à API."
+  },
+  "table": {
+    "name": "Nome",
+    "token": "Token",
+    "lastUsed": "Último uso",
+    "created": "Criada",
+    "menu": "Ações da chave"
+  },
+  "neverUsed": "Nunca",
+  "revoke": "Revogar",
+  "create": {
+    "title": "Criar chave de API",
+    "name": "Nome",
+    "namePlaceholder": "Produção",
+    "mode": "Modo",
+    "modeLive": "Produção",
+    "modeTest": "Teste",
+    "submit": "Criar chave"
+  },
+  "reveal": {
+    "title": "Chave de API criada",
+    "warning": "Este token é exibido uma única vez. Guarde-o agora.",
+    "done": "Concluir"
+  },
+  "revokeConfirm": {
+    "title": "Revogar chave de API",
+    "body": "Requisições usando {name} falham imediatamente.",
+    "confirm": "Revogar chave"
+  }
+}
