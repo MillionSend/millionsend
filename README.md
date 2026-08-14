@@ -15,16 +15,17 @@ the [Discussions](https://github.com/orgs/MillionSend/discussions) to follow alo
 
 ## Run it locally
 
+No clone needed — the prebuilt image is on GHCR:
+
 ```sh
-git clone https://github.com/MillionSend/millionsend.git
-cd millionsend
-cp .env.example .env   # fill the 3 required values (generation hints inside)
-docker compose up --build -d
+curl -O https://raw.githubusercontent.com/MillionSend/millionsend/main/deploy/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/MillionSend/millionsend/main/.env.example
+docker compose up -d   # after filling the 2 secrets in .env (generation hints inside)
 ```
 
 Dashboard at http://localhost:3000, API at http://localhost:3001. Full setup —
-including the SES/SNS event pipeline and Docker-less development — is in
-[SELF_HOSTING.md](SELF_HOSTING.md).
+including the from-source build, the SES/SNS event pipeline, and Docker-less
+development — is in [SELF_HOSTING.md](SELF_HOSTING.md).
 
 ## License
 

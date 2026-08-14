@@ -1,0 +1,36 @@
+# Standalone self-host compose file — no repo clone needed. Quickstart:
+#   curl -O https://raw.githubusercontent.com/MillionSend/millionsend/main/deploy/docker-compose.yml
+#   curl -o .env https://raw.githubusercontent.com/MillionSend/millionsend/main/.env.example
+#   (generate the two secrets in .env, then)
+#   docker compose up -d
+# :edge tracks main; pin a version tag for production.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: millionsend
+      POSTGRES_PASSWORD: millionsend
+      POSTGRES_DB: millionsend
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U millionsend -d millionsend"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  millionsend:
+    image: ghcr.io/millionsend/millionsend:edge
+    env_file: .env
+    environment:
+      PROCESS: all
+    ports:
+      - "3000:3000" # web dashboard
+      - "3001:3001" # api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
