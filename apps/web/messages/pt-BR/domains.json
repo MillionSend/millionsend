@@ -84,7 +84,7 @@
     "recordsSublineProvider": "provedor detectado pelos registros NS · verificações a cada 30 s",
     "recordsSubline": "verificações a cada 30 s",
     "groups": {
-      "verification": "Verificação do domínio",
+      "verification": "Verificação do domínio (DKIM)",
       "sending": "Habilitar envio",
       "dmarc": "DMARC (recomendado)"
     },

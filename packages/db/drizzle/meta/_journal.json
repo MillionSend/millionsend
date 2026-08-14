@@ -43,6 +43,13 @@
       "when": 1786743024995,
       "tag": "0005_chemical_romulus",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786746112379,
+      "tag": "0006_tricky_the_call",
+      "breakpoints": true
     }
   ]
 }

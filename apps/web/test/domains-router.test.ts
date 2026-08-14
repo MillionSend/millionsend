@@ -1,13 +1,12 @@
+import { createPublicKey } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, SesIdentityClient } from "@millionsend/ses";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDomainsRouter, type DomainsSesDeps } from "@/server/routers/domains";
 import { type Context, createCallerFactory, router } from "@/server/trpc";
-
-const TOKENS = ["tok1aaa", "tok2bbb", "tok3ccc"];
 
 let db: Db;
 let close: () => Promise<void>;
@@ -18,6 +17,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await close();
+  vi.restoreAllMocks();
 });
 
 interface FakeSesState {
@@ -36,13 +36,10 @@ function fakeSes(state: FakeSesState = {}) {
         name,
         input: (command as unknown as { input: Record<string, unknown> }).input,
       });
-      if (name === "CreateEmailIdentityCommand") {
-        return { DkimAttributes: { Tokens: TOKENS } };
-      }
       if (name === "GetEmailIdentityCommand") {
         return {
           VerifiedForSendingStatus: state.verifiedForSending ?? false,
-          DkimAttributes: { Status: state.dkimStatus ?? "PENDING", Tokens: TOKENS },
+          DkimAttributes: { Status: state.dkimStatus ?? "PENDING" },
           MailFromAttributes: {
             MailFromDomainStatus: state.verifiedForSending ? "SUCCESS" : "PENDING",
           },
@@ -58,6 +55,17 @@ function fakeSes(state: FakeSesState = {}) {
   return { deps, calls };
 }
 
+/** The DomainSigningPrivateKey the router uploaded, captured by the fake client. */
+function uploadedPrivateKey(calls: { name: string; input: Record<string, unknown> }[]): string {
+  const create = calls.find((c) => c.name === "CreateEmailIdentityCommand");
+  const attrs = create?.input.DkimSigningAttributes as
+    | { DomainSigningSelector?: string; DomainSigningPrivateKey?: string }
+    | undefined;
+  const key = attrs?.DomainSigningPrivateKey;
+  if (!key) throw new Error("no private key captured");
+  return key;
+}
+
 function callerFor(teamId: string, deps: DomainsSesDeps) {
   const factory = createCallerFactory(router({ domains: createDomainsRouter(deps) }));
   const ctx: Context = {
@@ -70,9 +78,12 @@ function callerFor(teamId: string, deps: DomainsSesDeps) {
 }
 
 describe("domains.create", () => {
-  it("registers the SES identity and inserts a pending row with DKIM tokens", async () => {
+  it("uploads a BYODKIM key to SES and stores only the selector and public half", async () => {
     const teamId = await createTeam(db);
     const { deps, calls } = fakeSes();
+    const consoleSpies = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
+      vi.spyOn(console, method),
+    );
     const { id } = await callerFor(teamId, deps).domains.create({
       name: "updates.example.com",
       region: "sa-east-1",
@@ -82,11 +93,16 @@ describe("domains.create", () => {
       "CreateEmailIdentityCommand",
       "PutEmailIdentityMailFromAttributesCommand",
     ]);
+    expect(calls[0]?.input).toMatchObject({
+      EmailIdentity: "updates.example.com",
+      DkimSigningAttributes: { DomainSigningSelector: "millionsend" },
+    });
     expect(calls[1]?.input).toMatchObject({
       EmailIdentity: "updates.example.com",
       MailFromDomain: "send.updates.example.com",
     });
 
+    const privateKeyB64 = uploadedPrivateKey(calls);
     const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(row).toMatchObject({
       teamId,
@@ -94,8 +110,50 @@ describe("domains.create", () => {
       region: "sa-east-1",
       status: "pending",
       mailFromSubdomain: "send",
-      dkimTokens: TOKENS,
+      dkimSelector: "millionsend",
     });
+
+    // The stored public key is the public half of the uploaded private key.
+    const derivedPublic = createPublicKey({
+      key: Buffer.from(privateKeyB64, "base64"),
+      format: "der",
+      type: "pkcs1",
+    });
+    expect(row?.dkimPublicKey).toBe(
+      derivedPublic.export({ format: "der", type: "spki" }).toString("base64"),
+    );
+
+    // Security invariant: no column of the persisted row contains any
+    // private-key material.
+    for (const [column, value] of Object.entries(row ?? {})) {
+      expect(String(value), `column ${column}`).not.toContain(privateKeyB64);
+    }
+    // ...and nothing logged it either.
+    for (const spy of consoleSpies) {
+      for (const args of spy.mock.calls) {
+        expect(args.map(String).join(" ")).not.toContain(privateKeyB64);
+      }
+    }
+  });
+
+  it("generates a distinct keypair per domain", async () => {
+    const teamId = await createTeam(db);
+    const { deps, calls } = fakeSes();
+    const caller = callerFor(teamId, deps);
+    const a = await caller.domains.create({ name: "a.example.com", region: "us-east-1" });
+    const b = await caller.domains.create({ name: "b.example.com", region: "us-east-1" });
+
+    const [rowA] = await db.select().from(schema.domains).where(eq(schema.domains.id, a.id));
+    const [rowB] = await db.select().from(schema.domains).where(eq(schema.domains.id, b.id));
+    expect(rowA?.dkimPublicKey).not.toBe(rowB?.dkimPublicKey);
+    const keys = calls
+      .filter((c) => c.name === "CreateEmailIdentityCommand")
+      .map(
+        (c) =>
+          (c.input.DkimSigningAttributes as { DomainSigningPrivateKey: string })
+            .DomainSigningPrivateKey,
+      );
+    expect(new Set(keys).size).toBe(2);
   });
 
   it("rejects an uppercase or bare-label name", async () => {
@@ -136,9 +194,6 @@ describe("domains.create", () => {
         if (name === "CreateEmailIdentityCommand") {
           throw Object.assign(new Error("identity exists"), { name: "AlreadyExistsException" });
         }
-        if (name === "GetEmailIdentityCommand") {
-          return { DkimAttributes: { Status: "PENDING", Tokens: TOKENS } };
-        }
         return {};
       },
     };
@@ -150,10 +205,16 @@ describe("domains.create", () => {
       region: "us-east-1",
     });
     expect(id).toBeTruthy();
-    expect(calls).toContain("PutEmailIdentityMailFromAttributesCommand");
+    // Adoption re-applies the fresh signing key before enabling MAIL FROM.
+    expect(calls).toEqual([
+      "CreateEmailIdentityCommand",
+      "PutEmailIdentityDkimSigningAttributesCommand",
+      "PutEmailIdentityMailFromAttributesCommand",
+    ]);
 
     const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
-    expect(row?.dkimTokens).toEqual(TOKENS);
+    expect(row?.dkimSelector).toBe("millionsend");
+    expect(row?.dkimPublicKey).toBeTruthy();
   });
 
   it("maps the losing insert of a concurrent double-submit to CONFLICT", async () => {
@@ -168,8 +229,9 @@ describe("domains.create", () => {
             name: "example.com",
             region: "us-east-1",
             mailFromSubdomain: "send",
+            dkimSelector: "millionsend",
+            dkimPublicKey: "winner-public-key",
           });
-          return { DkimAttributes: { Tokens: TOKENS } };
         }
         return {};
       },
@@ -238,16 +300,25 @@ describe("tenant isolation", () => {
 });
 
 describe("domains.records", () => {
-  it("derives the DNS checklist with per-record check state from the live identity", async () => {
+  it("derives the DNS checklist, with the DKIM TXT built from the stored key", async () => {
     const teamId = await createTeam(db);
     const { deps } = fakeSes();
     const caller = callerFor(teamId, deps);
     const { id } = await caller.domains.create({ name: "example.com", region: "eu-west-1" });
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
 
     const { records, provider } = await caller.domains.records({ id });
     expect(provider).toBeNull();
-    expect(records).toHaveLength(6);
-    expect(records.filter((r) => r.group === "verification")).toHaveLength(3);
+    expect(records).toHaveLength(4);
+    expect(records.filter((r) => r.group === "verification")).toEqual([
+      {
+        group: "verification",
+        type: "TXT",
+        name: "millionsend._domainkey.example.com",
+        value: `"v=DKIM1; k=rsa; p=${row?.dkimPublicKey}"`,
+        status: "pending",
+      },
+    ]);
     expect(records).toContainEqual({
       group: "sending",
       type: "MX",

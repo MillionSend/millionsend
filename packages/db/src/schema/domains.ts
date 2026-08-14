@@ -1,13 +1,4 @@
-import {
-  boolean,
-  jsonb,
-  pgEnum,
-  pgTable,
-  text,
-  timestamp,
-  uniqueIndex,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { boolean, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
 
 export const domainStatusEnum = pgEnum("domain_status", [
@@ -29,8 +20,11 @@ export const domains = pgTable(
     name: text("name").notNull(),
     region: text("region").notNull(),
     status: domainStatusEnum("status").notNull().default("pending"),
-    // Easy DKIM CNAME tokens returned by SES; rendered as the customer's DNS checklist.
-    dkimTokens: jsonb("dkim_tokens").$type<string[]>(),
+    // BYODKIM: only the selector and public half are stored — the private key
+    // is uploaded to SES at create time and never persisted anywhere. Nullable
+    // only so bare fixture inserts stay cheap; the create flow always sets both.
+    dkimSelector: text("dkim_selector"),
+    dkimPublicKey: text("dkim_public_key"),
     mailFromSubdomain: text("mail_from_subdomain").notNull().default("send"),
     trackingSubdomain: text("tracking_subdomain"),
     clickTracking: boolean("click_tracking").notNull().default(true),

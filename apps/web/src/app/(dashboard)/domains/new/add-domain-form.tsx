@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { type DnsRecord, DnsRecordsTable } from "@/components/dns-records-table";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
@@ -174,7 +174,12 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
   const trpc = useTRPC();
   const team = useQuery(trpc.settings.team.get.queryOptions());
   const [name, setName] = useState("");
+  const readiness = useQuery(trpc.system.awsReadiness.queryOptions());
+  const provisionedRegion = readiness.data?.region as DomainRegion | undefined;
   const [region, setRegion] = useState<DomainRegion>("us-east-1");
+  useEffect(() => {
+    if (provisionedRegion) setRegion(provisionedRegion);
+  }, [provisionedRegion]);
   const [returnPath, setReturnPath] = useState("send");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -263,7 +268,9 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
               disabled={create.isPending}
               onChange={(value) => setRegion(value as DomainRegion)}
               ariaLabel={t("new.region")}
-              options={DOMAIN_REGIONS.map((code) => ({
+              // Only the provisioned region: configuration sets and SNS
+              // topics are regional, so other regions would send blind.
+              options={(provisionedRegion ? [provisionedRegion] : DOMAIN_REGIONS).map((code) => ({
                 value: code,
                 label: `${regionFlag(code)} ${t(`regions.${code}`)} (${code})`,
               }))}

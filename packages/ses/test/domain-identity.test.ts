@@ -1,19 +1,23 @@
+import { createPublicKey } from "node:crypto";
 import {
   CreateEmailIdentityCommand,
   DeleteEmailIdentityCommand,
   GetEmailIdentityCommand,
+  type PutEmailIdentityDkimSigningAttributesCommand,
   PutEmailIdentityMailFromAttributesCommand,
 } from "@aws-sdk/client-sesv2";
 import { describe, expect, it } from "vitest";
 import {
   createDomainIdentity,
+  DKIM_SELECTOR,
   deleteDomainIdentity,
   dnsRecordsForDomain,
+  generateDkimKeyPair,
   getDomainVerification,
   type SesIdentityClient,
 } from "../src/domain-identity.js";
 
-const TOKENS = ["tok1aaa", "tok2bbb", "tok3ccc"];
+const DKIM = { selector: DKIM_SELECTOR, privateKeyB64: "cHJpdmF0ZS1rZXk=" };
 
 function fakeClient(respond: (command: object) => unknown = () => ({})) {
   const calls: object[] = [];
@@ -26,32 +30,50 @@ function fakeClient(respond: (command: object) => unknown = () => ({})) {
   return { client, calls };
 }
 
+describe("generateDkimKeyPair", () => {
+  it("produces a 2048-bit RSA pair with matching PKCS#1 private and SPKI public halves", () => {
+    const { privateKeyB64, publicKeyB64 } = generateDkimKeyPair();
+
+    const publicKey = createPublicKey({
+      key: Buffer.from(publicKeyB64, "base64"),
+      format: "der",
+      type: "spki",
+    });
+    expect(publicKey.asymmetricKeyType).toBe("rsa");
+    expect(publicKey.asymmetricKeyDetails?.modulusLength).toBe(2048);
+
+    // The private half must parse as PKCS#1 (what SES expects) and derive the
+    // exact public half published in DNS.
+    const derivedPublic = createPublicKey({
+      key: Buffer.from(privateKeyB64, "base64"),
+      format: "der",
+      type: "pkcs1",
+    });
+    expect(derivedPublic.export({ format: "der", type: "spki" }).toString("base64")).toBe(
+      publicKeyB64,
+    );
+  });
+
+  it("generates a fresh key per call", () => {
+    expect(generateDkimKeyPair().publicKeyB64).not.toBe(generateDkimKeyPair().publicKeyB64);
+  });
+});
+
 describe("dnsRecordsForDomain", () => {
-  it("derives the exact DKIM, MAIL FROM, SPF, and DMARC records", () => {
+  it("derives the exact DKIM TXT, MAIL FROM, SPF, and DMARC records", () => {
     const records = dnsRecordsForDomain({
       domain: "updates.example.com",
-      dkimTokens: TOKENS,
+      dkimSelector: "millionsend",
+      dkimPublicKey: "PUBKEYB64",
       mailFromSubdomain: "send",
       region: "sa-east-1",
     });
     expect(records).toEqual([
       {
         group: "verification",
-        type: "CNAME",
-        name: "tok1aaa._domainkey.updates.example.com",
-        value: "tok1aaa.dkim.amazonses.com",
-      },
-      {
-        group: "verification",
-        type: "CNAME",
-        name: "tok2bbb._domainkey.updates.example.com",
-        value: "tok2bbb.dkim.amazonses.com",
-      },
-      {
-        group: "verification",
-        type: "CNAME",
-        name: "tok3ccc._domainkey.updates.example.com",
-        value: "tok3ccc.dkim.amazonses.com",
+        type: "TXT",
+        name: "millionsend._domainkey.updates.example.com",
+        value: '"v=DKIM1; k=rsa; p=PUBKEYB64"',
       },
       {
         group: "sending",
@@ -77,20 +99,24 @@ describe("dnsRecordsForDomain", () => {
 });
 
 describe("createDomainIdentity", () => {
-  it("creates the identity, sets MAIL FROM, and returns the DKIM tokens", async () => {
-    const { client, calls } = fakeClient((command) =>
-      command instanceof CreateEmailIdentityCommand ? { DkimAttributes: { Tokens: TOKENS } } : {},
-    );
-    const result = await createDomainIdentity(client, {
+  it("creates the identity with BYODKIM signing attributes and sets MAIL FROM", async () => {
+    const { client, calls } = fakeClient();
+    await createDomainIdentity(client, {
       domain: "example.com",
       mailFromSubdomain: "send",
+      dkim: DKIM,
     });
-    expect(result.dkimTokens).toEqual(TOKENS);
 
     expect(calls).toHaveLength(2);
     const [create, mailFrom] = calls;
     expect(create).toBeInstanceOf(CreateEmailIdentityCommand);
-    expect((create as CreateEmailIdentityCommand).input).toEqual({ EmailIdentity: "example.com" });
+    expect((create as CreateEmailIdentityCommand).input).toEqual({
+      EmailIdentity: "example.com",
+      DkimSigningAttributes: {
+        DomainSigningSelector: "millionsend",
+        DomainSigningPrivateKey: DKIM.privateKeyB64,
+      },
+    });
     expect(mailFrom).toBeInstanceOf(PutEmailIdentityMailFromAttributesCommand);
     expect((mailFrom as PutEmailIdentityMailFromAttributesCommand).input).toEqual({
       EmailIdentity: "example.com",
@@ -99,29 +125,30 @@ describe("createDomainIdentity", () => {
     });
   });
 
-  it("adopts an already-existing identity and reads its tokens back", async () => {
+  it("adopts an already-existing identity by re-applying the signing key", async () => {
     const { client, calls } = fakeClient((command) => {
       if (command instanceof CreateEmailIdentityCommand) {
         throw Object.assign(new Error("identity exists"), { name: "AlreadyExistsException" });
       }
-      if (command instanceof GetEmailIdentityCommand) {
-        return { DkimAttributes: { Status: "PENDING", Tokens: TOKENS } };
-      }
       return {};
     });
-    const result = await createDomainIdentity(client, {
+    await createDomainIdentity(client, {
       domain: "example.com",
       mailFromSubdomain: "send",
+      dkim: DKIM,
     });
-    expect(result.dkimTokens).toEqual(TOKENS);
     expect(calls.map((c) => c.constructor.name)).toEqual([
       "CreateEmailIdentityCommand",
+      "PutEmailIdentityDkimSigningAttributesCommand",
       "PutEmailIdentityMailFromAttributesCommand",
-      "GetEmailIdentityCommand",
     ]);
-    expect((calls[1] as PutEmailIdentityMailFromAttributesCommand).input).toMatchObject({
+    expect((calls[1] as PutEmailIdentityDkimSigningAttributesCommand).input).toEqual({
       EmailIdentity: "example.com",
-      MailFromDomain: "send.example.com",
+      SigningAttributesOrigin: "EXTERNAL",
+      SigningAttributes: {
+        DomainSigningSelector: "millionsend",
+        DomainSigningPrivateKey: DKIM.privateKeyB64,
+      },
     });
   });
 
@@ -133,7 +160,11 @@ describe("createDomainIdentity", () => {
       return {};
     });
     await expect(
-      createDomainIdentity(client, { domain: "example.com", mailFromSubdomain: "send" }),
+      createDomainIdentity(client, {
+        domain: "example.com",
+        mailFromSubdomain: "send",
+        dkim: DKIM,
+      }),
     ).rejects.toThrow("throttled");
     expect(calls).toHaveLength(1);
   });
@@ -143,7 +174,7 @@ describe("getDomainVerification", () => {
   it("maps GetEmailIdentity output", async () => {
     const { client, calls } = fakeClient(() => ({
       VerifiedForSendingStatus: true,
-      DkimAttributes: { Status: "SUCCESS", Tokens: TOKENS },
+      DkimAttributes: { Status: "SUCCESS" },
       MailFromAttributes: { MailFromDomainStatus: "SUCCESS" },
     }));
     const verification = await getDomainVerification(client, { domain: "example.com" });
@@ -151,7 +182,6 @@ describe("getDomainVerification", () => {
       dkimStatus: "SUCCESS",
       verifiedForSending: true,
       mailFromStatus: "SUCCESS",
-      dkimTokens: TOKENS,
     });
     expect(calls[0]).toBeInstanceOf(GetEmailIdentityCommand);
     expect((calls[0] as GetEmailIdentityCommand).input).toEqual({ EmailIdentity: "example.com" });
@@ -164,7 +194,6 @@ describe("getDomainVerification", () => {
       dkimStatus: "NOT_STARTED",
       verifiedForSending: false,
       mailFromStatus: "PENDING",
-      dkimTokens: [],
     });
   });
 });
