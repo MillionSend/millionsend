@@ -233,11 +233,16 @@ export function Select({
             minWidth: "100%",
             width: "max-content",
             maxWidth: 320,
+            // Rows must scroll to the panel edge and clip on the radius —
+            // panel padding would crop them mid-item at the scroll boundary.
+            padding: 0,
+            overflow: "hidden",
           }}
         >
           {searchable ? (
             <input
               className="ms-menu-search"
+              style={{ width: "100%", margin: 0 }}
               // Search is the typing surface while the popover is open.
               // biome-ignore lint/a11y/noAutofocus: focus moves into the popover by design, Esc restores the trigger
               autoFocus
@@ -257,8 +262,10 @@ export function Select({
             role="listbox"
             style={{
               // Panel chrome around the list: 12px padding, plus the search row.
-              maxHeight: placement.maxHeight - (searchable ? 52 : 12),
+              maxHeight: placement.maxHeight - (searchable ? 40 : 0),
               overflowY: "auto",
+              padding: 4,
+              boxSizing: "border-box",
             }}
           >
             {filtered.length === 0 ? (

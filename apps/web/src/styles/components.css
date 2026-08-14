@@ -14,12 +14,12 @@
 .ms-btn {
   font: 600 var(--ms-fs-ui) var(--ms-font-sans);
   border-radius: var(--ms-r-input);
-  padding: 6px 12px;
+  padding: 6px 10px;
   border: 1px solid transparent;
   cursor: pointer;
   transition: opacity var(--ms-dur-fast) var(--ms-ease);
   display: inline-flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   white-space: nowrap;
   flex-shrink: 0;
@@ -515,7 +515,7 @@ svg:focus {
   background: var(--ms-panel);
   border: 1px solid var(--ms-line-strong);
   border-radius: 10px;
-  padding: 6px;
+  padding: 4px;
   min-width: 180px;
   box-sizing: border-box;
   z-index: 110;
@@ -529,7 +529,7 @@ svg:focus {
   width: 100%;
   min-height: 28px;
   box-sizing: border-box;
-  padding: 4px 10px;
+  padding: 4px 8px;
   font: 400 13px var(--ms-font-sans);
   color: var(--ms-bone);
   background: none;
@@ -556,7 +556,7 @@ svg:focus {
   height: 1px;
   border: 0; /* rendered as <hr> */
   background: var(--ms-line);
-  margin: 6px -6px; /* full-bleed across the panel, cancelling its 6px padding */
+  margin: 4px -4px; /* full-bleed across the panel, cancelling its 4px padding */
 }
 /* Uppercase group header inside a menu (e.g. the team switcher's "Teams"). */
 .ms-menu-label {
@@ -572,15 +572,15 @@ svg:focus {
    the hairline runs edge to edge. */
 .ms-menu-search {
   display: block;
-  width: calc(100% + 12px);
-  margin: -6px -6px 6px;
+  width: calc(100% + 8px);
+  margin: -4px -4px 4px;
   box-sizing: border-box;
   background: none;
   border: 0;
   border-bottom: 1px solid var(--ms-line);
   color: var(--ms-bone);
   font: 400 13px var(--ms-font-sans);
-  padding: 9px 12px;
+  padding: 8px 10px;
   outline: none;
 }
 .ms-menu-search::placeholder {
