@@ -1,19 +1,23 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useEffect, useState } from "react";
-import { CopyChip } from "@/components/copy-chip";
-import { type DnsRecord, DnsRecordsTable } from "@/components/dns-records-table";
+import {
+  type DnsRecord,
+  DnsRecordsTable,
+  DnsRecordsTableSkeleton,
+} from "@/components/dns-records-table";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { Select } from "@/components/select";
+import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import { isAwsCredentialError } from "@/lib/aws-errors";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatMailDate } from "@/lib/format";
+import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { AwsCredentialsBanner } from "../aws-credentials-banner";
 import { DOMAIN_REGIONS, type DomainRegion, regionFlag } from "../regions";
@@ -31,8 +35,8 @@ function isConflict(error: unknown): boolean {
   return (error as { data?: { code?: string } } | null)?.data?.code === "CONFLICT";
 }
 
-/** The canvas stepper rail: the current step lit, the other faint, hairline between. */
-function StepRail({ step }: { step: 1 | 2 }) {
+/** The canvas stepper rail on step 01: 01 lit, 02 faint below the hairline. */
+function StepRail() {
   return (
     <div
       aria-hidden="true"
@@ -46,23 +50,45 @@ function StepRail({ step }: { step: 1 | 2 }) {
         alignSelf: "stretch",
       }}
     >
-      <span
-        className="ms-mono"
-        style={{ fontSize: 11, color: step === 1 ? "var(--ms-bone)" : "var(--ms-faint)" }}
-      >
+      <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-bone)" }}>
         01
       </span>
       <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />
-      <span
-        className="ms-mono"
-        style={{
-          fontSize: 11,
-          color: step === 2 ? "var(--ms-bone)" : "var(--ms-faint)",
-          marginTop: 6,
-        }}
-      >
+      <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-faint)", marginTop: 6 }}>
         02
       </span>
+    </div>
+  );
+}
+
+/** Left rail of one stepper row: marker (✓ or number) above the connector line. */
+function MarkerRail({
+  marker,
+  color,
+  line = true,
+}: {
+  marker: string;
+  color: string;
+  line?: boolean;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className="ms-stepper-rail"
+      style={{
+        width: 30,
+        flex: "none",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+      }}
+    >
+      <span className="ms-mono" style={{ fontSize: 11, color }}>
+        {marker}
+      </span>
+      {line ? (
+        <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />
+      ) : null}
     </div>
   );
 }
@@ -70,97 +96,125 @@ function StepRail({ step }: { step: 1 | 2 }) {
 /** Wizard step 02: the created domain's DNS records, rendered in-page after create. */
 function DnsRecordsStep({ id }: { id: string }) {
   const t = useTranslations("domains");
+  const router = useRouter();
   const trpc = useTRPC();
   const domain = useQuery(trpc.domains.get.queryOptions({ id }));
   const records = useQuery(trpc.domains.records.queryOptions({ id }));
   const provider = records.data?.provider ?? null;
   return (
-    <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
-      <StepRail step={2} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            width: 520,
-            maxWidth: "100%",
-            background: "var(--ms-panel)",
-            border: "1px solid var(--ms-line-strong)",
-            borderRadius: "var(--ms-r-card)",
-            padding: "18px 24px",
-            boxSizing: "border-box",
-          }}
-        >
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {/* Step 01 — done: recap of the created domain */}
+      <div className="ms-step" style={{ display: "flex", gap: 44 }}>
+        <MarkerRail marker="✓" color="var(--ms-success)" />
+        <div style={{ flex: 1, minWidth: 0, paddingBottom: 28 }}>
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              fontSize: 16,
-              fontWeight: 600,
-              color: "var(--ms-bone)",
+              width: 520,
+              maxWidth: "100%",
+              backgroundColor: "var(--ms-ground)",
+              backgroundImage: statusGlow("success", 15),
+              border: "1px solid var(--ms-success-border)",
+              borderRadius: "var(--ms-r-card)",
+              padding: "18px 24px",
+              boxSizing: "border-box",
             }}
           >
-            <span>{t("new.cardTitle")}</span>
-            <span style={{ color: "var(--ms-success)", fontWeight: 400 }}>✓</span>
-          </div>
-          {domain.isSuccess ? (
-            <div style={{ marginTop: 10 }}>
-              <CopyChip value={domain.data.name} />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 16,
+                fontWeight: 600,
+                color: "var(--ms-bone)",
+              }}
+            >
+              <span>{t("new.cardTitle")}</span>
+              <span style={{ color: "var(--ms-success)", fontWeight: 400 }}>✓</span>
             </div>
-          ) : null}
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
+              {t("new.recapSubtitle")}
+            </p>
+            <div
+              style={{
+                marginTop: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                background: "var(--ms-inset)",
+                border: "1px solid var(--ms-line)",
+                borderRadius: "var(--ms-r-input)",
+                padding: "6px 10px",
+              }}
+            >
+              {domain.isSuccess ? (
+                <>
+                  <span>{regionFlag(domain.data.region)}</span>
+                  <span
+                    className="ms-mono"
+                    style={{ fontSize: 13, color: "var(--ms-bone)", overflowWrap: "anywhere" }}
+                  >
+                    {domain.data.name}
+                  </span>
+                </>
+              ) : (
+                <Skeleton width={200} height={16} />
+              )}
+            </div>
+          </div>
         </div>
+      </div>
 
-        <h2
-          className="ms-display"
-          style={{
-            fontSize: 22,
-            margin: "28px 0 0",
-            fontWeight: 500,
-            color: "var(--ms-bone)",
-          }}
-        >
-          {provider
-            ? t("detail.recordsHeading", { provider: provider.name })
-            : t("detail.recordsHeadingGeneric")}
-        </h2>
-        <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 6 }}>
-          {provider ? t("detail.recordsSublineProvider") : t("detail.recordsSubline")}
-        </div>
+      {/* Step 02 — fill in the DNS records */}
+      <div className="ms-step" style={{ display: "flex", gap: 44 }}>
+        <MarkerRail marker="02" color="var(--ms-bone)" line={false} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2
+            className="ms-display"
+            style={{ fontSize: 22, margin: 0, fontWeight: 500, color: "var(--ms-bone)" }}
+          >
+            {provider
+              ? t("new.recordsTitleProvider", { provider: provider.name })
+              : t("new.recordsTitle")}
+          </h2>
+          <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 6 }}>
+            {provider ? t("detail.recordsSublineProvider") : t("detail.recordsSubline")}
+          </div>
 
-        {records.isError ? (
-          <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 20 }}>
-            <p style={{ margin: 0, fontSize: "var(--ms-fs-ui)" }}>{t("detail.recordsError")}</p>
+          {records.isError ? (
+            <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 20 }}>
+              <p style={{ margin: 0, fontSize: "var(--ms-fs-ui)" }}>{t("detail.recordsError")}</p>
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                onClick={() => records.refetch()}
+              >
+                {t("detail.retry")}
+              </button>
+            </div>
+          ) : (
+            <div style={{ marginTop: 22 }}>
+              {records.isSuccess ? (
+                <DnsRecordsTable
+                  records={records.data.records as DnsRecord[]}
+                  domain={domain.data?.name}
+                />
+              ) : (
+                <DnsRecordsTableSkeleton />
+              )}
+            </div>
+          )}
+
+          <div style={{ marginTop: 24 }}>
+            {/* The detail page owns verification from here. */}
             <button
               type="button"
-              className="ms-btn ms-btn-secondary"
-              onClick={() => records.refetch()}
+              className="ms-btn ms-btn-primary"
+              onClick={() => router.push(`/domains/${id}`)}
             >
-              {t("detail.retry")}
+              {t("new.addedRecords")}
             </button>
           </div>
-        ) : records.isSuccess ? (
-          <div style={{ marginTop: 22 }}>
-            <DnsRecordsTable records={records.data.records as DnsRecord[]} />
-          </div>
-        ) : (
-          <div
-            style={{
-              height: 120,
-              marginTop: 22,
-              maxWidth: 1000,
-              borderRadius: "var(--ms-r-input)",
-              background: "var(--ms-inset)",
-            }}
-          />
-        )}
-
-        <div style={{ display: "flex", gap: 10, marginTop: 24, alignItems: "center" }}>
-          <Link
-            className="ms-btn ms-btn-primary"
-            style={{ textDecoration: "none" }}
-            href={`/domains/${id}`}
-          >
-            {t("new.viewDomain")}
-          </Link>
         </div>
       </div>
     </div>
@@ -212,7 +266,7 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
     <>
       <AwsCredentialsBanner />
       <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
-        <StepRail step={1} />
+        <StepRail />
 
         <form
           onSubmit={onSubmit}

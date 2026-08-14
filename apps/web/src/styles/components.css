@@ -702,16 +702,7 @@ svg:focus {
   }
 }
 
-/* Skeleton shimmer + live-dot pulse (values verbatim from the design canvas) */
-@keyframes ms-shimmer {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 0.9;
-  }
-}
+/* Live-dot pulse (values verbatim from the design canvas) */
 @keyframes ms-pulse {
   0%,
   100% {
@@ -1091,6 +1082,38 @@ svg:focus {
   .ms-sidebar,
   .ms-sidebar.open {
     transition: none;
+  }
+}
+
+/* Skeletons (skeleton.tsx) — inset base with a slow moving highlight. Every
+   loading surface mirrors its real layout with these blocks; no spinners or
+   blank panels before tables/cards. Token-based, so both themes hold: on
+   paper the bone highlight reads as a faint darker sweep. */
+.ms-skeleton {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+  background-color: var(--ms-inset);
+  background-image: linear-gradient(
+    100deg,
+    transparent 38%,
+    color-mix(in srgb, var(--ms-bone) 6%, transparent) 50%,
+    transparent 62%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  background-position: 100% 0;
+  animation: ms-skeleton-sweep 1.8s var(--ms-ease) infinite;
+}
+@keyframes ms-skeleton-sweep {
+  to {
+    background-position: -100% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-skeleton {
+    animation: none;
+    background-image: none;
   }
 }
 

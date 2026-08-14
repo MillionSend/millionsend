@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { Select } from "@/components/select";
+import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import type { AppLocale } from "@/i18n/request";
@@ -48,7 +49,34 @@ function TeamSection() {
       },
     }),
   );
-  if (!team) return null;
+  if (!team) {
+    // Mirrors the loaded card: name field + save, then the slug/plan row.
+    return (
+      <SectionCard title={t("team.title")}>
+        <div style={{ maxWidth: 280 }}>
+          <Skeleton width={44} height={10} />
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 6 }}>
+            <Skeleton width={200} height={30} radius="var(--ms-r-input)" />
+            <Skeleton width={56} height={30} radius="var(--ms-r-input)" />
+          </div>
+        </div>
+        <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 22 }}>
+          <div>
+            <Skeleton width={44} height={10} />
+            <div style={{ marginTop: 6 }}>
+              <Skeleton width={80} height={14} />
+            </div>
+          </div>
+          <div>
+            <Skeleton width={44} height={10} />
+            <div style={{ marginTop: 6 }}>
+              <Skeleton width={48} height={22} />
+            </div>
+          </div>
+        </div>
+      </SectionCard>
+    );
+  }
 
   const name = draft ?? team.name;
   return (
@@ -114,7 +142,6 @@ function MembersSection() {
   const t = useTranslations("settings");
   const trpc = useTRPC();
   const { data: members } = useQuery(trpc.settings.members.list.queryOptions());
-  if (!members) return null;
 
   return (
     <SectionCard title={t("members.title")}>
@@ -126,15 +153,31 @@ function MembersSection() {
             <th>{t("members.role")}</th>
           </tr>
         </thead>
-        <tbody>
-          {members.map((m) => (
-            <tr key={m.email}>
-              <td>{m.name}</td>
-              <td className="ms-mono">{m.email}</td>
-              <td>{t(`members.roles.${m.role}`)}</td>
+        {!members ? (
+          <tbody>
+            <tr>
+              <td>
+                <Skeleton width={110} height={13} />
+              </td>
+              <td>
+                <Skeleton width={180} height={13} />
+              </td>
+              <td>
+                <Skeleton width={52} />
+              </td>
             </tr>
-          ))}
-        </tbody>
+          </tbody>
+        ) : (
+          <tbody>
+            {members.map((m) => (
+              <tr key={m.email}>
+                <td>{m.name}</td>
+                <td className="ms-mono">{m.email}</td>
+                <td>{t(`members.roles.${m.role}`)}</td>
+              </tr>
+            ))}
+          </tbody>
+        )}
       </Table>
     </SectionCard>
   );
@@ -219,7 +262,26 @@ function InstanceSection() {
       },
     }),
   );
-  if (!data) return null;
+  if (!data) {
+    // Mirrors the loaded card: subtitle line, then the two numeric fields.
+    return (
+      <SectionCard title={t("instance.title")}>
+        <div style={{ margin: "-8px 0 16px" }}>
+          <Skeleton width={260} height={11} />
+        </div>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+          {[0, 1].map((field) => (
+            <div key={field} style={{ flex: "1 1 220px", maxWidth: 280 }}>
+              <Skeleton width={140} height={10} />
+              <div style={{ marginTop: 6 }}>
+                <Skeleton width="100%" height={30} radius="var(--ms-r-input)" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
+    );
+  }
 
   // Fields show the EFFECTIVE value (db, env, or default) — saving writes
   // what is shown, so what you see is always what runs.

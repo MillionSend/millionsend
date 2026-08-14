@@ -5,10 +5,15 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
-import { type DnsRecord, DnsRecordsTable } from "@/components/dns-records-table";
+import {
+  type DnsRecord,
+  DnsRecordsTable,
+  DnsRecordsTableSkeleton,
+} from "@/components/dns-records-table";
 import { Modal } from "@/components/modal";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
+import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner, Spinner } from "@/components/spinner";
 import { formatRelative, formatUtcMinute } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
@@ -140,7 +145,44 @@ export function DomainDetail({ id }: { id: string }) {
     );
   }
   if (!domain.isSuccess || !status) {
-    return <div className="ms-card" style={{ height: 220, background: "var(--ms-panel)" }} />;
+    // Mirrors the loaded page: breadcrumb + title, the meta strip, then the record tables.
+    return (
+      <>
+        <div style={{ marginBottom: 28 }}>
+          <Skeleton width={140} height={11} />
+          <div style={{ marginTop: 10 }}>
+            <Skeleton width={260} height={26} />
+          </div>
+        </div>
+        <div
+          className="ms-meta-grid"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 22,
+            padding: "20px 0",
+            borderTop: "1px solid var(--ms-line)",
+            borderBottom: "1px solid var(--ms-line)",
+            maxWidth: 1000,
+          }}
+        >
+          {["created", "status", "region"].map((key) => (
+            <div key={key}>
+              <Skeleton width={56} height={10} />
+              <div style={{ marginTop: 6 }}>
+                <Skeleton width={110} height={14} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <section style={{ marginTop: 26, maxWidth: 1000 }}>
+          <Skeleton width={300} height={22} />
+          <div style={{ marginTop: 22 }}>
+            <DnsRecordsTableSkeleton showStatus />
+          </div>
+        </section>
+      </>
+    );
   }
 
   const data = domain.data;
@@ -343,19 +385,14 @@ export function DomainDetail({ id }: { id: string }) {
               {t("detail.retry")}
             </button>
           </div>
-        ) : records.isSuccess ? (
-          <div style={{ marginTop: 22 }}>
-            <DnsRecordsTable records={rows} showStatus />
-          </div>
         ) : (
-          <div
-            style={{
-              height: 120,
-              marginTop: 22,
-              borderRadius: "var(--ms-r-input)",
-              background: "var(--ms-inset)",
-            }}
-          />
+          <div style={{ marginTop: 22 }}>
+            {records.isSuccess ? (
+              <DnsRecordsTable records={rows} domain={data.name} showStatus />
+            ) : (
+              <DnsRecordsTableSkeleton showStatus />
+            )}
+          </div>
         )}
 
         {status !== "verified" && provider?.url ? (

@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Odometer } from "@/components/odometer";
 import { PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
+import { Skeleton } from "@/components/skeleton";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { useTRPC } from "@/lib/trpc";
 
@@ -142,6 +143,45 @@ function RateCard(props: {
   );
 }
 
+/** Mirrors the loaded page: KPI card (3 figures + bar chart), then the two rate cards. */
+function MetricsSkeleton() {
+  return (
+    <>
+      <div className="ms-kpi-card">
+        <div className="ms-kpi-row" style={{ display: "flex", gap: 56, alignItems: "flex-start" }}>
+          {[90, 110, 130].map((width) => (
+            <div key={width}>
+              <Skeleton width={width} height={10} />
+              <div style={{ marginTop: 8 }}>
+                <Skeleton width={100} height={30} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 18 }}>
+          <Skeleton width="100%" height={228} radius="var(--ms-r-input)" />
+        </div>
+      </div>
+      <div className="ms-card-row" style={{ display: "flex", gap: 18, marginTop: 18 }}>
+        {[0, 1].map((card) => (
+          <div key={card} className="ms-kpi-card" style={{ flex: 1 }}>
+            <Skeleton width={110} height={10} />
+            <div style={{ marginTop: 8 }}>
+              <Skeleton width={80} height={26} />
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <Skeleton width="100%" height={BAR_AREA} radius="var(--ms-r-input)" />
+            </div>
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--ms-line)" }}>
+              <Skeleton width={120} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export default function MetricsPage() {
   const t = useTranslations("metrics");
   const locale = useLocale();
@@ -185,7 +225,7 @@ export default function MetricsPage() {
       />
 
       {data === undefined ? (
-        <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>{t("loading")}</p>
+        <MetricsSkeleton />
       ) : neverSent ? (
         <EmptyState area="metrics" headline={t("empty")} body={t.rich("emptyHint", codeRichTags)} />
       ) : (
