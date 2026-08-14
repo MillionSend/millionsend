@@ -2,11 +2,17 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 
 const DAY_MS = 86_400_000;
+
+// SKIP_ENV_VALIDATION leaves env reads live, so stubbing IS_CLOUD here
+// switches the routers between cloud and self-host behavior per test.
+function stubCloud(): void {
+  vi.stubEnv("IS_CLOUD", "true");
+}
 
 function utcDay(offsetDays: number): string {
   return new Date(Date.now() - offsetDays * DAY_MS).toISOString().slice(0, 10);
@@ -20,6 +26,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await close();
 });
 
@@ -38,11 +45,19 @@ function callerFor(userId: string, teamId: string, role: TeamRole) {
 }
 
 describe("settings.team", () => {
-  it("get returns name, slug, plan, and the plan's daily limit", async () => {
+  it("get returns name, slug, plan, and the plan's daily limit on cloud", async () => {
+    stubCloud();
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "owner");
     const team = await callerFor("u1", teamId, "owner").settings.team.get();
     expect(team).toEqual({ name: "acme", slug: "acme", plan: "free", planDailyLimit: 100 });
+  });
+
+  it("get reports no daily limit on self-host, where the cap is not enforced", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    const team = await callerFor("u1", teamId, "owner").settings.team.get();
+    expect(team.planDailyLimit).toBeNull();
   });
 
   it("rename updates the team for owners", async () => {
@@ -86,6 +101,7 @@ describe("settings.usage", () => {
   }
 
   it("returns the window's rows newest-first and today's accepted vs limit", async () => {
+    stubCloud();
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "owner");
     await insertCounter(teamId, utcDay(0), 42);
@@ -111,8 +127,16 @@ describe("settings.usage", () => {
   });
 
   it("reports a null limit for unlimited plans", async () => {
+    stubCloud();
     const teamId = await createTeam(db, "acme");
     await db.update(schema.teams).set({ plan: "scale" }).where(eq(schema.teams.id, teamId));
+    await addMember(teamId, "u1", "owner");
+    const usage = await callerFor("u1", teamId, "owner").settings.usage.recent();
+    expect(usage.today.limit).toBeNull();
+  });
+
+  it("reports a null limit on self-host even for capped plans", async () => {
+    const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "owner");
     const usage = await callerFor("u1", teamId, "owner").settings.usage.recent();
     expect(usage.today.limit).toBeNull();

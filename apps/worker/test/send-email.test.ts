@@ -35,6 +35,7 @@ afterAll(() => close());
 interface FakeSend {
   raw: Buffer;
   configurationSetName?: string | undefined;
+  region?: string | undefined;
 }
 
 function fakeSes(messageId = "fake-mid"): { ses: SesSender; sends: FakeSend[] } {
@@ -88,6 +89,7 @@ it("sends a queued email: MIME, join key, status, event row", async () => {
   expect(mime).toContain("Subject: greetings");
   expect(mime).toContain("r@example.com");
   expect(sends[0]?.configurationSetName).toBe("ms-config-set");
+  expect(sends[0]?.region).toBe("us-east-1");
 
   const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
   expect(row?.sesMessageId).toBe("mid-happy");
@@ -98,6 +100,54 @@ it("sends a queued email: MIME, join key, status, event row", async () => {
     .from(schema.emailEvents)
     .where(eq(schema.emailEvents.emailId, emailId));
   expect(events.map((e) => e.type)).toEqual(["sent"]);
+});
+
+it("sends through the domain's own SES region, not the deployment default", async () => {
+  const [saDomain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "acme.com.br",
+      region: "sa-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  if (!saDomain) throw new Error("domain insert failed");
+  const { ses, sends } = fakeSes("mid-region");
+  const emailId = await insertEmail({ domainId: saDomain.id, from: "Acme <a@acme.com.br>" });
+
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  expect(sends[0]?.region).toBe("sa-east-1");
+});
+
+it("falls back to the deployment configuration set when the domain has none", async () => {
+  const [bareDomain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "bare.dev",
+      region: "eu-west-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  if (!bareDomain) throw new Error("domain insert failed");
+  const { ses, sends } = fakeSes("mid-fallback");
+  const emailId = await insertEmail({ domainId: bareDomain.id, from: "Bare <a@bare.dev>" });
+
+  const deps: SendDeps = { keyring, ses, defaultConfigurationSet: "deployment-set" };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  expect(sends[0]?.configurationSetName).toBe("deployment-set");
+});
+
+it("the domain's configuration set wins over the deployment fallback", async () => {
+  const { ses, sends } = fakeSes("mid-domain-set");
+  const emailId = await insertEmail();
+
+  const deps: SendDeps = { keyring, ses, defaultConfigurationSet: "deployment-set" };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  expect(sends[0]?.configurationSetName).toBe("ms-config-set");
 });
 
 it("skips anything not in queued state — a job cannot force a send", async () => {

@@ -13,6 +13,7 @@ import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
+import { isUniqueViolation } from "@/lib/db-errors";
 import { router, teamProcedure } from "../trpc";
 
 // Lowercase registrable hostname with at least two labels; SES identities are
@@ -129,16 +130,27 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           mailFromSubdomain: input.mailFromSubdomain,
         });
 
-        const [created] = await ctx.db
-          .insert(schema.domains)
-          .values({
-            teamId: ctx.teamId,
-            name: input.name,
-            region: input.region,
-            mailFromSubdomain: input.mailFromSubdomain,
-            dkimTokens,
-          })
-          .returning({ id: schema.domains.id });
+        let created: { id: string } | undefined;
+        try {
+          [created] = await ctx.db
+            .insert(schema.domains)
+            .values({
+              teamId: ctx.teamId,
+              name: input.name,
+              region: input.region,
+              mailFromSubdomain: input.mailFromSubdomain,
+              dkimTokens,
+            })
+            .returning({ id: schema.domains.id });
+        } catch (error) {
+          // The pre-check above races with concurrent submits: the losing
+          // insert hits the (teamId, name) unique index, which is the same
+          // "already added" condition, not an internal failure.
+          if (isUniqueViolation(error)) {
+            throw new TRPCError({ code: "CONFLICT", message: "domain already added" });
+          }
+          throw error;
+        }
         if (!created) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
         return { id: created.id };
       }),

@@ -1,4 +1,3 @@
-import { SESv2Client } from "@aws-sdk/client-sesv2";
 import { env } from "@millionsend/config";
 import { EnvKeyring, purgeExpiredIdempotencyKeys } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
@@ -20,7 +19,7 @@ if (!env.MASTER_ENCRYPTION_KEY) {
 
 const db = getDb();
 const keyring = EnvKeyring.fromBase64(env.MASTER_ENCRYPTION_KEY);
-const ses = createSesSender(new SESv2Client({ region: env.AWS_REGION }));
+const ses = createSesSender(env.AWS_REGION);
 // The bucket is the messages/second control; worker concurrency is not a
 // rate limit and must never be treated as one. In-memory ⇒ single worker
 // process only (see SES_MAX_SEND_RATE in @millionsend/config).
@@ -40,7 +39,12 @@ await queue.work("email.send", async (payload) => {
   await takeToken();
   await sendEmail(
     db,
-    { keyring, ses, reschedule: (emailId, at) => enqueueSend(emailId, at) },
+    {
+      keyring,
+      ses,
+      defaultConfigurationSet: env.SES_CONFIGURATION_SET,
+      reschedule: (emailId, at) => enqueueSend(emailId, at),
+    },
     payload,
   );
 });

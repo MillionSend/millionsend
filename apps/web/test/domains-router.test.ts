@@ -121,6 +121,59 @@ describe("domains.create", () => {
     });
     expect(other.id).toBeTruthy();
   });
+
+  it("adopts an SES identity orphaned by a partial earlier create", async () => {
+    const teamId = await createTeam(db);
+    const calls: string[] = [];
+    const client: SesIdentityClient = {
+      async send(command) {
+        const name = command.constructor.name;
+        calls.push(name);
+        if (name === "CreateEmailIdentityCommand") {
+          throw Object.assign(new Error("identity exists"), { name: "AlreadyExistsException" });
+        }
+        if (name === "GetEmailIdentityCommand") {
+          return { DkimAttributes: { Status: "PENDING", Tokens: TOKENS } };
+        }
+        return {};
+      },
+    };
+    const { id } = await callerFor(teamId, { clientForRegion: () => client }).domains.create({
+      name: "example.com",
+      region: "us-east-1",
+    });
+    expect(id).toBeTruthy();
+    expect(calls).toContain("PutEmailIdentityMailFromAttributesCommand");
+
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.dkimTokens).toEqual(TOKENS);
+  });
+
+  it("maps the losing insert of a concurrent double-submit to CONFLICT", async () => {
+    const teamId = await createTeam(db);
+    // Deterministic race: the "other" submit wins between this call's
+    // pre-check select and its insert.
+    const client: SesIdentityClient = {
+      async send(command) {
+        if (command.constructor.name === "CreateEmailIdentityCommand") {
+          await db.insert(schema.domains).values({
+            teamId,
+            name: "example.com",
+            region: "us-east-1",
+            mailFromSubdomain: "send",
+          });
+          return { DkimAttributes: { Tokens: TOKENS } };
+        }
+        return {};
+      },
+    };
+    await expect(
+      callerFor(teamId, { clientForRegion: () => client }).domains.create({
+        name: "example.com",
+        region: "us-east-1",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
 });
 
 describe("domains.verify", () => {

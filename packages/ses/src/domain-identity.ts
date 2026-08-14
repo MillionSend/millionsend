@@ -59,14 +59,25 @@ export interface DomainVerification {
 /**
  * Registers the domain as an SES identity (Easy DKIM) and points its custom
  * MAIL FROM at `<mailFromSubdomain>.<domain>` for SPF/DMARC alignment.
+ *
+ * An identity that already exists is adopted rather than treated as an
+ * error: a partial earlier create (identity registered in SES but never
+ * recorded by the caller) would otherwise make the domain permanently
+ * un-creatable. Safe under the single-operator AWS account assumption —
+ * any pre-existing identity for the domain belongs to the same operator.
  */
 export async function createDomainIdentity(
   client: SesIdentityClient,
   params: { domain: string; mailFromSubdomain: string },
 ): Promise<{ dkimTokens: string[] }> {
-  const created = (await client.send(
-    new CreateEmailIdentityCommand({ EmailIdentity: params.domain }),
-  )) as CreateEmailIdentityCommandOutput;
+  let created: CreateEmailIdentityCommandOutput | undefined;
+  try {
+    created = (await client.send(
+      new CreateEmailIdentityCommand({ EmailIdentity: params.domain }),
+    )) as CreateEmailIdentityCommandOutput;
+  } catch (error) {
+    if ((error as { name?: string }).name !== "AlreadyExistsException") throw error;
+  }
   await client.send(
     new PutEmailIdentityMailFromAttributesCommand({
       EmailIdentity: params.domain,
@@ -74,7 +85,12 @@ export async function createDomainIdentity(
       BehaviorOnMxFailure: "USE_DEFAULT_VALUE",
     }),
   );
-  return { dkimTokens: created.DkimAttributes?.Tokens ?? [] };
+  if (created) return { dkimTokens: created.DkimAttributes?.Tokens ?? [] };
+  // Adopted identity: Create returned nothing, so read the tokens back.
+  const existing = (await client.send(
+    new GetEmailIdentityCommand({ EmailIdentity: params.domain }),
+  )) as GetEmailIdentityCommandOutput;
+  return { dkimTokens: existing.DkimAttributes?.Tokens ?? [] };
 }
 
 export async function getDomainVerification(

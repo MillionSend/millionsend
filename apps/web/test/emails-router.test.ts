@@ -3,7 +3,7 @@ import { EnvKeyring, encryptEmailBody, hashRecipient } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCaller } from "@/server/routers";
 import type { Context } from "@/server/trpc";
@@ -122,6 +122,29 @@ describe("emails.list", () => {
     expect(page2.items.map((r) => r.id)).toEqual([ids[0]]);
     expect(page2.nextCursor).toBeNull();
   });
+
+  it("does not skip same-millisecond rows differing only in microseconds", async () => {
+    const teamA = await createTeam(db, "team-a");
+    // timestamptz keeps microseconds; a JS Date cannot represent these two
+    // values distinctly, so they pin the full-precision cursor round-trip.
+    const newer = await insertEmail({
+      ...baseEmail(teamA),
+      subject: "newer",
+      createdAt: sql`timestamptz '2026-08-01 10:00:00.123456+00'` as unknown as Date,
+    });
+    const older = await insertEmail({
+      ...baseEmail(teamA),
+      subject: "older",
+      createdAt: sql`timestamptz '2026-08-01 10:00:00.123400+00'` as unknown as Date,
+    });
+
+    const page1 = await caller(teamA).emails.list({ limit: 1 });
+    expect(page1.items.map((r) => r.id)).toEqual([newer]);
+    if (!page1.nextCursor) throw new Error("expected a next cursor");
+
+    const page2 = await caller(teamA).emails.list({ limit: 1, cursor: page1.nextCursor });
+    expect(page2.items.map((r) => r.id)).toEqual([older]);
+  });
 });
 
 describe("emails.get", () => {
@@ -216,6 +239,36 @@ describe("emails.suppressions", () => {
     await caller(teamA).emails.suppressions.remove({ id: added.id });
     const afterRemove = await caller(teamA).emails.suppressions.list({});
     expect(afterRemove.items).toHaveLength(0);
+  });
+
+  it("pages without skipping same-millisecond suppressions", async () => {
+    const teamA = await createTeam(db, "team-a");
+    async function insertSuppression(email: string, createdAt: string): Promise<string> {
+      const [row] = await db
+        .insert(schema.suppressions)
+        .values({
+          teamId: teamA,
+          email,
+          emailHash: hashRecipient(email),
+          reason: "manual",
+          createdAt: sql`${createdAt}::timestamptz` as unknown as Date,
+        })
+        .returning({ id: schema.suppressions.id });
+      if (!row) throw new Error("suppression insert failed");
+      return row.id;
+    }
+    const newer = await insertSuppression("a@example.com", "2026-08-01 10:00:00.123456+00");
+    const older = await insertSuppression("b@example.com", "2026-08-01 10:00:00.123400+00");
+
+    const page1 = await caller(teamA).emails.suppressions.list({ limit: 1 });
+    expect(page1.items.map((r) => r.id)).toEqual([newer]);
+    if (!page1.nextCursor) throw new Error("expected a next cursor");
+
+    const page2 = await caller(teamA).emails.suppressions.list({
+      limit: 1,
+      cursor: page1.nextCursor,
+    });
+    expect(page2.items.map((r) => r.id)).toEqual([older]);
   });
 
   it("is idempotent on duplicate adds", async () => {

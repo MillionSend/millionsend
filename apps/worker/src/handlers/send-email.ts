@@ -11,12 +11,19 @@ import { createTransport } from "nodemailer";
  */
 
 export interface SesSender {
-  sendRaw(params: { raw: Buffer; configurationSetName?: string }): Promise<{ messageId: string }>;
+  sendRaw(params: {
+    raw: Buffer;
+    configurationSetName?: string;
+    /** SES region the sending identity is verified in; sender default when absent. */
+    region?: string;
+  }): Promise<{ messageId: string }>;
 }
 
 export interface SendDeps {
   keyring: Keyring;
   ses: SesSender;
+  /** Deployment-wide SES configuration set, used when the domain has none. */
+  defaultConfigurationSet?: string | undefined;
   /** Re-enqueue a not-yet-due scheduled email at its due time. */
   reschedule?: ((emailId: string, at: Date) => Promise<void>) | undefined;
 }
@@ -69,14 +76,20 @@ export async function sendEmail(
     headers: { "X-MillionSend-Email-ID": email.id },
   });
 
-  const configurationSet = email.domainId
+  // SES identities are verified per region: the send must target the
+  // domain's region, not a single deployment-wide one.
+  const domain = email.domainId
     ? (
         await db
-          .select({ cs: schema.domains.sesConfigurationSet })
+          .select({
+            sesConfigurationSet: schema.domains.sesConfigurationSet,
+            region: schema.domains.region,
+          })
           .from(schema.domains)
           .where(eq(schema.domains.id, email.domainId))
-      )[0]?.cs
+      )[0]
     : undefined;
+  const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
 
   // Atomic claim (sentAt doubles as the claim marker): closes the
   // double-send windows — a concurrent worker on the same job, and a retry
@@ -100,6 +113,7 @@ export async function sendEmail(
     ({ messageId } = await deps.ses.sendRaw({
       raw: mime,
       ...(configurationSet ? { configurationSetName: configurationSet } : {}),
+      ...(domain?.region ? { region: domain.region } : {}),
     }));
   } catch (err) {
     // sendRaw threw ⇒ the SDK exhausted its own retries without an accept:

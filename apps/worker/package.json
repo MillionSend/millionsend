@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch --experimental-strip-types src/server.ts",
+    "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -16,7 +16,8 @@
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "nodemailer": "^9.0.5"
+    "nodemailer": "^9.0.5",
+    "tsx": "^4.23.12"
   },
   "devDependencies": {
     "@hono/node-server": "^1.19.7",

@@ -2,16 +2,9 @@ import { randomBytes } from "node:crypto";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { isUniqueViolation } from "@/lib/db-errors";
 import { slugify } from "@/lib/slug";
 import { protectedProcedure, router } from "../trpc";
-
-/** Postgres unique_violation, possibly wrapped by the drizzle driver. */
-function isUniqueViolation(error: unknown): boolean {
-  for (let e = error; e instanceof Error; e = e.cause as Error) {
-    if ((e as { code?: unknown }).code === "23505") return true;
-  }
-  return false;
-}
 
 export const teamBootstrapRouter = router({
   createTeam: protectedProcedure

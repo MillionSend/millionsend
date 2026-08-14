@@ -6,6 +6,10 @@ allowBuilds:
   '@parcel/watcher': false
   '@swc/core': false
   esbuild: true
+# Supply-chain: only install package versions published at least 24h ago
+# (absorbs the zero-day-malware window; pnpm 11 default made explicit).
+minimumReleaseAge: 1440
+strictPeerDependencies: false
 minimumReleaseAgeExclude:
   - '@hono/zod-openapi@1.5.3'
   - hono@4.13.2

@@ -10,7 +10,7 @@
     }
   },
   "scripts": {
-    "dev": "node --watch --experimental-strip-types src/server.ts",
+    "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -23,7 +23,8 @@
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.13.2"
+    "hono": "^4.13.2",
+    "tsx": "^4.23.12"
   },
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",

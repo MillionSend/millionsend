@@ -65,6 +65,11 @@ export const env = createEnv({
     // without a topic allowlist would accept any AWS account's topic.
     SNS_TOPIC_ARNS: z.string().optional().transform(parseSnsTopicArns),
 
+    // SES configuration set whose event destination feeds the SNS topic
+    // (SELF_HOSTING checklist). Used for sends whenever a domain has no
+    // per-domain set recorded; without it SES publishes no events.
+    SES_CONFIGURATION_SET: z.string().optional(),
+
     // Messages/second ceiling for THE ONE worker process: the bucket is
     // in-memory, so running N worker replicas multiplies the real SES rate
     // by N. Until the bucket is shared (Postgres-backed), scale the worker
@@ -82,6 +87,11 @@ export const env = createEnv({
     // Dashboard session signing secret (`openssl rand -base64 32`).
     // Required only by the web process, which asserts it at boot.
     BETTER_AUTH_SECRET: z.string().min(32).optional(),
+
+    // Self-host signup policy: the FIRST user may always register; after
+    // that, registration requires this to be explicitly enabled. Keeps an
+    // internet-reachable dashboard from handing strangers the SES account.
+    ALLOW_SIGNUP: boolFromString,
 
     // Cloud-only (billing).
     STRIPE_SECRET_KEY: z.string().optional(),

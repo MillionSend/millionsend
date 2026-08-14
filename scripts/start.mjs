@@ -8,16 +8,21 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
+// ponytail: tsx at runtime is the ceiling here — it resolves NodeNext ".js"
+// specifiers to .ts sources, which node --experimental-strip-types cannot.
+// Precompiled dist images are the upgrade path if boot time or image size hurts.
+// Per-package .bin paths because pnpm links tsx into each dependent package,
+// not the workspace root.
 const PROCESSES = {
   api: {
-    command: "node",
-    args: ["--experimental-strip-types", join(root, "apps/api/src/server.ts")],
+    command: join(root, "apps/api/node_modules/.bin/tsx"),
+    args: [join(root, "apps/api/src/server.ts")],
     cwd: root,
     env: {},
   },
   worker: {
-    command: "node",
-    args: ["--experimental-strip-types", join(root, "apps/worker/src/server.ts")],
+    command: join(root, "apps/worker/node_modules/.bin/tsx"),
+    args: [join(root, "apps/worker/src/server.ts")],
     cwd: root,
     env: {},
   },
@@ -41,8 +46,8 @@ for (const name of names) {
 }
 
 const migrate = spawnSync(
-  "node",
-  ["--experimental-strip-types", join(root, "packages/db/src/migrate.ts")],
+  join(root, "packages/db/node_modules/.bin/tsx"),
+  [join(root, "packages/db/src/migrate.ts")],
   { cwd: root, stdio: "inherit" },
 );
 if (migrate.status !== 0) {

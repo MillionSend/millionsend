@@ -11,8 +11,14 @@ import { router, teamProcedure } from "../trpc";
 
 const emailStatus = z.enum(schema.emailStatusEnum.enumValues);
 
-/** Keyset cursor over (createdAt desc, id desc); id breaks createdAt ties. */
-const cursorSchema = z.object({ createdAt: z.date(), id: z.uuid() });
+/**
+ * Keyset cursor over (createdAt desc, id desc); id breaks createdAt ties.
+ * createdAt travels as the Postgres text rendering of the timestamptz, not
+ * as a Date: timestamptz carries microseconds and a JS Date only
+ * milliseconds, so a Date round-trip would silently skip same-millisecond
+ * rows at page boundaries.
+ */
+const cursorSchema = z.object({ createdAt: z.string(), id: z.uuid() });
 type Cursor = z.infer<typeof cursorSchema>;
 
 function beforeCursor(
@@ -20,23 +26,30 @@ function beforeCursor(
   cursor: Cursor,
 ): SQL | undefined {
   return or(
-    lt(t.createdAt, cursor.createdAt),
-    and(eq(t.createdAt, cursor.createdAt), lt(t.id, cursor.id)),
+    sql`${t.createdAt} < ${cursor.createdAt}::timestamptz`,
+    and(sql`${t.createdAt} = ${cursor.createdAt}::timestamptz`, lt(t.id, cursor.id)),
   );
+}
+
+/** Full-precision cursor value for a row's createdAt (see cursorSchema). */
+function createdAtCursorField(t: { createdAt: AnyPgColumn }): SQL<string> {
+  return sql<string>`${t.createdAt}::text`;
 }
 
 /**
  * Splits a limit+1 fetch into the page and its next-page cursor. Rows must
- * already be ordered (createdAt desc, id desc).
+ * already be ordered (createdAt desc, id desc); the cursorCreatedAt field
+ * feeds the cursor and is stripped from the returned items.
  */
-function paginate<T extends Cursor>(
+function paginate<T extends { id: string; cursorCreatedAt: string }>(
   rows: T[],
   limit: number,
-): { items: T[]; nextCursor: Cursor | null } {
-  const items = rows.slice(0, limit);
-  const last = items[items.length - 1];
+): { items: Omit<T, "cursorCreatedAt">[]; nextCursor: Cursor | null } {
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
   const nextCursor =
-    rows.length > limit && last ? { createdAt: last.createdAt, id: last.id } : null;
+    rows.length > limit && last ? { createdAt: last.cursorCreatedAt, id: last.id } : null;
+  const items = page.map(({ cursorCreatedAt: _cursorCreatedAt, ...item }) => item);
   return { items, nextCursor };
 }
 
@@ -82,6 +95,7 @@ export const emailsRouter = router({
           subject: t.subject,
           latestStatus: t.latestStatus,
           createdAt: t.createdAt,
+          cursorCreatedAt: createdAtCursorField(t),
           scheduledAt: t.scheduledAt,
         })
         .from(t)
@@ -167,7 +181,13 @@ export const emailsRouter = router({
         if (input.search) filters.push(ilike(t.email, `%${escapeLike(input.search)}%`));
         if (input.cursor) filters.push(beforeCursor(t, input.cursor));
         const rows = await ctx.db
-          .select({ id: t.id, email: t.email, reason: t.reason, createdAt: t.createdAt })
+          .select({
+            id: t.id,
+            email: t.email,
+            reason: t.reason,
+            createdAt: t.createdAt,
+            cursorCreatedAt: createdAtCursorField(t),
+          })
           .from(t)
           .where(and(...filters))
           .orderBy(desc(t.createdAt), desc(t.id))

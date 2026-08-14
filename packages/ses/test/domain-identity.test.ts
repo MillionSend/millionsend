@@ -98,6 +98,45 @@ describe("createDomainIdentity", () => {
       BehaviorOnMxFailure: "USE_DEFAULT_VALUE",
     });
   });
+
+  it("adopts an already-existing identity and reads its tokens back", async () => {
+    const { client, calls } = fakeClient((command) => {
+      if (command instanceof CreateEmailIdentityCommand) {
+        throw Object.assign(new Error("identity exists"), { name: "AlreadyExistsException" });
+      }
+      if (command instanceof GetEmailIdentityCommand) {
+        return { DkimAttributes: { Status: "PENDING", Tokens: TOKENS } };
+      }
+      return {};
+    });
+    const result = await createDomainIdentity(client, {
+      domain: "example.com",
+      mailFromSubdomain: "send",
+    });
+    expect(result.dkimTokens).toEqual(TOKENS);
+    expect(calls.map((c) => c.constructor.name)).toEqual([
+      "CreateEmailIdentityCommand",
+      "PutEmailIdentityMailFromAttributesCommand",
+      "GetEmailIdentityCommand",
+    ]);
+    expect((calls[1] as PutEmailIdentityMailFromAttributesCommand).input).toMatchObject({
+      EmailIdentity: "example.com",
+      MailFromDomain: "send.example.com",
+    });
+  });
+
+  it("rethrows create failures other than AlreadyExistsException", async () => {
+    const { client, calls } = fakeClient((command) => {
+      if (command instanceof CreateEmailIdentityCommand) {
+        throw Object.assign(new Error("throttled"), { name: "TooManyRequestsException" });
+      }
+      return {};
+    });
+    await expect(
+      createDomainIdentity(client, { domain: "example.com", mailFromSubdomain: "send" }),
+    ).rejects.toThrow("throttled");
+    expect(calls).toHaveLength(1);
+  });
 });
 
 describe("getDomainVerification", () => {

@@ -16,12 +16,13 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node --experimental-strip-types src/migrate.ts"
+    "db:migrate": "tsx src/migrate.ts"
   },
   "dependencies": {
     "@millionsend/config": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "postgres": "^3.4.7"
+    "postgres": "^3.4.7",
+    "tsx": "^4.23.12"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

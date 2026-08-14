@@ -21,11 +21,15 @@ app container running the api (port 3001), worker, and web dashboard (port 3000)
    cp .env.example .env
    ```
 
-2. Fill the three required values in `.env`:
+2. Generate the two secrets in `.env` (everything else defaults to a working local setup; set `APP_BASE_URL` when deploying to a real host — sign-in is only accepted from that origin):
 
    - `DATABASE_URL` — the default works with the bundled Postgres; leave it.
    - `MASTER_ENCRYPTION_KEY` — `openssl rand -base64 32`
    - `BETTER_AUTH_SECRET` — `openssl rand -base64 32`
+   - `APP_BASE_URL` — the URL you open the dashboard at. The default
+     `http://localhost:3000` works for a local compose setup; set your real
+     `https://` URL when exposing it, or sign-in is rejected as an untrusted
+     origin.
 
    Add `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (or rely on the default AWS
    credential chain). Sandbox SES accounts must keep `SES_MAX_SEND_RATE=1`.
@@ -38,6 +42,14 @@ app container running the api (port 3001), worker, and web dashboard (port 3000)
 
    Migrations run automatically on boot. Dashboard: http://localhost:3000.
    API: http://localhost:3001.
+
+## Signup policy
+
+The first user to register becomes the initial account — no configuration needed.
+After that, registration is closed: anyone with an account can create API keys that
+send through your SES account, so signup stays off unless you opt in with
+`ALLOW_SIGNUP=true`. Keep port 3000 off the public internet unless you have opened
+signup deliberately.
 
 ## SES event ingestion (bounces, complaints, deliveries)
 
@@ -53,6 +65,9 @@ of bounced addresses. Requires a publicly reachable `APP_BASE_URL` (HTTPS).
 4. In SES, create a configuration set (e.g. `millionsend`) with an event destination
    pointing at the topic. Enable these event types: Send, Delivery, Bounce, Complaint,
    Reject, Rendering Failure, Delivery Delay.
+5. Put the configuration set name in `.env` as `SES_CONFIGURATION_SET` and restart.
+   It is applied to every send that has no per-domain configuration set; without it,
+   sends go out without a configuration set and emit no events.
 
 ## Local development without Docker
 

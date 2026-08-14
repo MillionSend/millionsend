@@ -1,4 +1,5 @@
-import { PLAN_DAILY_LIMIT } from "@millionsend/core";
+import { env } from "@millionsend/config";
+import { PLAN_DAILY_LIMIT, type Plan } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gte } from "drizzle-orm";
@@ -6,6 +7,15 @@ import { z } from "zod";
 import { router, teamProcedure } from "../trpc";
 
 const DAY_MS = 86_400_000;
+
+/**
+ * The API enforces plan caps only when IS_CLOUD; self-host has no daily
+ * quota, so the dashboard must report none. env is read lazily (per call)
+ * so tests can construct the environment first.
+ */
+function planDailyLimit(plan: Plan): number | null {
+  return env.IS_CLOUD ? PLAN_DAILY_LIMIT[plan] : null;
+}
 
 /** UTC day string ("YYYY-MM-DD") — must match the day key quota reservation writes. */
 function utcDay(epochMs: number): string {
@@ -20,7 +30,7 @@ export const settingsRouter = router({
         .from(schema.teams)
         .where(eq(schema.teams.id, ctx.teamId));
       if (!team) throw new TRPCError({ code: "NOT_FOUND" });
-      return { ...team, planDailyLimit: PLAN_DAILY_LIMIT[team.plan] };
+      return { ...team, planDailyLimit: planDailyLimit(team.plan) };
     }),
 
     rename: teamProcedure
@@ -82,7 +92,7 @@ export const settingsRouter = router({
           rows,
           today: {
             accepted: rows.find((r) => r.day === today)?.accepted ?? 0,
-            limit: PLAN_DAILY_LIMIT[team.plan],
+            limit: planDailyLimit(team.plan),
           },
         };
       }),

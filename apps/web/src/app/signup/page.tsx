@@ -13,16 +13,18 @@ export default function SignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [failed, setFailed] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setPending(true);
-    setFailed(false);
+    setErrorMessage(null);
     const { error } = await authClient.signUp.email({ name, email, password });
     if (error) {
-      setFailed(true);
+      // Server messages (e.g. the signup-disabled policy) are shown verbatim;
+      // the catalog copy is only the fallback for messageless failures.
+      setErrorMessage(error.message || t("error"));
       setPending(false);
       return;
     }
@@ -75,9 +77,9 @@ export default function SignupPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
-        {failed ? (
+        {errorMessage ? (
           <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
-            {t("error")}
+            {errorMessage}
           </p>
         ) : null}
         <button type="submit" className="ms-btn ms-btn-primary" disabled={pending}>
