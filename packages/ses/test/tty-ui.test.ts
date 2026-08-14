@@ -4,19 +4,18 @@ import { lineReader } from "../src/setup-cli.js";
 import { bannerLines, selectPrompt } from "../src/tty-ui.js";
 
 describe("bannerLines", () => {
-  it("renders MILLIONSEND as one row pair when it fits", () => {
-    const lines = bannerLines(80);
-    expect(lines).toHaveLength(2);
-    expect(lines[0]?.length).toBe(lines[1]?.length);
-    expect(lines[0]?.length).toBeLessThanOrEqual(80);
+  it("stacks MILLION over SEND, every row the same width, under the 80-col gate", () => {
+    const lines = bannerLines();
+    // 5 art rows + 1 echo row per word, plus the spacer row between words.
+    expect(lines).toHaveLength(13);
+    expect(lines[0]?.length).toBe(71);
+    for (const line of lines) expect(line.length).toBe(71);
   });
 
-  it("stacks MILLION over SEND when narrow, rows aligned per word", () => {
-    const lines = bannerLines(30);
-    expect(lines).toHaveLength(4);
-    expect(lines[0]?.length).toBe(lines[1]?.length);
-    expect(lines[2]?.length).toBe(lines[3]?.length);
-    for (const line of lines) expect(line.length).toBeLessThanOrEqual(30);
+  it("draws full-shade bodies with a light-shade echo", () => {
+    const text = bannerLines().join("\n");
+    expect(text).toContain("█");
+    expect(text).toContain("░");
   });
 });
 

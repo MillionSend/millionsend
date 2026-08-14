@@ -11,49 +11,72 @@ const colorOn = (): boolean => process.stdout.isTTY === true && process.env.NO_C
 export const dim = (s: string): string => (colorOn() ? `\x1b[90m${s}\x1b[39m` : s);
 /** Bone-bright white — the selected row. */
 export const bone = (s: string): string => (colorOn() ? `\x1b[97m${s}\x1b[39m` : s);
-/** Steel blue — the single banner accent. */
-export const steel = (s: string): string => (colorOn() ? `\x1b[38;5;153m${s}\x1b[39m` : s);
 
 /**
- * Two-row block glyphs for the banner. Both rows of a glyph must be the same
- * width — the banner tests assert row widths line up per word.
+ * Five-row cell maps for the banner letters ('#' = filled cell). Every row of
+ * a letter must be the same width — banner rows are assembled cell by cell and
+ * the tests pin that all banner lines come out the same visual width.
  */
-const GLYPHS: Record<string, [string, string]> = {
-  M: ["█▀▄▀█", "█ ▀ █"],
-  I: ["█", "█"],
-  L: ["█  ", "█▄▄"],
-  O: ["█▀█", "█▄█"],
-  N: ["█▄ █", "█ ▀█"],
-  S: ["█▀", "▄█"],
-  E: ["█▀▀", "██▄"],
-  D: ["█▀▄", "█▄▀"],
+const LETTERS: Record<string, string[]> = {
+  M: ["#...#", "##.##", "#.#.#", "#...#", "#...#"],
+  I: ["###", ".#.", ".#.", ".#.", "###"],
+  L: ["#...", "#...", "#...", "#...", "####"],
+  O: [".###.", "#...#", "#...#", "#...#", ".###."],
+  N: ["#...#", "##..#", "#.#.#", "#..##", "#...#"],
+  S: [".###", "#...", ".##.", "...#", "###."],
+  E: ["####", "#...", "###.", "#...", "####"],
+  D: ["###.", "#..#", "#..#", "#..#", "###."],
 };
 
-function word(text: string): [string, string] {
-  const glyphs = [...text].map((c) => GLYPHS[c] ?? [" ", " "]);
-  return [glyphs.map((g) => g[0]).join(" "), glyphs.map((g) => g[1]).join(" ")];
-}
+const ART_ROWS = 5;
+/** Each cell renders as two characters so the letters read chunky, not spindly. */
+const CELL_W = 2;
 
 /**
- * Plain (uncolored) banner art: "MILLIONSEND" as one row pair when it fits
- * `width`, else "MILLION" stacked over "SEND". Pure so width logic is testable.
+ * Block art for `text`: full-shade body cells with a light-shade echo offset
+ * one character right and one row down — a thin drop shadow along each
+ * letter's right and bottom edges. Returns ART_ROWS + 1 equal-width lines.
  */
-export function bannerLines(width: number): string[] {
-  const wide = word("MILLIONSEND");
-  if (wide[0].length <= width) return wide;
-  return [...word("MILLION"), ...word("SEND")];
-}
-
-/**
- * Colored banner art. The M's left stem stays steel-bright against the dim
- * body — the "1" hiding in MillionSend's M.
- */
-export function banner(width: number): string[] {
-  const lines = bannerLines(width);
-  return lines.map((line, i) => {
-    const hasStem = lines.length === 2 || i < 2;
-    return hasStem ? steel(line[0] ?? "") + dim(line.slice(1)) : dim(line);
+function art(text: string): string[] {
+  const grid: boolean[][] = Array.from({ length: ART_ROWS }, () => []);
+  const glyphs = [...text].map((c) => LETTERS[c] ?? []);
+  glyphs.forEach((glyph, gi) => {
+    for (let r = 0; r < ART_ROWS; r++) {
+      for (const cell of glyph[r] ?? "") grid[r]?.push(cell === "#");
+      if (gi < glyphs.length - 1) grid[r]?.push(false);
+    }
   });
+  const width = (grid[0]?.length ?? 0) * CELL_W + 1;
+  const canvas = Array.from({ length: ART_ROWS + 1 }, () => Array<string>(width).fill(" "));
+  const paint = (dr: number, dc: number, ch: string): void => {
+    for (let r = 0; r < ART_ROWS; r++) {
+      for (let c = 0; c < (grid[r]?.length ?? 0); c++) {
+        if (!grid[r]?.[c]) continue;
+        for (let k = 0; k < CELL_W; k++) {
+          const row = canvas[r + dr];
+          if (row) row[c * CELL_W + k + dc] = ch;
+        }
+      }
+    }
+  };
+  paint(1, 1, "░"); // echo first, body painted over it
+  paint(0, 0, "█");
+  return canvas.map((row) => row.join(""));
+}
+
+/**
+ * Plain (uncolored) banner art: MILLION stacked over SEND — "Send one. Send a
+ * million." Every line is the same visual width. Pure so it is testable.
+ */
+export function bannerLines(): string[] {
+  const lines = [...art("MILLION"), "", ...art("SEND")];
+  const width = Math.max(...lines.map((l) => l.length));
+  return lines.map((l) => l.padEnd(width));
+}
+
+/** Banner art with the echo dimmed — grays only, no-op when piped/NO_COLOR. */
+export function banner(): string[] {
+  return bannerLines().map((line) => line.replace(/░+/g, (run) => dim(run)));
 }
 
 export interface SelectOption {

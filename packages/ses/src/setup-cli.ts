@@ -70,7 +70,19 @@ export function lineReader(
   });
   return {
     question(prompt: string): Promise<string> {
-      output.write(prompt);
+      // Hand the prompt to readline instead of writing it to output directly:
+      // on a TTY, readline repaints the line on every edit (backspace, arrows)
+      // using only the prompt it was given, so a prompt it never saw gets
+      // erased down to nothing on the first backspace. On non-TTY output
+      // rl.prompt() writes the prompt text verbatim — piped bytes unchanged.
+      // After EOF readline has closed itself and prompt() would throw; the
+      // direct write keeps the prompt-then-"" contract byte-identical.
+      if (ended) {
+        output.write(prompt);
+      } else {
+        rl.setPrompt(prompt);
+        rl.prompt();
+      }
       const line = queue.shift();
       if (line !== undefined) return Promise.resolve(line);
       if (ended) return Promise.resolve("");
@@ -116,7 +128,7 @@ function runAws(args: string[]): void {
 function printHeader(): void {
   const columns = process.stdout.columns ?? 0;
   if (process.stdout.isTTY === true && columns >= 80) {
-    for (const line of banner(columns)) console.log(line);
+    for (const line of banner()) console.log(line);
     console.log(`\n${dim(DESCRIPTION)}\n`);
   } else {
     console.log(`${BANNER}\n`);
