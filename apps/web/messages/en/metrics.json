@@ -21,6 +21,6 @@
     "risk": "RISK 0.08%",
     "complained": "Complained"
   },
-  "empty": "0 emails.",
+  "empty": "No metrics yet.",
   "emptyHint": "Metrics appear after your first send — POST /emails."
 }

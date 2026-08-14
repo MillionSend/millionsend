@@ -13,6 +13,7 @@ import { Select } from "@/components/select";
 import { StatusBadge, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { formatHoursMinutes } from "@/lib/format";
+import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "./list-parts";
 
@@ -140,9 +141,8 @@ export default function EmailsPage() {
             display: "flex",
             alignItems: "center",
             gap: 14,
-            backgroundColor: "#050505",
-            backgroundImage:
-              "radial-gradient(130% 200% at 0% 50%, rgba(217,174,95,.14), rgba(217,174,95,0) 58%)",
+            backgroundColor: "var(--ms-ground)",
+            backgroundImage: statusGlow("warn"),
             border: "1px solid var(--ms-warn-border)",
             borderRadius: 12,
             padding: "12px 16px",
@@ -227,7 +227,7 @@ export default function EmailsPage() {
             onAction={clearFilters}
           />
         ) : (
-          <EmptyState headline={t("list.empty")} body={t("list.emptyHint")} />
+          <EmptyState area="emails" headline={t("list.empty")} body={t("list.emptyHint")} />
         )
       ) : (
         <>

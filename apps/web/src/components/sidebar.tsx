@@ -10,6 +10,7 @@ import { useDismiss } from "@/components/popover-menu";
 import { TeamSwitcher } from "@/components/team-switcher";
 import { authClient } from "@/lib/auth-client";
 import { isActive } from "@/lib/nav";
+import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
 import { useTRPC } from "@/lib/trpc";
 import { formatUtcDayReset, meterClass } from "@/lib/usage-meter";
 
@@ -50,6 +51,66 @@ function NavItem({
       <NavGlyph name={item.icon} hovered={hovered} />
       {label}
     </Link>
+  );
+}
+
+/* Appearance row — label + segmented sun/moon toggle, per the account-menu
+   grammar. Mounts only inside the open menu, so document is available and the
+   initial state can read the live attribute. */
+function AppearanceRow() {
+  const tCommon = useTranslations("common");
+  const [theme, setTheme] = useState<Theme>(currentTheme);
+  const pick = (next: Theme) => {
+    applyTheme(next);
+    setTheme(next);
+  };
+  return (
+    <div className="ms-menu-item static">
+      {tCommon("accountMenu.appearance")}
+      <span className="ms-theme-toggle">
+        <button
+          type="button"
+          className={theme === "light" ? "active" : undefined}
+          aria-label={tCommon("accountMenu.themeLight")}
+          aria-pressed={theme === "light"}
+          onClick={() => pick("light")}
+        >
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="4.4" />
+            <path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className={theme === "dark" ? "active" : undefined}
+          aria-label={tCommon("accountMenu.themeDark")}
+          aria-pressed={theme === "dark"}
+          onClick={() => pick("dark")}
+        >
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z" />
+          </svg>
+        </button>
+      </span>
+    </div>
   );
 }
 
@@ -105,6 +166,7 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
         {/* biome-ignore lint/performance/noImgElement: static SVG logo, nothing for next/image to optimize */}
         <img
           src="/logo/millionsend-wordmark.svg"
+          className="ms-wordmark"
           alt={tCommon("appName")}
           style={{ height: 15, display: "block" }}
         />
@@ -175,6 +237,7 @@ export function Sidebar({ teamName, userEmail }: { teamName: string; userEmail: 
             >
               {tCommon("accountMenu.onboarding")}
             </Link>
+            <AppearanceRow />
             <hr className="ms-menu-sep" />
             <button type="button" role="menuitem" className="ms-menu-item" onClick={signOut}>
               {tCommon("signOut")}

@@ -10,8 +10,8 @@
   },
   "list": {
     "title": "Domínios",
-    "addDomain": "+ Adicionar domínio",
-    "empty": "0 domínios.",
+    "addDomain": "Adicionar domínio",
+    "empty": "Nenhum domínio ainda.",
     "emptyBody": "Adicione um domínio para começar a enviar.",
     "error": "Não foi possível carregar os domínios.",
     "retry": "Tentar novamente",

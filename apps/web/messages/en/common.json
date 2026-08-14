@@ -6,7 +6,10 @@
   "cancel": "Cancel",
   "signOut": "Log out",
   "accountMenu": {
-    "onboarding": "Onboarding"
+    "onboarding": "Onboarding",
+    "appearance": "Appearance",
+    "themeLight": "Light",
+    "themeDark": "Dark"
   },
   "teamSwitcher": {
     "teams": "Teams",

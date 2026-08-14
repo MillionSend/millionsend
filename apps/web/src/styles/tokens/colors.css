@@ -1,4 +1,6 @@
-/* MillionSend colors — canonical values from design-system/tokens.css ("Rollover"). Dark theme only. */
+/* MillionSend colors — canonical values from design-system/tokens.css ("Rollover").
+   Dark is the default (no data-theme attribute); :root[data-theme="light"] below
+   redefines the full set. */
 :root {
   /* Ground & surfaces — separation comes from darkness + 1px lines, never shadows */
   --ms-void: #000000; /* app/page ground */
@@ -45,4 +47,53 @@
   --ms-dot-complained: #d9ae5f;
   --ms-dot-suppressed: #67655f;
   --ms-dot-failed: #cf5546;
+}
+
+/* Light theme — warm paper ground, ink text, cool-gray hairlines. Same roles,
+   inverted values; separation still comes from tone + 1px lines, never shadows.
+   Status text holds ≥4.5:1 on its tinted background. The attribute is set
+   pre-paint by the inline script in the root layout (explicit toggle only —
+   system preference is not followed). */
+:root[data-theme="light"] {
+  --ms-void: #faf8f4;
+  --ms-ground: #f4f1ea;
+  --ms-panel: #fffefb;
+  --ms-panel-raised: #f1eee7;
+  --ms-inset: #f6f4ee;
+  --ms-line: #e7e6e2;
+  --ms-line-strong: #d7d6d1;
+  --ms-bone: #21201c;
+  --ms-muted: #6e6c66;
+  --ms-faint: #a9a7a0;
+  /* Steel keeps its hue, dropped in lightness so accents stay readable on paper. */
+  --ms-steel: #59616b;
+  --ms-success: #1f7a46;
+  --ms-success-bg: #e9f5ee;
+  --ms-success-border: #c5e2d1;
+  --ms-info: #2b5e9e;
+  --ms-info-bg: #eaf1fa;
+  --ms-info-border: #c9daef;
+  --ms-warn: #8a6018;
+  --ms-warn-bg: #faf2df;
+  --ms-warn-border: #e8d7ab;
+  --ms-danger: #b03a2e;
+  --ms-danger-bg: #fbecea;
+  --ms-danger-border: #efc9c3;
+  --ms-neutral: #55534e;
+  --ms-neutral-bg: #efede8;
+  --ms-neutral-border: #d9d7d1;
+  /* Dots — same grammar (grays in flight, chroma on delivery events),
+     darkened so 8px dots survive the paper ground. */
+  --ms-dot-queued: #8a8880;
+  --ms-dot-queued-quota: #8f7336;
+  --ms-dot-sent: #75736d;
+  --ms-dot-delivery-delayed: #857664;
+  --ms-dot-delivered: #2e9d5f;
+  --ms-dot-opened: #4a7fc0;
+  --ms-dot-clicked: #7a63c2;
+  --ms-dot-bounced: #c4685a;
+  --ms-dot-complained: #b8862f;
+  --ms-dot-suppressed: #a5a39a;
+  --ms-dot-failed: #c0392b;
+  --ms-focus-ring: 0 0 0 2px rgba(89, 97, 107, 0.28);
 }

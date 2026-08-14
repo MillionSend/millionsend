@@ -10,6 +10,7 @@ import { Drawer } from "@/components/drawer";
 import { CodeGlyph } from "@/components/icons/nav-icons";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { formatDurationShort, formatRelative, formatUtcTimestampMs } from "@/lib/format";
+import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
 type EventType =
@@ -302,9 +303,8 @@ export default function EmailDetailPage() {
             display: "flex",
             alignItems: "center",
             gap: 12,
-            backgroundColor: "#050505",
-            backgroundImage:
-              "radial-gradient(130% 200% at 0% 50%, rgba(224,127,118,.14), rgba(224,127,118,0) 58%)",
+            backgroundColor: "var(--ms-ground)",
+            backgroundImage: statusGlow("danger"),
             border: "1px solid var(--ms-danger-border)",
             borderRadius: 12,
             padding: "12px 16px",
@@ -574,7 +574,7 @@ export default function EmailDetailPage() {
               (email.html ? (
                 <div
                   style={{
-                    background: "#26262a",
+                    background: "var(--ms-inset)",
                     padding: 28,
                     display: "flex",
                     justifyContent: "center",

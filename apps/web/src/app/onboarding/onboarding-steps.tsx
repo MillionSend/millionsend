@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { StatusBadge } from "@/components/status-badge";
 import { jsSingleQuote, shellSingleQuote } from "@/lib/escape";
 import { formatUtcMinute, maskApiKey } from "@/lib/format";
+import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
 /** Syntax-colored snippet token: k keyword, s string, w call, f comment. */
@@ -199,9 +200,8 @@ const stepCard: React.CSSProperties = {
 
 const bankedCard: React.CSSProperties = {
   flex: 1,
-  backgroundColor: "#050505",
-  backgroundImage:
-    "radial-gradient(130% 200% at 0% 50%, rgba(95,206,139,.15), rgba(95,206,139,0) 58%)",
+  backgroundColor: "var(--ms-ground)",
+  backgroundImage: statusGlow("success", 15),
   border: "1px solid var(--ms-success-border)",
   borderRadius: 14,
   padding: "16px 22px",
@@ -582,7 +582,10 @@ export function OnboardingSteps({
                     </span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
-                    <span className="ms-chip" style={{ background: "rgba(0,0,0,.3)" }}>
+                    <span
+                      className="ms-chip"
+                      style={{ background: "color-mix(in srgb, var(--ms-void) 30%, transparent)" }}
+                    >
                       {token && revealed ? token : maskedKey}
                       {token ? (
                         <>

@@ -1,7 +1,7 @@
 {
-  "createKey": "+ Create API key",
+  "createKey": "Create API key",
   "empty": {
-    "headline": "0 API keys.",
+    "headline": "No API keys yet.",
     "body": "Create a key to authenticate requests to the API."
   },
   "table": {

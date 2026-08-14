@@ -1,30 +1,30 @@
 {
   "broadcasts": {
-    "count": "0 broadcasts.",
-    "body": "Broadcasts are not available yet."
+    "headline": "No broadcasts yet.",
+    "body": "One message to your whole audience. Not available yet."
   },
   "audience": {
-    "count": "0 contacts.",
-    "body": "Audience is not available yet."
+    "headline": "No contacts yet.",
+    "body": "Contacts, segments, and subscription state. Not available yet."
   },
   "metrics": {
-    "count": "0 data points.",
-    "body": "Metrics are not available yet."
+    "headline": "No metrics yet.",
+    "body": "Delivery and engagement over time. Not available yet."
   },
   "logs": {
-    "count": "0 log entries.",
-    "body": "Logs are not available yet."
+    "headline": "No logs yet.",
+    "body": "Every API request, recorded. Not available yet."
   },
   "webhooks": {
-    "count": "0 webhooks.",
-    "body": "Webhooks are not available yet."
+    "headline": "No webhooks yet.",
+    "body": "Event notifications pushed to your endpoint. Not available yet."
   },
   "templates": {
-    "count": "0 templates.",
-    "body": "Templates are not available yet."
+    "headline": "No templates yet.",
+    "body": "Reusable email layouts. Not available yet."
   },
   "generic": {
-    "count": "0 items.",
+    "headline": "Nothing here yet.",
     "body": "This page is not built yet."
   }
 }

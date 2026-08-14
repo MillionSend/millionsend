@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
+import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
@@ -68,13 +69,28 @@ export function ApiKeysView() {
             className="ms-btn ms-btn-primary"
             onClick={() => setCreateOpen(true)}
           >
+            <PlusGlyph size={14} />
             {t("createKey")}
           </button>
         }
       />
 
       {keys && keys.length === 0 ? (
-        <EmptyState headline={t("empty.headline")} body={t("empty.body")} />
+        <EmptyState
+          area="api-keys"
+          headline={t("empty.headline")}
+          body={t("empty.body")}
+          cta={
+            <button
+              type="button"
+              className="ms-btn ms-btn-primary"
+              onClick={() => setCreateOpen(true)}
+            >
+              <PlusGlyph />
+              {t("createKey")}
+            </button>
+          }
+        />
       ) : null}
 
       {keys && keys.length > 0 ? (

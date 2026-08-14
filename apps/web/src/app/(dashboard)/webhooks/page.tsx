@@ -7,7 +7,7 @@ export default async function WebhooksPage() {
   return (
     <>
       <PageHeader title={nav("webhooks")} />
-      <EmptyState headline={t("webhooks.count")} body={t("webhooks.body")} />
+      <EmptyState area="webhooks" headline={t("webhooks.headline")} body={t("webhooks.body")} />
     </>
   );
 }

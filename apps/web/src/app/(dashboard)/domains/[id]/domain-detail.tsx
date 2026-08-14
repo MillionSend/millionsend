@@ -9,6 +9,7 @@ import { Modal } from "@/components/modal";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Table } from "@/components/table";
 import { formatRelative, formatUtcMinute, midTruncateParts } from "@/lib/format";
+import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { DomainStatusBadge } from "../domain-status";
 import { RegionLabel } from "../region-label";
@@ -50,7 +51,7 @@ function GradientBanner({
   variant: "success" | "warn";
   children: React.ReactNode;
 }) {
-  const glow = variant === "success" ? "rgba(95,206,139,.15)" : "rgba(217,174,95,.14)";
+  const glow = statusGlow(variant, variant === "success" ? 15 : 14);
   return (
     <div
       role="status"
@@ -58,8 +59,8 @@ function GradientBanner({
         display: "flex",
         alignItems: "center",
         gap: 12,
-        backgroundColor: "#050505",
-        backgroundImage: `radial-gradient(130% 200% at 0% 50%, ${glow}, rgba(5,5,5,0) 58%)`,
+        backgroundColor: "var(--ms-ground)",
+        backgroundImage: glow,
         border: `1px solid var(--ms-${variant}-border)`,
         borderRadius: 12,
         padding: "11px 16px",

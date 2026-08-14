@@ -1,7 +1,7 @@
 {
-  "createKey": "+ Criar chave de API",
+  "createKey": "Criar chave de API",
   "empty": {
-    "headline": "0 chaves de API.",
+    "headline": "Nenhuma chave de API ainda.",
     "body": "Crie uma chave para autenticar requisições à API."
   },
   "table": {

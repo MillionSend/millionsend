@@ -7,7 +7,7 @@ export default async function LogsPage() {
   return (
     <>
       <PageHeader title={nav("logs")} />
-      <EmptyState headline={t("logs.count")} body={t("logs.body")} />
+      <EmptyState area="logs" headline={t("logs.headline")} body={t("logs.body")} />
     </>
   );
 }
