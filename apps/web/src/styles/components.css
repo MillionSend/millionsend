@@ -1093,3 +1093,15 @@ svg:focus {
     transition: none;
   }
 }
+
+/* Number inputs: the native stepper arrows clash with the control grammar. */
+.ms-number {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.ms-number::-webkit-outer-spin-button,
+.ms-number::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
