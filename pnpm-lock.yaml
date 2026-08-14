@@ -91,8 +91,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@electric-sql/pglite@0.3.16)(pg@8.23.0)(postgres@3.4.9)
       nodemailer:
-        specifier: ^7.0.9
-        version: 7.0.13
+        specifier: ^9.0.5
+        version: 9.0.5
     devDependencies:
       '@hono/node-server':
         specifier: ^1.19.7
@@ -107,8 +107,8 @@ importers:
         specifier: ^22.20.1
         version: 22.20.1
       '@types/nodemailer':
-        specifier: ^7.0.4
-        version: 7.0.12
+        specifier: ^8.0.1
+        version: 8.0.1
       resend:
         specifier: ^6.19.0
         version: 6.19.0
@@ -946,8 +946,8 @@ packages:
   '@types/node@22.20.1':
     resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
 
-  '@types/nodemailer@7.0.12':
-    resolution: {integrity: sha512-80vKwiIsVSyFA1rRovH59jNPLBOuc6dRZIHEu40gXTkBkZnQv8vog1xSGEb9j5q/tdMAs5ivvDR2pLTU0hGHXA==}
+  '@types/nodemailer@8.0.1':
+    resolution: {integrity: sha512-PxpaInm8V1JQDd4j0ds5HfvWQk8JupS1C0Picb96QJsrrRDjBH+DlK7L4ZdNSqNULhiZRQHc40nLVShaGxXAMw==}
 
   '@vitest/expect@3.2.7':
     resolution: {integrity: sha512-E8eBXaKibuvH2pSZErOjdVb5vF4PbKYcrnluBTYxEk1l/VhhwZg1kZQsdtjq+CsF5CFydf2Rdkz7jDHKSisi3w==}
@@ -1178,8 +1178,8 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nodemailer@7.0.13:
-    resolution: {integrity: sha512-PNDFSJdP+KFgdsG3ZzMXCgquO7I6McjY2vlqILjtJd0hy8wEvtugS9xKRF2NWlPNGxvLCXlTNIae4serI7dinw==}
+  nodemailer@9.0.5:
+    resolution: {integrity: sha512-wvjiKvjczmsN7U/8006JOdXubgBk2XFAbioDMbT+sM7cPs0QrhJTa6KBRX7P5REGGkDcLUz/EarWidb8G8C1jQ==}
     engines: {node: '>=6.0.0'}
 
   non-error@0.1.0:
@@ -1986,7 +1986,7 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
-  '@types/nodemailer@7.0.12':
+  '@types/nodemailer@8.0.1':
     dependencies:
       '@types/node': 22.20.1
 
@@ -2168,7 +2168,7 @@ snapshots:
 
   nanoid@3.3.18: {}
 
-  nodemailer@7.0.13: {}
+  nodemailer@9.0.5: {}
 
   non-error@0.1.0: {}
 
