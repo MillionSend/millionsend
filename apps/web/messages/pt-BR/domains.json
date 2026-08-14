@@ -118,5 +118,6 @@
     "recordsError": "Não foi possível carregar os registros DNS.",
     "retry": "Tentar novamente"
   },
-  "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY no .env — veja SELF_HOSTING.md."
+  "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY no .env — veja SELF_HOSTING.md.",
+  "awsCredentialsCta": "Abrir configuração do SES"
 }

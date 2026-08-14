@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 const TABS = [
   { key: "settings", href: "/settings" },
   { key: "usage", href: "/settings/usage" },
+  { key: "ses", href: "/settings/ses" },
 ] as const;
 
 export function SettingsTabs() {
