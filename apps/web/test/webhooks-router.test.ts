@@ -211,20 +211,23 @@ describe("webhooks.list success rate", () => {
 });
 
 describe("webhooks.testDelivery", () => {
-  it("enqueues a pending sample delivery marked test", async () => {
+  it("delivers the test event synchronously and records the outcome", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
     // Even an endpoint subscribed to other events accepts a test fire.
+    // SSRF-blocked target: the attempt settles immediately and
+    // deterministically — the pin is that the row is NEVER left pending.
     const { id } = await caller.webhooks.create({
-      url: "https://example.com/hooks",
+      url: "https://10.0.0.1/hooks",
       eventTypes: ["email.bounced"],
     });
 
-    const { id: deliveryId } = await caller.webhooks.testDelivery({ id });
-    const delivery = await caller.webhooks.deliveries.get({ id: deliveryId });
-    expect(delivery.status).toBe("pending");
+    const result = await caller.webhooks.testDelivery({ id });
+    expect(result.ok).toBe(false);
+    const delivery = await caller.webhooks.deliveries.get({ id: result.id });
+    expect(delivery.status).toBe("failed");
     expect(delivery.eventType).toBe("email.sent");
-    expect(delivery.attempts).toBe(0);
+    expect(delivery.attempts).toBe(1);
     expect(delivery.payload).toMatchObject({ type: "email.sent", test: true });
     expect(delivery.messageId).toMatch(/^msg_/);
   });
