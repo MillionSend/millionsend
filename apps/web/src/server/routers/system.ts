@@ -48,6 +48,9 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       snsTopicsConfigured: Boolean(env.SNS_TOPIC_ARNS?.length),
       configurationSetConfigured: Boolean(env.SES_CONFIGURATION_SET),
       maxSendRate: env.SES_MAX_SEND_RATE,
+      // The setup page bakes the SNS subscription endpoint into its generated
+      // setup script; null means the events section is omitted.
+      appBaseUrl: env.APP_BASE_URL ?? null,
     })),
 
     /**

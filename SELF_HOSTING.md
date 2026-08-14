@@ -43,6 +43,36 @@ app container running the api (port 3001), worker, and web dashboard (port 3000)
    Migrations run automatically on boot. Dashboard: http://localhost:3000.
    API: http://localhost:3001.
 
+## One-command AWS setup
+
+Two ways to create everything MillionSend needs in AWS (IAM policy + user +
+access key, SNS event topic, SES configuration set) without clicking through
+the console:
+
+- **Setup script** — the dashboard's Settings → SES page generates a shell
+  script pre-filled with your region and `APP_BASE_URL`. Paste it into a
+  terminal where the aws CLI has admin credentials; it creates everything and
+  prints the exact `.env` lines to paste. Re-running it is safe, but each run
+  mints a new access key — delete stale ones in the IAM console.
+
+- **CloudFormation** — the same resources as a stack:
+
+  ```sh
+  aws cloudformation deploy --template-file infra/millionsend-ses.cfn.yaml \
+    --stack-name millionsend --capabilities CAPABILITY_NAMED_IAM \
+    --parameter-overrides AppBaseUrl=https://your-host
+  aws cloudformation describe-stacks --stack-name millionsend \
+    --query "Stacks[0].Outputs" --output table
+  ```
+
+  The outputs map 1:1 to `.env` keys. Omit `AppBaseUrl` to skip the event
+  subscription. A hosted quick-create console link would need the template on
+  S3 — not offered yet.
+
+Either way, finish by pasting the values into `.env` and restarting. The SNS
+subscription confirms itself once the app runs with `SNS_TOPIC_ARNS` set; if it
+stays pending, use "Request confirmation" on it in the SNS console.
+
 ## Signup policy
 
 The first user to register becomes the initial account — no configuration needed.
@@ -63,8 +93,8 @@ of bounced addresses. Requires a publicly reachable `APP_BASE_URL` (HTTPS).
    endpoint confirms the subscription automatically when the topic ARN matches
    `SNS_TOPIC_ARNS`.
 4. In SES, create a configuration set (e.g. `millionsend`) with an event destination
-   pointing at the topic. Enable these event types: Send, Delivery, Bounce, Complaint,
-   Reject, Rendering Failure, Delivery Delay.
+   pointing at the topic. Enable these event types: Send, Delivery, Delivery Delay,
+   Bounce, Complaint, Open, Click, Reject, Rendering Failure.
 5. Put the configuration set name in `.env` as `SES_CONFIGURATION_SET` and restart.
    It is applied to every send that has no per-domain configuration set; without it,
    sends go out without a configuration set and emit no events.
