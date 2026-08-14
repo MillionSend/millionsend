@@ -1,0 +1,26 @@
+{
+  "title": "Metrics",
+  "loading": "Loading…",
+  "range": {
+    "7": "Last 7 days",
+    "15": "Last 15 days",
+    "30": "Last 30 days"
+  },
+  "kpi": {
+    "emails": "Emails",
+    "deliverability": "Deliverability rate",
+    "allTimeDelivered": "Emails delivered — all-time"
+  },
+  "bounce": {
+    "title": "Bounce rate",
+    "risk": "RISK 4%",
+    "bounced": "Bounced"
+  },
+  "complaint": {
+    "title": "Complaint rate",
+    "risk": "RISK 0.08%",
+    "complained": "Complained"
+  },
+  "empty": "0 emails.",
+  "emptyHint": "Metrics appear after your first send — POST /emails."
+}

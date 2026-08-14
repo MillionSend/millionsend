@@ -1,0 +1,61 @@
+{
+  "team": {
+    "title": "Name your team",
+    "teamName": "Team name",
+    "submit": "Create team",
+    "error": "Team creation failed. Try again."
+  },
+  "title": "Send your first email",
+  "subtitle": "Follow the steps to send an email using the MillionSend API.",
+  "accountCreated": "Account created",
+  "step1": {
+    "title": "Add an API key",
+    "body": "Keys authenticate every request. The full key is shown once, at creation.",
+    "cta": "Add API key",
+    "keyName": "Onboarding",
+    "done": "API key added",
+    "doneMeta": "sending access · all domains",
+    "show": "show",
+    "hide": "hide",
+    "error": "Key creation failed. Try again."
+  },
+  "step2": {
+    "title": "Send an email",
+    "bodyLocked": "To your own inbox, from a domain you verify — the snippet unlocks once you have a key.",
+    "bodyReady": "Your key and your inbox are pre-filled. Run it from your terminal.",
+    "subject": "It works.",
+    "html": "<p>0000001 and counting.</p>",
+    "fromPlaceholder": "you@yourdomain.com",
+    "keyComment": "real key on copy",
+    "keyCommentLocked": "your key, once created"
+  },
+  "step3": {
+    "title": "Watch it arrive",
+    "waiting": "waiting for your first email · checking every 5 s"
+  },
+  "success": {
+    "keyAdded": "API key added",
+    "emailSent": "Email sent to {to}",
+    "emailDelivered": "Email sent · delivered to {to} in {seconds} s",
+    "counting": "{count, plural, one {1 delivered. Counting.} other {# delivered. Counting.}}",
+    "deliveredIn": "delivered in {seconds} s"
+  },
+  "explore": {
+    "label": "Explore more",
+    "domains": {
+      "title": "Verify a domain",
+      "body": "Send from your own address.",
+      "link": "Domains →"
+    },
+    "webhooks": {
+      "title": "Set up webhooks",
+      "body": "Delivery events, pushed to your endpoint as they happen.",
+      "link": "Webhooks →"
+    },
+    "team": {
+      "title": "Invite your team",
+      "body": "Members manage emails, domains, and webhooks.",
+      "link": "Team →"
+    }
+  }
+}

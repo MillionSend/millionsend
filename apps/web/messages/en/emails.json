@@ -4,41 +4,103 @@
     "title": "Emails",
     "suppressionList": "Suppression list",
     "apiDocs": "Emails API",
-    "searchPlaceholder": "Search by recipient or subject…",
+    "searchPlaceholder": "Search…",
     "allStatuses": "All statuses",
+    "allApiKeys": "All API keys",
+    "range": {
+      "h24": "Last 24 hours",
+      "d7": "Last 7 days",
+      "d15": "Last 15 days",
+      "d30": "Last 30 days",
+      "all": "All time"
+    },
     "to": "To",
     "status": "Status",
     "subject": "Subject",
     "sent": "Sent",
     "loadMore": "Load more",
     "empty": "0 emails.",
-    "emptyHint": "Send your first email through the API — POST /emails."
+    "emptyHint": "Send your first email through the API — POST /emails.",
+    "sentToday": "{count} sent today",
+    "deliveredAllTime": "{count} delivered all-time",
+    "p50Delivery": "p50 delivery {ms} ms",
+    "pageOf": "Page 1 – {pages} of {total} emails",
+    "pageSize": "{count} items",
+    "noMatch": "No emails match your filters.",
+    "statusFilter": "Status \"{status}\"",
+    "clearFilters": "Clear filters",
+    "loadError": "Couldn't load emails.",
+    "retry": "Retry",
+    "capBanner": {
+      "reached": "Today's {limit}-email limit reached.",
+      "queued": "{count} emails queued — they'll send in {duration}.",
+      "upgrade": "Upgrade to Pro for 3,000/day →"
+    }
   },
   "detail": {
-    "eyebrow": "Email",
+    "breadcrumb": "Email details",
     "notFound": "Email not found.",
+    "statusIn": "{status} in {duration}",
     "from": "From",
     "subject": "Subject",
     "to": "To",
+    "cc": "CC",
+    "bcc": "BCC",
     "id": "ID",
     "replyTo": "Reply-to",
     "tags": "Tags",
+    "apiKey": "API key",
     "events": "Email events",
     "noEvents": "0 events.",
     "event": {
       "rendering_failure": "Rendering failure"
     },
+    "suppressedLine": "future sends blocked",
+    "bounceBanner": {
+      "hard": "Hard bounce — this address can't receive mail.",
+      "suppressed": "It was added to your suppression list."
+    },
     "preview": "Preview",
     "plainText": "Plain text",
     "html": "HTML",
-    "copyHtml": "Copy HTML",
     "bodyPurged": "Body purged after retention window.",
     "noHtml": "No HTML body.",
     "noText": "No plain-text body."
   },
+  "bouncedDrawer": {
+    "title": "Bounced details",
+    "type": "Type",
+    "subtype": "Subtype",
+    "code": "Code",
+    "smtpResponse": "SMTP response",
+    "whatToDo": "What to do",
+    "step1": "Confirm the address with the recipient — one typo causes most 5.1.1s.",
+    "step2": "It is suppressed now. When you have a corrected address, send to it — the suppression applies to this exact address only.",
+    "step3": "Importing lists? Validate before sending — bounce rate over 4% pauses sending.",
+    "copyReady": "Copy-ready"
+  },
+  "suppressedDrawer": {
+    "title": "Suppressed details",
+    "origin": "Origin",
+    "added": "Added",
+    "recipient": "Recipient",
+    "blocked": "Sends to this address are blocked to protect your domain reputation. The API returns <code>422 suppressed_recipient</code>.",
+    "suggestedActions": "Suggested actions",
+    "step1": "Confirm the mailbox exists now — removing early usually re-bounces.",
+    "step2": "Then remove the suppression; the next send goes through normally.",
+    "remove": "Remove email address"
+  },
   "suppressions": {
-    "title": "Suppression list",
-    "searchPlaceholder": "Search by email address…",
+    "title": "Suppressions",
+    "searchPlaceholder": "Search…",
+    "allOrigins": "All origins",
+    "statsBlocked": "{count} addresses blocked",
+    "reasonCount": {
+      "hard_bounce": "{count} bounce",
+      "complaint": "{count} complaint",
+      "manual": "{count} manual",
+      "one_click_unsubscribe": "{count} unsubscribe"
+    },
     "email": "Email",
     "origin": "Origin",
     "added": "Added",
@@ -56,11 +118,26 @@
     "empty": "0 suppressed addresses.",
     "emptyHint": "Hard bounces and complaints are added automatically.",
     "loadMore": "Load more",
+    "noMatch": "No suppressions match your filters.",
+    "clearFilters": "Clear filters",
+    "loadError": "Couldn't load suppressions.",
+    "retry": "Retry",
+    "pageOf": "Page 1 – {pages} of {total} suppressions",
+    "pageSize": "{count} items",
     "reason": {
-      "hard_bounce": "Hard bounce",
+      "hard_bounce": "Bounce",
       "complaint": "Complaint",
       "manual": "Manual",
       "one_click_unsubscribe": "Unsubscribe"
+    },
+    "detail": {
+      "breadcrumb": "Suppression details",
+      "notFound": "Suppression not found.",
+      "origin": "Origin",
+      "recipient": "Recipient",
+      "added": "Added",
+      "details": "Details",
+      "removeNote": "Removing an address that bounced permanently will likely bounce again — remove it only after the mailbox is fixed."
     }
   }
 }

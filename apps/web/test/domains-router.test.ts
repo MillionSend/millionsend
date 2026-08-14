@@ -23,6 +23,7 @@ afterEach(async () => {
 interface FakeSesState {
   dkimStatus?: DkimVerificationStatus;
   verifiedForSending?: boolean;
+  nsHosts?: string[];
 }
 
 /** Fake SesIdentityClient discriminating on AWS command class names. */
@@ -50,7 +51,10 @@ function fakeSes(state: FakeSesState = {}) {
       return {};
     },
   };
-  const deps: DomainsSesDeps = { clientForRegion: () => client };
+  const deps: DomainsSesDeps = {
+    clientForRegion: () => client,
+    resolveNs: async () => state.nsHosts ?? [],
+  };
   return { deps, calls };
 }
 
@@ -138,7 +142,10 @@ describe("domains.create", () => {
         return {};
       },
     };
-    const { id } = await callerFor(teamId, { clientForRegion: () => client }).domains.create({
+    const { id } = await callerFor(teamId, {
+      clientForRegion: () => client,
+      resolveNs: async () => [],
+    }).domains.create({
       name: "example.com",
       region: "us-east-1",
     });
@@ -168,10 +175,10 @@ describe("domains.create", () => {
       },
     };
     await expect(
-      callerFor(teamId, { clientForRegion: () => client }).domains.create({
-        name: "example.com",
-        region: "us-east-1",
-      }),
+      callerFor(teamId, {
+        clientForRegion: () => client,
+        resolveNs: async () => [],
+      }).domains.create({ name: "example.com", region: "us-east-1" }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 });
@@ -231,13 +238,14 @@ describe("tenant isolation", () => {
 });
 
 describe("domains.records", () => {
-  it("derives the DNS checklist from the live identity", async () => {
+  it("derives the DNS checklist with per-record check state from the live identity", async () => {
     const teamId = await createTeam(db);
     const { deps } = fakeSes();
     const caller = callerFor(teamId, deps);
     const { id } = await caller.domains.create({ name: "example.com", region: "eu-west-1" });
 
-    const { records } = await caller.domains.records({ id });
+    const { records, provider } = await caller.domains.records({ id });
+    expect(provider).toBeNull();
     expect(records).toHaveLength(6);
     expect(records.filter((r) => r.group === "verification")).toHaveLength(3);
     expect(records).toContainEqual({
@@ -246,7 +254,40 @@ describe("domains.records", () => {
       name: "send.example.com",
       value: "feedback-smtp.eu-west-1.amazonses.com",
       priority: 10,
+      status: "pending",
     });
+    // DMARC is never checked by SES, so it carries no state.
+    expect(records.find((r) => r.group === "dmarc")?.status).toBeNull();
+  });
+
+  it("marks DKIM rows verified once SES reports SUCCESS and detects the NS provider", async () => {
+    const teamId = await createTeam(db);
+    const { deps } = fakeSes({
+      dkimStatus: "SUCCESS",
+      verifiedForSending: true,
+      nsHosts: ["a.sec.dns.br", "ns1.registro.br"],
+    });
+    const caller = callerFor(teamId, deps);
+    const { id } = await caller.domains.create({
+      name: "updates.example.com.br",
+      region: "sa-east-1",
+    });
+
+    const { records, provider } = await caller.domains.records({ id });
+    expect(provider).toEqual({ name: "Registro.br", url: "https://registro.br/painel/" });
+    for (const record of records.filter((r) => r.group !== "dmarc")) {
+      expect(record.status).toBe("verified");
+    }
+  });
+});
+
+describe("domains.get", () => {
+  it("returns a zero sent count for a fresh domain", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+    const domain = await caller.domains.get({ id });
+    expect(domain.sentCount).toBe(0);
   });
 });
 

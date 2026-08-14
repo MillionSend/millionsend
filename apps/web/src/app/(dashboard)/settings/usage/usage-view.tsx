@@ -4,15 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
-
-const WARN_RATIO = 0.8;
-const DANGER_RATIO = 0.95;
-
-function meterClass(ratio: number): string {
-  if (ratio >= DANGER_RATIO) return "ms-meter-danger";
-  if (ratio >= WARN_RATIO) return "ms-meter-warn";
-  return "";
-}
+import { meterClass } from "@/lib/usage-meter";
 
 export function UsageView() {
   const t = useTranslations("settings.usage");

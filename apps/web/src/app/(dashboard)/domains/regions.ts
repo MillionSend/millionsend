@@ -14,3 +14,15 @@ export const DOMAIN_REGIONS = [
 ] as const satisfies readonly SesRegion[];
 
 export type DomainRegion = (typeof DOMAIN_REGIONS)[number];
+
+/** Flag emoji shown next to the localized region city name ("🇧🇷 São Paulo"). */
+export const REGION_FLAGS: Record<DomainRegion, string> = {
+  "us-east-1": "🇺🇸",
+  "eu-west-1": "🇮🇪",
+  "sa-east-1": "🇧🇷",
+  "ap-northeast-1": "🇯🇵",
+};
+
+export function regionFlag(region: string): string {
+  return REGION_FLAGS[region as DomainRegion] ?? "";
+}

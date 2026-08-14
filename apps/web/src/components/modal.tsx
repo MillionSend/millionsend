@@ -1,6 +1,29 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
+
+function CloseGlyph({ onClose }: { onClose: () => void }) {
+  const t = useTranslations("common");
+  return (
+    <button
+      type="button"
+      onClick={onClose}
+      aria-label={t("close")}
+      style={{
+        background: "none",
+        border: 0,
+        padding: 0,
+        cursor: "pointer",
+        color: "var(--ms-muted)",
+        fontSize: 15,
+        lineHeight: 1,
+      }}
+    >
+      ✕
+    </button>
+  );
+}
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -54,7 +77,19 @@ export function Modal({
       }}
     >
       <div className="ms-modal" role="dialog" aria-modal="true" ref={ref} tabIndex={-1}>
-        {title ? <h2>{title}</h2> : null}
+        {title ? (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 12,
+            }}
+          >
+            <h2>{title}</h2>
+            <CloseGlyph onClose={onClose} />
+          </div>
+        ) : null}
         {children}
       </div>
     </div>

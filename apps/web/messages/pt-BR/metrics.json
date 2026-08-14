@@ -1,0 +1,26 @@
+{
+  "title": "Métricas",
+  "loading": "Carregando…",
+  "range": {
+    "7": "Últimos 7 dias",
+    "15": "Últimos 15 dias",
+    "30": "Últimos 30 dias"
+  },
+  "kpi": {
+    "emails": "E-mails",
+    "deliverability": "Taxa de entrega",
+    "allTimeDelivered": "E-mails entregues — total histórico"
+  },
+  "bounce": {
+    "title": "Taxa de rejeição",
+    "risk": "RISCO 4%",
+    "bounced": "Rejeitados"
+  },
+  "complaint": {
+    "title": "Taxa de reclamação",
+    "risk": "RISCO 0,08%",
+    "complained": "Reclamações"
+  },
+  "empty": "0 e-mails.",
+  "emptyHint": "As métricas aparecem após o primeiro envio — POST /emails."
+}

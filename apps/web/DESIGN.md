@@ -37,11 +37,16 @@ accent per view. **Dark theme only.** All values live in `src/styles/` as
 
 ## Iconography
 
-**Text is the icon system.** Interface glyphs are unicode in the running
-font: `⧉` copy, `✓` confirmed, `●` status dot, `…` overflow, `</>` code
-(mono), `→` follow-through. The only drawn icons are the 10 nav glyphs in
-`src/components/nav-icon.tsx` and the logos in `public/logo/` (never
-redrawn). Do not add icon fonts or icon libraries.
+**Text is the icon system for inline affordances:** unicode glyphs in the
+running font — `⧉` copy, `✓` confirmed, `●` status dot, `…` overflow, `</>`
+code (mono), `→` follow-through. The drawn icons are the 10 nav glyphs in
+`src/components/icons/nav-icons.tsx`: lucide-derived (ISC) paths, 16px,
+stroke 1.4, currentColor, each with a semantic hover micro-animation driven
+by `motion` (≤500ms on `--ms-ease`, disabled under
+`prefers-reduced-motion`) and triggered by the parent nav item's hover. The
+command palette and page action buttons may reuse these glyphs. Do not add
+other icon fonts or icon libraries. Logos in
+`public/logo/` are never redrawn.
 
 ## Fonts
 
@@ -52,7 +57,7 @@ redrawn). Do not add icon fonts or icon libraries.
 
 ## Layout
 
-Fixed 300px sidebar on `--ms-panel`; content column on void with 75px
+Fixed 240px sidebar on `--ms-panel`; content column on void with 75px
 gutters. Cards: panel fill, 1px line, 14px radius, 24px padding. Controls
 compact: buttons/inputs ≈34px. Modals drop from top (14vh offset), overlay
 `rgba(0,0,0,.72)`, no blur.

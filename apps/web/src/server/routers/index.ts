@@ -2,6 +2,7 @@ import { createCallerFactory, router } from "../trpc";
 import { apiKeysRouter } from "./api-keys";
 import { domainsRouter } from "./domains";
 import { emailsRouter } from "./emails";
+import { metricsRouter } from "./metrics";
 import { settingsRouter } from "./settings";
 import { teamBootstrapRouter } from "./team-bootstrap";
 
@@ -9,6 +10,7 @@ export const appRouter = router({
   emails: emailsRouter,
   domains: domainsRouter,
   apiKeys: apiKeysRouter,
+  metrics: metricsRouter,
   settings: settingsRouter,
   team: teamBootstrapRouter,
 });

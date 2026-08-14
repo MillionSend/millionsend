@@ -1,0 +1,61 @@
+{
+  "team": {
+    "title": "Dê um nome ao seu time",
+    "teamName": "Nome do time",
+    "submit": "Criar time",
+    "error": "Falha ao criar o time. Tente de novo."
+  },
+  "title": "Envie seu primeiro e-mail",
+  "subtitle": "Siga os passos para enviar um e-mail pela API do MillionSend.",
+  "accountCreated": "Conta criada",
+  "step1": {
+    "title": "Adicione uma chave de API",
+    "body": "As chaves autenticam cada requisição. A chave completa aparece uma única vez, na criação.",
+    "cta": "Adicionar chave de API",
+    "keyName": "Onboarding",
+    "done": "Chave de API adicionada",
+    "doneMeta": "acesso de envio · todos os domínios",
+    "show": "mostrar",
+    "hide": "ocultar",
+    "error": "Falha ao criar a chave. Tente de novo."
+  },
+  "step2": {
+    "title": "Envie um e-mail",
+    "bodyLocked": "Para a sua própria caixa de entrada, de um domínio que você verificar — o snippet libera assim que você tiver uma chave.",
+    "bodyReady": "Sua chave e sua caixa de entrada já vêm preenchidas. Rode no seu terminal.",
+    "subject": "Funciona.",
+    "html": "<p>0000001 e contando.</p>",
+    "fromPlaceholder": "voce@seudominio.com.br",
+    "keyComment": "chave real ao copiar",
+    "keyCommentLocked": "sua chave, após a criação"
+  },
+  "step3": {
+    "title": "Veja chegar",
+    "waiting": "aguardando seu primeiro e-mail · verificando a cada 5 s"
+  },
+  "success": {
+    "keyAdded": "Chave de API adicionada",
+    "emailSent": "E-mail enviado para {to}",
+    "emailDelivered": "E-mail enviado · entregue para {to} em {seconds} s",
+    "counting": "{count, plural, one {1 entregue. Contando.} other {# entregues. Contando.}}",
+    "deliveredIn": "entregue em {seconds} s"
+  },
+  "explore": {
+    "label": "Explore mais",
+    "domains": {
+      "title": "Verifique um domínio",
+      "body": "Envie do seu próprio endereço.",
+      "link": "Domínios →"
+    },
+    "webhooks": {
+      "title": "Configure webhooks",
+      "body": "Eventos de entrega, enviados ao seu endpoint assim que acontecem.",
+      "link": "Webhooks →"
+    },
+    "team": {
+      "title": "Convide seu time",
+      "body": "Membros gerenciam e-mails, domínios e webhooks.",
+      "link": "Time →"
+    }
+  }
+}

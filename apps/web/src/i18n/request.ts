@@ -13,6 +13,8 @@ const NAMESPACES = [
   "emails",
   "domains",
   "api-keys",
+  "metrics",
+  "onboarding",
   "settings",
   "placeholders",
 ] as const;

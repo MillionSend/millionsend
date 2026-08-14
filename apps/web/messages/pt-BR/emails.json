@@ -4,41 +4,103 @@
     "title": "E-mails",
     "suppressionList": "Lista de supressão",
     "apiDocs": "API de e-mails",
-    "searchPlaceholder": "Buscar por destinatário ou assunto…",
+    "searchPlaceholder": "Buscar…",
     "allStatuses": "Todos os status",
+    "allApiKeys": "Todas as chaves de API",
+    "range": {
+      "h24": "Últimas 24 horas",
+      "d7": "Últimos 7 dias",
+      "d15": "Últimos 15 dias",
+      "d30": "Últimos 30 dias",
+      "all": "Todo o período"
+    },
     "to": "Para",
     "status": "Status",
     "subject": "Assunto",
     "sent": "Enviado",
     "loadMore": "Carregar mais",
     "empty": "0 e-mails.",
-    "emptyHint": "Envie seu primeiro e-mail pela API — POST /emails."
+    "emptyHint": "Envie seu primeiro e-mail pela API — POST /emails.",
+    "sentToday": "{count} enviados hoje",
+    "deliveredAllTime": "{count} entregues no total",
+    "p50Delivery": "entrega p50 {ms} ms",
+    "pageOf": "Página 1 – {pages} de {total} e-mails",
+    "pageSize": "{count} itens",
+    "noMatch": "Nenhum e-mail corresponde aos filtros.",
+    "statusFilter": "Status \"{status}\"",
+    "clearFilters": "Limpar filtros",
+    "loadError": "Não foi possível carregar os e-mails.",
+    "retry": "Tentar novamente",
+    "capBanner": {
+      "reached": "Limite diário de {limit} e-mails atingido.",
+      "queued": "{count} e-mails na fila — serão enviados em {duration}.",
+      "upgrade": "Faça upgrade para o Pro: 3.000/dia →"
+    }
   },
   "detail": {
-    "eyebrow": "E-mail",
+    "breadcrumb": "Detalhes do e-mail",
     "notFound": "E-mail não encontrado.",
+    "statusIn": "{status} em {duration}",
     "from": "De",
     "subject": "Assunto",
     "to": "Para",
+    "cc": "CC",
+    "bcc": "CCO",
     "id": "ID",
     "replyTo": "Responder para",
     "tags": "Tags",
+    "apiKey": "Chave de API",
     "events": "Eventos do e-mail",
     "noEvents": "0 eventos.",
     "event": {
       "rendering_failure": "Falha de renderização"
     },
+    "suppressedLine": "envios futuros bloqueados",
+    "bounceBanner": {
+      "hard": "Bounce permanente — este endereço não pode receber e-mails.",
+      "suppressed": "Ele foi adicionado à sua lista de supressão."
+    },
     "preview": "Prévia",
     "plainText": "Texto simples",
     "html": "HTML",
-    "copyHtml": "Copiar HTML",
     "bodyPurged": "Corpo removido após a janela de retenção.",
     "noHtml": "Sem corpo HTML.",
     "noText": "Sem corpo em texto simples."
   },
+  "bouncedDrawer": {
+    "title": "Detalhes do bounce",
+    "type": "Tipo",
+    "subtype": "Subtipo",
+    "code": "Código",
+    "smtpResponse": "Resposta SMTP",
+    "whatToDo": "O que fazer",
+    "step1": "Confirme o endereço com o destinatário — um erro de digitação causa a maioria dos 5.1.1.",
+    "step2": "Ele está suprimido agora. Quando tiver o endereço corrigido, envie para ele — a supressão vale apenas para este endereço exato.",
+    "step3": "Importando listas? Valide antes de enviar — taxa de bounce acima de 4% pausa os envios.",
+    "copyReady": "Pronto para copiar"
+  },
+  "suppressedDrawer": {
+    "title": "Detalhes da supressão",
+    "origin": "Origem",
+    "added": "Adicionado",
+    "recipient": "Destinatário",
+    "blocked": "Envios para este endereço são bloqueados para proteger a reputação do seu domínio. A API retorna <code>422 suppressed_recipient</code>.",
+    "suggestedActions": "Ações sugeridas",
+    "step1": "Confirme que a caixa postal existe agora — remover cedo demais costuma gerar novo bounce.",
+    "step2": "Depois remova a supressão; o próximo envio segue normalmente.",
+    "remove": "Remover endereço de e-mail"
+  },
   "suppressions": {
-    "title": "Lista de supressão",
-    "searchPlaceholder": "Buscar por endereço de e-mail…",
+    "title": "Supressões",
+    "searchPlaceholder": "Buscar…",
+    "allOrigins": "Todas as origens",
+    "statsBlocked": "{count} endereços bloqueados",
+    "reasonCount": {
+      "hard_bounce": "{count} bounce",
+      "complaint": "{count} reclamação",
+      "manual": "{count} manual",
+      "one_click_unsubscribe": "{count} descadastro"
+    },
     "email": "E-mail",
     "origin": "Origem",
     "added": "Adicionado",
@@ -56,11 +118,26 @@
     "empty": "0 endereços suprimidos.",
     "emptyHint": "Bounces permanentes e reclamações são adicionados automaticamente.",
     "loadMore": "Carregar mais",
+    "noMatch": "Nenhuma supressão corresponde aos filtros.",
+    "clearFilters": "Limpar filtros",
+    "loadError": "Não foi possível carregar as supressões.",
+    "retry": "Tentar novamente",
+    "pageOf": "Página 1 – {pages} de {total} supressões",
+    "pageSize": "{count} itens",
     "reason": {
-      "hard_bounce": "Bounce permanente",
+      "hard_bounce": "Bounce",
       "complaint": "Reclamação",
       "manual": "Manual",
       "one_click_unsubscribe": "Descadastro"
+    },
+    "detail": {
+      "breadcrumb": "Detalhes da supressão",
+      "notFound": "Supressão não encontrada.",
+      "origin": "Origem",
+      "recipient": "Destinatário",
+      "added": "Adicionado",
+      "details": "Detalhes",
+      "removeNote": "Remover um endereço que devolveu permanentemente provavelmente devolverá de novo — remova apenas depois que a caixa postal for corrigida."
     }
   }
 }

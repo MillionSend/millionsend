@@ -3,7 +3,7 @@ import type { Keyring } from "@millionsend/core";
 import { decryptEmailBody, type EmailBody, EnvKeyring, hashRecipient } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, ilike, lt, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
@@ -75,6 +75,8 @@ export const emailsRouter = router({
       z.object({
         status: emailStatus.optional(),
         search: z.string().trim().max(200).optional(),
+        apiKeyId: z.uuid().optional(),
+        since: z.coerce.date().optional(),
         cursor: cursorSchema.optional(),
         limit: z.number().int().min(1).max(50).default(25),
       }),
@@ -87,6 +89,13 @@ export const emailsRouter = router({
         const pattern = `%${escapeLike(input.search)}%`;
         filters.push(or(ilike(t.subject, pattern), sql`${t.to}::text ilike ${pattern}`));
       }
+      if (input.apiKeyId) filters.push(eq(t.apiKeyId, input.apiKeyId));
+      if (input.since) filters.push(gte(t.createdAt, input.since));
+      // Total counts the filter scope, not the page — the cursor is excluded.
+      const [totalRow] = await ctx.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(t)
+        .where(and(...filters));
       if (input.cursor) filters.push(beforeCursor(t, input.cursor));
       const rows = await ctx.db
         .select({
@@ -102,8 +111,52 @@ export const emailsRouter = router({
         .where(and(...filters))
         .orderBy(desc(t.createdAt), desc(t.id))
         .limit(input.limit + 1);
-      return paginate(rows, input.limit);
+      return { ...paginate(rows, input.limit), total: totalRow?.total ?? 0 };
     }),
+
+  /** Masthead proof strip + cap banner: today's sends, all-time deliveries, p50, queued backlog. */
+  stats: teamProcedure.query(async ({ ctx }) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const c = schema.usageCounters;
+    const [usage] = await ctx.db
+      .select({
+        sentToday: sql<number>`coalesce(sum(${c.accepted}) filter (where ${c.day} = ${today}), 0)::int`,
+        deliveredAllTime: sql<number>`coalesce(sum(${c.delivered}), 0)::int`,
+      })
+      .from(c)
+      .where(eq(c.teamId, ctx.teamId));
+
+    const t = schema.emails;
+    const [queued] = await ctx.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(t)
+      .where(and(eq(t.teamId, ctx.teamId), eq(t.latestStatus, "queued_quota")));
+
+    // p50 over SES delivery processingTimeMillis recorded in delivered events.
+    const ev = schema.emailEvents;
+    const [p50] = await ctx.db
+      .select({
+        p50: sql<
+          string | null
+        >`percentile_cont(0.5) within group (order by (${ev.data}->'delivery'->>'processingTimeMillis')::numeric)`,
+      })
+      .from(ev)
+      .innerJoin(t, eq(ev.emailId, t.id))
+      .where(
+        and(
+          eq(t.teamId, ctx.teamId),
+          eq(ev.type, "delivered"),
+          sql`${ev.data}->'delivery'->>'processingTimeMillis' is not null`,
+        ),
+      );
+
+    return {
+      sentToday: usage?.sentToday ?? 0,
+      deliveredAllTime: usage?.deliveredAllTime ?? 0,
+      queuedQuota: queued?.count ?? 0,
+      p50DeliveryMs: p50?.p50 == null ? null : Math.round(Number(p50.p50)),
+    };
+  }),
 
   get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
     const t = schema.emails;
@@ -145,8 +198,20 @@ export const emailsRouter = router({
       .where(eq(ev.emailId, email.id))
       .orderBy(asc(ev.occurredAt), asc(ev.id));
 
+    let apiKeyName: string | null = null;
+    if (email.apiKeyId) {
+      const k = schema.apiKeys;
+      const [key] = await ctx.db
+        .select({ name: k.name })
+        .from(k)
+        .where(and(eq(k.id, email.apiKeyId), eq(k.teamId, ctx.teamId)))
+        .limit(1);
+      apiKeyName = key?.name ?? null;
+    }
+
     // Whitelisted shape: the ciphertext/key columns must never reach the client.
     return {
+      apiKeyName,
       id: email.id,
       from: email.from,
       to: email.to,
@@ -171,6 +236,8 @@ export const emailsRouter = router({
       .input(
         z.object({
           search: z.string().trim().max(200).optional(),
+          reason: z.enum(schema.suppressionReasonEnum.enumValues).optional(),
+          since: z.coerce.date().optional(),
           cursor: cursorSchema.optional(),
           limit: z.number().int().min(1).max(50).default(25),
         }),
@@ -179,6 +246,13 @@ export const emailsRouter = router({
         const t = schema.suppressions;
         const filters: (SQL | undefined)[] = [eq(t.teamId, ctx.teamId)];
         if (input.search) filters.push(ilike(t.email, `%${escapeLike(input.search)}%`));
+        if (input.reason) filters.push(eq(t.reason, input.reason));
+        if (input.since) filters.push(gte(t.createdAt, input.since));
+        // Total counts the filter scope, not the page — the cursor is excluded.
+        const [totalRow] = await ctx.db
+          .select({ total: sql<number>`count(*)::int` })
+          .from(t)
+          .where(and(...filters));
         if (input.cursor) filters.push(beforeCursor(t, input.cursor));
         const rows = await ctx.db
           .select({
@@ -192,8 +266,63 @@ export const emailsRouter = router({
           .where(and(...filters))
           .orderBy(desc(t.createdAt), desc(t.id))
           .limit(input.limit + 1);
-        return paginate(rows, input.limit);
+        return { ...paginate(rows, input.limit), total: totalRow?.total ?? 0 };
       }),
+
+    /** Masthead proof strip: "{total} addresses blocked · {n} bounce · {n} complaint". */
+    stats: teamProcedure.query(async ({ ctx }) => {
+      const t = schema.suppressions;
+      const rows = await ctx.db
+        .select({ reason: t.reason, count: sql<number>`count(*)::int` })
+        .from(t)
+        .where(eq(t.teamId, ctx.teamId))
+        .groupBy(t.reason);
+      const byReason = Object.fromEntries(rows.map((r) => [r.reason, r.count])) as Partial<
+        Record<(typeof schema.suppressionReasonEnum.enumValues)[number], number>
+      >;
+      return { total: rows.reduce((sum, r) => sum + r.count, 0), byReason };
+    }),
+
+    get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
+      const t = schema.suppressions;
+      const [row] = await ctx.db
+        .select({
+          id: t.id,
+          email: t.email,
+          reason: t.reason,
+          createdAt: t.createdAt,
+          sourceEmailId: t.sourceEmailId,
+        })
+        .from(t)
+        .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
+        .limit(1);
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+
+      // The SMTP diagnostic lives on the source email's bounce event; the
+      // team guard on the join keeps a stray sourceEmailId from leaking
+      // another tenant's event payload.
+      let bounce: Record<string, unknown> | null = null;
+      if (row.sourceEmailId) {
+        const ev = schema.emailEvents;
+        const e = schema.emails;
+        const [event] = await ctx.db
+          .select({ data: ev.data })
+          .from(ev)
+          .innerJoin(e, eq(ev.emailId, e.id))
+          .where(
+            and(
+              eq(ev.emailId, row.sourceEmailId),
+              eq(e.teamId, ctx.teamId),
+              eq(ev.type, "bounced"),
+            ),
+          )
+          .orderBy(desc(ev.occurredAt), desc(ev.id))
+          .limit(1);
+        const data = event?.data?.bounce;
+        bounce = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+      }
+      return { ...row, bounce };
+    }),
 
     add: teamProcedure
       .input(

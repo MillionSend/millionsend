@@ -1,17 +1,19 @@
 "use client";
 
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
-import { useDeferredValue, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import { useDeferredValue, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { Modal } from "@/components/modal";
-import { PageHeader } from "@/components/page-header";
+import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
+import { FilterSelect, ListFooter, ListSkeleton, SearchBox, StateCard } from "../list-parts";
 
-type Reason = "hard_bounce" | "complaint" | "manual" | "one_click_unsubscribe";
+const REASONS = ["hard_bounce", "complaint", "manual", "one_click_unsubscribe"] as const;
+type Reason = (typeof REASONS)[number];
 
 const REASON_VARIANT: Record<Reason, "warn" | "danger" | "neutral"> = {
   complaint: "warn",
@@ -20,14 +22,27 @@ const REASON_VARIANT: Record<Reason, "warn" | "danger" | "neutral"> = {
   one_click_unsubscribe: "neutral",
 };
 
+const RANGE_HOURS = { h24: 24, d7: 168, d30: 720 } as const;
+type RangeKey = keyof typeof RANGE_HOURS | "all";
+const RANGE_KEYS: RangeKey[] = ["all", "h24", "d7", "d30"];
+
 export default function SuppressionsPage() {
   const t = useTranslations("emails");
   const common = useTranslations("common");
+  const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 
   const [search, setSearch] = useState("");
+  const [reason, setReason] = useState<Reason | "all">("all");
+  const [range, setRange] = useState<RangeKey>("all");
+  const [limit, setLimit] = useState(40);
   const deferredSearch = useDeferredValue(search.trim());
+  const since = useMemo(
+    () => (range === "all" ? undefined : new Date(Date.now() - RANGE_HOURS[range] * 3_600_000)),
+    [range],
+  );
   const [addOpen, setAddOpen] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [removeTarget, setRemoveTarget] = useState<{ id: string; email: string | null } | null>(
@@ -36,14 +51,30 @@ export default function SuppressionsPage() {
 
   const query = useInfiniteQuery(
     trpc.emails.suppressions.list.infiniteQueryOptions(
-      { limit: 25, ...(deferredSearch ? { search: deferredSearch } : {}) },
+      {
+        limit,
+        ...(deferredSearch ? { search: deferredSearch } : {}),
+        ...(reason !== "all" ? { reason } : {}),
+        ...(since ? { since } : {}),
+      },
       { getNextPageParam: (page) => page.nextCursor },
     ),
   );
+  const stats = useQuery(trpc.emails.suppressions.stats.queryOptions());
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const total = query.data?.pages[0]?.total ?? 0;
 
-  const invalidate = () =>
-    queryClient.invalidateQueries(trpc.emails.suppressions.list.pathFilter());
+  const byReason = stats.data?.byReason;
+  const subtitle = stats.data
+    ? [
+        t("suppressions.statsBlocked", { count: nf.format(stats.data.total) }),
+        ...REASONS.filter((r) => (byReason?.[r] ?? 0) > 0).map((r) =>
+          t(`suppressions.reasonCount.${r}`, { count: nf.format(byReason?.[r] ?? 0) }),
+        ),
+      ].join(" · ")
+    : undefined;
+
+  const invalidate = () => queryClient.invalidateQueries(trpc.emails.suppressions.pathFilter());
 
   const addMutation = useMutation(
     trpc.emails.suppressions.add.mutationOptions({
@@ -63,53 +94,110 @@ export default function SuppressionsPage() {
     }),
   );
 
+  const hasFilters = deferredSearch !== "" || reason !== "all" || range !== "all";
+
+  function clearFilters() {
+    setSearch("");
+    setReason("all");
+    setRange("all");
+  }
+
   return (
     <>
-      <Link href="/emails" style={{ fontSize: "var(--ms-fs-label)", color: "var(--ms-muted)" }}>
-        ← {t("list.title")}
-      </Link>
-      <div style={{ height: 12 }} />
       <PageHeader
+        breadcrumb={
+          <>
+            <Crumb href="/emails" label={t("list.title")} />
+            <CrumbEnd label={t("suppressions.title")} />
+          </>
+        }
         title={t("suppressions.title")}
+        {...(subtitle ? { subtitle } : {})}
         actions={
-          <button type="button" className="ms-btn ms-btn-primary" onClick={() => setAddOpen(true)}>
-            {t("suppressions.add")}
-          </button>
+          <>
+            <a className="ms-btn ms-btn-icon" href="#emails-api" aria-label={t("list.apiDocs")}>
+              {"</>"}
+            </a>
+            <button
+              type="button"
+              className="ms-btn ms-btn-primary"
+              onClick={() => setAddOpen(true)}
+            >
+              {t("suppressions.add")}
+            </button>
+          </>
         }
       />
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        <input
-          className="ms-input"
-          style={{ flex: 1, maxWidth: 320 }}
-          placeholder={t("suppressions.searchPlaceholder")}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}>
+        <SearchBox
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={setSearch}
+          placeholder={t("suppressions.searchPlaceholder")}
         />
+        <FilterSelect
+          value={reason}
+          onChange={(value) => setReason(value as Reason | "all")}
+          width={120}
+          ariaLabel={t("suppressions.origin")}
+        >
+          <option value="all">{t("suppressions.allOrigins")}</option>
+          {REASONS.map((r) => (
+            <option key={r} value={r}>
+              {t(`suppressions.reason.${r}`)}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterSelect
+          value={range}
+          onChange={(value) => setRange(value as RangeKey)}
+          width={110}
+          ariaLabel={t(`list.range.${range === "all" ? "all" : range}`)}
+        >
+          {RANGE_KEYS.map((key) => (
+            <option key={key} value={key}>
+              {t(`list.range.${key}`)}
+            </option>
+          ))}
+        </FilterSelect>
       </div>
 
       {query.isPending ? (
-        <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>{t("loading")}</p>
+        <ListSkeleton />
+      ) : query.isError ? (
+        <StateCard
+          headline={t("suppressions.loadError")}
+          actionLabel={t("suppressions.retry")}
+          onAction={() => query.refetch()}
+        />
       ) : items.length === 0 ? (
-        <EmptyState headline={t("suppressions.empty")} body={t("suppressions.emptyHint")} />
+        hasFilters ? (
+          <StateCard
+            headline={t("suppressions.noMatch")}
+            actionLabel={t("suppressions.clearFilters")}
+            onAction={clearFilters}
+          />
+        ) : (
+          <EmptyState headline={t("suppressions.empty")} body={t("suppressions.emptyHint")} />
+        )
       ) : (
         <>
           <Table>
             <thead>
               <tr>
-                <th>{t("suppressions.email")}</th>
-                <th>{t("suppressions.origin")}</th>
-                <th className="right">{t("suppressions.added")}</th>
+                <th style={{ width: "40%" }}>{t("suppressions.email")}</th>
+                <th style={{ width: "18%" }}>{t("suppressions.origin")}</th>
+                <th>{t("suppressions.added")}</th>
                 {/* Overflow-action column — no header label. */}
-                <th />
+                <th className="right" />
               </tr>
             </thead>
             <tbody>
               {items.map((row) => (
                 <tr key={row.id}>
-                  <td>
+                  <td className="ms-mono" style={{ fontSize: 13 }}>
                     {row.email ? (
-                      <span className="ms-mono">{row.email}</span>
+                      <Link href={`/emails/suppressions/${row.id}`}>{row.email}</Link>
                     ) : (
                       <span style={{ color: "var(--ms-faint)" }}>—</span>
                     )}
@@ -119,13 +207,14 @@ export default function SuppressionsPage() {
                       {t(`suppressions.reason.${row.reason}`)}
                     </span>
                   </td>
-                  <td className="right">
+                  <td style={{ color: "var(--ms-muted)" }}>
                     <RelativeTime date={row.createdAt} />
                   </td>
                   <td className="right" style={{ width: 40 }}>
                     <button
                       type="button"
                       className="ms-btn ms-btn-ghost"
+                      style={{ padding: "0 4px", color: "var(--ms-faint)" }}
                       aria-label={t("suppressions.remove")}
                       onClick={() => setRemoveTarget({ id: row.id, email: row.email })}
                     >
@@ -148,6 +237,15 @@ export default function SuppressionsPage() {
               </button>
             </div>
           ) : null}
+          <ListFooter
+            left={t("suppressions.pageOf", {
+              pages: query.data?.pages.length ?? 1,
+              total: nf.format(total),
+            })}
+            size={limit}
+            onSize={setLimit}
+            sizeLabel={(size) => t("suppressions.pageSize", { count: size })}
+          />
         </>
       )}
 

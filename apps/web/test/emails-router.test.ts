@@ -123,6 +123,29 @@ describe("emails.list", () => {
     expect(page2.nextCursor).toBeNull();
   });
 
+  it("filters by apiKeyId and since, and reports the filter-scope total", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const keyId = "5c1f7f60-8f4f-4f7e-9a6c-1d2e3f405060";
+    const withKey = await insertEmail({
+      ...baseEmail(teamA),
+      apiKeyId: keyId,
+      createdAt: new Date("2026-08-10T10:00:00Z"),
+    });
+    await insertEmail({ ...baseEmail(teamA), createdAt: new Date("2026-08-01T10:00:00Z") });
+
+    const byKey = await caller(teamA).emails.list({ apiKeyId: keyId });
+    expect(byKey.items.map((r) => r.id)).toEqual([withKey]);
+    expect(byKey.total).toBe(1);
+
+    const recent = await caller(teamA).emails.list({ since: new Date("2026-08-05T00:00:00Z") });
+    expect(recent.items.map((r) => r.id)).toEqual([withKey]);
+    expect(recent.total).toBe(1);
+
+    const all = await caller(teamA).emails.list({ limit: 1 });
+    expect(all.total).toBe(2);
+    expect(all.items).toHaveLength(1);
+  });
+
   it("does not skip same-millisecond rows differing only in microseconds", async () => {
     const teamA = await createTeam(db, "team-a");
     // timestamptz keeps microseconds; a JS Date cannot represent these two
@@ -204,6 +227,53 @@ describe("emails.get", () => {
   });
 });
 
+describe("emails.stats", () => {
+  it("aggregates usage counters, queued backlog, and p50 delivery time per team", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const today = new Date().toISOString().slice(0, 10);
+
+    await db.insert(schema.usageCounters).values([
+      { teamId: teamA, day: today, accepted: 87, delivered: 40 },
+      { teamId: teamA, day: "2026-01-01", accepted: 200, delivered: 160 },
+      { teamId: teamB, day: today, accepted: 5, delivered: 5 },
+    ]);
+    await insertEmail({ ...baseEmail(teamA), latestStatus: "queued_quota" });
+    const delivered = await insertEmail({ ...baseEmail(teamA), latestStatus: "delivered" });
+    await db.insert(schema.emailEvents).values([
+      {
+        emailId: delivered,
+        type: "delivered",
+        occurredAt: new Date("2026-08-01T10:00:02Z"),
+        data: { delivery: { processingTimeMillis: 128 } },
+      },
+      {
+        emailId: delivered,
+        type: "delivered",
+        occurredAt: new Date("2026-08-01T10:00:03Z"),
+        data: { delivery: { processingTimeMillis: 200 } },
+      },
+    ]);
+
+    const stats = await caller(teamA).emails.stats();
+    expect(stats.sentToday).toBe(87);
+    expect(stats.deliveredAllTime).toBe(200);
+    expect(stats.queuedQuota).toBe(1);
+    expect(stats.p50DeliveryMs).toBe(164);
+  });
+
+  it("returns zeros and a null p50 for an empty team", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const stats = await caller(teamA).emails.stats();
+    expect(stats).toEqual({
+      sentToday: 0,
+      deliveredAllTime: 0,
+      queuedQuota: 0,
+      p50DeliveryMs: null,
+    });
+  });
+});
+
 describe("emails.suppressions", () => {
   it("adds, lists, and removes within the team only", async () => {
     const teamA = await createTeam(db, "team-a");
@@ -269,6 +339,70 @@ describe("emails.suppressions", () => {
       cursor: page1.nextCursor,
     });
     expect(page2.items.map((r) => r.id)).toEqual([older]);
+  });
+
+  it("filters by reason, reports totals, and aggregates stats", async () => {
+    const teamA = await createTeam(db, "team-a");
+    await caller(teamA).emails.suppressions.add({ email: "a@example.com", reason: "manual" });
+    await db.insert(schema.suppressions).values({
+      teamId: teamA,
+      email: "b@example.com",
+      emailHash: hashRecipient("b@example.com"),
+      reason: "hard_bounce",
+    });
+
+    const bounces = await caller(teamA).emails.suppressions.list({ reason: "hard_bounce" });
+    expect(bounces.items.map((r) => r.email)).toEqual(["b@example.com"]);
+    expect(bounces.total).toBe(1);
+
+    const all = await caller(teamA).emails.suppressions.list({});
+    expect(all.total).toBe(2);
+
+    const stats = await caller(teamA).emails.suppressions.stats();
+    expect(stats.total).toBe(2);
+    expect(stats.byReason).toEqual({ manual: 1, hard_bounce: 1 });
+  });
+
+  it("gets a suppression with its source-bounce diagnostics, team-scoped", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const sourceEmail = await insertEmail({
+      ...baseEmail(teamA),
+      to: ["gone@example.com"],
+      latestStatus: "bounced",
+    });
+    await db.insert(schema.emailEvents).values({
+      emailId: sourceEmail,
+      type: "bounced",
+      occurredAt: new Date("2026-08-01T10:00:02Z"),
+      data: {
+        bounce: {
+          bounceType: "Permanent",
+          bounceSubType: "General",
+          bouncedRecipients: [{ diagnosticCode: "smtp; 550 5.1.1 user unknown" }],
+        },
+      },
+    });
+    const [suppression] = await db
+      .insert(schema.suppressions)
+      .values({
+        teamId: teamA,
+        email: "gone@example.com",
+        emailHash: hashRecipient("gone@example.com"),
+        reason: "hard_bounce",
+        sourceEmailId: sourceEmail,
+      })
+      .returning({ id: schema.suppressions.id });
+    if (!suppression) throw new Error("suppression insert failed");
+
+    const row = await caller(teamA).emails.suppressions.get({ id: suppression.id });
+    expect(row.email).toBe("gone@example.com");
+    expect(row.reason).toBe("hard_bounce");
+    expect(row.bounce).toMatchObject({ bounceType: "Permanent", bounceSubType: "General" });
+
+    await expect(
+      caller(teamB).emails.suppressions.get({ id: suppression.id }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("is idempotent on duplicate adds", async () => {

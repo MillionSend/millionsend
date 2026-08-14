@@ -8,16 +8,15 @@ import { AuthShell } from "@/components/auth-shell";
 import { useTRPC } from "@/lib/trpc";
 
 export function OnboardingForm() {
-  const t = useTranslations("auth.onboarding");
+  const t = useTranslations("onboarding.team");
   const router = useRouter();
   const trpc = useTRPC();
   const [name, setName] = useState("");
   const createTeam = useMutation(
     trpc.team.createTeam.mutationOptions({
-      onSuccess: () => {
-        router.push("/emails");
-        router.refresh();
-      },
+      // Stay on /onboarding: with the membership in place the server
+      // re-renders this route as the send-your-first-email stepper.
+      onSuccess: () => router.refresh(),
     }),
   );
 

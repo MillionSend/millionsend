@@ -5,11 +5,31 @@
   "close": "Fechar",
   "cancel": "Cancelar",
   "signOut": "Sair",
+  "plan": {
+    "free": "Free",
+    "pro": "Pro",
+    "scale": "Scale"
+  },
+  "sidebar": {
+    "today": "hoje",
+    "resetsIn": "reinicia em {time}"
+  },
+  "commandPalette": {
+    "placeholder": "Digite um comando ou vá para um recurso…",
+    "navigate": "Navegar",
+    "actions": "Ações",
+    "createApiKey": "Criar chave de API",
+    "addDomain": "Adicionar domínio",
+    "noResults": "Nenhum resultado.",
+    "hintNavigate": "navegar",
+    "hintOpen": "abrir",
+    "hintClose": "fechar"
+  },
   "status": {
     "queued": "Na fila",
     "queued_quota": "Na fila (cota)",
     "sent": "Enviado",
-    "delivery_delayed": "Atrasado",
+    "delivery_delayed": "Entrega atrasada",
     "delivered": "Entregue",
     "opened": "Aberto",
     "clicked": "Clicado",

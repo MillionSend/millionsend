@@ -464,3 +464,45 @@ table.ms-table {
     opacity: 1;
   }
 }
+
+/* The product's only rotation: the DNS-check spinner ring (1s linear per the brief) */
+.ms-spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ms-warn-border);
+  border-top-color: var(--ms-warn);
+  animation: ms-spin 1s linear infinite;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+@keyframes ms-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-spinner {
+    animation: none;
+  }
+}
+
+/* Skeleton shimmer + live-dot pulse (values verbatim from the design canvas) */
+@keyframes ms-shimmer {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@keyframes ms-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}

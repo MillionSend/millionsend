@@ -5,16 +5,36 @@
   "close": "Close",
   "cancel": "Cancel",
   "signOut": "Sign out",
+  "plan": {
+    "free": "Free",
+    "pro": "Pro",
+    "scale": "Scale"
+  },
+  "sidebar": {
+    "today": "today",
+    "resetsIn": "resets in {time}"
+  },
+  "commandPalette": {
+    "placeholder": "Type a command or jump to a resource…",
+    "navigate": "Navigate",
+    "actions": "Actions",
+    "createApiKey": "Create API key",
+    "addDomain": "Add domain",
+    "noResults": "No results.",
+    "hintNavigate": "navigate",
+    "hintOpen": "open",
+    "hintClose": "close"
+  },
   "status": {
     "queued": "Queued",
     "queued_quota": "Queued (quota)",
     "sent": "Sent",
-    "delivery_delayed": "Delayed",
+    "delivery_delayed": "Delivery delayed",
     "delivered": "Delivered",
     "opened": "Opened",
     "clicked": "Clicked",
     "bounced": "Bounced",
-    "complained": "Complaint",
+    "complained": "Complained",
     "suppressed": "Suppressed",
     "failed": "Failed",
     "verified": "Verified",
