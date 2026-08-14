@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
-/** Keys match the tile renders in public/empty-states/<area>.webp. */
+/** Keys match the tile renders in public/empty-states/<area>.webp (dark)
+ * and public/empty-states/light/<area>.webp (light). */
 export type EmptyStateArea =
   | "emails"
   | "broadcasts"
@@ -31,9 +32,18 @@ export function EmptyState({
   return (
     <div className="ms-card ms-empty">
       <div className="ms-empty-scene" aria-hidden="true">
+        {/* Both theme variants stay in the DOM (each <20KB); the CSS
+            ms-dark-only/ms-light-only swap makes the toggle instant. */}
         <img
-          className="ms-empty-tile"
+          className="ms-empty-tile ms-dark-only"
           src={`/empty-states/${area}.webp`}
+          alt=""
+          width={96}
+          height={96}
+        />
+        <img
+          className="ms-empty-tile ms-light-only"
+          src={`/empty-states/light/${area}.webp`}
           alt=""
           width={96}
           height={96}
