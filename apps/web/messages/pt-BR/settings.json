@@ -8,9 +8,11 @@
     "title": "Conecte seu AWS SES",
     "subtitle": "Sua instância envia pela sua própria conta SES.",
     "setup": {
+      "stepTitle": "Criar recursos AWS",
+      "recommended": "Recomendado",
       "scriptTitle": "Mais rápido: execute este script",
       "scriptNote": "Cole em um terminal onde o AWS CLI tenha credenciais de administrador. Ele cria o usuário IAM, a política, o tópico SNS e o conjunto de configuração, e então imprime as linhas do seu .env.",
-      "eventsSkipped": "APP_BASE_URL não é uma URL https pública, então a parte de ingestão de eventos ficou de fora. Defina-a e recarregue para incluí-la.",
+      "eventsSkipped": "<code>APP_BASE_URL</code> não é uma URL https pública, então a parte de ingestão de eventos ficou de fora. Defina-a e recarregue para incluí-la.",
       "cfnNote": "Prefere IaC? A mesma configuração existe como CloudFormation em infra/millionsend-ses.cfn.yaml — veja SELF_HOSTING.md.",
       "manualTitle": "Manual: passos no console",
       "step1": "Crie uma política: console IAM → Policies → Create policy → JSON — cole este documento.",
@@ -27,13 +29,12 @@
       "keysConfigured": "configuradas",
       "keysChain": "não definidas — a cadeia padrão de provedores será tentada",
       "snsNote": "não definido — a ingestão de eventos está desativada",
-      "configSetNote": "não definido — o SES não publica eventos",
-      "envTemplate": "modelo de .env"
+      "configSetNote": "não definido — o SES não publica eventos"
     },
     "test": {
       "title": "Testar conexão",
       "button": "Testar conexão",
-      "note": "executa GetAccount a partir da instância — somente leitura, nada é enviado",
+      "note": "executa <code>GetAccount</code> a partir da instância — somente leitura, nada é enviado",
       "sendingEnabled": "Envio habilitado",
       "sendingDisabled": "Envio desabilitado",
       "production": "Acesso de produção",
@@ -47,14 +48,18 @@
       "sandboxLink": "Solicitar acesso de produção",
       "rateHint": "SES_MAX_SEND_RATE={envRate} no .env · máximo da conta {accountRate}/s — os valores divergem.",
       "errors": {
-        "credentials": "A AWS rejeitou as credenciais — verifique AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY no .env.",
-        "unreachable": "O SES não respondeu — verifique AWS_REGION e o caminho de rede."
-      }
+        "credentials": "A AWS rejeitou as credenciais — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no .env.",
+        "unreachable": "O SES não respondeu — verifique <code>AWS_REGION</code> e o caminho de rede."
+      },
+      "disabledHint": "Defina suas credenciais AWS primeiro."
     },
     "next": {
       "title": "Próximos passos",
       "addDomain": "Adicionar um domínio de envio",
       "selfHosting": "A ingestão de eventos e o checklist completo estão em SELF_HOSTING.md."
+    },
+    "events": {
+      "title": "Eventos"
     }
   },
   "team": {
