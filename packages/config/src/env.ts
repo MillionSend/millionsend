@@ -45,6 +45,28 @@ export const env = createEnv({
     AWS_ACCESS_KEY_ID: z.string().optional(),
     AWS_SECRET_ACCESS_KEY: z.string().optional(),
 
+    // SNS topics allowed to deliver SES events (comma-separated ARNs).
+    // Unset disables the ingestion endpoint entirely — signature checks
+    // without a topic allowlist would accept any AWS account's topic.
+    SNS_TOPIC_ARNS: z
+      .string()
+      .optional()
+      .transform((v) =>
+        v
+          ? v
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0)
+          : undefined,
+      ),
+
+    // Worker-side messages/second ceiling. 14/s is SES's standard production
+    // default; sandbox accounts must set 1. GetAccount auto-detection later.
+    SES_MAX_SEND_RATE: z.coerce.number().positive().default(14),
+
+    // Days email BODIES are kept; metadata and events are unaffected.
+    EMAIL_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
+
     // Public base URL of this deployment; SNS subscriptions and hosted
     // unsubscribe pages are derived from it.
     APP_BASE_URL: z.url().optional(),

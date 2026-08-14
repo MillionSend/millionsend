@@ -16,6 +16,14 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import type { SerializedSesEvent } from "@millionsend/queue";
+import {
+  type CertFetcher,
+  isAllowedSnsUrl,
+  parseSesEvent,
+  type SnsMessage,
+  verifySnsMessage,
+} from "@millionsend/ses";
 import { and, eq, isNull } from "drizzle-orm";
 import { createMiddleware } from "hono/factory";
 import {
@@ -25,11 +33,22 @@ import {
   sendEmailResponseSchema,
 } from "./schemas.js";
 
+export interface SnsIngestDeps {
+  /** Only these topics may deliver events; everything else is rejected. */
+  allowedTopicArns: readonly string[];
+  fetchCert: CertFetcher;
+  enqueueSesEvent: (event: SerializedSesEvent, dedupeKey: string) => Promise<void>;
+  /** Overridable for tests; default fetches the (validated) SubscribeURL. */
+  confirmSubscription?: ((subscribeUrl: string) => Promise<void>) | undefined;
+}
+
 export interface ApiDeps {
   db: Db;
   keyring: Keyring;
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
+  /** SES event ingestion; omitted → the endpoint does not exist (404). */
+  sns?: SnsIngestDeps | undefined;
 }
 
 interface AuthContext {
@@ -56,6 +75,25 @@ function senderDomain(from: string): string | null {
   const addr = extractAddrSpec(from);
   const at = addr.lastIndexOf("@");
   return at > 0 ? addr.slice(at + 1).toLowerCase() : null;
+}
+
+const snsMessageSchema = z.object({
+  Type: z.enum(["Notification", "SubscriptionConfirmation", "UnsubscribeConfirmation"]),
+  MessageId: z.string().min(1),
+  TopicArn: z.string().min(1),
+  Message: z.string(),
+  Timestamp: z.string(),
+  SignatureVersion: z.string(),
+  Signature: z.string().min(1),
+  SigningCertURL: z.string(),
+  Subject: z.string().optional(),
+  Token: z.string().optional(),
+  SubscribeURL: z.string().optional(),
+});
+
+async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
+  const res = await fetch(subscribeUrl);
+  if (!res.ok) throw new Error(`SNS subscription confirmation failed: ${res.status}`);
 }
 
 export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
@@ -368,6 +406,67 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       200,
     );
   });
+
+  const sns = deps.sns;
+  if (sns) {
+    // SES event ingestion. No API-key auth: the SNS signature (verified
+    // against Amazon's cert on an allowlisted host, plus the topic
+    // allowlist) IS the authentication. Everything in the body is untrusted
+    // until verifySnsMessage says otherwise.
+    app.post("/ses/events", async (c) => {
+      let raw: unknown;
+      try {
+        raw = await c.req.json();
+      } catch {
+        return c.json(errorBody(400, "invalid_payload", "Body must be JSON"), 400);
+      }
+      const parsed = snsMessageSchema.safeParse(raw);
+      if (!parsed.success) {
+        return c.json(errorBody(400, "invalid_payload", "Not an SNS message"), 400);
+      }
+      const msg: SnsMessage = parsed.data;
+      const verdict = await verifySnsMessage(msg, {
+        fetchCert: sns.fetchCert,
+        allowedTopicArns: sns.allowedTopicArns,
+      });
+      if (!verdict.ok) {
+        return c.json(errorBody(403, "forbidden", "SNS message rejected"), 403);
+      }
+
+      if (msg.Type === "SubscriptionConfirmation") {
+        // Fetch only AWS's own URL — a signed message from an allowlisted
+        // topic still doesn't get to point us at arbitrary hosts.
+        if (!msg.SubscribeURL || !isAllowedSnsUrl(msg.SubscribeURL)) {
+          return c.json(errorBody(400, "invalid_payload", "SubscribeURL rejected"), 400);
+        }
+        await (sns.confirmSubscription ?? fetchSubscribeUrl)(msg.SubscribeURL);
+        return c.json({ ok: true }, 200);
+      }
+
+      if (msg.Type === "Notification") {
+        let inner: unknown;
+        try {
+          inner = JSON.parse(msg.Message);
+        } catch {
+          // Verified but not JSON: ack so SNS stops redelivering something
+          // a retry can never fix.
+          return c.json({ ok: true }, 200);
+        }
+        const event = parseSesEvent(inner);
+        if (event) {
+          // Dedupe on the SNS MessageId — SNS redelivers at-least-once.
+          await sns.enqueueSesEvent(
+            { ...event, occurredAt: event.occurredAt.toISOString() },
+            msg.MessageId,
+          );
+        }
+        return c.json({ ok: true }, 200);
+      }
+
+      // UnsubscribeConfirmation: acknowledged, nothing to do.
+      return c.json({ ok: true }, 200);
+    });
+  }
 
   return app;
 }

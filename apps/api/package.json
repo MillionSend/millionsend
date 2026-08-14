@@ -3,6 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/app.ts",
+      "default": "./src/app.ts"
+    }
+  },
   "scripts": {
     "dev": "node --watch --experimental-strip-types src/server.ts",
     "typecheck": "tsc --noEmit",
@@ -14,6 +20,8 @@
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",
+    "@millionsend/queue": "workspace:*",
+    "@millionsend/ses": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.2"
   },

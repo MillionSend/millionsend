@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "node --watch --experimental-strip-types src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -18,9 +19,12 @@
     "nodemailer": "^7.0.9"
   },
   "devDependencies": {
+    "@hono/node-server": "^1.19.7",
+    "@millionsend/api": "workspace:*",
     "@millionsend/test-utils": "workspace:*",
     "@types/node": "^22.20.1",
     "@types/nodemailer": "^7.0.4",
+    "resend": "^6.19.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }

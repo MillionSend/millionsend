@@ -38,6 +38,12 @@ importers:
       '@millionsend/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@millionsend/queue':
+        specifier: workspace:*
+        version: link:../../packages/queue
+      '@millionsend/ses':
+        specifier: workspace:*
+        version: link:../../packages/ses
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@electric-sql/pglite@0.3.16)(pg@8.23.0)(postgres@3.4.9)
@@ -88,6 +94,12 @@ importers:
         specifier: ^7.0.9
         version: 7.0.13
     devDependencies:
+      '@hono/node-server':
+        specifier: ^1.19.7
+        version: 1.19.17(hono@4.13.2)
+      '@millionsend/api':
+        specifier: workspace:*
+        version: link:../api
       '@millionsend/test-utils':
         specifier: workspace:*
         version: link:../../packages/test-utils
@@ -97,6 +109,9 @@ importers:
       '@types/nodemailer':
         specifier: ^7.0.4
         version: 7.0.12
+      resend:
+        specifier: ^6.19.0
+        version: 6.19.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

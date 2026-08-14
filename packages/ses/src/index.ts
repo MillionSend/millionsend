@@ -7,6 +7,7 @@ export {
   type CertFetcher,
   createCachingCertFetcher,
   isAllowedCertUrl,
+  isAllowedSnsUrl,
   type SnsMessage,
   type VerifyOptions,
   type VerifyResult,

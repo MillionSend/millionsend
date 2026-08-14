@@ -21,14 +21,29 @@ export interface SnsMessage {
   SignatureVersion: string;
   Signature: string;
   SigningCertURL: string;
-  Subject?: string;
-  Token?: string;
-  SubscribeURL?: string;
+  Subject?: string | undefined;
+  Token?: string | undefined;
+  SubscribeURL?: string | undefined;
 }
 
 export type CertFetcher = (url: string) => Promise<string>;
 
-const CERT_HOST_PATTERN = /^sns\.[a-z0-9-]+\.amazonaws\.com$/;
+const SNS_HOST_PATTERN = /^sns\.[a-z0-9-]+\.amazonaws\.com$/;
+
+/**
+ * HTTPS URL on a real sns.<region>.amazonaws.com host. Gate for every URL a
+ * message asks us to fetch (SubscribeURL confirmation included) — otherwise a
+ * forged message turns the server into an SSRF proxy.
+ */
+export function isAllowedSnsUrl(rawUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && SNS_HOST_PATTERN.test(url.hostname);
+}
 
 export function isAllowedCertUrl(rawUrl: string): boolean {
   let url: URL;
@@ -39,7 +54,7 @@ export function isAllowedCertUrl(rawUrl: string): boolean {
   }
   return (
     url.protocol === "https:" &&
-    CERT_HOST_PATTERN.test(url.hostname) &&
+    SNS_HOST_PATTERN.test(url.hostname) &&
     url.pathname.endsWith(".pem")
   );
 }
