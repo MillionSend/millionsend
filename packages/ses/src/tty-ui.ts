@@ -60,6 +60,20 @@ export function banner(tier: "full" | "compact" = "full"): string[] {
   return bannerLines(tier);
 }
 
+/** Greedy word wrap; single words longer than width stay unbroken. */
+export function wrapText(text: string, width: number): string {
+  const lines: string[] = [];
+  for (const word of text.split(/\s+/)) {
+    const last = lines[lines.length - 1];
+    if (last !== undefined && `${last} ${word}`.length <= width) {
+      lines[lines.length - 1] = `${last} ${word}`;
+    } else {
+      lines.push(word);
+    }
+  }
+  return lines.join("\n");
+}
+
 export interface SelectOption {
   value: string;
   label: string;

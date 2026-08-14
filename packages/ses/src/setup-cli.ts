@@ -14,15 +14,16 @@ import {
   teardownPlan,
   upsertEnv,
 } from "./setup.js";
-import { banner, dim, pickBannerTier, selectPrompt } from "./tty-ui.js";
+import { banner, dim, pickBannerTier, selectPrompt, wrapText } from "./tty-ui.js";
 
-const DESCRIPTION = [
-  "Creates the IAM user, policy, access key — and, with an https APP_BASE_URL,",
-  "the SNS event topic and SES configuration set. Run it where YOUR admin AWS",
-  "credentials live: this machine, or the server. It never needs the app running.",
-].join("\n");
+// Wrapped at print time to the live terminal width — baked-in line breaks
+// double-wrap on narrow terminals (soft wrap first, then the hard break).
+const DESCRIPTION_TEXT =
+  "Creates the IAM user, policy, access key — and, with an https APP_BASE_URL, the SNS event topic and SES configuration set. Run it where YOUR admin AWS credentials live: this machine, or the server. It never needs the app running.";
+const descriptionWidth = (): number => Math.min(process.stdout.columns || 80, 80) - 2;
+const DESCRIPTION = (): string => wrapText(DESCRIPTION_TEXT, descriptionWidth());
 
-const BANNER = `millionsend · aws setup\n\n${DESCRIPTION}`;
+const BANNER = (): string => `millionsend · aws setup\n\n${DESCRIPTION()}`;
 
 const REGION_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -128,11 +129,11 @@ function runAws(args: string[]): void {
 function printHeader(): void {
   const tier = pickBannerTier(process.stdout.columns ?? 0, process.stdout.isTTY === true);
   if (tier === "plain") {
-    console.log(`${BANNER}\n`);
+    console.log(`${BANNER()}\n`);
     return;
   }
   for (const line of banner(tier)) console.log(line);
-  console.log(`\n${dim(DESCRIPTION)}\n`);
+  console.log(`\n${dim(DESCRIPTION())}\n`);
 }
 
 /**
