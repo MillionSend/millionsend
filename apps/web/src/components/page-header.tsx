@@ -40,7 +40,13 @@ export function PageHeader({
         ) : null}
         <h1
           className="ms-display"
-          style={{ fontSize: "var(--ms-fs-h1)", color: "var(--ms-bone)", margin: 0 }}
+          // Erode 500 reads thin at title sizes; section titles carry 600.
+          style={{
+            fontSize: "var(--ms-fs-h1)",
+            fontWeight: 600,
+            color: "var(--ms-bone)",
+            margin: 0,
+          }}
         >
           {title}
         </h1>

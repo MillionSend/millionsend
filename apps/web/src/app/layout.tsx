@@ -32,7 +32,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             vendoring the font files into this repository. */}
         <link
           rel="stylesheet"
-          href="https://api.fontshare.com/v2/css?f[]=erode@500&display=swap"
+          href="https://api.fontshare.com/v2/css?f[]=erode@500,600&display=swap"
           precedence="default"
         />
         <NextIntlClientProvider>
