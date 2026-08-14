@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
+import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { maskApiKey } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
@@ -51,13 +52,18 @@ export function ApiKeysView() {
     }),
   );
 
-  function closeCreate() {
+  // Stable identities: Modal's focus effect depends on onClose, and a fresh
+  // arrow per render would re-run it on every keystroke, stealing focus from
+  // the form inputs.
+  const { reset: resetCreate } = createMutation;
+  const closeCreate = useCallback(() => {
     setCreateOpen(false);
     setRevealedToken(null);
     setName("");
     setMode("live");
-    createMutation.reset();
-  }
+    resetCreate();
+  }, [resetCreate]);
+  const closeRevoke = useCallback(() => setRevokeTarget(null), []);
 
   return (
     <>
@@ -139,17 +145,23 @@ export function ApiKeysView() {
         title={revealedToken ? t("reveal.title") : t("create.title")}
       >
         {revealedToken ? (
-          <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+          <form
+            style={{ display: "grid", gap: 12, marginTop: 12 }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              closeCreate();
+            }}
+          >
             <CopyChip value={revealedToken} />
             <p style={{ margin: 0, color: "var(--ms-warn)", fontSize: "var(--ms-fs-label)" }}>
               {t("reveal.warning")}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button type="button" className="ms-btn ms-btn-primary" onClick={closeCreate}>
-                {t("reveal.done")}
+              <button type="submit" className="ms-btn ms-btn-primary">
+                {t("reveal.done")} <span className="ms-keycap">↵</span>
               </button>
             </div>
-          </div>
+          </form>
         ) : (
           <form
             style={{ display: "grid", gap: 14, marginTop: 12 }}
@@ -166,6 +178,7 @@ export function ApiKeysView() {
                 className="ms-input"
                 style={{ width: "100%" }}
                 value={name}
+                disabled={createMutation.isPending}
                 placeholder={t("create.namePlaceholder")}
                 onChange={(event) => setName(event.target.value)}
               />
@@ -176,6 +189,7 @@ export function ApiKeysView() {
                 id="api-key-mode"
                 width="100%"
                 value={mode}
+                disabled={createMutation.isPending}
                 onChange={(value) => setMode(value === "test" ? "test" : "live")}
                 ariaLabel={t("create.mode")}
                 options={[
@@ -193,6 +207,7 @@ export function ApiKeysView() {
                 className="ms-btn ms-btn-primary"
                 disabled={name.trim().length === 0 || createMutation.isPending}
               >
+                <BtnSpinner on={createMutation.isPending} />
                 {t("create.submit")} <span className="ms-keycap">↵</span>
               </button>
             </div>
@@ -200,11 +215,7 @@ export function ApiKeysView() {
         )}
       </Modal>
 
-      <Modal
-        open={revokeTarget !== null}
-        onClose={() => setRevokeTarget(null)}
-        title={t("revokeConfirm.title")}
-      >
+      <Modal open={revokeTarget !== null} onClose={closeRevoke} title={t("revokeConfirm.title")}>
         {revokeTarget ? (
           <form
             style={{ display: "grid", gap: 14, marginTop: 12 }}
@@ -218,11 +229,7 @@ export function ApiKeysView() {
               {t("revokeConfirm.body", { name: revokeTarget.name })}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                onClick={() => setRevokeTarget(null)}
-              >
+              <button type="button" className="ms-btn ms-btn-secondary" onClick={closeRevoke}>
                 {common("cancel")} <span className="ms-keycap">Esc</span>
               </button>
               <button
@@ -230,6 +237,7 @@ export function ApiKeysView() {
                 className="ms-btn ms-btn-destructive"
                 disabled={revokeMutation.isPending}
               >
+                <BtnSpinner on={revokeMutation.isPending} />
                 {t("revokeConfirm.confirm")} <span className="ms-keycap">↵</span>
               </button>
             </div>

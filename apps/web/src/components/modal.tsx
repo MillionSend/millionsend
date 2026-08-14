@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 function CloseGlyph({ onClose }: { onClose: () => void }) {
   const t = useTranslations("common");
@@ -41,9 +42,15 @@ export function Modal({
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
+  // Focus runs on open ONLY: with onClose in its deps, an unstable arrow
+  // from a call site would re-run this every render and steal focus from
+  // whatever the user is typing into.
+  useEffect(() => {
+    if (open) ref.current?.focus();
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
-    ref.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onClose();
@@ -68,7 +75,9 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
+  // Portaled to <body>: a modal opened from inside a stacking context (e.g.
+  // the sidebar) must still paint above every sibling of that context.
+  return createPortal(
     // biome-ignore lint/a11y/noStaticElementInteractions: overlay click-to-dismiss; Esc handles keyboard
     <div
       className="ms-modal-overlay"
@@ -92,6 +101,7 @@ export function Modal({
         ) : null}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

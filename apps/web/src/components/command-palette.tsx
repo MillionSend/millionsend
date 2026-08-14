@@ -83,7 +83,12 @@ export function CommandPalette() {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: overlay click-to-dismiss; Esc handles keyboard
     <div
-      style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,.72)" }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: "var(--ms-z-modal)",
+        background: "rgba(0,0,0,.72)",
+      }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) setOpen(false);
       }}

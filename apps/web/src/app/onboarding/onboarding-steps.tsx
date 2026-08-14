@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+import { BtnSpinner } from "@/components/spinner";
 import { StatusBadge } from "@/components/status-badge";
 import { jsSingleQuote, shellSingleQuote } from "@/lib/escape";
 import { formatUtcMinute, maskApiKey } from "@/lib/format";
@@ -629,6 +630,7 @@ export function OnboardingSteps({
                     disabled={createKey.isPending}
                     onClick={() => createKey.mutate({ name: t("step1.keyName"), mode: "live" })}
                   >
+                    <BtnSpinner on={createKey.isPending} />
                     {t("step1.cta")}
                   </button>
                 </div>

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { AuthShell } from "@/components/auth-shell";
+import { BtnSpinner } from "@/components/spinner";
 import { useTRPC } from "@/lib/trpc";
 
 export function OnboardingForm() {
@@ -40,6 +41,7 @@ export function OnboardingForm() {
             style={{ width: "100%" }}
             required
             maxLength={80}
+            disabled={createTeam.isPending}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
@@ -50,6 +52,7 @@ export function OnboardingForm() {
           </p>
         ) : null}
         <button type="submit" className="ms-btn ms-btn-primary" disabled={createTeam.isPending}>
+          <BtnSpinner on={createTeam.isPending} />
           {t("submit")}
         </button>
       </form>

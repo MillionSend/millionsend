@@ -11,6 +11,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
+import { AwsCredentialsBanner } from "./aws-credentials-banner";
 import { type DomainStatus, DomainStatusBadge } from "./domain-status";
 import { RegionLabel } from "./region-label";
 
@@ -103,6 +104,8 @@ export function DomainsView() {
           </Link>
         }
       />
+
+      <AwsCredentialsBanner />
 
       {domains.isError ? (
         <div

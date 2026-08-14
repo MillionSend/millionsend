@@ -9,6 +9,7 @@ import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
 import { CodeGlyph } from "@/components/icons/nav-icons";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
+import { BtnSpinner } from "@/components/spinner";
 import { formatDurationShort, formatRelative, formatUtcTimestampMs } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
@@ -769,6 +770,7 @@ export default function EmailDetailPage() {
             if (suppressionRow) removeMutation.mutate({ id: suppressionRow.id });
           }}
         >
+          <BtnSpinner on={removeMutation.isPending} />
           {t("suppressedDrawer.remove")}
         </button>
       </Drawer>

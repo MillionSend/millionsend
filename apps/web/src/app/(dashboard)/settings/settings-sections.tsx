@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { Select } from "@/components/select";
+import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import type { AppLocale } from "@/i18n/request";
 import { useTRPC } from "@/lib/trpc";
@@ -68,10 +69,12 @@ function TeamSection() {
               style={{ flex: 1, maxWidth: 420 }}
               required
               maxLength={80}
+              disabled={rename.isPending}
               value={name}
               onChange={(e) => setDraft(e.target.value)}
             />
             <button type="submit" className="ms-btn ms-btn-secondary" disabled={rename.isPending}>
+              <BtnSpinner on={rename.isPending} />
               {t("team.save")}
             </button>
             {rename.isSuccess && draft === null ? (

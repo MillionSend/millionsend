@@ -3,13 +3,14 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { CodeGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
+import { BtnSpinner } from "@/components/spinner";
 import { type BadgeStatus, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
@@ -106,6 +107,12 @@ export default function SuppressionsPage() {
   );
 
   const hasFilters = deferredSearch !== "" || reason !== "all" || range !== "all";
+
+  // Stable identities: Modal's focus effect depends on onClose, and a fresh
+  // arrow per render would re-run it on every keystroke, stealing focus from
+  // the email input.
+  const closeAdd = useCallback(() => setAddOpen(false), []);
+  const closeRemove = useCallback(() => setRemoveTarget(null), []);
 
   function clearFilters() {
     setSearch("");
@@ -261,13 +268,14 @@ export default function SuppressionsPage() {
         </>
       )}
 
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title={t("suppressions.addTitle")}>
+      <Modal open={addOpen} onClose={closeAdd} title={t("suppressions.addTitle")}>
         <p style={{ margin: "0 0 18px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
           {t("suppressions.addBody")}
         </p>
         <form
           onSubmit={(event) => {
             event.preventDefault();
+            if (addMutation.isPending) return;
             addMutation.mutate({ email: newEmail.trim(), reason: "manual" });
           }}
         >
@@ -278,6 +286,7 @@ export default function SuppressionsPage() {
               className={`ms-input mono${addMutation.isError ? " error" : ""}`}
               style={{ width: "100%" }}
               placeholder={t("suppressions.emailPlaceholder")}
+              disabled={addMutation.isPending}
               value={newEmail}
               onChange={(event) => setNewEmail(event.target.value)}
             />
@@ -294,14 +303,15 @@ export default function SuppressionsPage() {
             </p>
           ) : null}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
-            <button type="button" className="ms-btn ms-btn-ghost" onClick={() => setAddOpen(false)}>
-              {common("cancel")}
+            <button type="button" className="ms-btn ms-btn-ghost" onClick={closeAdd}>
+              {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
             <button
               type="submit"
               className="ms-btn ms-btn-primary"
               disabled={addMutation.isPending || newEmail.trim().length === 0}
             >
+              <BtnSpinner on={addMutation.isPending} />
               {t("suppressions.addConfirm")} <span className="ms-keycap">↵</span>
             </button>
           </div>
@@ -310,31 +320,34 @@ export default function SuppressionsPage() {
 
       <Modal
         open={removeTarget !== null}
-        onClose={() => setRemoveTarget(null)}
+        onClose={closeRemove}
         title={t("suppressions.removeTitle")}
       >
-        <p style={{ margin: "0 0 22px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-          {t("suppressions.removeBody", { email: removeTarget?.email ?? "—" })}
-        </p>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button
-            type="button"
-            className="ms-btn ms-btn-ghost"
-            onClick={() => setRemoveTarget(null)}
-          >
-            {common("cancel")}
-          </button>
-          <button
-            type="button"
-            className="ms-btn ms-btn-destructive"
-            disabled={removeMutation.isPending}
-            onClick={() => {
-              if (removeTarget) removeMutation.mutate({ id: removeTarget.id });
-            }}
-          >
-            {t("suppressions.removeConfirm")}
-          </button>
-        </div>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (removeTarget && !removeMutation.isPending) {
+              removeMutation.mutate({ id: removeTarget.id });
+            }
+          }}
+        >
+          <p style={{ margin: "0 0 22px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
+            {t("suppressions.removeBody", { email: removeTarget?.email ?? "—" })}
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            <button type="button" className="ms-btn ms-btn-ghost" onClick={closeRemove}>
+              {common("cancel")} <span className="ms-keycap">Esc</span>
+            </button>
+            <button
+              type="submit"
+              className="ms-btn ms-btn-destructive"
+              disabled={removeMutation.isPending}
+            >
+              <BtnSpinner on={removeMutation.isPending} />
+              {t("suppressions.removeConfirm")} <span className="ms-keycap">↵</span>
+            </button>
+          </div>
+        </form>
       </Modal>
     </>
   );

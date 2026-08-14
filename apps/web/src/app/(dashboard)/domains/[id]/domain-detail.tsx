@@ -3,10 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
+import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { formatRelative, formatUtcMinute, midTruncateParts } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
@@ -189,6 +190,10 @@ export function DomainDetail({ id }: { id: string }) {
   const [copiedKey, setCopiedKey] = useState<"instructions" | "prompt" | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  // Stable identity: Modal's focus effect depends on onClose, and a fresh
+  // arrow per render would re-run it on every keystroke, stealing focus
+  // from the type-to-confirm input.
+  const closeDelete = useCallback(() => setConfirmingDelete(false), []);
 
   const status = verify.data?.status ?? domain.data?.status;
   const checking = status === "pending" || status === "temporary_failure";
@@ -530,6 +535,7 @@ export function DomainDetail({ id }: { id: string }) {
               disabled={verify.isPending}
               onClick={() => verify.mutate({ id })}
             >
+              <BtnSpinner on={verify.isPending} />
               {t("detail.verify")}
             </button>
             <span
@@ -542,11 +548,7 @@ export function DomainDetail({ id }: { id: string }) {
         ) : null}
       </section>
 
-      <Modal
-        open={confirmingDelete}
-        onClose={() => setConfirmingDelete(false)}
-        title={t("detail.deleteDomain")}
-      >
+      <Modal open={confirmingDelete} onClose={closeDelete} title={t("detail.deleteDomain")}>
         <p
           style={{
             margin: "10px 0 14px",
@@ -568,6 +570,7 @@ export function DomainDetail({ id }: { id: string }) {
             placeholder={data.name}
             autoComplete="off"
             spellCheck={false}
+            disabled={deleteDomain.isPending}
             value={confirmText}
             onChange={(e) => setConfirmText(e.target.value)}
           />
@@ -579,14 +582,11 @@ export function DomainDetail({ id }: { id: string }) {
             disabled={!confirmMatches || deleteDomain.isPending}
             onClick={() => deleteDomain.mutate({ id })}
           >
+            <BtnSpinner on={deleteDomain.isPending} />
             {t("detail.deleteDomain")} <span className="ms-keycap">⌘</span>
             <span className="ms-keycap">↵</span>
           </button>
-          <button
-            type="button"
-            className="ms-btn ms-btn-secondary"
-            onClick={() => setConfirmingDelete(false)}
-          >
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>
             {common("cancel")} <span className="ms-keycap">Esc</span>
           </button>
         </div>
