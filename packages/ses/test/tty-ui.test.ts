@@ -6,11 +6,11 @@ import { bannerLines, selectPrompt } from "../src/tty-ui.js";
 describe("bannerLines", () => {
   it("renders MILLIONSEND on one line, every row the same width, echo included ≤ 78", () => {
     const lines = bannerLines();
-    // 4 art rows + 1 echo row.
-    expect(lines).toHaveLength(5);
-    expect(lines[0]?.length).toBe(48);
+    // 5 art rows + 1 echo row.
+    expect(lines).toHaveLength(6);
+    expect(lines[0]?.length).toBe(57);
     expect(lines[0]?.length).toBeLessThanOrEqual(78);
-    for (const line of lines) expect(line.length).toBe(48);
+    for (const line of lines) expect(line.length).toBe(57);
   });
 
   it("draws full-shade bodies with a light-shade echo", () => {

@@ -13,23 +13,24 @@ export const dim = (s: string): string => (colorOn() ? `\x1b[90m${s}\x1b[39m` : 
 export const bone = (s: string): string => (colorOn() ? `\x1b[97m${s}\x1b[39m` : s);
 
 /**
- * Four-row cell maps for the banner letters ('#' = filled cell). Every row of
+ * Five-row cell maps for the banner letters ('#' = filled cell). Every row of
  * a letter must be the same width — banner rows are assembled cell by cell and
- * the tests pin that all banner lines come out the same visual width. Glyphs
- * are 3-4 cells wide so the full one-line word plus echo stays under 80 cols.
+ * the tests pin that all banner lines come out the same visual width. Five
+ * rows give M its peaks and N its diagonal; at one char per cell the full
+ * one-line word plus echo stays under 80 cols.
  */
 const LETTERS: Record<string, string[]> = {
-  M: ["#..#", "####", "#..#", "#..#"],
-  I: ["###", ".#.", ".#.", "###"],
-  L: ["#..", "#..", "#..", "###"],
-  O: [".##.", "#..#", "#..#", ".##."],
-  N: ["#..#", "##.#", "#.##", "#..#"],
-  S: [".##", "#..", "..#", "##."],
-  E: ["###", "##.", "#..", "###"],
-  D: ["##.", "#.#", "#.#", "##."],
+  M: ["#...#", "##.##", "#.#.#", "#...#", "#...#"],
+  I: ["###", ".#.", ".#.", ".#.", "###"],
+  L: ["#...", "#...", "#...", "#...", "####"],
+  O: [".###.", "#...#", "#...#", "#...#", ".###."],
+  N: ["#...#", "##..#", "#.#.#", "#..##", "#...#"],
+  S: [".###", "#...", ".##.", "...#", "###."],
+  E: ["####", "#...", "###.", "#...", "####"],
+  D: ["###.", "#..#", "#..#", "#..#", "###."],
 };
 
-const ART_ROWS = 4;
+const ART_ROWS = 5;
 
 /**
  * Block art for `text`: full-shade body cells with a light-shade echo offset
