@@ -35,6 +35,18 @@ const PROCESSES = {
   },
 };
 
+// "setup" argv mode runs the interactive AWS setup CLI instead of the app:
+//   docker compose run --rm millionsend setup [teardown] [--dry-run]
+// (the Dockerfile ENTRYPOINT forwards compose run args here).
+if (process.argv[2] === "setup") {
+  const cli = spawnSync(
+    join(root, "node_modules/.bin/tsx"),
+    [join(root, "scripts/aws-setup/index.ts"), ...process.argv.slice(3)],
+    { cwd: root, stdio: "inherit" },
+  );
+  process.exit(cli.status ?? 1);
+}
+
 // biome-ignore lint/suspicious/noUndeclaredEnvVars: container runtime selector, never read under turbo
 const selection = process.env.PROCESS ?? "all";
 const names = selection === "all" ? Object.keys(PROCESSES) : [selection];

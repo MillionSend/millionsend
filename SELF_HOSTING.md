@@ -45,17 +45,34 @@ app container running the api (port 3001), worker, and web dashboard (port 3000)
 
 ## One-command AWS setup
 
-Two ways to create everything MillionSend needs in AWS (IAM policy + user +
+Three ways to create everything MillionSend needs in AWS (IAM policy + user +
 access key, SNS event topic, SES configuration set) without clicking through
 the console:
 
-- **Setup script** — the dashboard's Settings → SES page generates a shell
-  script pre-filled with your region and `APP_BASE_URL`. Paste it into a
-  terminal where the aws CLI has admin credentials; it creates everything and
-  prints the exact `.env` lines to paste. Re-running it is safe, but each run
-  mints a new access key — delete stale ones in the IAM console.
+- **Setup CLI (recommended)** — interactive, idempotent, and it runs wherever
+  your AWS admin credentials live; the MillionSend server never needs them.
 
-- **CloudFormation** — the same resources as a stack:
+  ```sh
+  # On your own machine (repo clone; admin credentials via profile or env):
+  pnpm install && pnpm setup:aws
+
+  # Or on the server, inside the container:
+  docker compose run --rm millionsend setup
+  ```
+
+  It verifies your AWS identity, shows the plan, prompts for region and
+  `APP_BASE_URL`, creates everything, and always prints the exact `.env`
+  lines — copy-paste them to the server when MillionSend runs elsewhere. If a
+  `.env` exists where the CLI runs, it offers to update it in place.
+  `--dry-run` prints the plan and exits. Re-running is safe, but each run
+  mints a new access key — delete stale ones in the IAM console.
+  `pnpm setup:aws teardown` deletes everything the setup created (including
+  all access keys of the `millionsend` user, so a running server stops
+  sending).
+
+- **CloudFormation quick-create** — the Settings → SES page links straight to
+  the CloudFormation console review page with a hosted copy of the template.
+  Or deploy it from a terminal:
 
   ```sh
   aws cloudformation deploy --template-file infra/millionsend-ses.cfn.yaml \
@@ -66,12 +83,25 @@ the console:
   ```
 
   The outputs map 1:1 to `.env` keys. Omit `AppBaseUrl` to skip the event
-  subscription. A hosted quick-create console link would need the template on
-  S3 — not offered yet.
+  subscription.
+
+- **Setup script** — the dashboard's Settings → SES page also generates a
+  shell script pre-filled with your region and `APP_BASE_URL`. Paste it into a
+  terminal where the aws CLI has admin credentials.
 
 Either way, finish by pasting the values into `.env` and restarting. The SNS
 subscription confirms itself once the app runs with `SNS_TOPIC_ARNS` set; if it
 stays pending, use "Request confirmation" on it in the SNS console.
+
+### Maintainers: hosted quick-create template
+
+The quick-create console link loads the template from the `millionsend-public`
+S3 bucket. After changing `infra/millionsend-ses.cfn.yaml`, re-upload it:
+
+```sh
+aws s3 cp infra/millionsend-ses.cfn.yaml \
+  s3://millionsend-public/millionsend-ses.cfn.yaml
+```
 
 ## Signup policy
 

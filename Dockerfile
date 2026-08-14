@@ -25,4 +25,6 @@ RUN groupadd --system millionsend && useradd --system --gid millionsend millions
 COPY --from=build --chown=millionsend:millionsend /app /app
 USER millionsend
 EXPOSE 3000 3001
-CMD ["node", "scripts/start.mjs"]
+# ENTRYPOINT (not CMD) so `docker compose run millionsend setup` reaches
+# start.mjs as argv instead of replacing the command.
+ENTRYPOINT ["node", "scripts/start.mjs"]

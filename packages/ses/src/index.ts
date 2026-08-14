@@ -25,6 +25,22 @@ export {
   type SesEventType,
 } from "./ses-events.js";
 export {
+  httpsOrigin,
+  runSetup,
+  runTeardown,
+  SES_EVENT_TYPES,
+  SES_IAM_POLICY,
+  SES_IAM_POLICY_JSON,
+  SETUP_NAMES,
+  type SetupClients,
+  type SetupResult,
+  setupEnvEntries,
+  setupPlan,
+  snsTopicPolicy,
+  teardownPlan,
+  upsertEnv,
+} from "./setup.js";
+export {
   type CertFetcher,
   canonicalString,
   createCachingCertFetcher,

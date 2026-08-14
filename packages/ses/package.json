@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./setup-constants": {
+      "types": "./src/setup-constants.ts",
+      "default": "./src/setup-constants.ts"
     }
   },
   "scripts": {
@@ -14,7 +18,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-iam": "^3.750.0",
     "@aws-sdk/client-sesv2": "^3.750.0",
+    "@aws-sdk/client-sns": "^3.750.0",
+    "@aws-sdk/client-sts": "^3.750.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
