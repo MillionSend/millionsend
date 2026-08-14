@@ -11,10 +11,48 @@ import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
+import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { maskApiKey } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
+
+/** Mirrors the loaded table: name, masked mono token, two relative times, menu column. */
+function KeysSkeleton() {
+  const t = useTranslations("api-keys");
+  return (
+    <Table>
+      <thead>
+        <tr>
+          <th>{t("table.name")}</th>
+          <th>{t("table.token")}</th>
+          <th>{t("table.lastUsed")}</th>
+          <th>{t("table.created")}</th>
+          <th className="right" aria-label={t("table.menu")} />
+        </tr>
+      </thead>
+      <tbody>
+        {[110, 80].map((width) => (
+          <tr key={width}>
+            <td>
+              <Skeleton width={width} height={13} />
+            </td>
+            <td>
+              <Skeleton width={176} height={13} />
+            </td>
+            <td>
+              <Skeleton width={72} />
+            </td>
+            <td>
+              <Skeleton width={72} />
+            </td>
+            <td className="right" />
+          </tr>
+        ))}
+      </tbody>
+    </Table>
+  );
+}
 
 export function ApiKeysView() {
   const t = useTranslations("api-keys");
@@ -80,6 +118,8 @@ export function ApiKeysView() {
           </button>
         }
       />
+
+      {listQuery.isPending ? <KeysSkeleton /> : null}
 
       {keys && keys.length === 0 ? (
         <EmptyState

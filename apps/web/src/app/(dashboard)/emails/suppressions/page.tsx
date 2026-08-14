@@ -181,7 +181,9 @@ export default function SuppressionsPage() {
       </div>
 
       {query.isPending ? (
-        <ListSkeleton />
+        <ListSkeleton
+          headers={[t("suppressions.email"), t("suppressions.origin"), t("suppressions.added"), ""]}
+        />
       ) : query.isError ? (
         <StateCard
           headline={t("suppressions.loadError")}

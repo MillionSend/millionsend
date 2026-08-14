@@ -216,7 +216,9 @@ export default function EmailsPage() {
       </div>
 
       {query.isPending ? (
-        <ListSkeleton />
+        <ListSkeleton
+          headers={[t("list.to"), t("list.status"), t("list.subject"), t("list.sent")]}
+        />
       ) : query.isError ? (
         <StateCard
           headline={t("list.loadError")}

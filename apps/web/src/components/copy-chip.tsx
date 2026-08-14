@@ -20,10 +20,18 @@ function useCopy(value: string) {
 }
 
 /** Mono chip with a ⧉→✓ copy affordance. `display` masks what's shown; the full `value` is copied. */
-export function CopyChip({ value, display }: { value: string; display?: React.ReactNode }) {
+export function CopyChip({
+  value,
+  display,
+  title,
+}: {
+  value: string;
+  display?: React.ReactNode;
+  title?: string;
+}) {
   const { copied, copy, label } = useCopy(value);
   return (
-    <span className="ms-chip">
+    <span className="ms-chip" {...(title ? { title } : {})}>
       {/* Width-constrained chips (table cells) end-ellipsize; the full value is copied. */}
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {display ?? value}

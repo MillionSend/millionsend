@@ -9,31 +9,32 @@ import { PlusGlyph } from "@/components/icons/nav-icons";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
+import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { AwsCredentialsBanner } from "./aws-credentials-banner";
 import { type DomainStatus, DomainStatusBadge } from "./domain-status";
 import { RegionLabel } from "./region-label";
 
+/** Mirrors the loaded rows: mono domain link, status badge, region label, relative time. */
 function SkeletonRows() {
   const widths = [180, 120, 90];
   return (
     <tbody>
       {widths.map((width) => (
         <tr key={width}>
-          {[0, 1, 2, 3].map((col) => (
-            <td key={col} className={col === 3 ? "right" : undefined}>
-              <span
-                style={{
-                  display: "inline-block",
-                  width: col === 0 ? width : 64,
-                  height: 12,
-                  borderRadius: "var(--ms-r-chip)",
-                  background: "var(--ms-inset)",
-                }}
-              />
-            </td>
-          ))}
+          <td>
+            <Skeleton width={width} height={13} />
+          </td>
+          <td>
+            <SkeletonBadge />
+          </td>
+          <td>
+            <Skeleton width={140} />
+          </td>
+          <td className="right">
+            <Skeleton width={48} />
+          </td>
         </tr>
       ))}
     </tbody>

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { Select } from "@/components/select";
+import { Skeleton, SkeletonBadge } from "@/components/skeleton";
+import { Table } from "@/components/table";
 
 /** Filter-row chrome shared by the Emails-area list screens (emails + suppressions). */
 
@@ -48,31 +50,45 @@ export function SearchBox({
   );
 }
 
-/** Skeleton matching final list geometry — no spinners on lists (canvas rule). */
-export function ListSkeleton() {
-  const bar = (width: string, height: number, delay: string) => ({
-    height,
-    width,
-    borderRadius: 6,
-    background: "var(--ms-inset)",
-    animation: `ms-shimmer 1.6s ${delay} infinite`,
-  });
-  // Widths and stagger delays verbatim from the canvas skeleton spec.
-  const rows: Array<[string, string, string, string]> = [
-    ["38%", "30%", "0s", ".2s"],
-    ["32%", "36%", ".1s", ".3s"],
-    ["41%", "26%", ".2s", ".4s"],
-  ];
+/**
+ * Loading stand-in mirroring the Emails-area list tables — real header
+ * labels over rows shaped like the loaded columns (mono link, badge, text,
+ * right-aligned time). No spinners on lists.
+ */
+export function ListSkeleton({ headers }: { headers: [string, string, string, string] }) {
+  const widths = ["58%", "42%", "66%", "50%", "38%", "62%", "46%", "54%"];
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20, padding: "8px 0" }}>
-      {rows.map(([w1, w2, d1, d2]) => (
-        <div key={w1} style={{ display: "flex", gap: 14, alignItems: "center" }}>
-          <span style={bar(w1, 11, d1)} />
-          <span style={bar("74px", 20, d1)} />
-          <span style={bar(w2, 11, d2)} />
-        </div>
-      ))}
-    </div>
+    <Table>
+      <thead>
+        <tr>
+          <th style={{ width: "36%" }}>{headers[0]}</th>
+          <th style={{ width: "16%" }}>{headers[1]}</th>
+          <th>{headers[2]}</th>
+          <th className="right" style={{ width: "13%" }}>
+            {headers[3]}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {widths.map((width, row) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows, position is identity
+          <tr key={row}>
+            <td>
+              <Skeleton width={width} height={13} />
+            </td>
+            <td>
+              <SkeletonBadge />
+            </td>
+            <td>
+              <Skeleton width={widths[widths.length - 1 - row] ?? "50%"} />
+            </td>
+            <td className="right">
+              <Skeleton width={48} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
   );
 }
 
