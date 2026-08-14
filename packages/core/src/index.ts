@@ -9,9 +9,11 @@ export {
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
 export {
   decryptEmailBody,
+  decryptPayload,
   type EmailBody,
   type EncryptedBody,
   encryptEmailBody,
+  encryptPayload,
 } from "./crypto/envelope.js";
 export { EnvKeyring, type Keyring } from "./crypto/keyring.js";
 export {
@@ -24,6 +26,24 @@ export {
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
+export { isBlockedIp, type PostJsonOptions, type PostJsonResult, postJson } from "./ssrf.js";
 export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";
 export { extractAddrSpec, findSuppressed, hashRecipient } from "./suppressions.js";
 export { DAY_MS, utcDay } from "./utc-day.js";
+export {
+  buildWebhookPayload,
+  decryptWebhookSecret,
+  encryptWebhookSecret,
+  enqueueWebhookDeliveries,
+  generateWebhookSecret,
+  isWebhookEventType,
+  signWebhook,
+  verifyWebhookSignature,
+  WEBHOOK_EVENT_TYPES,
+  WEBHOOK_MAX_ATTEMPTS,
+  WEBHOOK_RETRY_SCHEDULE_MS,
+  type WebhookEmailFacts,
+  type WebhookEventType,
+  type WebhookPayload,
+  type WebhookSignatureHeaders,
+} from "./webhooks.js";

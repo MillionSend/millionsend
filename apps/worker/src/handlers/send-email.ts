@@ -1,4 +1,9 @@
-import { applyStatusCas, decryptEmailBody, type Keyring } from "@millionsend/core";
+import {
+  applyStatusCas,
+  decryptEmailBody,
+  enqueueWebhookDeliveries,
+  type Keyring,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull } from "drizzle-orm";
@@ -26,6 +31,8 @@ export interface SendDeps {
   defaultConfigurationSet?: string | undefined;
   /** Re-enqueue a not-yet-due scheduled email at its due time. */
   reschedule?: ((emailId: string, at: Date) => Promise<void>) | undefined;
+  /** Enqueue a webhook.deliver job; email.sent webhooks are skipped when absent. */
+  enqueueWebhookDelivery?: ((deliveryId: string) => Promise<void>) | undefined;
 }
 
 export type SendOutcome = "sent" | "skipped" | "deferred" | "failed";
@@ -140,6 +147,17 @@ export async function sendEmail(
     occurredAt: new Date(),
     data: { source: "worker" },
   });
+  // The sentAt claim above makes this path single-shot per email, so the
+  // email.sent fan-out cannot double-fire on a job retry.
+  if (deps.enqueueWebhookDelivery) {
+    await enqueueWebhookDeliveries(db, {
+      teamId: email.teamId,
+      email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
+      type: "email.sent",
+      occurredAt: new Date(),
+      enqueue: deps.enqueueWebhookDelivery,
+    });
+  }
   return "sent";
 }
 

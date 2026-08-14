@@ -17,6 +17,7 @@ const NAMESPACES = [
   "onboarding",
   "settings",
   "placeholders",
+  "webhooks",
 ] as const;
 
 function isAppLocale(value: string | undefined): value is AppLocale {

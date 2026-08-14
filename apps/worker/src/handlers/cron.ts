@@ -10,6 +10,40 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, isNull, lt, lte, or } from "drizzle-orm";
 
+/**
+ * Safety net for webhook.deliver jobs lost between the delivery-row insert
+ * and the enqueue (or a dropped retry). Only rows well past due are touched;
+ * queue dedupe per deliveryId collapses any overlap with a live job, and the
+ * delivery handler skips terminal rows, so a stray extra job is harmless.
+ */
+export async function reconcileWebhookDeliveries(
+  db: Db,
+  deps: { enqueue: (deliveryId: string) => Promise<void>; now?: Date },
+): Promise<number> {
+  const now = deps.now ?? new Date();
+  const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
+  const stalled = await db
+    .select({ id: schema.webhookDeliveries.id })
+    .from(schema.webhookDeliveries)
+    .where(
+      or(
+        and(
+          eq(schema.webhookDeliveries.status, "pending"),
+          lt(schema.webhookDeliveries.createdAt, staleBefore),
+        ),
+        and(
+          eq(schema.webhookDeliveries.status, "failed"),
+          lt(schema.webhookDeliveries.nextAttemptAt, staleBefore),
+        ),
+      ),
+    )
+    .orderBy(asc(schema.webhookDeliveries.createdAt));
+  for (const delivery of stalled) {
+    await deps.enqueue(delivery.id);
+  }
+  return stalled.length;
+}
+
 export interface DrainDeps {
   isCloud: boolean;
   /** startAfter defers the job for emails scheduled beyond the drain time. */

@@ -50,6 +50,13 @@
       "when": 1786746112379,
       "tag": "0006_tricky_the_call",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786749731015,
+      "tag": "0007_lush_ezekiel",
+      "breakpoints": true
     }
   ]
 }

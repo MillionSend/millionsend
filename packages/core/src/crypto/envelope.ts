@@ -15,18 +15,16 @@ export interface EncryptedBody {
 }
 
 /**
- * Envelope encryption for email bodies: a fresh random DEK per email
- * (sidesteps GCM nonce budgets), wrapped by the keyring's KEK. Metadata
- * stays plaintext elsewhere; only the body payload is sealed here.
- * ciphertext layout: body || authTag. The plaintext DEK is scrubbed on
- * every path, including keyring failure.
+ * Envelope encryption: a fresh random DEK per payload (sidesteps GCM nonce
+ * budgets), wrapped by the keyring's KEK. ciphertext layout: payload ||
+ * authTag. The plaintext DEK is scrubbed on every path, including keyring
+ * failure. Email bodies and webhook signing secrets both seal through here.
  */
-export async function encryptEmailBody(body: EmailBody, keyring: Keyring): Promise<EncryptedBody> {
+export async function encryptPayload(plaintext: Buffer, keyring: Keyring): Promise<EncryptedBody> {
   const dek = randomBytes(32);
   try {
     const iv = randomBytes(GCM_IV_LENGTH);
     const cipher = createCipheriv("aes-256-gcm", dek, iv);
-    const plaintext = Buffer.from(JSON.stringify(body), "utf8");
     const encrypted = Buffer.concat([
       cipher.update(plaintext),
       cipher.final(),
@@ -39,10 +37,7 @@ export async function encryptEmailBody(body: EmailBody, keyring: Keyring): Promi
   }
 }
 
-export async function decryptEmailBody(
-  encrypted: EncryptedBody,
-  keyring: Keyring,
-): Promise<EmailBody> {
+export async function decryptPayload(encrypted: EncryptedBody, keyring: Keyring): Promise<Buffer> {
   if (encrypted.ciphertext.length < GCM_TAG_LENGTH) {
     throw new Error(`ciphertext too short: ${encrypted.ciphertext.length} bytes`);
   }
@@ -52,9 +47,20 @@ export async function decryptEmailBody(
     const body = encrypted.ciphertext.subarray(0, encrypted.ciphertext.length - GCM_TAG_LENGTH);
     const decipher = createDecipheriv("aes-256-gcm", dek, encrypted.iv);
     decipher.setAuthTag(tag);
-    const plaintext = Buffer.concat([decipher.update(body), decipher.final()]);
-    return JSON.parse(plaintext.toString("utf8")) as EmailBody;
+    return Buffer.concat([decipher.update(body), decipher.final()]);
   } finally {
     dek.fill(0);
   }
+}
+
+export async function encryptEmailBody(body: EmailBody, keyring: Keyring): Promise<EncryptedBody> {
+  return encryptPayload(Buffer.from(JSON.stringify(body), "utf8"), keyring);
+}
+
+export async function decryptEmailBody(
+  encrypted: EncryptedBody,
+  keyring: Keyring,
+): Promise<EmailBody> {
+  const plaintext = await decryptPayload(encrypted, keyring);
+  return JSON.parse(plaintext.toString("utf8")) as EmailBody;
 }

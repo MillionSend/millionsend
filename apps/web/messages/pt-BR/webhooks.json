@@ -1,0 +1,84 @@
+{
+  "addWebhook": "Adicionar webhook",
+  "empty": {
+    "headline": "Nenhum webhook ainda.",
+    "body": "Adicione um endpoint para receber eventos de email."
+  },
+  "table": {
+    "url": "URL",
+    "events": "Eventos",
+    "status": "Status",
+    "successRate": "Taxa de sucesso",
+    "created": "Criado",
+    "menu": "Ações do webhook"
+  },
+  "allEvents": "Todos",
+  "eventsCount": "{count, plural, one {# evento} other {# eventos}}",
+  "status": {
+    "enabled": "Ativo",
+    "disabled": "Desativado",
+    "auto_disabled": "Desativado automaticamente"
+  },
+  "enable": "Ativar",
+  "disable": "Desativar",
+  "delete": "Excluir",
+  "create": {
+    "title": "Adicionar webhook",
+    "url": "URL do endpoint",
+    "urlPlaceholder": "https://exemplo.com/webhooks/millionsend",
+    "description": "Descrição (opcional)",
+    "descriptionPlaceholder": "Eventos de produção",
+    "events": "Eventos",
+    "allEvents": "Todos os eventos",
+    "submit": "Adicionar webhook"
+  },
+  "reveal": {
+    "title": "Webhook criado",
+    "secretLabel": "Segredo de assinatura",
+    "warning": "Este segredo de assinatura é exibido uma única vez. Guarde-o agora.",
+    "done": "Concluir"
+  },
+  "deleteConfirm": {
+    "title": "Excluir webhook",
+    "body": "Entregas para {url} param imediatamente. O histórico de entregas é removido.",
+    "confirm": "Excluir webhook"
+  },
+  "detail": {
+    "eyebrow": "Webhook",
+    "sendTest": "Enviar evento de teste",
+    "testQueued": "Evento de teste na fila.",
+    "moreActions": "Ações do webhook",
+    "url": "URL",
+    "description": "Descrição",
+    "signingSecret": "Segredo de assinatura",
+    "events": "Eventos",
+    "status": "Status",
+    "created": "Criado",
+    "error": "Não foi possível carregar este webhook.",
+    "retry": "Tentar novamente",
+    "deliveries": "Entregas",
+    "noDeliveries": "Nenhuma entrega ainda.",
+    "deliveriesError": "Não foi possível carregar as entregas.",
+    "payload": "Payload",
+    "response": "Resposta",
+    "messageId": "ID da mensagem",
+    "noResponse": "Nenhuma resposta registrada.",
+    "prev": "Anterior",
+    "next": "Próxima",
+    "pageOf": "{from}–{to} de {total}"
+  },
+  "deliveryTable": {
+    "event": "Evento",
+    "status": "Status",
+    "response": "Resposta",
+    "attempts": "Tentativas",
+    "time": "Hora",
+    "toggle": "Alternar detalhes da entrega"
+  },
+  "deliveryStatus": {
+    "pending": "Pendente",
+    "success": "Sucesso",
+    "failed": "Falhou",
+    "exhausted": "Esgotado"
+  }
+}

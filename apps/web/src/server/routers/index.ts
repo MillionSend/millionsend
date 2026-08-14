@@ -6,6 +6,7 @@ import { metricsRouter } from "./metrics";
 import { settingsRouter } from "./settings";
 import { systemRouter } from "./system";
 import { teamBootstrapRouter } from "./team-bootstrap";
+import { webhooksRouter } from "./webhooks";
 
 export const appRouter = router({
   emails: emailsRouter,
@@ -15,6 +16,7 @@ export const appRouter = router({
   settings: settingsRouter,
   system: systemRouter,
   team: teamBootstrapRouter,
+  webhooks: webhooksRouter,
 });
 
 export type AppRouter = typeof appRouter;

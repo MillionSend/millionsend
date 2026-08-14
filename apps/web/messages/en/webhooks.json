@@ -1,0 +1,84 @@
+{
+  "addWebhook": "Add webhook",
+  "empty": {
+    "headline": "No webhooks yet.",
+    "body": "Add an endpoint to receive email events."
+  },
+  "table": {
+    "url": "URL",
+    "events": "Events",
+    "status": "Status",
+    "successRate": "Success rate",
+    "created": "Created",
+    "menu": "Webhook actions"
+  },
+  "allEvents": "All",
+  "eventsCount": "{count, plural, one {# event} other {# events}}",
+  "status": {
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "auto_disabled": "Auto-disabled"
+  },
+  "enable": "Enable",
+  "disable": "Disable",
+  "delete": "Delete",
+  "create": {
+    "title": "Add webhook",
+    "url": "Endpoint URL",
+    "urlPlaceholder": "https://example.com/webhooks/millionsend",
+    "description": "Description (optional)",
+    "descriptionPlaceholder": "Production events",
+    "events": "Events",
+    "allEvents": "All events",
+    "submit": "Add webhook"
+  },
+  "reveal": {
+    "title": "Webhook created",
+    "secretLabel": "Signing secret",
+    "warning": "This signing secret is shown once. Store it now.",
+    "done": "Done"
+  },
+  "deleteConfirm": {
+    "title": "Delete webhook",
+    "body": "Deliveries to {url} stop immediately. Delivery history is removed.",
+    "confirm": "Delete webhook"
+  },
+  "detail": {
+    "eyebrow": "Webhook",
+    "sendTest": "Send test event",
+    "testQueued": "Test event queued.",
+    "moreActions": "Webhook actions",
+    "url": "URL",
+    "description": "Description",
+    "signingSecret": "Signing secret",
+    "events": "Events",
+    "status": "Status",
+    "created": "Created",
+    "error": "Could not load this webhook.",
+    "retry": "Retry",
+    "deliveries": "Deliveries",
+    "noDeliveries": "No deliveries yet.",
+    "deliveriesError": "Could not load deliveries.",
+    "payload": "Payload",
+    "response": "Response",
+    "messageId": "Message ID",
+    "noResponse": "No response recorded.",
+    "prev": "Previous",
+    "next": "Next",
+    "pageOf": "{from}–{to} of {total}"
+  },
+  "deliveryTable": {
+    "event": "Event",
+    "status": "Status",
+    "response": "Response",
+    "attempts": "Attempts",
+    "time": "Time",
+    "toggle": "Toggle delivery details"
+  },
+  "deliveryStatus": {
+    "pending": "Pending",
+    "success": "Success",
+    "failed": "Failed",
+    "exhausted": "Exhausted"
+  }
+}

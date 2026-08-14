@@ -12,6 +12,7 @@ export interface JobPayloads {
   // snsMessageId rides along for durable idempotency in the handler; queue
   // dedupe alone cannot cover an SNS redelivery after the job completed.
   "ses.event": { event: SerializedSesEvent; snsMessageId: string };
+  "webhook.deliver": { deliveryId: string };
 }
 
 /** ParsedSesEvent with occurredAt as ISO string (JSON-safe). */
@@ -50,6 +51,8 @@ export const CRON_JOBS = {
   // Hourly retention sweeps keep purge batches small.
   "retention.purge": "0 * * * *",
   "idempotency.purge": "30 * * * *",
+  // Every 15 min: re-enqueue webhook deliveries whose job was lost.
+  "webhooks.reconcile": "*/15 * * * *",
 } as const;
 
 export type CronJobName = keyof typeof CRON_JOBS;

@@ -1,13 +1,5 @@
-import { getTranslations } from "next-intl/server";
-import { EmptyState } from "@/components/empty-state";
-import { PageHeader } from "@/components/page-header";
+import { WebhooksView } from "./webhooks-view";
 
-export default async function WebhooksPage() {
-  const [nav, t] = await Promise.all([getTranslations("nav"), getTranslations("placeholders")]);
-  return (
-    <>
-      <PageHeader title={nav("webhooks")} />
-      <EmptyState area="webhooks" headline={t("webhooks.headline")} body={t("webhooks.body")} />
-    </>
-  );
+export default function WebhooksPage() {
+  return <WebhooksView />;
 }
