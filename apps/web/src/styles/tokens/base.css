@@ -1,6 +1,10 @@
 /* Base surface + canonical helper classes (verbatim from source tokens.css). */
 .ms-root,
 body.ms {
+  /* margin reset lives here because the canvas sets it at page level —
+     without it the browser's default 8px floats the whole shell off the
+     viewport edges. */
+  margin: 0;
   background: var(--ms-void);
   color: var(--ms-bone);
   font-family: var(--ms-font-sans);

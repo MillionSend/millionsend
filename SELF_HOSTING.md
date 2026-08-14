@@ -37,7 +37,7 @@ app container running the api (port 3001), worker, and web dashboard (port 3000)
 3. Start:
 
    ```sh
-   docker compose up -d
+   docker compose up --build -d
    ```
 
    Migrations run automatically on boot. Dashboard: http://localhost:3000.
@@ -58,7 +58,7 @@ of bounced addresses. Requires a publicly reachable `APP_BASE_URL` (HTTPS).
 
 1. In SNS (same region as SES), create a standard topic, e.g. `millionsend-events`.
 2. Put the topic ARN in `.env` as `SNS_TOPIC_ARNS` and restart
-   (`docker compose up -d`).
+   (`docker compose up --build -d`).
 3. Subscribe the topic to `https://<your-host>/ses/events`, protocol HTTPS. The
    endpoint confirms the subscription automatically when the topic ARN matches
    `SNS_TOPIC_ARNS`.

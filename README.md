@@ -1,6 +1,8 @@
-# MillionSend
+<p align="center">
+  <img src="apps/web/public/logo/millionsend-banner.svg" alt="MillionSend" width="560">
+</p>
 
-**The open-source email platform. Send one. Send a million.**
+<p align="center"><b>The open-source email platform. Send one. Send a million.</b></p>
 
 Self-host on your own AWS SES, or use the hosted cloud. Resend-compatible API — migrating
 means changing two environment variables, not rewriting your integration.
@@ -17,7 +19,7 @@ the [Discussions](https://github.com/orgs/MillionSend/discussions) to follow alo
 git clone https://github.com/MillionSend/millionsend.git
 cd millionsend
 cp .env.example .env   # fill the 3 required values (generation hints inside)
-docker compose up -d
+docker compose up --build -d
 ```
 
 Dashboard at http://localhost:3000, API at http://localhost:3001. Full setup —
