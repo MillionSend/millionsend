@@ -19,6 +19,7 @@ export {
   completeIdempotent,
   type IdempotencyBegin,
   purgeExpiredIdempotencyKeys,
+  releaseIdempotent,
 } from "./idempotency.js";
 export { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";

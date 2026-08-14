@@ -35,6 +35,13 @@ const validBody = {
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
   teamId = await createTeam(db, "api-team");
+  await db.insert(schema.domains).values({
+    teamId,
+    name: "acme.dev",
+    region: "us-east-1",
+    status: "verified",
+    verifiedAt: new Date(),
+  });
   const key = generateApiKey("live");
   token = key.token;
   await db.insert(schema.apiKeys).values({
@@ -102,7 +109,7 @@ describe("send edge cases", () => {
       { ...validBody, subject: "different" },
       { "idempotency-key": "same-key" },
     );
-    expect(drifted.status).toBe(422);
+    expect(drifted.status).toBe(409);
   });
 
   it("stores bodies encrypted at rest", async () => {

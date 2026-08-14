@@ -23,6 +23,13 @@ let teamId: string;
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
   teamId = await createTeam(db, "contract");
+  await db.insert(schema.domains).values({
+    teamId,
+    name: "acme.dev",
+    region: "us-east-1",
+    status: "verified",
+    verifiedAt: new Date(),
+  });
   const key = generateApiKey("test");
   await db.insert(schema.apiKeys).values({
     teamId,

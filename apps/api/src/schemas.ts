@@ -1,4 +1,5 @@
 import { z } from "@hono/zod-openapi";
+import { extractAddrSpec } from "@millionsend/core";
 
 /**
  * Wire-compatible with Resend's documented /emails surface
@@ -6,13 +7,17 @@ import { z } from "@hono/zod-openapi";
  * not drift — the contract test runs the official `resend` SDK against us.
  */
 
+const emailAddress = z.string().refine((v) => z.email().safeParse(extractAddrSpec(v)).success, {
+  message: "must be a valid email address (display names allowed)",
+});
+
 const recipientList = z
-  .union([z.string(), z.array(z.string()).min(1).max(50)])
+  .union([emailAddress, z.array(emailAddress).min(1).max(50)])
   .transform((v) => (Array.isArray(v) ? v : [v]));
 
 export const sendEmailRequestSchema = z
   .object({
-    from: z.string().min(3).openapi({ example: "Acme <onboarding@acme.dev>" }),
+    from: emailAddress.openapi({ example: "Acme <onboarding@acme.dev>" }),
     to: recipientList.openapi({ example: ["delivered@resend.dev"] }),
     subject: z.string().min(1),
     html: z.string().optional(),
@@ -20,7 +25,11 @@ export const sendEmailRequestSchema = z
     cc: recipientList.optional(),
     bcc: recipientList.optional(),
     reply_to: recipientList.optional(),
+    scheduled_at: z.iso.datetime({ offset: true }).optional(),
     tags: z.array(z.object({ name: z.string().min(1), value: z.string() })).optional(),
+    // Accepted into the schema so we can reject loudly instead of silently
+    // stripping — "never an incompatible subset" (docs/resend-compatibility.md).
+    attachments: z.array(z.unknown()).optional(),
   })
   .refine((v) => v.html !== undefined || v.text !== undefined, {
     message: "Either html or text must be provided",
@@ -44,6 +53,7 @@ export const getEmailResponseSchema = z
     html: z.string().nullable(),
     text: z.string().nullable(),
     created_at: z.string(),
+    scheduled_at: z.string().nullable(),
     last_event: z.string(),
   })
   .openapi("GetEmailResponse");

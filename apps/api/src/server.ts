@@ -16,7 +16,7 @@ const app = createApi({
   isCloud: env.IS_CLOUD,
 });
 
-const port = Number(process.env.PORT ?? 3001);
+const port = env.PORT;
 serve({ fetch: app.fetch, port }, (info) => {
   console.log(`millionsend api listening on :${info.port}`);
 });
