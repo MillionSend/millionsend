@@ -88,7 +88,7 @@ export function DnsRecordsTable({
                     <td>
                       <CopyChip value={name} title={record.name} />
                     </td>
-                    <td>
+                    <td style={{ paddingRight: 24 }}>
                       <CopyChip value={record.value} />
                     </td>
                     <td>{t("detail.ttlAuto")}</td>
@@ -127,7 +127,7 @@ export function DnsRecordsTableSkeleton({ showStatus = false }: { showStatus?: b
                 <td>
                   <SkeletonChip width="85%" />
                 </td>
-                <td>
+                <td style={{ paddingRight: 24 }}>
                   <SkeletonChip width="95%" />
                 </td>
                 <td>
