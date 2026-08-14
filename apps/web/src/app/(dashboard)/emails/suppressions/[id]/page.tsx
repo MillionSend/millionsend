@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { CopyGlyph } from "@/components/copy-chip";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
+import { BtnSpinner } from "@/components/spinner";
 import { formatUtcMinute } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
@@ -75,6 +76,7 @@ export default function SuppressionDetailPage() {
             disabled={removeMutation.isPending}
             onClick={() => removeMutation.mutate({ id: row.id })}
           >
+            <BtnSpinner on={removeMutation.isPending} />
             {t("suppressions.remove")}
           </button>
         }

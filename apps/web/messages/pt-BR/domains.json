@@ -58,7 +58,8 @@
     },
     "submit": "Adicionar domínio",
     "conflict": "Este domínio já foi adicionado.",
-    "error": "Não foi possível adicionar o domínio."
+    "error": "Não foi possível adicionar o domínio.",
+    "credentialsError": "A AWS rejeitou as credenciais da requisição — verifique AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY no .env. Veja SELF_HOSTING.md."
   },
   "detail": {
     "eyebrow": "Detalhes do domínio",
@@ -116,5 +117,6 @@
     "error": "Não foi possível carregar o domínio.",
     "recordsError": "Não foi possível carregar os registros DNS.",
     "retry": "Tentar novamente"
-  }
+  },
+  "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY no .env — veja SELF_HOSTING.md."
 }

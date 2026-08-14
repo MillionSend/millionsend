@@ -2,10 +2,11 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { useDismiss } from "@/components/popover-menu";
+import { BtnSpinner } from "@/components/spinner";
 import { useTRPC } from "@/lib/trpc";
 
 /** Rounded-square avatar: the team's initial on a raised tile. */
@@ -89,6 +90,10 @@ export function TeamSwitcher({ teamName }: { teamName: string }) {
   const [newName, setNewName] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   useDismiss(rootRef, open, () => setOpen(false));
+  // Stable identity: Modal's focus effect depends on onClose, and a fresh
+  // arrow per render would re-run it on every keystroke, stealing focus
+  // from the name input.
+  const closeCreate = useCallback(() => setCreateOpen(false), []);
 
   const { data } = useQuery(trpc.team.list.queryOptions());
   const active = data?.teams.find((m) => m.teamId === data.activeTeamId);
@@ -161,7 +166,6 @@ export function TeamSwitcher({ teamName }: { teamName: string }) {
             left: 0,
             right: 0,
             minWidth: 0,
-            zIndex: 20,
           }}
         >
           <div className="ms-menu-label">{t("teams")}</div>
@@ -216,10 +220,11 @@ export function TeamSwitcher({ teamName }: { teamName: string }) {
           </button>
         </div>
       ) : null}
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={t("create")}>
+      <Modal open={createOpen} onClose={closeCreate} title={t("create")}>
         <form
           onSubmit={(event) => {
             event.preventDefault();
+            if (createTeam.isPending) return;
             createTeam.mutate({ name: newName });
           }}
           style={{ display: "grid", gap: 16, marginTop: 12 }}
@@ -233,6 +238,7 @@ export function TeamSwitcher({ teamName }: { teamName: string }) {
               style={{ width: "100%" }}
               required
               maxLength={80}
+              disabled={createTeam.isPending}
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
             />
@@ -243,15 +249,12 @@ export function TeamSwitcher({ teamName }: { teamName: string }) {
             </p>
           ) : null}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button
-              type="button"
-              className="ms-btn ms-btn-secondary"
-              onClick={() => setCreateOpen(false)}
-            >
-              {tCommon("cancel")}
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeCreate}>
+              {tCommon("cancel")} <span className="ms-keycap">Esc</span>
             </button>
             <button type="submit" className="ms-btn ms-btn-primary" disabled={createTeam.isPending}>
-              {t("submit")}
+              <BtnSpinner on={createTeam.isPending} />
+              {t("submit")} <span className="ms-keycap">↵</span>
             </button>
           </div>
         </form>

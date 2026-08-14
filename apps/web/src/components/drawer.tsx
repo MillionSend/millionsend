@@ -36,7 +36,7 @@ export function Drawer({
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 100,
+        zIndex: "var(--ms-z-modal)",
         animation: "ms-fade var(--ms-dur-base) var(--ms-ease)",
       }}
     >

@@ -4,6 +4,7 @@ import { domainsRouter } from "./domains";
 import { emailsRouter } from "./emails";
 import { metricsRouter } from "./metrics";
 import { settingsRouter } from "./settings";
+import { systemRouter } from "./system";
 import { teamBootstrapRouter } from "./team-bootstrap";
 
 export const appRouter = router({
@@ -12,6 +13,7 @@ export const appRouter = router({
   apiKeys: apiKeysRouter,
   metrics: metricsRouter,
   settings: settingsRouter,
+  system: systemRouter,
   team: teamBootstrapRouter,
 });
 
