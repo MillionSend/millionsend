@@ -55,18 +55,34 @@ export function SearchBox({
  * labels over rows shaped like the loaded columns (mono link, badge, text,
  * right-aligned time). No spinners on lists.
  */
-export function ListSkeleton({ headers }: { headers: [string, string, string, string] }) {
+export function ListSkeleton({
+  headers,
+  action = false,
+}: {
+  headers: [string, string, string, string];
+  /**
+   * Last column holds a 30px .ms-btn overflow trigger instead of a relative
+   * time (suppressions); the trigger is the row's tallest content, so its
+   * stand-in must keep that height. Also switches the header widths to the
+   * suppressions table's (40/18% vs the emails table's 34/15%).
+   */
+  action?: boolean;
+}) {
   const widths = ["58%", "42%", "66%", "50%", "38%", "62%", "46%", "54%"];
   return (
     <Table>
       <thead>
         <tr>
-          <th style={{ width: "36%" }}>{headers[0]}</th>
-          <th style={{ width: "16%" }}>{headers[1]}</th>
+          <th style={{ width: action ? "40%" : "34%" }}>{headers[0]}</th>
+          <th style={{ width: action ? "18%" : "15%" }}>{headers[1]}</th>
           <th>{headers[2]}</th>
-          <th className="right" style={{ width: "13%" }}>
-            {headers[3]}
-          </th>
+          {action ? (
+            <th className="right" />
+          ) : (
+            <th className="right" style={{ width: "13%" }}>
+              {headers[3]}
+            </th>
+          )}
         </tr>
       </thead>
       <tbody>
@@ -82,9 +98,15 @@ export function ListSkeleton({ headers }: { headers: [string, string, string, st
             <td>
               <Skeleton width={widths[widths.length - 1 - row] ?? "50%"} />
             </td>
-            <td className="right">
-              <Skeleton width={48} />
-            </td>
+            {action ? (
+              <td className="right" style={{ width: 40 }}>
+                <Skeleton width={22} height={30} radius="var(--ms-r-input)" />
+              </td>
+            ) : (
+              <td className="right">
+                <Skeleton width={48} />
+              </td>
+            )}
           </tr>
         ))}
       </tbody>

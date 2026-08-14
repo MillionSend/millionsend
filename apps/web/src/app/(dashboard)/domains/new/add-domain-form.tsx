@@ -158,7 +158,16 @@ function DnsRecordsStep({ id }: { id: string }) {
                   </span>
                 </>
               ) : (
-                <Skeleton width={200} height={16} />
+                <>
+                  {/* The loaded row's height comes from the flag span's line
+                      box (base font-size × 1.55 line-height); a 1lh stand-in
+                      reserves exactly that, and the mono line keeps its real
+                      13px wrapper so nothing shifts when the domain lands. */}
+                  <Skeleton width="1.2em" height="1lh" />
+                  <span className="ms-mono" style={{ fontSize: 13, display: "flex" }}>
+                    <Skeleton width={200} height="1lh" />
+                  </span>
+                </>
               )}
             </div>
           </div>

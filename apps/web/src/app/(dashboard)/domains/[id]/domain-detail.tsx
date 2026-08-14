@@ -13,7 +13,7 @@ import {
 import { Modal } from "@/components/modal";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
-import { Skeleton } from "@/components/skeleton";
+import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner, Spinner } from "@/components/spinner";
 import { formatRelative, formatUtcMinute } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
@@ -145,14 +145,23 @@ export function DomainDetail({ id }: { id: string }) {
     );
   }
   if (!domain.isSuccess || !status) {
-    // Mirrors the loaded page: breadcrumb + title, the meta strip, then the record tables.
+    // Mirrors the loaded page's containers exactly (PageHeader breadcrumb +
+    // H1, MetaItem strip, status banner, record tables) so nothing shifts
+    // when data lands. Text lines are 1lh bars inside the real typography
+    // wrappers; display:flex makes the wrapper's height the bar's height,
+    // which equals the loaded single-line height.
     return (
       <>
         <div style={{ marginBottom: 28 }}>
-          <Skeleton width={140} height={11} />
-          <div style={{ marginTop: 10 }}>
-            <Skeleton width={260} height={26} />
+          <div style={{ display: "flex", fontSize: 13, lineHeight: 1, marginBottom: 10 }}>
+            <Skeleton width={140} height="1lh" />
           </div>
+          <h1
+            className="ms-display"
+            style={{ fontSize: "var(--ms-fs-h1)", margin: 0, display: "flex" }}
+          >
+            <Skeleton width={260} height="1lh" />
+          </h1>
         </div>
         <div
           className="ms-meta-grid"
@@ -166,17 +175,41 @@ export function DomainDetail({ id }: { id: string }) {
             maxWidth: 1000,
           }}
         >
-          {["created", "status", "region"].map((key) => (
-            <div key={key}>
-              <Skeleton width={56} height={10} />
-              <div style={{ marginTop: 6 }}>
-                <Skeleton width={110} height={14} />
-              </div>
-            </div>
-          ))}
+          {/* Labels are static — only the values wait on data. The badge ghost
+              keeps the strip at the loaded height (the status badge is its
+              tallest cell). */}
+          <MetaItem label={t("detail.created")}>
+            <Skeleton width={110} height={14} />
+          </MetaItem>
+          <MetaItem label={t("detail.status")}>
+            <SkeletonBadge />
+          </MetaItem>
+          <MetaItem label={t("detail.region")}>
+            <Skeleton width={140} height={14} />
+          </MetaItem>
+        </div>
+        {/* Every non-failed status shows a GradientBanner here on load;
+            reserving its box (13.5px line + 11px vertical padding + 1px
+            border) keeps the records section from jumping when status
+            arrives. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            fontSize: 13.5,
+            padding: "11px 16px",
+            marginTop: 24,
+            border: "1px solid var(--ms-line)",
+            borderRadius: 12,
+            maxWidth: 1000,
+          }}
+        >
+          <Skeleton width={280} height="1lh" />
         </div>
         <section style={{ marginTop: 26, maxWidth: 1000 }}>
-          <Skeleton width={300} height={22} />
+          <h2 className="ms-display" style={{ fontSize: 22, margin: 0, display: "flex" }}>
+            <Skeleton width={300} height="1lh" />
+          </h2>
           <div style={{ marginTop: 22 }}>
             <DnsRecordsTableSkeleton showStatus />
           </div>
