@@ -12,6 +12,7 @@ let close: () => Promise<void>;
 let app: ReturnType<typeof createApi>;
 let teamId: string;
 let token: string;
+const enqueuedSends: { emailId: string; startAfter?: Date }[] = [];
 
 async function post(body: unknown, headers: Record<string, string> = {}) {
   return app.request("/emails", {
@@ -55,6 +56,9 @@ beforeAll(async () => {
     db,
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
     isCloud: true,
+    enqueueEmailSend: async (emailId, opts) => {
+      enqueuedSends.push({ emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) });
+    },
   });
 });
 afterAll(() => close());

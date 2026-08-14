@@ -6,6 +6,21 @@ const boolFromString = z
   .default("false")
   .transform((v) => v === "true" || v === "1");
 
+/**
+ * Comma-separated ARNs → non-empty array, or undefined. Values like "," or
+ * whitespace must yield undefined, not [] — a truthy empty allowlist would
+ * mount the SNS endpoint yet 403 every delivery, including the
+ * SubscriptionConfirmation needed to ever receive events.
+ */
+export function parseSnsTopicArns(value: string | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const arns = value
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return arns.length > 0 ? arns : undefined;
+}
+
 // Canonical base64 only: Buffer.from silently skips foreign characters, so a
 // mangled key could pass a length check yet decode differently elsewhere —
 // which would make previously encrypted bodies unrecoverable.
@@ -48,20 +63,13 @@ export const env = createEnv({
     // SNS topics allowed to deliver SES events (comma-separated ARNs).
     // Unset disables the ingestion endpoint entirely — signature checks
     // without a topic allowlist would accept any AWS account's topic.
-    SNS_TOPIC_ARNS: z
-      .string()
-      .optional()
-      .transform((v) =>
-        v
-          ? v
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s.length > 0)
-          : undefined,
-      ),
+    SNS_TOPIC_ARNS: z.string().optional().transform(parseSnsTopicArns),
 
-    // Worker-side messages/second ceiling. 14/s is SES's standard production
-    // default; sandbox accounts must set 1. GetAccount auto-detection later.
+    // Messages/second ceiling for THE ONE worker process: the bucket is
+    // in-memory, so running N worker replicas multiplies the real SES rate
+    // by N. Until the bucket is shared (Postgres-backed), scale the worker
+    // vertically only, or divide this value by the replica count. 14/s is
+    // SES's standard production default; sandbox accounts must set 1.
     SES_MAX_SEND_RATE: z.coerce.number().positive().default(14),
 
     // Days email BODIES are kept; metadata and events are unaffected.

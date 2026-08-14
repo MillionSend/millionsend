@@ -12,22 +12,31 @@ if (!env.MASTER_ENCRYPTION_KEY) {
   throw new Error("MASTER_ENCRYPTION_KEY is required to start the API");
 }
 
+// The API is the email.send producer, so the queue is unconditional.
+const queue = await Queue.start(env.DATABASE_URL);
+
 // SES event ingestion exists only when a topic allowlist is configured —
 // signature checks without one would accept any AWS account's topic.
 const snsTopicArns = env.SNS_TOPIC_ARNS;
-const queue = snsTopicArns ? await Queue.start(env.DATABASE_URL) : null;
 
 const app = createApi({
   db: getDb(),
   keyring: EnvKeyring.fromBase64(env.MASTER_ENCRYPTION_KEY),
   isCloud: env.IS_CLOUD,
-  ...(queue && snsTopicArns
+  enqueueEmailSend: async (emailId, opts) => {
+    await queue.send(
+      "email.send",
+      { emailId },
+      { dedupeKey: emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) },
+    );
+  },
+  ...(snsTopicArns
     ? {
         sns: {
           allowedTopicArns: snsTopicArns,
           fetchCert: createCachingCertFetcher(),
-          enqueueSesEvent: async (event, dedupeKey) => {
-            await queue.send("ses.event", { event }, { dedupeKey });
+          enqueueSesEvent: async (event, snsMessageId) => {
+            await queue.send("ses.event", { event, snsMessageId }, { dedupeKey: snsMessageId });
           },
         },
       }

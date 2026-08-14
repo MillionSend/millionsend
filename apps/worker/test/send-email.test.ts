@@ -111,9 +111,33 @@ it("skips anything not in queued state — a job cannot force a send", async () 
   expect(sends).toHaveLength(0);
 });
 
-it("skips scheduled emails whose time has not come", async () => {
+it("defers a not-yet-due scheduled email back to the queue", async () => {
   const { ses, sends } = fakeSes();
-  const emailId = await insertEmail({ scheduledAt: new Date(Date.now() + 60 * 60 * 1000) });
+  const due = new Date(Date.now() + 60 * 60 * 1000);
+  const emailId = await insertEmail({ scheduledAt: due });
+  const rescheduled: { emailId: string; at: Date }[] = [];
+  const outcome = await sendEmail(
+    db,
+    {
+      keyring,
+      ses,
+      reschedule: async (id, at) => {
+        rescheduled.push({ emailId: id, at });
+      },
+    },
+    { emailId },
+  );
+  // "skipped" here would ack the job and strand the email forever.
+  expect(outcome).toBe("deferred");
+  expect(rescheduled).toEqual([{ emailId, at: due }]);
+  expect(sends).toHaveLength(0);
+});
+
+it("skips an already-claimed email — no duplicate delivery on retry", async () => {
+  const { ses, sends } = fakeSes();
+  // A prior attempt claimed the row (sentAt set) and reached SES before its
+  // bookkeeping failed; the retry must NOT send again.
+  const emailId = await insertEmail({ sentAt: new Date() });
   expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("skipped");
   expect(sends).toHaveLength(0);
 });
@@ -149,4 +173,6 @@ it("SES failure leaves the email queued for the job retry", async () => {
   const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
   expect(row?.latestStatus).toBe("queued");
   expect(row?.sesMessageId).toBeNull();
+  // The claim must be released, or the retry would skip and strand the email.
+  expect(row?.sentAt).toBeNull();
 });

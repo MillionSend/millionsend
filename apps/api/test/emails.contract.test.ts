@@ -39,7 +39,7 @@ beforeAll(async () => {
     last4: key.last4,
   });
   const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
-  const app = createApi({ db, keyring, isCloud: true });
+  const app = createApi({ db, keyring, isCloud: true, enqueueEmailSend: async () => {} });
   await new Promise<void>((resolve) => {
     server = serve({ fetch: app.fetch, port: 0 }, () => resolve());
   });

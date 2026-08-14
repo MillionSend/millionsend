@@ -39,7 +39,11 @@ const EVENT_TYPE_BY_EVENT: Record<
   "Rendering Failure": "rendering_failure",
 };
 
-export async function processSesEvent(db: Db, event: SerializedSesEvent): Promise<void> {
+export async function processSesEvent(
+  db: Db,
+  event: SerializedSesEvent,
+  opts: { snsMessageId?: string } = {},
+): Promise<void> {
   const status = STATUS_BY_EVENT[event.eventType];
   const eventType = EVENT_TYPE_BY_EVENT[event.eventType];
   if (!status || !eventType) return;
@@ -51,12 +55,22 @@ export async function processSesEvent(db: Db, event: SerializedSesEvent): Promis
   // Unknown message id: not ours (or purged) — never act on it.
   if (!email) return;
 
-  await db.insert(schema.emailEvents).values({
-    emailId: email.id,
-    type: eventType,
-    occurredAt: new Date(event.occurredAt),
-    data: event.data,
-  });
+  // The event insert doubles as the idempotency gate: SNS delivers
+  // at-least-once and queue dedupe cannot cover redelivery after the job
+  // completed, so a duplicate SNS MessageId stops here — before counters,
+  // which are the one non-idempotent step below.
+  const inserted = await db
+    .insert(schema.emailEvents)
+    .values({
+      emailId: email.id,
+      type: eventType,
+      occurredAt: new Date(event.occurredAt),
+      snsMessageId: opts.snsMessageId ?? null,
+      data: event.data,
+    })
+    .onConflictDoNothing()
+    .returning({ id: schema.emailEvents.id });
+  if (inserted.length === 0) return;
 
   await applyStatusCas(db, email.id, status);
 

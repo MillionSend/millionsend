@@ -110,9 +110,18 @@ export const emailEvents = pgTable(
       .references(() => emails.id, { onDelete: "cascade" }),
     type: emailEventTypeEnum("type").notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    // Durable idempotency key: SNS delivers at-least-once and queue-level
+    // dedupe cannot cover post-completion redeliveries, so the SNS MessageId
+    // is recorded here and enforced unique. Null for worker-originated events.
+    snsMessageId: text("sns_message_id"),
     // Raw provider payload subset (bounce diagnostics, click URL, user agent...).
     data: jsonb("data").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("email_events_email_idx").on(t.emailId, t.occurredAt)],
+  (t) => [
+    index("email_events_email_idx").on(t.emailId, t.occurredAt),
+    uniqueIndex("email_events_sns_message_id_idx")
+      .on(t.snsMessageId)
+      .where(sql`${t.snsMessageId} is not null`),
+  ],
 );

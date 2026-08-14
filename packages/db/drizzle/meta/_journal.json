@@ -22,6 +22,13 @@
       "when": 1786663627268,
       "tag": "0002_lovely_absorbing_man",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786669661575,
+      "tag": "0003_adorable_doctor_spectrum",
+      "breakpoints": true
     }
   ]
 }

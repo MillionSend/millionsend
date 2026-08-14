@@ -37,7 +37,8 @@ let baseUrl: string;
 let resend: Resend;
 let teamId: string;
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
-const jobs: { event: SerializedSesEvent; dedupeKey: string }[] = [];
+const jobs: { event: SerializedSesEvent; snsMessageId: string }[] = [];
+const sendJobs: string[] = [];
 const rawSends: Buffer[] = [];
 const fakeSes: SesSender = {
   async sendRaw({ raw }) {
@@ -68,11 +69,14 @@ beforeAll(async () => {
     db,
     keyring,
     isCloud: true,
+    enqueueEmailSend: async (emailId) => {
+      sendJobs.push(emailId);
+    },
     sns: {
       allowedTopicArns: [SNS_TEST_TOPIC_ARN],
       fetchCert: async () => snsTestCertPem(),
-      enqueueSesEvent: async (event, dedupeKey) => {
-        jobs.push({ event, dedupeKey });
+      enqueueSesEvent: async (event, snsMessageId) => {
+        jobs.push({ event, snsMessageId });
       },
     },
   });
@@ -126,6 +130,8 @@ it("accepts a send from the official resend SDK", async () => {
   emailId = data.id;
   const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
   expect(row?.latestStatus).toBe("queued");
+  // The accept must PRODUCE a send job — an email without one never sends.
+  expect(sendJobs).toEqual([emailId]);
 });
 
 it("worker sends it through (fake) SES and records the join key", async () => {
@@ -151,12 +157,19 @@ it("a signed Delivery event lands over the wire and drives the status", async ()
     ),
   );
   expect(res.status).toBe(200);
-  const job = jobs.find((j) => j.dedupeKey === "sns-e2e-delivery");
+  const job = jobs.find((j) => j.snsMessageId === "sns-e2e-delivery");
   if (!job) throw new Error("delivery job not enqueued");
-  await processSesEvent(db, job.event);
+  await processSesEvent(db, job.event, { snsMessageId: job.snsMessageId });
+  // SNS redelivery of the same MessageId must be a no-op (counters included).
+  await processSesEvent(db, job.event, { snsMessageId: job.snsMessageId });
 
   const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
   expect(row?.latestStatus).toBe("delivered");
+  const [counter] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(counter?.delivered).toBe(1);
 });
 
 it("a signed Permanent bounce suppresses the recipient", async () => {
@@ -176,9 +189,9 @@ it("a signed Permanent bounce suppresses the recipient", async () => {
     ),
   );
   expect(res.status).toBe(200);
-  const job = jobs.find((j) => j.dedupeKey === "sns-e2e-bounce");
+  const job = jobs.find((j) => j.snsMessageId === "sns-e2e-bounce");
   if (!job) throw new Error("bounce job not enqueued");
-  await processSesEvent(db, job.event);
+  await processSesEvent(db, job.event, { snsMessageId: job.snsMessageId });
 
   const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
   expect(row?.latestStatus).toBe("bounced");

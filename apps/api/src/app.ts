@@ -22,6 +22,7 @@ import {
   isAllowedSnsUrl,
   parseSesEvent,
   type SnsMessage,
+  snsMessageSchema,
   verifySnsMessage,
 } from "@millionsend/ses";
 import { and, eq, isNull } from "drizzle-orm";
@@ -37,7 +38,7 @@ export interface SnsIngestDeps {
   /** Only these topics may deliver events; everything else is rejected. */
   allowedTopicArns: readonly string[];
   fetchCert: CertFetcher;
-  enqueueSesEvent: (event: SerializedSesEvent, dedupeKey: string) => Promise<void>;
+  enqueueSesEvent: (event: SerializedSesEvent, snsMessageId: string) => Promise<void>;
   /** Overridable for tests; default fetches the (validated) SubscribeURL. */
   confirmSubscription?: ((subscribeUrl: string) => Promise<void>) | undefined;
 }
@@ -47,6 +48,11 @@ export interface ApiDeps {
   keyring: Keyring;
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
+  /**
+   * Hands an accepted email to the send queue. REQUIRED: accepting mail
+   * without a producer would strand it in "queued" forever.
+   */
+  enqueueEmailSend: (emailId: string, opts?: { startAfter?: Date }) => Promise<void>;
   /** SES event ingestion; omitted → the endpoint does not exist (404). */
   sns?: SnsIngestDeps | undefined;
 }
@@ -76,20 +82,6 @@ function senderDomain(from: string): string | null {
   const at = addr.lastIndexOf("@");
   return at > 0 ? addr.slice(at + 1).toLowerCase() : null;
 }
-
-const snsMessageSchema = z.object({
-  Type: z.enum(["Notification", "SubscriptionConfirmation", "UnsubscribeConfirmation"]),
-  MessageId: z.string().min(1),
-  TopicArn: z.string().min(1),
-  Message: z.string(),
-  Timestamp: z.string(),
-  SignatureVersion: z.string(),
-  Signature: z.string().min(1),
-  SigningCertURL: z.string(),
-  Subject: z.string().optional(),
-  Token: z.string().optional(),
-  SubscribeURL: z.string().optional(),
-});
 
 async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
   const res = await fetch(subscribeUrl);
@@ -280,7 +272,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       const limit = deps.isCloud ? PLAN_DAILY_LIMIT[auth.plan] : null;
       // Quota reservation, email insert, and idempotency completion commit
       // atomically (the quota contract).
-      const emailId = await deps.db.transaction(async (tx) => {
+      const accepted = await deps.db.transaction(async (tx) => {
         const txDb = tx as unknown as Db;
         const quota = await reserveDailyQuota(txDb, { teamId: auth.teamId, count: 1, limit });
         const [row] = await tx
@@ -315,9 +307,24 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           // this branch produces no second email.
           if (!recorded) throw new IdempotencyTakeoverError();
         }
-        return row.id;
+        return { id: row.id, parked: !quota.reserved };
       });
-      return c.json({ id: emailId }, 200);
+      // After commit: hand the send to the queue (quota-parked emails wait
+      // for the midnight drain instead). An enqueue failure must NOT undo
+      // the accept — the email and its idempotency record are committed, so
+      // rethrowing would let a retry create a second email. The reconcile
+      // sweep re-enqueues any accepted email whose job was lost.
+      if (!accepted.parked) {
+        try {
+          await deps.enqueueEmailSend(
+            accepted.id,
+            body.scheduled_at ? { startAfter: new Date(body.scheduled_at) } : {},
+          );
+        } catch (err) {
+          console.error("email.send enqueue failed; reconcile sweep will recover", err);
+        }
+      }
+      return c.json({ id: accepted.id }, 200);
     } catch (err) {
       if (err instanceof IdempotencyTakeoverError && idemKey) {
         const replay = await beginIdempotent(deps.db, {
@@ -454,7 +461,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         }
         const event = parseSesEvent(inner);
         if (event) {
-          // Dedupe on the SNS MessageId — SNS redelivers at-least-once.
+          // The SNS MessageId dedupes redeliveries twice over: as the queue
+          // singletonKey while a job is queued, and durably in the handler
+          // via the unique email_events.sns_message_id.
           await sns.enqueueSesEvent(
             { ...event, occurredAt: event.occurredAt.toISOString() },
             msg.MessageId,

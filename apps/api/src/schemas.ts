@@ -25,7 +25,14 @@ export const sendEmailRequestSchema = z
     cc: recipientList.optional(),
     bcc: recipientList.optional(),
     reply_to: recipientList.optional(),
-    scheduled_at: z.iso.datetime({ offset: true }).optional(),
+    // Capped at 30 days ahead (Resend's own limit). Also keeps a scheduled
+    // send from outliving the default body-retention window.
+    scheduled_at: z.iso
+      .datetime({ offset: true })
+      .refine((v) => new Date(v).getTime() <= Date.now() + 30 * 24 * 60 * 60 * 1000, {
+        message: "scheduled_at cannot be more than 30 days in the future",
+      })
+      .optional(),
     tags: z.array(z.object({ name: z.string().min(1), value: z.string() })).optional(),
     // Accepted into the schema so we can reject loudly instead of silently
     // stripping — "never an incompatible subset" (docs/resend-compatibility.md).

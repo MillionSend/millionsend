@@ -1,7 +1,7 @@
 import { applyStatusCas, decryptEmailBody, type Keyring } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { createTransport } from "nodemailer";
 
 /**
@@ -17,9 +17,11 @@ export interface SesSender {
 export interface SendDeps {
   keyring: Keyring;
   ses: SesSender;
+  /** Re-enqueue a not-yet-due scheduled email at its due time. */
+  reschedule?: ((emailId: string, at: Date) => Promise<void>) | undefined;
 }
 
-export type SendOutcome = "sent" | "skipped" | "failed";
+export type SendOutcome = "sent" | "skipped" | "deferred" | "failed";
 
 export async function sendEmail(
   db: Db,
@@ -33,7 +35,12 @@ export async function sendEmail(
   // Only queued emails are sendable: quota-parked, already-sent, and failed
   // rows are skipped no matter how the job arrived.
   if (email?.latestStatus !== "queued") return "skipped";
-  if (email.scheduledAt && email.scheduledAt.getTime() > Date.now()) return "skipped";
+  if (email.scheduledAt && email.scheduledAt.getTime() > Date.now()) {
+    // Returning without re-enqueueing would ack the job and strand the
+    // email forever; hand it back to the queue for its due time.
+    await deps.reschedule?.(email.id, email.scheduledAt);
+    return "deferred";
+  }
 
   const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
   if (!bodyCiphertext || !bodyIv || !bodyWrappedDek || bodyKeyVersion === null) {
@@ -71,16 +78,46 @@ export async function sendEmail(
       )[0]?.cs
     : undefined;
 
-  const { messageId } = await deps.ses.sendRaw({
-    raw: mime,
-    ...(configurationSet ? { configurationSetName: configurationSet } : {}),
-  });
+  // Atomic claim (sentAt doubles as the claim marker): closes the
+  // double-send windows — a concurrent worker on the same job, and a retry
+  // after SES accepted but the post-send bookkeeping failed. Claimed rows
+  // are simply skipped on the next attempt.
+  const claimed = await db
+    .update(schema.emails)
+    .set({ sentAt: new Date() })
+    .where(
+      and(
+        eq(schema.emails.id, email.id),
+        eq(schema.emails.latestStatus, "queued"),
+        isNull(schema.emails.sentAt),
+      ),
+    )
+    .returning({ id: schema.emails.id });
+  if (claimed.length === 0) return "skipped";
+
+  let messageId: string;
+  try {
+    ({ messageId } = await deps.ses.sendRaw({
+      raw: mime,
+      ...(configurationSet ? { configurationSetName: configurationSet } : {}),
+    }));
+  } catch (err) {
+    // sendRaw threw ⇒ the SDK exhausted its own retries without an accept:
+    // release the claim so the job retry can send. (After a SUCCESSFUL
+    // sendRaw the claim is never released — a bookkeeping failure then
+    // leaves the row claimed rather than risking a duplicate delivery.)
+    await db
+      .update(schema.emails)
+      .set({ sentAt: null })
+      .where(and(eq(schema.emails.id, email.id), eq(schema.emails.latestStatus, "queued")));
+    throw err;
+  }
 
   // Record the join key BEFORE the status flip: an SES event can arrive
   // within milliseconds and must find the row by sesMessageId.
   await db
     .update(schema.emails)
-    .set({ sesMessageId: messageId, sentAt: new Date() })
+    .set({ sesMessageId: messageId })
     .where(eq(schema.emails.id, email.id));
   await applyStatusCas(db, email.id, "sent");
   await db.insert(schema.emailEvents).values({

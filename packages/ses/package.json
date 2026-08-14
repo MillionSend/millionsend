@@ -14,7 +14,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.750.0"
+    "@aws-sdk/client-sesv2": "^3.750.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

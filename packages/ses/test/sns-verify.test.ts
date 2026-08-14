@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { isAllowedCertUrl, type SnsMessage, verifySnsMessage } from "../src/sns-verify.js";
+import {
+  canonicalString,
+  isAllowedCertUrl,
+  type SnsMessage,
+  verifySnsMessage,
+} from "../src/sns-verify.js";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const KEY = readFileSync(join(fixtures, "sns-test-key.pem"), "utf8");
@@ -13,25 +18,8 @@ const TOPIC = "arn:aws:sns:us-east-1:123456789012:millionsend-events";
 const CERT_URL = "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-test.pem";
 
 function sign(msg: Omit<SnsMessage, "Signature">): SnsMessage {
-  const fields =
-    msg.Type === "Notification"
-      ? (["Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"] as const)
-      : ([
-          "Message",
-          "MessageId",
-          "SubscribeURL",
-          "Timestamp",
-          "Token",
-          "TopicArn",
-          "Type",
-        ] as const);
-  let canonical = "";
-  for (const f of fields) {
-    const v = msg[f as keyof typeof msg];
-    if (v !== undefined) canonical += `${f}\n${v}\n`;
-  }
   const signer = createSign(msg.SignatureVersion === "2" ? "RSA-SHA256" : "RSA-SHA1");
-  signer.update(canonical, "utf8");
+  signer.update(canonicalString(msg), "utf8");
   return { ...msg, Signature: signer.sign(KEY, "base64") };
 }
 

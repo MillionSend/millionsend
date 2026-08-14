@@ -5,10 +5,12 @@ export {
 } from "./ses-events.js";
 export {
   type CertFetcher,
+  canonicalString,
   createCachingCertFetcher,
   isAllowedCertUrl,
   isAllowedSnsUrl,
   type SnsMessage,
+  snsMessageSchema,
   type VerifyOptions,
   type VerifyResult,
   verifySnsMessage,

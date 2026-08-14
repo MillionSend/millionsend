@@ -4,7 +4,11 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { drainQuotaParked, purgeExpiredEmailBodies } from "../src/handlers/cron.js";
+import {
+  drainQuotaParked,
+  purgeExpiredEmailBodies,
+  reconcileStalledSends,
+} from "../src/handlers/cron.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -90,24 +94,91 @@ it("self-host drain (no caps) releases everything", async () => {
   expect(enqueued).toEqual([a, b]);
 });
 
-it("enqueue failure re-parks the email and returns the reservation", async () => {
-  const emailId = await insertParked(new Date("2026-08-13T01:00:00Z"));
+it("one enqueue failure re-parks that email, releases its reservation, and does NOT block the rest", async () => {
+  const failing = await insertParked(new Date("2026-08-13T01:00:00Z"));
+  const healthy = await insertParked(new Date("2026-08-13T02:00:00Z"));
 
+  const enqueued: string[] = [];
   await expect(
     drainQuotaParked(db, {
       isCloud: true,
-      enqueueSend: async () => {
-        throw new Error("queue down");
+      enqueueSend: async (id) => {
+        if (id === failing) throw new Error("queue down");
+        enqueued.push(id);
       },
     }),
-  ).rejects.toThrow("queue down");
+  ).rejects.toThrow("1 email(s) failed");
 
-  expect(await statusOf(emailId)).toBe("queued_quota");
+  expect(await statusOf(failing)).toBe("queued_quota");
+  expect(await statusOf(healthy)).toBe("queued");
+  expect(enqueued).toEqual([healthy]);
   const [counter] = await db
     .select()
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, teamId));
-  expect(counter?.accepted ?? 0).toBe(0);
+  expect(counter?.accepted).toBe(1);
+});
+
+it("drain passes a scheduled email's due time through to the queue", async () => {
+  const due = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const [row] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: "scheduled",
+      latestStatus: "queued_quota",
+      scheduledAt: due,
+    })
+    .returning({ id: schema.emails.id });
+  if (!row) throw new Error("insert failed");
+
+  const enqueued: { id: string; startAfter?: Date }[] = [];
+  await drainQuotaParked(db, {
+    isCloud: false,
+    enqueueSend: async (id, startAfter) => {
+      enqueued.push({ id, ...(startAfter ? { startAfter } : {}) });
+    },
+  });
+  expect(enqueued).toEqual([{ id: row.id, startAfter: due }]);
+});
+
+it("reconcile re-enqueues stale queued emails but never claimed or fresh ones", async () => {
+  const now = new Date();
+  const old = (mins: number) => new Date(now.getTime() - mins * 60 * 1000);
+  const base = {
+    teamId,
+    from: "a@acme.dev",
+    to: ["r@example.com"] as string[],
+    subject: "s",
+  };
+  const [stale] = await db
+    .insert(schema.emails)
+    .values({ ...base, latestStatus: "queued" as const, createdAt: old(30) })
+    .returning({ id: schema.emails.id });
+  // Claimed: a previous attempt may already be at SES — must NOT resend.
+  await db
+    .insert(schema.emails)
+    .values({ ...base, latestStatus: "queued" as const, createdAt: old(30), sentAt: now });
+  // Fresh: its original job is presumably still queued.
+  await db
+    .insert(schema.emails)
+    .values({ ...base, latestStatus: "queued" as const, createdAt: now });
+  // Parked: quota drain's business, not reconcile's.
+  await db
+    .insert(schema.emails)
+    .values({ ...base, latestStatus: "queued_quota" as const, createdAt: old(30) });
+
+  const enqueued: string[] = [];
+  const count = await reconcileStalledSends(db, {
+    enqueueSend: async (id) => {
+      enqueued.push(id);
+    },
+    now,
+  });
+  expect(count).toBe(1);
+  expect(enqueued).toEqual([stale?.id]);
 });
 
 it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async () => {
@@ -158,6 +229,28 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
 
   const [freshRow] = await db.select().from(schema.emails).where(eq(schema.emails.id, fresh.id));
   expect(freshRow?.bodyCiphertext).not.toBeNull();
+
+  // An old-but-still-future-scheduled email keeps its body — the send needs it.
+  const [scheduled] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: "future",
+      latestStatus: "queued",
+      createdAt: new Date("2026-07-01T00:00:00Z"),
+      scheduledAt: new Date("2026-08-15T00:00:00Z"),
+      ...body,
+    })
+    .returning({ id: schema.emails.id });
+  if (!scheduled) throw new Error("insert failed");
+  expect(await purgeExpiredEmailBodies(db, { retentionDays: 30, now })).toBe(0);
+  const [scheduledRow] = await db
+    .select()
+    .from(schema.emails)
+    .where(eq(schema.emails.id, scheduled.id));
+  expect(scheduledRow?.bodyCiphertext).not.toBeNull();
 
   // Second run: already-purged rows are not re-stamped.
   expect(await purgeExpiredEmailBodies(db, { retentionDays: 30, now: new Date() })).toBe(0);

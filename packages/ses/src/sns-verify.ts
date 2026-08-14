@@ -1,4 +1,5 @@
 import { createVerify, X509Certificate } from "node:crypto";
+import { z } from "zod";
 
 /**
  * Cryptographic verification of SNS messages. Everything arriving at the
@@ -25,6 +26,34 @@ export interface SnsMessage {
   Token?: string | undefined;
   SubscribeURL?: string | undefined;
 }
+
+// SNS delivery paths are inconsistent about absent vs null for optional
+// fields (SQS/Lambda records carry "Subject": null); both must parse, and
+// null normalizes to undefined so canonicalString skips the field exactly
+// as AWS did when signing.
+const optionalSignedField = z
+  .string()
+  .nullish()
+  .transform((v) => v ?? undefined);
+
+/**
+ * Wire shape of an SNS POST body. Lives NEXT TO canonicalString on purpose:
+ * any field added to the signed set must change both together, or verified
+ * messages would be silently stripped before verification.
+ */
+export const snsMessageSchema = z.object({
+  Type: z.enum(["Notification", "SubscriptionConfirmation", "UnsubscribeConfirmation"]),
+  MessageId: z.string().min(1),
+  TopicArn: z.string().min(1),
+  Message: z.string(),
+  Timestamp: z.string(),
+  SignatureVersion: z.string(),
+  Signature: z.string().min(1),
+  SigningCertURL: z.string(),
+  Subject: optionalSignedField,
+  Token: optionalSignedField,
+  SubscribeURL: optionalSignedField,
+});
 
 export type CertFetcher = (url: string) => Promise<string>;
 
@@ -77,11 +106,12 @@ const CONFIRMATION_FIELDS = [
   "Type",
 ] as const;
 
-function canonicalString(msg: SnsMessage): string {
+/** The exact string SNS signs; exported so test signers cannot drift from it. */
+export function canonicalString(msg: Omit<SnsMessage, "Signature">): string {
   const fields = msg.Type === "Notification" ? NOTIFICATION_FIELDS : CONFIRMATION_FIELDS;
   let out = "";
   for (const field of fields) {
-    const value = msg[field as keyof SnsMessage];
+    const value = msg[field as keyof Omit<SnsMessage, "Signature">];
     if (value !== undefined) out += `${field}\n${value}\n`;
   }
   return out;

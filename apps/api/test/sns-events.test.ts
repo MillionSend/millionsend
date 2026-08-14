@@ -32,6 +32,7 @@ beforeAll(async () => {
     db,
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
     isCloud: true,
+    enqueueEmailSend: async () => {},
     sns: {
       allowedTopicArns: [SNS_TEST_TOPIC_ARN],
       fetchCert: async (url) => {
@@ -120,6 +121,13 @@ it("attacker cert host: 403 and the cert is NEVER fetched", async () => {
   expect(enqueued).toHaveLength(0);
 });
 
+it('an explicit "Subject": null still verifies — SNS delivery paths disagree on absent vs null', async () => {
+  const signed = signSnsMessage(baseNotification(deliveryPayload));
+  const res = await post({ ...signed, Subject: null });
+  expect(res.status).toBe(200);
+  expect(enqueued).toHaveLength(1);
+});
+
 it("non-JSON and non-SNS bodies: 400", async () => {
   expect((await post("not json {")).status).toBe(400);
   expect((await post({ hello: "world" })).status).toBe(400);
@@ -165,6 +173,7 @@ it("endpoint does not exist when SNS ingestion is not configured", async () => {
     db,
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
     isCloud: true,
+    enqueueEmailSend: async () => {},
   });
   const res = await bare.request("/ses/events", { method: "POST", body: "{}" });
   expect(res.status).toBe(404);

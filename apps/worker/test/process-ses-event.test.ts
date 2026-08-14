@@ -174,6 +174,27 @@ it("duplicate suppression events collapse to one row", async () => {
   expect(rows).toHaveLength(1);
 });
 
+it("a redelivered SNS MessageId is fully idempotent — counters included", async () => {
+  await insertSentEmail("mid-redeliver");
+  const deliveredBefore = (
+    await db.select().from(schema.usageCounters).where(eq(schema.usageCounters.teamId, teamId))
+  )[0]?.delivered;
+  const event = makeEvent({ sesMessageId: "mid-redeliver" });
+  await processSesEvent(db, event, { snsMessageId: "sns-redeliver-1" });
+  await processSesEvent(db, event, { snsMessageId: "sns-redeliver-1" });
+
+  const rows = await db
+    .select()
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.snsMessageId, "sns-redeliver-1"));
+  expect(rows).toHaveLength(1);
+  const [counter] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(counter?.delivered).toBe((deliveredBefore ?? 0) + 1);
+});
+
 it("unknown event types are a no-op", async () => {
   const emailId = await insertSentEmail("mid-unknown");
   await processSesEvent(db, makeEvent({ eventType: "Subscription", sesMessageId: "mid-unknown" }));
