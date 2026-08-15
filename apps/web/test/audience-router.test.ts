@@ -277,6 +277,113 @@ describe("audience.contacts.list", () => {
   });
 });
 
+describe("audience.contacts.list filters", () => {
+  it("narrows to a segment, matching the segment's own count", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    await caller.audience.contacts.addMany({
+      audienceId,
+      rows: [{ email: "ada@x.com" }, { email: "bob@x.com" }, { email: "cyd@y.com" }],
+    });
+    const { id: segmentId } = await caller.segments.create({
+      audienceId,
+      name: "X domain",
+      filter: { match: "all", conditions: [{ field: "email", op: "ends_with", value: "@x.com" }] },
+    });
+
+    const scoped = await caller.audience.contacts.list({ audienceId, segmentId });
+    expect(scoped.items.map((c) => c.email).sort()).toEqual(["ada@x.com", "bob@x.com"]);
+    // The list scope equals the segment's live membership count.
+    expect(scoped.total).toBe((await caller.segments.get({ id: segmentId })).count);
+
+    // The segment filter survives paging by keyset cursor.
+    const page1 = await caller.audience.contacts.list({ audienceId, segmentId, limit: 1 });
+    expect(page1.items).toHaveLength(1);
+    expect(page1.total).toBe(2);
+    if (!page1.nextCursor) throw new Error("expected a next cursor");
+    const page2 = await caller.audience.contacts.list({
+      audienceId,
+      segmentId,
+      limit: 1,
+      cursor: page1.nextCursor,
+    });
+    const emails = [...page1.items, ...page2.items].map((c) => c.email).sort();
+    expect(emails).toEqual(["ada@x.com", "bob@x.com"]);
+  });
+
+  it("narrows to a topic by effective membership (default plus explicit overrides)", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    const { id: ada } = await caller.audience.contacts.add({ audienceId, email: "ada@x.com" });
+    const { id: bob } = await caller.audience.contacts.add({ audienceId, email: "bob@x.com" });
+
+    // Opt-in topic: everyone subscribed by default; bob opts out.
+    const { id: optIn } = await caller.topics.create({ name: "News", defaultSubscribed: true });
+    await caller.audience.contacts.setTopic({ contactId: bob, topicId: optIn, subscribed: false });
+    expect(
+      (await caller.audience.contacts.list({ audienceId, topicId: optIn })).items.map(
+        (c) => c.email,
+      ),
+    ).toEqual(["ada@x.com"]);
+
+    // Opt-out topic: nobody subscribed by default; ada opts in.
+    const { id: optOut } = await caller.topics.create({ name: "Beta", defaultSubscribed: false });
+    await caller.audience.contacts.setTopic({ contactId: ada, topicId: optOut, subscribed: true });
+    const optOutList = await caller.audience.contacts.list({ audienceId, topicId: optOut });
+    expect(optOutList.items.map((c) => c.email)).toEqual(["ada@x.com"]);
+    expect(optOutList.total).toBe(1);
+  });
+
+  it("rejects a foreign segment/topic and a wrong-audience segment", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const a = callerFor(teamA);
+    const b = callerFor(teamB);
+    const { id: aAudience } = await a.audience.audiences.create({ name: "A's" });
+    const { id: aSegment } = await a.segments.create({
+      audienceId: aAudience,
+      name: "seg",
+      filter: { match: "all", conditions: [] },
+    });
+    const { id: aTopic } = await a.topics.create({ name: "T", defaultSubscribed: true });
+
+    const { id: bAudience } = await b.audience.audiences.create({ name: "B's" });
+    // B cannot borrow A's segment or topic to filter B's own audience.
+    await expect(
+      b.audience.contacts.list({ audienceId: bAudience, segmentId: aSegment }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      b.audience.contacts.list({ audienceId: bAudience, topicId: aTopic }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // A same-team segment aimed at the wrong audience is a BAD_REQUEST.
+    const { id: aOther } = await a.audience.audiences.create({ name: "A other" });
+    await expect(
+      a.audience.contacts.list({ audienceId: aOther, segmentId: aSegment }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("audience.audiences.rename", () => {
+  it("renames within the team and 404s across teams", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const a = callerFor(teamA);
+    const b = callerFor(teamB);
+    const { id } = await a.audience.audiences.create({ name: "Old" });
+
+    await a.audience.audiences.rename({ id, name: "New" });
+    expect((await a.audience.audiences.get({ id })).name).toBe("New");
+
+    await expect(b.audience.audiences.rename({ id, name: "Hijack" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect((await a.audience.audiences.get({ id })).name).toBe("New");
+  });
+});
+
 describe("audience.contacts.update", () => {
   it("flips subscription state and clears names with empty strings", async () => {
     const teamId = await createTeam(db, "team-a");

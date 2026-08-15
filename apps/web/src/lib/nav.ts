@@ -2,3 +2,12 @@
 export function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
+
+/**
+ * The longest href in `hrefs` that `pathname` is active under, or undefined.
+ * Longest wins so nested section hrefs (/audience/segments) beat their parent
+ * (/audience) instead of both lighting up.
+ */
+export function pickActive(pathname: string, hrefs: readonly string[]): string | undefined {
+  return hrefs.filter((href) => isActive(pathname, href)).sort((a, b) => b.length - a.length)[0];
+}

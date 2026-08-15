@@ -6,6 +6,7 @@ import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
+import { assertSegmentInAudience, segmentPredicate } from "./segments";
 import { assertTopic, topicMembershipSql } from "./topics";
 
 const emailSchema = z.string().trim().pipe(z.email()).pipe(z.string().max(320));
@@ -93,6 +94,19 @@ export const audienceRouter = router({
         return { id: row.id };
       }),
 
+    rename: teamProcedure
+      .input(z.object({ id: z.uuid(), name: z.string().trim().min(1).max(200) }))
+      .mutation(async ({ ctx, input }) => {
+        const a = schema.audiences;
+        const [row] = await ctx.db
+          .update(a)
+          .set({ name: input.name })
+          .where(and(eq(a.id, input.id), eq(a.teamId, ctx.teamId)))
+          .returning({ id: a.id });
+        if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        return { id: row.id };
+      }),
+
     delete: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       const a = schema.audiences;
       const [row] = await ctx.db
@@ -110,6 +124,8 @@ export const audienceRouter = router({
         z.object({
           audienceId: z.uuid(),
           search: z.string().trim().max(200).optional(),
+          segmentId: z.uuid().optional(),
+          topicId: z.uuid().optional(),
           cursor: cursorSchema.optional(),
           limit: z.number().int().min(1).max(50).default(25),
         }),
@@ -125,6 +141,27 @@ export const audienceRouter = router({
           const pattern = `%${escapeLike(input.search)}%`;
           filters.push(
             or(ilike(t.email, pattern), ilike(t.firstName, pattern), ilike(t.lastName, pattern)),
+          );
+        }
+        // Segment filter AND's the ONE core translator's predicate; a foreign or
+        // wrong-audience segment is rejected before it can widen the scope.
+        if (input.segmentId) {
+          const segment = await assertSegmentInAudience(ctx, input.segmentId, input.audienceId);
+          // undefined = empty filter (whole audience); nothing to AND in then.
+          const predicate = segmentPredicate(segment.filter);
+          if (predicate) filters.push(predicate);
+        }
+        // Topic filter reuses the ONE membership rule via a correlated EXISTS,
+        // keeping the keyset query flat so the cursor still works.
+        if (input.topicId) {
+          await assertTopic(ctx, input.topicId);
+          const tp = schema.topics;
+          const s = schema.contactTopicSubscriptions;
+          filters.push(
+            sql`exists (select 1 from ${tp} left join ${s} on ${and(
+              eq(s.topicId, tp.id),
+              eq(s.contactId, t.id),
+            )} where ${and(eq(tp.id, input.topicId), topicMembershipSql(s, tp))})`,
           );
         }
         // Total counts the filter scope, not the page — the cursor is excluded.
