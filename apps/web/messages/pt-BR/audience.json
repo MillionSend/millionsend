@@ -1,9 +1,26 @@
 {
   "tabs": {
-    "audiences": "Audiências",
+    "contacts": "Contatos",
     "properties": "Propriedades",
     "segments": "Segmentos",
     "topics": "Tópicos"
+  },
+  "switcher": {
+    "label": "Selecionar audiência"
+  },
+  "manage": {
+    "menu": "Gerenciar audiências",
+    "create": "Criar audiência",
+    "rename": "Renomear audiência",
+    "delete": "Excluir audiência",
+    "renameTitle": "Renomear audiência",
+    "renameConfirm": "Renomear"
+  },
+  "filters": {
+    "segment": "Segmento",
+    "topic": "Tópico",
+    "allContacts": "Todos os contatos",
+    "anyTopic": "Qualquer tópico"
   },
   "placeholder": {
     "properties": "0 propriedades.",

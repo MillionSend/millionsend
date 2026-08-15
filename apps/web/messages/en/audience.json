@@ -1,9 +1,26 @@
 {
   "tabs": {
-    "audiences": "Audiences",
+    "contacts": "Contacts",
     "properties": "Properties",
     "segments": "Segments",
     "topics": "Topics"
+  },
+  "switcher": {
+    "label": "Select audience"
+  },
+  "manage": {
+    "menu": "Manage audiences",
+    "create": "Create audience",
+    "rename": "Rename audience",
+    "delete": "Delete audience",
+    "renameTitle": "Rename audience",
+    "renameConfirm": "Rename"
+  },
+  "filters": {
+    "segment": "Segment",
+    "topic": "Topic",
+    "allContacts": "All contacts",
+    "anyTopic": "Any topic"
   },
   "placeholder": {
     "properties": "0 properties.",
