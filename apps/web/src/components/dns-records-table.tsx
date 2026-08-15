@@ -38,11 +38,10 @@ export type DnsRecord = {
 };
 
 // verified reads success; a record still pending at AWS or missing/wrong in our
-// lookup warns; a present-but-wrong record is the danger case; checking is neutral.
+// lookup warns; a present-but-wrong record is the danger case.
 const RECORD_STATUS_TONE: Record<RecordStatus, string> = {
   verified: "ms-badge-success",
   pending: "ms-badge-warn",
-  checking: "ms-badge-neutral",
   missing: "ms-badge-warn",
   mismatch: "ms-badge-danger",
 };
