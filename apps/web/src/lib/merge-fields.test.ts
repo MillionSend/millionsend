@@ -16,6 +16,14 @@ describe("buildMergeOptions", () => {
     expect(custom.map((o) => o.name)).toEqual(["plan", "signup_date"]);
     expect(custom.every((o) => o.builtin === false)).toBe(true);
   });
+
+  it("merges derived and defined keys, keeping a defined-only key and deduping overlap", () => {
+    // Callers pass [...derivedKeys, ...definedKeys]; `plan` is in both, `tier`
+    // is defined but not yet in use — it must still appear, exactly once.
+    const opts = buildMergeOptions(["plan", "plan", "tier"]);
+    const custom = opts.slice(MERGE_BUILTINS.length).map((o) => o.name);
+    expect(custom).toEqual(["plan", "tier"]);
+  });
 });
 
 describe("token round-trip", () => {

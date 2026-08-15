@@ -414,5 +414,60 @@ export const audienceRouter = router({
       const rows = resultRows<{ key: string; contactCount: number; sampleValue: string }>(result);
       return rows.map((r) => ({ ...r, totalContacts }));
     }),
+
+    /** The team's typed property DEFINITIONS, newest first. */
+    defineList: teamProcedure.query(async ({ ctx }) => {
+      const p = schema.contactProperties;
+      return ctx.db
+        .select({
+          id: p.id,
+          key: p.key,
+          type: p.type,
+          fallbackValue: p.fallbackValue,
+          createdAt: p.createdAt,
+        })
+        .from(p)
+        .where(eq(p.teamId, ctx.teamId))
+        .orderBy(desc(p.createdAt), desc(p.id));
+    }),
+
+    /**
+     * Declares a typed property. The key is stored verbatim (parameterized, so
+     * a hostile string stays data); CONFLICT is the case-insensitive
+     * (teamId, lower(key)) unique index. Only 'string' is defined today.
+     */
+    define: teamProcedure
+      .input(
+        z.object({
+          key: z.string().trim().min(1).max(200),
+          type: z.enum(["string"]).default("string"),
+          fallbackValue: z.string().max(1000).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const p = schema.contactProperties;
+        const [row] = await ctx.db
+          .insert(p)
+          .values({
+            teamId: ctx.teamId,
+            key: input.key,
+            type: input.type,
+            ...(input.fallbackValue !== undefined ? { fallbackValue: input.fallbackValue } : {}),
+          })
+          .onConflictDoNothing()
+          .returning({ id: p.id });
+        if (!row) throw new TRPCError({ code: "CONFLICT" });
+        return { id: row.id };
+      }),
+
+    remove: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+      const p = schema.contactProperties;
+      const [row] = await ctx.db
+        .delete(p)
+        .where(and(eq(p.id, input.id), eq(p.teamId, ctx.teamId)))
+        .returning({ id: p.id });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      return { id: row.id };
+    }),
   }),
 });

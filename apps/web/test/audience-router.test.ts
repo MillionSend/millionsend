@@ -533,6 +533,80 @@ describe("audience.properties.list", () => {
   });
 });
 
+describe("audience.properties definitions", () => {
+  it("defines, lists, and removes typed properties, scoped to the team", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+
+    const { id } = await caller.audience.properties.define({
+      key: "plan",
+      fallbackValue: "free",
+    });
+    // type defaults to 'string'; the fallback round-trips.
+    expect(await caller.audience.properties.defineList()).toMatchObject([
+      { id, key: "plan", type: "string", fallbackValue: "free" },
+    ]);
+
+    await caller.audience.properties.remove({ id });
+    expect(await caller.audience.properties.defineList()).toEqual([]);
+  });
+
+  it("rejects a case-insensitive duplicate key", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await caller.audience.properties.define({ key: "Plan" });
+    await expect(caller.audience.properties.define({ key: "plan" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+  });
+
+  it("stores a hostile key as data, never executing it", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const hostile = `x")-- drop`;
+    await caller.audience.properties.define({ key: hostile });
+    expect((await caller.audience.properties.defineList()).map((p) => p.key)).toEqual([hostile]);
+    // The table survives — nothing dropped.
+    await expect(caller.audience.properties.define({ key: "plan" })).resolves.toMatchObject({
+      id: expect.any(String),
+    });
+  });
+
+  it("never leaks or removes another team's definitions", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const a = callerFor(teamA);
+    const b = callerFor(teamB);
+    const { id: aProp } = await a.audience.properties.define({ key: "secret" });
+    await b.audience.properties.define({ key: "plan" });
+
+    expect((await b.audience.properties.defineList()).map((p) => p.key)).toEqual(["plan"]);
+    await expect(b.audience.properties.remove({ id: aProp })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect((await a.audience.properties.defineList()).map((p) => p.key)).toEqual(["secret"]);
+  });
+
+  it("carries coverage alongside a definition once contacts have the value", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    await caller.audience.properties.define({ key: "plan" });
+    await caller.audience.contacts.add({
+      audienceId,
+      email: "ada@example.com",
+      properties: { plan: "pro" },
+    });
+    await caller.audience.contacts.add({ audienceId, email: "alan@example.com" });
+
+    // The tab merges the two sources: the definition exists, and the derived
+    // list supplies its coverage (1 of 2 contacts).
+    expect((await caller.audience.properties.defineList()).map((p) => p.key)).toEqual(["plan"]);
+    const plan = (await caller.audience.properties.list()).find((p) => p.key === "plan");
+    expect(plan).toMatchObject({ contactCount: 1, totalContacts: 2 });
+  });
+});
+
 describe("unsubscribe route", () => {
   const secretKey = deriveUnsubscribeKey(Buffer.from(TEST_KEK, "base64"));
 

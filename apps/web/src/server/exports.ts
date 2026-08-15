@@ -1,8 +1,12 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import { TRPCError } from "@trpc/server";
 import { and, desc, eq, gte, ilike, isNull, or, type SQL, sql } from "drizzle-orm";
+import { z } from "zod";
 import { type CsvColumn, toCsv } from "@/lib/csv-export";
 import { escapeLike } from "@/lib/sql";
+import { assertSegmentInAudience, segmentPredicate } from "./routers/segments";
+import { assertTopic, topicMembershipSql } from "./routers/topics";
 
 /**
  * ponytail: hard row cap instead of a streamed cursor. An export past this
@@ -21,14 +25,18 @@ interface ContactExportRow {
 }
 
 /**
- * Contacts of one audience, teamId-scoped. teamId AND audienceId both gate the
- * query and contacts.teamId is denormalized, so a cross-team audienceId
- * matches no rows — it can never leak another team's contacts.
+ * Contacts of one audience, teamId-scoped, matching the same optional segment
+ * and topic filters as audience.contacts.list — so a filtered on-screen view
+ * exports the same rows. teamId AND audienceId both gate the query and
+ * contacts.teamId is denormalized, so a cross-team audienceId matches no rows —
+ * it can never leak another team's contacts. A foreign or wrong-audience
+ * segment/topic is rejected by the shared router guards and yields zero rows
+ * (an export never errors on it), so a tampered link can't reveal other data.
  */
-export function contactRowsForExport(
+export async function contactRowsForExport(
   db: Db,
   teamId: string,
-  filters: { audienceId: string; search?: string },
+  filters: { audienceId: string; search?: string; segmentId?: string; topicId?: string },
 ): Promise<ContactExportRow[]> {
   const t = schema.contacts;
   const conds: SQL[] = [eq(t.teamId, teamId), eq(t.audienceId, filters.audienceId)];
@@ -40,6 +48,32 @@ export function contactRowsForExport(
       ilike(t.lastName, pattern),
     );
     if (match) conds.push(match);
+  }
+  const ctx = { db, teamId };
+  try {
+    // Segment filter AND's the ONE core translator's predicate; the shared guard
+    // rejects a foreign or wrong-audience segment before it can widen the scope.
+    if (filters.segmentId) {
+      const segment = await assertSegmentInAudience(ctx, filters.segmentId, filters.audienceId);
+      // undefined = empty filter (whole audience); nothing to AND in then.
+      const predicate = segmentPredicate(segment.filter);
+      if (predicate) conds.push(predicate);
+    }
+    // Topic filter reuses the ONE membership rule via a correlated EXISTS.
+    if (filters.topicId) {
+      await assertTopic(ctx, filters.topicId);
+      const tp = schema.topics;
+      const s = schema.contactTopicSubscriptions;
+      conds.push(
+        sql`exists (select 1 from ${tp} left join ${s} on ${and(
+          eq(s.topicId, tp.id),
+          eq(s.contactId, t.id),
+        )} where ${and(eq(tp.id, filters.topicId), topicMembershipSql(s, tp))})`,
+      );
+    }
+  } catch (err) {
+    if (err instanceof TRPCError) return [];
+    throw err;
   }
   return db
     .select({
@@ -177,6 +211,11 @@ const apiKeyColumns: CsvColumn<ApiKeyExportRow>[] = [
   { header: "created_at", value: (r) => r.createdAt },
 ];
 
+/** A query param usable as a uuid id, or undefined so the filter is skipped. */
+function asUuid(value: string | null): string | undefined {
+  return value && z.uuid().safeParse(value).success ? value : undefined;
+}
+
 /**
  * Builds one export's filename + CSV body from the request's query params.
  * Every branch is teamId-scoped; returns null for an unknown resource.
@@ -192,9 +231,14 @@ export async function buildExport(
       const audienceId = params.get("audienceId");
       if (!audienceId) return null;
       const search = params.get("search") ?? undefined;
+      // Non-uuid segment/topic params never reach the id-keyed guard query.
+      const segmentId = asUuid(params.get("segmentId"));
+      const topicId = asUuid(params.get("topicId"));
       const rows = await contactRowsForExport(db, teamId, {
         audienceId,
         ...(search ? { search } : {}),
+        ...(segmentId ? { segmentId } : {}),
+        ...(topicId ? { topicId } : {}),
       });
       return { filename: "contacts.csv", csv: toCsv(rows, contactColumns(rows), { bom: true }) };
     }

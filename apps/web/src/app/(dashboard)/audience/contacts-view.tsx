@@ -296,10 +296,12 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
   const total = query.data?.pages[0]?.total ?? 0;
   const filtered = deferredSearch !== "" || segmentId !== "" || topicId !== "";
 
-  // Export mirrors the audience + search box; segment/topic filters are not
-  // carried (the export route scopes by audience + text only).
+  // Export mirrors the on-screen view: audience + search box + the active
+  // segment and topic filters, so a filtered download matches the table.
   const exportParams = new URLSearchParams({ audienceId });
   if (deferredSearch) exportParams.set("search", deferredSearch);
+  if (segmentId) exportParams.set("segmentId", segmentId);
+  if (topicId) exportParams.set("topicId", topicId);
 
   const invalidate = () => queryClient.invalidateQueries(trpc.audience.pathFilter());
 
