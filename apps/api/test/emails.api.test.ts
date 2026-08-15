@@ -235,6 +235,92 @@ describe("batch send", () => {
   });
 });
 
+describe("batch send is atomic (no double-send on retry)", () => {
+  it("a mid-batch failure after item 1 does not re-send item 1 on retry", async () => {
+    const atomicTeam = await createTeam(db, "batch-atomic");
+    await db.insert(schema.domains).values({
+      teamId: atomicTeam,
+      name: "atomic.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const key = generateApiKey("live");
+    await db.insert(schema.apiKeys).values({
+      teamId: atomicTeam,
+      name: "atomic",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+
+    // Fail the Nth body-encryption to force a failure mid Pass-2, after an
+    // earlier item's insert but before the batch commits.
+    const realKeyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
+    let failAt = Number.POSITIVE_INFINITY;
+    let wraps = 0;
+    const keyring = {
+      async wrapDek(dek: Buffer) {
+        wraps += 1;
+        if (wraps >= failAt) throw new Error("injected wrap failure");
+        return realKeyring.wrapDek(dek);
+      },
+      unwrapDek: (wrapped: Buffer, keyVersion: number) =>
+        realKeyring.unwrapDek(wrapped, keyVersion),
+    };
+
+    const enqueued: string[] = [];
+    const atomicApp = createApi({
+      db,
+      keyring,
+      isCloud: true,
+      enqueueEmailSend: async (id) => {
+        enqueued.push(id);
+      },
+    });
+
+    const items = [
+      { from: "A <a@atomic.dev>", to: ["one@example.com"], subject: "atomic-1", text: "t" },
+      { from: "A <a@atomic.dev>", to: ["two@example.com"], subject: "atomic-2", text: "t" },
+    ];
+    const send = (headers: Record<string, string>) =>
+      atomicApp.request("/emails/batch", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${key.token}`,
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify(items),
+      });
+
+    // Attempt 1: second item's encryption throws inside the Pass-2 transaction.
+    failAt = 2;
+    const first = await send({ "idempotency-key": "atomic-key" });
+    expect(first.status).toBeGreaterThanOrEqual(500);
+    // Whole batch rolled back: item 1 was neither committed nor enqueued.
+    expect(enqueued).toHaveLength(0);
+    const afterFail = await db
+      .select({ id: schema.emails.id })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, atomicTeam));
+    expect(afterFail).toHaveLength(0);
+
+    // Attempt 2 (retry, same key): the batch succeeds exactly once.
+    failAt = Number.POSITIVE_INFINITY;
+    const retry = await send({ "idempotency-key": "atomic-key" });
+    expect(retry.status).toBe(200);
+    const rows = await db
+      .select({ subject: schema.emails.subject })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, atomicTeam));
+    // Exactly two emails: item 1 from the failed attempt was NOT sent again.
+    expect(rows).toHaveLength(2);
+    expect(rows.filter((r) => r.subject === "atomic-1")).toHaveLength(1);
+    expect(enqueued).toHaveLength(2);
+  });
+});
+
 describe("cancel scheduled email", () => {
   const cancel = (id: string) =>
     app.request(`/emails/${id}/cancel`, {

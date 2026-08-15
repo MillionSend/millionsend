@@ -98,6 +98,13 @@ export async function acceptEmail(
      * aborts the accept. The HTTP API records idempotency completion here.
      */
     completeInTx?: ((tx: Db, emailId: string) => Promise<void>) | undefined;
+    /**
+     * Run the quota reservation + insert inside this caller-owned transaction
+     * instead of opening a new one, and skip the enqueue. Lets a batch accept
+     * many items atomically (all-or-nothing) and enqueue after its own commit,
+     * matching single-send's guarantee that a mid-flight failure sends nothing.
+     */
+    tx?: Db | undefined;
   } = {},
 ): Promise<AcceptEmailResult> {
   // Suppression: dedupe, check every recipient field, and strip suppressed
@@ -105,7 +112,9 @@ export async function acceptEmail(
   const allRecipients = [
     ...new Set([...payload.to, ...(payload.cc ?? []), ...(payload.bcc ?? [])]),
   ];
-  const suppressed = await findSuppressed(deps.db, auth.teamId, allRecipients);
+  // Read through the caller's transaction when one is supplied: a batch holds
+  // the connection open, so a read on deps.db would deadlock a single-conn pool.
+  const suppressed = await findSuppressed(opts.tx ?? deps.db, auth.teamId, allRecipients);
   const keep = (list: string[] | undefined) => list?.filter((r) => !suppressed.has(r));
   const to = keep(payload.to) ?? [];
   if (to.length === 0) return { ok: false, reason: "all_suppressed" };
@@ -121,10 +130,9 @@ export async function acceptEmail(
   // Quota reservation, email insert, and the caller's in-transaction hook
   // commit atomically (the quota contract). Over-quota mail is parked as
   // queued_quota — still accepted, drained after the midnight rollover.
-  const accepted = await deps.db.transaction(async (tx) => {
-    const txDb = tx as unknown as Db;
+  const runAccept = async (txDb: Db) => {
     const quota = await reserveDailyQuota(txDb, { teamId: auth.teamId, count: 1, limit });
-    const [row] = await tx
+    const [row] = await txDb
       .insert(schema.emails)
       .values({
         teamId: auth.teamId,
@@ -148,13 +156,17 @@ export async function acceptEmail(
     if (!row) throw new Error("email insert returned no row");
     await opts.completeInTx?.(txDb, row.id);
     return { id: row.id, parked: !quota.reserved };
-  });
+  };
+  const accepted = opts.tx
+    ? await runAccept(opts.tx)
+    : await deps.db.transaction((tx) => runAccept(tx as unknown as Db));
   // After commit: hand the send to the queue (quota-parked emails wait for
   // the midnight drain instead). An enqueue failure must NOT undo the accept
   // — the email is committed, so rethrowing would let a retry create a
   // second email. The reconcile sweep re-enqueues any accepted email whose
-  // job was lost.
-  if (!accepted.parked) {
+  // job was lost. When the caller owns the transaction (opts.tx), it enqueues
+  // after its own commit — the insert here is not yet durable.
+  if (!opts.tx && !accepted.parked) {
     try {
       await deps.enqueueEmailSend(
         accepted.id,

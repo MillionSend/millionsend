@@ -32,8 +32,62 @@ describe("sanitizeHtml", () => {
     expect(out).not.toContain("javascript:");
   });
 
-  it("leaves merge tokens and ordinary email markup untouched", () => {
-    const src = "<table><tr><td>Hi {{{FIRST_NAME|there}}}</td></tr></table>";
-    expect(sanitizeHtml(src)).toBe(src);
+  // Attribute-boundary bypasses that defeated the old regex sanitizer: a slash
+  // or missing whitespace before the handler/href instead of a space.
+  it("neutralizes handlers/urls separated by / or missing whitespace", () => {
+    for (const payload of [
+      '<img src="x"/onerror=alert(1)>',
+      "<img/onerror=alert(1) src=x>",
+      "<a/href=javascript:alert(1)>click</a>",
+      "<svg/onload=alert(1)>",
+      "<svg onload=alert(1)></svg>",
+      '<img src="data:text/html,<script>alert(1)</script>">',
+      "<a href=`javascript:alert(1)`>x</a>",
+      "<<img src=x onerror=alert(1)>",
+    ]) {
+      const out = sanitizeHtml(payload);
+      expect(out).not.toMatch(/onerror|onload/i);
+      // No url attribute whose value is the executable javascript: scheme (a
+      // leading backtick/space demotes it to an inert relative URL, which is
+      // safe to leave — the property is "does not execute", not "no substring").
+      expect(out).not.toMatch(/=\s*["']?\s*javascript:/i);
+      expect(out).not.toMatch(/<svg/i);
+      expect(out).not.toMatch(/<script/i);
+    }
+  });
+
+  it("keeps legitimate email formatting and structure", () => {
+    const out = sanitizeHtml(
+      '<p><b>b</b><i>i</i><u>u</u> <a href="https://x">link</a></p>' +
+        "<table><tr><td>cell</td></tr></table>" +
+        '<img src="https://cdn/i.png" alt="pic">' +
+        "<span>Hi {{{FIRST_NAME|there}}}</span>",
+    );
+    expect(out).toContain("<b>b</b>");
+    expect(out).toContain("<i>i</i>");
+    expect(out).toContain("<u>u</u>");
+    expect(out).toContain('href="https://x"');
+    expect(out).toMatch(/<table/);
+    expect(out).toContain("<td>cell</td>");
+    expect(out).toContain('src="https://cdn/i.png"');
+    expect(out).toContain("{{{FIRST_NAME|there}}}");
+  });
+
+  it("preserves merge tokens as plain text", () => {
+    const out = sanitizeHtml("<table><tr><td>Hi {{{FIRST_NAME|there}}}</td></tr></table>");
+    expect(out).toContain("{{{FIRST_NAME|there}}}");
+    expect(out).toContain("<td>");
+  });
+
+  it("keeps merge tokens used inside href/src so unsubscribe links survive", () => {
+    // A {{{...}}} token leads with '{', a non-scheme char DOMPurify's URI check
+    // permits — the worker substitutes the real URL at send time. Losing this
+    // would silently break RFC 8058 unsubscribe links written in a custom-HTML
+    // block, while javascript:/data: URLs must still be stripped.
+    const link = sanitizeHtml('<a href="{{{UNSUBSCRIBE_URL}}}">Unsubscribe</a>');
+    expect(link).toContain('href="{{{UNSUBSCRIBE_URL}}}"');
+    const img = sanitizeHtml('<img src="{{{HERO_IMAGE}}}">');
+    expect(img).toContain('src="{{{HERO_IMAGE}}}"');
+    expect(sanitizeHtml('<a href="javascript:alert(1)">x</a>')).not.toContain("javascript:");
   });
 });

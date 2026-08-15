@@ -3,7 +3,7 @@ import { EnvKeyring, generateApiKey, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi } from "../src/app.js";
 
@@ -340,5 +340,135 @@ describe("broadcasts API deliverability guardrail", () => {
     const res = await sendGuarded(token, broadcastId);
     expect(res.status).toBe(200);
     expect(enqueued).toContain(broadcastId);
+  });
+});
+
+describe("domain-scoped keys cannot cross domains on broadcasts", () => {
+  let scopedToken: string;
+  let fullToken: string;
+  let scopeTeam: string;
+  let audId: string;
+  let enq: string[];
+  let scopedApp: ReturnType<typeof createApi>;
+  const fromOther = "Other <hi@other-scope.dev>";
+
+  const req = (token: string, method: string, path: string, body?: unknown) =>
+    scopedApp.request(path, {
+      method,
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+
+  const draft = (from: string) => ({ audience_id: audId, from, subject: "hi", html: "<p>hi</p>" });
+
+  beforeAll(async () => {
+    const team = await makeSendableTeam("bc-scope");
+    scopeTeam = team.teamId;
+    fullToken = team.token;
+    const [aud] = await db
+      .select({ id: schema.audiences.id })
+      .from(schema.audiences)
+      .where(eq(schema.audiences.teamId, scopeTeam));
+    const [acme] = await db
+      .select({ id: schema.domains.id })
+      .from(schema.domains)
+      .where(eq(schema.domains.teamId, scopeTeam));
+    if (!aud || !acme) throw new Error("seed missing");
+    audId = aud.id;
+    await db.insert(schema.domains).values({
+      teamId: scopeTeam,
+      name: "other-scope.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const key = generateApiKey("live");
+    scopedToken = key.token;
+    await db.insert(schema.apiKeys).values({
+      teamId: scopeTeam,
+      name: "scoped",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+      domainId: acme.id,
+    });
+    enq = [];
+    scopedApp = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: true,
+      enqueueEmailSend: async () => {},
+      enqueueBroadcastSend: async (id) => {
+        enq.push(id);
+      },
+      appBaseUrl: "https://app.example.test",
+    });
+  });
+
+  it("403s a scoped key creating from another domain, staging nothing", async () => {
+    const before = await db
+      .select({ id: schema.broadcasts.id })
+      .from(schema.broadcasts)
+      .where(and(eq(schema.broadcasts.teamId, scopeTeam), eq(schema.broadcasts.from, fromOther)));
+    const res = await req(scopedToken, "POST", "/broadcasts", draft(fromOther));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ statusCode: 403, name: "restricted_api_key" });
+    const after = await db
+      .select({ id: schema.broadcasts.id })
+      .from(schema.broadcasts)
+      .where(and(eq(schema.broadcasts.teamId, scopeTeam), eq(schema.broadcasts.from, fromOther)));
+    expect(after.length).toBe(before.length);
+  });
+
+  it("403s a scoped key sending from another domain, leaving it unsent", async () => {
+    const [bc] = await db
+      .insert(schema.broadcasts)
+      .values({
+        teamId: scopeTeam,
+        audienceId: audId,
+        from: fromOther,
+        subject: "s",
+        html: "<p>hi</p>",
+      })
+      .returning({ id: schema.broadcasts.id });
+    if (!bc) throw new Error("insert failed");
+    const res = await req(scopedToken, "POST", `/broadcasts/${bc.id}/send`, {});
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ statusCode: 403, name: "restricted_api_key" });
+    const [row] = await db
+      .select({ status: schema.broadcasts.status })
+      .from(schema.broadcasts)
+      .where(eq(schema.broadcasts.id, bc.id));
+    expect(row?.status).toBe("draft");
+    expect(enq).not.toContain(bc.id);
+  });
+
+  it("lets the scoped key send from its own domain", async () => {
+    const [bc] = await db
+      .insert(schema.broadcasts)
+      .values({
+        teamId: scopeTeam,
+        audienceId: audId,
+        from: "Acme <hi@acme.dev>",
+        subject: "s",
+        html: "<p>hi</p>",
+      })
+      .returning({ id: schema.broadcasts.id });
+    if (!bc) throw new Error("insert failed");
+    const res = await req(scopedToken, "POST", `/broadcasts/${bc.id}/send`, {});
+    expect(res.status).toBe(200);
+    expect(enq).toContain(bc.id);
+  });
+
+  it("leaves a full, unscoped key free to cross domains", async () => {
+    const created = await req(fullToken, "POST", "/broadcasts", draft(fromOther));
+    expect(created.status).toBe(200);
+    const { id } = (await created.json()) as { id: string };
+    const sent = await req(fullToken, "POST", `/broadcasts/${id}/send`, {});
+    expect(sent.status).toBe(200);
+    expect(enq).toContain(id);
   });
 });

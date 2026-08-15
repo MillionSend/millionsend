@@ -1,27 +1,87 @@
+import DOMPurify from "isomorphic-dompurify";
+
 /**
- * Defense-in-depth HTML sanitizer for the author paste / Custom-HTML / raw-code
- * path of the email editor. Authors are authenticated team members, so this is
- * a second line rather than the primary trust boundary: it removes executable
- * and document-metadata elements plus event-handler and javascript: attributes,
- * leaving the presentational markup email clients accept.
+ * HTML sanitizer for the author paste / Custom-HTML / raw-code path of the email
+ * editor. A real HTML parse (DOMPurify over a DOM) rather than regex, so
+ * attribute-boundary tricks (`<img/onerror=x src=y>`, `<img src="x"/onerror=x>`,
+ * `<a/href=javascript:...>`) cannot smuggle handlers or js:/data: URLs past it.
+ * Output is rendered via dangerouslySetInnerHTML and emitted into email HTML, so
+ * it must survive SSR: isomorphic-dompurify supplies a DOM on the server too.
  *
- * ponytail: regex sanitizer, known ceiling — no real HTML parse, no CSS
- * expression()/url(javascript:) stripping, no SVG-vector coverage. If untrusted
- * authors ever reach this path, replace with a parser-based pass (DOMPurify).
+ * The allowlist is the presentational + table markup email clients accept; svg,
+ * math, script/style/iframe and unknown tags are dropped by exclusion, and
+ * DOMPurify strips event handlers, javascript:/data: URLs, and unsafe style
+ * declarations. Merge tokens ({{{NAME}}}) are plain text and pass through.
  */
 
-const PAIRED_WITH_CONTENT =
-  /<(script|style|iframe|object|embed|form|noscript)\b[\s\S]*?<\/\1\s*>/gi;
-const STRAY_UNSAFE_TAGS =
-  /<\/?(script|style|iframe|object|embed|form|noscript|link|meta|base)\b[^>]*>/gi;
-const EVENT_HANDLER_ATTRS = /\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
-const JS_URL_ATTRS =
-  /\s(href|src|xlink:href|action|formaction)\s*=\s*("\s*javascript:[^"]*"|'\s*javascript:[^']*'|javascript:[^\s>]+)/gi;
+const ALLOWED_TAGS = [
+  "a",
+  "b",
+  "strong",
+  "i",
+  "em",
+  "u",
+  "s",
+  "strike",
+  "span",
+  "p",
+  "br",
+  "div",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "ul",
+  "ol",
+  "li",
+  "blockquote",
+  "pre",
+  "code",
+  "small",
+  "sub",
+  "sup",
+  "hr",
+  "center",
+  "font",
+  "table",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "td",
+  "th",
+  "caption",
+  "colgroup",
+  "col",
+  "img",
+];
+
+const ALLOWED_ATTR = [
+  "href",
+  "src",
+  "alt",
+  "title",
+  "width",
+  "height",
+  "align",
+  "valign",
+  "border",
+  "cellpadding",
+  "cellspacing",
+  "colspan",
+  "rowspan",
+  "style",
+  "bgcolor",
+  "color",
+  "target",
+  "role",
+  "dir",
+  "face",
+  "size",
+];
 
 export function sanitizeHtml(html: string): string {
-  return html
-    .replace(PAIRED_WITH_CONTENT, "")
-    .replace(STRAY_UNSAFE_TAGS, "")
-    .replace(EVENT_HANDLER_ATTRS, "")
-    .replace(JS_URL_ATTRS, "");
+  return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR });
 }
