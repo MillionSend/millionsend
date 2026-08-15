@@ -1,0 +1,172 @@
+{
+  "provider": {
+    "apple": {
+      "title": "Apple requires a registered sending domain",
+      "body": "This address routes through Apple Private Relay or iCloud. Apple accepts mail only from domains with aligned SPF and DKIM that are registered with them.",
+      "action": "Authenticate your sending domain (SPF + DKIM aligned) and register it in Apple's iCloud postmaster, then resend."
+    },
+    "googleBulk": {
+      "title": "Google rejected on bulk-sender authentication",
+      "body": "Google enforces authentication for bulk senders: SPF or DKIM alignment plus a DMARC record on the sending domain.",
+      "action": "Publish a DMARC record and confirm SPF or DKIM aligns with your From domain, then resend."
+    },
+    "microsoftBlock": {
+      "title": "Microsoft SmartScreen blocked this message",
+      "body": "Outlook, Hotmail, and Live filtered this send on reputation. The block clears as your sending history improves.",
+      "action": "Enroll in Microsoft SNDS and JMRP, reduce complaint volume, and slow the sending pace to this domain."
+    }
+  },
+  "code": {
+    "noMailbox": {
+      "title": "No such mailbox",
+      "body": "The recipient server reported the address does not exist. A typo causes most of these.",
+      "action": "Confirm the exact address with the recipient before sending again."
+    },
+    "badDomain": {
+      "title": "Bad destination system",
+      "body": "The recipient's mail system rejected the address as invalid.",
+      "action": "Verify the domain and address are correct, then send to the corrected address."
+    },
+    "mailboxDisabled": {
+      "title": "Mailbox disabled",
+      "body": "The address exists but the mailbox is inactive or suspended.",
+      "action": "Reach the recipient another way to confirm an active address before resending."
+    },
+    "mailboxFull": {
+      "title": "Mailbox full",
+      "body": "The recipient's mailbox is over quota. This usually clears on its own.",
+      "action": "Wait and resend later; the address remains valid."
+    },
+    "messageTooLarge": {
+      "title": "Message too large",
+      "body": "The recipient server refused the message for exceeding its size limit.",
+      "action": "Shrink the message or host large attachments behind a link, then resend."
+    },
+    "dnsRouting": {
+      "title": "Domain does not resolve",
+      "body": "The recipient domain has no reachable mail server (missing or broken DNS/MX).",
+      "action": "Check the domain for a typo; if it is correct, the domain cannot receive mail right now."
+    },
+    "policyBlock": {
+      "title": "Blocked by recipient policy",
+      "body": "The recipient server refused the message on a content or reputation policy.",
+      "action": "Review the message content and your sending reputation before retrying."
+    },
+    "authFailure": {
+      "title": "Authentication failed",
+      "body": "The recipient rejected the message for failing SPF, DKIM, or DMARC.",
+      "action": "Fix your domain's SPF, DKIM, and DMARC alignment, then resend."
+    },
+    "greylisted": {
+      "title": "Greylisted or rate-limited",
+      "body": "The recipient server temporarily deferred the message and expects a retry.",
+      "action": "No action needed; delivery is retried automatically."
+    }
+  },
+  "subtype": {
+    "permanentGeneral": {
+      "title": "Permanent bounce",
+      "body": "The recipient server permanently rejected the message. This address will keep bouncing.",
+      "action": "Confirm the address is correct; the address is suppressed until you do."
+    },
+    "noEmail": {
+      "title": "Address does not exist",
+      "body": "The recipient server reported no mailbox for this address.",
+      "action": "Confirm the exact address with the recipient before sending again."
+    },
+    "suppressed": {
+      "title": "On the SES suppression list",
+      "body": "This address recently bounced or complained across the platform and was suppressed globally.",
+      "action": "Only resend if you have confirmed the mailbox is valid again."
+    },
+    "onAccountSuppressionList": {
+      "title": "On your account suppression list",
+      "body": "This address is suppressed for your account from a prior bounce or complaint.",
+      "action": "Remove the suppression only after the mailbox is confirmed valid."
+    },
+    "transientGeneral": {
+      "title": "Temporary bounce",
+      "body": "The recipient server deferred the message for a temporary reason.",
+      "action": "Delivery is retried automatically; no action needed."
+    },
+    "mailboxFull": {
+      "title": "Mailbox full",
+      "body": "The recipient's mailbox is over quota. This usually clears on its own.",
+      "action": "Wait and resend later; the address remains valid."
+    },
+    "messageTooLarge": {
+      "title": "Message too large",
+      "body": "The recipient server refused the message for exceeding its size limit.",
+      "action": "Shrink the message or host large attachments behind a link, then resend."
+    },
+    "contentRejected": {
+      "title": "Content rejected",
+      "body": "The recipient server refused the message based on its content.",
+      "action": "Review the message body and links, then resend."
+    },
+    "attachmentRejected": {
+      "title": "Attachment rejected",
+      "body": "The recipient server refused the message for a blocked attachment type.",
+      "action": "Remove or link to the attachment instead, then resend."
+    },
+    "undetermined": {
+      "title": "Bounce reason undetermined",
+      "body": "The recipient server did not give a clear reason for the bounce.",
+      "action": "Check the SMTP response below; resend cautiously if the address is valid."
+    }
+  },
+  "generic": {
+    "permanent": {
+      "title": "Permanent bounce",
+      "body": "The recipient server permanently rejected the message.",
+      "action": "Confirm the address is correct before sending again."
+    },
+    "transient": {
+      "title": "Temporary bounce",
+      "body": "The recipient server deferred the message for a temporary reason.",
+      "action": "Delivery is retried automatically; no action needed."
+    },
+    "undetermined": {
+      "title": "Bounce reason undetermined",
+      "body": "The recipient server did not give a clear reason for the bounce.",
+      "action": "Check the SMTP response below for detail."
+    },
+    "unknown": {
+      "title": "Delivery failed",
+      "body": "The recipient server rejected the message without a reason we can map.",
+      "action": "Check the SMTP response below; confirm the address before resending."
+    }
+  },
+  "complaint": {
+    "abuse": {
+      "title": "Marked as spam",
+      "body": "The recipient reported this message as spam. The address is suppressed to protect your reputation.",
+      "action": "Do not resend; review how this recipient was added to your list."
+    },
+    "authFailure": {
+      "title": "Complaint on authentication",
+      "body": "The report cites an email authentication failure (SPF, DKIM, or DMARC).",
+      "action": "Fix your domain's SPF, DKIM, and DMARC alignment."
+    },
+    "fraud": {
+      "title": "Reported as fraud",
+      "body": "The recipient reported this message as fraud or phishing.",
+      "action": "Do not resend; review the message content and sending source."
+    },
+    "notSpam": {
+      "title": "Marked as not spam",
+      "body": "The recipient moved this message out of spam. This is a positive signal.",
+      "action": "No action needed."
+    },
+    "virus": {
+      "title": "Reported as containing a virus",
+      "body": "The recipient reported this message as carrying malware.",
+      "action": "Do not resend; scan your content and attachments."
+    },
+    "other": {
+      "title": "Complaint received",
+      "body": "The recipient filed a complaint of an unspecified type. The address is suppressed.",
+      "action": "Do not resend; review how this recipient was added to your list."
+    }
+  }
+}

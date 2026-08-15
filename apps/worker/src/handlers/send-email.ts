@@ -79,6 +79,23 @@ export async function sendEmail(
     deps.keyring,
   );
 
+  // SES identities are verified per region: the send must target the
+  // domain's region, not a single deployment-wide one. The name also seeds
+  // the broadcast List-Id below, so it is loaded here before header assembly.
+  const domain = email.domainId
+    ? (
+        await db
+          .select({
+            name: schema.domains.name,
+            sesConfigurationSet: schema.domains.sesConfigurationSet,
+            region: schema.domains.region,
+          })
+          .from(schema.domains)
+          .where(eq(schema.domains.id, email.domainId))
+      )[0]
+    : undefined;
+  const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
+
   const headers: Record<string, string> = { "X-MillionSend-Email-ID": email.id };
   if (email.contactId) {
     if (!deps.unsubscribe) {
@@ -94,6 +111,14 @@ export async function sendEmail(
       ),
     );
   }
+  // Bulk-mail class signals (RFC 2919 List-Id, RFC 3834 Auto-Submitted, and
+  // Precedence) so mailbox providers file broadcasts as list mail. Only for
+  // broadcast rows — transactional sends must not carry them.
+  if (email.broadcastId && email.contactId) {
+    if (domain?.name) headers["List-Id"] = `<${email.broadcastId}.${domain.name}>`;
+    headers.Precedence = "bulk";
+    headers["Auto-Submitted"] = "auto-generated";
+  }
 
   const mime = await buildRawMime({
     from: email.from,
@@ -106,21 +131,6 @@ export async function sendEmail(
     ...(body.text ? { text: body.text } : {}),
     headers,
   });
-
-  // SES identities are verified per region: the send must target the
-  // domain's region, not a single deployment-wide one.
-  const domain = email.domainId
-    ? (
-        await db
-          .select({
-            sesConfigurationSet: schema.domains.sesConfigurationSet,
-            region: schema.domains.region,
-          })
-          .from(schema.domains)
-          .where(eq(schema.domains.id, email.domainId))
-      )[0]
-    : undefined;
-  const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
 
   // Atomic claim (sentAt doubles as the claim marker): closes the
   // double-send windows — a concurrent worker on the same job, and a retry

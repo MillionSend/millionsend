@@ -1,10 +1,12 @@
 "use client";
 
+import { resolveBounceGuidance, resolveComplaintGuidance } from "@millionsend/core/bounce-guidance";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { CopyGlyph } from "@/components/copy-chip";
+import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -13,8 +15,15 @@ import { useTRPC } from "@/lib/trpc";
 
 type BounceData = {
   bounceType?: string;
+  bounceSubType?: string;
   bouncedRecipients?: Array<{ diagnosticCode?: string }>;
 };
+
+/** Recipient domain for provider-keyed bounce guidance. */
+function domainOf(address: string | null): string | null {
+  const at = address?.lastIndexOf("@") ?? -1;
+  return at >= 0 ? (address as string).slice(at + 1) : null;
+}
 
 /** Mirrors the loaded page's boxes (header + action button, meta strip). */
 function SuppressionDetailSkeleton() {
@@ -127,6 +136,20 @@ export default function SuppressionDetailPage() {
       ? [bounce.bounceType.toLowerCase()]
       : []),
   ].join(" — ");
+  // ponytail: complaint feedbackType isn't fetched here, so complaints resolve
+  // to the generic "complaint.other" guidance; pull the complaint event's
+  // feedbackType into suppressions.get if per-type complaint copy is needed.
+  const guidanceKey =
+    row.reason === "hard_bounce"
+      ? resolveBounceGuidance({
+          bounceType: bounce?.bounceType ?? null,
+          bounceSubType: bounce?.bounceSubType ?? null,
+          diagnosticCode: diagnostic,
+          recipientDomain: domainOf(row.email ?? null),
+        }).key
+      : row.reason === "complaint"
+        ? resolveComplaintGuidance(null).key
+        : null;
 
   return (
     <>
@@ -218,6 +241,15 @@ export default function SuppressionDetailPage() {
             </span>
           </div>
         </>
+      ) : null}
+
+      {guidanceKey ? (
+        <div style={{ maxWidth: 860 }}>
+          <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>
+            {t("bouncedDrawer.whatToDo")}
+          </div>
+          <GuidanceBlock guidanceKey={guidanceKey} />
+        </div>
       ) : null}
 
       {row.reason === "hard_bounce" ? (

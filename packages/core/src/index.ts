@@ -17,6 +17,15 @@ export {
   hashApiKey,
   verifyApiKey,
 } from "./api-keys.js";
+export {
+  BOUNCE_GUIDANCE_KEYS,
+  type BounceCategory,
+  type BounceGuidance,
+  parseSmtpDiagnostic,
+  type ResolveBounceInput,
+  resolveBounceGuidance,
+  resolveComplaintGuidance,
+} from "./bounce-guidance.js";
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
 export {
   decryptEmailBody,

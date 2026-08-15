@@ -73,9 +73,6 @@
     "code": "Código",
     "smtpResponse": "Resposta SMTP",
     "whatToDo": "O que fazer",
-    "step1": "Confirme o endereço com o destinatário — um erro de digitação causa a maioria dos 5.1.1.",
-    "step2": "Ele está suprimido agora. Quando tiver o endereço corrigido, envie para ele — a supressão vale apenas para este endereço exato.",
-    "step3": "Importando listas? Valide antes de enviar — taxa de bounce acima de 4% pausa os envios.",
     "copyReady": "Pronto para copiar"
   },
   "suppressedDrawer": {

@@ -1,5 +1,6 @@
 "use client";
 
+import { parseSmtpDiagnostic, resolveBounceGuidance } from "@millionsend/core/bounce-guidance";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -7,6 +8,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
+import { GuidanceBlock } from "@/components/guidance-block";
 import { CodeGlyph } from "@/components/icons/nav-icons";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
@@ -75,9 +77,13 @@ function complaintOf(data: EventData): { complaintFeedbackType?: string } | null
 }
 /** "550 5.1.1" out of an SMTP diagnostic string, or null. */
 function smtpCode(diagnostic: string | undefined): string | null {
-  if (!diagnostic) return null;
-  const match = /(\d{3})[ -]+(\d+\.\d+\.\d+)/.exec(diagnostic);
-  return match ? `${match[1]} ${match[2]}` : null;
+  return parseSmtpDiagnostic(diagnostic).display;
+}
+
+/** Recipient domain for provider-keyed bounce guidance. */
+function domainOf(address: string | null): string | null {
+  const at = address?.lastIndexOf("@") ?? -1;
+  return at >= 0 ? (address as string).slice(at + 1) : null;
 }
 
 function Microlabel({
@@ -390,6 +396,12 @@ export default function EmailDetailPage() {
   const bounceDiag = bounce?.bouncedRecipients?.[0]?.diagnosticCode;
   const bounceCode = smtpCode(bounceDiag) ?? bounce?.bouncedRecipients?.[0]?.status ?? null;
   const hardBounced = bounce?.bounceType === "Permanent";
+  const bounceGuidance = resolveBounceGuidance({
+    bounceType: bounce?.bounceType ?? null,
+    bounceSubType: bounce?.bounceSubType ?? null,
+    diagnosticCode: bounceDiag ?? null,
+    recipientDomain: domainOf(recipient),
+  });
 
   // Masthead proof strip: "delivered in 1.92 s · 2min ago · permanent · 550 5.1.1"
   const sublineParts: string[] = [];
@@ -856,11 +868,7 @@ export default function EmailDetailPage() {
         <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>
           {t("bouncedDrawer.whatToDo")}
         </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <StepRow index={1} text={t("bouncedDrawer.step1")} />
-          <StepRow index={2} text={t("bouncedDrawer.step2")} />
-          <StepRow index={3} text={t("bouncedDrawer.step3")} />
-        </div>
+        <GuidanceBlock guidanceKey={bounceGuidance.key} />
         {recipient ? (
           <>
             <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>
