@@ -1,14 +1,24 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import type { BlockDoc } from "@/lib/email-blocks/model";
+import { buildMergeOptions } from "@/lib/merge-fields";
 import { useTRPC } from "@/lib/trpc";
 import { ContentPreview } from "../broadcasts/parts";
+
+// Client-only: the block editor pulls in tiptap and touches the DOM, so it
+// must not render on the server. The ghost holds the field's height meanwhile.
+const BlockEditor = dynamic(() => import("@/components/block-editor").then((m) => m.BlockEditor), {
+  ssr: false,
+  loading: () => <Skeleton width="100%" height={340} radius="var(--ms-r-input)" />,
+});
 
 export interface EditorInitial {
   id: string;
@@ -16,6 +26,7 @@ export interface EditorInitial {
   subject: string | null;
   html: string;
   text: string | null;
+  document: BlockDoc | null;
 }
 
 /** Ghost of the editor while an existing template loads — same field boxes, no shift. */
@@ -58,8 +69,20 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   const [subject, setSubject] = useState(initial?.subject ?? "");
   const [html, setHtml] = useState(initial?.html ?? "");
   const [text, setText] = useState(initial?.text ?? "");
+  const [document, setDocument] = useState<BlockDoc | null>(initial?.document ?? null);
   const [tab, setTab] = useState<"edit" | "preview">("edit");
-  const [textOpen, setTextOpen] = useState(Boolean(initial?.text));
+
+  // Merge-field picker options and preview sample values both derive from the
+  // team's contact-property keys in use.
+  const properties = useQuery(trpc.audience.properties.list.queryOptions());
+  const mergeFields = useMemo(
+    () => buildMergeOptions((properties.data ?? []).map((p) => p.key)),
+    [properties.data],
+  );
+  const previewSamples = useMemo(
+    () => Object.fromEntries((properties.data ?? []).map((p) => [p.key, p.sampleValue])),
+    [properties.data],
+  );
 
   const createMutation = useMutation(trpc.templates.create.mutationOptions());
   const updateMutation = useMutation(trpc.templates.update.mutationOptions());
@@ -77,6 +100,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
         subject: subject.trim(),
         html,
         text,
+        document,
       });
       return initial.id;
     }
@@ -85,6 +109,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
       ...(subject.trim() ? { subject: subject.trim() } : {}),
       html,
       ...(text ? { text } : {}),
+      ...(document ? { document } : {}),
     });
     return id;
   }
@@ -214,13 +239,14 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
             </div>
           </div>
           {tab === "edit" ? (
-            <textarea
-              id="tpl-html"
-              className="ms-input ms-mono"
-              style={{ width: "100%", minHeight: 260, resize: "vertical", lineHeight: 1.6 }}
-              placeholder={t("editor.htmlPlaceholder")}
-              value={html}
-              onChange={(event) => setHtml(event.target.value)}
+            <BlockEditor
+              value={{ document, html }}
+              onChange={(v) => {
+                setDocument(v.document);
+                setHtml(v.html);
+                setText(v.text);
+              }}
+              mergeFields={mergeFields}
             />
           ) : (
             <div
@@ -231,7 +257,11 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
               }}
             >
               {html ? (
-                <ContentPreview html={html} title={t("editor.previewTab")} />
+                <ContentPreview
+                  html={html}
+                  title={t("editor.previewTab")}
+                  samples={previewSamples}
+                />
               ) : (
                 <p
                   style={{
@@ -261,29 +291,6 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
               unsub: "{{{UNSUBSCRIBE_URL}}}",
             })}
           </p>
-        </div>
-
-        <div>
-          <button
-            type="button"
-            className="ms-btn ms-btn-ghost"
-            aria-expanded={textOpen}
-            onClick={() => setTextOpen((v) => !v)}
-          >
-            {textOpen ? "▾" : "▸"} {t(textOpen ? "editor.textToggleHide" : "editor.textToggleShow")}
-          </button>
-          {textOpen ? (
-            <div className="ms-field" style={{ marginTop: 10 }}>
-              <label htmlFor="tpl-text">{t("editor.textLabel")}</label>
-              <textarea
-                id="tpl-text"
-                className="ms-input ms-mono"
-                style={{ width: "100%", minHeight: 140, resize: "vertical", lineHeight: 1.6 }}
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-              />
-            </div>
-          ) : null}
         </div>
 
         {saveError ? (

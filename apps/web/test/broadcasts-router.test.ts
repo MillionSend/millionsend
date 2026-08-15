@@ -48,6 +48,21 @@ const DRAFT_INPUT = {
   html: "<p>Hi</p>",
 };
 
+const SAMPLE_DOC = {
+  version: 1 as const,
+  blocks: [
+    {
+      type: "text" as const,
+      id: "b1",
+      html: "<p>Hi {{{FIRST_NAME|there}}}</p>",
+      align: "left" as const,
+      color: "#111111",
+      fontSize: 16,
+      padding: 12,
+    },
+  ],
+};
+
 async function seedDraft(teamId: string) {
   const caller = callerFor(teamId);
   const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
@@ -130,6 +145,43 @@ describe("broadcasts.create / get / list", () => {
     expect(page2.nextCursor).toBeNull();
     const seen = [...page1.items, ...page2.items].map((b) => b.id);
     expect(new Set(seen).size).toBe(3);
+  });
+});
+
+describe("broadcasts.document", () => {
+  it("round-trips a block document through create, get, and update", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    const { id } = await caller.broadcasts.create({
+      audienceId,
+      ...DRAFT_INPUT,
+      document: SAMPLE_DOC,
+    });
+    expect((await caller.broadcasts.get({ id })).document).toEqual(SAMPLE_DOC);
+    // Clearing back to a legacy raw-HTML draft.
+    await caller.broadcasts.update({ id, document: null });
+    expect((await broadcastRow(id))?.document).toBeNull();
+  });
+
+  it("leaves the document null on a legacy raw-HTML draft", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { id } = await seedDraft(teamId);
+    expect((await broadcastRow(id))?.document).toBeNull();
+  });
+
+  it("rejects a malformed document via the zod guard", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    await expect(
+      caller.broadcasts.create({
+        audienceId,
+        ...DRAFT_INPUT,
+        // biome-ignore lint/suspicious/noExplicitAny: deliberately wrong shape
+        document: { version: 1, blocks: [{ type: "nope" }] } as any,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
 

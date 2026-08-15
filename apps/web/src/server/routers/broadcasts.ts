@@ -12,6 +12,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { createTranslator } from "next-intl";
 import { z } from "zod";
+import { blockDocSchema } from "@/lib/email-blocks/model";
 import enDeliverability from "../../../messages/en/deliverability.json";
 import ptBRDeliverability from "../../../messages/pt-BR/deliverability.json";
 import { type AppLocale, DEFAULT_LOCALE, LOCALE_COOKIE, LOCALES } from "../../i18n/request";
@@ -85,6 +86,8 @@ const subjectSchema = z.string().trim().min(1).max(998);
 // "" clears the field — stored as null, never as an empty string.
 const nameSchema = z.string().trim().max(200);
 const bodySchema = z.string().max(500_000);
+// Block-editor source of truth; null clears it back to a legacy raw-HTML row.
+const documentSchema = blockDocSchema.nullable();
 
 type BroadcastRow = typeof schema.broadcasts.$inferSelect;
 
@@ -220,6 +223,7 @@ export const broadcastsRouter = router({
         replyTo: emailSchema.optional(),
         html: bodySchema.optional(),
         text: bodySchema.optional(),
+        document: documentSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -240,6 +244,7 @@ export const broadcastsRouter = router({
           replyTo: input.replyTo ? encodeReplyTo(input.replyTo) : null,
           html: input.html || null,
           text: input.text || null,
+          document: input.document ?? null,
         })
         .returning({ id: b.id });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -259,6 +264,7 @@ export const broadcastsRouter = router({
         replyTo: emailSchema.or(z.literal("")).optional(),
         html: bodySchema.optional(),
         text: bodySchema.optional(),
+        document: documentSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -286,6 +292,7 @@ export const broadcastsRouter = router({
           ...(input.replyTo !== undefined ? { replyTo: encodeReplyTo(input.replyTo) } : {}),
           ...(input.html !== undefined ? { html: input.html || null } : {}),
           ...(input.text !== undefined ? { text: input.text || null } : {}),
+          ...(input.document !== undefined ? { document: input.document } : {}),
           updatedAt: new Date(),
         })
         .where(and(eq(b.id, input.id), eq(b.teamId, ctx.teamId)));

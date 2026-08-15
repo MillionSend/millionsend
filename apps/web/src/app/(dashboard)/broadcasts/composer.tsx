@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
@@ -10,8 +11,17 @@ import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { type BlockDoc, parseBlockDoc } from "@/lib/email-blocks/model";
+import { buildMergeOptions } from "@/lib/merge-fields";
 import { useTRPC } from "@/lib/trpc";
 import { ContentPreview } from "./parts";
+
+// Client-only: the block editor pulls in tiptap and touches the DOM, so it
+// must not render on the server. The ghost holds the field's height meanwhile.
+const BlockEditor = dynamic(() => import("@/components/block-editor").then((m) => m.BlockEditor), {
+  ssr: false,
+  loading: () => <Skeleton width="100%" height={340} radius="var(--ms-r-input)" />,
+});
 
 export interface ComposerInitial {
   id: string;
@@ -24,6 +34,7 @@ export interface ComposerInitial {
   replyTo: string | null;
   html: string | null;
   text: string | null;
+  document: BlockDoc | null;
 }
 
 /** Ghost of the composer while an existing draft loads — same field boxes, no shift. */
@@ -76,8 +87,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const [replyTo, setReplyTo] = useState(initial?.replyTo ?? "");
   const [html, setHtml] = useState(initial?.html ?? "");
   const [text, setText] = useState(initial?.text ?? "");
+  const [document, setDocument] = useState<BlockDoc | null>(initial?.document ?? null);
   const [tab, setTab] = useState<"edit" | "preview">("edit");
-  const [textOpen, setTextOpen] = useState(Boolean(initial?.text));
   const [guardOpen, setGuardOpen] = useState(false);
   const [schedule, setSchedule] = useState("");
   const [templateId, setTemplateId] = useState("");
@@ -90,6 +101,18 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const templates = useQuery(trpc.templates.list.queryOptions({ limit: 50 }));
   const templateOptions = templates.data?.items ?? [];
 
+  // Merge-field picker options and preview sample values both derive from the
+  // team's contact-property keys in use.
+  const properties = useQuery(trpc.audience.properties.list.queryOptions());
+  const mergeFields = useMemo(
+    () => buildMergeOptions((properties.data ?? []).map((p) => p.key)),
+    [properties.data],
+  );
+  const previewSamples = useMemo(
+    () => Object.fromEntries((properties.data ?? []).map((p) => [p.key, p.sampleValue])),
+    [properties.data],
+  );
+
   /** Copies the template's content in as a starting snapshot — no link back;
    * later template edits change nothing here. */
   async function applyTemplate(id: string) {
@@ -99,7 +122,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     if (template.subject) setSubject(template.subject);
     setHtml(template.html);
     setText(template.text ?? "");
-    setTextOpen(Boolean(template.text));
+    setDocument(parseBlockDoc(template.document));
   }
   const recipientCount = useQuery(
     trpc.broadcasts.recipientCount.queryOptions(
@@ -132,6 +155,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
         replyTo: replyTo.trim(),
         html,
         text,
+        document,
       });
       return initial.id;
     }
@@ -145,6 +169,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
       ...(replyTo.trim() ? { replyTo: replyTo.trim() } : {}),
       ...(html ? { html } : {}),
       ...(text ? { text } : {}),
+      ...(document ? { document } : {}),
     });
     return id;
   }
@@ -422,13 +447,15 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
             </div>
           </div>
           {tab === "edit" ? (
-            <textarea
-              id="bc-html"
-              className="ms-input ms-mono"
-              style={{ width: "100%", minHeight: 260, resize: "vertical", lineHeight: 1.6 }}
-              placeholder={t("composer.htmlPlaceholder")}
-              value={html}
-              onChange={(event) => setHtml(event.target.value)}
+            <BlockEditor
+              key={templateId}
+              value={{ document, html }}
+              onChange={(v) => {
+                setDocument(v.document);
+                setHtml(v.html);
+                setText(v.text);
+              }}
+              mergeFields={mergeFields}
             />
           ) : (
             <div
@@ -439,7 +466,11 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               }}
             >
               {html ? (
-                <ContentPreview html={html} title={t("composer.previewTab")} />
+                <ContentPreview
+                  html={html}
+                  title={t("composer.previewTab")}
+                  samples={previewSamples}
+                />
               ) : (
                 <p
                   style={{
@@ -462,30 +493,6 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
             </span>{" "}
             {t("composer.unsubHint")}
           </p>
-        </div>
-
-        <div>
-          <button
-            type="button"
-            className="ms-btn ms-btn-ghost"
-            aria-expanded={textOpen}
-            onClick={() => setTextOpen((v) => !v)}
-          >
-            {textOpen ? "▾" : "▸"}{" "}
-            {t(textOpen ? "composer.textToggleHide" : "composer.textToggleShow")}
-          </button>
-          {textOpen ? (
-            <div className="ms-field" style={{ marginTop: 10 }}>
-              <label htmlFor="bc-text">{t("composer.textLabel")}</label>
-              <textarea
-                id="bc-text"
-                className="ms-input ms-mono"
-                style={{ width: "100%", minHeight: 140, resize: "vertical", lineHeight: 1.6 }}
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-              />
-            </div>
-          ) : null}
         </div>
 
         {saveError && !guardOpen ? (

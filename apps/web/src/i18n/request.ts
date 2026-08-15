@@ -9,6 +9,7 @@ export const LOCALE_COOKIE = "NEXT_LOCALE";
 const NAMESPACES = [
   "common",
   "audience",
+  "block-editor",
   "auth",
   "broadcasts",
   "deliverability",
@@ -18,6 +19,7 @@ const NAMESPACES = [
   "domains",
   "api-keys",
   "logs",
+  "merge-fields",
   "metrics",
   "onboarding",
   "settings",

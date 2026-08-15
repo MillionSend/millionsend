@@ -1,4 +1,4 @@
-import { index, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { audiences } from "./audiences.js";
 import { segments } from "./segments.js";
 import { teams } from "./teams.js";
@@ -43,6 +43,9 @@ export const broadcasts = pgTable(
     replyTo: text("reply_to"),
     html: text("html"),
     text: text("text"),
+    // Block-editor source of truth (BlockDoc). Null → legacy raw-HTML row whose
+    // `html` was hand-authored; the app renders those in CODE mode.
+    document: jsonb("document").$type<unknown>(),
     status: broadcastStatusEnum("status").notNull().default("draft"),
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
