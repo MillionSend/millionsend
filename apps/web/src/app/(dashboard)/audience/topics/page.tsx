@@ -6,6 +6,7 @@ import { useCallback, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -13,6 +14,7 @@ import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { useTRPC } from "@/lib/trpc";
 import { AudienceTabs } from "../audience-tabs";
 
@@ -233,7 +235,12 @@ export default function TopicsPage() {
             />
           </div>
           <div className="ms-field" style={{ marginTop: 14 }}>
-            <label htmlFor="topic-default">{t("defaultLabel")}</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+              <label htmlFor="topic-default" style={{ marginBottom: 0 }}>
+                {t("defaultLabel")}
+              </label>
+              <Tooltip text={t("defaultHint")} />
+            </div>
             <Select
               id="topic-default"
               value={defaultSub}
@@ -267,8 +274,8 @@ export default function TopicsPage() {
               {t("createError")}
             </p>
           ) : null}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
-            <button type="button" className="ms-btn ms-btn-ghost" onClick={closeCreate}>
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeCreate}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
             <button
@@ -279,7 +286,7 @@ export default function TopicsPage() {
               <BtnSpinner on={createMutation.isPending} />
               {t("createConfirm")} <span className="ms-keycap">↵</span>
             </button>
-          </div>
+          </ModalFooter>
         </form>
       </Modal>
 
@@ -292,11 +299,11 @@ export default function TopicsPage() {
             }
           }}
         >
-          <p style={{ margin: "0 0 22px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
+          <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
             {t("deleteBody", { name: deleteTarget?.name ?? "—" })}
           </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-            <button type="button" className="ms-btn ms-btn-ghost" onClick={closeDelete}>
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
             <button
@@ -307,7 +314,7 @@ export default function TopicsPage() {
               <BtnSpinner on={deleteMutation.isPending} />
               {t("deleteConfirm")} <span className="ms-keycap">↵</span>
             </button>
-          </div>
+          </ModalFooter>
         </form>
       </Modal>
     </>

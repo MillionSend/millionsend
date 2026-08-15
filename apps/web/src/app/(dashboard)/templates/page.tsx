@@ -8,6 +8,7 @@ import { useCallback, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -191,11 +192,11 @@ export default function TemplatesPage() {
             }
           }}
         >
-          <p style={{ margin: "0 0 22px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
+          <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
             {t("list.deleteBody", { name: deleteTarget?.name ?? "—" })}
           </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-            <button type="button" className="ms-btn ms-btn-ghost" onClick={closeDelete}>
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
             <button
@@ -206,7 +207,7 @@ export default function TemplatesPage() {
               <BtnSpinner on={deleteMutation.isPending} />
               {t("list.deleteConfirm")} <span className="ms-keycap">↵</span>
             </button>
-          </div>
+          </ModalFooter>
         </form>
       </Modal>
     </>

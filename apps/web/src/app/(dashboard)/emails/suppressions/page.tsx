@@ -7,6 +7,7 @@ import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { CodeGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
@@ -308,8 +309,8 @@ export default function SuppressionsPage() {
               {t("suppressions.invalidEmail")}
             </p>
           ) : null}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
-            <button type="button" className="ms-btn ms-btn-ghost" onClick={closeAdd}>
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeAdd}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
             <button
@@ -320,7 +321,7 @@ export default function SuppressionsPage() {
               <BtnSpinner on={addMutation.isPending} />
               {t("suppressions.addConfirm")} <span className="ms-keycap">↵</span>
             </button>
-          </div>
+          </ModalFooter>
         </form>
       </Modal>
 
@@ -340,8 +341,8 @@ export default function SuppressionsPage() {
           <p style={{ margin: "0 0 22px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
             {t("suppressions.removeBody", { email: removeTarget?.email ?? "—" })}
           </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-            <button type="button" className="ms-btn ms-btn-ghost" onClick={closeRemove}>
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeRemove}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
             <button
@@ -352,7 +353,7 @@ export default function SuppressionsPage() {
               <BtnSpinner on={removeMutation.isPending} />
               {t("suppressions.removeConfirm")} <span className="ms-keycap">↵</span>
             </button>
-          </div>
+          </ModalFooter>
         </form>
       </Modal>
     </>

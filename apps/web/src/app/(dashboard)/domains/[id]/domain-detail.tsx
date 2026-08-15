@@ -11,6 +11,7 @@ import {
   DnsRecordsTableSkeleton,
 } from "@/components/dns-records-table";
 import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
@@ -635,7 +636,10 @@ export function DomainDetail({ id }: { id: string }) {
             onChange={(e) => setConfirmText(e.target.value)}
           />
         </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+        <ModalFooter>
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>
+            {common("cancel")} <span className="ms-keycap">Esc</span>
+          </button>
           <button
             type="button"
             className="ms-btn ms-btn-destructive"
@@ -646,10 +650,7 @@ export function DomainDetail({ id }: { id: string }) {
             {t("detail.deleteDomain")} <span className="ms-keycap">⌘</span>
             <span className="ms-keycap">↵</span>
           </button>
-          <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>
-            {common("cancel")} <span className="ms-keycap">Esc</span>
-          </button>
-        </div>
+        </ModalFooter>
       </Modal>
     </>
   );

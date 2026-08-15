@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
@@ -543,8 +544,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               {sendErrorMessage}
             </p>
           ) : null}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
-            <button type="button" className="ms-btn ms-btn-ghost" onClick={closeGuard}>
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeGuard}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
             <button
@@ -556,7 +557,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               {schedule ? t("guard.schedule") : t("guard.sendNow")}{" "}
               <span className="ms-keycap">⌘↵</span>
             </button>
-          </div>
+          </ModalFooter>
         </form>
       </Modal>
     </>
