@@ -252,8 +252,10 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
     .where(eq(schema.emails.id, scheduled.id));
   expect(scheduledRow?.bodyCiphertext).not.toBeNull();
 
-  // Second run: already-purged rows are not re-stamped.
-  expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now: new Date() })).toBe(0);
+  // Second run: already-purged rows are not re-stamped. Same fixed clock —
+  // the wall clock must never enter this test or the absolute fixture dates
+  // silently expire.
+  expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(0);
 });
 
 it("retention purge prefers the instance setting over the env-derived default", async () => {

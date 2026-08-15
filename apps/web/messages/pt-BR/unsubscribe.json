@@ -1,0 +1,7 @@
+{
+  "confirm": "Cancelar a inscrição de {email}?",
+  "button": "Cancelar inscrição",
+  "done": "Inscrição cancelada.",
+  "doneDetail": "{email} não receberá mais estes e-mails.",
+  "invalid": "Este link não é válido."
+}

@@ -29,6 +29,12 @@ export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.
 export { isBlockedIp, type PostJsonOptions, type PostJsonResult, postJson } from "./ssrf.js";
 export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";
 export { extractAddrSpec, findSuppressed, hashRecipient } from "./suppressions.js";
+export {
+  buildUnsubscribeHeaders,
+  deriveUnsubscribeKey,
+  makeUnsubscribeToken,
+  verifyUnsubscribeToken,
+} from "./unsubscribe.js";
 export { DAY_MS, utcDay } from "./utc-day.js";
 export {
   buildWebhookPayload,

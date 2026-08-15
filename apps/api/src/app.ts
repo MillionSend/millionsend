@@ -25,13 +25,23 @@ import {
   snsMessageSchema,
   verifySnsMessage,
 } from "@millionsend/ses";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { createMiddleware } from "hono/factory";
 import {
+  audienceResponseSchema,
+  contactIdResponseSchema,
+  createAudienceRequestSchema,
+  createContactRequestSchema,
   errorSchema,
+  getContactResponseSchema,
   getEmailResponseSchema,
+  listAudiencesResponseSchema,
+  listContactsResponseSchema,
+  removeAudienceResponseSchema,
+  removeContactResponseSchema,
   sendEmailRequestSchema,
   sendEmailResponseSchema,
+  updateContactRequestSchema,
 } from "./schemas.js";
 
 export interface SnsIngestDeps {
@@ -86,6 +96,355 @@ function senderDomain(from: string): string | null {
 async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
   const res = await fetch(subscribeUrl);
   if (!res.ok) throw new Error(`SNS subscription confirmation failed: ${res.status}`);
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  let e: unknown = err;
+  while (e instanceof Error) {
+    if ((e as { code?: string }).code === "23505" || e.message.includes("duplicate key")) {
+      return true;
+    }
+    e = e.cause;
+  }
+  return false;
+}
+
+function registerAudienceRoutes(
+  app: OpenAPIHono<Env>,
+  db: Db,
+  prefix: "audiences" | "segments",
+): void {
+  const objectName = prefix === "audiences" ? "audience" : "segment";
+  const jsonErr = (description: string) => ({
+    content: { "application/json": { schema: errorSchema } },
+    description,
+  });
+
+  const findAudience = async (teamId: string, id: string) =>
+    (
+      await db
+        .select()
+        .from(schema.audiences)
+        .where(and(eq(schema.audiences.id, id), eq(schema.audiences.teamId, teamId)))
+    )[0];
+
+  // The contact path segment may be the contact UUID or its email — the
+  // resend SDK sends either, undistinguished. Email matching is
+  // case-insensitive, mirroring the unique index.
+  const contactWhere = (teamId: string, audienceId: string, idOrEmail: string) =>
+    and(
+      eq(schema.contacts.audienceId, audienceId),
+      eq(schema.contacts.teamId, teamId),
+      z.uuid().safeParse(idOrEmail).success
+        ? eq(schema.contacts.id, idOrEmail)
+        : sql`lower(${schema.contacts.email}) = ${idOrEmail.toLowerCase()}`,
+    );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: `/${prefix}`,
+      request: {
+        body: { content: { "application/json": { schema: createAudienceRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: audienceResponseSchema } },
+          description: "Audience created",
+        },
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { name } = c.req.valid("json");
+      const [row] = await db
+        .insert(schema.audiences)
+        .values({ teamId: auth.teamId, name })
+        .returning({ id: schema.audiences.id, name: schema.audiences.name });
+      if (!row) throw new Error("audience insert returned no row");
+      return c.json({ object: objectName, id: row.id, name: row.name }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: `/${prefix}`,
+      responses: {
+        200: {
+          content: { "application/json": { schema: listAudiencesResponseSchema } },
+          description: "Audiences",
+        },
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const rows = await db
+        .select()
+        .from(schema.audiences)
+        .where(eq(schema.audiences.teamId, auth.teamId))
+        .orderBy(asc(schema.audiences.createdAt));
+      return c.json(
+        {
+          object: "list" as const,
+          data: rows.map((r) => ({
+            id: r.id,
+            name: r.name,
+            created_at: r.createdAt.toISOString(),
+          })),
+          has_more: false,
+        },
+        200,
+      );
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: `/${prefix}/{id}`,
+      request: { params: z.object({ id: z.uuid() }) },
+      responses: {
+        200: {
+          content: { "application/json": { schema: audienceResponseSchema } },
+          description: "Audience",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const audience = await findAudience(auth.teamId, c.req.valid("param").id);
+      if (!audience) return c.json(errorBody(404, "not_found", "Audience not found"), 404);
+      return c.json(
+        {
+          object: objectName,
+          id: audience.id,
+          name: audience.name,
+          created_at: audience.createdAt.toISOString(),
+        },
+        200,
+      );
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: `/${prefix}/{id}`,
+      request: { params: z.object({ id: z.uuid() }) },
+      responses: {
+        200: {
+          content: { "application/json": { schema: removeAudienceResponseSchema } },
+          description: "Audience deleted",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const [row] = await db
+        .delete(schema.audiences)
+        .where(and(eq(schema.audiences.id, id), eq(schema.audiences.teamId, auth.teamId)))
+        .returning({ id: schema.audiences.id });
+      if (!row) return c.json(errorBody(404, "not_found", "Audience not found"), 404);
+      return c.json({ object: objectName, id: row.id, deleted: true as const }, 200);
+    },
+  );
+
+  const audienceIdParam = z.object({ audienceId: z.uuid() });
+  const contactParams = z.object({ audienceId: z.uuid(), id: z.string().min(1) });
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: `/${prefix}/{audienceId}/contacts`,
+      request: {
+        params: audienceIdParam,
+        body: { content: { "application/json": { schema: createContactRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: contactIdResponseSchema } },
+          description: "Contact created",
+        },
+        404: jsonErr("Not found"),
+        409: jsonErr("Contact already exists"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { audienceId } = c.req.valid("param");
+      const body = c.req.valid("json");
+      if (!(await findAudience(auth.teamId, audienceId))) {
+        return c.json(errorBody(404, "not_found", "Audience not found"), 404);
+      }
+      try {
+        const [row] = await db
+          .insert(schema.contacts)
+          .values({
+            audienceId,
+            teamId: auth.teamId,
+            email: body.email,
+            firstName: body.first_name ?? null,
+            lastName: body.last_name ?? null,
+            unsubscribed: body.unsubscribed ?? false,
+          })
+          .returning({ id: schema.contacts.id });
+        if (!row) throw new Error("contact insert returned no row");
+        return c.json({ object: "contact" as const, id: row.id }, 200);
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          return c.json(errorBody(409, "conflict", "Contact already exists"), 409);
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: `/${prefix}/{audienceId}/contacts`,
+      request: { params: audienceIdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: listContactsResponseSchema } },
+          description: "Contacts",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { audienceId } = c.req.valid("param");
+      if (!(await findAudience(auth.teamId, audienceId))) {
+        return c.json(errorBody(404, "not_found", "Audience not found"), 404);
+      }
+      const rows = await db
+        .select()
+        .from(schema.contacts)
+        .where(
+          and(eq(schema.contacts.audienceId, audienceId), eq(schema.contacts.teamId, auth.teamId)),
+        )
+        .orderBy(asc(schema.contacts.createdAt));
+      return c.json(
+        {
+          object: "list" as const,
+          data: rows.map((r) => ({
+            id: r.id,
+            email: r.email,
+            first_name: r.firstName,
+            last_name: r.lastName,
+            created_at: r.createdAt.toISOString(),
+            unsubscribed: r.unsubscribed,
+          })),
+          has_more: false,
+        },
+        200,
+      );
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: `/${prefix}/{audienceId}/contacts/{id}`,
+      request: { params: contactParams },
+      responses: {
+        200: {
+          content: { "application/json": { schema: getContactResponseSchema } },
+          description: "Contact",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { audienceId, id } = c.req.valid("param");
+      const [contact] = await db
+        .select()
+        .from(schema.contacts)
+        .where(contactWhere(auth.teamId, audienceId, id));
+      if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      return c.json(
+        {
+          object: "contact" as const,
+          id: contact.id,
+          email: contact.email,
+          first_name: contact.firstName,
+          last_name: contact.lastName,
+          created_at: contact.createdAt.toISOString(),
+          unsubscribed: contact.unsubscribed,
+        },
+        200,
+      );
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "patch",
+      path: `/${prefix}/{audienceId}/contacts/{id}`,
+      request: {
+        params: contactParams,
+        body: { content: { "application/json": { schema: updateContactRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: contactIdResponseSchema } },
+          description: "Contact updated",
+        },
+        404: jsonErr("Not found"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { audienceId, id } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const [row] = await db
+        .update(schema.contacts)
+        .set({
+          updatedAt: new Date(),
+          ...(body.first_name !== undefined ? { firstName: body.first_name } : {}),
+          ...(body.last_name !== undefined ? { lastName: body.last_name } : {}),
+          ...(body.unsubscribed !== undefined ? { unsubscribed: body.unsubscribed } : {}),
+        })
+        .where(contactWhere(auth.teamId, audienceId, id))
+        .returning({ id: schema.contacts.id });
+      if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      return c.json({ object: "contact" as const, id: row.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: `/${prefix}/{audienceId}/contacts/{id}`,
+      request: { params: contactParams },
+      responses: {
+        200: {
+          content: { "application/json": { schema: removeContactResponseSchema } },
+          description: "Contact deleted",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { audienceId, id } = c.req.valid("param");
+      const [row] = await db
+        .delete(schema.contacts)
+        .where(contactWhere(auth.teamId, audienceId, id))
+        .returning({ id: schema.contacts.id });
+      if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      return c.json({ object: "contact" as const, contact: row.id, deleted: true as const }, 200);
+    },
+  );
 }
 
 export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
@@ -158,6 +517,17 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   });
   app.use("/emails", requireApiKey);
   app.use("/emails/*", requireApiKey);
+
+  // The resend SDK (v6+) aliases `audiences` to segments: audience CRUD goes
+  // to /segments (object: "segment") and contact list to
+  // /segments/{id}/contacts, while contact CRUD stays on
+  // /audiences/{id}/contacts. Same handlers on both prefixes keeps every SDK
+  // path working (docs/resend-compatibility.md).
+  for (const prefix of ["audiences", "segments"] as const) {
+    app.use(`/${prefix}`, requireApiKey);
+    app.use(`/${prefix}/*`, requireApiKey);
+    registerAudienceRoutes(app, deps.db, prefix);
+  }
 
   const sendRoute = createRoute({
     method: "post",

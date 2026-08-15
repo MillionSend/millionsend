@@ -57,6 +57,13 @@
       "when": 1786749731015,
       "tag": "0007_lush_ezekiel",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786751100517,
+      "tag": "0008_large_rafael_vega",
+      "breakpoints": true
     }
   ]
 }
