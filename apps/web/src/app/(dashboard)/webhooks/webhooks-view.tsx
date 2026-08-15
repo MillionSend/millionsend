@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
+import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
@@ -16,8 +17,33 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
-import { WEBHOOK_EVENT_TYPES, type WebhookEventType } from "@/lib/webhook-events";
+import {
+  WEBHOOK_EVENT_GROUPS,
+  WEBHOOK_EVENT_META,
+  WEBHOOK_EVENT_TYPES,
+  type WebhookEventType,
+} from "@/lib/webhook-events";
 import { WebhookStatusBadge } from "./webhook-status-badge";
+
+/** Shared dot + human-label option list for the event picker, derived from meta. */
+function useWebhookEventOptions() {
+  const t = useTranslations("webhooks");
+  return {
+    groups: WEBHOOK_EVENT_GROUPS.map((key) => ({ key, label: t(`eventGroup.${key}`) })),
+    options: WEBHOOK_EVENT_TYPES.map((value) => ({
+      value,
+      label: t(`eventLabel.${value}`),
+      group: WEBHOOK_EVENT_META[value].group,
+      adornment: (
+        <span
+          className="ms-dot"
+          style={{ background: WEBHOOK_EVENT_META[value].dot }}
+          aria-hidden="true"
+        />
+      ),
+    })),
+  };
+}
 
 /** Mirrors the loaded table: mono URL, events chip, badge, rate, time, menu. */
 function WebhooksSkeleton() {
@@ -65,47 +91,39 @@ export function EventTypesPicker({
   allEvents,
   selected,
   disabled,
+  id,
   onToggleAll,
-  onToggleEvent,
+  onChange,
 }: {
   allEvents: boolean;
   selected: WebhookEventType[];
   disabled: boolean;
+  id?: string;
   onToggleAll: (all: boolean) => void;
-  onToggleEvent: (event: WebhookEventType, checked: boolean) => void;
+  onChange: (events: WebhookEventType[]) => void;
 }) {
   const t = useTranslations("webhooks");
+  const { groups, options } = useWebhookEventOptions();
+  const summary = allEvents
+    ? t("create.allEvents")
+    : selected.length === 0
+      ? t("create.selectPrompt")
+      : t("eventsCount", { count: selected.length });
   return (
-    <fieldset style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 8 }}>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
-        <input
-          type="checkbox"
-          checked={allEvents}
-          disabled={disabled}
-          onChange={(event) => onToggleAll(event.target.checked)}
-        />
-        {t("create.allEvents")}
-      </label>
-      {!allEvents ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, paddingLeft: 22 }}>
-          {WEBHOOK_EVENT_TYPES.map((eventType) => (
-            <label
-              key={eventType}
-              className="ms-mono"
-              style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}
-            >
-              <input
-                type="checkbox"
-                checked={selected.includes(eventType)}
-                disabled={disabled}
-                onChange={(event) => onToggleEvent(eventType, event.target.checked)}
-              />
-              {eventType}
-            </label>
-          ))}
-        </div>
-      ) : null}
-    </fieldset>
+    <GroupedMultiSelect
+      value={selected}
+      onChange={(next) => onChange(next as WebhookEventType[])}
+      options={options}
+      groups={groups}
+      ariaLabel={t("create.events")}
+      summary={summary}
+      searchPlaceholder={t("create.searchEvents")}
+      noResultsLabel={t("create.noEvents")}
+      allOption={{ label: t("create.allEvents"), selected: allEvents, onToggle: onToggleAll }}
+      disabled={disabled}
+      width="100%"
+      {...(id !== undefined ? { id } : {})}
+    />
   );
 }
 
@@ -342,17 +360,14 @@ export function WebhooksView() {
               />
             </div>
             <div className="ms-field">
-              <span style={{ fontSize: "var(--ms-fs-label)" }}>{t("create.events")}</span>
+              <label htmlFor="webhook-events">{t("create.events")}</label>
               <EventTypesPicker
+                id="webhook-events"
                 allEvents={allEvents}
                 selected={selectedEvents}
                 disabled={createMutation.isPending}
                 onToggleAll={setAllEvents}
-                onToggleEvent={(eventType, checked) =>
-                  setSelectedEvents((prev) =>
-                    checked ? [...prev, eventType] : prev.filter((e) => e !== eventType),
-                  )
-                }
+                onChange={setSelectedEvents}
               />
             </div>
             <ModalFooter>

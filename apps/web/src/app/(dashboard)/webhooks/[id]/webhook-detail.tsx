@@ -14,7 +14,7 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
-import { maskWebhookSecret } from "@/lib/webhook-events";
+import { maskWebhookSecret, WEBHOOK_EVENT_META, type WebhookEventType } from "@/lib/webhook-events";
 import { DeliveryStatusBadge, WebhookStatusBadge } from "../webhook-status-badge";
 
 const DELIVERIES_PAGE_SIZE = 25;
@@ -394,11 +394,27 @@ export function WebhookDetail({ id }: { id: string }) {
             <span className="ms-chip">{t("allEvents")}</span>
           ) : (
             <div className="ms-wrap-row" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {data.eventTypes.map((eventType) => (
-                <span key={eventType} className="ms-chip">
-                  {eventType}
-                </span>
-              ))}
+              {data.eventTypes.map((eventType) => {
+                const meta = WEBHOOK_EVENT_META[eventType as WebhookEventType] as
+                  | { dot: string }
+                  | undefined;
+                return (
+                  <span
+                    key={eventType}
+                    className="ms-chip"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    {meta ? (
+                      <span
+                        className="ms-dot"
+                        style={{ background: meta.dot }}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    {meta ? t(`eventLabel.${eventType}`) : eventType}
+                  </span>
+                );
+              })}
             </div>
           )}
         </MetaItem>

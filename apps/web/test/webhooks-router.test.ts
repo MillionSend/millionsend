@@ -4,7 +4,11 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { WEBHOOK_EVENT_TYPES as WEB_WEBHOOK_EVENT_TYPES } from "@/lib/webhook-events";
+import {
+  WEBHOOK_EVENT_TYPES as WEB_WEBHOOK_EVENT_TYPES,
+  WEBHOOK_EVENT_GROUPS,
+  WEBHOOK_EVENT_META,
+} from "@/lib/webhook-events";
 import { createCaller } from "@/server/routers";
 
 // vitest.config sets SKIP_ENV_VALIDATION (env reads stay live), so setting
@@ -61,6 +65,14 @@ async function insertDelivery(
 
 it("keeps the client event-type mirror in lockstep with core", () => {
   expect([...WEB_WEBHOOK_EVENT_TYPES]).toEqual([...CORE_WEBHOOK_EVENT_TYPES]);
+});
+
+it("annotates every event type in WEBHOOK_EVENT_META with a known group and no orphans", () => {
+  expect(Object.keys(WEBHOOK_EVENT_META).sort()).toEqual([...WEB_WEBHOOK_EVENT_TYPES].sort());
+  for (const meta of Object.values(WEBHOOK_EVENT_META)) {
+    expect(WEBHOOK_EVENT_GROUPS).toContain(meta.group);
+    expect(meta.dot).toMatch(/^var\(--ms-dot-/);
+  }
 });
 
 describe("webhooks.create", () => {

@@ -14,6 +14,20 @@
   },
   "allEvents": "All",
   "eventsCount": "{count, plural, one {# event} other {# events}}",
+  "eventGroup": {
+    "delivery": "Delivery",
+    "engagement": "Engagement",
+    "problems": "Problems"
+  },
+  "eventLabel": {
+    "email.sent": "Email sent",
+    "email.delivered": "Email delivered",
+    "email.delivery_delayed": "Delivery delayed",
+    "email.opened": "Email opened",
+    "email.clicked": "Link clicked",
+    "email.bounced": "Email bounced",
+    "email.complained": "Marked as spam"
+  },
   "status": {
     "enabled": "Enabled",
     "disabled": "Disabled",
@@ -30,6 +44,9 @@
     "descriptionPlaceholder": "Production events",
     "events": "Events",
     "allEvents": "All events",
+    "selectPrompt": "Select events to listen for",
+    "searchEvents": "Search events…",
+    "noEvents": "No matching events.",
     "submit": "Add webhook"
   },
   "reveal": {
