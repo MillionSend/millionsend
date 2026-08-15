@@ -100,37 +100,50 @@ function MetaItem({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
-function TrackingToggle({
-  label,
-  hint,
+/** A pill toggle switch — green when on, the knob slides. Our own control. */
+function Switch({
   checked,
   disabled,
   onChange,
+  ariaLabel,
 }: {
-  label: string;
-  hint: string;
   checked: boolean;
   disabled: boolean;
   onChange: (checked: boolean) => void;
+  ariaLabel: string;
 }) {
   return (
-    <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-        style={{ marginTop: 3 }}
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      style={{
+        flexShrink: 0,
+        width: 40,
+        height: 22,
+        borderRadius: 999,
+        border: "none",
+        padding: 2,
+        cursor: disabled ? "default" : "pointer",
+        background: checked ? "var(--ms-success)" : "var(--ms-faint)",
+        transition: "background 120ms",
+      }}
+    >
+      <span
+        style={{
+          display: "block",
+          width: 18,
+          height: 18,
+          borderRadius: "50%",
+          background: "var(--ms-bone)",
+          transform: checked ? "translateX(18px)" : "translateX(0)",
+          transition: "transform 120ms",
+        }}
       />
-      <span>
-        <span style={{ display: "block", fontSize: 13.5, color: "var(--ms-bone)" }}>{label}</span>
-        {hint ? (
-          <span style={{ display: "block", fontSize: 12, color: "var(--ms-muted)", marginTop: 2 }}>
-            {hint}
-          </span>
-        ) : null}
-      </span>
-    </label>
+    </button>
   );
 }
 
@@ -274,30 +287,27 @@ function ConfigurationPanel({
         title={t("detail.tracking.click")}
         description={t("detail.tracking.clickHint")}
       >
-        <TrackingToggle
-          label={
-            clickTracking ? t("detail.configuration.enabled") : t("detail.configuration.disabled")
-          }
-          hint=""
+        <Switch
           checked={clickTracking}
           disabled={update.isPending}
           onChange={(checked) => update.mutate({ id, clickTracking: checked })}
+          ariaLabel={t("detail.tracking.click")}
         />
       </ConfigSection>
 
       <ConfigSection title={t("detail.tracking.open")} description={t("detail.tracking.openHint")}>
-        <TrackingToggle
-          label={
-            openTracking ? t("detail.configuration.enabled") : t("detail.configuration.disabled")
-          }
-          hint=""
+        <Switch
           checked={openTracking}
           disabled={update.isPending}
           onChange={(checked) => update.mutate({ id, openTracking: checked })}
+          ariaLabel={t("detail.tracking.open")}
         />
       </ConfigSection>
 
-      <ConfigSection title={t("detail.configuration.tls")}>
+      <ConfigSection
+        title={t("detail.configuration.tls")}
+        description={t("detail.configuration.tlsHint")}
+      >
         <Select
           value={tlsMode}
           ariaLabel={t("detail.configuration.tls")}
@@ -311,107 +321,7 @@ function ConfigurationPanel({
             { value: "enforced", label: t("detail.configuration.tlsEnforced") },
           ]}
         />
-        <p
-          style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--ms-muted)", lineHeight: 1.5 }}
-        >
-          {tlsMode === "enforced"
-            ? t("detail.configuration.tlsEnforcedHint")
-            : t("detail.configuration.tlsOpportunisticHint")}
-        </p>
       </ConfigSection>
-    </div>
-  );
-}
-
-/**
- * Master tracking switch shown above the DNS records. It reflects whether
- * app-layer tracking is active for the domain (either toggle on). Turning it
- * off ships raw, untouched links and no open pixel; turning it on enables click
- * tracking — open tracking stays an explicit opt-in in Configuration because it
- * is inaccurate.
- */
-function TrackingMasterToggle({
-  id,
-  openTracking,
-  clickTracking,
-}: {
-  id: string;
-  openTracking: boolean;
-  clickTracking: boolean;
-}) {
-  const t = useTranslations("domains");
-  const trpc = useTRPC();
-  const queryClient = useQueryClient();
-  const active = clickTracking || openTracking;
-
-  const update = useMutation(
-    trpc.domains.updateConfiguration.mutationOptions({
-      onSuccess: () => {
-        void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
-        void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
-      },
-    }),
-  );
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 16,
-        alignItems: "center",
-        justifyContent: "space-between",
-        border: "1px solid var(--ms-line)",
-        borderRadius: 12,
-        padding: "14px 16px",
-        marginBottom: 20,
-        maxWidth: 1000,
-      }}
-    >
-      <div>
-        <div style={{ fontSize: 13.5, color: "var(--ms-bone)", fontWeight: 500 }}>
-          {t("detail.tracking.masterLabel")}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 3, lineHeight: 1.5 }}>
-          {active ? t("detail.tracking.masterOn") : t("detail.tracking.masterOff")}
-        </div>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={active}
-        aria-label={t("detail.tracking.masterLabel")}
-        disabled={update.isPending}
-        onClick={() =>
-          update.mutate(
-            active
-              ? { id, clickTracking: false, openTracking: false }
-              : { id, clickTracking: true },
-          )
-        }
-        style={{
-          flexShrink: 0,
-          width: 40,
-          height: 22,
-          borderRadius: 999,
-          border: "none",
-          padding: 2,
-          cursor: update.isPending ? "default" : "pointer",
-          background: active ? "var(--ms-success)" : "var(--ms-faint)",
-          transition: "background 120ms",
-        }}
-      >
-        <span
-          style={{
-            display: "block",
-            width: 18,
-            height: 18,
-            borderRadius: "50%",
-            background: "var(--ms-bone)",
-            transform: active ? "translateX(18px)" : "translateX(0)",
-            transition: "transform 120ms",
-          }}
-        />
-      </button>
     </div>
   );
 }
@@ -819,14 +729,7 @@ export function DomainDetail({ id }: { id: string }) {
               </button>
             </div>
           ) : (
-            <div style={{ marginTop: status === "verified" ? 0 : 22 }}>
-              {status === "verified" ? (
-                <TrackingMasterToggle
-                  id={id}
-                  openTracking={data.openTracking}
-                  clickTracking={data.clickTracking}
-                />
-              ) : null}
+            <div style={{ marginTop: 22 }}>
               {records.isSuccess ? (
                 <DnsRecordsTable records={rows} domain={data.name} showStatus />
               ) : (

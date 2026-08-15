@@ -101,11 +101,7 @@
       "subdomain": "Tracking subdomain",
       "subdomainHint": "Optional. Serves tracking links from your own domain instead of the default host — add the CNAME shown in Records.",
       "subdomainPlaceholder": "links",
-      "subdomainError": "Use a single lowercase DNS label.",
-      "masterLabel": "Enable tracking",
-      "masterHint": "When on, links are rewritten through your tracking host and a 1×1 open pixel is injected. When off, links ship untouched and no pixel is added.",
-      "masterOn": "Tracking is on — links route through your tracking host.",
-      "masterOff": "Tracking is off — links ship untouched, no open pixel."
+      "subdomainError": "Use a single lowercase DNS label."
     },
     "configuration": {
       "note": "Tracking is applied by MillionSend, not SES. When off, emails ship the raw, untouched links and no open pixel. When on, we rewrite links through your tracking host and inject a 1×1 open pixel, then generate the open and click events ourselves.",
@@ -113,13 +109,10 @@
       "update": "Update",
       "subdomainActive": "Custom subdomain set — add its CNAME from Records.",
       "subdomainNeutral": "Using the default tracking host. Set a subdomain to serve links from your own domain.",
-      "enabled": "Enabled",
-      "disabled": "Disabled",
       "tls": "TLS (Transport Layer Security)",
       "tlsOpportunistic": "Opportunistic",
       "tlsEnforced": "Enforced",
-      "tlsOpportunisticHint": "Attempts TLS and falls back to plaintext if the receiving server doesn't support it.",
-      "tlsEnforcedHint": "Requires TLS — messages to servers that don't support it are not delivered."
+      "tlsHint": "Opportunistic attempts a secure TLS connection and falls back to plaintext if the receiving server doesn't support it. Enforced requires TLS — the message is never sent unencrypted."
     },
     "columns": {
       "type": "Type",
