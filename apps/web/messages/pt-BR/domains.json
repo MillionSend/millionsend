@@ -101,11 +101,7 @@
       "subdomain": "Subdomínio de rastreamento",
       "subdomainHint": "Opcional. Serve os links de rastreamento pelo seu próprio domínio em vez do host padrão — adicione o CNAME mostrado em Registros.",
       "subdomainPlaceholder": "links",
-      "subdomainError": "Use um único rótulo DNS em minúsculas.",
-      "masterLabel": "Ativar rastreamento",
-      "masterHint": "Quando ativado, os links são reescritos pelo seu host de rastreamento e um pixel 1×1 de abertura é injetado. Quando desativado, os links são enviados intactos e nenhum pixel é adicionado.",
-      "masterOn": "Rastreamento ativado — os links passam pelo seu host de rastreamento.",
-      "masterOff": "Rastreamento desativado — os links são enviados intactos, sem pixel de abertura."
+      "subdomainError": "Use um único rótulo DNS em minúsculas."
     },
     "configuration": {
       "note": "O rastreamento é aplicado pelo MillionSend, não pelo SES. Quando desativado, os emails são enviados com os links intactos e sem pixel de abertura. Quando ativado, reescrevemos os links pelo seu host de rastreamento e injetamos um pixel 1×1 de abertura, gerando os eventos de abertura e clique por conta própria.",
@@ -113,13 +109,10 @@
       "update": "Atualizar",
       "subdomainActive": "Subdomínio personalizado definido — adicione o CNAME em Registros.",
       "subdomainNeutral": "Usando o host de rastreamento padrão. Defina um subdomínio para servir os links pelo seu próprio domínio.",
-      "enabled": "Ativado",
-      "disabled": "Desativado",
       "tls": "TLS (Transport Layer Security)",
       "tlsOpportunistic": "Oportunista",
       "tlsEnforced": "Obrigatório",
-      "tlsOpportunisticHint": "Tenta usar TLS e recai para texto puro se o servidor destinatário não oferecer suporte.",
-      "tlsEnforcedHint": "Exige TLS — mensagens para servidores sem suporte não são entregues."
+      "tlsHint": "Oportunista tenta uma conexão TLS segura e recorre a texto puro se o servidor de destino não oferecer suporte. Obrigatório exige TLS — a mensagem nunca é enviada sem criptografia."
     },
     "columns": {
       "type": "Tipo",
