@@ -4,21 +4,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { type BlockDoc, parseBlockDoc } from "@/lib/email-blocks/model";
+import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
 import { useTRPC } from "@/lib/trpc";
 import { ContentPreview } from "./parts";
 
-// Client-only: the block editor pulls in tiptap and touches the DOM, so it
+// Client-only: the Maily editor pulls in tiptap and touches the DOM, so it
 // must not render on the server. The ghost holds the field's height meanwhile.
-const BlockEditor = dynamic(() => import("@/components/block-editor").then((m) => m.BlockEditor), {
+const MailyEditor = dynamic(() => import("@/components/maily-editor").then((m) => m.default), {
   ssr: false,
   loading: () => <Skeleton width="100%" height={340} radius="var(--ms-r-input)" />,
 });
@@ -34,7 +34,7 @@ export interface ComposerInitial {
   replyTo: string | null;
   html: string | null;
   text: string | null;
-  document: BlockDoc | null;
+  document: unknown;
 }
 
 /** Ghost of the composer while an existing draft loads — same field boxes, no shift. */
@@ -87,7 +87,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const [replyTo, setReplyTo] = useState(initial?.replyTo ?? "");
   const [html, setHtml] = useState(initial?.html ?? "");
   const [text, setText] = useState(initial?.text ?? "");
-  const [document, setDocument] = useState<BlockDoc | null>(initial?.document ?? null);
+  const [document, setDocument] = useState<unknown>(initial?.document ?? null);
   const [tab, setTab] = useState<"edit" | "preview">("edit");
   const [guardOpen, setGuardOpen] = useState(false);
   const [schedule, setSchedule] = useState("");
@@ -113,6 +113,26 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     [properties.data],
   );
 
+  // Send html is rendered server-side (Maily needs juice), so a design-mode
+  // edit cannot emit it — this debounced render both feeds the preview and
+  // supplies the html we persist. Code/legacy mode carries its raw html instead.
+  const [debouncedDoc, setDebouncedDoc] = useState<unknown>(document);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedDoc(document), 350);
+    return () => clearTimeout(id);
+  }, [document]);
+  const rendered = useQuery(
+    trpc.email.render.queryOptions(
+      { document: debouncedDoc },
+      { enabled: isMailyDoc(debouncedDoc) },
+    ),
+  );
+  useEffect(() => {
+    if (!rendered.data) return;
+    setHtml(rendered.data.html);
+    setText(rendered.data.text);
+  }, [rendered.data]);
+
   /** Copies the template's content in as a starting snapshot — no link back;
    * later template edits change nothing here. */
   async function applyTemplate(id: string) {
@@ -122,7 +142,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     if (template.subject) setSubject(template.subject);
     setHtml(template.html);
     setText(template.text ?? "");
-    setDocument(parseBlockDoc(template.document));
+    setDocument(template.document);
   }
   const recipientCount = useQuery(
     trpc.broadcasts.recipientCount.queryOptions(
@@ -447,13 +467,17 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
             </div>
           </div>
           {tab === "edit" ? (
-            <BlockEditor
+            <MailyEditor
               key={templateId}
               value={{ document, html }}
               onChange={(v) => {
                 setDocument(v.document);
-                setHtml(v.html);
-                setText(v.text);
+                // A null document is the code/legacy escape hatch: its raw html
+                // is authoritative. A design edit's html comes from the render.
+                if (v.document === null) {
+                  setHtml(v.html);
+                  setText(v.text);
+                }
               }}
               mergeFields={mergeFields}
             />

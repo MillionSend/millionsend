@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { parseBlockDoc } from "@/lib/email-blocks/model";
 import { useTRPC } from "@/lib/trpc";
 import { EditorSkeleton, TemplateEditor } from "../../editor";
 
@@ -38,7 +37,7 @@ export default function EditTemplatePage() {
         subject: template.subject,
         html: template.html,
         text: template.text,
-        document: parseBlockDoc(template.document),
+        document: template.document,
       }}
     />
   );

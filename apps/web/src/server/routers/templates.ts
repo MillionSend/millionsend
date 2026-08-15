@@ -3,7 +3,8 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { blockDocSchema } from "@/lib/email-blocks/model";
+import { mailyDocumentSchema } from "@/lib/email-doc";
+import { resolveEditorSave } from "../email-content";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
 
@@ -11,8 +12,8 @@ const nameSchema = z.string().trim().min(1).max(200);
 // "" clears the field — stored as null, never as an empty string.
 const subjectSchema = z.string().trim().max(998);
 const bodySchema = z.string().max(500_000);
-// Block-editor source of truth; null clears it back to a legacy raw-HTML row.
-const documentSchema = blockDocSchema.nullable();
+// Maily editor source of truth; null clears it back to a legacy raw-HTML row.
+const documentSchema = mailyDocumentSchema.nullable();
 
 type TemplateRow = typeof schema.templates.$inferSelect;
 
@@ -75,16 +76,17 @@ export const templatesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const saved = await resolveEditorSave(input);
       const t = schema.templates;
       const [row] = await ctx.db
         .insert(t)
         .values({
           teamId: ctx.teamId,
-          name: input.name,
-          subject: input.subject || null,
-          html: input.html,
-          text: input.text || null,
-          document: input.document ?? null,
+          name: saved.name,
+          subject: saved.subject || null,
+          html: saved.html,
+          text: saved.text || null,
+          document: saved.document ?? null,
         })
         .returning({ id: t.id });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -104,15 +106,16 @@ export const templatesRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await getOwnTemplate(ctx, input.id);
+      const saved = await resolveEditorSave(input);
       const t = schema.templates;
       await ctx.db
         .update(t)
         .set({
-          ...(input.name !== undefined ? { name: input.name } : {}),
-          ...(input.subject !== undefined ? { subject: input.subject || null } : {}),
-          ...(input.html !== undefined ? { html: input.html } : {}),
-          ...(input.text !== undefined ? { text: input.text || null } : {}),
-          ...(input.document !== undefined ? { document: input.document } : {}),
+          ...(saved.name !== undefined ? { name: saved.name } : {}),
+          ...(saved.subject !== undefined ? { subject: saved.subject || null } : {}),
+          ...(saved.html !== undefined ? { html: saved.html } : {}),
+          ...(saved.text !== undefined ? { text: saved.text || null } : {}),
+          ...(saved.document !== undefined ? { document: saved.document } : {}),
           updatedAt: new Date(),
         })
         .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)));

@@ -8,14 +8,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import type { BlockDoc } from "@/lib/email-blocks/model";
+import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
 import { useTRPC } from "@/lib/trpc";
 import { ContentPreview } from "../broadcasts/parts";
 
-// Client-only: the block editor pulls in tiptap and touches the DOM, so it
+// Client-only: the Maily editor pulls in tiptap and touches the DOM, so it
 // must not render on the server. The ghost holds the field's height meanwhile.
-const BlockEditor = dynamic(() => import("@/components/block-editor").then((m) => m.BlockEditor), {
+const MailyEditor = dynamic(() => import("@/components/maily-editor").then((m) => m.default), {
   ssr: false,
   loading: () => <Skeleton width="100%" height={340} radius="var(--ms-r-input)" />,
 });
@@ -26,7 +26,7 @@ export interface EditorInitial {
   subject: string | null;
   html: string;
   text: string | null;
-  document: BlockDoc | null;
+  document: unknown;
 }
 
 /** Ghost of the editor while an existing template loads — same field boxes, no shift. */
@@ -69,7 +69,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   const [subject, setSubject] = useState(initial?.subject ?? "");
   const [html, setHtml] = useState(initial?.html ?? "");
   const [text, setText] = useState(initial?.text ?? "");
-  const [document, setDocument] = useState<BlockDoc | null>(initial?.document ?? null);
+  const [document, setDocument] = useState<unknown>(initial?.document ?? null);
   const [tab, setTab] = useState<"edit" | "preview">("edit");
 
   // Merge-field picker options and preview sample values both derive from the
@@ -83,6 +83,26 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
     () => Object.fromEntries((properties.data ?? []).map((p) => [p.key, p.sampleValue])),
     [properties.data],
   );
+
+  // Send html is rendered server-side (Maily needs juice), so a design-mode
+  // edit cannot emit it — this debounced render both feeds the preview and
+  // supplies the html we persist. Code/legacy mode carries its raw html instead.
+  const [debouncedDoc, setDebouncedDoc] = useState<unknown>(document);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedDoc(document), 350);
+    return () => clearTimeout(id);
+  }, [document]);
+  const rendered = useQuery(
+    trpc.email.render.queryOptions(
+      { document: debouncedDoc },
+      { enabled: isMailyDoc(debouncedDoc) },
+    ),
+  );
+  useEffect(() => {
+    if (!rendered.data) return;
+    setHtml(rendered.data.html);
+    setText(rendered.data.text);
+  }, [rendered.data]);
 
   const createMutation = useMutation(trpc.templates.create.mutationOptions());
   const updateMutation = useMutation(trpc.templates.update.mutationOptions());
@@ -239,12 +259,16 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
             </div>
           </div>
           {tab === "edit" ? (
-            <BlockEditor
+            <MailyEditor
               value={{ document, html }}
               onChange={(v) => {
                 setDocument(v.document);
-                setHtml(v.html);
-                setText(v.text);
+                // A null document is the code/legacy escape hatch: its raw html
+                // is authoritative. A design edit's html comes from the render.
+                if (v.document === null) {
+                  setHtml(v.html);
+                  setText(v.text);
+                }
               }}
               mergeFields={mergeFields}
             />
