@@ -120,6 +120,27 @@ describe("api request logging", () => {
     expect(rows[0]?.statusCode).toBe(200);
   });
 
+  it("redacts content fields in logged RESPONSE bodies (GET /emails/{id})", async () => {
+    await db.delete(schema.apiRequests);
+    const res = await post({ ...validBody, to: ["readback@example.com"] });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+
+    const read = await app.request(`/emails/${id}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(read.status).toBe(200);
+    // The live response still serves the decrypted content...
+    expect(await read.json()).toMatchObject({ html: "<p>secret</p>", text: "secret" });
+
+    // ...but the stored log copy must not become a plaintext copy of the
+    // encrypted body.
+    const rows = await waitForRows(2);
+    const logged = rows.find((r) => r.method === "GET");
+    expect(logged?.responseBody).toMatchObject({ html: "[redacted]", text: "[redacted]" });
+    expect(JSON.stringify(logged?.responseBody)).not.toContain("secret");
+  });
+
   it("stores a truncation marker instead of oversized bodies", async () => {
     await db.delete(schema.apiRequests);
     const res = await post({ ...validBody, subject: "x".repeat(20_000) });

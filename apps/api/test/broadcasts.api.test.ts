@@ -72,6 +72,7 @@ beforeAll(async () => {
     isCloud: true,
     enqueueEmailSend: async () => {},
     enqueueBroadcastSend: async () => {},
+    appBaseUrl: "https://app.example.test",
   });
 });
 
@@ -119,10 +120,70 @@ describe("broadcasts API", () => {
     expect(await sent.json()).toMatchObject({ statusCode: 422, name: "validation_error" });
   });
 
-  it("cancel of a draft is invalid_state", async () => {
+  it("cancel of a draft is a 400 with a RESEND_ERROR_CODE_KEY name", async () => {
     const res = await call(tokenA, "POST", `/broadcasts/${broadcastId}/cancel`);
     expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ name: "invalid_state" });
+    expect(await res.json()).toMatchObject({ name: "invalid_parameter" });
+  });
+
+  it("rejects a multi-mailbox From on create and update", async () => {
+    const spoof = "Acme <evil@evil.test> <ok@acme.dev>";
+    const created = await call(tokenA, "POST", "/broadcasts", { ...draftBody(), from: spoof });
+    expect(created.status).toBe(422);
+    expect(await created.json()).toMatchObject({ name: "validation_error" });
+
+    const updated = await call(tokenA, "PATCH", `/broadcasts/${broadcastId}`, { from: spoof });
+    expect(updated.status).toBe(422);
+  });
+
+  it("send rejects a stored multi-mailbox From (pre-validation rows)", async () => {
+    // Bypasses request validation the way a legacy row would.
+    const [row] = await db
+      .insert(schema.broadcasts)
+      .values({
+        teamId: teamA,
+        audienceId,
+        from: "Acme <evil@evil.test> <ok@acme.dev>",
+        subject: "s",
+        html: "<p>hi</p>",
+      })
+      .returning({ id: schema.broadcasts.id });
+    const sent = await call(tokenA, "POST", `/broadcasts/${row?.id}/send`, {});
+    expect(sent.status).toBe(422);
+    expect(await sent.json()).toMatchObject({
+      name: "validation_error",
+      message: "from must be a single address",
+    });
+  });
+
+  it("send 422s when APP_BASE_URL is not configured", async () => {
+    const bare = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: true,
+      enqueueEmailSend: async () => {},
+      enqueueBroadcastSend: async () => {},
+    });
+    const created = await call(tokenA, "POST", "/broadcasts", draftBody());
+    const id = (await json(created)).id;
+    const sent = await bare.request(`/broadcasts/${id}/send`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${tokenA}`, "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(sent.status).toBe(422);
+    expect(await sent.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringContaining("APP_BASE_URL"),
+    });
+  });
+
+  it("honors limit and has_more on the list", async () => {
+    const res = await call(tokenA, "GET", "/broadcasts?limit=1");
+    expect(res.status).toBe(200);
+    const body = (await json(res)) as unknown as { data: unknown[]; has_more: boolean };
+    expect(body.data).toHaveLength(1);
+    expect(body.has_more).toBe(true);
   });
 
   it("isolates tenants: team B cannot see or touch team A broadcasts", async () => {
@@ -160,11 +221,12 @@ describe("broadcasts API", () => {
     expect(res.status).toBe(404);
   });
 
-  it("send → scheduled; update and delete then 400; cancel → canceled", async () => {
+  it("send → queued on the wire; update and delete then 400; cancel → canceled", async () => {
     const sent = await call(tokenA, "POST", `/broadcasts/${broadcastId}/send`, {});
     expect(sent.status).toBe(200);
     const got = await call(tokenA, "GET", `/broadcasts/${broadcastId}`);
-    expect(await got.json()).toMatchObject({ status: "scheduled" });
+    // Internally scheduled; the SDK's status union has no 'scheduled'.
+    expect(await got.json()).toMatchObject({ status: "queued" });
 
     expect(
       (await call(tokenA, "PATCH", `/broadcasts/${broadcastId}`, { subject: "late" })).status,

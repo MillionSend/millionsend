@@ -1,10 +1,12 @@
 import {
   buildUnsubscribeHeaders,
   encryptEmailBody,
-  extractAddrSpec,
   findSuppressed,
   type Keyring,
   makeUnsubscribeToken,
+  PLAN_DAILY_LIMIT,
+  parseSingleSender,
+  reserveDailyQuota,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -24,6 +26,8 @@ export interface BroadcastDeps {
   unsubscribeSecretKey: Buffer;
   /** Public base URL hosting /unsubscribe/<token>; absent → fan-out refuses. */
   appBaseUrl: string | undefined;
+  /** Cloud enforces plan quotas; self-host sends without caps. */
+  isCloud: boolean;
   enqueueEmailSend: (emailId: string) => Promise<void>;
   /** Re-enqueue a not-yet-due scheduled broadcast at its due time. */
   reschedule?: ((broadcastId: string, at: Date) => Promise<void>) | undefined;
@@ -88,8 +92,8 @@ export async function sendBroadcast(
     .from(schema.broadcasts)
     .where(eq(schema.broadcasts.id, payload.broadcastId));
   // Only scheduled/sending proceed: draft, canceled, and sent are no-ops no
-  // matter how the job arrived — this re-check is what makes a cancel racing
-  // the fan-out safe.
+  // matter how the job arrived. (The sending-claim CAS below re-checks this
+  // atomically — that, not this read, is what makes a racing cancel safe.)
   if (!broadcast || (broadcast.status !== "scheduled" && broadcast.status !== "sending")) {
     return "skipped";
   }
@@ -120,8 +124,17 @@ export async function sendBroadcast(
   // Resolve the sender's verified domain (region + configuration set for the
   // per-email send). Verified at schedule time; a loud failure here means it
   // was un-verified since.
-  const addr = extractAddrSpec(broadcast.from);
-  const fromDomain = addr.slice(addr.lastIndexOf("@") + 1).toLowerCase();
+  // SECURITY: broadcast.from is emitted verbatim into every fanned-out email,
+  // so the domain checked here must come from the same strict single-mailbox
+  // parser the accept paths use — a lenient extractor could verify one address
+  // of an ambiguous legacy value while another gets emitted.
+  const sender = parseSingleSender(broadcast.from);
+  if (!sender) {
+    throw new Error(
+      `broadcast ${broadcast.id}: from is not a single unambiguous mailbox; refusing to send`,
+    );
+  }
+  const fromDomain = sender.domain;
   const [domain] = await db
     .select({ id: schema.domains.id, status: schema.domains.status })
     .from(schema.domains)
@@ -130,7 +143,7 @@ export async function sendBroadcast(
     throw new Error(`broadcast ${broadcast.id}: sender domain ${fromDomain} is not verified`);
   }
 
-  await db
+  const [claimed] = await db
     .update(schema.broadcasts)
     .set({ status: "sending", updatedAt: new Date() })
     .where(
@@ -138,7 +151,19 @@ export async function sendBroadcast(
         eq(schema.broadcasts.id, broadcast.id),
         inArray(schema.broadcasts.status, ["scheduled", "sending"]),
       ),
-    );
+    )
+    .returning({ id: schema.broadcasts.id });
+  // This CAS is the authoritative gate, not the SELECT above: a cancel
+  // landing between the two flips the status, the CAS matches zero rows,
+  // and fanning out anyway would mail a canceled audience.
+  if (!claimed) return "skipped";
+
+  const [team] = await db
+    .select({ plan: schema.teams.plan })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, broadcast.teamId));
+  if (!team) throw new Error(`broadcast ${broadcast.id}: team ${broadcast.teamId} not found`);
+  const dailyLimit = deps.isCloud ? PLAN_DAILY_LIMIT[team.plan] : null;
 
   const replyTo = broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null;
   const batchSize = deps.batchSize ?? 100;
@@ -194,33 +219,56 @@ export async function sendBroadcast(
         },
         deps.keyring,
       );
-      const [row] = await db
-        .insert(schema.emails)
-        .values({
+      // Quota reservation and email insert commit atomically (the quota
+      // contract), same as the API accept path — a broadcast must not
+      // bypass the plan's daily cap.
+      const accepted = await db.transaction(async (tx) => {
+        // Insert before reserving: a conflict means a previous run already
+        // fanned this contact out (and reserved quota for it), so a re-run
+        // must not burn quota again.
+        const [row] = await tx
+          .insert(schema.emails)
+          .values({
+            teamId: broadcast.teamId,
+            domainId: domain.id,
+            broadcastId: broadcast.id,
+            contactId: contact.id,
+            from: broadcast.from,
+            to: [contact.email],
+            replyTo,
+            subject: broadcast.subject,
+            latestStatus: "queued",
+            bodyCiphertext: encrypted.ciphertext,
+            bodyIv: encrypted.iv,
+            bodyWrappedDek: encrypted.wrappedDek,
+            bodyKeyVersion: encrypted.keyVersion,
+          })
+          .onConflictDoNothing({
+            target: [schema.emails.broadcastId, schema.emails.contactId],
+            where: sql`${schema.emails.broadcastId} is not null`,
+          })
+          .returning({ id: schema.emails.id });
+        if (!row) return null;
+        const quota = await reserveDailyQuota(tx as unknown as Db, {
           teamId: broadcast.teamId,
-          domainId: domain.id,
-          broadcastId: broadcast.id,
-          contactId: contact.id,
-          from: broadcast.from,
-          to: [contact.email],
-          replyTo,
-          subject: broadcast.subject,
-          latestStatus: "queued",
-          bodyCiphertext: encrypted.ciphertext,
-          bodyIv: encrypted.iv,
-          bodyWrappedDek: encrypted.wrappedDek,
-          bodyKeyVersion: encrypted.keyVersion,
-        })
-        .onConflictDoNothing({
-          target: [schema.emails.broadcastId, schema.emails.contactId],
-          where: sql`${schema.emails.broadcastId} is not null`,
-        })
-        .returning({ id: schema.emails.id });
-      // Conflict → this contact was fanned out by a previous run; its job is
+          count: 1,
+          limit: dailyLimit,
+        });
+        if (quota.reserved) return { id: row.id, parked: false };
+        // Over the plan cap: park as queued_quota — accepted but not
+        // enqueued; the daily quota drain moves it to queued after the UTC
+        // rollover.
+        await tx
+          .update(schema.emails)
+          .set({ latestStatus: "queued_quota" })
+          .where(eq(schema.emails.id, row.id));
+        return { id: row.id, parked: true };
+      });
+      // null → this contact was fanned out by a previous run; its job is
       // already queued (or the sends.reconcile sweep recovers it).
-      if (row) {
+      if (accepted && !accepted.parked) {
         try {
-          await deps.enqueueEmailSend(row.id);
+          await deps.enqueueEmailSend(accepted.id);
         } catch (err) {
           console.error("email.send enqueue failed; reconcile sweep will recover", err);
         }

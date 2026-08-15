@@ -183,6 +183,29 @@ describe("audience.contacts.addMany", () => {
     expect((await caller.audience.audiences.get({ id: audienceId })).contacts).toBe(3);
   });
 
+  it("survives a concurrent import racing the same address", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+
+    // Both imports carry the same address (plus an in-batch dupe); neither
+    // may 500 on the unique index — the loser counts it as skipped.
+    const [a, b] = await Promise.all([
+      caller.audience.contacts.addMany({
+        audienceId,
+        rows: [{ email: "raced@example.com" }, { email: "RACED@example.com" }],
+      }),
+      caller.audience.contacts.addMany({
+        audienceId,
+        rows: [{ email: "Raced@example.com" }],
+      }),
+    ]);
+    expect(a.created + b.created).toBe(1);
+    expect(a.created + a.skipped).toBe(2);
+    expect(b.created + b.skipped).toBe(1);
+    expect((await caller.audience.audiences.get({ id: audienceId })).contacts).toBe(1);
+  });
+
   it("caps a batch at 1000 rows", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);

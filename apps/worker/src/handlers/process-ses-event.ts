@@ -94,78 +94,101 @@ export async function processSesEvent(
 
   // The event insert doubles as the idempotency gate: SNS delivers
   // at-least-once and queue dedupe cannot cover redelivery after the job
-  // completed, so a duplicate SNS MessageId stops here — before counters,
-  // which are the one non-idempotent step below.
-  const inserted = await db
-    .insert(schema.emailEvents)
-    .values({
-      emailId: email.id,
-      type: eventType,
-      occurredAt: new Date(event.occurredAt),
-      snsMessageId: opts.snsMessageId ?? null,
-      data: event.data,
-    })
-    .onConflictDoNothing()
-    .returning({ id: schema.emailEvents.id });
-  if (inserted.length === 0) return;
-
-  await applyStatusCas(db, email.id, status);
-
-  // Fan the now-recorded event out to the team's webhook endpoints. The
-  // event insert above is the single idempotency gate, so this runs at most
-  // once per SES event. "sent" is excluded here: the send worker already
-  // fires email.sent at claim time, and the SES Send event would duplicate it.
-  const webhookType = `email.${eventType}`;
-  if (opts.enqueueWebhookDelivery && eventType !== "sent" && isWebhookEventType(webhookType)) {
-    await enqueueWebhookDeliveries(db, {
-      teamId: email.teamId,
-      email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
-      type: webhookType,
-      occurredAt: new Date(event.occurredAt),
-      extras: webhookExtras(event),
-      enqueue: opts.enqueueWebhookDelivery,
-    });
-  }
-
-  const day = utcDay(new Date(event.occurredAt));
-  const counter =
-    event.eventType === "Delivery"
-      ? "delivered"
-      : event.eventType === "Bounce"
-        ? "bounced"
-        : event.eventType === "Complaint"
-          ? "complained"
-          : null;
-  if (counter) {
-    await db.execute(sql`
-      insert into ${schema.usageCounters} (team_id, day, ${sql.raw(counter)})
-      values (${email.teamId}, ${day}, 1)
-      on conflict (team_id, day) do update
-        set ${sql.raw(counter)} = ${schema.usageCounters}.${sql.raw(counter)} + 1
-    `);
-  }
-
-  // Auto-suppression: permanent bounces and complaints, scoped to the
-  // owning team only.
-  const toSuppress =
-    event.eventType === "Bounce" && event.bounce?.bounceType === "Permanent"
-      ? event.bounce.recipients.map((r) => ({ email: r, reason: "hard_bounce" as const }))
-      : event.eventType === "Complaint"
-        ? (event.complaint?.recipients ?? []).map((r) => ({
-            email: r,
-            reason: "complaint" as const,
-          }))
-        : [];
-  for (const s of toSuppress) {
-    await db
-      .insert(schema.suppressions)
+  // completed, so a duplicate SNS MessageId stops at the insert. The gate
+  // and every effect it guards (status CAS, counters, suppressions, webhook
+  // delivery rows) commit in ONE transaction — a gate committed without its
+  // effects would make a retry early-return and permanently drop them,
+  // losing e.g. a hard-bounce suppression.
+  const deliveryIds: string[] = [];
+  const applied = await db.transaction(async (tx) => {
+    const txDb = tx as unknown as Db;
+    const inserted = await txDb
+      .insert(schema.emailEvents)
       .values({
-        teamId: email.teamId,
-        email: s.email,
-        emailHash: hashRecipient(s.email),
-        reason: s.reason,
-        sourceEmailId: email.id,
+        emailId: email.id,
+        type: eventType,
+        occurredAt: new Date(event.occurredAt),
+        snsMessageId: opts.snsMessageId ?? null,
+        data: event.data,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ id: schema.emailEvents.id });
+    if (inserted.length === 0) return false;
+
+    await applyStatusCas(txDb, email.id, status);
+
+    // Fan the now-recorded event out to the team's webhook endpoints —
+    // delivery rows join the transaction; the queue enqueue happens after
+    // commit (a lost job is recovered by the webhook reconcile sweep).
+    // "sent" is excluded here: the send worker already fires email.sent at
+    // claim time, and the SES Send event would duplicate it.
+    const webhookType = `email.${eventType}`;
+    if (opts.enqueueWebhookDelivery && eventType !== "sent" && isWebhookEventType(webhookType)) {
+      await enqueueWebhookDeliveries(txDb, {
+        teamId: email.teamId,
+        email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
+        type: webhookType,
+        occurredAt: new Date(event.occurredAt),
+        extras: webhookExtras(event),
+        enqueue: async (deliveryId) => {
+          deliveryIds.push(deliveryId);
+        },
+      });
+    }
+
+    const day = utcDay(new Date(event.occurredAt));
+    const counter =
+      event.eventType === "Delivery"
+        ? "delivered"
+        : event.eventType === "Bounce"
+          ? "bounced"
+          : event.eventType === "Complaint"
+            ? "complained"
+            : null;
+    if (counter) {
+      await txDb.execute(sql`
+        insert into ${schema.usageCounters} (team_id, day, ${sql.raw(counter)})
+        values (${email.teamId}, ${day}, 1)
+        on conflict (team_id, day) do update
+          set ${sql.raw(counter)} = ${schema.usageCounters}.${sql.raw(counter)} + 1
+      `);
+    }
+
+    // Auto-suppression: permanent bounces and complaints, scoped to the
+    // owning team only.
+    const toSuppress =
+      event.eventType === "Bounce" && event.bounce?.bounceType === "Permanent"
+        ? event.bounce.recipients.map((r) => ({ email: r, reason: "hard_bounce" as const }))
+        : event.eventType === "Complaint"
+          ? (event.complaint?.recipients ?? []).map((r) => ({
+              email: r,
+              reason: "complaint" as const,
+            }))
+          : [];
+    for (const s of toSuppress) {
+      await txDb
+        .insert(schema.suppressions)
+        .values({
+          teamId: email.teamId,
+          email: s.email,
+          emailHash: hashRecipient(s.email),
+          reason: s.reason,
+          sourceEmailId: email.id,
+        })
+        .onConflictDoNothing();
+    }
+    return true;
+  });
+  if (!applied) return;
+
+  const enqueueDelivery = opts.enqueueWebhookDelivery;
+  if (enqueueDelivery) {
+    for (const deliveryId of deliveryIds) {
+      try {
+        await enqueueDelivery(deliveryId);
+      } catch (err) {
+        console.error("webhook.deliver enqueue failed; reconcile sweep will recover", err);
+      }
+    }
   }
 }

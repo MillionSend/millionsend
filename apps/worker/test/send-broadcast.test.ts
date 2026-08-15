@@ -4,6 +4,7 @@ import {
   deriveUnsubscribeKey,
   EnvKeyring,
   hashRecipient,
+  utcDay,
   verifyUnsubscribeToken,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -63,6 +64,7 @@ function makeDeps(overrides: Partial<BroadcastDeps> = {}): {
       keyring,
       unsubscribeSecretKey: secretKey,
       appBaseUrl: BASE_URL,
+      isCloud: false,
       enqueueEmailSend: async (emailId) => {
         enqueued.push(emailId);
       },
@@ -231,6 +233,111 @@ it("cancel before fan-out sends nothing", async () => {
   expect(enqueued).toHaveLength(0);
 });
 
+/**
+ * Wraps db so the given hook runs (and commits) just before the FIRST
+ * db.update(...) executes — deterministically reproducing a write landing in
+ * the gap between sendBroadcast's status read and its sending-claim CAS.
+ */
+function interposeBeforeFirstUpdate(realDb: Db, hook: () => Promise<void>): Db {
+  type AnyFn = (...args: unknown[]) => unknown;
+  let armed = true;
+  const wrapChain = (target: object): object =>
+    new Proxy(target, {
+      get(t, prop) {
+        const value = (t as Record<PropertyKey, unknown>)[prop];
+        if (prop === "then" && typeof value === "function") {
+          return (onOk: AnyFn, onErr: AnyFn) =>
+            hook().then(() => (value as AnyFn).call(t, onOk, onErr), onErr);
+        }
+        if (typeof value === "function") {
+          return (...args: unknown[]) => wrapChain((value as AnyFn).apply(t, args) as object);
+        }
+        return value;
+      },
+    });
+  return new Proxy(realDb as object, {
+    get(t, prop) {
+      const value = (t as Record<PropertyKey, unknown>)[prop];
+      if (prop === "update" && armed) {
+        return (...args: unknown[]) => {
+          armed = false;
+          return wrapChain((value as AnyFn).apply(t, args) as object);
+        };
+      }
+      return typeof value === "function" ? (value as AnyFn).bind(t) : value;
+    },
+  }) as Db;
+}
+
+it("a cancel racing the sending claim fans out nothing", async () => {
+  const broadcastId = await insertBroadcast();
+  const { deps, enqueued } = makeDeps();
+  // The cancel lands after sendBroadcast's status SELECT but before its
+  // claim UPDATE — the claim must lose and the fan-out must not run.
+  const racingDb = interposeBeforeFirstUpdate(db, async () => {
+    await db
+      .update(schema.broadcasts)
+      .set({ status: "canceled", updatedAt: new Date() })
+      .where(eq(schema.broadcasts.id, broadcastId));
+  });
+
+  expect(await sendBroadcast(racingDb, deps, { broadcastId })).toBe("skipped");
+  expect(await emailsOf(broadcastId)).toHaveLength(0);
+  expect(enqueued).toHaveLength(0);
+  const [broadcast] = await db
+    .select()
+    .from(schema.broadcasts)
+    .where(eq(schema.broadcasts.id, broadcastId));
+  expect(broadcast?.status).toBe("canceled");
+});
+
+it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", async () => {
+  const qTeamId = await createTeam(db, "bc-quota");
+  await db.insert(schema.domains).values({
+    teamId: qTeamId,
+    name: "quota.dev",
+    region: "us-east-1",
+    status: "verified",
+    verifiedAt: new Date(),
+    sesConfigurationSet: "ms-set",
+  });
+  const [aud] = await db
+    .insert(schema.audiences)
+    .values({ teamId: qTeamId, name: "q" })
+    .returning({ id: schema.audiences.id });
+  if (!aud) throw new Error("audience insert failed");
+  await db.insert(schema.contacts).values([
+    { audienceId: aud.id, teamId: qTeamId, email: "q1@example.com" },
+    { audienceId: aud.id, teamId: qTeamId, email: "q2@example.com" },
+    { audienceId: aud.id, teamId: qTeamId, email: "q3@example.com" },
+  ]);
+  // Free plan cap is 100/day; 98 already accepted → headroom for 2 of 3.
+  await db.insert(schema.usageCounters).values({ teamId: qTeamId, day: utcDay(), accepted: 98 });
+  const broadcastId = await insertBroadcast({
+    teamId: qTeamId,
+    audienceId: aud.id,
+    from: "Acme <hi@quota.dev>",
+  });
+  const { deps, enqueued } = makeDeps({ isCloud: true });
+
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+
+  const rows = await emailsOf(broadcastId);
+  expect(rows).toHaveLength(3);
+  const queued = rows.filter((r) => r.latestStatus === "queued");
+  const parked = rows.filter((r) => r.latestStatus === "queued_quota");
+  expect(queued).toHaveLength(2);
+  expect(parked).toHaveLength(1);
+  // Only accepted rows get an email.send job; parked ones wait for the
+  // daily quota drain.
+  expect(enqueued.sort()).toEqual(queued.map((r) => r.id).sort());
+  const [counter] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, qTeamId));
+  expect(counter?.accepted).toBe(100);
+});
+
 it("defers a not-yet-due scheduled broadcast back to the queue", async () => {
   const due = new Date(Date.now() + 60 * 60 * 1000);
   const broadcastId = await insertBroadcast({ scheduledAt: due });
@@ -243,6 +350,19 @@ it("defers a not-yet-due scheduled broadcast back to the queue", async () => {
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("deferred");
   expect(rescheduled).toEqual([{ id: broadcastId, at: due }]);
   expect(await emailsOf(broadcastId)).toHaveLength(0);
+});
+
+it("a stored multi-mailbox from fails the fan-out loudly, sending nothing", async () => {
+  // Legacy rows predate strict from validation: the last angle-addr's domain
+  // (acme.dev) is verified, but the value is ambiguous — a lenient extractor
+  // would verify one address while another could be emitted.
+  const broadcastId = await insertBroadcast({
+    from: "Acme <evil@other.test> <hi@acme.dev>",
+  });
+  const { deps, enqueued } = makeDeps();
+  await expect(sendBroadcast(db, deps, { broadcastId })).rejects.toThrow(/single unambiguous/);
+  expect(await emailsOf(broadcastId)).toHaveLength(0);
+  expect(enqueued).toHaveLength(0);
 });
 
 it("missing APP_BASE_URL fails the fan-out loudly, sending nothing", async () => {
