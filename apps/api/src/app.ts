@@ -1,18 +1,17 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  type ApiKeyAuth,
+  acceptEmail,
+  authenticateApiKey,
   beginIdempotent,
   canonicalBodyHash,
   completeIdempotent,
   decryptEmailBody,
-  encryptEmailBody,
-  extractAddrSpec,
   extractTokenPrefix,
-  findSuppressed,
   type Keyring,
-  PLAN_DAILY_LIMIT,
   releaseIdempotent,
-  reserveDailyQuota,
-  verifyApiKey,
+  senderDomain,
+  verifySenderDomain,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -25,7 +24,7 @@ import {
   snsMessageSchema,
   verifySnsMessage,
 } from "@millionsend/ses";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { createMiddleware } from "hono/factory";
 import {
   audienceResponseSchema,
@@ -83,15 +82,7 @@ export interface ApiDeps {
   sns?: SnsIngestDeps | undefined;
 }
 
-interface AuthContext {
-  teamId: string;
-  plan: (typeof schema.planEnum.enumValues)[number];
-  apiKeyId: string;
-}
-
-type Env = { Variables: { auth: AuthContext } };
-
-const LAST_USED_STAMP_INTERVAL_MS = 60_000;
+type Env = { Variables: { auth: ApiKeyAuth } };
 
 class IdempotencyTakeoverError extends Error {
   constructor() {
@@ -101,12 +92,6 @@ class IdempotencyTakeoverError extends Error {
 
 function errorBody(status: number, name: string, message: string) {
   return { statusCode: status, name, message };
-}
-
-function senderDomain(from: string): string | null {
-  const addr = extractAddrSpec(from);
-  const at = addr.lastIndexOf("@");
-  return at > 0 ? addr.slice(at + 1).toLowerCase() : null;
 }
 
 async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
@@ -926,33 +911,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     if (!token || !prefix) {
       return c.json(errorBody(401, "missing_api_key", "Missing or malformed API key"), 401);
     }
-    const candidates = await deps.db
-      .select({
-        id: schema.apiKeys.id,
-        keyHash: schema.apiKeys.keyHash,
-        teamId: schema.apiKeys.teamId,
-        lastUsedAt: schema.apiKeys.lastUsedAt,
-        plan: schema.teams.plan,
-      })
-      .from(schema.apiKeys)
-      .innerJoin(schema.teams, eq(schema.apiKeys.teamId, schema.teams.id))
-      .where(and(eq(schema.apiKeys.tokenPrefix, prefix), isNull(schema.apiKeys.revokedAt)));
-    const match = candidates.find((k) => verifyApiKey(token, k.keyHash));
-    if (!match) {
+    const auth = await authenticateApiKey(deps.db, token);
+    if (!auth) {
       return c.json(errorBody(401, "invalid_api_key", "API key is invalid"), 401);
     }
-    c.set("auth", { teamId: match.teamId, plan: match.plan, apiKeyId: match.id });
-    const now = Date.now();
-    if (!match.lastUsedAt || now - match.lastUsedAt.getTime() > LAST_USED_STAMP_INTERVAL_MS) {
-      deps.db
-        .update(schema.apiKeys)
-        .set({ lastUsedAt: new Date(now) })
-        .where(eq(schema.apiKeys.id, match.id))
-        .then(
-          () => undefined,
-          () => undefined,
-        );
-    }
+    c.set("auth", auth);
     await next();
   });
   app.use("/emails", requireApiKey);
@@ -1003,23 +966,13 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       return c.json(errorBody(422, "validation_error", "Attachments are not yet supported"), 422);
     }
 
-    // Sender domain must be one of the team's verified domains — otherwise
-    // any key could queue mail claiming any sender.
-    const fromDomain = senderDomain(body.from);
-    const domain = fromDomain
-      ? (
-          await deps.db
-            .select({ id: schema.domains.id, status: schema.domains.status })
-            .from(schema.domains)
-            .where(and(eq(schema.domains.teamId, auth.teamId), eq(schema.domains.name, fromDomain)))
-        )[0]
-      : undefined;
-    if (domain?.status !== "verified") {
+    const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
+    if (!domain.ok) {
       return c.json(
         errorBody(
           422,
           "validation_error",
-          `The ${fromDomain ?? "sender"} domain is not verified for this team`,
+          `The ${domain.fromDomain ?? "sender"} domain is not verified for this team`,
         ),
         422,
       );
@@ -1065,80 +1018,42 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
 
     try {
-      // Suppression: dedupe, check every recipient field, and strip
-      // suppressed addresses; refuse only when no `to` recipient remains.
-      const allRecipients = [...new Set([...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])])];
-      const suppressed = await findSuppressed(deps.db, auth.teamId, allRecipients);
-      const keep = (list: string[] | undefined) => list?.filter((r) => !suppressed.has(r));
-      const to = keep(body.to) ?? [];
-      if (to.length === 0) {
+      const result = await acceptEmail(
+        deps,
+        auth,
+        {
+          from: body.from,
+          to: body.to,
+          cc: body.cc,
+          bcc: body.bcc,
+          replyTo: body.reply_to,
+          subject: body.subject,
+          html: body.html,
+          text: body.text,
+          tags: body.tags ? Object.fromEntries(body.tags.map((t) => [t.name, t.value])) : null,
+          scheduledAt: body.scheduled_at ? new Date(body.scheduled_at) : undefined,
+          domainId: domain.domainId,
+        },
+        {
+          completeInTx: idemKey
+            ? async (tx, emailId) => {
+                const recorded = await completeIdempotent(tx, {
+                  teamId: auth.teamId,
+                  key: idemKey,
+                  emailIds: [emailId],
+                });
+                // Another owner took over and recorded its own response:
+                // abort so this branch produces no second email.
+                if (!recorded) throw new IdempotencyTakeoverError();
+              }
+            : undefined,
+        },
+      );
+      if (!result.ok) {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         return c.json(errorBody(422, "validation_error", "All recipients are suppressed"), 422);
       }
-      const cc = keep(body.cc);
-      const bcc = keep(body.bcc);
-
-      const encrypted = await encryptEmailBody(
-        { html: body.html ?? null, text: body.text ?? null },
-        deps.keyring,
-      );
-
-      const limit = deps.isCloud ? PLAN_DAILY_LIMIT[auth.plan] : null;
-      // Quota reservation, email insert, and idempotency completion commit
-      // atomically (the quota contract).
-      const accepted = await deps.db.transaction(async (tx) => {
-        const txDb = tx as unknown as Db;
-        const quota = await reserveDailyQuota(txDb, { teamId: auth.teamId, count: 1, limit });
-        const [row] = await tx
-          .insert(schema.emails)
-          .values({
-            teamId: auth.teamId,
-            domainId: domain.id,
-            apiKeyId: auth.apiKeyId,
-            from: body.from,
-            to,
-            cc: cc && cc.length > 0 ? cc : null,
-            bcc: bcc && bcc.length > 0 ? bcc : null,
-            replyTo: body.reply_to ?? null,
-            subject: body.subject,
-            tags: body.tags ? Object.fromEntries(body.tags.map((t) => [t.name, t.value])) : null,
-            latestStatus: quota.reserved ? "queued" : "queued_quota",
-            scheduledAt: body.scheduled_at ? new Date(body.scheduled_at) : null,
-            bodyCiphertext: encrypted.ciphertext,
-            bodyIv: encrypted.iv,
-            bodyWrappedDek: encrypted.wrappedDek,
-            bodyKeyVersion: encrypted.keyVersion,
-          })
-          .returning({ id: schema.emails.id });
-        if (!row) throw new Error("email insert returned no row");
-        if (idemKey) {
-          const recorded = await completeIdempotent(txDb, {
-            teamId: auth.teamId,
-            key: idemKey,
-            emailIds: [row.id],
-          });
-          // Another owner took over and recorded its own response: abort so
-          // this branch produces no second email.
-          if (!recorded) throw new IdempotencyTakeoverError();
-        }
-        return { id: row.id, parked: !quota.reserved };
-      });
-      // After commit: hand the send to the queue (quota-parked emails wait
-      // for the midnight drain instead). An enqueue failure must NOT undo
-      // the accept — the email and its idempotency record are committed, so
-      // rethrowing would let a retry create a second email. The reconcile
-      // sweep re-enqueues any accepted email whose job was lost.
-      if (!accepted.parked) {
-        try {
-          await deps.enqueueEmailSend(
-            accepted.id,
-            body.scheduled_at ? { startAfter: new Date(body.scheduled_at) } : {},
-          );
-        } catch (err) {
-          console.error("email.send enqueue failed; reconcile sweep will recover", err);
-        }
-      }
-      return c.json({ id: accepted.id }, 200);
+      return c.json({ id: result.id }, 200);
     } catch (err) {
       if (err instanceof IdempotencyTakeoverError && idemKey) {
         const replay = await beginIdempotent(deps.db, {

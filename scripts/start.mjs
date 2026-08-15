@@ -1,6 +1,7 @@
 // Self-host process supervisor. PROCESS selects what runs in this container:
-// api | worker | web | all (default all). Migrations always run first so a
-// fresh database is usable on first boot.
+// api | worker | web | smtp | all (default all). Migrations always run first
+// so a fresh database is usable on first boot. "all" excludes smtp — the
+// SMTP relay is opt-in via its own compose service (PROCESS=smtp).
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -33,7 +34,15 @@ const PROCESSES = {
     // PORT belongs to the api (default 3001); the web process is fixed at 3000.
     env: { PORT: "3000" },
   },
+  smtp: {
+    command: join(root, "apps/smtp/node_modules/.bin/tsx"),
+    args: [join(root, "apps/smtp/src/server.ts")],
+    cwd: root,
+    env: {},
+  },
 };
+
+const ALL_PROCESSES = ["api", "worker", "web"];
 
 // "setup" argv mode runs the interactive AWS setup CLI instead of the app:
 //   docker compose run --rm millionsend setup [teardown] [--dry-run]
@@ -49,10 +58,12 @@ if (process.argv[2] === "setup") {
 
 // biome-ignore lint/suspicious/noUndeclaredEnvVars: container runtime selector, never read under turbo
 const selection = process.env.PROCESS ?? "all";
-const names = selection === "all" ? Object.keys(PROCESSES) : [selection];
+const names = selection === "all" ? ALL_PROCESSES : [selection];
 for (const name of names) {
   if (!PROCESSES[name]) {
-    console.error(`start: unknown PROCESS "${selection}" (expected api | worker | web | all)`);
+    console.error(
+      `start: unknown PROCESS "${selection}" (expected api | worker | web | smtp | all)`,
+    );
     process.exit(1);
   }
 }
