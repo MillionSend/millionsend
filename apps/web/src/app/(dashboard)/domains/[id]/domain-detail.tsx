@@ -402,9 +402,18 @@ export function DomainDetail({ id }: { id: string }) {
     trpc.domains.records.queryOptions({ id }, { enabled: domain.isSuccess }),
   );
 
+  // Persist the last live-DNS result across re-checks. Reading it straight off
+  // the verify mutation would blank out while a re-check is pending, so a row
+  // whose live status is Missing would flick back to AWS's cached Verified for
+  // that instant. Holding the previous result keeps the badge stable.
+  const [liveDns, setLiveDns] = useState<
+    { type: string; name: string; value: string; status: "found" | "missing" | "mismatch" }[]
+  >([]);
+
   const verify = useMutation(
     trpc.domains.verify.mutationOptions({
-      onSuccess: () => {
+      onSuccess: (data) => {
+        setLiveDns(data.liveDns ?? []);
         void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
         void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
         void queryClient.invalidateQueries({ queryKey: trpc.domains.list.queryKey() });
@@ -438,7 +447,6 @@ export function DomainDetail({ id }: { id: string }) {
 
   // Live DNS must be real on load: the SES status can still read 'verified' for
   // a record removed seconds ago, so re-check every record's live DNS on mount.
-  // Until it returns, each row's live is unknown and shows 'checking', not green.
   const verifyMutate = verify.mutate;
   useEffect(() => {
     verifyMutate({ id });
@@ -559,11 +567,9 @@ export function DomainDetail({ id }: { id: string }) {
 
   const data = domain.data;
   const provider = records.data?.provider ?? null;
-  // Live DNS statuses ride on the verify result, keyed by record identity so
-  // each row shows its live Found/Missing/Mismatch beside SES's cached verdict.
-  const liveByKey = new Map(
-    (verify.data?.liveDns ?? []).map((r) => [`${r.type}\t${r.name}\t${r.value}`, r.status]),
-  );
+  // Live DNS statuses keyed by record identity, from the persisted result so a
+  // re-check doesn't blank the badges mid-flight.
+  const liveByKey = new Map(liveDns.map((r) => [`${r.type}\t${r.name}\t${r.value}`, r.status]));
   const rows = ((records.data?.records ?? []) as DnsRecord[]).map((r) => ({
     ...r,
     live: liveByKey.get(`${r.type}\t${r.name}\t${r.value}`),
@@ -781,12 +787,6 @@ export function DomainDetail({ id }: { id: string }) {
                   ? t("detail.recordsHeading", { provider: provider.name })
                   : t("detail.recordsHeadingGeneric")}
               </h2>
-              <div
-                className="ms-mono"
-                style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 6 }}
-              >
-                {provider ? t("detail.recordsSublineProvider") : t("detail.recordsSubline")}
-              </div>
             </>
           ) : null}
 

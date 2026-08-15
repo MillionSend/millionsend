@@ -87,8 +87,6 @@
     },
     "recordsHeading": "Add these records at {provider}",
     "recordsHeadingGeneric": "Add these records at your DNS provider",
-    "recordsSublineProvider": "provider auto-detected from NS records · checks run every 30 s",
-    "recordsSubline": "checks run every 30 s",
     "groups": {
       "verification": "Domain verification (DKIM)",
       "sending": "Enable sending",

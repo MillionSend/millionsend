@@ -186,9 +186,6 @@ function DnsRecordsStep({ id }: { id: string }) {
               ? t("new.recordsTitleProvider", { provider: provider.name })
               : t("new.recordsTitle")}
           </h2>
-          <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 6 }}>
-            {provider ? t("detail.recordsSublineProvider") : t("detail.recordsSubline")}
-          </div>
 
           {records.isError ? (
             <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 20 }}>

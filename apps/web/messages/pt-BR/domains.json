@@ -87,8 +87,6 @@
     },
     "recordsHeading": "Adicione estes registros em {provider}",
     "recordsHeadingGeneric": "Adicione estes registros no seu provedor de DNS",
-    "recordsSublineProvider": "provedor detectado pelos registros NS · verificações a cada 30 s",
-    "recordsSubline": "verificações a cada 30 s",
     "groups": {
       "verification": "Verificação do domínio (DKIM)",
       "sending": "Habilitar envio",
