@@ -9,6 +9,7 @@ import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
 import { CodeGlyph } from "@/components/icons/nav-icons";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
+import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { formatDurationShort, formatRelative, formatUtcTimestampMs } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
@@ -171,6 +172,164 @@ function CodeBlock({ value }: { value: string }) {
 const TAB_KEYS = ["preview", "text", "html"] as const;
 type Tab = (typeof TAB_KEYS)[number];
 
+/** Mirrors the loaded page's boxes (header, meta grid, events strip, body panel). */
+function EmailDetailSkeleton() {
+  const t = useTranslations("emails");
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          gap: 16,
+          marginBottom: 28,
+        }}
+      >
+        <div>
+          <div style={{ display: "flex", fontSize: 13, lineHeight: 1, marginBottom: 10 }}>
+            <Skeleton width={150} height="1lh" />
+          </div>
+          <h1
+            className="ms-display"
+            style={{ fontSize: "var(--ms-fs-h1)", fontWeight: 600, margin: 0, display: "flex" }}
+          >
+            <Skeleton width={260} height="1lh" />
+          </h1>
+          <div className="ms-mono" style={{ fontSize: 12, marginTop: 8, display: "flex" }}>
+            <Skeleton width={220} height="1lh" />
+          </div>
+        </div>
+        <Skeleton width={30} height={30} radius="var(--ms-r-input)" />
+      </div>
+
+      <div
+        className="ms-meta-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: "22px 28px",
+          padding: "22px 0",
+          borderTop: "1px solid var(--ms-line)",
+          borderBottom: "1px solid var(--ms-line)",
+        }}
+      >
+        <Meta label={t("detail.from")} mono>
+          <span style={{ display: "flex" }}>
+            <Skeleton width={180} height="1lh" />
+          </span>
+        </Meta>
+        <Meta label={t("detail.subject")}>
+          <span style={{ display: "flex" }}>
+            <Skeleton width={200} height="1lh" />
+          </span>
+        </Meta>
+        <div>
+          <Microlabel>{t("detail.id")}</Microlabel>
+          <div style={{ marginTop: 4 }}>
+            <SkeletonChip width={190} />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 26 }}>
+        <div className="ms-microlabel">{t("detail.events")}</div>
+        <div
+          style={{
+            marginTop: 12,
+            border: "1px solid var(--ms-line)",
+            borderRadius: 14,
+            padding: "30px 26px",
+            backgroundImage: "radial-gradient(var(--ms-line) 1px, transparent 1px)",
+            backgroundSize: "18px 18px",
+            backgroundPosition: "center",
+            display: "flex",
+            alignItems: "center",
+            overflowX: "auto",
+          }}
+        >
+          {[0, 1, 2].map((index) => (
+            <div key={index} style={{ display: "contents" }}>
+              {index > 0 ? (
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 36,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 5,
+                    padding: "0 4px",
+                  }}
+                >
+                  <span className="ms-mono" style={{ fontSize: 10.5, display: "flex" }}>
+                    <Skeleton width={32} height="1lh" />
+                  </span>
+                  <span style={{ height: 1, background: "var(--ms-line-strong)", width: "100%" }} />
+                </div>
+              ) : null}
+              <div
+                style={{
+                  background: "var(--ms-panel)",
+                  border: "1px solid var(--ms-line)",
+                  borderRadius: 12,
+                  padding: "12px 16px",
+                  width: 264,
+                  boxSizing: "border-box",
+                  flex: "none",
+                }}
+              >
+                <div style={{ fontSize: 13.5, fontWeight: 600, display: "flex" }}>
+                  <Skeleton width={70} height="1lh" />
+                </div>
+                <div className="ms-mono" style={{ fontSize: 11.5, marginTop: 7, display: "flex" }}>
+                  <Skeleton width={168} height="1lh" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: 26,
+          background: "var(--ms-panel)",
+          border: "1px solid var(--ms-line)",
+          borderRadius: 14,
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "10px 12px",
+            borderBottom: "1px solid var(--ms-line)",
+          }}
+        >
+          {[52, 64, 44].map((width) => (
+            <span key={width} style={{ fontSize: 13, padding: "5px 11px", display: "flex" }}>
+              <Skeleton width={width} height="1lh" />
+            </span>
+          ))}
+        </div>
+        <div
+          style={{
+            background: "var(--ms-inset)",
+            padding: 28,
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
+          <Skeleton width={560} height={480} radius={8} />
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function EmailDetailPage() {
   const { id } = useParams<{ id: string }>();
   const t = useTranslations("emails");
@@ -205,7 +364,7 @@ export default function EmailDetailPage() {
   );
 
   if (query.isPending) {
-    return <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>{t("loading")}</p>;
+    return <EmailDetailSkeleton />;
   }
   if (query.isError || !email) {
     return (

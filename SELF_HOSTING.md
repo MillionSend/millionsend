@@ -123,6 +123,51 @@ it stays pending, use "Request confirmation" on it in the SNS console.
 </details>
 
 <details>
+<summary><b>SMTP relay</b></summary>
+
+A drop-in SMTP relay for software that speaks SMTP instead of HTTP — legacy apps,
+CMS plugins, anything with an "SMTP settings" form. Messages go through the same
+accept pipeline as `POST /emails`: same domain verification, suppression checks,
+request logging, and delivery events.
+
+Connection details:
+
+- Host: wherever the `smtp` service is reachable (the compose files publish it on
+  the Docker host).
+- Port: `2587` (`SMTP_PORT` to change).
+- Username: `millionsend` (fixed).
+- Password: an `ms_` API key from the dashboard.
+- Encryption: plaintext by default; STARTTLS is offered (and required before AUTH)
+  when `SMTP_TLS_CERT_PATH` and `SMTP_TLS_KEY_PATH` point at a PEM keypair. Without
+  one, keep the port inside your own network or behind a TLS-terminating load
+  balancer.
+
+Nodemailer example:
+
+```js
+import nodemailer from "nodemailer";
+
+const transport = nodemailer.createTransport({
+  host: "localhost",
+  port: 2587,
+  auth: { user: "millionsend", pass: "ms_..." },
+});
+
+await transport.sendMail({
+  from: "you@yourdomain.com",
+  to: "someone@example.com",
+  subject: "Hello",
+  html: "<p>Sent over SMTP.</p>",
+});
+```
+
+The `smtp` service is already defined in the compose files and starts with
+`docker compose up`. It is optional — remove the service if you only send through
+the HTTP API.
+
+</details>
+
+<details>
 <summary><b>Signup policy</b></summary>
 
 The first user to register becomes the initial account — no configuration needed.

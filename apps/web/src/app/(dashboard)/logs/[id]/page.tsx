@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { CopyChip } from "@/components/copy-chip";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
+import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { formatUtcTimestampMs } from "@/lib/format";
 import { statusCodeColor } from "@/lib/status-code-color";
 import { useTRPC } from "@/lib/trpc";
@@ -77,6 +78,97 @@ function JsonSection({
   );
 }
 
+/** JsonSection's boxes with the pre's lines as bars. */
+function JsonSectionSkeleton({ label }: { label: string }) {
+  return (
+    <section style={{ marginTop: 26 }}>
+      <div className="ms-microlabel">{label}</div>
+      <div
+        style={{
+          marginTop: 10,
+          background: "var(--ms-panel)",
+          border: "1px solid var(--ms-line)",
+          borderRadius: 14,
+          overflow: "hidden",
+        }}
+      >
+        <div
+          className="ms-mono"
+          style={{
+            padding: "14px 16px",
+            fontSize: 12,
+            lineHeight: 1.7,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-start",
+          }}
+        >
+          {[64, 220, 180, 96].map((width, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: placeholder lines, position is identity
+            <span key={index} style={{ display: "flex" }}>
+              <Skeleton width={width} height="1lh" />
+            </span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Mirrors the loaded page's boxes (header, meta strip, request/response panels). */
+function LogDetailSkeleton() {
+  const t = useTranslations("logs");
+  return (
+    <>
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ display: "flex", fontSize: 13, lineHeight: 1, marginBottom: 10 }}>
+          <Skeleton width={180} height="1lh" />
+        </div>
+        <h1
+          className="ms-display"
+          style={{ fontSize: "var(--ms-fs-h1)", fontWeight: 600, margin: 0, display: "flex" }}
+        >
+          <Skeleton width={300} height="1lh" />
+        </h1>
+      </div>
+
+      <div
+        className="ms-meta-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, 1fr)",
+          gap: "22px 28px",
+          padding: "22px 0",
+          borderTop: "1px solid var(--ms-line)",
+          borderBottom: "1px solid var(--ms-line)",
+        }}
+      >
+        <div>
+          <Microlabel>{t("detail.status")}</Microlabel>
+          <div className="ms-mono" style={{ fontSize: 13, marginTop: 5, display: "flex" }}>
+            <Skeleton width={32} height="1lh" />
+          </div>
+        </div>
+        <div>
+          <Microlabel>{t("detail.when")}</Microlabel>
+          <div className="ms-mono" style={{ fontSize: 13, marginTop: 5, display: "flex" }}>
+            <Skeleton width={220} height="1lh" />
+          </div>
+        </div>
+        <div>
+          <Microlabel>{t("detail.id")}</Microlabel>
+          <div style={{ marginTop: 4 }}>
+            <SkeletonChip width={190} />
+          </div>
+        </div>
+      </div>
+
+      <JsonSectionSkeleton label={t("detail.request")} />
+      <JsonSectionSkeleton label={t("detail.response")} />
+    </>
+  );
+}
+
 export default function LogDetailPage() {
   const { id } = useParams<{ id: string }>();
   const t = useTranslations("logs");
@@ -86,7 +178,7 @@ export default function LogDetailPage() {
   const log = query.data;
 
   if (query.isPending) {
-    return <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>{t("loading")}</p>;
+    return <LogDetailSkeleton />;
   }
   if (query.isError || !log) {
     return (
