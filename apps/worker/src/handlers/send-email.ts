@@ -5,6 +5,7 @@ import {
   enqueueWebhookDeliveries,
   type Keyring,
   makeUnsubscribeToken,
+  rewriteForTracking,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -41,6 +42,14 @@ export interface SendDeps {
    * never go out missing List-Unsubscribe headers.
    */
   unsubscribe?: { secretKey: Buffer; baseUrl: string } | undefined;
+  /**
+   * App-layer engagement tracking. secretKey signs the click/open tokens
+   * (HKDF-derived from the master key); defaultBaseUrl is the tracking host
+   * for domains without a custom tracking subdomain (env.APP_BASE_URL). The
+   * whole dep is optional so tests that don't exercise tracking need not wire
+   * it — the worker always provides it, since the master key is always present.
+   */
+  tracking?: { secretKey: Buffer; defaultBaseUrl?: string | undefined } | undefined;
 }
 
 export type SendOutcome = "sent" | "skipped" | "deferred" | "failed";
@@ -89,12 +98,46 @@ export async function sendEmail(
             name: schema.domains.name,
             sesConfigurationSet: schema.domains.sesConfigurationSet,
             region: schema.domains.region,
+            clickTracking: schema.domains.clickTracking,
+            openTracking: schema.domains.openTracking,
+            trackingSubdomain: schema.domains.trackingSubdomain,
           })
           .from(schema.domains)
           .where(eq(schema.domains.id, email.domainId))
       )[0]
     : undefined;
   const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
+
+  // App-layer engagement tracking: when the domain has click or open tracking
+  // on, WE rewrite links through our redirect endpoint and inject our pixel
+  // before the MIME is built — SES never touches the body. Both off ships the
+  // raw links and no pixel (clean-links requirement).
+  const click = domain?.clickTracking ?? false;
+  const open = domain?.openTracking ?? false;
+  let html = body.html;
+  // deps.tracking is always present in the running worker (the master key is
+  // always available to derive the signing key); it is optional only so tests
+  // that don't exercise tracking need not wire it, and its absence simply
+  // leaves the body untouched.
+  if (html && (click || open) && deps.tracking) {
+    const trackingBaseUrl = domain?.trackingSubdomain
+      ? `https://${domain.trackingSubdomain}.${domain.name}`
+      : deps.tracking.defaultBaseUrl;
+    // A custom subdomain is self-sufficient; without one the redirect host is
+    // APP_BASE_URL. Missing it would ship links pointing nowhere, so fail loud.
+    if (!trackingBaseUrl) {
+      throw new Error(
+        `tracking is enabled for email ${email.id} but APP_BASE_URL is unset and the domain has no tracking subdomain`,
+      );
+    }
+    html = rewriteForTracking(html, {
+      emailId: email.id,
+      trackingBaseUrl,
+      click,
+      open,
+      secretKey: deps.tracking.secretKey,
+    });
+  }
 
   const headers: Record<string, string> = { "X-MillionSend-Email-ID": email.id };
   if (email.contactId) {
@@ -127,7 +170,7 @@ export async function sendEmail(
     ...(email.bcc ? { bcc: email.bcc } : {}),
     ...(email.replyTo ? { replyTo: email.replyTo } : {}),
     subject: email.subject,
-    ...(body.html ? { html: body.html } : {}),
+    ...(html ? { html } : {}),
     ...(body.text ? { text: body.text } : {}),
     headers,
   });

@@ -39,7 +39,7 @@ describe("buildAwsSetupScript", () => {
       "aws sesv2 create-configuration-set --configuration-set-name millionsend",
     );
     expect(script).toContain(
-      '"MatchingEventTypes":["SEND","DELIVERY","DELIVERY_DELAY","BOUNCE","COMPLAINT","OPEN","CLICK","REJECT","RENDERING_FAILURE"]',
+      '"MatchingEventTypes":["SEND","DELIVERY","DELIVERY_DELAY","BOUNCE","COMPLAINT","REJECT","RENDERING_FAILURE"]',
     );
     expect(script).toContain('echo "SNS_TOPIC_ARNS=$TOPIC_ARN"');
     expect(script).toContain('echo "SES_CONFIGURATION_SET=millionsend"');

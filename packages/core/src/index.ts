@@ -62,6 +62,7 @@ export {
   releaseIdempotent,
 } from "./idempotency.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
+export { type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
 export { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
 export {
@@ -75,6 +76,13 @@ export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status
 export { extractAddrSpec, findSuppressed, hashRecipient } from "./suppressions.js";
 export { INVITE_TTL_MS, signInviteToken, verifyInviteToken } from "./team-invitations.js";
 export { isSubscribedToTopic } from "./topics.js";
+export {
+  deriveTrackingKey,
+  makeClickToken,
+  makeOpenToken,
+  verifyClickToken,
+  verifyOpenToken,
+} from "./tracking.js";
 export {
   buildUnsubscribeHeaders,
   deriveUnsubscribeKey,

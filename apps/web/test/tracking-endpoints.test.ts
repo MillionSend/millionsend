@@ -1,0 +1,146 @@
+import { deriveTrackingKey, makeClickToken, makeOpenToken } from "@millionsend/core";
+import { type Db, schema } from "@millionsend/db";
+import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { and, eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// A known 32-byte master key so the endpoints derive the same tracking key we
+// sign tokens with here. Set before the route modules read env.
+const KEY_B64 = "dOdpMPArQsV3KWv5I+kizDihKLus3uMLev4DODaFnOQ=";
+process.env.MASTER_ENCRYPTION_KEY = KEY_B64;
+const secretKey = deriveTrackingKey(Buffer.from(KEY_B64, "base64"));
+
+// getDb() inside the route handlers must hit the per-test PGlite db.
+const h = vi.hoisted(() => ({ db: undefined as unknown as Db }));
+vi.mock("@millionsend/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@millionsend/db")>();
+  return { ...actual, getDb: () => h.db };
+});
+
+const { GET: clickGet } = await import("@/app/t/c/[token]/route");
+const { GET: openGet } = await import("@/app/t/o/[token]/route");
+
+let db: Db;
+let close: () => Promise<void>;
+
+beforeEach(async () => {
+  ({ db, close } = await createTestDb());
+  h.db = db;
+});
+
+afterEach(async () => {
+  await close();
+  vi.restoreAllMocks();
+});
+
+async function seedEmail(): Promise<{ emailId: string; teamId: string }> {
+  const teamId = await createTeam(db);
+  const [email] = await db
+    .insert(schema.emails)
+    .values({ teamId, from: "sender@example.com", to: ["rcpt@example.com"], subject: "Hi" })
+    .returning({ id: schema.emails.id });
+  return { emailId: email?.id ?? "", teamId };
+}
+
+function req(token: string) {
+  return [
+    new Request(`https://links.example.com/t/x/${token}`),
+    { params: Promise.resolve({ token }) },
+  ] as const;
+}
+
+async function counts(emailId: string, teamId: string, type: "opened" | "clicked") {
+  const events = await db
+    .select({ id: schema.emailEvents.id })
+    .from(schema.emailEvents)
+    .where(and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, type)));
+  const [counter] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  return { events: events.length, counter: counter?.[type] ?? 0 };
+}
+
+describe("click endpoint /t/c", () => {
+  it("records a unique click and 302s to the signed url", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const url = "https://shop.example.com/product?id=9";
+    const token = makeClickToken({ emailId, url, secretKey });
+
+    const res = await clickGet(...req(token));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(url);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+
+    // A second click on the same email is the same unique engagement.
+    const res2 = await clickGet(...req(token));
+    expect(res2.status).toBe(302);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+  });
+
+  it("promotes the email status to clicked", async () => {
+    const { emailId } = await seedEmail();
+    const token = makeClickToken({ emailId, url: "https://x.example.com/", secretKey });
+    await clickGet(...req(token));
+    const [row] = await db
+      .select({ status: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, emailId));
+    expect(row?.status).toBe("clicked");
+  });
+
+  it("404s a tampered token instead of redirecting off-site", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = makeClickToken({
+      emailId,
+      url: "https://safe.example.com/",
+      secretKey,
+    });
+    // Flip a payload character: the mac no longer matches, so nothing is signed.
+    const tampered = `${token.slice(0, -3)}AAA`;
+
+    const res = await clickGet(...req(tampered));
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+  });
+
+  it("404s a token signed with a foreign key (no open redirect)", async () => {
+    const { emailId } = await seedEmail();
+    const foreign = deriveTrackingKey(Buffer.from("A".repeat(32), "utf8"));
+    const token = makeClickToken({
+      emailId,
+      url: "https://evil.example.com/",
+      secretKey: foreign,
+    });
+    const res = await clickGet(...req(token));
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+  });
+});
+
+describe("open endpoint /t/o", () => {
+  it("records a unique open and returns a 1x1 gif", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = makeOpenToken({ emailId, secretKey });
+
+    const res = await openGet(...req(token));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/gif");
+    expect(res.headers.get("cache-control")).toContain("no-store");
+    const body = Buffer.from(await res.arrayBuffer());
+    expect(body.subarray(0, 3).toString("ascii")).toBe("GIF");
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+
+    await openGet(...req(token));
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+  });
+
+  it("returns the gif silently for an invalid token and records nothing", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const res = await openGet(...req("not-a-real-token"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/gif");
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
+  });
+});

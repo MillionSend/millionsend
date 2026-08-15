@@ -139,11 +139,11 @@ it("Complaint: suppression with reason complaint", async () => {
 
 it("out-of-order events never regress the status ladder", async () => {
   const emailId = await insertSentEmail("mid-order");
-  await processSesEvent(db, makeEvent({ eventType: "Open", sesMessageId: "mid-order" }));
-  expect(await statusOf(emailId)).toBe("opened");
-  // A late Delivery ranks below opened: event row recorded, status unchanged.
   await processSesEvent(db, makeEvent({ eventType: "Delivery", sesMessageId: "mid-order" }));
-  expect(await statusOf(emailId)).toBe("opened");
+  expect(await statusOf(emailId)).toBe("delivered");
+  // A late Send ranks below delivered: event row recorded, status unchanged.
+  await processSesEvent(db, makeEvent({ eventType: "Send", sesMessageId: "mid-order" }));
+  expect(await statusOf(emailId)).toBe("delivered");
   const events = await db
     .select()
     .from(schema.emailEvents)
@@ -249,52 +249,36 @@ it("a mid-processing failure never burns the idempotency gate: retry records the
   expect(events).toHaveLength(1);
 });
 
-async function engagementCounters(): Promise<{ opened: number; clicked: number }> {
-  const [row] = await db
+// Engagement (opened/clicked) is tracked app-layer now: the per-domain config
+// set excludes OPEN/CLICK, so SES never sends them. A stray legacy event is
+// ignored entirely — no status change, no counter, no event row — so it can
+// never double-count what the app-layer redirect endpoints already recorded.
+it("legacy Open/Click SES events are ignored entirely", async () => {
+  const emailId = await insertSentEmail("mid-legacy-engagement");
+  await processSesEvent(
+    db,
+    makeEvent({ eventType: "Open", sesMessageId: "mid-legacy-engagement" }),
+  );
+  await processSesEvent(
+    db,
+    makeEvent({
+      eventType: "Click",
+      sesMessageId: "mid-legacy-engagement",
+      click: { link: "https://x.test" },
+    }),
+  );
+  expect(await statusOf(emailId)).toBe("sent");
+  const events = await db
+    .select()
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, emailId));
+  expect(events).toHaveLength(0);
+  const [counter] = await db
     .select()
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, teamId));
-  return { opened: row?.opened ?? 0, clicked: row?.clicked ?? 0 };
-}
-
-it("opened counts UNIQUE engagement: two opens of one email advance it once", async () => {
-  const before = await engagementCounters();
-  await insertSentEmail("mid-open-unique");
-  await processSesEvent(db, makeEvent({ eventType: "Open", sesMessageId: "mid-open-unique" }));
-  await processSesEvent(db, makeEvent({ eventType: "Open", sesMessageId: "mid-open-unique" }));
-  const after = await engagementCounters();
-  expect(after.opened - before.opened).toBe(1);
-});
-
-it("opens across two distinct emails each count", async () => {
-  const before = await engagementCounters();
-  await insertSentEmail("mid-open-a");
-  await insertSentEmail("mid-open-b");
-  await processSesEvent(db, makeEvent({ eventType: "Open", sesMessageId: "mid-open-a" }));
-  await processSesEvent(db, makeEvent({ eventType: "Open", sesMessageId: "mid-open-b" }));
-  const after = await engagementCounters();
-  expect(after.opened - before.opened).toBe(2);
-});
-
-it("a click increments clicked once", async () => {
-  const before = await engagementCounters();
-  await insertSentEmail("mid-click");
-  await processSesEvent(
-    db,
-    makeEvent({ eventType: "Click", sesMessageId: "mid-click", click: { link: "https://x.test" } }),
-  );
-  const after = await engagementCounters();
-  expect(after.clicked - before.clicked).toBe(1);
-});
-
-it("an SNS redelivery of an open never double-counts", async () => {
-  const before = await engagementCounters();
-  await insertSentEmail("mid-open-redeliver");
-  const event = makeEvent({ eventType: "Open", sesMessageId: "mid-open-redeliver" });
-  await processSesEvent(db, event, { snsMessageId: "sns-open-1" });
-  await processSesEvent(db, event, { snsMessageId: "sns-open-1" });
-  const after = await engagementCounters();
-  expect(after.opened - before.opened).toBe(1);
+  expect(counter?.opened ?? 0).toBe(0);
+  expect(counter?.clicked ?? 0).toBe(0);
 });
 
 it("unknown event types are a no-op", async () => {

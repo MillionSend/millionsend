@@ -11,15 +11,18 @@ export const SETUP_NAMES = {
   eventDestination: "millionsend-events",
 } as const;
 
-/** SESv2 event types the event destination subscribes to — the full set the app ingests. */
+/**
+ * SESv2 event types the event destination subscribes to. Deliberately excludes
+ * OPEN and CLICK: engagement is tracked app-layer (we rewrite links and inject
+ * the pixel ourselves), and subscribing to OPEN/CLICK is what makes SES rewrite
+ * links / inject its own pixel. Omitting them keeps SES out of the message body.
+ */
 export const SES_EVENT_TYPES = [
   "SEND",
   "DELIVERY",
   "DELIVERY_DELAY",
   "BOUNCE",
   "COMPLAINT",
-  "OPEN",
-  "CLICK",
   "REJECT",
   "RENDERING_FAILURE",
 ] as const;

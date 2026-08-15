@@ -17,6 +17,7 @@ import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
 import { isUniqueViolation } from "@/lib/db-errors";
+import { resolveBaseUrl } from "../auth";
 import { router, teamProcedure } from "../trpc";
 
 // Lowercase registrable hostname with at least two labels; SES identities are
@@ -273,15 +274,16 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
               : null,
       }));
 
-      // A branded tracking subdomain points at SES's regional open/click
-      // endpoint (r.<region>.awstrack.me). SES exposes no verification state
-      // for it, so it carries no status — like DMARC.
+      // Engagement tracking is app-layer: WE rewrite links and inject the open
+      // pixel, so a branded tracking subdomain CNAMEs to THIS app (the /t/c and
+      // /t/o handlers serve on any host). We can't check the CNAME's presence,
+      // so it carries no status — like DMARC.
       if (domain.trackingSubdomain) {
         records.push({
           group: "tracking",
           type: "CNAME",
           name: `${domain.trackingSubdomain}.${domain.name}`,
-          value: `r.${domain.region}.awstrack.me`,
+          value: new URL(resolveBaseUrl(env.APP_BASE_URL)).host,
           status: null,
         });
       }

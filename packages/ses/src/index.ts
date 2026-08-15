@@ -5,6 +5,14 @@ export {
   type SesAccountOverview,
 } from "./account.js";
 export {
+  applyDomainConfiguration,
+  type DomainConfiguration,
+  domainConfigurationSetName,
+  ensureDomainConfigurationSet,
+  type SesConfigClient,
+  type TlsMode,
+} from "./domain-config.js";
+export {
   createDomainIdentity,
   createSesv2Client,
   DKIM_SELECTOR,
