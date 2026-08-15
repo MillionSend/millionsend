@@ -6,6 +6,7 @@ import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
+import { assertTopic, topicMembershipSql } from "./topics";
 
 const emailSchema = z.string().trim().pipe(z.email()).pipe(z.string().max(320));
 // "" clears the field — stored as null, never as an empty string.
@@ -24,6 +25,17 @@ export async function assertAudience(
     .select({ id: a.id })
     .from(a)
     .where(and(eq(a.id, audienceId), eq(a.teamId, ctx.teamId)))
+    .limit(1);
+  if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+}
+
+/** Guards contact-keyed procedures: NOT_FOUND outside the team. */
+async function assertContact(ctx: { db: Db; teamId: string }, contactId: string): Promise<void> {
+  const c = schema.contacts;
+  const [row] = await ctx.db
+    .select({ id: c.id })
+    .from(c)
+    .where(and(eq(c.id, contactId), eq(c.teamId, ctx.teamId)))
     .limit(1);
   if (!row) throw new TRPCError({ code: "NOT_FOUND" });
 }
@@ -284,5 +296,51 @@ export const audienceRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       return { id: row.id };
     }),
+
+    /**
+     * The team's topics, each with this contact's EFFECTIVE subscribe state:
+     * the explicit subscription row when one exists, else the topic's
+     * defaultSubscribed. Absence of a row is not "unsubscribed" — it is the
+     * default. (Global unsubscribe is a separate contact flag, surfaced
+     * elsewhere; it does not change per-topic effective state here.)
+     */
+    topics: teamProcedure.input(z.object({ contactId: z.uuid() })).query(async ({ ctx, input }) => {
+      await assertContact(ctx, input.contactId);
+      const t = schema.topics;
+      const s = schema.contactTopicSubscriptions;
+      return ctx.db
+        .select({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          defaultSubscribed: t.defaultSubscribed,
+          subscribed: topicMembershipSql(s, t),
+        })
+        .from(t)
+        .leftJoin(s, and(eq(s.topicId, t.id), eq(s.contactId, input.contactId)))
+        .where(eq(t.teamId, ctx.teamId))
+        .orderBy(desc(t.createdAt), desc(t.id));
+    }),
+
+    /** Upserts the explicit per-topic override for this contact. */
+    setTopic: teamProcedure
+      .input(z.object({ contactId: z.uuid(), topicId: z.uuid(), subscribed: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        await assertContact(ctx, input.contactId);
+        await assertTopic(ctx, input.topicId);
+        const s = schema.contactTopicSubscriptions;
+        await ctx.db
+          .insert(s)
+          .values({
+            contactId: input.contactId,
+            topicId: input.topicId,
+            subscribed: input.subscribed,
+          })
+          .onConflictDoUpdate({
+            target: [s.contactId, s.topicId],
+            set: { subscribed: input.subscribed, updatedAt: new Date() },
+          });
+        return { subscribed: input.subscribed };
+      }),
   }),
 });

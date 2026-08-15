@@ -211,7 +211,7 @@ export const createBroadcastRequestSchema = z
     text: z.string().optional(),
     reply_to: replyToList.optional(),
     preview_text: z.string().optional(),
-    topic_id: z.string().nullable().optional(),
+    topic_id: z.uuid().nullable().optional(),
     send: z.boolean().optional(),
     scheduled_at: z.string().optional(),
   })
@@ -234,7 +234,7 @@ export const updateBroadcastRequestSchema = z
     text: z.string().optional(),
     reply_to: replyToList.optional(),
     preview_text: z.string().optional(),
-    topic_id: z.string().nullable().optional(),
+    topic_id: z.uuid().nullable().optional(),
   })
   .openapi("UpdateBroadcastRequest");
 
@@ -278,6 +278,7 @@ export const getBroadcastResponseSchema = broadcastListItemSchema
     subject: z.string(),
     reply_to: z.array(z.string()).nullable(),
     preview_text: z.string().nullable(),
+    topic_id: z.uuid().nullable(),
     html: z.string().nullable(),
     text: z.string().nullable(),
   })
@@ -290,3 +291,50 @@ export const removeBroadcastResponseSchema = z
 export const cancelBroadcastResponseSchema = z
   .object({ object: z.literal("broadcast"), id: z.uuid() })
   .openapi("CancelBroadcastResponse");
+
+/**
+ * Topics. Wire-compatible with the resend SDK's `topics` and
+ * `contacts.topics` surfaces: default_subscription is 'opt_in'/'opt_out'
+ * (opt_in = subscribed unless the contact opts out) and is fixed at creation.
+ */
+
+const subscriptionEnum = z.enum(["opt_in", "opt_out"]);
+
+export const createTopicRequestSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    default_subscription: subscriptionEnum,
+  })
+  .openapi("CreateTopicRequest");
+
+export const topicIdResponseSchema = z.object({ id: z.uuid() }).openapi("TopicIdResponse");
+
+const topicSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  description: z.string().optional(),
+  default_subscription: subscriptionEnum,
+  created_at: z.string(),
+});
+
+export const topicResponseSchema = topicSchema.openapi("TopicResponse");
+
+// ListTopicsResponseSuccess is a bare { data: Topic[] } — no keyset pagination.
+export const listTopicsResponseSchema = z
+  .object({ data: z.array(topicSchema) })
+  .openapi("ListTopicsResponse");
+
+export const removeTopicResponseSchema = z
+  .object({ id: z.uuid(), object: z.literal("topic"), deleted: z.literal(true) })
+  .openapi("RemoveTopicResponse");
+
+// PATCH /contacts/{id}/topics: the SDK sends the topics array as the bare
+// request body (contact-topics.ts posts `payload.topics`).
+export const updateContactTopicsRequestSchema = z
+  .array(z.object({ id: z.uuid(), subscription: subscriptionEnum }))
+  .openapi("UpdateContactTopicsRequest");
+
+export const updateContactTopicsResponseSchema = z
+  .object({ id: z.uuid() })
+  .openapi("UpdateContactTopicsResponse");

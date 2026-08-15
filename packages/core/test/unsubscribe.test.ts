@@ -12,11 +12,25 @@ import {
 
 const key = randomBytes(32);
 const contactId = "b7f9c9a2-1234-4cde-9f00-0123456789ab";
+const topicId = "1e2d3c4b-5a69-4788-9900-aabbccddeeff";
 
 describe("unsubscribe tokens", () => {
-  it("round-trips a contactId", () => {
+  it("round-trips a contactId with no topic (null topicId)", () => {
     const token = makeUnsubscribeToken({ contactId, secretKey: key });
-    expect(verifyUnsubscribeToken(token, key)).toBe(contactId);
+    expect(verifyUnsubscribeToken(token, key)).toEqual({ contactId, topicId: null });
+  });
+
+  it("round-trips a contactId and topicId when topic-scoped", () => {
+    const token = makeUnsubscribeToken({ contactId, topicId, secretKey: key });
+    expect(verifyUnsubscribeToken(token, key)).toEqual({ contactId, topicId });
+  });
+
+  it("treats a null/empty topicId as a global token", () => {
+    const token = makeUnsubscribeToken({ contactId, topicId: null, secretKey: key });
+    expect(verifyUnsubscribeToken(token, key)).toEqual({ contactId, topicId: null });
+    // A topic-scoped token's mac must not verify against the global variant.
+    const scoped = makeUnsubscribeToken({ contactId, topicId, secretKey: key });
+    expect(scoped).not.toBe(token);
   });
 
   it("rejects a tampered payload", () => {

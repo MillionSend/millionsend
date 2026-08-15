@@ -4,6 +4,7 @@ import {
   encryptEmailBody,
   fetchDeliverabilityHealth,
   findSuppressed,
+  isSubscribedToTopic,
   type Keyring,
   makeUnsubscribeToken,
   PLAN_DAILY_LIMIT,
@@ -172,6 +173,19 @@ export async function sendBroadcast(
   if (!team) throw new Error(`broadcast ${broadcast.id}: team ${broadcast.teamId} not found`);
   const dailyLimit = deps.isCloud ? PLAN_DAILY_LIMIT[team.plan] : null;
 
+  // Topic-scoped send: fetch the topic's default once (it gates every contact
+  // with no explicit override) and hydrate per-batch override rows below. A
+  // null topicId is a global send and skips all of this.
+  let topicDefault: boolean | null = null;
+  if (broadcast.topicId) {
+    const [topic] = await db
+      .select({ defaultSubscribed: schema.topics.defaultSubscribed })
+      .from(schema.topics)
+      .where(eq(schema.topics.id, broadcast.topicId));
+    if (!topic) throw new Error(`broadcast ${broadcast.id}: topic ${broadcast.topicId} not found`);
+    topicDefault = topic.defaultSubscribed;
+  }
+
   // Graduated throttle: a team over the deliverability risk line (warning or
   // paused) drips its fan-out so reputation can recover, instead of bursting.
   // A broadcast that reaches fan-out already "paused" (scheduled while healthy,
@@ -215,10 +229,37 @@ export async function sendBroadcast(
       broadcast.teamId,
       contacts.map((c) => c.email),
     );
+    // Explicit topic overrides for this batch (absence = topicDefault).
+    const topicOverrides = new Map<string, boolean>();
+    if (broadcast.topicId) {
+      const rows = await db
+        .select({
+          contactId: schema.contactTopicSubscriptions.contactId,
+          subscribed: schema.contactTopicSubscriptions.subscribed,
+        })
+        .from(schema.contactTopicSubscriptions)
+        .where(
+          and(
+            eq(schema.contactTopicSubscriptions.topicId, broadcast.topicId),
+            inArray(
+              schema.contactTopicSubscriptions.contactId,
+              contacts.map((c) => c.id),
+            ),
+          ),
+        );
+      for (const r of rows) topicOverrides.set(r.contactId, r.subscribed);
+    }
     for (const contact of contacts) {
       if (suppressed.has(contact.email)) continue;
+      if (
+        broadcast.topicId &&
+        !isSubscribedToTopic(topicOverrides.get(contact.id), topicDefault ?? false)
+      ) {
+        continue;
+      }
       const token = makeUnsubscribeToken({
         contactId: contact.id,
+        topicId: broadcast.topicId,
         secretKey: deps.unsubscribeSecretKey,
       });
       const headers = buildUnsubscribeHeaders(deps.appBaseUrl, token);

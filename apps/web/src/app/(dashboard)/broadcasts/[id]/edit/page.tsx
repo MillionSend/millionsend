@@ -42,6 +42,7 @@ export default function EditBroadcastPage() {
       initial={{
         id: broadcast.id,
         audienceId: broadcast.audienceId,
+        topicId: broadcast.topicId,
         name: broadcast.name,
         from: broadcast.from,
         subject: broadcast.subject,

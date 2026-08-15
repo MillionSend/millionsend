@@ -26,7 +26,7 @@ import {
   snsMessageSchema,
   verifySnsMessage,
 } from "@millionsend/ses";
-import { and, asc, desc, eq, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { createMiddleware } from "hono/factory";
 import {
@@ -37,6 +37,7 @@ import {
   createAudienceRequestSchema,
   createBroadcastRequestSchema,
   createContactRequestSchema,
+  createTopicRequestSchema,
   errorSchema,
   getBroadcastResponseSchema,
   getContactResponseSchema,
@@ -46,14 +47,20 @@ import {
   listBroadcastsResponseSchema,
   listContactsResponseSchema,
   listQuerySchema,
+  listTopicsResponseSchema,
   removeAudienceResponseSchema,
   removeBroadcastResponseSchema,
   removeContactResponseSchema,
+  removeTopicResponseSchema,
   sendBroadcastRequestSchema,
   sendEmailRequestSchema,
   sendEmailResponseSchema,
+  topicIdResponseSchema,
+  topicResponseSchema,
   updateBroadcastRequestSchema,
   updateContactRequestSchema,
+  updateContactTopicsRequestSchema,
+  updateContactTopicsResponseSchema,
 } from "./schemas.js";
 
 export interface SnsIngestDeps {
@@ -193,6 +200,11 @@ async function keysetPage<R>(opts: {
  */
 function wireBroadcastStatus(status: string): string {
   return status === "scheduled" || status === "sending" ? "queued" : status;
+}
+
+/** Resend's opt_in/opt_out ⇄ our `subscribed` boolean (opt_in = subscribed). */
+function wireSubscription(subscribed: boolean): "opt_in" | "opt_out" {
+  return subscribed ? "opt_in" : "opt_out";
 }
 
 function isUniqueViolation(err: unknown): boolean {
@@ -820,6 +832,197 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       return c.json({ object: "contact" as const, contact: first.id, deleted: true as const }, 200);
     },
   );
+
+  app.openapi(
+    createRoute({
+      method: "patch",
+      path: "/contacts/{id}/topics",
+      request: {
+        params: idParam,
+        body: {
+          content: { "application/json": { schema: updateContactTopicsRequestSchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: updateContactTopicsResponseSchema } },
+          description: "Contact topic subscriptions updated",
+        },
+        404: jsonErr("Not found"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const entries = c.req.valid("json");
+      // An email may resolve to the same person across several audiences;
+      // subscription state is set for every copy (see PATCH /contacts/{id}).
+      const matched = await db
+        .select({ id: t.id })
+        .from(t)
+        .where(teamContactWhere(auth.teamId, id));
+      const first = matched[0];
+      if (!first) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      if (entries.length === 0) return c.json({ id: first.id }, 200);
+
+      // Topics are teamId-scoped: a subscription may only target one this
+      // team owns, or a caller could write rows against another team's topic.
+      const topicIds = [...new Set(entries.map((e) => e.id))];
+      const owned = await db
+        .select({ id: schema.topics.id })
+        .from(schema.topics)
+        .where(and(eq(schema.topics.teamId, auth.teamId), inArray(schema.topics.id, topicIds)));
+      if (owned.length !== topicIds.length) {
+        return c.json(errorBody(404, "not_found", "Topic not found"), 404);
+      }
+
+      const values = matched.flatMap((contact) =>
+        entries.map((e) => ({
+          contactId: contact.id,
+          topicId: e.id,
+          subscribed: e.subscription === "opt_in",
+        })),
+      );
+      await db
+        .insert(schema.contactTopicSubscriptions)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [
+            schema.contactTopicSubscriptions.contactId,
+            schema.contactTopicSubscriptions.topicId,
+          ],
+          set: {
+            subscribed: sql`excluded.subscribed`,
+            updatedAt: new Date(),
+          },
+        });
+      return c.json({ id: first.id }, 200);
+    },
+  );
+}
+
+function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
+  const jsonErr = (description: string) => ({
+    content: { "application/json": { schema: errorSchema } },
+    description,
+  });
+  const idParam = z.object({ id: z.uuid() });
+  const b = schema.topics;
+
+  const toWire = (row: typeof schema.topics.$inferSelect) => ({
+    id: row.id,
+    name: row.name,
+    ...(row.description !== null ? { description: row.description } : {}),
+    default_subscription: wireSubscription(row.defaultSubscribed),
+    created_at: row.createdAt.toISOString(),
+  });
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/topics",
+      request: {
+        body: { content: { "application/json": { schema: createTopicRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: topicIdResponseSchema } },
+          description: "Topic created",
+        },
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const [row] = await db
+        .insert(b)
+        .values({
+          teamId: auth.teamId,
+          name: body.name,
+          description: body.description ?? null,
+          // Immutable after creation (topics.ts): opt_in = subscribed unless
+          // the contact opts out.
+          defaultSubscribed: body.default_subscription === "opt_in",
+        })
+        .returning({ id: b.id });
+      if (!row) throw new Error("topic insert returned no row");
+      return c.json({ id: row.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/topics",
+      responses: {
+        200: {
+          content: { "application/json": { schema: listTopicsResponseSchema } },
+          description: "Topics",
+        },
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const rows = await db
+        .select()
+        .from(b)
+        .where(eq(b.teamId, auth.teamId))
+        .orderBy(asc(b.createdAt), asc(b.id));
+      return c.json({ data: rows.map(toWire) }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/topics/{id}",
+      request: { params: idParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: topicResponseSchema } },
+          description: "Topic",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const [row] = await db
+        .select()
+        .from(b)
+        .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)));
+      if (!row) return c.json(errorBody(404, "not_found", "Topic not found"), 404);
+      return c.json(toWire(row), 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: "/topics/{id}",
+      request: { params: idParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: removeTopicResponseSchema } },
+          description: "Topic deleted",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const [row] = await db
+        .delete(b)
+        .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)))
+        .returning({ id: b.id });
+      if (!row) return c.json(errorBody(404, "not_found", "Topic not found"), 404);
+      return c.json({ id: row.id, object: "topic" as const, deleted: true as const }, 200);
+    },
+  );
 }
 
 function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
@@ -846,16 +1049,22 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         .where(and(eq(schema.audiences.id, id), eq(schema.audiences.teamId, teamId)))
     )[0];
 
+  const findTopic = async (teamId: string, id: string) =>
+    (
+      await db
+        .select({ id: schema.topics.id })
+        .from(schema.topics)
+        .where(and(eq(schema.topics.id, id), eq(schema.topics.teamId, teamId)))
+    )[0];
+
   // Accepted into the request schema so unsupported Resend knobs fail loudly
   // instead of being silently stripped (docs/resend-compatibility.md).
   const unsupported = (body: {
     preview_text?: string | undefined;
-    topic_id?: string | null | undefined;
     send?: boolean | undefined;
     scheduled_at?: string | undefined;
   }): string | null => {
     if (body.preview_text !== undefined) return "preview_text is not yet supported";
-    if (body.topic_id != null) return "topic_id is not yet supported";
     if (body.send) return "send-on-create is not supported; use POST /broadcasts/{id}/send";
     if (body.scheduled_at !== undefined) {
       return "scheduled_at on create is not supported; use POST /broadcasts/{id}/send";
@@ -892,11 +1101,15 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       if (!audienceId || !(await findAudience(auth.teamId, audienceId))) {
         return c.json(errorBody(404, "not_found", "Audience not found"), 404);
       }
+      if (body.topic_id != null && !(await findTopic(auth.teamId, body.topic_id))) {
+        return c.json(errorBody(404, "not_found", "Topic not found"), 404);
+      }
       const [row] = await db
         .insert(schema.broadcasts)
         .values({
           teamId: auth.teamId,
           audienceId,
+          topicId: body.topic_id ?? null,
           name: body.name ?? null,
           from: body.from,
           subject: body.subject,
@@ -998,6 +1211,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           subject: broadcast.subject,
           reply_to: parseReplyTo(broadcast.replyTo),
           preview_text: null,
+          topic_id: broadcast.topicId,
           html: broadcast.html,
           text: broadcast.text,
           status: wireBroadcastStatus(broadcast.status),
@@ -1046,12 +1260,16 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       if (audienceId !== undefined && !(await findAudience(auth.teamId, audienceId))) {
         return c.json(errorBody(404, "not_found", "Audience not found"), 404);
       }
+      if (body.topic_id != null && !(await findTopic(auth.teamId, body.topic_id))) {
+        return c.json(errorBody(404, "not_found", "Topic not found"), 404);
+      }
       const [row] = await db
         .update(schema.broadcasts)
         .set({
           updatedAt: new Date(),
           ...(body.name !== undefined ? { name: body.name } : {}),
           ...(audienceId !== undefined ? { audienceId } : {}),
+          ...(body.topic_id !== undefined ? { topicId: body.topic_id } : {}),
           ...(body.from !== undefined ? { from: body.from } : {}),
           ...(body.subject !== undefined ? { subject: body.subject } : {}),
           ...(body.html !== undefined ? { html: body.html } : {}),
@@ -1354,6 +1572,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.use("/broadcasts", requireApiKey);
   app.use("/broadcasts/*", requireApiKey);
   registerBroadcastRoutes(app, deps);
+
+  app.use("/topics", requireApiKey);
+  app.use("/topics/*", requireApiKey);
+  registerTopicRoutes(app, deps.db);
 
   const sendRoute = createRoute({
     method: "post",

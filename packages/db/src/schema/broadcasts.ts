@@ -1,6 +1,7 @@
 import { index, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { audiences } from "./audiences.js";
 import { teams } from "./teams.js";
+import { topics } from "./topics.js";
 
 /**
  * Lifecycle: draft → scheduled → sending → sent, with scheduled → canceled as
@@ -25,6 +26,9 @@ export const broadcasts = pgTable(
     // SET NULL, not CASCADE: deleting an audience must not erase the send
     // history of broadcasts already sent to it.
     audienceId: uuid("audience_id").references(() => audiences.id, { onDelete: "set null" }),
+    // SET NULL, not CASCADE: deleting a topic must not erase the send history
+    // of broadcasts already sent under it. A null topicId is a global send.
+    topicId: uuid("topic_id").references(() => topics.id, { onDelete: "set null" }),
     // Internal label, never rendered into the email.
     name: text("name"),
     from: text("from").notNull(),
