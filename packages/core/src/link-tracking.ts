@@ -17,6 +17,14 @@ export interface RewriteOptions {
   click: boolean;
   open: boolean;
   secretKey: Buffer;
+  /**
+   * Any href equal to or under this prefix is left un-wrapped by click
+   * tracking. For broadcasts the in-body unsubscribe link is already expanded
+   * to its real URL before encryption (the {{{-token guard no longer applies),
+   * so wrapping it through /t/c would record a bogus click and add a hop —
+   * pass the `/unsubscribe/` prefix to exclude it.
+   */
+  skipHrefPrefix?: string;
 }
 
 // ponytail: naive attribute regex — a quoted `>` inside an <a> tag would fool
@@ -43,6 +51,7 @@ export function rewriteForTracking(html: string, opts: RewriteOptions): string {
   if (opts.click) {
     out = out.replace(ANCHOR_HREF, (match, prefix: string, quote: string, url: string) => {
       if (!isTrackableHref(url)) return match;
+      if (opts.skipHrefPrefix && url.startsWith(opts.skipHrefPrefix)) return match;
       const token = makeClickToken({ emailId: opts.emailId, url, secretKey: opts.secretKey });
       return `${prefix}${quote}${base}/t/c/${token}${quote}`;
     });

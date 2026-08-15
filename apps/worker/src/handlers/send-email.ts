@@ -1,6 +1,7 @@
 import {
   applyStatusCas,
   buildUnsubscribeHeaders,
+  buildUnsubscribeUrl,
   decryptEmailBody,
   enqueueWebhookDeliveries,
   type Keyring,
@@ -130,12 +131,20 @@ export async function sendEmail(
         `tracking is enabled for email ${email.id} but APP_BASE_URL is unset and the domain has no tracking subdomain`,
       );
     }
+    // A broadcast's in-body unsubscribe link is already expanded to its real
+    // URL before encryption, so click tracking must skip it — wrapping the
+    // visible Unsubscribe link through /t/c would log a bogus click.
+    const skipHrefPrefix =
+      email.contactId && deps.unsubscribe
+        ? buildUnsubscribeUrl(deps.unsubscribe.baseUrl, "")
+        : undefined;
     html = rewriteForTracking(html, {
       emailId: email.id,
       trackingBaseUrl,
       click,
       open,
       secretKey: deps.tracking.secretKey,
+      ...(skipHrefPrefix ? { skipHrefPrefix } : {}),
     });
   }
 

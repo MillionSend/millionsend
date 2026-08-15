@@ -417,6 +417,50 @@ it("click on leaves an unexpanded {{{UNSUBSCRIBE_URL}}} intact", async () => {
   expect(mime).toContain("/t/c/");
 });
 
+it("broadcast: an already-expanded in-body unsubscribe link is NOT click-wrapped, but ordinary links are", async () => {
+  const [ct] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "ct.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+      clickTracking: true,
+    })
+    .returning({ id: schema.domains.id });
+  if (!ct) throw new Error("domain insert failed");
+
+  // send-broadcast substitutes {{{UNSUBSCRIBE_URL}}} to the real URL before
+  // encryption; by send-time no {{{-token remains to guard it.
+  const unsubUrl = "https://app.example.com/unsubscribe/Zm9v.YmFy";
+  const { ses, sends } = fakeSes("mid-unsub-body");
+  const emailId = await insertEmail(
+    { domainId: ct.id, from: "CT <a@ct.dev>", broadcastId: null, contactId: crypto.randomUUID() },
+    `<a href="${unsubUrl}">Unsubscribe</a><a href="https://dest.test/read">read</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    unsubscribe: { secretKey: randomBytes(32), baseUrl: "https://app.example.com" },
+    tracking: { secretKey: trackingSecret, defaultBaseUrl: "https://track.example.com" },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  // The visible unsubscribe link survives verbatim — no /t/c hop, no bogus
+  // click. Wrapping would fold the raw URL into a signed token, so its literal
+  // presence proves it was left untouched.
+  expect(mime).toContain(unsubUrl);
+  expect(mime).not.toMatch(/t\/c\/[^"']*unsubscribe/);
+  // The ordinary link is still wrapped.
+  expect(mime).toContain("https://track.example.com/t/c/");
+  expect(mime).not.toContain("dest.test/read");
+  // RFC 8058 header still points at the unsubscribe URL (unfold header folding).
+  const headers = mime.replace(/\r\n[ \t]/g, "").toLowerCase();
+  expect(headers).toContain("list-unsubscribe:<https://app.example.com/unsubscribe/");
+});
+
 it("tracking on with no base url and no subdomain fails loudly", async () => {
   const { ses, sends } = fakeSes();
   const emailId = await insertEmail({}, `<a href="https://dest.test/z">z</a>`);

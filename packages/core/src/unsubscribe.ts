@@ -54,14 +54,24 @@ export function verifyUnsubscribeToken(
   return { contactId, topicId: parts[1] || null };
 }
 
+/**
+ * The `/unsubscribe/<token>` link. An empty token yields the bare
+ * `/unsubscribe/` prefix, used to exclude the in-body link from click tracking.
+ */
+export function buildUnsubscribeUrl(baseUrl: string, token: string): string {
+  return new URL(
+    `unsubscribe/${token}`,
+    baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`,
+  ).toString();
+}
+
 /** RFC 8058 one-click unsubscribe headers for outgoing mail. */
 export function buildUnsubscribeHeaders(
   baseUrl: string,
   token: string,
 ): { "List-Unsubscribe": string; "List-Unsubscribe-Post": string } {
-  const url = new URL(`unsubscribe/${token}`, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
   return {
-    "List-Unsubscribe": `<${url.toString()}>`,
+    "List-Unsubscribe": `<${buildUnsubscribeUrl(baseUrl, token)}>`,
     "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
   };
 }
