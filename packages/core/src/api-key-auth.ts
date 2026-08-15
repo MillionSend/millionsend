@@ -9,6 +9,13 @@ export interface ApiKeyAuth {
   teamId: string;
   plan: Plan;
   apiKeyId: string;
+  /**
+   * SECURITY: the key's scope, enforced server-side. "sending_access" keys may
+   * only reach the send surface; a non-null domainId restricts sends to that
+   * one domain. Never trust the client to declare either.
+   */
+  permission: (typeof schema.apiKeys.permission.enumValues)[number];
+  domainId: string | null;
 }
 
 const LAST_USED_STAMP_INTERVAL_MS = 60_000;
@@ -29,6 +36,8 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
       keyHash: schema.apiKeys.keyHash,
       teamId: schema.apiKeys.teamId,
       lastUsedAt: schema.apiKeys.lastUsedAt,
+      permission: schema.apiKeys.permission,
+      domainId: schema.apiKeys.domainId,
       plan: schema.teams.plan,
     })
     .from(schema.apiKeys)
@@ -46,5 +55,11 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
         () => undefined,
       );
   }
-  return { teamId: match.teamId, plan: match.plan, apiKeyId: match.id };
+  return {
+    teamId: match.teamId,
+    plan: match.plan,
+    apiKeyId: match.id,
+    permission: match.permission,
+    domainId: match.domainId,
+  };
 }

@@ -57,6 +57,7 @@
     "complained": "Complained",
     "suppressed": "Suppressed",
     "failed": "Failed",
+    "canceled": "Canceled",
     "verified": "Verified",
     "pending": "Pending"
   }

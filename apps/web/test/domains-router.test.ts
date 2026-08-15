@@ -377,6 +377,33 @@ describe("domains.delete", () => {
     const rows = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(rows).toHaveLength(0);
   });
+
+  it("revokes and unscopes domain-scoped keys so the restrict FK cannot block the delete", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+    const [key] = await db
+      .insert(schema.apiKeys)
+      .values({
+        teamId,
+        name: "scoped",
+        tokenPrefix: "ms_live_scoped",
+        keyHash: "hash-scoped",
+        last4: "abcd",
+        domainId: id,
+      })
+      .returning({ id: schema.apiKeys.id });
+
+    await caller.domains.delete({ id });
+
+    expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(0);
+    const [row] = await db
+      .select()
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.id, key?.id ?? ""));
+    expect(row?.domainId).toBeNull();
+    expect(row?.revokedAt).not.toBeNull();
+  });
 });
 
 describe("domains.updateConfiguration", () => {

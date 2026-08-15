@@ -17,6 +17,7 @@ const VARIANTS = {
   bounced: "danger",
   complained: "warn",
   failed: "danger",
+  canceled: "neutral",
 } as const;
 
 export type BadgeStatus = keyof typeof VARIANTS;
@@ -38,6 +39,8 @@ const DOT_COLORS: Record<BadgeStatus, string> = {
   bounced: "var(--ms-dot-bounced)",
   complained: "var(--ms-dot-complained)",
   failed: "var(--ms-dot-failed)",
+  // Terminal but benign: borrows the queued gray rather than a danger hue.
+  canceled: "var(--ms-dot-queued)",
 };
 
 /** 8px status dot; without a status it renders the ring that marks an unfiltered "all" option. */

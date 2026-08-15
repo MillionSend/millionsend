@@ -100,6 +100,11 @@ async function handleMessage(
       `The ${domain.fromDomain ?? "sender"} domain is not verified for this team`,
     );
   }
+  // SECURITY: a domain-scoped key may only send from its one domain — the same
+  // scope the HTTP send surface enforces, applied here so SMTP is no bypass.
+  if (auth.domainId !== null && auth.domainId !== domain.domainId) {
+    throw smtpError(550, "This API key can only send from its assigned domain");
+  }
 
   const result = await acceptEmail(deps, auth, {
     from,

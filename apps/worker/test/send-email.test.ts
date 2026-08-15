@@ -269,6 +269,38 @@ it("SES failure leaves the email queued for the job retry", async () => {
   expect(row?.sentAt).toBeNull();
 });
 
+it("no-ops a canceled email: no SES call, status stays canceled", async () => {
+  const { ses, sends } = fakeSes("mid-cancel");
+  const deps: SendDeps = { keyring, ses };
+  // A future-scheduled email that a cancel flipped to canceled before its
+  // send job ran.
+  const emailId = await insertEmail({
+    latestStatus: "canceled",
+    scheduledAt: new Date(Date.now() + 3_600_000),
+  });
+
+  expect(await sendEmail(db, deps, { emailId })).toBe("skipped");
+  expect(sends).toHaveLength(0);
+
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("canceled");
+  expect(row?.sentAt).toBeNull();
+});
+
+it("a cancel that wins the race blocks the send claim", async () => {
+  const { ses, sends } = fakeSes("mid-race");
+  const deps: SendDeps = { keyring, ses };
+  const emailId = await insertEmail({ scheduledAt: new Date(Date.now() - 1000) });
+  // Cancel commits first (queued -> canceled), mirroring the API's CAS.
+  await db
+    .update(schema.emails)
+    .set({ latestStatus: "canceled" })
+    .where(eq(schema.emails.id, emailId));
+
+  expect(await sendEmail(db, deps, { emailId })).toBe("skipped");
+  expect(sends).toHaveLength(0);
+});
+
 it("token bucket setRate re-paces the existing bucket", async () => {
   const bucket = createTokenBucket(1);
   await bucket.take(); // consumes the single initial token

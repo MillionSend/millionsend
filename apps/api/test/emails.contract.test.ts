@@ -102,4 +102,32 @@ describe("official resend SDK against MillionSend", () => {
     expect(res.data).toBeNull();
     expect(res.error?.name).toBe("invalid_api_key");
   });
+
+  it("sends a batch through resend.batch.send", async () => {
+    const res = await resend.batch.send([
+      { from: "Acme <onboarding@acme.dev>", to: ["a@example.com"], subject: "one", text: "1" },
+      { from: "Acme <onboarding@acme.dev>", to: ["b@example.com"], subject: "two", text: "2" },
+    ]);
+    expect(res.error).toBeNull();
+    expect(res.data?.data).toHaveLength(2);
+    for (const item of res.data?.data ?? []) expect(item.id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("cancels a scheduled email through resend.emails.cancel", async () => {
+    const scheduled = await resend.emails.send({
+      from: "Acme <onboarding@acme.dev>",
+      to: ["later@example.com"],
+      subject: "scheduled",
+      text: "later",
+      scheduledAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    expect(scheduled.error).toBeNull();
+    const id = scheduled.data?.id ?? "";
+    const canceled = await resend.emails.cancel(id);
+    expect(canceled.error).toBeNull();
+    expect(canceled.data).toMatchObject({ object: "email", id });
+
+    const fetched = await resend.emails.get(id);
+    expect(fetched.data?.last_event).toBe("canceled");
+  });
 });

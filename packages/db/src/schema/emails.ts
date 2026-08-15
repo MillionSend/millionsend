@@ -23,6 +23,10 @@ import { teams } from "./teams.js";
  * "failed" is strictly terminal: retryable send errors keep the email in
  * "queued" (the job requeues); only permanent, non-retryable failure sets
  * "failed" — a failed email can therefore never later be delivered.
+ *
+ * "canceled" is terminal and ranks highest so applyStatusCas can never
+ * regress it: a scheduled email flips to it before its send job runs, and
+ * the send handler's queued-only guard then skips it.
  */
 export const emailStatusEnum = pgEnum("email_status", [
   "queued_quota",
@@ -36,6 +40,7 @@ export const emailStatusEnum = pgEnum("email_status", [
   "complained",
   "suppressed",
   "failed",
+  "canceled",
 ]);
 
 /**
