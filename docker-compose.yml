@@ -26,5 +26,17 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  smtp:
+    build: .
+    env_file: .env
+    environment:
+      PROCESS: smtp
+    ports:
+      - "2587:2587" # smtp relay
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:

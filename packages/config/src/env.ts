@@ -56,6 +56,14 @@ export const env = createEnv({
 
     IS_CLOUD: boolFromString,
 
+    // SMTP relay (PROCESS=smtp) listen port.
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(2587),
+    // STARTTLS certificate for the SMTP relay. Both set → STARTTLS is
+    // offered and required before AUTH; unset → plaintext (run the relay
+    // inside your own network or behind a TLS-terminating load balancer).
+    SMTP_TLS_CERT_PATH: z.string().optional(),
+    SMTP_TLS_KEY_PATH: z.string().optional(),
+
     // Envelope-encryption KEK for email bodies at rest.
     // Self-host: required. Cloud: omitted in favor of KMS_KEY_ID.
     MASTER_ENCRYPTION_KEY: canonicalBase64Key.optional(),

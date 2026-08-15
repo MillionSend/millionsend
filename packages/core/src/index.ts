@@ -1,4 +1,15 @@
 export {
+  type AcceptEmailAuth,
+  type AcceptEmailDeps,
+  type AcceptEmailPayload,
+  type AcceptEmailResult,
+  acceptEmail,
+  type SenderDomainVerdict,
+  senderDomain,
+  verifySenderDomain,
+} from "./accept-email.js";
+export { type ApiKeyAuth, authenticateApiKey } from "./api-key-auth.js";
+export {
   type ApiKeyMode,
   extractTokenPrefix,
   type GeneratedApiKey,

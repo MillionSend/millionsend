@@ -29,8 +29,11 @@ export function verifyUnsubscribeToken(token: string, secretKey: Buffer): string
   const dot = token.indexOf(".");
   if (dot < 1) return null;
   const payload = token.slice(0, dot);
-  const mac = Buffer.from(token.slice(dot + 1), "base64url");
-  const expected = sign(payload, secretKey);
+  // Compare in encoded space: base64url decoding ignores the final padding
+  // bits, so byte-level comparison would accept non-canonical signatures
+  // (e.g. a trailing "A" tampered to "B" decodes identically).
+  const mac = Buffer.from(token.slice(dot + 1), "utf8");
+  const expected = Buffer.from(sign(payload, secretKey).toString("base64url"), "utf8");
   if (mac.length !== expected.length || !timingSafeEqual(mac, expected)) return null;
   const contactId = Buffer.from(payload, "base64url").toString("utf8");
   return contactId.length > 0 ? contactId : null;

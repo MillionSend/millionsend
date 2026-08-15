@@ -29,13 +29,26 @@ describe("unsubscribe tokens", () => {
 
   it("rejects a tampered mac and a wrong key", () => {
     const token = makeUnsubscribeToken({ contactId, secretKey: key });
-    // Flip a full-width char mid-mac (the final base64url char only carries
-    // 2 significant bits, so flipping it may decode to the same bytes).
     const at = token.indexOf(".") + 3;
     const flipped = token.slice(0, at) + (token[at] === "A" ? "B" : "A") + token.slice(at + 1);
     expect(flipped).not.toBe(token);
     expect(verifyUnsubscribeToken(flipped, key)).toBeNull();
     expect(verifyUnsubscribeToken(token, randomBytes(32))).toBeNull();
+  });
+
+  it("rejects a non-canonical final mac char (padding-bit malleability)", () => {
+    // The last base64url char of a 32-byte mac carries 2 ignored padding
+    // bits: setting one yields a different char that decodes to the same
+    // bytes. Verification compares in encoded space and must reject it.
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const token = makeUnsubscribeToken({ contactId, secretKey: key });
+    const last = token[token.length - 1] as string;
+    const tampered = token.slice(0, -1) + alphabet[alphabet.indexOf(last) | 1];
+    expect(tampered).not.toBe(token);
+    expect(Buffer.from(tampered.split(".")[1] as string, "base64url")).toEqual(
+      Buffer.from(token.split(".")[1] as string, "base64url"),
+    );
+    expect(verifyUnsubscribeToken(tampered, key)).toBeNull();
   });
 
   it("rejects garbage without throwing", () => {

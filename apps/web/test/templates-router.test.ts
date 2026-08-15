@@ -102,8 +102,15 @@ describe("templates.list keyset paging", () => {
     }
     const oldest = ids[0];
     if (!oldest) throw new Error("expected a created template id");
-    // Distinct updatedAt so the recency ordering itself is observable.
+    // Distinct updatedAt so the recency ordering itself is observable. The
+    // gap is stamped directly: inserts default to the DB's microsecond clock
+    // while updates carry a millisecond JS Date, so real clocks can order an
+    // update BEFORE a same-millisecond insert.
     await caller.templates.update({ id: oldest, name: "t0 edited" });
+    await db
+      .update(schema.templates)
+      .set({ updatedAt: new Date(Date.now() + 60_000) })
+      .where(eq(schema.templates.id, oldest));
 
     const page1 = await caller.templates.list({ limit: 2 });
     expect(page1.items).toHaveLength(2);

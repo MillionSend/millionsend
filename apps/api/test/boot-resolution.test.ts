@@ -23,6 +23,7 @@ const env = {
 const ENTRYPOINTS = [
   { pkg: "apps/api", entry: "apps/api/src/server.ts" },
   { pkg: "apps/worker", entry: "apps/worker/src/server.ts" },
+  { pkg: "apps/smtp", entry: "apps/smtp/src/server.ts" },
   { pkg: "packages/db", entry: "packages/db/src/migrate.ts" },
 ];
 

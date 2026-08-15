@@ -1,0 +1,32 @@
+{
+  "name": "@millionsend/smtp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@millionsend/config": "workspace:*",
+    "@millionsend/core": "workspace:*",
+    "@millionsend/db": "workspace:*",
+    "@millionsend/queue": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "mailparser": "^3.7.5",
+    "smtp-server": "^3.14.0",
+    "tsx": "^4.23.12",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@millionsend/test-utils": "workspace:*",
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "^22.20.1",
+    "@types/nodemailer": "^8.0.1",
+    "@types/smtp-server": "^3.5.13",
+    "nodemailer": "^9.0.5",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
