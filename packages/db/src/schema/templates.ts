@@ -1,4 +1,4 @@
-import { index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
 
 // Reusable email content only — broadcasts copy a template's content at
@@ -15,6 +15,9 @@ export const templates = pgTable(
     subject: text("subject"),
     html: text("html").notNull(),
     text: text("text"),
+    // Block-editor source of truth (BlockDoc). Null → legacy raw-HTML row whose
+    // `html` was hand-authored; the app renders those in CODE mode.
+    document: jsonb("document").$type<unknown>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

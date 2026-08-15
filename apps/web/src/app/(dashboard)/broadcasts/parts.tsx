@@ -2,6 +2,28 @@
 
 import { useTranslations } from "next-intl";
 import { Skeleton } from "@/components/skeleton";
+import { MERGE_TOKEN_RE } from "@/lib/merge-fields";
+
+// Stand-in values so every merge pill reads as real content in the preview
+// rather than a raw {{{TOKEN}}}. UNSUBSCRIBE_URL becomes a dead "#" — the
+// worker resolves the real link at send time. Unknown names fall back to the
+// author's own |fallback, then to the bare name.
+const PREVIEW_SAMPLES: Record<string, string> = {
+  FIRST_NAME: "Ada",
+  LAST_NAME: "Lovelace",
+  EMAIL: "ada@example.com",
+  UNSUBSCRIBE_URL: "#",
+};
+
+/** Fill every merge token with a preview sample; `samples` supplies real
+ * per-contact-property values where the caller has them. */
+function fillMergeSamples(html: string, samples: Record<string, string>): string {
+  return html.replace(
+    MERGE_TOKEN_RE,
+    (_m, name: string, fallback: string | undefined) =>
+      PREVIEW_SAMPLES[name] ?? samples[name] ?? fallback ?? name,
+  );
+}
 
 export type BroadcastStatus = "draft" | "scheduled" | "sending" | "sent" | "canceled";
 
@@ -63,8 +85,19 @@ export function StatBlock({ label, value }: { label: string; value: string | nul
   );
 }
 
-/** Sandboxed render of broadcast HTML; scripts never run, the token renders as a dead link. */
-export function ContentPreview({ html, title }: { html: string; title: string }) {
+/**
+ * Sandboxed render of broadcast HTML; scripts never run. Every merge token is
+ * shown as a sample value so the preview reads like a real send.
+ */
+export function ContentPreview({
+  html,
+  title,
+  samples = {},
+}: {
+  html: string;
+  title: string;
+  samples?: Record<string, string>;
+}) {
   return (
     <div
       style={{
@@ -77,7 +110,7 @@ export function ContentPreview({ html, title }: { html: string; title: string })
       <iframe
         title={title}
         sandbox=""
-        srcDoc={html.replaceAll("{{{UNSUBSCRIBE_URL}}}", "#")}
+        srcDoc={fillMergeSamples(html, samples)}
         style={{
           width: 560,
           maxWidth: "100%",

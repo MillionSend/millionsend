@@ -37,6 +37,21 @@ const TEMPLATE_INPUT = {
   text: "Hi {{{FIRST_NAME|there}}}",
 };
 
+const SAMPLE_DOC = {
+  version: 1 as const,
+  blocks: [
+    {
+      type: "text" as const,
+      id: "b1",
+      html: "<p>Hi {{{FIRST_NAME|there}}}</p>",
+      align: "left" as const,
+      color: "#111111",
+      fontSize: 16,
+      padding: 12,
+    },
+  ],
+};
+
 async function templateRow(id: string) {
   const [row] = await db.select().from(schema.templates).where(eq(schema.templates.id, id));
   return row ?? null;
@@ -122,6 +137,35 @@ describe("templates.list keyset paging", () => {
     expect(page2.nextCursor).toBeNull();
     const seen = [...page1.items, ...page2.items].map((t) => t.id);
     expect(new Set(seen).size).toBe(3);
+  });
+});
+
+describe("templates.document", () => {
+  it("round-trips a block document through create and get", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id } = await caller.templates.create({ ...TEMPLATE_INPUT, document: SAMPLE_DOC });
+    expect((await caller.templates.get({ id })).document).toEqual(SAMPLE_DOC);
+    // A legacy row (no document) stays null and still opens.
+    const { id: legacyId } = await caller.templates.create(TEMPLATE_INPUT);
+    expect((await caller.templates.get({ id: legacyId })).document).toBeNull();
+  });
+
+  it("clears the document back to legacy raw-HTML when updated to null", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id } = await caller.templates.create({ ...TEMPLATE_INPUT, document: SAMPLE_DOC });
+    await caller.templates.update({ id, document: null });
+    expect((await templateRow(id))?.document).toBeNull();
+  });
+
+  it("rejects a malformed document via the zod guard", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await expect(
+      // biome-ignore lint/suspicious/noExplicitAny: deliberately wrong shape
+      caller.templates.create({ ...TEMPLATE_INPUT, document: { version: 2, blocks: [] } as any }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
 

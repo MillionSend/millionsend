@@ -1,0 +1,66 @@
+{
+  "mode": {
+    "design": "Design",
+    "code": "Code",
+    "designLocked": "Editing raw HTML disables the visual editor for this content."
+  },
+  "toolbar": {
+    "text": "Text",
+    "image": "Image",
+    "variables": "Variables"
+  },
+  "block": {
+    "heading": "Heading",
+    "text": "Text",
+    "image": "Image",
+    "button": "Button",
+    "divider": "Divider",
+    "spacer": "Spacer",
+    "variable": "Variable",
+    "html": "Custom HTML"
+  },
+  "canvas": {
+    "empty": "Add a block to begin, or type / inside a text block."
+  },
+  "code": {
+    "placeholder": "<html>…</html>"
+  },
+  "row": {
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "remove": "Delete block"
+  },
+  "panel": {
+    "level": "Level",
+    "color": "Color",
+    "fontSize": "Font size",
+    "align": "Align",
+    "label": "Label",
+    "href": "Link",
+    "bgColor": "Background",
+    "textColor": "Text color",
+    "radius": "Corner radius",
+    "src": "Image URL",
+    "alt": "Alt text",
+    "width": "Width",
+    "link": "Link",
+    "thickness": "Thickness",
+    "height": "Height",
+    "customHtml": "HTML",
+    "padding": "Padding",
+    "linkPrompt": "Link URL (leave empty to remove)",
+    "bold": "Bold",
+    "italic": "Italic",
+    "underline": "Underline",
+    "strike": "Strikethrough"
+  },
+  "picker": {
+    "search": "Search fields…",
+    "fallback": "Fallback (optional)",
+    "empty": "No fields match."
+  },
+  "view": {
+    "imagePlaceholder": "No image — set a URL in the panel",
+    "spacer": "Spacer · {h}px"
+  }
+}

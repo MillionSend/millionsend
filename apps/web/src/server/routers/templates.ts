@@ -3,6 +3,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
+import { blockDocSchema } from "@/lib/email-blocks/model";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
 
@@ -10,6 +11,8 @@ const nameSchema = z.string().trim().min(1).max(200);
 // "" clears the field — stored as null, never as an empty string.
 const subjectSchema = z.string().trim().max(998);
 const bodySchema = z.string().max(500_000);
+// Block-editor source of truth; null clears it back to a legacy raw-HTML row.
+const documentSchema = blockDocSchema.nullable();
 
 type TemplateRow = typeof schema.templates.$inferSelect;
 
@@ -68,6 +71,7 @@ export const templatesRouter = router({
         subject: subjectSchema.optional(),
         html: bodySchema.min(1),
         text: bodySchema.optional(),
+        document: documentSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -80,6 +84,7 @@ export const templatesRouter = router({
           subject: input.subject || null,
           html: input.html,
           text: input.text || null,
+          document: input.document ?? null,
         })
         .returning({ id: t.id });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -94,6 +99,7 @@ export const templatesRouter = router({
         subject: subjectSchema.optional(),
         html: bodySchema.min(1).optional(),
         text: bodySchema.optional(),
+        document: documentSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -106,6 +112,7 @@ export const templatesRouter = router({
           ...(input.subject !== undefined ? { subject: input.subject || null } : {}),
           ...(input.html !== undefined ? { html: input.html } : {}),
           ...(input.text !== undefined ? { text: input.text || null } : {}),
+          ...(input.document !== undefined ? { document: input.document } : {}),
           updatedAt: new Date(),
         })
         .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)));
@@ -130,6 +137,7 @@ export const templatesRouter = router({
         subject: source.subject,
         html: source.html,
         text: source.text,
+        document: source.document,
       })
       .returning({ id: t.id });
     if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
