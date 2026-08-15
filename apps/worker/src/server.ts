@@ -103,7 +103,7 @@ await queue.work("broadcast.send", async (payload) => {
       unsubscribeSecretKey,
       appBaseUrl: env.APP_BASE_URL,
       isCloud: env.IS_CLOUD,
-      enqueueEmailSend: (emailId) => enqueueSend(emailId),
+      enqueueEmailSend: enqueueSend,
       reschedule: (broadcastId, at) => enqueueBroadcast(broadcastId, at),
     },
     payload,

@@ -1,8 +1,8 @@
 {
   "banner": {
     "warning": {
-      "bounce": "Sua taxa de rejeição ({rate}) está se aproximando do limite.",
-      "complaint": "Sua taxa de reclamação ({rate}) está se aproximando do limite."
+      "bounce": "Sua taxa de rejeição ({rate}) está se aproximando do limite. Novas transmissões estão sendo enviadas em ritmo reduzido até que ela se recupere.",
+      "complaint": "Sua taxa de reclamação ({rate}) está se aproximando do limite. Novas transmissões estão sendo enviadas em ritmo reduzido até que ela se recupere."
     },
     "paused": {
       "bounce": "As transmissões estão pausadas: sua taxa de rejeição ({rate}) está acima do limite de {limit}.",

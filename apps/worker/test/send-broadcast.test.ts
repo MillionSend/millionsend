@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  broadcastSendSpacingMs,
   decryptEmailBody,
   deriveUnsubscribeKey,
   EnvKeyring,
@@ -56,17 +57,21 @@ afterAll(() => close());
 function makeDeps(overrides: Partial<BroadcastDeps> = {}): {
   deps: BroadcastDeps;
   enqueued: string[];
+  startAfters: (Date | undefined)[];
 } {
   const enqueued: string[] = [];
+  const startAfters: (Date | undefined)[] = [];
   return {
     enqueued,
+    startAfters,
     deps: {
       keyring,
       unsubscribeSecretKey: secretKey,
       appBaseUrl: BASE_URL,
       isCloud: false,
-      enqueueEmailSend: async (emailId) => {
+      enqueueEmailSend: async (emailId, startAfter) => {
         enqueued.push(emailId);
+        startAfters.push(startAfter);
       },
       // Batch of 1 exercises the keyset pagination.
       batchSize: 1,
@@ -336,6 +341,74 @@ it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", 
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, qTeamId));
   expect(counter?.accepted).toBe(100);
+});
+
+async function seedThrottleTeam(
+  label: string,
+  counter: Partial<typeof schema.usageCounters.$inferInsert>,
+): Promise<{ broadcastId: string }> {
+  const tId = await createTeam(db, label);
+  await db.insert(schema.domains).values({
+    teamId: tId,
+    name: `${label}.dev`,
+    region: "us-east-1",
+    status: "verified",
+    verifiedAt: new Date(),
+    sesConfigurationSet: "ms-set",
+  });
+  const [aud] = await db
+    .insert(schema.audiences)
+    .values({ teamId: tId, name: "t" })
+    .returning({ id: schema.audiences.id });
+  if (!aud) throw new Error("audience insert failed");
+  await db.insert(schema.contacts).values([
+    { audienceId: aud.id, teamId: tId, email: "t1@example.com" },
+    { audienceId: aud.id, teamId: tId, email: "t2@example.com" },
+    { audienceId: aud.id, teamId: tId, email: "t3@example.com" },
+  ]);
+  await db.insert(schema.usageCounters).values({ teamId: tId, day: utcDay(), ...counter });
+  const broadcastId = await insertBroadcast({
+    teamId: tId,
+    audienceId: aud.id,
+    from: `Acme <hi@${label}.dev>`,
+  });
+  return { broadcastId };
+}
+
+it("throttles the fan-out drip when the team is over the risk line", async () => {
+  // 90/2000 = 4.5% bounce: over WARN (4%), under PAUSE (5%), volume >= floor.
+  const { broadcastId } = await seedThrottleTeam("bc-throttle", {
+    accepted: 2000,
+    bounced: 90,
+  });
+  const { deps, startAfters } = makeDeps();
+
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+
+  expect(startAfters).toHaveLength(3);
+  expect(startAfters.every((d) => d instanceof Date)).toBe(true);
+  const [t0, t1, t2] = startAfters.map((d) => (d as Date).getTime());
+  if (t0 === undefined || t1 === undefined || t2 === undefined)
+    throw new Error("missing startAfter");
+  const spacing = broadcastSendSpacingMs("warning");
+  // Deltas between consecutive enqueues equal the core spacing exactly; the
+  // absolute base (wall clock) is never asserted.
+  expect(t1 - t0).toBe(spacing);
+  expect(t2 - t1).toBe(spacing);
+});
+
+it("fans out at full rate (no startAfter) when the team is ok", async () => {
+  // 10/2000 = 0.5% bounce: clean, over the volume floor → ok, full rate.
+  const { broadcastId } = await seedThrottleTeam("bc-fullrate", {
+    accepted: 2000,
+    bounced: 10,
+  });
+  const { deps, startAfters } = makeDeps();
+
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+
+  expect(startAfters).toHaveLength(3);
+  expect(startAfters.every((d) => d === undefined)).toBe(true);
 });
 
 it("defers a not-yet-due scheduled broadcast back to the queue", async () => {
