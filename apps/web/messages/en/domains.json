@@ -81,7 +81,10 @@
     "created": "Created",
     "status": "Status",
     "region": "Region",
-    "dnsTitle": "DNS records",
+    "tabs": {
+      "records": "Records",
+      "configuration": "Configuration"
+    },
     "recordsHeading": "Add these records at {provider}",
     "recordsHeadingGeneric": "Add these records at your DNS provider",
     "recordsSublineProvider": "provider auto-detected from NS records · checks run every 30 s",
@@ -93,17 +96,28 @@
       "tracking": "Open & click tracking"
     },
     "tracking": {
-      "title": "Tracking",
-      "subtitle": "SES tracks opens and clicks at the configuration-set level, for the whole account. These save as this domain's settings — they don't switch SES tracking on or off on their own.",
       "open": "Open tracking",
       "openHint": "Adds a 1×1 pixel so a render counts as an open.",
       "click": "Click tracking",
       "clickHint": "Routes links through SES to count clicks.",
       "subdomain": "Tracking subdomain",
-      "subdomainHint": "Optional. Serves tracking links from your own domain instead of awstrack.me — add the CNAME below.",
+      "subdomainHint": "Optional. Serves tracking links from your own domain instead of awstrack.me — add the CNAME shown in Records.",
       "subdomainPlaceholder": "email",
-      "subdomainError": "Use a single lowercase DNS label.",
-      "error": "Couldn't save tracking settings."
+      "subdomainError": "Use a single lowercase DNS label."
+    },
+    "configuration": {
+      "note": "SES applies tracking and TLS at the configuration-set level, for the whole account. These save as this domain's settings — they don't switch SES behavior on their own.",
+      "trackingMetrics": "Enable tracking metrics",
+      "update": "Update",
+      "subdomainActive": "Custom subdomain set — add its CNAME from Records.",
+      "subdomainNeutral": "Using awstrack.me for tracking links.",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "tls": "TLS (Transport Layer Security)",
+      "tlsOpportunistic": "Opportunistic",
+      "tlsEnforced": "Enforced",
+      "tlsOpportunisticHint": "Attempts TLS and falls back to plaintext if the receiving server doesn't support it.",
+      "tlsEnforcedHint": "Requires TLS — messages to servers that don't support it are not delivered."
     },
     "columns": {
       "type": "Type",

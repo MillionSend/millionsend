@@ -14,6 +14,7 @@ import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
+import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner, Spinner } from "@/components/spinner";
 import { formatRelative, formatUtcMinute } from "@/lib/format";
@@ -95,30 +96,57 @@ function TrackingToggle({
       />
       <span>
         <span style={{ display: "block", fontSize: 13.5, color: "var(--ms-bone)" }}>{label}</span>
-        <span style={{ display: "block", fontSize: 12, color: "var(--ms-muted)", marginTop: 2 }}>
-          {hint}
-        </span>
+        {hint ? (
+          <span style={{ display: "block", fontSize: 12, color: "var(--ms-muted)", marginTop: 2 }}>
+            {hint}
+          </span>
+        ) : null}
       </span>
     </label>
   );
 }
 
+function ConfigSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section style={{ paddingTop: 22, marginTop: 22, borderTop: "1px solid var(--ms-line)" }}>
+      <h3 style={{ fontSize: 14, fontWeight: 500, color: "var(--ms-bone)", margin: 0 }}>{title}</h3>
+      {description ? (
+        <p style={{ fontSize: 12.5, color: "var(--ms-muted)", margin: "6px 0 0", lineHeight: 1.5 }}>
+          {description}
+        </p>
+      ) : null}
+      <div style={{ marginTop: 12 }}>{children}</div>
+    </section>
+  );
+}
+
 /**
- * Tracking preferences persist to the domain row as settings; SES tracking
- * itself is enabled at the configuration-set level, so these toggles do not
- * gate it on their own. Toggles save immediately; the subdomain saves on blur
- * so a branded CNAME can be surfaced in the DNS table once set.
+ * Configuration preferences persist to the domain row as settings; SES applies
+ * tracking and TLS at the configuration-set level, so these controls do not
+ * flip SES behavior on their own. Toggles and TLS save on change; the tracking
+ * subdomain saves on the explicit Update button so its branded CNAME can be
+ * surfaced in the DNS table once set.
  */
-function TrackingSection({
+function ConfigurationPanel({
   id,
   openTracking,
   clickTracking,
   trackingSubdomain,
+  tlsMode,
 }: {
   id: string;
   openTracking: boolean;
   clickTracking: boolean;
   trackingSubdomain: string | null;
+  tlsMode: "opportunistic" | "enforced";
 }) {
   const t = useTranslations("domains");
   const trpc = useTRPC();
@@ -126,7 +154,7 @@ function TrackingSection({
   const [subdomain, setSubdomain] = useState(trackingSubdomain ?? "");
 
   const update = useMutation(
-    trpc.domains.updateTracking.mutationOptions({
+    trpc.domains.updateConfiguration.mutationOptions({
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
         void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
@@ -134,71 +162,135 @@ function TrackingSection({
     }),
   );
 
-  const invalid = subdomain.trim() !== "" && !DNS_LABEL_RE.test(subdomain.trim());
+  const trimmed = subdomain.trim();
+  const invalid = trimmed !== "" && !DNS_LABEL_RE.test(trimmed);
+  const dirty = trimmed !== (trackingSubdomain ?? "");
 
   function saveSubdomain() {
-    const next = subdomain.trim();
-    if (invalid || next === (trackingSubdomain ?? "")) return;
-    update.mutate({ id, trackingSubdomain: next });
+    if (invalid || !dirty) return;
+    update.mutate({ id, trackingSubdomain: trimmed });
   }
 
   return (
-    <section style={{ marginTop: 34, maxWidth: 1000 }}>
-      <h2
-        className="ms-display"
-        style={{ fontSize: 22, margin: 0, fontWeight: 500, color: "var(--ms-bone)" }}
-      >
-        {t("detail.tracking.title")}
-      </h2>
-      <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 6 }}>
-        {t("detail.tracking.subtitle")}
+    <div style={{ maxWidth: 1000 }}>
+      <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)" }}>
+        {t("detail.configuration.note")}
       </div>
 
-      <div style={{ display: "grid", gap: 14, marginTop: 20 }}>
+      <ConfigSection
+        title={t("detail.configuration.trackingMetrics")}
+        description={t("detail.tracking.subdomainHint")}
+      >
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", maxWidth: 460 }}>
+          <div className="ms-field" style={{ flex: 1 }}>
+            <input
+              id="tracking-subdomain"
+              type="text"
+              className="ms-input mono"
+              style={{ width: "100%" }}
+              aria-label={t("detail.tracking.subdomain")}
+              placeholder={t("detail.tracking.subdomainPlaceholder")}
+              autoComplete="off"
+              spellCheck={false}
+              disabled={update.isPending}
+              value={subdomain}
+              onChange={(e) => setSubdomain(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveSubdomain();
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            className="ms-btn ms-btn-secondary"
+            disabled={update.isPending || invalid || !dirty}
+            onClick={saveSubdomain}
+          >
+            {t("detail.configuration.update")}
+          </button>
+        </div>
+        <p
+          style={{
+            margin: "8px 0 0",
+            fontSize: 12,
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            color: invalid ? "var(--ms-danger)" : "var(--ms-muted)",
+          }}
+        >
+          {invalid ? (
+            t("detail.tracking.subdomainError")
+          ) : (
+            <>
+              <span
+                aria-hidden
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  background: trackingSubdomain ? "var(--ms-success)" : "var(--ms-faint)",
+                }}
+              />
+              {trackingSubdomain
+                ? t("detail.configuration.subdomainActive")
+                : t("detail.configuration.subdomainNeutral")}
+            </>
+          )}
+        </p>
+      </ConfigSection>
+
+      <ConfigSection
+        title={t("detail.tracking.click")}
+        description={t("detail.tracking.clickHint")}
+      >
         <TrackingToggle
-          label={t("detail.tracking.open")}
-          hint={t("detail.tracking.openHint")}
-          checked={openTracking}
-          disabled={update.isPending}
-          onChange={(checked) => update.mutate({ id, openTracking: checked })}
-        />
-        <TrackingToggle
-          label={t("detail.tracking.click")}
-          hint={t("detail.tracking.clickHint")}
+          label={
+            clickTracking ? t("detail.configuration.enabled") : t("detail.configuration.disabled")
+          }
+          hint=""
           checked={clickTracking}
           disabled={update.isPending}
           onChange={(checked) => update.mutate({ id, clickTracking: checked })}
         />
-        <div className="ms-field" style={{ maxWidth: 360 }}>
-          <label htmlFor="tracking-subdomain">{t("detail.tracking.subdomain")}</label>
-          <input
-            id="tracking-subdomain"
-            type="text"
-            className="ms-input mono"
-            style={{ width: "100%" }}
-            placeholder={t("detail.tracking.subdomainPlaceholder")}
-            autoComplete="off"
-            spellCheck={false}
-            disabled={update.isPending}
-            value={subdomain}
-            onChange={(e) => setSubdomain(e.target.value)}
-            onBlur={saveSubdomain}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.currentTarget.blur();
-            }}
-          />
-          <p
-            style={{
-              margin: "6px 0 0",
-              fontSize: 12,
-              color: invalid ? "var(--ms-danger)" : "var(--ms-muted)",
-            }}
-          >
-            {invalid ? t("detail.tracking.subdomainError") : t("detail.tracking.subdomainHint")}
-          </p>
-        </div>
-      </div>
-    </section>
+      </ConfigSection>
+
+      <ConfigSection title={t("detail.tracking.open")} description={t("detail.tracking.openHint")}>
+        <TrackingToggle
+          label={
+            openTracking ? t("detail.configuration.enabled") : t("detail.configuration.disabled")
+          }
+          hint=""
+          checked={openTracking}
+          disabled={update.isPending}
+          onChange={(checked) => update.mutate({ id, openTracking: checked })}
+        />
+      </ConfigSection>
+
+      <ConfigSection title={t("detail.configuration.tls")}>
+        <Select
+          value={tlsMode}
+          ariaLabel={t("detail.configuration.tls")}
+          disabled={update.isPending}
+          width={240}
+          onChange={(value) =>
+            update.mutate({ id, tlsMode: value as "opportunistic" | "enforced" })
+          }
+          options={[
+            { value: "opportunistic", label: t("detail.configuration.tlsOpportunistic") },
+            { value: "enforced", label: t("detail.configuration.tlsEnforced") },
+          ]}
+        />
+        <p
+          style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--ms-muted)", lineHeight: 1.5 }}
+        >
+          {tlsMode === "enforced"
+            ? t("detail.configuration.tlsEnforcedHint")
+            : t("detail.configuration.tlsOpportunisticHint")}
+        </p>
+      </ConfigSection>
+    </div>
   );
 }
 
@@ -235,6 +327,7 @@ export function DomainDetail({ id }: { id: string }) {
   );
 
   const [copiedKey, setCopiedKey] = useState<"instructions" | "prompt" | null>(null);
+  const [tab, setTab] = useState<"records" | "configuration">("records");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   // Stable identity: Modal's focus effect depends on onClose, and a fresh
@@ -341,37 +434,13 @@ export function DomainDetail({ id }: { id: string }) {
         >
           <Skeleton width={280} height="1lh" />
         </div>
-        <section style={{ marginTop: 26, maxWidth: 1000 }}>
-          <h2 className="ms-display" style={{ fontSize: 22, margin: 0, display: "flex" }}>
-            <Skeleton width={300} height="1lh" />
-          </h2>
-          <div style={{ marginTop: 22 }}>
-            <DnsRecordsTableSkeleton showStatus />
-          </div>
-        </section>
-        <section style={{ marginTop: 34, maxWidth: 1000 }}>
-          <h2 className="ms-display" style={{ fontSize: 22, margin: 0, display: "flex" }}>
-            <Skeleton width={140} height="1lh" />
-          </h2>
-          <div style={{ display: "grid", gap: 14, marginTop: 20 }}>
-            {[0, 1].map((toggle) => (
-              <div key={toggle} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                <Skeleton width={13} height={13} />
-                <div style={{ display: "grid", gap: 6 }}>
-                  <Skeleton width={120} height="1lh" />
-                  <Skeleton width={220} height="1lh" />
-                </div>
-              </div>
-            ))}
-            <div className="ms-field" style={{ maxWidth: 360 }}>
-              <div style={{ display: "flex" }}>
-                <Skeleton width={130} height="1lh" />
-              </div>
-              <div style={{ marginTop: 6, display: "flex" }}>
-                <Skeleton width="100%" height={38} radius="var(--ms-r-input)" />
-              </div>
-            </div>
-          </div>
+        {/* Records | Configuration tab bar (Configuration lands once verified). */}
+        <div className="ms-tabs" style={{ marginTop: 26 }}>
+          <Skeleton width={64} height={30} radius="var(--ms-r-input)" />
+          <Skeleton width={96} height={30} radius="var(--ms-r-input)" />
+        </div>
+        <section style={{ marginTop: 24, maxWidth: 1000 }}>
+          <DnsRecordsTableSkeleton showStatus />
         </section>
       </>
     );
@@ -549,65 +618,94 @@ export function DomainDetail({ id }: { id: string }) {
         </GradientBanner>
       ) : null}
 
-      <section style={{ marginTop: 26, maxWidth: 1000 }}>
-        <h2
-          className="ms-display"
-          style={{ fontSize: 22, margin: 0, fontWeight: 500, color: "var(--ms-bone)" }}
-        >
-          {status === "verified"
-            ? t("detail.dnsTitle")
-            : provider
-              ? t("detail.recordsHeading", { provider: provider.name })
-              : t("detail.recordsHeadingGeneric")}
-        </h2>
-        {status !== "verified" ? (
-          <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 6 }}>
-            {provider ? t("detail.recordsSublineProvider") : t("detail.recordsSubline")}
-          </div>
-        ) : null}
+      {/* Configuration is SES-verified-only: an unverified domain can't send,
+          so its tracking/TLS settings have nothing to apply to yet. */}
+      {status === "verified" ? (
+        <div className="ms-tabs" style={{ marginTop: 26 }}>
+          <button
+            type="button"
+            className={tab === "records" ? "active" : ""}
+            onClick={() => setTab("records")}
+          >
+            {t("detail.tabs.records")}
+          </button>
+          <button
+            type="button"
+            className={tab === "configuration" ? "active" : ""}
+            onClick={() => setTab("configuration")}
+          >
+            {t("detail.tabs.configuration")}
+          </button>
+        </div>
+      ) : null}
 
-        {records.isError ? (
-          <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 20 }}>
-            <p style={{ margin: 0, fontSize: "var(--ms-fs-ui)" }}>{t("detail.recordsError")}</p>
-            <button
-              type="button"
-              className="ms-btn ms-btn-secondary"
-              onClick={() => records.refetch()}
-            >
-              {t("detail.retry")}
-            </button>
-          </div>
-        ) : (
-          <div style={{ marginTop: 22 }}>
-            {records.isSuccess ? (
-              <DnsRecordsTable records={rows} domain={data.name} showStatus />
-            ) : (
-              <DnsRecordsTableSkeleton showStatus />
-            )}
-          </div>
-        )}
+      {status === "verified" && tab === "configuration" ? (
+        <div style={{ marginTop: 24 }}>
+          <ConfigurationPanel
+            id={id}
+            openTracking={data.openTracking}
+            clickTracking={data.clickTracking}
+            trackingSubdomain={data.trackingSubdomain}
+            tlsMode={data.tlsMode}
+          />
+        </div>
+      ) : (
+        <section style={{ marginTop: status === "verified" ? 24 : 26, maxWidth: 1000 }}>
+          {status !== "verified" ? (
+            <>
+              <h2
+                className="ms-display"
+                style={{ fontSize: 22, margin: 0, fontWeight: 500, color: "var(--ms-bone)" }}
+              >
+                {provider
+                  ? t("detail.recordsHeading", { provider: provider.name })
+                  : t("detail.recordsHeadingGeneric")}
+              </h2>
+              <div
+                className="ms-mono"
+                style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 6 }}
+              >
+                {provider ? t("detail.recordsSublineProvider") : t("detail.recordsSubline")}
+              </div>
+            </>
+          ) : null}
 
-        {status !== "verified" && provider?.url ? (
-          <div style={{ display: "flex", gap: 10, marginTop: 24, alignItems: "center" }}>
-            <a
-              className="ms-btn ms-btn-secondary"
-              style={{ textDecoration: "none" }}
-              href={provider.url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t("detail.goToProvider", { provider: provider.name })} ↗
-            </a>
-          </div>
-        ) : null}
-      </section>
+          {records.isError ? (
+            <div style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 20 }}>
+              <p style={{ margin: 0, fontSize: "var(--ms-fs-ui)" }}>{t("detail.recordsError")}</p>
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                onClick={() => records.refetch()}
+              >
+                {t("detail.retry")}
+              </button>
+            </div>
+          ) : (
+            <div style={{ marginTop: status === "verified" ? 0 : 22 }}>
+              {records.isSuccess ? (
+                <DnsRecordsTable records={rows} domain={data.name} showStatus />
+              ) : (
+                <DnsRecordsTableSkeleton showStatus />
+              )}
+            </div>
+          )}
 
-      <TrackingSection
-        id={id}
-        openTracking={data.openTracking}
-        clickTracking={data.clickTracking}
-        trackingSubdomain={data.trackingSubdomain}
-      />
+          {status !== "verified" && provider?.url ? (
+            <div style={{ display: "flex", gap: 10, marginTop: 24, alignItems: "center" }}>
+              <a
+                className="ms-btn ms-btn-secondary"
+                style={{ textDecoration: "none" }}
+                href={provider.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("detail.goToProvider", { provider: provider.name })} ↗
+              </a>
+            </div>
+          ) : null}
+        </section>
+      )}
 
       <Modal open={confirmingDelete} onClose={closeDelete} title={t("detail.deleteDomain")}>
         <p

@@ -180,6 +180,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         openTracking: domain.openTracking,
         clickTracking: domain.clickTracking,
         trackingSubdomain: domain.trackingSubdomain,
+        tlsMode: domain.tlsMode,
         createdAt: domain.createdAt,
         verifiedAt: domain.verifiedAt,
         lastCheckedAt: domain.lastCheckedAt,
@@ -311,7 +312,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       };
     }),
 
-    updateTracking: teamProcedure
+    updateConfiguration: teamProcedure
       .input(
         z.object({
           id: z.uuid(),
@@ -325,6 +326,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
             .refine((v) => v === "" || SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
             .nullable()
             .optional(),
+          tlsMode: z.enum(schema.tlsModeEnum.enumValues).optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -333,12 +335,14 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           openTracking: boolean;
           clickTracking: boolean;
           trackingSubdomain: string | null;
+          tlsMode: (typeof schema.tlsModeEnum.enumValues)[number];
         }> = {};
         if (input.openTracking !== undefined) set.openTracking = input.openTracking;
         if (input.clickTracking !== undefined) set.clickTracking = input.clickTracking;
         if (input.trackingSubdomain !== undefined) {
           set.trackingSubdomain = input.trackingSubdomain || null;
         }
+        if (input.tlsMode !== undefined) set.tlsMode = input.tlsMode;
         const next = { ...domain, ...set };
         if (Object.keys(set).length > 0) {
           await ctx.db
@@ -350,6 +354,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           openTracking: next.openTracking,
           clickTracking: next.clickTracking,
           trackingSubdomain: next.trackingSubdomain,
+          tlsMode: next.tlsMode,
         };
       }),
 
