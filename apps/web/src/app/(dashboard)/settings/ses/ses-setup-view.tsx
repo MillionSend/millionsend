@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
+import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import { buildAwsSetupScript, CFN_DEPLOY_COMMAND, cfnQuickCreateUrl } from "@/lib/aws-setup-script";
@@ -307,7 +308,71 @@ export function SesSetupView() {
     if (prevCredentialsOk.current === false && credentialsOk) void testRefetch();
     prevCredentialsOk.current = credentialsOk;
   }, [hasReadiness, credentialsOk, testRefetch]);
-  if (!readiness.data || !sesEnv.data) return null;
+  if (!readiness.data || !sesEnv.data) {
+    // Ghost of the stepper chrome while the env checks resolve — real rails
+    // and titles (all static), card interiors as bars.
+    return (
+      <div style={{ maxWidth: 880 }}>
+        <Step marker="01" title={t("setup.stepTitle")}>
+          <section className="ms-card" style={{ ...stepCardStyle, padding: 22 }}>
+            <div style={{ fontSize: 16, fontWeight: 600, display: "flex" }}>
+              <Skeleton width={220} height="1lh" />
+            </div>
+            <p style={{ margin: "12px 0 0" }}>
+              <SkeletonChip width={180} />
+            </p>
+            <p style={{ margin: "10px 0 0", fontSize: 13, display: "flex" }}>
+              <Skeleton width={320} height="1lh" />
+            </p>
+          </section>
+        </Step>
+        <Step marker="02" title={t("credentials.title")}>
+          <section className="ms-card" style={{ ...stepCardStyle, padding: 24 }}>
+            <p style={{ margin: "0 0 8px", fontSize: 13, display: "flex" }}>
+              <Skeleton width={280} height="1lh" />
+            </p>
+            <div>
+              {[300, 220].map((width) => (
+                <div
+                  key={width}
+                  className="ms-mono"
+                  style={{
+                    padding: "8px 0",
+                    borderBottom: "1px solid var(--ms-line)",
+                    fontSize: 12.5,
+                    display: "flex",
+                  }}
+                >
+                  <Skeleton width={width} height="1lh" />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 18 }}>
+              <Skeleton width={130} height={30} radius="var(--ms-r-input)" />
+            </div>
+          </section>
+        </Step>
+        <Step marker="03" last title={t("events.title")}>
+          <section className="ms-card" style={{ ...stepCardStyle, padding: 24 }}>
+            {[240, 280].map((width) => (
+              <div
+                key={width}
+                className="ms-mono"
+                style={{
+                  padding: "8px 0",
+                  borderBottom: "1px solid var(--ms-line)",
+                  fontSize: 12.5,
+                  display: "flex",
+                }}
+              >
+                <Skeleton width={width} height="1lh" />
+              </div>
+            ))}
+          </section>
+        </Step>
+      </div>
+    );
+  }
 
   const fmt = new Intl.NumberFormat(locale);
   const result = test.data;

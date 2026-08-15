@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { CopyGlyph } from "@/components/copy-chip";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
+import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { formatUtcMinute } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
@@ -14,6 +15,75 @@ type BounceData = {
   bounceType?: string;
   bouncedRecipients?: Array<{ diagnosticCode?: string }>;
 };
+
+/** Mirrors the loaded page's boxes (header + action button, meta strip). */
+function SuppressionDetailSkeleton() {
+  const t = useTranslations("emails");
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          gap: 16,
+          marginBottom: 28,
+        }}
+      >
+        <div>
+          <div style={{ display: "flex", fontSize: 13, lineHeight: 1, marginBottom: 10 }}>
+            <Skeleton width={220} height="1lh" />
+          </div>
+          <h1
+            className="ms-display"
+            style={{ fontSize: "var(--ms-fs-h1)", fontWeight: 600, margin: 0, display: "flex" }}
+          >
+            <Skeleton width={280} height="1lh" />
+          </h1>
+        </div>
+        <Skeleton width={110} height={30} radius="var(--ms-r-input)" />
+      </div>
+
+      <div
+        className="ms-meta-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, 1fr)",
+          gap: 22,
+          padding: "20px 0",
+          borderTop: "1px solid var(--ms-line)",
+          borderBottom: "1px solid var(--ms-line)",
+          maxWidth: 860,
+        }}
+      >
+        <div>
+          <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
+            {t("suppressions.detail.origin")}
+          </div>
+          <div style={{ fontSize: 14, marginTop: 4, display: "flex" }}>
+            <Skeleton width={120} height="1lh" />
+          </div>
+        </div>
+        <div>
+          <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
+            {t("suppressions.detail.recipient")}
+          </div>
+          <div className="ms-mono" style={{ fontSize: 13, marginTop: 5, display: "flex" }}>
+            <Skeleton width={180} height="1lh" />
+          </div>
+        </div>
+        <div>
+          <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
+            {t("suppressions.detail.added")}
+          </div>
+          <div style={{ fontSize: 14, marginTop: 4, display: "flex" }}>
+            <Skeleton width={140} height="1lh" />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
 
 export default function SuppressionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -33,7 +103,7 @@ export default function SuppressionDetailPage() {
   );
 
   if (query.isPending) {
-    return <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>{t("loading")}</p>;
+    return <SuppressionDetailSkeleton />;
   }
   if (query.isError || !query.data) {
     return (

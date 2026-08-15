@@ -10,7 +10,7 @@ import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
-import { BtnSpinner, Spinner } from "@/components/spinner";
+import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { maskWebhookSecret } from "@/lib/webhook-events";
@@ -92,9 +92,46 @@ function DeliveryExpanded({ id }: { id: string }) {
   const delivery = useQuery(trpc.webhooks.deliveries.get.queryOptions({ id }));
 
   if (delivery.isPending) {
+    // Mirrors the loaded expanded row (payload block, response, message id).
     return (
-      <div style={{ display: "flex", padding: "6px 0" }}>
-        <Spinner size={14} />
+      <div style={{ display: "grid", gap: 12, padding: "4px 0 8px" }}>
+        <div>
+          <p className="ms-microlabel" style={{ margin: "0 0 6px", fontSize: 10.5 }}>
+            {t("detail.payload")}
+          </p>
+          <div
+            className="ms-mono"
+            style={{
+              padding: 12,
+              fontSize: 11.5,
+              lineHeight: 1.6,
+              background: "var(--ms-ground)",
+              border: "1px solid var(--ms-line)",
+              borderRadius: 8,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-start",
+            }}
+          >
+            {[64, 220, 180, 96].map((width, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: placeholder lines, position is identity
+              <span key={index} style={{ display: "flex" }}>
+                <Skeleton width={width} height="1lh" />
+              </span>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="ms-microlabel" style={{ margin: "0 0 6px", fontSize: 10.5 }}>
+            {t("detail.response")}
+          </p>
+          <div className="ms-mono" style={{ fontSize: 11.5, lineHeight: 1.6, display: "flex" }}>
+            <Skeleton width={40} height="1lh" />
+          </div>
+        </div>
+        <div className="ms-mono" style={{ fontSize: 11, display: "flex" }}>
+          <Skeleton width={260} height="1lh" />
+        </div>
       </div>
     );
   }

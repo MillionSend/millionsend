@@ -103,6 +103,16 @@ ALLOW_SIGNUP=false
 # API port (the web dashboard is always 3000).
 PORT=3001
 
+# SMTP relay (the optional smtp compose service) listen port. Clients
+# authenticate with username "millionsend" and an ms_ API key as the password.
+SMTP_PORT=2587
+
+# STARTTLS keypair for the SMTP relay (PEM paths inside the container). Both
+# set: STARTTLS is offered and required before AUTH. Unset: plaintext — keep
+# the port inside your own network or behind a TLS-terminating load balancer.
+SMTP_TLS_CERT_PATH=
+SMTP_TLS_KEY_PATH=
+
 # Leave false. true enables hosted-cloud behavior (KMS, Stripe billing).
 IS_CLOUD=false
 `;
