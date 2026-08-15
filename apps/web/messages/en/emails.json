@@ -73,9 +73,6 @@
     "code": "Code",
     "smtpResponse": "SMTP response",
     "whatToDo": "What to do",
-    "step1": "Confirm the address with the recipient — one typo causes most 5.1.1s.",
-    "step2": "It is suppressed now. When you have a corrected address, send to it — the suppression applies to this exact address only.",
-    "step3": "Importing lists? Validate before sending — bounce rate over 4% pauses sending.",
     "copyReady": "Copy-ready"
   },
   "suppressedDrawer": {

@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./bounce-guidance": {
+      "types": "./src/bounce-guidance.ts",
+      "default": "./src/bounce-guidance.ts"
     }
   },
   "scripts": {

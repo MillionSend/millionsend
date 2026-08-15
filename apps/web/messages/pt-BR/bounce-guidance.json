@@ -1,0 +1,172 @@
+{
+  "provider": {
+    "apple": {
+      "title": "A Apple exige um domínio de envio registrado",
+      "body": "Este endereço passa pelo Apple Private Relay ou iCloud. A Apple só aceita e-mails de domínios com SPF e DKIM alinhados e registrados junto a ela.",
+      "action": "Autentique seu domínio de envio (SPF + DKIM alinhados) e registre-o no postmaster do iCloud da Apple, depois reenvie."
+    },
+    "googleBulk": {
+      "title": "O Google recusou por autenticação de remetente em massa",
+      "body": "O Google exige autenticação de remetentes em massa: alinhamento de SPF ou DKIM mais um registro DMARC no domínio de envio.",
+      "action": "Publique um registro DMARC e confirme que SPF ou DKIM alinha com seu domínio do From, depois reenvie."
+    },
+    "microsoftBlock": {
+      "title": "O SmartScreen da Microsoft bloqueou esta mensagem",
+      "body": "Outlook, Hotmail e Live filtraram este envio por reputação. O bloqueio some conforme seu histórico de envio melhora.",
+      "action": "Inscreva-se no SNDS e no JMRP da Microsoft, reduza as reclamações e diminua o ritmo de envio para este domínio."
+    }
+  },
+  "code": {
+    "noMailbox": {
+      "title": "Caixa postal inexistente",
+      "body": "O servidor do destinatário informou que o endereço não existe. Um erro de digitação causa a maioria destes.",
+      "action": "Confirme o endereço exato com o destinatário antes de enviar de novo."
+    },
+    "badDomain": {
+      "title": "Sistema de destino inválido",
+      "body": "O sistema de e-mail do destinatário recusou o endereço como inválido.",
+      "action": "Verifique se o domínio e o endereço estão corretos e envie para o endereço corrigido."
+    },
+    "mailboxDisabled": {
+      "title": "Caixa postal desativada",
+      "body": "O endereço existe, mas a caixa postal está inativa ou suspensa.",
+      "action": "Fale com o destinatário por outro meio para confirmar um endereço ativo antes de reenviar."
+    },
+    "mailboxFull": {
+      "title": "Caixa postal cheia",
+      "body": "A caixa postal do destinatário está acima da cota. Isso costuma se resolver sozinho.",
+      "action": "Aguarde e reenvie mais tarde; o endereço continua válido."
+    },
+    "messageTooLarge": {
+      "title": "Mensagem grande demais",
+      "body": "O servidor do destinatário recusou a mensagem por exceder o limite de tamanho.",
+      "action": "Reduza a mensagem ou hospede anexos grandes atrás de um link, depois reenvie."
+    },
+    "dnsRouting": {
+      "title": "O domínio não resolve",
+      "body": "O domínio do destinatário não tem servidor de e-mail acessível (DNS/MX ausente ou quebrado).",
+      "action": "Verifique se há erro de digitação no domínio; se estiver correto, o domínio não consegue receber e-mail agora."
+    },
+    "policyBlock": {
+      "title": "Bloqueado por política do destinatário",
+      "body": "O servidor do destinatário recusou a mensagem por uma política de conteúdo ou reputação.",
+      "action": "Reveja o conteúdo da mensagem e sua reputação de envio antes de tentar de novo."
+    },
+    "authFailure": {
+      "title": "Falha de autenticação",
+      "body": "O destinatário recusou a mensagem por falha de SPF, DKIM ou DMARC.",
+      "action": "Corrija o alinhamento de SPF, DKIM e DMARC do seu domínio, depois reenvie."
+    },
+    "greylisted": {
+      "title": "Greylisting ou limite de taxa",
+      "body": "O servidor do destinatário adiou a mensagem temporariamente e espera uma nova tentativa.",
+      "action": "Nenhuma ação necessária; a entrega é tentada de novo automaticamente."
+    }
+  },
+  "subtype": {
+    "permanentGeneral": {
+      "title": "Bounce permanente",
+      "body": "O servidor do destinatário recusou a mensagem em definitivo. Este endereço continuará devolvendo.",
+      "action": "Confirme se o endereço está correto; ele fica suprimido até você fazer isso."
+    },
+    "noEmail": {
+      "title": "O endereço não existe",
+      "body": "O servidor do destinatário informou que não há caixa postal para este endereço.",
+      "action": "Confirme o endereço exato com o destinatário antes de enviar de novo."
+    },
+    "suppressed": {
+      "title": "Na lista de supressão do SES",
+      "body": "Este endereço devolveu ou recebeu reclamação recentemente na plataforma e foi suprimido globalmente.",
+      "action": "Só reenvie se tiver confirmado que a caixa postal voltou a ser válida."
+    },
+    "onAccountSuppressionList": {
+      "title": "Na lista de supressão da sua conta",
+      "body": "Este endereço está suprimido na sua conta por um bounce ou reclamação anterior.",
+      "action": "Remova a supressão só depois de confirmar que a caixa postal é válida."
+    },
+    "transientGeneral": {
+      "title": "Bounce temporário",
+      "body": "O servidor do destinatário adiou a mensagem por um motivo temporário.",
+      "action": "A entrega é tentada de novo automaticamente; nenhuma ação necessária."
+    },
+    "mailboxFull": {
+      "title": "Caixa postal cheia",
+      "body": "A caixa postal do destinatário está acima da cota. Isso costuma se resolver sozinho.",
+      "action": "Aguarde e reenvie mais tarde; o endereço continua válido."
+    },
+    "messageTooLarge": {
+      "title": "Mensagem grande demais",
+      "body": "O servidor do destinatário recusou a mensagem por exceder o limite de tamanho.",
+      "action": "Reduza a mensagem ou hospede anexos grandes atrás de um link, depois reenvie."
+    },
+    "contentRejected": {
+      "title": "Conteúdo recusado",
+      "body": "O servidor do destinatário recusou a mensagem com base no conteúdo.",
+      "action": "Reveja o corpo e os links da mensagem, depois reenvie."
+    },
+    "attachmentRejected": {
+      "title": "Anexo recusado",
+      "body": "O servidor do destinatário recusou a mensagem por um tipo de anexo bloqueado.",
+      "action": "Remova o anexo ou substitua por um link, depois reenvie."
+    },
+    "undetermined": {
+      "title": "Motivo do bounce indeterminado",
+      "body": "O servidor do destinatário não deu um motivo claro para o bounce.",
+      "action": "Confira a resposta SMTP abaixo; reenvie com cautela se o endereço for válido."
+    }
+  },
+  "generic": {
+    "permanent": {
+      "title": "Bounce permanente",
+      "body": "O servidor do destinatário recusou a mensagem em definitivo.",
+      "action": "Confirme se o endereço está correto antes de enviar de novo."
+    },
+    "transient": {
+      "title": "Bounce temporário",
+      "body": "O servidor do destinatário adiou a mensagem por um motivo temporário.",
+      "action": "A entrega é tentada de novo automaticamente; nenhuma ação necessária."
+    },
+    "undetermined": {
+      "title": "Motivo do bounce indeterminado",
+      "body": "O servidor do destinatário não deu um motivo claro para o bounce.",
+      "action": "Confira a resposta SMTP abaixo para mais detalhes."
+    },
+    "unknown": {
+      "title": "Falha na entrega",
+      "body": "O servidor do destinatário recusou a mensagem sem um motivo que possamos mapear.",
+      "action": "Confira a resposta SMTP abaixo; confirme o endereço antes de reenviar."
+    }
+  },
+  "complaint": {
+    "abuse": {
+      "title": "Marcada como spam",
+      "body": "O destinatário denunciou esta mensagem como spam. O endereço é suprimido para proteger sua reputação.",
+      "action": "Não reenvie; reveja como este destinatário entrou na sua lista."
+    },
+    "authFailure": {
+      "title": "Reclamação de autenticação",
+      "body": "A denúncia cita uma falha de autenticação de e-mail (SPF, DKIM ou DMARC).",
+      "action": "Corrija o alinhamento de SPF, DKIM e DMARC do seu domínio."
+    },
+    "fraud": {
+      "title": "Denunciada como fraude",
+      "body": "O destinatário denunciou esta mensagem como fraude ou phishing.",
+      "action": "Não reenvie; reveja o conteúdo da mensagem e a origem do envio."
+    },
+    "notSpam": {
+      "title": "Marcada como não spam",
+      "body": "O destinatário tirou esta mensagem do spam. É um sinal positivo.",
+      "action": "Nenhuma ação necessária."
+    },
+    "virus": {
+      "title": "Denunciada por conter vírus",
+      "body": "O destinatário denunciou esta mensagem como portadora de malware.",
+      "action": "Não reenvie; verifique seu conteúdo e anexos."
+    },
+    "other": {
+      "title": "Reclamação recebida",
+      "body": "O destinatário registrou uma reclamação de tipo não especificado. O endereço é suprimido.",
+      "action": "Não reenvie; reveja como este destinatário entrou na sua lista."
+    }
+  }
+}

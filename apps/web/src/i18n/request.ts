@@ -13,6 +13,7 @@ const NAMESPACES = [
   "broadcasts",
   "nav",
   "emails",
+  "bounce-guidance",
   "domains",
   "api-keys",
   "logs",

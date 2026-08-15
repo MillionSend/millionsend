@@ -96,6 +96,11 @@ it("sends a queued email: MIME, join key, status, event row", async () => {
   expect(sends[0]?.configurationSetName).toBe("ms-config-set");
   expect(sends[0]?.region).toBe("us-east-1");
 
+  // Transactional mail carries none of the bulk-class headers.
+  for (const h of ["List-Id", "List-Unsubscribe", "Precedence", "Auto-Submitted"]) {
+    expect(mime.toLowerCase()).not.toContain(`${h.toLowerCase()}:`);
+  }
+
   const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
   expect(row?.sesMessageId).toBe("mid-happy");
   expect(row?.latestStatus).toBe("sent");
@@ -105,6 +110,38 @@ it("sends a queued email: MIME, join key, status, event row", async () => {
     .from(schema.emailEvents)
     .where(eq(schema.emailEvents.emailId, emailId));
   expect(events.map((e) => e.type)).toEqual(["sent"]);
+});
+
+it("a broadcast send carries the RFC bulk-mail headers", async () => {
+  const [audience] = await db
+    .insert(schema.audiences)
+    .values({ teamId, name: "bulk-news" })
+    .returning({ id: schema.audiences.id });
+  if (!audience) throw new Error("audience insert failed");
+  const [broadcast] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId, audienceId: audience.id, from: "Acme <a@acme.dev>", subject: "hi" })
+    .returning({ id: schema.broadcasts.id });
+  if (!broadcast) throw new Error("broadcast insert failed");
+
+  const { ses, sends } = fakeSes("mid-bulk");
+  const contactId = crypto.randomUUID();
+  const emailId = await insertEmail({ broadcastId: broadcast.id, contactId });
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    unsubscribe: { secretKey: randomBytes(32), baseUrl: "https://app.example.com" },
+  };
+
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  // Unfold RFC 5322 header folding before matching; nodemailer normalizes
+  // header casing, so compare case-insensitively like the transactional test.
+  const mime = (sends[0]?.raw.toString("utf8") ?? "").replace(/\r\n[ \t]/g, "").toLowerCase();
+  expect(mime).toContain(`list-id: <${broadcast.id}.acme.dev>`);
+  expect(mime).toContain("precedence: bulk");
+  expect(mime).toContain("auto-submitted: auto-generated");
+  expect(mime).toContain("list-unsubscribe:");
+  expect(mime).toContain("list-unsubscribe-post: list-unsubscribe=one-click");
 });
 
 it("sends through the domain's own SES region, not the deployment default", async () => {
