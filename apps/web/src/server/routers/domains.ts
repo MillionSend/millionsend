@@ -366,6 +366,14 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         // An identity already gone from SES must not block removing the row.
         if ((error as { name?: string }).name !== "NotFoundException") throw error;
       }
+      // api_keys.domainId is ON DELETE restrict: a key scoped to this domain
+      // would block the delete, and set-null would silently widen it to an
+      // all-domains key. So revoke every scoped key and drop its FK first — a
+      // revoked key never authenticates, and clearing domainId frees the delete.
+      await ctx.db
+        .update(schema.apiKeys)
+        .set({ revokedAt: new Date(), domainId: null })
+        .where(and(eq(schema.apiKeys.teamId, ctx.teamId), eq(schema.apiKeys.domainId, domain.id)));
       await ctx.db
         .delete(schema.domains)
         .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));

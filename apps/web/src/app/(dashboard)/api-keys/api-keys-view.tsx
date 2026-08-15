@@ -69,9 +69,15 @@ export function ApiKeysView() {
   const listQuery = useQuery(trpc.apiKeys.list.queryOptions());
   const keys = listQuery.data;
 
+  const domainsQuery = useQuery(trpc.domains.list.queryOptions());
+  const verifiedDomains = (domainsQuery.data ?? []).filter((d) => d.status === "verified");
+
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"live" | "test">("live");
+  const [permission, setPermission] = useState<"full_access" | "sending_access">("full_access");
+  // "" = any verified domain; otherwise a domain id the key is scoped to.
+  const [domainId, setDomainId] = useState("");
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<{ id: string; name: string } | null>(null);
 
@@ -104,6 +110,8 @@ export function ApiKeysView() {
     setRevealedToken(null);
     setName("");
     setMode("live");
+    setPermission("full_access");
+    setDomainId("");
     resetCreate();
   }, [resetCreate]);
   const closeRevoke = useCallback(() => setRevokeTarget(null), []);
@@ -158,7 +166,21 @@ export function ApiKeysView() {
           <tbody>
             {keys.map((key) => (
               <tr key={key.id}>
-                <td>{key.name}</td>
+                <td>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {key.name}
+                    <span
+                      className={`ms-badge ms-badge-${
+                        key.permission === "sending_access" ? "info" : "neutral"
+                      }`}
+                    >
+                      {t(key.permission === "sending_access" ? "scope.sending" : "scope.full")}
+                    </span>
+                    {key.domainName ? (
+                      <span className="ms-badge ms-badge-neutral">{key.domainName}</span>
+                    ) : null}
+                  </span>
+                </td>
                 <td>
                   <span className="ms-mono">{maskApiKey(key.tokenPrefix, key.last4)}</span>
                 </td>
@@ -213,7 +235,7 @@ export function ApiKeysView() {
             onSubmit={(event) => {
               event.preventDefault();
               if (name.trim().length === 0 || createMutation.isPending) return;
-              createMutation.mutate({ name, mode });
+              createMutation.mutate({ name, mode, permission, domainId: domainId || null });
             }}
           >
             <div className="ms-field">
@@ -240,6 +262,49 @@ export function ApiKeysView() {
                 options={[
                   { value: "live", label: t("create.modeLive") },
                   { value: "test", label: t("create.modeTest") },
+                ]}
+              />
+            </div>
+            <div className="ms-field">
+              <label htmlFor="api-key-permission">{t("create.permission")}</label>
+              <Select
+                id="api-key-permission"
+                width="100%"
+                value={permission}
+                disabled={createMutation.isPending}
+                onChange={(value) =>
+                  setPermission(value === "sending_access" ? "sending_access" : "full_access")
+                }
+                ariaLabel={t("create.permission")}
+                options={[
+                  { value: "full_access", label: t("create.permFull") },
+                  { value: "sending_access", label: t("create.permSending") },
+                ]}
+              />
+              {permission === "sending_access" ? (
+                <p
+                  style={{
+                    margin: "6px 0 0",
+                    color: "var(--ms-muted)",
+                    fontSize: "var(--ms-fs-label)",
+                  }}
+                >
+                  {t("create.permHint")}
+                </p>
+              ) : null}
+            </div>
+            <div className="ms-field">
+              <label htmlFor="api-key-domain">{t("create.domain")}</label>
+              <Select
+                id="api-key-domain"
+                width="100%"
+                value={domainId}
+                disabled={createMutation.isPending}
+                onChange={setDomainId}
+                ariaLabel={t("create.domain")}
+                options={[
+                  { value: "", label: t("create.domainAny") },
+                  ...verifiedDomains.map((d) => ({ value: d.id, label: d.name })),
                 ]}
               />
             </div>

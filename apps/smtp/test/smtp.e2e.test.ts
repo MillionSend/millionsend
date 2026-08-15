@@ -154,6 +154,46 @@ describe("smtp relay", () => {
     ).rejects.toMatchObject({ responseCode: 550 });
   });
 
+  it("confines a domain-scoped key to its domain (550 from another)", async () => {
+    const [scopedDomain] = await db
+      .insert(schema.domains)
+      .values({
+        teamId,
+        name: "scoped.dev",
+        region: "us-east-1",
+        status: "verified",
+        verifiedAt: new Date(),
+      })
+      .returning({ id: schema.domains.id });
+    if (!scopedDomain) throw new Error("domain insert failed");
+    const scopedKey = generateApiKey("live");
+    await db.insert(schema.apiKeys).values({
+      teamId,
+      name: "scoped",
+      tokenPrefix: scopedKey.tokenPrefix,
+      keyHash: scopedKey.keyHash,
+      last4: scopedKey.last4,
+      domainId: scopedDomain.id,
+    });
+    const auth = { user: SMTP_USERNAME, pass: scopedKey.token };
+    // acme.dev is verified for the team but is not this key's domain.
+    await expect(
+      transport(auth).sendMail({
+        from: "a@acme.dev",
+        to: "r@example.com",
+        subject: "s",
+        text: "t",
+      }),
+    ).rejects.toMatchObject({ responseCode: 550 });
+    const ok = await transport(auth).sendMail({
+      from: "a@scoped.dev",
+      to: "r@example.com",
+      subject: "s",
+      text: "t",
+    });
+    expect(ok.response).toContain("Queued as");
+  });
+
   it("rejects an unverified sender domain with 554", async () => {
     await expect(
       transport({ user: SMTP_USERNAME, pass: token }).sendMail({

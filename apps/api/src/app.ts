@@ -1,5 +1,6 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  type AcceptEmailPayload,
   type ApiKeyAuth,
   acceptEmail,
   authenticateApiKey,
@@ -9,6 +10,7 @@ import {
   decryptEmailBody,
   extractTokenPrefix,
   fetchDeliverabilityHealth,
+  findSuppressed,
   type Keyring,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
@@ -29,13 +31,16 @@ import {
   snsMessageSchema,
   verifySnsMessage,
 } from "@millionsend/ses";
-import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { createMiddleware } from "hono/factory";
 import {
   audienceResponseSchema,
+  batchEmailRequestSchema,
+  batchEmailResponseSchema,
   broadcastIdResponseSchema,
   cancelBroadcastResponseSchema,
+  cancelEmailResponseSchema,
   contactIdResponseSchema,
   createAudienceRequestSchema,
   createBroadcastRequestSchema,
@@ -59,6 +64,7 @@ import {
   removeContactResponseSchema,
   removeSegmentResponseSchema,
   removeTopicResponseSchema,
+  type SendEmailRequest,
   segmentResponseSchema,
   sendBroadcastRequestSchema,
   sendEmailRequestSchema,
@@ -119,6 +125,46 @@ class IdempotencyTakeoverError extends Error {
 
 function errorBody(status: number, name: string, message: string) {
   return { statusCode: status, name, message };
+}
+
+/**
+ * SECURITY: a domain-scoped API key (domainId set) may only send from that one
+ * verified domain; a null domainId sends from any of the team's domains. The
+ * scope is server-side, resolved from the authenticated key — never the payload.
+ */
+function keyForbidsSendingDomain(auth: ApiKeyAuth, domainId: string): boolean {
+  return auth.domainId !== null && auth.domainId !== domainId;
+}
+
+const RESTRICTED_DOMAIN_MESSAGE = "This API key can only send from its assigned domain";
+
+/**
+ * Fields accepted into the send schema only to reject them loudly rather than
+ * silently strip (docs/resend-compatibility.md). Returns the 422 message, or
+ * null when the payload uses no unsupported field.
+ */
+function unsupportedSendField(body: SendEmailRequest): string | null {
+  if (body.attachments && body.attachments.length > 0) return "Attachments are not yet supported";
+  if (body.headers !== undefined) return "headers are not yet supported";
+  if (body.topic_id != null) return "topic_id is not yet supported";
+  return null;
+}
+
+/** Maps a validated Resend-shaped send body to the shared accept payload. */
+function toAcceptPayload(body: SendEmailRequest, domainId: string): AcceptEmailPayload {
+  return {
+    from: body.from,
+    to: body.to,
+    cc: body.cc,
+    bcc: body.bcc,
+    replyTo: body.reply_to,
+    subject: body.subject,
+    html: body.html,
+    text: body.text,
+    tags: body.tags ? Object.fromEntries(body.tags.map((t) => [t.name, t.value])) : null,
+    scheduledAt: body.scheduled_at ? new Date(body.scheduled_at) : undefined,
+    domainId,
+  };
 }
 
 /**
@@ -1830,6 +1876,18 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     c.set("auth", auth);
     await next();
   });
+
+  // SECURITY: a "sending_access" key is confined to the send surface
+  // (/emails*). Every management group mounts this after requireApiKey, so a
+  // sending key hitting audiences/contacts/segments/broadcasts/topics is 403,
+  // not a silent success. "full_access" keys pass through.
+  const requireFullAccess = createMiddleware<Env>(async (c, next) => {
+    if (c.get("auth")?.permission === "sending_access") {
+      return c.json(errorBody(403, "restricted_api_key", "This API key can only send emails"), 403);
+    }
+    return next();
+  });
+
   app.use("/emails", requireApiKey);
   app.use("/emails/*", requireApiKey);
 
@@ -1839,28 +1897,28 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   // /audiences/{id}/contacts. Same handlers on both prefixes keeps every SDK
   // path working (docs/resend-compatibility.md).
   for (const prefix of ["audiences", "segments"] as const) {
-    app.use(`/${prefix}`, requireApiKey);
-    app.use(`/${prefix}/*`, requireApiKey);
+    app.use(`/${prefix}`, requireApiKey, requireFullAccess);
+    app.use(`/${prefix}/*`, requireApiKey, requireFullAccess);
     registerAudienceRoutes(app, deps.db, prefix);
   }
 
   // Top-level /contacts, used by the SDK when no audienceId is given.
-  app.use("/contacts", requireApiKey);
-  app.use("/contacts/*", requireApiKey);
+  app.use("/contacts", requireApiKey, requireFullAccess);
+  app.use("/contacts/*", requireApiKey, requireFullAccess);
   registerContactRootRoutes(app, deps.db);
 
   // Real segmentation (MillionSend extension). /segments2, not /segments — the
   // latter is the resend audiences alias registered above.
-  app.use("/segments2", requireApiKey);
-  app.use("/segments2/*", requireApiKey);
+  app.use("/segments2", requireApiKey, requireFullAccess);
+  app.use("/segments2/*", requireApiKey, requireFullAccess);
   registerSegmentRoutes(app, deps.db);
 
-  app.use("/broadcasts", requireApiKey);
-  app.use("/broadcasts/*", requireApiKey);
+  app.use("/broadcasts", requireApiKey, requireFullAccess);
+  app.use("/broadcasts/*", requireApiKey, requireFullAccess);
   registerBroadcastRoutes(app, deps);
 
-  app.use("/topics", requireApiKey);
-  app.use("/topics/*", requireApiKey);
+  app.use("/topics", requireApiKey, requireFullAccess);
+  app.use("/topics/*", requireApiKey, requireFullAccess);
   registerTopicRoutes(app, deps.db);
 
   const sendRoute = createRoute({
@@ -1873,6 +1931,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       200: {
         content: { "application/json": { schema: sendEmailResponseSchema } },
         description: "Email accepted",
+      },
+      403: {
+        content: { "application/json": { schema: errorSchema } },
+        description: "Restricted API key",
       },
       409: {
         content: { "application/json": { schema: errorSchema } },
@@ -1889,16 +1951,8 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const auth = c.get("auth");
     const body = c.req.valid("json");
 
-    if (body.attachments && body.attachments.length > 0) {
-      return c.json(errorBody(422, "validation_error", "Attachments are not yet supported"), 422);
-    }
-    // Rejected loudly instead of silently stripped (docs/resend-compatibility.md).
-    if (body.headers !== undefined) {
-      return c.json(errorBody(422, "validation_error", "headers are not yet supported"), 422);
-    }
-    if (body.topic_id != null) {
-      return c.json(errorBody(422, "validation_error", "topic_id is not yet supported"), 422);
-    }
+    const unsupported = unsupportedSendField(body);
+    if (unsupported) return c.json(errorBody(422, "validation_error", unsupported), 422);
 
     const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
     if (!domain.ok) {
@@ -1912,6 +1966,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         ),
         422,
       );
+    }
+    if (keyForbidsSendingDomain(auth, domain.domainId)) {
+      return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
     }
 
     // Idempotency FIRST: a replay must return the stored response even if
@@ -1954,37 +2011,20 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
 
     try {
-      const result = await acceptEmail(
-        deps,
-        auth,
-        {
-          from: body.from,
-          to: body.to,
-          cc: body.cc,
-          bcc: body.bcc,
-          replyTo: body.reply_to,
-          subject: body.subject,
-          html: body.html,
-          text: body.text,
-          tags: body.tags ? Object.fromEntries(body.tags.map((t) => [t.name, t.value])) : null,
-          scheduledAt: body.scheduled_at ? new Date(body.scheduled_at) : undefined,
-          domainId: domain.domainId,
-        },
-        {
-          completeInTx: idemKey
-            ? async (tx, emailId) => {
-                const recorded = await completeIdempotent(tx, {
-                  teamId: auth.teamId,
-                  key: idemKey,
-                  emailIds: [emailId],
-                });
-                // Another owner took over and recorded its own response:
-                // abort so this branch produces no second email.
-                if (!recorded) throw new IdempotencyTakeoverError();
-              }
-            : undefined,
-        },
-      );
+      const result = await acceptEmail(deps, auth, toAcceptPayload(body, domain.domainId), {
+        completeInTx: idemKey
+          ? async (tx, emailId) => {
+              const recorded = await completeIdempotent(tx, {
+                teamId: auth.teamId,
+                key: idemKey,
+                emailIds: [emailId],
+              });
+              // Another owner took over and recorded its own response:
+              // abort so this branch produces no second email.
+              if (!recorded) throw new IdempotencyTakeoverError();
+            }
+          : undefined,
+      });
       if (!result.ok) {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         return c.json(errorBody(422, "validation_error", "All recipients are suppressed"), 422);
@@ -2011,6 +2051,195 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       }
       throw err;
     }
+  });
+
+  const jsonErr = (description: string) => ({
+    content: { "application/json": { schema: errorSchema } },
+    description,
+  });
+
+  const batchRoute = createRoute({
+    method: "post",
+    path: "/emails/batch",
+    request: {
+      body: { content: { "application/json": { schema: batchEmailRequestSchema } } },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: batchEmailResponseSchema } },
+        description: "Batch accepted",
+      },
+      403: jsonErr("Restricted API key"),
+      409: jsonErr("Idempotency conflict"),
+      422: jsonErr("Validation error"),
+    },
+  });
+
+  app.openapi(batchRoute, async (c) => {
+    const auth = c.get("auth");
+    const items = c.req.valid("json");
+
+    // Pass 1 — validate every item with no writes, so any bad item fails the
+    // whole batch (Resend 'strict' batch validation) before a single accept.
+    const payloads: AcceptEmailPayload[] = [];
+    for (const [i, body] of items.entries()) {
+      const unsupported = unsupportedSendField(body);
+      if (unsupported) {
+        return c.json(errorBody(422, "validation_error", `emails.${i}: ${unsupported}`), 422);
+      }
+      const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
+      if (!domain.ok) {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            domain.reason === "invalid_sender"
+              ? `emails.${i}: from must be a single address`
+              : `emails.${i}: The ${domain.fromDomain} domain is not verified for this team`,
+          ),
+          422,
+        );
+      }
+      if (keyForbidsSendingDomain(auth, domain.domainId)) {
+        return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
+      }
+      // Suppression is resolved up front too, so an all-suppressed item fails
+      // the batch atomically instead of leaving earlier items accepted.
+      const recipients = [...new Set([...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])])];
+      const suppressed = await findSuppressed(deps.db, auth.teamId, recipients);
+      if (body.to.every((r) => suppressed.has(r))) {
+        return c.json(
+          errorBody(422, "validation_error", `emails.${i}: All recipients are suppressed`),
+          422,
+        );
+      }
+      payloads.push(toAcceptPayload(body, domain.domainId));
+    }
+
+    const idemKey = c.req.header("idempotency-key") ?? null;
+    if (idemKey) {
+      const begin = await beginIdempotent(deps.db, {
+        teamId: auth.teamId,
+        key: idemKey,
+        bodyHash: canonicalBodyHash(items),
+      });
+      if (begin.kind === "replay") {
+        return c.json({ data: begin.emailIds.map((id) => ({ id })) }, 200);
+      }
+      if (begin.kind === "conflict") {
+        return c.json(
+          errorBody(
+            409,
+            "invalid_idempotent_request",
+            "Idempotency key was used with a different payload",
+          ),
+          409,
+        );
+      }
+      if (begin.kind === "in_flight") {
+        return c.json(
+          errorBody(
+            409,
+            "concurrent_idempotent_requests",
+            "A request with this idempotency key is still processing",
+          ),
+          409,
+        );
+      }
+    }
+
+    // Pass 2 — accept each validated item; every one cleared suppression in
+    // pass 1, so acceptEmail returns an id for each.
+    // ponytail: batch accepts commit per-item, so completion is not atomic
+    // with the inserts (single-send records it in the accept tx). A crash
+    // mid-batch keeps the key in_flight until the lease expires; a retry after
+    // that could re-accept. Wrap all items in one tx if that corner matters.
+    try {
+      const ids: string[] = [];
+      for (const payload of payloads) {
+        const result = await acceptEmail(deps, auth, payload);
+        if (!result.ok) throw new Error("batch item all-suppressed after pre-check");
+        ids.push(result.id);
+      }
+      if (idemKey) {
+        const recorded = await completeIdempotent(deps.db, {
+          teamId: auth.teamId,
+          key: idemKey,
+          emailIds: ids,
+        });
+        if (!recorded) {
+          const replay = await beginIdempotent(deps.db, {
+            teamId: auth.teamId,
+            key: idemKey,
+            bodyHash: canonicalBodyHash(items),
+          });
+          if (replay.kind === "replay") {
+            return c.json({ data: replay.emailIds.map((id) => ({ id })) }, 200);
+          }
+        }
+      }
+      return c.json({ data: ids.map((id) => ({ id })) }, 200);
+    } catch (err) {
+      if (idemKey) {
+        await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey }).catch(() => {});
+      }
+      throw err;
+    }
+  });
+
+  const cancelRoute = createRoute({
+    method: "post",
+    path: "/emails/{id}/cancel",
+    request: { params: z.object({ id: z.uuid() }) },
+    responses: {
+      200: {
+        content: { "application/json": { schema: cancelEmailResponseSchema } },
+        description: "Email canceled",
+      },
+      404: jsonErr("Not found"),
+      422: jsonErr("Not cancelable"),
+    },
+  });
+
+  app.openapi(cancelRoute, async (c) => {
+    const auth = c.get("auth");
+    const { id } = c.req.valid("param");
+    const [email] = await deps.db
+      .select({ id: schema.emails.id })
+      .from(schema.emails)
+      .where(and(eq(schema.emails.id, id), eq(schema.emails.teamId, auth.teamId)));
+    // Cross-team / unknown id is a 404 (never reveals another team's email).
+    if (!email) return c.json(errorBody(404, "not_found", "Email not found"), 404);
+    // Atomic flip guarded like the send handler's claim (not-yet-sendable AND
+    // sent_at IS NULL): a cancel racing the send loses cleanly — whichever
+    // update commits first, the other's WHERE no longer matches. A scheduled
+    // email parked over quota sits in queued_quota until the nightly drain, so
+    // both pre-send states are cancelable. Requiring scheduled_at excludes
+    // immediate sends, which Resend cannot cancel.
+    const [row] = await deps.db
+      .update(schema.emails)
+      .set({ latestStatus: "canceled" })
+      .where(
+        and(
+          eq(schema.emails.id, id),
+          eq(schema.emails.teamId, auth.teamId),
+          inArray(schema.emails.latestStatus, ["queued", "queued_quota"]),
+          isNull(schema.emails.sentAt),
+          isNotNull(schema.emails.scheduledAt),
+        ),
+      )
+      .returning({ id: schema.emails.id });
+    if (!row) {
+      return c.json(
+        errorBody(
+          422,
+          "validation_error",
+          "Only scheduled emails that have not been sent can be canceled",
+        ),
+        422,
+      );
+    }
+    return c.json({ object: "email" as const, id: row.id }, 200);
   });
 
   const getRoute = createRoute({

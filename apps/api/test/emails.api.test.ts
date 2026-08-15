@@ -176,11 +176,149 @@ describe("get email wire shape", () => {
   });
 });
 
+describe("batch send", () => {
+  const batch = (items: unknown[], headers: Record<string, string> = {}) =>
+    app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...headers },
+      body: JSON.stringify(items),
+    });
+
+  it("accepts each item and returns ids in SDK shape", async () => {
+    // Earlier suites burned the daily quota; clear it so accepts enqueue
+    // instead of parking as queued_quota.
+    await db
+      .update(schema.usageCounters)
+      .set({ accepted: 0 })
+      .where(eq(schema.usageCounters.teamId, teamId));
+    const res = await batch([
+      { ...validBody, to: ["b1@example.com"] },
+      { ...validBody, to: ["b2@example.com"] },
+    ]);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { id: string }[] };
+    expect(body.data).toHaveLength(2);
+    for (const { id } of body.data) expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    // Each item ran through the accept pipeline and was enqueued.
+    for (const { id } of body.data) {
+      expect(enqueuedSends.some((e) => e.emailId === id)).toBe(true);
+    }
+  });
+
+  it("fails the whole batch up front when any item is invalid (nothing accepted)", async () => {
+    const before = enqueuedSends.length;
+    const res = await batch([
+      { ...validBody, to: ["ok@example.com"] },
+      { ...validBody, from: "Nope <a@unverified.dev>", to: ["bad@example.com"] },
+    ]);
+    expect(res.status).toBe(422);
+    expect(enqueuedSends.length).toBe(before);
+  });
+
+  it("422s over the 100-email cap", async () => {
+    const items = Array.from({ length: 101 }, (_, i) => ({
+      ...validBody,
+      to: [`cap${i}@example.com`],
+    }));
+    expect((await batch(items)).status).toBe(422);
+  });
+
+  it("replays a repeated Idempotency-Key to the same ids", async () => {
+    const items = [{ ...validBody, to: ["idem@example.com"] }];
+    const first = (await (await batch(items, { "idempotency-key": "batch-key-1" })).json()) as {
+      data: { id: string }[];
+    };
+    const second = (await (await batch(items, { "idempotency-key": "batch-key-1" })).json()) as {
+      data: { id: string }[];
+    };
+    expect(second.data).toEqual(first.data);
+  });
+});
+
+describe("cancel scheduled email", () => {
+  const cancel = (id: string) =>
+    app.request(`/emails/${id}/cancel`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+  async function scheduleEmail(to: string): Promise<string> {
+    const res = await post({
+      ...validBody,
+      to: [to],
+      scheduled_at: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  it("cancels a future-scheduled email and marks it canceled", async () => {
+    const id = await scheduleEmail("cancel1@example.com");
+    const res = await cancel(id);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ object: "email", id });
+    const [row] = await db
+      .select({ s: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, id));
+    expect(row?.s).toBe("canceled");
+  });
+
+  it("errors when the email was already sent", async () => {
+    const id = await scheduleEmail("cancel2@example.com");
+    await db
+      .update(schema.emails)
+      .set({ latestStatus: "sent", sentAt: new Date() })
+      .where(eq(schema.emails.id, id));
+    const res = await cancel(id);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ name: "validation_error" });
+  });
+
+  it("404s a cross-team email rather than canceling it", async () => {
+    // A fresh team's scheduled email must be invisible to this token.
+    const otherTeam = await createTeam(db, "cancel-other");
+    await db.insert(schema.domains).values({
+      teamId: otherTeam,
+      name: "other-cancel.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const [foreign] = await db
+      .insert(schema.emails)
+      .values({
+        teamId: otherTeam,
+        from: "A <a@other-cancel.dev>",
+        to: ["x@example.com"],
+        subject: "s",
+        latestStatus: "queued",
+        scheduledAt: new Date(Date.now() + 3_600_000),
+      })
+      .returning({ id: schema.emails.id });
+    if (!foreign) throw new Error("insert failed");
+    const res = await cancel(foreign.id);
+    expect(res.status).toBe(404);
+    const [row] = await db
+      .select({ s: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, foreign.id));
+    expect(row?.s).toBe("queued");
+  });
+
+  it("rejects canceling a non-scheduled (immediate) email", async () => {
+    const res = await post({ ...validBody, to: ["immediate@example.com"] });
+    const { id } = (await res.json()) as { id: string };
+    expect((await cancel(id)).status).toBe(422);
+  });
+});
+
 describe("openapi", () => {
   it("serves the generated spec without auth", async () => {
     const res = await app.request("/openapi.json");
     expect(res.status).toBe(200);
     const spec = (await res.json()) as { paths: Record<string, unknown> };
-    expect(Object.keys(spec.paths)).toEqual(expect.arrayContaining(["/emails", "/emails/{id}"]));
+    expect(Object.keys(spec.paths)).toEqual(
+      expect.arrayContaining(["/emails", "/emails/{id}", "/emails/batch", "/emails/{id}/cancel"]),
+    );
   });
 });

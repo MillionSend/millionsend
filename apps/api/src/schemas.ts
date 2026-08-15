@@ -59,6 +59,27 @@ export type SendEmailRequest = z.infer<typeof sendEmailRequestSchema>;
 
 export const sendEmailResponseSchema = z.object({ id: z.uuid() }).openapi("SendEmailResponse");
 
+/**
+ * Batch send (resend.batch.send → POST /emails/batch). The SDK posts a bare
+ * array of email options (attachments unsupported in batch); we reuse the
+ * single-send schema per item and cap at Resend's 100-email limit — an
+ * over-cap array is a 422. Strict validation only: any invalid item fails the
+ * whole batch up front (x-batch-validation defaults to 'strict').
+ */
+export const batchEmailRequestSchema = z
+  .array(sendEmailRequestSchema)
+  .min(1)
+  .max(100)
+  .openapi("BatchEmailRequest");
+
+export const batchEmailResponseSchema = z
+  .object({ data: z.array(z.object({ id: z.uuid() })) })
+  .openapi("BatchEmailResponse");
+
+export const cancelEmailResponseSchema = z
+  .object({ object: z.literal("email"), id: z.uuid() })
+  .openapi("CancelEmailResponse");
+
 export const getEmailResponseSchema = z
   .object({
     object: z.literal("email"),

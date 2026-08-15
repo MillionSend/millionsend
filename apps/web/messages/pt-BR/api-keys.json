@@ -13,6 +13,10 @@
   },
   "neverUsed": "Nunca",
   "revoke": "Revogar",
+  "scope": {
+    "full": "Acesso total",
+    "sending": "Apenas envio"
+  },
   "create": {
     "title": "Criar chave de API",
     "name": "Nome",
@@ -20,6 +24,12 @@
     "mode": "Modo",
     "modeLive": "Produção",
     "modeTest": "Teste",
+    "permission": "Permissão",
+    "permFull": "Acesso total",
+    "permSending": "Apenas envio",
+    "permHint": "Apenas envio: esta chave pode enviar e-mails. Ela não pode ler, configurar ou gerenciar chaves.",
+    "domain": "Domínio",
+    "domainAny": "Qualquer domínio",
     "submit": "Criar chave"
   },
   "reveal": {
