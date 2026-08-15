@@ -1,6 +1,6 @@
 import { getDb, schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
-import { targetForToken } from "../lookup";
+import { postUnsubscribeLocation, targetForToken } from "../lookup";
 
 /**
  * Public unsubscribe endpoint — the signed token is the only credential, and
@@ -51,7 +51,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
     return new Response(null, { status: 200 });
   }
   return Response.redirect(
-    new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}?done=1`, request.url),
+    postUnsubscribeLocation(request.url, token, target.customization.redirectUrl),
     303,
   );
 }

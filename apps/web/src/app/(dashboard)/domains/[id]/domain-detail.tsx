@@ -420,6 +420,10 @@ export function DomainDetail({ id }: { id: string }) {
     }),
   );
 
+  // A verify round-trip can return in well under a human blink; holding the
+  // pending state for a floor keeps the Check DNS button's spinner visible so
+  // the click registers as an action that ran.
+  const [minSpin, setMinSpin] = useState(false);
   const [copiedKey, setCopiedKey] = useState<"instructions" | "prompt" | null>(null);
   const [tab, setTab] = useState<"records" | "configuration">("records");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -439,6 +443,12 @@ export function DomainDetail({ id }: { id: string }) {
     const timer = setInterval(() => verifyMutate({ id }), 30_000);
     return () => clearInterval(timer);
   }, [checking, id, verifyMutate]);
+
+  const runCheck = useCallback(() => {
+    setMinSpin(true);
+    setTimeout(() => setMinSpin(false), 600);
+    verifyMutate({ id });
+  }, [id, verifyMutate]);
 
   // ⌘↵ confirms the type-to-confirm delete, as printed on the button.
   const confirmMatches = confirmText === domain.data?.name;
@@ -542,7 +552,15 @@ export function DomainDetail({ id }: { id: string }) {
 
   const data = domain.data;
   const provider = records.data?.provider ?? null;
-  const rows = (records.data?.records ?? []) as DnsRecord[];
+  // Live DNS statuses ride on the verify result, keyed by record identity so
+  // each row shows its live Found/Missing/Mismatch beside SES's cached verdict.
+  const liveByKey = new Map(
+    (verify.data?.liveDns ?? []).map((r) => [`${r.type}\t${r.name}\t${r.value}`, r.status]),
+  );
+  const rows = ((records.data?.records ?? []) as DnsRecord[]).map((r) => ({
+    ...r,
+    live: liveByKey.get(`${r.type}\t${r.name}\t${r.value}`),
+  }));
   const checkable = rows.filter((r) => r.status !== null);
   const foundCount = checkable.filter((r) => r.status === "verified").length;
 
@@ -575,17 +593,18 @@ export function DomainDetail({ id }: { id: string }) {
         }
         actions={
           <>
-            {status !== "verified" ? (
-              <button
-                type="button"
-                className="ms-btn ms-btn-primary"
-                disabled={verify.isPending}
-                onClick={() => verify.mutate({ id })}
-              >
-                <BtnSpinner on={verify.isPending} />
-                {t("detail.verify")}
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className={
+                status !== "verified" ? "ms-btn ms-btn-primary" : "ms-btn ms-btn-secondary"
+              }
+              title={t("detail.checkDnsTooltip")}
+              disabled={verify.isPending || minSpin}
+              onClick={runCheck}
+            >
+              <BtnSpinner on={verify.isPending || minSpin} />
+              {t("detail.checkDns")}
+            </button>
             <div style={{ position: "relative" }}>
               <PopoverMenu
                 ariaLabel={t("detail.moreActions")}

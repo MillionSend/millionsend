@@ -2,7 +2,37 @@
   "tabs": {
     "settings": "Settings",
     "usage": "Usage",
-    "ses": "SES"
+    "ses": "SES",
+    "smtp": "SMTP",
+    "unsubscribe": "Unsubscribe page"
+  },
+  "smtp": {
+    "title": "SMTP",
+    "intro": "Send emails using SMTP instead of the REST API.",
+    "subtitle": "Point your app's SMTP client at this deployment's relay.",
+    "host": "Host",
+    "port": "Port",
+    "portNote": "For encrypted/TLS use 587 or 2465.",
+    "user": "User",
+    "password": "Password",
+    "passwordNote": "Use any API key as the password.",
+    "passwordLink": "API keys",
+    "passwordTooltip": "The relay authenticates with any of your API keys — paste one in place of YOUR_API_KEY. Keys are never shown here.",
+    "docs": "SMTP documentation"
+  },
+  "unsubscribe": {
+    "title": "Unsubscribe page",
+    "subtitle": "Customize the hosted page recipients see when they unsubscribe.",
+    "brandName": "Brand name",
+    "brandNamePlaceholder": "Your organization",
+    "message": "Custom message",
+    "messagePlaceholder": "Shown above the unsubscribe confirmation.",
+    "redirectUrl": "Redirect URL",
+    "redirectUrlNote": "Where to send recipients after they unsubscribe. Leave blank to keep them on the confirmation page.",
+    "redirectUrlInvalid": "Enter an http(s) URL.",
+    "save": "Save",
+    "saved": "Saved",
+    "error": "Could not save."
   },
   "ses": {
     "title": "Connect your AWS SES",

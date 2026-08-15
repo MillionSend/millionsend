@@ -46,6 +46,14 @@ function fillSlots(template: string, slots: Record<string, string>) {
   return <>{parts}</>;
 }
 
+function BrandHeading({ name }: { name: string }) {
+  return (
+    <span className="ms-display" style={{ fontSize: 20, fontWeight: 600, color: "var(--ms-bone)" }}>
+      {name}
+    </span>
+  );
+}
+
 function Wordmark() {
   return (
     <>
@@ -81,6 +89,8 @@ export default async function UnsubscribeConfirmPage({
   // never asks for something that would change nothing.
   const done = target !== null && (query.done === "1" || target.alreadyDone);
   const topicName = target?.topic?.name;
+  const brandName = target?.customization.brandName ?? null;
+  const customMessage = target?.customization.message ?? null;
 
   const confirmText =
     target && topicName
@@ -107,11 +117,16 @@ export default async function UnsubscribeConfirmPage({
         padding: 24,
       }}
     >
-      <Wordmark />
+      {brandName ? <BrandHeading name={brandName} /> : <Wordmark />}
       <div
         className="ms-card"
         style={{ padding: "28px 32px", width: "100%", maxWidth: 420, textAlign: "center" }}
       >
+        {customMessage ? (
+          <p style={{ margin: "0 0 16px", fontSize: 13.5, color: "var(--ms-muted)" }}>
+            {customMessage}
+          </p>
+        ) : null}
         {target === null ? (
           <p style={{ margin: 0, fontSize: 15, color: "var(--ms-bone)" }}>{m.invalid}</p>
         ) : done ? (

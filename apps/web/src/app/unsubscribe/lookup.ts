@@ -9,6 +9,13 @@ import { schema } from "@millionsend/db";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
+/** Per-team customization the hosted confirm page applies; all fields optional. */
+export interface UnsubscribeCustomization {
+  brandName: string | null;
+  message: string | null;
+  redirectUrl: string | null;
+}
+
 export interface UnsubscribeTarget {
   contactId: string;
   email: string;
@@ -16,6 +23,22 @@ export interface UnsubscribeTarget {
   topic: { id: string; name: string } | null;
   /** Already unsubscribed from this scope — the confirm page reads as done. */
   alreadyDone: boolean;
+  /** The contact's team's customization for the confirm page. */
+  customization: UnsubscribeCustomization;
+}
+
+/**
+ * Where the browser lands after a (non-one-click) unsubscribe POST: the team's
+ * configured redirect when set, else the in-place done state. Absolute string
+ * so it can go straight into a Location header.
+ */
+export function postUnsubscribeLocation(
+  requestUrl: string,
+  token: string,
+  redirectUrl: string | null,
+): string {
+  if (redirectUrl) return redirectUrl;
+  return new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}?done=1`, requestUrl).toString();
 }
 
 /**
@@ -36,12 +59,28 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
   if (topicId !== null && !z.uuid().safeParse(topicId).success) return null;
 
   const c = schema.contacts;
+  const tm = schema.teams;
   const [contact] = await db
-    .select({ id: c.id, email: c.email, teamId: c.teamId, unsubscribed: c.unsubscribed })
+    .select({
+      id: c.id,
+      email: c.email,
+      teamId: c.teamId,
+      unsubscribed: c.unsubscribed,
+      brandName: tm.unsubscribeBrandName,
+      message: tm.unsubscribeMessage,
+      redirectUrl: tm.unsubscribeRedirectUrl,
+    })
     .from(c)
+    .innerJoin(tm, eq(tm.id, c.teamId))
     .where(eq(c.id, contactId))
     .limit(1);
   if (!contact) return null;
+
+  const customization: UnsubscribeCustomization = {
+    brandName: contact.brandName,
+    message: contact.message,
+    redirectUrl: contact.redirectUrl,
+  };
 
   if (topicId === null) {
     return {
@@ -49,6 +88,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
       email: contact.email,
       topic: null,
       alreadyDone: contact.unsubscribed,
+      customization,
     };
   }
 
@@ -75,5 +115,6 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
     email: contact.email,
     topic: { id: topic.id, name: topic.name },
     alreadyDone: !effective,
+    customization,
   };
 }

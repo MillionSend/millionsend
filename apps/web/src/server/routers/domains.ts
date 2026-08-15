@@ -18,6 +18,7 @@ import { z } from "zod";
 import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { resolveBaseUrl } from "../auth";
+import { checkDnsRecords, type DnsResolver, nodeDnsResolver } from "../dns-check";
 import { router, teamProcedure } from "../trpc";
 
 // Lowercase registrable hostname with at least two labels; SES identities are
@@ -32,6 +33,8 @@ const SUBDOMAIN_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 export interface DomainsSesDeps {
   clientForRegion(region: string): SesIdentityClient;
   resolveNs(name: string): Promise<string[]>;
+  /** Live per-record DNS lookups; omitted falls back to node:dns/promises. */
+  dns?: DnsResolver;
 }
 
 const regionClients = new Map<string, SesIdentityClient>();
@@ -56,6 +59,7 @@ const defaultSesDeps: DomainsSesDeps = {
     return client;
   },
   resolveNs: (name) => dnsResolveNs(name),
+  dns: nodeDnsResolver,
 };
 
 /**
@@ -138,6 +142,57 @@ function statusFromVerification(v: {
   if (v.dkimStatus === "FAILED") return "failed";
   if (v.dkimStatus === "TEMPORARY_FAILURE") return "temporary_failure";
   return "pending";
+}
+
+/**
+ * The domain's expected DNS checklist with each row's SES-derived status,
+ * plus the branded-tracking CNAME once a subdomain is set. Shared by the
+ * records query (what to add) and verify (what to live-check).
+ */
+function buildTrackedRecords(
+  domain: {
+    name: string;
+    dkimSelector: string | null;
+    dkimPublicKey: string | null;
+    mailFromSubdomain: string;
+    region: string;
+    trackingSubdomain: string | null;
+  },
+  verification: { dkimStatus: string; mailFromStatus: string },
+): TrackedDnsRecord[] {
+  const records: TrackedDnsRecord[] = dnsRecordsForDomain({
+    domain: domain.name,
+    // The columns are nullable only for bare fixture inserts; every row
+    // created through this router carries both values.
+    dkimSelector: domain.dkimSelector ?? DKIM_SELECTOR,
+    dkimPublicKey: domain.dkimPublicKey ?? "",
+    mailFromSubdomain: domain.mailFromSubdomain,
+    region: domain.region,
+  }).map((record) => ({
+    ...record,
+    // DMARC is recommended-only: SES never checks it, so it carries no state.
+    status:
+      record.group === "verification"
+        ? recordCheck(verification.dkimStatus)
+        : record.group === "sending"
+          ? recordCheck(verification.mailFromStatus)
+          : null,
+  }));
+
+  // Engagement tracking is app-layer: WE rewrite links and inject the open
+  // pixel, so a branded tracking subdomain CNAMEs to THIS app (the /t/c and
+  // /t/o handlers serve on any host). SES never checks it, so it carries no
+  // SES status — like DMARC — but the live DNS check does resolve it.
+  if (domain.trackingSubdomain) {
+    records.push({
+      group: "tracking",
+      type: "CNAME",
+      name: `${domain.trackingSubdomain}.${domain.name}`,
+      value: new URL(resolveBaseUrl(env.APP_BASE_URL)).host,
+      status: null,
+    });
+  }
+  return records;
 }
 
 async function requireDomain(db: Db, teamId: string, id: string) {
@@ -255,40 +310,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         getDomainVerification(deps.clientForRegion(domain.region), { domain: domain.name }),
         detectProvider(deps.resolveNs, domain.name),
       ]);
-      const records: TrackedDnsRecord[] = dnsRecordsForDomain({
-        domain: domain.name,
-        // The columns are nullable only for bare fixture inserts; every row
-        // created through this router carries both values.
-        dkimSelector: domain.dkimSelector ?? DKIM_SELECTOR,
-        dkimPublicKey: domain.dkimPublicKey ?? "",
-        mailFromSubdomain: domain.mailFromSubdomain,
-        region: domain.region,
-      }).map((record) => ({
-        ...record,
-        // DMARC is recommended-only: SES never checks it, so it carries no state.
-        status:
-          record.group === "verification"
-            ? recordCheck(verification.dkimStatus)
-            : record.group === "sending"
-              ? recordCheck(verification.mailFromStatus)
-              : null,
-      }));
-
-      // Engagement tracking is app-layer: WE rewrite links and inject the open
-      // pixel, so a branded tracking subdomain CNAMEs to THIS app (the /t/c and
-      // /t/o handlers serve on any host). We can't check the CNAME's presence,
-      // so it carries no status — like DMARC.
-      if (domain.trackingSubdomain) {
-        records.push({
-          group: "tracking",
-          type: "CNAME",
-          name: `${domain.trackingSubdomain}.${domain.name}`,
-          value: new URL(resolveBaseUrl(env.APP_BASE_URL)).host,
-          status: null,
-        });
-      }
-
-      return { provider, records };
+      return { provider, records: buildTrackedRecords(domain, verification) };
     }),
 
     verify: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
@@ -296,6 +318,17 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       const verification = await getDomainVerification(deps.clientForRegion(domain.region), {
         domain: domain.name,
       });
+      // Live per-record DNS runs alongside the SES status refresh: SES's cached
+      // "verified for sending" stays authoritative, but the live lookup is what
+      // catches a record removed since SES last re-checked.
+      const records = buildTrackedRecords(domain, verification);
+      const live = await checkDnsRecords(records, deps.dns ?? nodeDnsResolver);
+      const liveDns = records.map((record, i) => ({
+        type: record.type,
+        name: record.name,
+        value: record.value,
+        status: live[i] ?? "missing",
+      }));
       const status = statusFromVerification(verification);
       const now = new Date();
       await ctx.db
@@ -311,6 +344,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         dkimStatus: verification.dkimStatus,
         mailFromStatus: verification.mailFromStatus,
         verifiedForSending: verification.verifiedForSending,
+        liveDns,
       };
     }),
 
