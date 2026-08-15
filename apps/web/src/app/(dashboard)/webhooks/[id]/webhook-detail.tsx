@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { Fragment, useCallback, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -530,7 +531,7 @@ export function WebhookDetail({ id }: { id: string }) {
           <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
             {t("deleteConfirm.body", { url: data.url })}
           </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <ModalFooter>
             <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
@@ -542,7 +543,7 @@ export function WebhookDetail({ id }: { id: string }) {
               <BtnSpinner on={deleteMutation.isPending} />
               {t("deleteConfirm.confirm")} <span className="ms-keycap">↵</span>
             </button>
-          </div>
+          </ModalFooter>
         </form>
       </Modal>
     </>

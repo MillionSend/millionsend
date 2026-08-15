@@ -7,6 +7,7 @@ import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -242,7 +243,7 @@ export function ApiKeysView() {
                 ]}
               />
             </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            <ModalFooter>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeCreate}>
                 {common("cancel")} <span className="ms-keycap">Esc</span>
               </button>
@@ -254,7 +255,7 @@ export function ApiKeysView() {
                 <BtnSpinner on={createMutation.isPending} />
                 {t("create.submit")} <span className="ms-keycap">↵</span>
               </button>
-            </div>
+            </ModalFooter>
           </form>
         )}
       </Modal>
@@ -272,7 +273,7 @@ export function ApiKeysView() {
             <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
               {t("revokeConfirm.body", { name: revokeTarget.name })}
             </p>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            <ModalFooter>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeRevoke}>
                 {common("cancel")} <span className="ms-keycap">Esc</span>
               </button>
@@ -284,7 +285,7 @@ export function ApiKeysView() {
                 <BtnSpinner on={revokeMutation.isPending} />
                 {t("revokeConfirm.confirm")} <span className="ms-keycap">↵</span>
               </button>
-            </div>
+            </ModalFooter>
           </form>
         ) : null}
       </Modal>

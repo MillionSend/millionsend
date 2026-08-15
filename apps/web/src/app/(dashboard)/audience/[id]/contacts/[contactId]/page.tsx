@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -450,8 +451,8 @@ export default function ContactDetailPage() {
               {t("detail.addProperty")}
             </button>
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
-            <button type="button" className="ms-btn ms-btn-ghost" onClick={closeEdit}>
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeEdit}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
             <button
@@ -462,7 +463,7 @@ export default function ContactDetailPage() {
               <BtnSpinner on={updateMutation.isPending} />
               {t("detail.saveConfirm")} <span className="ms-keycap">↵</span>
             </button>
-          </div>
+          </ModalFooter>
         </form>
       </Modal>
 
@@ -476,8 +477,8 @@ export default function ContactDetailPage() {
           <p style={{ margin: "0 0 22px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
             {t("contacts.deleteBody", { email: row?.email ?? "—" })}
           </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-            <button type="button" className="ms-btn ms-btn-ghost" onClick={closeDelete}>
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
             <button
@@ -488,7 +489,7 @@ export default function ContactDetailPage() {
               <BtnSpinner on={deleteMutation.isPending} />
               {t("contacts.deleteConfirm")} <span className="ms-keycap">↵</span>
             </button>
-          </div>
+          </ModalFooter>
         </form>
       </Modal>
     </>

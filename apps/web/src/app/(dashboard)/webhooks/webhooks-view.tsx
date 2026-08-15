@@ -8,6 +8,7 @@ import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -354,7 +355,7 @@ export function WebhooksView() {
                 }
               />
             </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            <ModalFooter>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeCreate}>
                 {common("cancel")} <span className="ms-keycap">Esc</span>
               </button>
@@ -366,7 +367,7 @@ export function WebhooksView() {
                 <BtnSpinner on={createMutation.isPending} />
                 {t("create.submit")} <span className="ms-keycap">↵</span>
               </button>
-            </div>
+            </ModalFooter>
           </form>
         )}
       </Modal>
@@ -384,7 +385,7 @@ export function WebhooksView() {
             <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
               {t("deleteConfirm.body", { url: deleteTarget.url })}
             </p>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            <ModalFooter>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>
                 {common("cancel")} <span className="ms-keycap">Esc</span>
               </button>
@@ -396,7 +397,7 @@ export function WebhooksView() {
                 <BtnSpinner on={deleteMutation.isPending} />
                 {t("deleteConfirm.confirm")} <span className="ms-keycap">↵</span>
               </button>
-            </div>
+            </ModalFooter>
           </form>
         ) : null}
       </Modal>
