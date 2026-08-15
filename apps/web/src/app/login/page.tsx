@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { AuthShell } from "@/components/auth-shell";
 import { authClient } from "@/lib/auth-client";
+import { safeNextPath } from "@/lib/nav";
 
 export default function LoginPage() {
   const t = useTranslations("auth.login");
   const router = useRouter();
+  const next = safeNextPath(useSearchParams().get("next"), "/emails");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [failed, setFailed] = useState(false);
@@ -26,7 +28,7 @@ export default function LoginPage() {
       return;
     }
     // The dashboard layout guard bounces team-less users to /onboarding.
-    router.push("/emails");
+    router.push(next);
   }
 
   return (
@@ -70,7 +72,8 @@ export default function LoginPage() {
           {t("submit")}
         </button>
         <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
-          {t("noAccount")} <Link href="/signup">{t("signupLink")}</Link>
+          {t("noAccount")}{" "}
+          <Link href={`/signup?next=${encodeURIComponent(next)}`}>{t("signupLink")}</Link>
         </p>
       </form>
     </AuthShell>

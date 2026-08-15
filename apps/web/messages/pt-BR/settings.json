@@ -95,6 +95,40 @@
       "member": "Membro"
     }
   },
+  "invitations": {
+    "invite": {
+      "trigger": "Convidar membro",
+      "title": "Convidar um membro",
+      "email": "E-mail",
+      "emailPlaceholder": "nome@empresa.com",
+      "role": "Função",
+      "submit": "Criar convite",
+      "error": "Não foi possível criar o convite."
+    },
+    "created": {
+      "title": "Link do convite",
+      "body": "Compartilhe este link com {email}. Ele funciona uma vez e expira em 7 dias.",
+      "done": "Concluído"
+    },
+    "pending": {
+      "title": "Convites pendentes",
+      "email": "E-mail",
+      "link": "Link",
+      "copy": "Copiar link",
+      "revoke": "Revogar",
+      "actions": "Ações"
+    },
+    "accept": {
+      "title": "Entrar no time",
+      "loading": "Verificando sua sessão…",
+      "signInPrompt": "Entre ou crie uma conta para aceitar este convite.",
+      "signIn": "Entrar",
+      "signUp": "Criar conta",
+      "body": "Aceitar este convite como {email}?",
+      "submit": "Aceitar convite",
+      "invalid": "Este convite não é mais válido."
+    }
+  },
   "instance": {
     "title": "Instância",
     "subtitle": "Vale para toda esta instalação, todos os times.",

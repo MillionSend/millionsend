@@ -1,10 +1,20 @@
 import { env } from "@millionsend/config";
-import { DAY_MS, PLAN_DAILY_LIMIT, type Plan, utcDay } from "@millionsend/core";
+import {
+  DAY_MS,
+  INVITE_TTL_MS,
+  PLAN_DAILY_LIMIT,
+  type Plan,
+  signInviteToken,
+  utcDay,
+  verifyInviteToken,
+} from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gte } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { router, teamProcedure } from "../trpc";
+import { isUniqueViolation } from "@/lib/db-errors";
+import { resolveBaseUrl } from "../auth";
+import { protectedProcedure, router, teamProcedure } from "../trpc";
 
 /**
  * The API enforces plan caps only when IS_CLOUD; self-host has no daily
@@ -13,6 +23,25 @@ import { router, teamProcedure } from "../trpc";
  */
 function planDailyLimit(plan: Plan): number | null {
   return env.IS_CLOUD ? PLAN_DAILY_LIMIT[plan] : null;
+}
+
+/** Managing members is an owner/admin concern; plain members are read-only. */
+function assertCanManageMembers(role: string): void {
+  if (role !== "owner" && role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+}
+
+function requireAuthSecret(): string {
+  if (!env.BETTER_AUTH_SECRET) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "BETTER_AUTH_SECRET is required",
+    });
+  }
+  return env.BETTER_AUTH_SECRET;
+}
+
+function inviteAcceptUrl(inviteId: string): string {
+  return `${resolveBaseUrl(env.APP_BASE_URL)}/invite/${signInviteToken(inviteId, requireAuthSecret())}`;
 }
 
 export const settingsRouter = router({
@@ -51,6 +80,129 @@ export const settingsRouter = router({
         .where(eq(schema.teamMembers.teamId, ctx.teamId))
         .orderBy(asc(schema.teamMembers.createdAt)),
     ),
+  }),
+
+  invitations: router({
+    // The accept link is a bearer token, so listing pending invites — like
+    // creating and revoking them — is owner/admin only.
+    list: teamProcedure.query(async ({ ctx }) => {
+      assertCanManageMembers(ctx.role);
+      const rows = await ctx.db
+        .select({
+          id: schema.teamInvitations.id,
+          email: schema.teamInvitations.email,
+          role: schema.teamInvitations.role,
+          expiresAt: schema.teamInvitations.expiresAt,
+          createdAt: schema.teamInvitations.createdAt,
+        })
+        .from(schema.teamInvitations)
+        .where(
+          and(
+            eq(schema.teamInvitations.teamId, ctx.teamId),
+            isNull(schema.teamInvitations.acceptedAt),
+          ),
+        )
+        .orderBy(desc(schema.teamInvitations.createdAt));
+      return rows.map((row) => ({ ...row, acceptUrl: inviteAcceptUrl(row.id) }));
+    }),
+
+    create: teamProcedure
+      .input(
+        z.object({
+          email: z.email().trim().toLowerCase(),
+          role: z.enum(["member", "admin"]).default("member"),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        assertCanManageMembers(ctx.role);
+        try {
+          const [row] = await ctx.db
+            .insert(schema.teamInvitations)
+            .values({
+              teamId: ctx.teamId,
+              email: input.email,
+              role: input.role,
+              invitedByUserId: ctx.session.user.id,
+              expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+            })
+            .returning({ id: schema.teamInvitations.id });
+          if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+          return {
+            id: row.id,
+            email: input.email,
+            role: input.role,
+            acceptUrl: inviteAcceptUrl(row.id),
+          };
+        } catch (error) {
+          if (isUniqueViolation(error)) {
+            throw new TRPCError({ code: "CONFLICT", message: "Already invited." });
+          }
+          throw error;
+        }
+      }),
+
+    // Hard delete: a revoked invite should stop resolving entirely, and the
+    // partial unique index only guards un-accepted rows, so re-inviting works.
+    revoke: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+      assertCanManageMembers(ctx.role);
+      const [row] = await ctx.db
+        .delete(schema.teamInvitations)
+        .where(
+          and(
+            eq(schema.teamInvitations.id, input.id),
+            eq(schema.teamInvitations.teamId, ctx.teamId),
+            isNull(schema.teamInvitations.acceptedAt),
+          ),
+        )
+        .returning({ id: schema.teamInvitations.id });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      return { id: row.id };
+    }),
+
+    /**
+     * The authenticated caller joins the invite's team with its role. teamId
+     * comes only from the invite row. The invited email is not required to
+     * match the caller: the signed link is the bearer credential, and
+     * self-host operators routinely invite an address the new user signs up
+     * under verbatim. Single-use is atomic — acceptedAt is stamped in the same
+     * conditional update, so a second accept finds nothing to stamp.
+     */
+    accept: protectedProcedure
+      .input(z.object({ token: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        const inviteId = verifyInviteToken(input.token, requireAuthSecret());
+        if (!inviteId) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid invitation." });
+
+        const teamId = await ctx.db.transaction(async (tx) => {
+          const [claimed] = await tx
+            .update(schema.teamInvitations)
+            .set({ acceptedAt: new Date() })
+            .where(
+              and(
+                eq(schema.teamInvitations.id, inviteId),
+                isNull(schema.teamInvitations.acceptedAt),
+                gt(schema.teamInvitations.expiresAt, new Date()),
+              ),
+            )
+            .returning({
+              teamId: schema.teamInvitations.teamId,
+              role: schema.teamInvitations.role,
+            });
+          if (!claimed)
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid invitation." });
+
+          await tx
+            .insert(schema.teamMembers)
+            .values({ teamId: claimed.teamId, userId: ctx.session.user.id, role: claimed.role })
+            .onConflictDoNothing({
+              target: [schema.teamMembers.teamId, schema.teamMembers.userId],
+            });
+          return claimed.teamId;
+        });
+
+        ctx.setActiveTeamCookie?.(teamId);
+        return { teamId };
+      }),
   }),
 
   usage: router({

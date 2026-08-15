@@ -1,15 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { AuthShell } from "@/components/auth-shell";
 import { authClient } from "@/lib/auth-client";
+import { safeNextPath } from "@/lib/nav";
 
 export default function SignupPage() {
   const t = useTranslations("auth.signup");
   const router = useRouter();
+  // An invited user carries ?next=/invite/... — send them to accept the invite
+  // rather than /onboarding, which would have them create their own team.
+  const nextParam = useSearchParams().get("next");
+  const next = safeNextPath(nextParam, "/onboarding");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,7 +33,7 @@ export default function SignupPage() {
       setPending(false);
       return;
     }
-    router.push("/onboarding");
+    router.push(next);
   }
 
   return (
@@ -86,7 +91,10 @@ export default function SignupPage() {
           {t("submit")}
         </button>
         <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
-          {t("haveAccount")} <Link href="/login">{t("loginLink")}</Link>
+          {t("haveAccount")}{" "}
+          <Link href={nextParam ? `/login?next=${encodeURIComponent(next)}` : "/login"}>
+            {t("loginLink")}
+          </Link>
         </p>
       </form>
     </AuthShell>

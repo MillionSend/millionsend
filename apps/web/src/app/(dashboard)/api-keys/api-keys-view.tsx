@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
+import { ExportCsvLink } from "@/components/export-csv-link";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
@@ -121,14 +122,17 @@ export function ApiKeysView() {
       <PageHeader
         title={nav("apiKeys")}
         actions={
-          <button
-            type="button"
-            className="ms-btn ms-btn-primary"
-            onClick={() => setCreateOpen(true)}
-          >
-            <PlusGlyph size={14} />
-            {t("createKey")}
-          </button>
+          <>
+            <ExportCsvLink href="/export/api-keys" />
+            <button
+              type="button"
+              className="ms-btn ms-btn-primary"
+              onClick={() => setCreateOpen(true)}
+            >
+              <PlusGlyph size={14} />
+              {t("createKey")}
+            </button>
+          </>
         }
       />
 

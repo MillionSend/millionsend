@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { ExportCsvLink } from "@/components/export-csv-link";
 import { ChevronGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
@@ -295,6 +296,11 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
   const total = query.data?.pages[0]?.total ?? 0;
   const filtered = deferredSearch !== "" || segmentId !== "" || topicId !== "";
 
+  // Export mirrors the audience + search box; segment/topic filters are not
+  // carried (the export route scopes by audience + text only).
+  const exportParams = new URLSearchParams({ audienceId });
+  if (deferredSearch) exportParams.set("search", deferredSearch);
+
   const invalidate = () => queryClient.invalidateQueries(trpc.audience.pathFilter());
 
   const addMutation = useMutation(
@@ -396,7 +402,10 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
       <PageHeader
         title={t("list.title")}
         actions={
-          <AddContactsSplit onManual={() => setAddOpen(true)} onCsv={() => setImportOpen(true)} />
+          <>
+            <ExportCsvLink href={`/export/contacts?${exportParams.toString()}`} />
+            <AddContactsSplit onManual={() => setAddOpen(true)} onCsv={() => setImportOpen(true)} />
+          </>
         }
       />
       <AudienceTabs />

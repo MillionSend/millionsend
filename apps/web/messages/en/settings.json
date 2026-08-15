@@ -95,6 +95,40 @@
       "member": "Member"
     }
   },
+  "invitations": {
+    "invite": {
+      "trigger": "Invite member",
+      "title": "Invite a member",
+      "email": "Email",
+      "emailPlaceholder": "name@company.com",
+      "role": "Role",
+      "submit": "Create invite",
+      "error": "Could not create the invitation."
+    },
+    "created": {
+      "title": "Invitation link",
+      "body": "Share this link with {email}. It works once and expires in 7 days.",
+      "done": "Done"
+    },
+    "pending": {
+      "title": "Pending invitations",
+      "email": "Email",
+      "link": "Link",
+      "copy": "Copy link",
+      "revoke": "Revoke",
+      "actions": "Actions"
+    },
+    "accept": {
+      "title": "Join the team",
+      "loading": "Checking your session…",
+      "signInPrompt": "Sign in or create an account to accept this invitation.",
+      "signIn": "Sign in",
+      "signUp": "Create account",
+      "body": "Accept this invitation as {email}?",
+      "submit": "Accept invitation",
+      "invalid": "This invitation is no longer valid."
+    }
+  },
   "instance": {
     "title": "Instance",
     "subtitle": "Applies to this whole deployment, every team.",

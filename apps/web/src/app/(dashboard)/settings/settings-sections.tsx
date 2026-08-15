@@ -3,7 +3,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { CopyChip } from "@/components/copy-chip";
+import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -150,13 +153,189 @@ function TeamSection() {
   );
 }
 
+function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useTranslations("settings");
+  const common = useTranslations("common");
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"member" | "admin">("member");
+
+  const create = useMutation(
+    trpc.settings.invitations.create.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries(trpc.settings.invitations.list.queryFilter()),
+    }),
+  );
+
+  const { reset } = create;
+  const close = useCallback(() => {
+    onClose();
+    setEmail("");
+    setRole("member");
+    reset();
+  }, [onClose, reset]);
+
+  return (
+    <Modal
+      open={open}
+      onClose={close}
+      title={create.data ? t("invitations.created.title") : t("invitations.invite.title")}
+    >
+      {create.data ? (
+        <form
+          style={{ display: "grid", gap: 12, marginTop: 12 }}
+          onSubmit={(event) => {
+            event.preventDefault();
+            close();
+          }}
+        >
+          <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
+            {t("invitations.created.body", { email: create.data.email })}
+          </p>
+          <CopyChip value={create.data.acceptUrl} />
+          <ModalFooter>
+            <button type="submit" className="ms-btn ms-btn-primary">
+              {t("invitations.created.done")} <span className="ms-keycap">↵</span>
+            </button>
+          </ModalFooter>
+        </form>
+      ) : (
+        <form
+          style={{ display: "grid", gap: 14, marginTop: 12 }}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (email.trim().length === 0 || create.isPending) return;
+            create.mutate({ email, role });
+          }}
+        >
+          <div className="ms-field">
+            <label htmlFor="invite-email">{t("invitations.invite.email")}</label>
+            <input
+              id="invite-email"
+              type="email"
+              className="ms-input"
+              style={{ width: "100%" }}
+              required
+              value={email}
+              disabled={create.isPending}
+              placeholder={t("invitations.invite.emailPlaceholder")}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </div>
+          <div className="ms-field">
+            <label htmlFor="invite-role">{t("invitations.invite.role")}</label>
+            <Select
+              id="invite-role"
+              width="100%"
+              value={role}
+              disabled={create.isPending}
+              onChange={(value) => setRole(value === "admin" ? "admin" : "member")}
+              ariaLabel={t("invitations.invite.role")}
+              options={[
+                { value: "member", label: t("members.roles.member") },
+                { value: "admin", label: t("members.roles.admin") },
+              ]}
+            />
+          </div>
+          {create.isError ? (
+            <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
+              {t("invitations.invite.error")}
+            </p>
+          ) : null}
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={close}>
+              {common("cancel")} <span className="ms-keycap">Esc</span>
+            </button>
+            <button
+              type="submit"
+              className="ms-btn ms-btn-primary"
+              disabled={email.trim().length === 0 || create.isPending}
+            >
+              <BtnSpinner on={create.isPending} />
+              {t("invitations.invite.submit")} <span className="ms-keycap">↵</span>
+            </button>
+          </ModalFooter>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+function PendingInvitations() {
+  const t = useTranslations("settings");
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const { data: invitations } = useQuery(trpc.settings.invitations.list.queryOptions());
+  const revoke = useMutation(
+    trpc.settings.invitations.revoke.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries(trpc.settings.invitations.list.queryFilter()),
+    }),
+  );
+
+  if (!invitations || invitations.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div className="ms-microlabel" style={{ marginBottom: 8 }}>
+        {t("invitations.pending.title")}
+      </div>
+      <Table>
+        <thead>
+          <tr>
+            <th>{t("invitations.pending.email")}</th>
+            <th>{t("members.role")}</th>
+            <th>{t("invitations.pending.link")}</th>
+            <th className="right" aria-label={t("invitations.pending.actions")} />
+          </tr>
+        </thead>
+        <tbody>
+          {invitations.map((invite) => (
+            <tr key={invite.id}>
+              <td className="ms-mono">{invite.email}</td>
+              <td>{t(`members.roles.${invite.role}`)}</td>
+              <td>
+                <CopyChip value={invite.acceptUrl} display={t("invitations.pending.copy")} />
+              </td>
+              <td className="right">
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-secondary"
+                  disabled={revoke.isPending}
+                  onClick={() => revoke.mutate({ id: invite.id })}
+                >
+                  {t("invitations.pending.revoke")}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </div>
+  );
+}
+
 function MembersSection() {
   const t = useTranslations("settings");
   const trpc = useTRPC();
   const { data: members } = useQuery(trpc.settings.members.list.queryOptions());
+  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
+  const role = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
+  const canManage = role === "owner" || role === "admin";
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   return (
     <SectionCard title={t("members.title")}>
+      {canManage ? (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <button
+            type="button"
+            className="ms-btn ms-btn-primary"
+            onClick={() => setInviteOpen(true)}
+          >
+            {t("invitations.invite.trigger")}
+          </button>
+        </div>
+      ) : null}
       <Table>
         <thead>
           <tr>
@@ -191,6 +370,8 @@ function MembersSection() {
           </tbody>
         )}
       </Table>
+      {canManage ? <PendingInvitations /> : null}
+      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
     </SectionCard>
   );
 }
