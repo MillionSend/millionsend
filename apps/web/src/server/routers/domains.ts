@@ -112,6 +112,16 @@ async function detectProvider(
 
 type DomainStatus = (typeof schema.domainStatusEnum.enumValues)[number];
 
+/** DNS checklist rows plus the optional branded-tracking CNAME the UI table renders. */
+type TrackedDnsRecord = {
+  group: "verification" | "sending" | "dmarc" | "tracking";
+  type: string;
+  name: string;
+  value: string;
+  priority?: number;
+  status: "verified" | "pending" | "failed" | null;
+};
+
 /** Per-record check state: verification rows follow DKIM, sending rows follow MAIL FROM. */
 function recordCheck(sesStatus: string): "verified" | "pending" | "failed" {
   if (sesStatus === "SUCCESS") return "verified";
@@ -167,6 +177,9 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         region: domain.region,
         status: domain.status,
         mailFromSubdomain: domain.mailFromSubdomain,
+        openTracking: domain.openTracking,
+        clickTracking: domain.clickTracking,
+        trackingSubdomain: domain.trackingSubdomain,
         createdAt: domain.createdAt,
         verifiedAt: domain.verifiedAt,
         lastCheckedAt: domain.lastCheckedAt,
@@ -240,27 +253,39 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         getDomainVerification(deps.clientForRegion(domain.region), { domain: domain.name }),
         detectProvider(deps.resolveNs, domain.name),
       ]);
-      return {
-        provider,
-        records: dnsRecordsForDomain({
-          domain: domain.name,
-          // The columns are nullable only for bare fixture inserts; every row
-          // created through this router carries both values.
-          dkimSelector: domain.dkimSelector ?? DKIM_SELECTOR,
-          dkimPublicKey: domain.dkimPublicKey ?? "",
-          mailFromSubdomain: domain.mailFromSubdomain,
-          region: domain.region,
-        }).map((record) => ({
-          ...record,
-          // DMARC is recommended-only: SES never checks it, so it carries no state.
-          status:
-            record.group === "verification"
-              ? recordCheck(verification.dkimStatus)
-              : record.group === "sending"
-                ? recordCheck(verification.mailFromStatus)
-                : null,
-        })),
-      };
+      const records: TrackedDnsRecord[] = dnsRecordsForDomain({
+        domain: domain.name,
+        // The columns are nullable only for bare fixture inserts; every row
+        // created through this router carries both values.
+        dkimSelector: domain.dkimSelector ?? DKIM_SELECTOR,
+        dkimPublicKey: domain.dkimPublicKey ?? "",
+        mailFromSubdomain: domain.mailFromSubdomain,
+        region: domain.region,
+      }).map((record) => ({
+        ...record,
+        // DMARC is recommended-only: SES never checks it, so it carries no state.
+        status:
+          record.group === "verification"
+            ? recordCheck(verification.dkimStatus)
+            : record.group === "sending"
+              ? recordCheck(verification.mailFromStatus)
+              : null,
+      }));
+
+      // A branded tracking subdomain points at SES's regional open/click
+      // endpoint (r.<region>.awstrack.me). SES exposes no verification state
+      // for it, so it carries no status — like DMARC.
+      if (domain.trackingSubdomain) {
+        records.push({
+          group: "tracking",
+          type: "CNAME",
+          name: `${domain.trackingSubdomain}.${domain.name}`,
+          value: `r.${domain.region}.awstrack.me`,
+          status: null,
+        });
+      }
+
+      return { provider, records };
     }),
 
     verify: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
@@ -285,6 +310,48 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         verifiedForSending: verification.verifiedForSending,
       };
     }),
+
+    updateTracking: teamProcedure
+      .input(
+        z.object({
+          id: z.uuid(),
+          openTracking: z.boolean().optional(),
+          clickTracking: z.boolean().optional(),
+          // Empty string clears the custom subdomain; any other value must be a
+          // single lowercase DNS label (the CNAME host under the domain).
+          trackingSubdomain: z
+            .string()
+            .trim()
+            .refine((v) => v === "" || SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
+            .nullable()
+            .optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
+        const set: Partial<{
+          openTracking: boolean;
+          clickTracking: boolean;
+          trackingSubdomain: string | null;
+        }> = {};
+        if (input.openTracking !== undefined) set.openTracking = input.openTracking;
+        if (input.clickTracking !== undefined) set.clickTracking = input.clickTracking;
+        if (input.trackingSubdomain !== undefined) {
+          set.trackingSubdomain = input.trackingSubdomain || null;
+        }
+        const next = { ...domain, ...set };
+        if (Object.keys(set).length > 0) {
+          await ctx.db
+            .update(schema.domains)
+            .set(set)
+            .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));
+        }
+        return {
+          openTracking: next.openTracking,
+          clickTracking: next.clickTracking,
+          trackingSubdomain: next.trackingSubdomain,
+        };
+      }),
 
     delete: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);

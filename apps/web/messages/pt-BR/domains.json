@@ -89,7 +89,21 @@
     "groups": {
       "verification": "Verificação do domínio (DKIM)",
       "sending": "Habilitar envio",
-      "dmarc": "DMARC (recomendado)"
+      "dmarc": "DMARC (recomendado)",
+      "tracking": "Rastreamento de aberturas e cliques"
+    },
+    "tracking": {
+      "title": "Rastreamento",
+      "subtitle": "O SES rastreia aberturas e cliques no nível do conjunto de configurações, para toda a conta. Isto salva como as configurações deste domínio — não liga nem desliga o rastreamento do SES por conta própria.",
+      "open": "Rastreamento de aberturas",
+      "openHint": "Adiciona um pixel 1×1 para que uma renderização conte como abertura.",
+      "click": "Rastreamento de cliques",
+      "clickHint": "Encaminha os links pelo SES para contar cliques.",
+      "subdomain": "Subdomínio de rastreamento",
+      "subdomainHint": "Opcional. Serve os links de rastreamento pelo seu próprio domínio em vez de awstrack.me — adicione o CNAME abaixo.",
+      "subdomainPlaceholder": "email",
+      "subdomainError": "Use um único rótulo DNS em minúsculas.",
+      "error": "Não foi possível salvar as configurações de rastreamento."
     },
     "columns": {
       "type": "Tipo",

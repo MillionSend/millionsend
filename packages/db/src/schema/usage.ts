@@ -20,6 +20,10 @@ export const usageCounters = pgTable(
     delivered: integer("delivered").notNull().default(0),
     bounced: integer("bounced").notNull().default(0),
     complained: integer("complained").notNull().default(0),
+    // Unique engagement per day: one recipient opening/clicking many times
+    // counts once, so rates against `delivered` stay <= 100%.
+    opened: integer("opened").notNull().default(0),
+    clicked: integer("clicked").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.day] })],
 );

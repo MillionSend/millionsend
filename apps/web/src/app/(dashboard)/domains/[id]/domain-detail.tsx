@@ -21,6 +21,9 @@ import { useTRPC } from "@/lib/trpc";
 import { DomainStatusBadge } from "../domain-status";
 import { RegionLabel } from "../region-label";
 
+// Single lowercase DNS label — mirrors SUBDOMAIN_RE the domains router enforces.
+const DNS_LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
 /**
  * Status-tinted gradient banner (canvas: near-black ground, glow rising from
  * the left edge). The rgba glows are the canvas values verbatim — the token
@@ -64,6 +67,137 @@ function MetaItem({ label, children }: { label: string; children: React.ReactNod
       </p>
       <div style={{ marginTop: 4, fontSize: 14, color: "var(--ms-bone)" }}>{children}</div>
     </div>
+  );
+}
+
+function TrackingToggle({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ marginTop: 3 }}
+      />
+      <span>
+        <span style={{ display: "block", fontSize: 13.5, color: "var(--ms-bone)" }}>{label}</span>
+        <span style={{ display: "block", fontSize: 12, color: "var(--ms-muted)", marginTop: 2 }}>
+          {hint}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+/**
+ * Tracking preferences persist to the domain row as settings; SES tracking
+ * itself is enabled at the configuration-set level, so these toggles do not
+ * gate it on their own. Toggles save immediately; the subdomain saves on blur
+ * so a branded CNAME can be surfaced in the DNS table once set.
+ */
+function TrackingSection({
+  id,
+  openTracking,
+  clickTracking,
+  trackingSubdomain,
+}: {
+  id: string;
+  openTracking: boolean;
+  clickTracking: boolean;
+  trackingSubdomain: string | null;
+}) {
+  const t = useTranslations("domains");
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const [subdomain, setSubdomain] = useState(trackingSubdomain ?? "");
+
+  const update = useMutation(
+    trpc.domains.updateTracking.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
+      },
+    }),
+  );
+
+  const invalid = subdomain.trim() !== "" && !DNS_LABEL_RE.test(subdomain.trim());
+
+  function saveSubdomain() {
+    const next = subdomain.trim();
+    if (invalid || next === (trackingSubdomain ?? "")) return;
+    update.mutate({ id, trackingSubdomain: next });
+  }
+
+  return (
+    <section style={{ marginTop: 34, maxWidth: 1000 }}>
+      <h2
+        className="ms-display"
+        style={{ fontSize: 22, margin: 0, fontWeight: 500, color: "var(--ms-bone)" }}
+      >
+        {t("detail.tracking.title")}
+      </h2>
+      <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 6 }}>
+        {t("detail.tracking.subtitle")}
+      </div>
+
+      <div style={{ display: "grid", gap: 14, marginTop: 20 }}>
+        <TrackingToggle
+          label={t("detail.tracking.open")}
+          hint={t("detail.tracking.openHint")}
+          checked={openTracking}
+          disabled={update.isPending}
+          onChange={(checked) => update.mutate({ id, openTracking: checked })}
+        />
+        <TrackingToggle
+          label={t("detail.tracking.click")}
+          hint={t("detail.tracking.clickHint")}
+          checked={clickTracking}
+          disabled={update.isPending}
+          onChange={(checked) => update.mutate({ id, clickTracking: checked })}
+        />
+        <div className="ms-field" style={{ maxWidth: 360 }}>
+          <label htmlFor="tracking-subdomain">{t("detail.tracking.subdomain")}</label>
+          <input
+            id="tracking-subdomain"
+            type="text"
+            className="ms-input mono"
+            style={{ width: "100%" }}
+            placeholder={t("detail.tracking.subdomainPlaceholder")}
+            autoComplete="off"
+            spellCheck={false}
+            disabled={update.isPending}
+            value={subdomain}
+            onChange={(e) => setSubdomain(e.target.value)}
+            onBlur={saveSubdomain}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+          />
+          <p
+            style={{
+              margin: "6px 0 0",
+              fontSize: 12,
+              color: invalid ? "var(--ms-danger)" : "var(--ms-muted)",
+            }}
+          >
+            {invalid ? t("detail.tracking.subdomainError") : t("detail.tracking.subdomainHint")}
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -212,6 +346,30 @@ export function DomainDetail({ id }: { id: string }) {
           </h2>
           <div style={{ marginTop: 22 }}>
             <DnsRecordsTableSkeleton showStatus />
+          </div>
+        </section>
+        <section style={{ marginTop: 34, maxWidth: 1000 }}>
+          <h2 className="ms-display" style={{ fontSize: 22, margin: 0, display: "flex" }}>
+            <Skeleton width={140} height="1lh" />
+          </h2>
+          <div style={{ display: "grid", gap: 14, marginTop: 20 }}>
+            {[0, 1].map((toggle) => (
+              <div key={toggle} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <Skeleton width={13} height={13} />
+                <div style={{ display: "grid", gap: 6 }}>
+                  <Skeleton width={120} height="1lh" />
+                  <Skeleton width={220} height="1lh" />
+                </div>
+              </div>
+            ))}
+            <div className="ms-field" style={{ maxWidth: 360 }}>
+              <div style={{ display: "flex" }}>
+                <Skeleton width={130} height="1lh" />
+              </div>
+              <div style={{ marginTop: 6, display: "flex" }}>
+                <Skeleton width="100%" height={38} radius="var(--ms-r-input)" />
+              </div>
+            </div>
           </div>
         </section>
       </>
@@ -442,6 +600,13 @@ export function DomainDetail({ id }: { id: string }) {
           </div>
         ) : null}
       </section>
+
+      <TrackingSection
+        id={id}
+        openTracking={data.openTracking}
+        clickTracking={data.clickTracking}
+        trackingSubdomain={data.trackingSubdomain}
+      />
 
       <Modal open={confirmingDelete} onClose={closeDelete} title={t("detail.deleteDomain")}>
         <p

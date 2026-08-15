@@ -12,7 +12,15 @@ import { and, asc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { router, teamProcedure } from "../trpc";
 
-const COUNTS = { accepted: 0, sent: 0, delivered: 0, bounced: 0, complained: 0 };
+const COUNTS = {
+  accepted: 0,
+  sent: 0,
+  delivered: 0,
+  bounced: 0,
+  complained: 0,
+  opened: 0,
+  clicked: 0,
+};
 type Counts = typeof COUNTS;
 
 export const metricsRouter = router({
@@ -33,6 +41,8 @@ export const metricsRouter = router({
             delivered: c.delivered,
             bounced: c.bounced,
             complained: c.complained,
+            opened: c.opened,
+            clicked: c.clicked,
           })
           .from(c)
           .where(and(eq(c.teamId, ctx.teamId), gte(c.day, since)))
@@ -60,6 +70,8 @@ export const metricsRouter = router({
           delivered: acc.delivered + d.delivered,
           bounced: acc.bounced + d.bounced,
           complained: acc.complained + d.complained,
+          opened: acc.opened + d.opened,
+          clicked: acc.clicked + d.clicked,
         }),
         { ...COUNTS },
       );
