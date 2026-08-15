@@ -1,3 +1,4 @@
+import { resultRows } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -379,5 +380,39 @@ export const audienceRouter = router({
           });
         return { subscribed: input.subscribed };
       }),
+  }),
+
+  properties: router({
+    /**
+     * Distinct custom-property keys in use across the team's contacts, each
+     * with how many carry a non-empty value (coverage over totalContacts) and
+     * one sample value. Derived from the free-form contacts.properties map —
+     * there is no property-definition table. Also the source of truth for the
+     * broadcast merge-field variable picker.
+     */
+    list: teamProcedure.query(async ({ ctx }) => {
+      const c = schema.contacts;
+      const [totalRow] = await ctx.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(c)
+        .where(eq(c.teamId, ctx.teamId));
+      const totalContacts = totalRow?.total ?? 0;
+      // jsonb_each_text expands each contact's map to (key, value) rows; the
+      // key is row data, never string-interpolated, so a hostile stored key is
+      // returned as data, not executed. A {} map expands to zero rows and thus
+      // contributes no key. Sorted by coverage (contactCount) desc.
+      const result = await ctx.db.execute(sql`
+        select kv.key as key,
+               count(*)::int as "contactCount",
+               min(kv.value) as "sampleValue"
+        from ${c} c
+        cross join lateral jsonb_each_text(c.properties) as kv(key, value)
+        where c.team_id = ${ctx.teamId} and kv.value <> ''
+        group by kv.key
+        order by count(*) desc, kv.key asc
+      `);
+      const rows = resultRows<{ key: string; contactCount: number; sampleValue: string }>(result);
+      return rows.map((r) => ({ ...r, totalContacts }));
+    }),
   }),
 });

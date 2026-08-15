@@ -22,11 +22,15 @@
     "allContacts": "All contacts",
     "anyTopic": "Any topic"
   },
-  "placeholder": {
-    "properties": "0 properties.",
-    "segments": "0 segments.",
-    "topics": "0 topics.",
-    "notAvailable": "Not available yet."
+  "properties": {
+    "title": "Audience",
+    "name": "Name",
+    "coverage": "Coverage",
+    "example": "Example value",
+    "empty": "No properties yet.",
+    "emptyHint": "Properties come from custom contact fields — set them on a contact or through the API.",
+    "loadError": "Could not load properties.",
+    "retry": "Retry"
   },
   "list": {
     "title": "Audience",

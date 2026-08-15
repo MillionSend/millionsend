@@ -53,6 +53,7 @@ export {
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
 } from "./deliverability.js";
+export { firstRow, resultRows } from "./driver-result.js";
 export {
   beginIdempotent,
   completeIdempotent,
