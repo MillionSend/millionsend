@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkDnsRecords, type DnsResolver } from "@/server/dns-check";
+import { checkDnsRecords, type DnsResolver } from "../src/dns-check.js";
 
 const empty: DnsResolver = {
   resolveTxt: async () => [],

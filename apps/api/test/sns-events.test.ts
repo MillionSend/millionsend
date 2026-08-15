@@ -3,13 +3,13 @@ import { EnvKeyring } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
 import {
-  createTestDb,
   SNS_TEST_CERT_URL,
   SNS_TEST_TOPIC_ARN,
   signSnsMessage,
   snsTestCertPem,
   type UnsignedSnsMessage,
-} from "@millionsend/test-utils";
+} from "@millionsend/ses/test-support";
+import { createTestDb } from "@millionsend/test-utils";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { createApi } from "../src/app.js";
 

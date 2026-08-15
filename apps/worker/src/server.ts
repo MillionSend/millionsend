@@ -9,6 +9,7 @@ import {
 } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
 import { Queue } from "@millionsend/queue";
+import { createSesv2Client, nodeDnsResolver, type SesIdentityClient } from "@millionsend/ses";
 import {
   drainQuotaParked,
   purgeExpiredApiRequests,
@@ -16,6 +17,7 @@ import {
   reconcileStalledBroadcasts,
   reconcileStalledSends,
   reconcileWebhookDeliveries,
+  reverifyDomains,
 } from "./handlers/cron.js";
 import { deliverWebhook } from "./handlers/deliver-webhook.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
@@ -46,6 +48,23 @@ const unsubscribe = env.APP_BASE_URL
   ? { secretKey: unsubscribeSecretKey, baseUrl: env.APP_BASE_URL }
   : undefined;
 const ses = createSesSender(env.AWS_REGION);
+// SESv2 identity clients (GetEmailIdentity) for domain re-verification, cached
+// per region since identities live in the domain's region. Distinct from the
+// send client above (SendEmail); credentials fall back to the provider chain.
+const identityClients = new Map<string, SesIdentityClient>();
+const clientForRegion = (region: string): SesIdentityClient => {
+  let client = identityClients.get(region);
+  if (!client) {
+    client = createSesv2Client({
+      region,
+      ...(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
+        ? { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY }
+        : {}),
+    });
+    identityClients.set(region, client);
+  }
+  return client;
+};
 // The bucket is the messages/second control; worker concurrency is not a
 // rate limit and must never be treated as one. In-memory ⇒ single worker
 // process only (see SES_MAX_SEND_RATE in @millionsend/config). The db-backed
@@ -172,6 +191,12 @@ await queue.scheduleCrons({
       enqueue: (broadcastId) => enqueueBroadcast(broadcastId),
     });
     if (requeued > 0) console.log(`broadcasts.reconcile: requeued=${requeued}`);
+  },
+  "domains.reverify": async () => {
+    const result = await reverifyDomains(db, { clientForRegion, resolver: nodeDnsResolver });
+    if (result.checked > 0 || result.failed > 0) {
+      console.log(`domains.reverify: checked=${result.checked} failed=${result.failed}`);
+    }
   },
 });
 

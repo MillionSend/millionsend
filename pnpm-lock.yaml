@@ -388,6 +388,9 @@ importers:
       '@aws-sdk/client-sts':
         specifier: ^3.750.0
         version: 3.1109.0
+      '@millionsend/core':
+        specifier: workspace:*
+        version: link:../core
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -435,9 +438,6 @@ importers:
       '@millionsend/db':
         specifier: workspace:*
         version: link:../db
-      '@millionsend/ses':
-        specifier: workspace:*
-        version: link:../ses
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@electric-sql/pglite@0.3.16)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)

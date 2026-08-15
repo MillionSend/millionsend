@@ -15,7 +15,6 @@
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",
     "@millionsend/db": "workspace:*",
-    "@millionsend/ses": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

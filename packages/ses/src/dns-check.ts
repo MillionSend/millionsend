@@ -3,18 +3,9 @@ import {
   resolveMx as dnsResolveMx,
   resolveTxt as dnsResolveTxt,
 } from "node:dns/promises";
+import type { LiveDnsStatus } from "@millionsend/core/domain-status";
 
-/**
- * Live per-record DNS verdict, distinct from SES's cached verification status.
- * `found` = the expected record resolves; `mismatch` = the name answers but no
- * answer carries the expected value (a wrong/stale record); `missing` = the
- * name doesn't answer at all (removed record, NXDOMAIN, or lookup timeout).
- * This is the real-time signal that catches a record removed seconds ago, which
- * SES's GetEmailIdentity keeps reporting as verified until it re-checks.
- */
-export type LiveDnsStatus = "found" | "missing" | "mismatch";
-
-/** DNS access seam so the router can inject a fake and tests hit no network. */
+/** DNS access seam so callers inject a fake and tests hit no network. */
 export interface DnsResolver {
   resolveTxt(hostname: string): Promise<string[][]>;
   resolveMx(hostname: string): Promise<{ priority: number; exchange: string }[]>;

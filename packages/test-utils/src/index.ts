@@ -1,11 +1,3 @@
-export {
-  SNS_TEST_CERT_URL,
-  SNS_TEST_TOPIC_ARN,
-  signSnsMessage,
-  snsTestCertPem,
-  type UnsignedSnsMessage,
-} from "./sns.js";
-
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

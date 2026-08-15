@@ -1,15 +1,19 @@
 import { resolveNs as dnsResolveNs } from "node:dns/promises";
 import { env } from "@millionsend/config";
+import { recordCheck } from "@millionsend/core/domain-status";
 import { type Db, schema } from "@millionsend/db";
 import {
+  checkDnsRecords,
+  computeDomainVerification,
   createDomainIdentity,
   createSesv2Client,
   DKIM_SELECTOR,
-  type DkimVerificationStatus,
+  type DnsResolver,
   deleteDomainIdentity,
   dnsRecordsForDomain,
   generateDkimKeyPair,
   getDomainVerification,
+  nodeDnsResolver,
   type SesIdentityClient,
 } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
@@ -17,14 +21,7 @@ import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
 import { isUniqueViolation } from "@/lib/db-errors";
-import { combineRecordStatus, sesGateFromRecordStatus } from "@/lib/dns-record-status";
 import { resolveBaseUrl } from "../auth";
-import {
-  checkDnsRecords,
-  type DnsResolver,
-  type LiveDnsStatus,
-  nodeDnsResolver,
-} from "../dns-check";
 import { router, teamProcedure } from "../trpc";
 
 // Lowercase registrable hostname with at least two labels; SES identities are
@@ -121,8 +118,6 @@ async function detectProvider(
   return null;
 }
 
-type DomainStatus = (typeof schema.domainStatusEnum.enumValues)[number];
-
 /** DNS checklist rows plus the optional branded-tracking CNAME the UI table renders. */
 type TrackedDnsRecord = {
   group: "verification" | "sending" | "dmarc" | "tracking";
@@ -132,37 +127,6 @@ type TrackedDnsRecord = {
   priority?: number;
   status: "verified" | "pending" | "failed" | null;
 };
-
-/** Per-record check state: verification rows follow DKIM, sending rows follow MAIL FROM. */
-function recordCheck(sesStatus: string): "verified" | "pending" | "failed" {
-  if (sesStatus === "SUCCESS") return "verified";
-  if (sesStatus === "FAILED") return "failed";
-  return "pending";
-}
-
-/**
- * SECURITY: the send gate keys off the stored domains.status, so this is the
- * one place strictness is decided. A domain is `verified` ONLY when every
- * REQUIRED record (those SES checks — DKIM, MX, SPF; non-null SES status)
- * passes BOTH gates: our live DNS lookup found it AND SES verified it. Optional
- * records (DMARC, tracking CNAME; null SES status) never gate. A live-MISSING
- * SPF thus keeps the domain `pending` even when SES's mail-from reads success.
- * DKIM hard/temporary SES failures surface before the all-records check.
- */
-function strictDomainStatus(
-  dkimStatus: DkimVerificationStatus,
-  records: { status: TrackedDnsRecord["status"]; live: LiveDnsStatus | undefined }[],
-): DomainStatus {
-  if (dkimStatus === "FAILED") return "failed";
-  if (dkimStatus === "TEMPORARY_FAILURE") return "temporary_failure";
-  const required = records.filter((r) => r.status !== null);
-  const allVerified = required.every(
-    (r) =>
-      combineRecordStatus({ live: r.live, sesGate: sesGateFromRecordStatus(r.status) }) ===
-      "verified",
-  );
-  return allVerified ? "verified" : "pending";
-}
 
 /**
  * The domain's expected DNS checklist with each row's SES-derived status,
@@ -335,24 +299,28 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
 
     verify: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
-      const verification = await getDomainVerification(deps.clientForRegion(domain.region), {
-        domain: domain.name,
-      });
-      // Live per-record DNS runs alongside the SES status refresh: SES's cached
-      // "verified for sending" stays authoritative, but the live lookup is what
-      // catches a record removed since SES last re-checked.
-      const records = buildTrackedRecords(domain, verification);
-      const live = await checkDnsRecords(records, deps.dns ?? nodeDnsResolver);
-      const liveDns = records.map((record, i) => ({
-        type: record.type,
-        name: record.name,
-        value: record.value,
-        status: live[i] ?? "missing",
-      }));
-      const status = strictDomainStatus(
-        verification.dkimStatus,
-        records.map((record, i) => ({ status: record.status, live: live[i] })),
+      const resolver = deps.dns ?? nodeDnsResolver;
+      // The shared source of truth the worker cron also runs: SES status + live
+      // DNS folded into the strict stored status the send gate keys off.
+      const { status, liveDns, verification } = await computeDomainVerification(
+        deps.clientForRegion(domain.region),
+        resolver,
+        domain,
       );
+      // The branded tracking CNAME never gates status, so computeDomainVerification
+      // omits it — live-check it here so its row badge still reflects real DNS.
+      if (domain.trackingSubdomain) {
+        const cname = buildTrackedRecords(domain, verification).find((r) => r.group === "tracking");
+        if (cname) {
+          const [live] = await checkDnsRecords([cname], resolver);
+          liveDns.push({
+            type: cname.type,
+            name: cname.name,
+            value: cname.value,
+            status: live ?? "missing",
+          });
+        }
+      }
       const now = new Date();
       await ctx.db
         .update(schema.domains)

@@ -53,6 +53,16 @@ export {
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
 } from "./deliverability.js";
+export {
+  combineRecordStatus,
+  type DomainStatus,
+  type LiveDnsStatus,
+  type RecordStatus,
+  recordCheck,
+  type SesGate,
+  sesGateFromRecordStatus,
+  strictDomainStatus,
+} from "./domain-status.js";
 export { firstRow, resultRows } from "./driver-result.js";
 export {
   beginIdempotent,
