@@ -135,7 +135,6 @@
     "checkDns": "Checar DNS",
     "checkDnsTooltip": "Relê o DNS ao vivo de cada registro e atualiza o status de verificação do SES. Os resultados ao vivo detectam um registro que você acabou de remover; o SES pode demorar para desverificar um domínio cujos registros já não existem.",
     "recordStatus": {
-      "checking": "Checando",
       "missing": "Ausente",
       "mismatch": "Divergente",
       "pending": "Pendente",

@@ -1,7 +1,7 @@
 export type LiveDnsStatus = "found" | "missing" | "mismatch";
 
 /** The single source-of-truth verdict a DNS record row shows in its Status cell. */
-export type RecordStatus = "checking" | "missing" | "mismatch" | "pending" | "verified";
+export type RecordStatus = "missing" | "mismatch" | "pending" | "verified";
 
 /** AWS's second gate on a record: `undefined` for records SES never checks (DMARC, tracking CNAME). */
 export type SesGate = "verified" | "pending";
@@ -31,7 +31,11 @@ export function combineRecordStatus({
   live: LiveDnsStatus | undefined;
   sesGate: SesGate | undefined;
 }): RecordStatus {
-  if (live === undefined) return "checking";
+  // Before our live lookup returns, fall back to AWS's known status (the
+  // Check-DNS button's own spinner signals that a fresh check is running, so
+  // rows don't need their own "checking" state). `verified` shows through;
+  // everything else reads `pending` until the live result arrives.
+  if (live === undefined) return sesGate === "verified" ? "verified" : "pending";
   if (live === "missing") return "missing";
   if (live === "mismatch") return "mismatch";
   // live === "found": our DNS passed — verified unless AWS is still pending.

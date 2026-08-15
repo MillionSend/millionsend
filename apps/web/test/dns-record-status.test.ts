@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { combineRecordStatus, sesGateFromRecordStatus } from "@/lib/dns-record-status";
 
 describe("combineRecordStatus", () => {
-  it("returns checking while our live lookup hasn't run", () => {
-    expect(combineRecordStatus({ live: undefined, sesGate: undefined })).toBe("checking");
-    expect(combineRecordStatus({ live: undefined, sesGate: "verified" })).toBe("checking");
-    expect(combineRecordStatus({ live: undefined, sesGate: "pending" })).toBe("checking");
+  it("falls back to AWS's status before our live lookup returns (no checking state)", () => {
+    // The Check-DNS button spinner signals the in-flight check, so rows show
+    // AWS's known status meanwhile rather than a per-row "checking" pill.
+    expect(combineRecordStatus({ live: undefined, sesGate: "verified" })).toBe("verified");
+    expect(combineRecordStatus({ live: undefined, sesGate: "pending" })).toBe("pending");
+    expect(combineRecordStatus({ live: undefined, sesGate: undefined })).toBe("pending");
   });
 
   it("our DNS is the primary gate — missing/mismatch win regardless of AWS", () => {
