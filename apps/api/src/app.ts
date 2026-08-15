@@ -114,6 +114,34 @@ async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
   if (!res.ok) throw new Error(`SNS subscription confirmation failed: ${res.status}`);
 }
 
+/**
+ * The emails table encrypts content at rest; request logs must not become a
+ * plaintext copy. Content-bearing fields lose their value before storage.
+ */
+const REDACTED_REQUEST_FIELDS = ["html", "text", "attachments"] as const;
+
+function redactRequestBody(body: unknown): unknown {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return body;
+  const copy: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  for (const field of REDACTED_REQUEST_FIELDS) {
+    if (field in copy) copy[field] = "[redacted]";
+  }
+  return copy;
+}
+
+const LOGGED_JSON_MAX_BYTES = 16 * 1024;
+
+/** Oversized (or unserializable) payloads store a marker instead of the JSON. */
+function capLoggedJson(value: unknown): unknown {
+  if (value == null) return null;
+  try {
+    if (JSON.stringify(value).length > LOGGED_JSON_MAX_BYTES) return { truncated: true };
+  } catch {
+    return null;
+  }
+  return value;
+}
+
 function isUniqueViolation(err: unknown): boolean {
   let e: unknown = err;
   while (e instanceof Error) {
@@ -856,6 +884,37 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.doc("/openapi.json", {
     openapi: "3.1.0",
     info: { title: "MillionSend API", version: "1.0.0" },
+  });
+
+  // After-response request logging, authenticated requests only — an
+  // unauthenticated 401 has no team to attribute the row to. /ses/events is
+  // excluded entirely (SNS traffic, not a customer API call). Fire-and-forget:
+  // a logging failure must never fail or slow the response. Headers are never
+  // stored (Authorization included); request bodies are redacted and capped.
+  app.use("*", async (c, next) => {
+    await next();
+    const auth = c.get("auth");
+    if (!auth || c.req.path.startsWith("/ses/")) return;
+    const { method, path } = c.req;
+    const statusCode = c.res.status;
+    // Cloned before the response is returned; both body reads happen off the
+    // request's critical path.
+    const resClone = c.res.clone();
+    void (async () => {
+      const requestBody =
+        method === "GET" || method === "HEAD"
+          ? null
+          : redactRequestBody(await c.req.json().catch(() => null));
+      const responseBody = await resClone.json().catch(() => null);
+      await deps.db.insert(schema.apiRequests).values({
+        teamId: auth.teamId,
+        method,
+        path,
+        statusCode,
+        requestBody: capLoggedJson(requestBody),
+        responseBody: capLoggedJson(responseBody),
+      });
+    })().catch((err) => console.error("api request log failed", err));
   });
 
   const requireApiKey = createMiddleware<Env>(async (c, next) => {

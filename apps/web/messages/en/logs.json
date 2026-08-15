@@ -1,0 +1,30 @@
+{
+  "loading": "Loading…",
+  "list": {
+    "title": "Logs",
+    "method": "Method",
+    "path": "Path",
+    "status": "Status",
+    "when": "When",
+    "all": "All",
+    "loadMore": "Load more",
+    "empty": "No requests yet.",
+    "emptyHint": "Calls to the API with your key show up here — <code>POST /emails</code> is a good first one.",
+    "noMatch": "No requests match this filter.",
+    "clearFilter": "Clear filter",
+    "loadError": "Couldn't load logs.",
+    "retry": "Retry"
+  },
+  "detail": {
+    "eyebrow": "Log",
+    "notFound": "Log not found.",
+    "status": "Status",
+    "when": "When",
+    "id": "ID",
+    "request": "Request",
+    "response": "Response",
+    "noBody": "No body.",
+    "redacted": "Content fields (html, text, attachments) are redacted from logs.",
+    "truncated": "Body over 16 KB — not stored."
+  }
+}

@@ -10,6 +10,7 @@ import { getDb } from "@millionsend/db";
 import { Queue } from "@millionsend/queue";
 import {
   drainQuotaParked,
+  purgeExpiredApiRequests,
   purgeExpiredEmailBodies,
   reconcileStalledBroadcasts,
   reconcileStalledSends,
@@ -141,7 +142,12 @@ await queue.scheduleCrons({
     const purged = await purgeExpiredEmailBodies(db, {
       defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
     });
-    if (purged > 0) console.log(`retention.purge: purged=${purged}`);
+    const requests = await purgeExpiredApiRequests(db, {
+      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
+    });
+    if (purged > 0 || requests > 0) {
+      console.log(`retention.purge: purged=${purged} apiRequests=${requests}`);
+    }
   },
   "idempotency.purge": async () => {
     await purgeExpiredIdempotencyKeys(db);

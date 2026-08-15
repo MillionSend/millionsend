@@ -4,6 +4,7 @@ import { audienceRouter } from "./audience";
 import { broadcastsRouter } from "./broadcasts";
 import { domainsRouter } from "./domains";
 import { emailsRouter } from "./emails";
+import { logsRouter } from "./logs";
 import { metricsRouter } from "./metrics";
 import { settingsRouter } from "./settings";
 import { systemRouter } from "./system";
@@ -17,6 +18,7 @@ export const appRouter = router({
   emails: emailsRouter,
   domains: domainsRouter,
   apiKeys: apiKeysRouter,
+  logs: logsRouter,
   metrics: metricsRouter,
   settings: settingsRouter,
   system: systemRouter,

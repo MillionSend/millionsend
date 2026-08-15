@@ -1,0 +1,30 @@
+{
+  "loading": "Carregando…",
+  "list": {
+    "title": "Logs",
+    "method": "Método",
+    "path": "Caminho",
+    "status": "Status",
+    "when": "Quando",
+    "all": "Todos",
+    "loadMore": "Carregar mais",
+    "empty": "Nenhuma requisição ainda.",
+    "emptyHint": "Chamadas à API com a sua chave aparecem aqui — <code>POST /emails</code> é uma boa primeira.",
+    "noMatch": "Nenhuma requisição corresponde a este filtro.",
+    "clearFilter": "Limpar filtro",
+    "loadError": "Não foi possível carregar os logs.",
+    "retry": "Tentar novamente"
+  },
+  "detail": {
+    "eyebrow": "Log",
+    "notFound": "Log não encontrado.",
+    "status": "Status",
+    "when": "Quando",
+    "id": "ID",
+    "request": "Requisição",
+    "response": "Resposta",
+    "noBody": "Sem corpo.",
+    "redacted": "Campos de conteúdo (html, text, attachments) são omitidos dos logs.",
+    "truncated": "Corpo acima de 16 KB — não armazenado."
+  }
+}
