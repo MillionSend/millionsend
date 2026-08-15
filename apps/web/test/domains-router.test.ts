@@ -260,21 +260,107 @@ describe("domains.create", () => {
   });
 });
 
-describe("domains.verify", () => {
-  it("flips status to verified and stamps verifiedAt when SES reports SUCCESS", async () => {
-    const teamId = await createTeam(db);
-    const { deps } = fakeSes({ dkimStatus: "SUCCESS", verifiedForSending: true });
-    const caller = callerFor(teamId, deps);
-    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+// Live DNS answers for a fully-published example.com/us-east-1 zone. spf=false
+// drops the SPF TXT so only that required record reads Missing. The DKIM TXT
+// value carries the domain's stored public key.
+function publishedDns(dkimPublicKey: string, { spf = true }: { spf?: boolean } = {}) {
+  return {
+    resolveTxt: async (name: string) => {
+      if (name === "millionsend._domainkey.example.com") {
+        return [[`v=DKIM1; k=rsa; p=${dkimPublicKey}`]];
+      }
+      if (name === "send.example.com" && spf) return [["v=spf1 include:amazonses.com ~all"]];
+      return [];
+    },
+    resolveMx: async (name: string) =>
+      name === "send.example.com"
+        ? [{ priority: 10, exchange: "feedback-smtp.us-east-1.amazonses.com" }]
+        : [],
+  };
+}
 
-    const result = await caller.domains.verify({ id });
+async function seedAndPublicKey(teamId: string): Promise<string> {
+  const caller = callerFor(teamId, fakeSes().deps);
+  const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+  const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+  return row?.dkimPublicKey ?? "";
+}
+
+describe("domains.verify", () => {
+  it("flips to verified only when every required record is live-found AND SES-verified", async () => {
+    const teamId = await createTeam(db);
+    const dkimPublicKey = await seedAndPublicKey(teamId);
+    const { deps } = fakeSes({
+      dkimStatus: "SUCCESS",
+      verifiedForSending: true,
+      dns: publishedDns(dkimPublicKey),
+    });
+    const caller = callerFor(teamId, deps);
+    const [seed] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamId));
+
+    const result = await caller.domains.verify({ id: seed?.id ?? "" });
     expect(result.status).toBe("verified");
     expect(result.dkimStatus).toBe("SUCCESS");
 
-    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamId));
     expect(row?.status).toBe("verified");
     expect(row?.verifiedAt).toBeInstanceOf(Date);
     expect(row?.lastCheckedAt).toBeInstanceOf(Date);
+  });
+
+  it("stays pending when SES verifies but the SPF TXT is live-MISSING, then verifies once it appears", async () => {
+    const teamId = await createTeam(db);
+    const dkimPublicKey = await seedAndPublicKey(teamId);
+    const [seed] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamId));
+
+    // DKIM + MX live-found + SES success, but SPF TXT absent from the zone: SES
+    // reads mail-from success, yet strict verification refuses to call this
+    // verified — the send gate must stay closed.
+    const pending = callerFor(
+      teamId,
+      fakeSes({
+        dkimStatus: "SUCCESS",
+        verifiedForSending: true,
+        dns: publishedDns(dkimPublicKey, { spf: false }),
+      }).deps,
+    );
+    expect((await pending.domains.verify({ id: seed?.id ?? "" })).status).toBe("pending");
+    let [row] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamId));
+    expect(row?.status).toBe("pending");
+    expect(row?.verifiedAt).toBeNull();
+
+    // Publish the SPF TXT: now every required record passes both gates.
+    const verified = callerFor(
+      teamId,
+      fakeSes({
+        dkimStatus: "SUCCESS",
+        verifiedForSending: true,
+        dns: publishedDns(dkimPublicKey),
+      }).deps,
+    );
+    expect((await verified.domains.verify({ id: seed?.id ?? "" })).status).toBe("verified");
+    [row] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamId));
+    expect(row?.status).toBe("verified");
+    expect(row?.verifiedAt).toBeInstanceOf(Date);
+  });
+
+  it("verifies with DMARC missing — the optional records never gate", async () => {
+    const teamId = await createTeam(db);
+    const dkimPublicKey = await seedAndPublicKey(teamId);
+    // Set a tracking subdomain so the optional tracking CNAME is also in play;
+    // publishedDns answers neither DMARC nor the CNAME, and both must be ignored.
+    const [seed] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamId));
+    const caller = callerFor(
+      teamId,
+      fakeSes({
+        dkimStatus: "SUCCESS",
+        verifiedForSending: true,
+        dns: publishedDns(dkimPublicKey),
+      }).deps,
+    );
+    await caller.domains.updateConfiguration({ id: seed?.id ?? "", trackingSubdomain: "email" });
+
+    expect((await caller.domains.verify({ id: seed?.id ?? "" })).status).toBe("verified");
   });
 
   it("stays pending while DKIM is still propagating", async () => {

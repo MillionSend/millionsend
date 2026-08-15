@@ -160,6 +160,25 @@ describe("broadcasts API", () => {
     expect(await sent.json()).toMatchObject({ statusCode: 422, name: "validation_error" });
   });
 
+  it("send 422s from a domain that exists but is not fully verified (pending status)", async () => {
+    // The row exists for the team, but strict verification left it 'pending';
+    // the send gate must refuse it exactly like an unknown domain.
+    await db.insert(schema.domains).values({
+      teamId: teamA,
+      name: "pending.dev",
+      region: "us-east-1",
+      status: "pending",
+    });
+    const res = await call(tokenA, "POST", "/broadcasts", {
+      ...draftBody(),
+      from: "Pending <hi@pending.dev>",
+    });
+    const id = (await json(res)).id;
+    const sent = await call(tokenA, "POST", `/broadcasts/${id}/send`, {});
+    expect(sent.status).toBe(422);
+    expect(await sent.json()).toMatchObject({ statusCode: 422, name: "validation_error" });
+  });
+
   it("cancel of a draft is a 400 with a RESEND_ERROR_CODE_KEY name", async () => {
     const res = await call(tokenA, "POST", `/broadcasts/${broadcastId}/cancel`);
     expect(res.status).toBe(400);

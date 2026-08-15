@@ -71,6 +71,40 @@ describe("auth", () => {
   });
 });
 
+describe("not-fully-verified domain send gate", () => {
+  // A domain row that exists for the team but whose status is short of
+  // 'verified' (e.g. SPF still propagating) must never send: verifySenderDomain
+  // keys off the stored status, which strict verification only sets to
+  // 'verified' when every required DNS record passes both gates.
+  const notVerified = { ...validBody, from: "Pending <a@pending.dev>", to: ["x@example.com"] };
+
+  beforeAll(async () => {
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "pending.dev",
+      region: "us-east-1",
+      status: "pending",
+    });
+  });
+
+  it("422s POST /emails from a pending domain", async () => {
+    const res = await post(notVerified);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ statusCode: 422, name: "validation_error" });
+  });
+
+  it("422s POST /emails/batch when an item is from a pending domain, accepting nothing", async () => {
+    const before = enqueuedSends.length;
+    const res = await app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify([{ ...validBody, to: ["ok@example.com"] }, notVerified]),
+    });
+    expect(res.status).toBe(422);
+    expect(enqueuedSends.length).toBe(before);
+  });
+});
+
 describe("send edge cases", () => {
   it("parks the 101st email of the day as queued_quota but still accepts it", async () => {
     // Free plan cap is 100/day; burn it, then send one more.
