@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, encryptEmailBody } from "@millionsend/core";
+import { EnvKeyring, encryptEmailBody, verifyClickToken, verifyOpenToken } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -56,10 +56,20 @@ function fakeSes(messageId = "fake-mid"): { ses: SesSender; sends: FakeSend[] } 
   };
 }
 
+const trackingSecret = randomBytes(32);
+
+// nodemailer quoted-printable-encodes the html part and soft-wraps at 76 cols;
+// dropping the `=\r\n` soft breaks reassembles token URLs (base64url chars are
+// never QP-encoded) so they can be matched and verified.
+function unwrapQp(mime: string): string {
+  return mime.replace(/=\r\n/g, "");
+}
+
 async function insertEmail(
   overrides: Partial<typeof schema.emails.$inferInsert> = {},
+  bodyHtml = "<b>hi</b>",
 ): Promise<string> {
-  const encrypted = await encryptEmailBody({ html: "<b>hi</b>", text: "hi" }, keyring);
+  const encrypted = await encryptEmailBody({ html: bodyHtml, text: "hi" }, keyring);
   const [row] = await db
     .insert(schema.emails)
     .values({
@@ -299,6 +309,124 @@ it("a cancel that wins the race blocks the send claim", async () => {
 
   expect(await sendEmail(db, deps, { emailId })).toBe("skipped");
   expect(sends).toHaveLength(0);
+});
+
+it("clickTracking on routes <a href> through /t/c and the token verifies to the original url", async () => {
+  const { ses, sends } = fakeSes("mid-click-track");
+  const url = "https://dest.test/landing?x=1";
+  const emailId = await insertEmail({}, `<a href="${url}">click</a>`);
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: { secretKey: trackingSecret, defaultBaseUrl: "https://track.example.com" },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).toContain("https://track.example.com/t/c/");
+  // The raw destination is gone: it lives only inside the signed token.
+  expect(mime).not.toContain("dest.test");
+  const match = mime.match(/\/t\/c\/([A-Za-z0-9_.-]+)/);
+  expect(match).not.toBeNull();
+  expect(verifyClickToken(match?.[1] ?? "", trackingSecret)).toEqual({ emailId, url });
+});
+
+it("openTracking on injects the pixel; a custom subdomain sets the tracking host", async () => {
+  const [both] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "both.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+      clickTracking: true,
+      openTracking: true,
+      trackingSubdomain: "track",
+    })
+    .returning({ id: schema.domains.id });
+  if (!both) throw new Error("domain insert failed");
+  const { ses, sends } = fakeSes("mid-both");
+  const emailId = await insertEmail(
+    { domainId: both.id, from: "Both <a@both.dev>" },
+    `<a href="https://dest.test/a">go</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: { secretKey: trackingSecret, defaultBaseUrl: "https://fallback.test" },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  // The custom subdomain host wins over the deployment default.
+  expect(mime).toContain("https://track.both.dev/t/c/");
+  expect(mime).not.toContain("fallback.test");
+  const pixel = mime.match(/\/t\/o\/([A-Za-z0-9_.-]+)/);
+  expect(pixel).not.toBeNull();
+  expect(verifyOpenToken(pixel?.[1] ?? "", trackingSecret)).toEqual({ emailId });
+});
+
+it("both toggles off ships the raw link and no pixel (clean links)", async () => {
+  const [clean] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "clean.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+      clickTracking: false,
+      openTracking: false,
+    })
+    .returning({ id: schema.domains.id });
+  if (!clean) throw new Error("domain insert failed");
+  const { ses, sends } = fakeSes("mid-clean");
+  const emailId = await insertEmail(
+    { domainId: clean.id, from: "Clean <a@clean.dev>" },
+    `<a href="https://dest.test/keepme">go</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: { secretKey: trackingSecret, defaultBaseUrl: "https://track.example.com" },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).toContain("dest.test/keepme");
+  expect(mime).not.toContain("/t/c/");
+  expect(mime).not.toContain("/t/o/");
+});
+
+it("click on leaves an unexpanded {{{UNSUBSCRIBE_URL}}} intact", async () => {
+  const { ses, sends } = fakeSes("mid-unsub-token");
+  const emailId = await insertEmail(
+    {},
+    `<a href="{{{UNSUBSCRIBE_URL}}}">unsub</a><a href="https://dest.test/y">y</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: { secretKey: trackingSecret, defaultBaseUrl: "https://track.example.com" },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).toContain("{{{UNSUBSCRIBE_URL}}}");
+  expect(mime).toContain("/t/c/");
+});
+
+it("tracking on with no base url and no subdomain fails loudly", async () => {
+  const { ses, sends } = fakeSes();
+  const emailId = await insertEmail({}, `<a href="https://dest.test/z">z</a>`);
+  const deps: SendDeps = { keyring, ses, tracking: { secretKey: trackingSecret } };
+  await expect(sendEmail(db, deps, { emailId })).rejects.toThrow(/APP_BASE_URL/);
+  // Failed before the claim: nothing was sent and the row stays queued.
+  expect(sends).toHaveLength(0);
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("queued");
+  expect(row?.sentAt).toBeNull();
 });
 
 it("token bucket setRate re-paces the existing bucket", async () => {

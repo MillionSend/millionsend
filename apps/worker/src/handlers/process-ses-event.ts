@@ -9,7 +9,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 /**
  * Turns a VERIFIED SES event into state. Authority rules: the email row is
@@ -19,14 +19,20 @@ import { and, eq, ne, sql } from "drizzle-orm";
  * another tenant.
  */
 
+/**
+ * Open and Click are deliberately absent: engagement is tracked app-layer (we
+ * rewrite links and inject the pixel ourselves, generating the opened/clicked
+ * events and counters at the redirect endpoints), and the per-domain config set
+ * no longer subscribes to OPEN/CLICK. A stray legacy OPEN/CLICK event therefore
+ * finds no mapping here and is ignored entirely — never double-counting the
+ * app-layer engagement.
+ */
 const STATUS_BY_EVENT: Record<string, EmailStatus | undefined> = {
   Send: "sent",
   Delivery: "delivered",
   DeliveryDelay: "delivery_delayed",
   Bounce: "bounced",
   Complaint: "complained",
-  Open: "opened",
-  Click: "clicked",
   Reject: "failed",
   "Rendering Failure": "failed",
 };
@@ -40,8 +46,6 @@ const EVENT_TYPE_BY_EVENT: Record<
   DeliveryDelay: "delivery_delayed",
   Bounce: "bounced",
   Complaint: "complained",
-  Open: "opened",
-  Click: "clicked",
   Reject: "failed",
   "Rendering Failure": "rendering_failure",
 };
@@ -62,7 +66,6 @@ function webhookExtras(event: SerializedSesEvent): Record<string, unknown> {
       ? { complaint_feedback_type: event.complaint.complaintFeedbackType }
       : {};
   }
-  if (event.click?.link) return { click: { link: event.click.link } };
   return {};
 }
 
@@ -137,6 +140,8 @@ export async function processSesEvent(
     }
 
     const day = utcDay(new Date(event.occurredAt));
+    // delivered/bounced/complained count every event. Engagement counters
+    // (opened/clicked) are owned by the app-layer tracking endpoints, not here.
     const counter =
       event.eventType === "Delivery"
         ? "delivered"
@@ -144,31 +149,8 @@ export async function processSesEvent(
           ? "bounced"
           : event.eventType === "Complaint"
             ? "complained"
-            : event.eventType === "Open"
-              ? "opened"
-              : event.eventType === "Click"
-                ? "clicked"
-                : null;
-    // opened/clicked aggregate UNIQUE engagement: a recipient opening five
-    // times is one open, so the counter advances only on the first such event
-    // for this email. delivered/bounced/complained count every event.
-    const countsUnique = counter === "opened" || counter === "clicked";
-    let shouldCount = counter !== null;
-    if (counter && countsUnique) {
-      const [prior] = await txDb
-        .select({ id: schema.emailEvents.id })
-        .from(schema.emailEvents)
-        .where(
-          and(
-            eq(schema.emailEvents.emailId, email.id),
-            eq(schema.emailEvents.type, eventType),
-            ne(schema.emailEvents.id, inserted.id),
-          ),
-        )
-        .limit(1);
-      shouldCount = prior === undefined;
-    }
-    if (counter && shouldCount) {
+            : null;
+    if (counter) {
       await txDb.execute(sql`
         insert into ${schema.usageCounters} (team_id, day, ${sql.raw(counter)})
         values (${email.teamId}, ${day}, 1)

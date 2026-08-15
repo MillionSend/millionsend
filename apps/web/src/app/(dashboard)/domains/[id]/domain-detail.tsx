@@ -129,11 +129,12 @@ function ConfigSection({
 }
 
 /**
- * Configuration preferences persist to the domain row as settings; SES applies
- * tracking and TLS at the configuration-set level, so these controls do not
- * flip SES behavior on their own. Toggles and TLS save on change; the tracking
- * subdomain saves on the explicit Update button so its branded CNAME can be
- * surfaced in the DNS table once set.
+ * Configuration preferences persist to the domain row. Engagement tracking is
+ * app-layer: the open/click toggles decide whether WE rewrite links and inject
+ * the open pixel at send time (SES is never asked to track). TLS remains a real
+ * per-domain SES configuration-set setting. Toggles and TLS save on change; the
+ * tracking subdomain saves on the explicit Update button so its branded CNAME
+ * can be surfaced in the DNS table once set.
  */
 function ConfigurationPanel({
   id,
@@ -290,6 +291,99 @@ function ConfigurationPanel({
             : t("detail.configuration.tlsOpportunisticHint")}
         </p>
       </ConfigSection>
+    </div>
+  );
+}
+
+/**
+ * Master tracking switch shown above the DNS records. It reflects whether
+ * app-layer tracking is active for the domain (either toggle on). Turning it
+ * off ships raw, untouched links and no open pixel; turning it on enables click
+ * tracking — open tracking stays an explicit opt-in in Configuration because it
+ * is inaccurate.
+ */
+function TrackingMasterToggle({
+  id,
+  openTracking,
+  clickTracking,
+}: {
+  id: string;
+  openTracking: boolean;
+  clickTracking: boolean;
+}) {
+  const t = useTranslations("domains");
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const active = clickTracking || openTracking;
+
+  const update = useMutation(
+    trpc.domains.updateConfiguration.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
+      },
+    }),
+  );
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 16,
+        alignItems: "center",
+        justifyContent: "space-between",
+        border: "1px solid var(--ms-line)",
+        borderRadius: 12,
+        padding: "14px 16px",
+        marginBottom: 20,
+        maxWidth: 1000,
+      }}
+    >
+      <div>
+        <div style={{ fontSize: 13.5, color: "var(--ms-bone)", fontWeight: 500 }}>
+          {t("detail.tracking.masterLabel")}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 3, lineHeight: 1.5 }}>
+          {active ? t("detail.tracking.masterOn") : t("detail.tracking.masterOff")}
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={active}
+        aria-label={t("detail.tracking.masterLabel")}
+        disabled={update.isPending}
+        onClick={() =>
+          update.mutate(
+            active
+              ? { id, clickTracking: false, openTracking: false }
+              : { id, clickTracking: true },
+          )
+        }
+        style={{
+          flexShrink: 0,
+          width: 40,
+          height: 22,
+          borderRadius: 999,
+          border: "none",
+          padding: 2,
+          cursor: update.isPending ? "default" : "pointer",
+          background: active ? "var(--ms-success)" : "var(--ms-faint)",
+          transition: "background 120ms",
+        }}
+      >
+        <span
+          style={{
+            display: "block",
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            background: "var(--ms-bone)",
+            transform: active ? "translateX(18px)" : "translateX(0)",
+            transition: "transform 120ms",
+          }}
+        />
+      </button>
     </div>
   );
 }
@@ -683,6 +777,13 @@ export function DomainDetail({ id }: { id: string }) {
             </div>
           ) : (
             <div style={{ marginTop: status === "verified" ? 0 : 22 }}>
+              {status === "verified" ? (
+                <TrackingMasterToggle
+                  id={id}
+                  openTracking={data.openTracking}
+                  clickTracking={data.clickTracking}
+                />
+              ) : null}
               {records.isSuccess ? (
                 <DnsRecordsTable records={rows} domain={data.name} showStatus />
               ) : (

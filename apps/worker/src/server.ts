@@ -1,5 +1,6 @@
 import { env } from "@millionsend/config";
 import {
+  deriveTrackingKey,
   deriveUnsubscribeKey,
   EnvKeyring,
   getInstanceSettings,
@@ -30,7 +31,15 @@ if (!env.MASTER_ENCRYPTION_KEY) {
 
 const db = getDb();
 const keyring = EnvKeyring.fromBase64(env.MASTER_ENCRYPTION_KEY);
-const unsubscribeSecretKey = deriveUnsubscribeKey(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64"));
+const masterKeyBytes = Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64");
+const unsubscribeSecretKey = deriveUnsubscribeKey(masterKeyBytes);
+// App-layer tracking signs tokens with an HKDF-derived key; defaultBaseUrl is
+// the redirect host for domains without a custom tracking subdomain. Absent
+// APP_BASE_URL only fails a send whose domain has tracking on and no subdomain.
+const tracking = {
+  secretKey: deriveTrackingKey(masterKeyBytes),
+  ...(env.APP_BASE_URL ? { defaultBaseUrl: env.APP_BASE_URL } : {}),
+};
 // Absent APP_BASE_URL doesn't stop the worker — transactional mail still
 // flows — but broadcast fan-out and broadcast sends refuse loudly.
 const unsubscribe = env.APP_BASE_URL
@@ -81,6 +90,7 @@ await queue.work("email.send", async (payload) => {
       defaultConfigurationSet: env.SES_CONFIGURATION_SET,
       reschedule: (emailId, at) => enqueueSend(emailId, at),
       enqueueWebhookDelivery: enqueueWebhook,
+      tracking,
       ...(unsubscribe ? { unsubscribe } : {}),
     },
     payload,
