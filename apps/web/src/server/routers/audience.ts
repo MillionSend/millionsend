@@ -10,6 +10,9 @@ import { router, teamProcedure } from "../trpc";
 const emailSchema = z.string().trim().pipe(z.email()).pipe(z.string().max(320));
 // "" clears the field — stored as null, never as an empty string.
 const personName = z.string().trim().max(200);
+// Resend-style custom fields: a flat map of string→string. Non-string
+// values are rejected at the boundary.
+const propertiesSchema = z.record(z.string(), z.string());
 
 /** Guards every procedure keyed by audienceId (contacts, broadcasts): NOT_FOUND outside the team. */
 export async function assertAudience(
@@ -147,6 +150,7 @@ export const audienceRouter = router({
           firstName: t.firstName,
           lastName: t.lastName,
           unsubscribed: t.unsubscribed,
+          properties: t.properties,
           createdAt: t.createdAt,
         })
         .from(t)
@@ -164,6 +168,7 @@ export const audienceRouter = router({
           email: emailSchema,
           firstName: personName.optional(),
           lastName: personName.optional(),
+          properties: propertiesSchema.optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -177,6 +182,7 @@ export const audienceRouter = router({
             email: input.email,
             firstName: input.firstName || null,
             lastName: input.lastName || null,
+            ...(input.properties !== undefined ? { properties: input.properties } : {}),
           })
           .onConflictDoNothing()
           .returning({ id: t.id });
@@ -247,16 +253,20 @@ export const audienceRouter = router({
           firstName: personName.optional(),
           lastName: personName.optional(),
           unsubscribed: z.boolean().optional(),
+          properties: propertiesSchema.optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
         const t = schema.contacts;
+        // properties REPLACES the whole map when provided (not a merge);
+        // omitting it leaves the stored map unchanged.
         const [row] = await ctx.db
           .update(t)
           .set({
             ...(input.firstName !== undefined ? { firstName: input.firstName || null } : {}),
             ...(input.lastName !== undefined ? { lastName: input.lastName || null } : {}),
             ...(input.unsubscribed !== undefined ? { unsubscribed: input.unsubscribed } : {}),
+            ...(input.properties !== undefined ? { properties: input.properties } : {}),
             updatedAt: new Date(),
           })
           .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))

@@ -35,6 +35,7 @@ export default function ContactDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editFirst, setEditFirst] = useState("");
   const [editLast, setEditLast] = useState("");
+  const [editProps, setEditProps] = useState<{ key: string; value: string }[]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const query = useQuery(
@@ -100,6 +101,9 @@ export default function ContactDetailPage() {
                 onClick={() => {
                   setEditFirst(row.firstName ?? "");
                   setEditLast(row.lastName ?? "");
+                  setEditProps(
+                    Object.entries(row.properties).map(([key, value]) => ({ key, value })),
+                  );
                   setEditOpen(true);
                 }}
               >
@@ -193,15 +197,66 @@ export default function ContactDetailPage() {
         </MetaItem>
       </div>
 
+      <div style={{ padding: "20px 0", borderBottom: "1px solid var(--ms-line)" }}>
+        <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
+          {t("detail.properties")}
+        </p>
+        {row ? (
+          Object.keys(row.properties).length === 0 ? (
+            <p style={{ margin: "8px 0 0", fontSize: 14, color: "var(--ms-muted)" }}>
+              {t("detail.noProperties")}
+            </p>
+          ) : (
+            <dl
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(120px, max-content) 1fr",
+                gap: "6px 22px",
+                margin: "10px 0 0",
+              }}
+            >
+              {Object.entries(row.properties).map(([key, value]) => (
+                <div key={key} style={{ display: "contents" }}>
+                  <dt style={{ fontSize: 14, color: "var(--ms-muted)" }}>{key}</dt>
+                  <dd style={{ margin: 0, fontSize: 14, color: "var(--ms-bone)" }}>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(120px, max-content) 1fr",
+              gap: "6px 22px",
+              marginTop: 10,
+            }}
+          >
+            <Skeleton width={90} height={14} />
+            <Skeleton width={160} height={14} />
+            <Skeleton width={70} height={14} />
+            <Skeleton width={120} height={14} />
+          </div>
+        )}
+      </div>
+
       <Modal open={editOpen} onClose={closeEdit} title={t("detail.editTitle")}>
         <form
           onSubmit={(event) => {
             event.preventDefault();
             if (!row || updateMutation.isPending) return;
+            // Rows with a blank key are dropped; a repeated key keeps its
+            // last value. Sent as the full replacement map (update semantics).
+            const properties: Record<string, string> = {};
+            for (const { key, value } of editProps) {
+              const k = key.trim();
+              if (k) properties[k] = value;
+            }
             updateMutation.mutate({
               id: row.id,
               firstName: editFirst.trim(),
               lastName: editLast.trim(),
+              properties,
             });
           }}
         >
@@ -228,6 +283,62 @@ export default function ContactDetailPage() {
                 onChange={(event) => setEditLast(event.target.value)}
               />
             </div>
+          </div>
+          <div style={{ marginTop: 18 }}>
+            <p className="ms-microlabel" style={{ margin: "0 0 8px", fontSize: 10.5 }}>
+              {t("detail.properties")}
+            </p>
+            <div style={{ display: "grid", gap: 8 }}>
+              {editProps.map((prop, i) => (
+                // Rows are positional and may hold blank keys mid-edit, so the
+                // array index is the only stable identity here.
+                // biome-ignore lint/suspicious/noArrayIndexKey: no stable id per row
+                <div key={i} style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="ms-input"
+                    style={{ flex: 1, minWidth: 0 }}
+                    placeholder={t("detail.propKeyPlaceholder")}
+                    disabled={updateMutation.isPending}
+                    value={prop.key}
+                    onChange={(event) =>
+                      setEditProps((rows) =>
+                        rows.map((r, j) => (j === i ? { ...r, key: event.target.value } : r)),
+                      )
+                    }
+                  />
+                  <input
+                    className="ms-input"
+                    style={{ flex: 1, minWidth: 0 }}
+                    placeholder={t("detail.propValuePlaceholder")}
+                    disabled={updateMutation.isPending}
+                    value={prop.value}
+                    onChange={(event) =>
+                      setEditProps((rows) =>
+                        rows.map((r, j) => (j === i ? { ...r, value: event.target.value } : r)),
+                      )
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="ms-btn ms-btn-ghost"
+                    aria-label={t("detail.removeProperty")}
+                    disabled={updateMutation.isPending}
+                    onClick={() => setEditProps((rows) => rows.filter((_, j) => j !== i))}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="ms-btn ms-btn-ghost"
+              style={{ marginTop: 8 }}
+              disabled={updateMutation.isPending}
+              onClick={() => setEditProps((rows) => [...rows, { key: "", value: "" }])}
+            >
+              {t("detail.addProperty")}
+            </button>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
             <button type="button" className="ms-btn ms-btn-ghost" onClick={closeEdit}>

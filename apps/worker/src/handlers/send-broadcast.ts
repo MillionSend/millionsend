@@ -41,9 +41,10 @@ export type BroadcastOutcome = "sent" | "skipped" | "deferred" | "canceled";
 /** Literal token replaced per recipient with their hosted unsubscribe URL. */
 const UNSUBSCRIBE_URL_TOKEN = "{{{UNSUBSCRIBE_URL}}}";
 
-// Resend's broadcast merge syntax: {{{FIRST_NAME}}} or {{{FIRST_NAME|there}}}.
-// Only the three contact fields match; any other {{{…}}} stays literal.
-const MERGE_TOKEN = /\{\{\{(FIRST_NAME|LAST_NAME|EMAIL)(?:\|([^{}]*))?\}\}\}/g;
+// Resend's broadcast merge syntax: {{{NAME}}} or {{{NAME|fallback}}}. NAME is a
+// builtin (FIRST_NAME/LAST_NAME/EMAIL) or a custom-property key; a name with no
+// matching value falls back (or resolves to "") so no raw token reaches an inbox.
+const MERGE_TOKEN = /\{\{\{([A-Za-z0-9_]+)(?:\|([^{}]*))?\}\}\}/g;
 
 function escapeHtml(value: string): string {
   return value
@@ -58,14 +59,16 @@ export interface MergeContact {
   email: string;
   firstName: string | null;
   lastName: string | null;
+  properties: Record<string, string>;
 }
 
 /**
- * Substitutes contact merge tokens. A null/empty field falls back to the
- * token's `|fallback` text, or to "" without one — the raw token must never
- * reach an inbox. Contact values are user data landing in markup, so the
- * html body gets them escaped; fallbacks are the author's own content and
- * stay literal.
+ * Substitutes contact merge tokens. Builtins (EMAIL/FIRST_NAME/LAST_NAME) win
+ * over a same-named custom property; any other name resolves against
+ * `properties` by exact key. A null/empty value falls back to the token's
+ * `|fallback` text, or to "" without one — the raw token must never reach an
+ * inbox. Contact values are user data landing in markup, so the html body gets
+ * them escaped; fallbacks are the author's own content and stay literal.
  */
 export function applyMergeFields(
   content: string,
@@ -78,7 +81,9 @@ export function applyMergeFields(
         ? contact.email
         : field === "FIRST_NAME"
           ? contact.firstName
-          : contact.lastName;
+          : field === "LAST_NAME"
+            ? contact.lastName
+            : (contact.properties[field] ?? null);
     if (!value) return fallback ?? "";
     return opts.html ? escapeHtml(value) : value;
   });
@@ -188,6 +193,7 @@ export async function sendBroadcast(
         email: schema.contacts.email,
         firstName: schema.contacts.firstName,
         lastName: schema.contacts.lastName,
+        properties: schema.contacts.properties,
       })
       .from(schema.contacts)
       .where(

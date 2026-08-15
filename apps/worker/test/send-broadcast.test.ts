@@ -453,7 +453,7 @@ it("missing APP_BASE_URL fails the fan-out loudly, sending nothing", async () =>
 });
 
 it("applyMergeFields substitutes contact fields, with fallbacks for null and empty", () => {
-  const contact = { email: "ada@example.com", firstName: "Ada", lastName: null };
+  const contact = { email: "ada@example.com", firstName: "Ada", lastName: null, properties: {} };
   expect(
     applyMergeFields("Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}} ({{{EMAIL}}})", contact, {
       html: false,
@@ -467,11 +467,41 @@ it("applyMergeFields substitutes contact fields, with fallbacks for null and emp
   expect(applyMergeFields("Hi {{{LAST_NAME}}}.", contact, { html: false })).toBe("Hi .");
 });
 
-it("applyMergeFields leaves unknown tokens untouched", () => {
-  const contact = { email: "ada@example.com", firstName: "Ada", lastName: null };
-  expect(applyMergeFields("{{{NOPE}}} {{{FULL_NAME|x}}}", contact, { html: false })).toBe(
-    "{{{NOPE}}} {{{FULL_NAME|x}}}",
+it("applyMergeFields resolves custom properties, with fallback and no leaked token", () => {
+  const contact = {
+    email: "ada@example.com",
+    firstName: "Ada",
+    lastName: null,
+    properties: { plan: "free", tier: "" },
+  };
+  expect(applyMergeFields("Plan: {{{plan|paid}}}", contact, { html: false })).toBe("Plan: free");
+  // Empty property value falls back like null.
+  expect(applyMergeFields("{{{tier|basic}}}", contact, { html: false })).toBe("basic");
+  // Unknown property without a fallback → "" (never the raw token).
+  expect(applyMergeFields("[{{{unknown}}}]", contact, { html: false })).toBe("[]");
+});
+
+it("applyMergeFields prefers a builtin over a same-named property", () => {
+  const contact = {
+    email: "ada@example.com",
+    firstName: "Ada",
+    lastName: null,
+    properties: { FIRST_NAME: "Overridden" },
+  };
+  expect(applyMergeFields("{{{FIRST_NAME}}}", contact, { html: false })).toBe("Ada");
+});
+
+it("applyMergeFields html-escapes a hostile property value in html bodies only", () => {
+  const contact = {
+    email: "ada@example.com",
+    firstName: "Ada",
+    lastName: null,
+    properties: { plan: "<img src=x onerror=alert(1)>\"&'" },
+  };
+  expect(applyMergeFields("<p>{{{plan}}}</p>", contact, { html: true })).toBe(
+    "<p>&lt;img src=x onerror=alert(1)&gt;&quot;&amp;&#39;</p>",
   );
+  expect(applyMergeFields("{{{plan}}}", contact, { html: false })).toBe(contact.properties.plan);
 });
 
 it("applyMergeFields html-escapes contact values in html bodies only", () => {
@@ -479,6 +509,7 @@ it("applyMergeFields html-escapes contact values in html bodies only", () => {
     email: "ada@example.com",
     firstName: "<img src=x onerror=alert(1)>\"&'",
     lastName: null,
+    properties: {},
   };
   expect(applyMergeFields("<p>{{{FIRST_NAME}}}</p>", contact, { html: true })).toBe(
     "<p>&lt;img src=x onerror=alert(1)&gt;&quot;&amp;&#39;</p>",
@@ -498,11 +529,12 @@ it("fan-out personalizes merge fields per contact in html and text", async () =>
     email: "hostile@example.com",
     firstName: "<b>Ada</b>",
     lastName: null,
+    properties: { plan: "<b>pro</b>" },
   });
   const broadcastId = await insertBroadcast({
     audienceId: audience.id,
-    html: '<p>Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}}</p>{{{NOPE}}}<a href="{{{UNSUBSCRIBE_URL}}}">bye</a>',
-    text: "Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}} {{{NOPE}}}",
+    html: '<p>Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}} on {{{plan}}}</p>{{{NOPE}}}<a href="{{{UNSUBSCRIBE_URL}}}">bye</a>',
+    text: "Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}} on {{{plan}}} {{{NOPE}}}",
   });
 
   expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
@@ -517,13 +549,14 @@ it("fan-out personalizes merge fields per contact in html and text", async () =>
     },
     keyring,
   );
-  // Hostile name escaped in html, raw in text; null field → fallback;
-  // unknown token untouched; unsubscribe URL still swapped in.
-  expect(body.html).toContain("Hi &lt;b&gt;Ada&lt;/b&gt; friend");
-  expect(body.html).toContain("{{{NOPE}}}");
+  // Hostile name and property escaped in html, raw in text; null field →
+  // fallback; unknown property token resolves to "" (never leaked); unsubscribe
+  // URL still swapped in.
+  expect(body.html).toContain("Hi &lt;b&gt;Ada&lt;/b&gt; friend on &lt;b&gt;pro&lt;/b&gt;");
+  expect(body.html).not.toContain("{{{NOPE}}}");
   expect(body.html).toContain(`${BASE_URL}/unsubscribe/`);
   expect(body.html).not.toContain("{{{UNSUBSCRIBE_URL}}}");
-  expect(body.text).toBe("Hi <b>Ada</b> friend {{{NOPE}}}");
+  expect(body.text).toBe("Hi <b>Ada</b> friend on <b>pro</b> ");
 });
 
 it("reconcile re-enqueues past-due scheduled and stale sending broadcasts", async () => {

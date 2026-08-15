@@ -94,6 +94,12 @@
     "edit": "Editar",
     "editTitle": "Editar contato",
     "saveConfirm": "Salvar",
-    "notFound": "Contato não encontrado."
+    "notFound": "Contato não encontrado.",
+    "properties": "Propriedades",
+    "noProperties": "Nenhuma propriedade.",
+    "propKeyPlaceholder": "Chave",
+    "propValuePlaceholder": "Valor",
+    "addProperty": "Adicionar propriedade",
+    "removeProperty": "Remover propriedade"
   }
 }
