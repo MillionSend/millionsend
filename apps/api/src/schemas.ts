@@ -72,3 +72,79 @@ export const errorSchema = z
     message: z.string(),
   })
   .openapi("ErrorResponse");
+
+/**
+ * Audiences/contacts. The resend SDK (v6+) reaches this surface through two
+ * prefixes: `resend.audiences.*` hits /segments (object: "segment") while
+ * `resend.contacts.*` hits /audiences/{id}/contacts (and /segments/{id}/contacts
+ * for list) — both prefixes serve the same handlers, so `object` is a string.
+ */
+
+export const createAudienceRequestSchema = z
+  .object({ name: z.string().min(1) })
+  .openapi("CreateAudienceRequest");
+
+export const audienceResponseSchema = z
+  .object({
+    object: z.string(),
+    id: z.uuid(),
+    name: z.string(),
+    created_at: z.string().optional(),
+  })
+  .openapi("AudienceResponse");
+
+export const listAudiencesResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    data: z.array(z.object({ id: z.uuid(), name: z.string(), created_at: z.string() })),
+    has_more: z.boolean(),
+  })
+  .openapi("ListAudiencesResponse");
+
+export const removeAudienceResponseSchema = z
+  .object({ object: z.string(), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveAudienceResponse");
+
+export const createContactRequestSchema = z
+  .object({
+    // Bare addr-spec only — a contact record is an address, not a mailbox
+    // with display name.
+    email: z.email(),
+    first_name: z.string().optional(),
+    last_name: z.string().optional(),
+    unsubscribed: z.boolean().optional(),
+  })
+  .openapi("CreateContactRequest");
+
+export const updateContactRequestSchema = z
+  .object({
+    first_name: z.string().nullable().optional(),
+    last_name: z.string().nullable().optional(),
+    unsubscribed: z.boolean().optional(),
+  })
+  .openapi("UpdateContactRequest");
+
+export const contactIdResponseSchema = z
+  .object({ object: z.literal("contact"), id: z.uuid() })
+  .openapi("ContactIdResponse");
+
+const contactSchema = z.object({
+  id: z.uuid(),
+  email: z.string(),
+  first_name: z.string().nullable(),
+  last_name: z.string().nullable(),
+  created_at: z.string(),
+  unsubscribed: z.boolean(),
+});
+
+export const getContactResponseSchema = contactSchema
+  .extend({ object: z.literal("contact") })
+  .openapi("GetContactResponse");
+
+export const listContactsResponseSchema = z
+  .object({ object: z.literal("list"), data: z.array(contactSchema), has_more: z.boolean() })
+  .openapi("ListContactsResponse");
+
+export const removeContactResponseSchema = z
+  .object({ object: z.literal("contact"), contact: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveContactResponse");
