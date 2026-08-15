@@ -113,21 +113,37 @@ describe("audiences API", () => {
     expect(await res.json()).toMatchObject({ statusCode: 409, name: "validation_error" });
   });
 
-  it("serves the SDK-required properties field on contact reads", async () => {
-    const res = await call(tokenA, "GET", `/audiences/${audienceId}/contacts/${contactId}`);
-    expect((await json(res)).properties).toEqual({});
-  });
-
-  it("rejects contact properties loudly instead of stripping them", async () => {
+  it("stores custom properties on create and returns them, coercing scalars", async () => {
     const create = await call(tokenA, "POST", `/audiences/${audienceId}/contacts`, {
       email: "props@example.com",
-      properties: { plan: "pro" },
+      properties: { plan: "pro", seats: 5, active: true },
+    });
+    expect(create.status).toBe(200);
+    const id = (await json(create)).id;
+    const got = await call(tokenA, "GET", `/audiences/${audienceId}/contacts/${id}`);
+    // Scalars coerce to strings; the map is returned verbatim, never {}.
+    expect((await json(got)).properties).toEqual({ plan: "pro", seats: "5", active: "true" });
+  });
+
+  it("round-trips updated properties via PATCH", async () => {
+    const patch = await call(tokenA, "PATCH", `/audiences/${audienceId}/contacts/${contactId}`, {
+      properties: { tier: "gold" },
+    });
+    expect(patch.status).toBe(200);
+    const got = await call(tokenA, "GET", `/audiences/${audienceId}/contacts/${contactId}`);
+    expect((await json(got)).properties).toEqual({ tier: "gold" });
+  });
+
+  it("rejects nested property values with a 422 instead of storing JSON", async () => {
+    const create = await call(tokenA, "POST", `/audiences/${audienceId}/contacts`, {
+      email: "nested@example.com",
+      properties: { plan: { name: "pro" } },
     });
     expect(create.status).toBe(422);
     expect(await create.json()).toMatchObject({ name: "validation_error" });
 
     const patch = await call(tokenA, "PATCH", `/audiences/${audienceId}/contacts/${contactId}`, {
-      properties: { plan: "pro" },
+      properties: { tags: ["a", "b"] },
     });
     expect(patch.status).toBe(422);
   });

@@ -153,6 +153,31 @@ describe("audience.contacts.add", () => {
     });
     expect(await contactRow(id)).toMatchObject({ firstName: "Ada", lastName: null });
   });
+
+  it("persists custom properties and returns them from get", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    const { id } = await caller.audience.contacts.add({
+      audienceId,
+      email: "ada@example.com",
+      properties: { plan: "pro", city: "London" },
+    });
+    expect((await contactRow(id))?.properties).toEqual({ plan: "pro", city: "London" });
+    expect((await caller.audience.contacts.get({ id })).properties).toEqual({
+      plan: "pro",
+      city: "London",
+    });
+  });
+
+  it("defaults properties to an empty map when none are given", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    const { id } = await caller.audience.contacts.add({ audienceId, email: "ada@example.com" });
+    expect((await contactRow(id))?.properties).toEqual({});
+    expect((await caller.audience.contacts.get({ id })).properties).toEqual({});
+  });
 });
 
 describe("audience.contacts.addMany", () => {
@@ -272,6 +297,29 @@ describe("audience.contacts.update", () => {
       lastName: "Lovelace",
       unsubscribed: true,
     });
+  });
+
+  it("replaces the whole properties map, leaving it untouched when omitted", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    const { id } = await caller.audience.contacts.add({
+      audienceId,
+      email: "ada@example.com",
+      properties: { plan: "pro", city: "London" },
+    });
+
+    // Provided map replaces wholesale — the dropped key does not survive.
+    await caller.audience.contacts.update({ id, properties: { plan: "free" } });
+    expect((await contactRow(id))?.properties).toEqual({ plan: "free" });
+
+    // Omitting properties leaves the stored map unchanged.
+    await caller.audience.contacts.update({ id, firstName: "Ada" });
+    expect((await contactRow(id))?.properties).toEqual({ plan: "free" });
+
+    // An explicit empty map clears it.
+    await caller.audience.contacts.update({ id, properties: {} });
+    expect((await contactRow(id))?.properties).toEqual({});
   });
 });
 

@@ -105,6 +105,22 @@ function errorBody(status: number, name: string, message: string) {
   return { statusCode: status, name, message };
 }
 
+/**
+ * Coerces an incoming contact `properties` record to a flat string→string map
+ * (Resend property values are strings): scalars pass through `String()`, null
+ * clears a key (omitted). A nested object or array is invalid — returns null so
+ * the caller answers 422 rather than silently storing structured JSON.
+ */
+function coerceContactProperties(input: Record<string, unknown>): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "object") return null;
+    out[key] = String(value);
+  }
+  return out;
+}
+
 async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
   const res = await fetch(subscribeUrl);
   if (!res.ok) throw new Error(`SNS subscription confirmation failed: ${res.status}`);
@@ -382,12 +398,16 @@ function registerAudienceRoutes(
       const auth = c.get("auth");
       const { audienceId } = c.req.valid("param");
       const body = c.req.valid("json");
-      // Rejected loudly instead of silently stripped (docs/resend-compatibility.md).
+      let properties: Record<string, string> = {};
       if (body.properties !== undefined) {
-        return c.json(
-          errorBody(422, "validation_error", "contact properties are not yet supported"),
-          422,
-        );
+        const coerced = coerceContactProperties(body.properties);
+        if (coerced === null) {
+          return c.json(
+            errorBody(422, "validation_error", "contact properties must be flat string values"),
+            422,
+          );
+        }
+        properties = coerced;
       }
       if (!(await findAudience(auth.teamId, audienceId))) {
         return c.json(errorBody(404, "not_found", "Audience not found"), 404);
@@ -402,6 +422,7 @@ function registerAudienceRoutes(
             firstName: body.first_name ?? null,
             lastName: body.last_name ?? null,
             unsubscribed: body.unsubscribed ?? false,
+            properties,
           })
           .returning({ id: schema.contacts.id });
         if (!row) throw new Error("contact insert returned no row");
@@ -511,9 +532,7 @@ function registerAudienceRoutes(
           last_name: contact.lastName,
           created_at: contact.createdAt.toISOString(),
           unsubscribed: contact.unsubscribed,
-          // Required by the SDK's GetContactResponseSuccess; contact
-          // properties are not supported yet.
-          properties: {},
+          properties: contact.properties,
         },
         200,
       );
@@ -541,12 +560,16 @@ function registerAudienceRoutes(
       const auth = c.get("auth");
       const { audienceId, id } = c.req.valid("param");
       const body = c.req.valid("json");
-      // Rejected loudly instead of silently stripped (docs/resend-compatibility.md).
+      let properties: Record<string, string> | undefined;
       if (body.properties !== undefined) {
-        return c.json(
-          errorBody(422, "validation_error", "contact properties are not yet supported"),
-          422,
-        );
+        const coerced = coerceContactProperties(body.properties);
+        if (coerced === null) {
+          return c.json(
+            errorBody(422, "validation_error", "contact properties must be flat string values"),
+            422,
+          );
+        }
+        properties = coerced;
       }
       const [row] = await db
         .update(schema.contacts)
@@ -555,6 +578,7 @@ function registerAudienceRoutes(
           ...(body.first_name !== undefined ? { firstName: body.first_name } : {}),
           ...(body.last_name !== undefined ? { lastName: body.last_name } : {}),
           ...(body.unsubscribed !== undefined ? { unsubscribed: body.unsubscribed } : {}),
+          ...(properties !== undefined ? { properties } : {}),
         })
         .where(contactWhere(auth.teamId, audienceId, id))
         .returning({ id: schema.contacts.id });
@@ -711,7 +735,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
           last_name: contact.lastName,
           created_at: contact.createdAt.toISOString(),
           unsubscribed: contact.unsubscribed,
-          properties: {},
+          properties: contact.properties,
         },
         200,
       );
@@ -739,11 +763,16 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
       const body = c.req.valid("json");
+      let properties: Record<string, string> | undefined;
       if (body.properties !== undefined) {
-        return c.json(
-          errorBody(422, "validation_error", "contact properties are not yet supported"),
-          422,
-        );
+        const coerced = coerceContactProperties(body.properties);
+        if (coerced === null) {
+          return c.json(
+            errorBody(422, "validation_error", "contact properties must be flat string values"),
+            422,
+          );
+        }
+        properties = coerced;
       }
       // An email cursor may match the same person in several audiences;
       // updating all of them is what an audience-less request means
@@ -755,6 +784,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
           ...(body.first_name !== undefined ? { firstName: body.first_name } : {}),
           ...(body.last_name !== undefined ? { lastName: body.last_name } : {}),
           ...(body.unsubscribed !== undefined ? { unsubscribed: body.unsubscribed } : {}),
+          ...(properties !== undefined ? { properties } : {}),
         })
         .where(teamContactWhere(auth.teamId, id))
         .returning({ id: t.id });

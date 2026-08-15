@@ -94,6 +94,12 @@
     "edit": "Edit",
     "editTitle": "Edit contact",
     "saveConfirm": "Save",
-    "notFound": "Contact not found."
+    "notFound": "Contact not found.",
+    "properties": "Properties",
+    "noProperties": "No properties.",
+    "propKeyPlaceholder": "Key",
+    "propValuePlaceholder": "Value",
+    "addProperty": "Add property",
+    "removeProperty": "Remove property"
   }
 }

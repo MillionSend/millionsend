@@ -65,15 +65,29 @@ describe("official resend SDK: top-level /contacts", () => {
     expect(created.error?.message).toContain("audience_id is required");
   });
 
-  it("rejects contact properties loudly instead of stripping them", async () => {
+  it("stores custom properties and rejects nested values", async () => {
     const created = await resend.contacts.create({
       audienceId,
       email: "props@example.com",
-      properties: { plan: "pro" },
+      properties: { plan: "pro", seats: 2 },
     });
-    expect(created.data).toBeNull();
-    expect(created.error?.statusCode).toBe(422);
-    expect(created.error?.message).toContain("properties");
+    expect(created.error).toBeNull();
+    const id = created.data?.id ?? "";
+    const fetched = await resend.contacts.get({ audienceId, id });
+    expect((fetched.data as unknown as { properties: Record<string, string> }).properties).toEqual({
+      plan: "pro",
+      seats: "2",
+    });
+
+    const nested = await resend.contacts.create({
+      audienceId,
+      email: "nested@example.com",
+      properties: { plan: { name: "pro" } as unknown as string },
+    });
+    expect(nested.data).toBeNull();
+    expect(nested.error?.statusCode).toBe(422);
+    expect(nested.error?.message).toContain("properties");
+    await resend.contacts.remove({ audienceId, id });
   });
 
   it("gets a contact by bare id and by email, with the required properties field", async () => {
@@ -97,19 +111,22 @@ describe("official resend SDK: top-level /contacts", () => {
     expect(byEmail.data?.id).toBe(contactId);
   });
 
-  it("updates by id without an audienceId and rejects properties", async () => {
+  it("updates by id without an audienceId, storing properties", async () => {
     const updated = await resend.contacts.update({ id: contactId, unsubscribed: true });
     expect(updated.error).toBeNull();
     expect(updated.data?.id).toBe(contactId);
     const fetched = await resend.contacts.get(contactId);
     expect(fetched.data?.unsubscribed).toBe(true);
 
-    const rejected = await resend.contacts.update({
+    const withProps = await resend.contacts.update({
       id: contactId,
       properties: { plan: "pro" },
     });
-    expect(rejected.data).toBeNull();
-    expect(rejected.error?.statusCode).toBe(422);
+    expect(withProps.error).toBeNull();
+    const reread = await resend.contacts.get(contactId);
+    expect((reread.data as unknown as { properties: Record<string, string> }).properties).toEqual({
+      plan: "pro",
+    });
   });
 
   it("removes by bare id, then get 404s", async () => {

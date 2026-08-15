@@ -145,7 +145,8 @@ export const createContactRequestSchema = z
     first_name: z.string().optional(),
     last_name: z.string().optional(),
     unsubscribed: z.boolean().optional(),
-    // Accepted so the handler can reject loudly instead of silently stripping.
+    // Kept as unknown values so the handler can coerce scalars to strings and
+    // reject nested objects/arrays with a precise 422 message.
     properties: z.record(z.string(), z.unknown()).optional(),
   })
   .openapi("CreateContactRequest");
@@ -155,7 +156,8 @@ export const updateContactRequestSchema = z
     first_name: z.string().nullable().optional(),
     last_name: z.string().nullable().optional(),
     unsubscribed: z.boolean().optional(),
-    // Accepted so the handler can reject loudly instead of silently stripping.
+    // Kept as unknown values so the handler can coerce scalars to strings and
+    // reject nested objects/arrays with a precise 422 message.
     properties: z.record(z.string(), z.unknown()).optional(),
   })
   .openapi("UpdateContactRequest");
@@ -174,9 +176,9 @@ const contactSchema = z.object({
 });
 
 export const getContactResponseSchema = contactSchema
-  // `properties` is required by the SDK's GetContactResponseSuccess; contact
-  // properties are not supported yet, so it is always {}.
-  .extend({ object: z.literal("contact"), properties: z.record(z.string(), z.unknown()) })
+  // `properties` is required by the SDK's GetContactResponseSuccess. Stored as
+  // a flat string→string map (Resend property values are strings).
+  .extend({ object: z.literal("contact"), properties: z.record(z.string(), z.string()) })
   .openapi("GetContactResponse");
 
 export const listContactsResponseSchema = z

@@ -112,6 +112,27 @@ describe("official resend SDK: audiences + contacts", () => {
     expect(byEmail.data?.id).toBe(contactId);
   });
 
+  it("round-trips custom properties through the SDK", async () => {
+    const created = await resend.contacts.create({
+      audienceId,
+      email: "props@example.com",
+      properties: { plan: "pro", seats: 3 },
+    });
+    expect(created.error).toBeNull();
+    const id = created.data?.id ?? "";
+
+    const fetched = await resend.contacts.get({ audienceId, id });
+    expect(fetched.error).toBeNull();
+    // Stored flat string→string; scalars coerced. The SDK types properties as a
+    // {type,value} map, so read the runtime shape through a cast.
+    expect((fetched.data as unknown as { properties: Record<string, string> }).properties).toEqual({
+      plan: "pro",
+      seats: "3",
+    });
+
+    await resend.contacts.remove({ audienceId, id });
+  });
+
   it("updates a contact by email and reads the change back", async () => {
     const updated = await resend.contacts.update({
       audienceId,
