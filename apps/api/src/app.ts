@@ -1394,6 +1394,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           content: { "application/json": { schema: broadcastIdResponseSchema } },
           description: "Broadcast created as draft",
         },
+        403: jsonErr("Restricted API key"),
         404: jsonErr("Audience not found"),
         422: jsonErr("Validation error"),
       },
@@ -1413,6 +1414,14 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       }
       if (body.topic_id != null && !(await findTopic(auth.teamId, body.topic_id))) {
         return c.json(errorBody(404, "not_found", "Topic not found"), 404);
+      }
+      // A domain-scoped key must not even stage a broadcast from a domain
+      // outside its scope. Sender-domain verification stays deferred to send
+      // (a draft may hold an as-yet-unverified From), so only a resolved
+      // verified domain is scope-checked here.
+      const domain = await verifySenderDomain(db, auth.teamId, body.from);
+      if (domain.ok && keyForbidsSendingDomain(auth, domain.domainId)) {
+        return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
       }
       const [row] = await db
         .insert(schema.broadcasts)
@@ -1735,6 +1744,11 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           ),
           422,
         );
+      }
+      // Same per-key domain confinement as /emails and SMTP: a domain-scoped
+      // key must not send from a different team domain.
+      if (keyForbidsSendingDomain(auth, domain.domainId)) {
+        return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
       }
       const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at) : new Date();
       const [row] = await db
@@ -2148,38 +2162,64 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       }
     }
 
-    // Pass 2 — accept each validated item; every one cleared suppression in
-    // pass 1, so acceptEmail returns an id for each.
-    // ponytail: batch accepts commit per-item, so completion is not atomic
-    // with the inserts (single-send records it in the accept tx). A crash
-    // mid-batch keeps the key in_flight until the lease expires; a retry after
-    // that could re-accept. Wrap all items in one tx if that corner matters.
+    // Pass 2 — accept every validated item in ONE transaction so the batch is
+    // all-or-nothing, like single-send: a failure after item k rolls back
+    // items 1..k, so a retry can never re-send what a prior attempt already
+    // committed. Idempotency completion is recorded in the same transaction;
+    // enqueue happens only after commit (reconcile re-enqueues any lost job).
     try {
-      const ids: string[] = [];
-      for (const payload of payloads) {
-        const result = await acceptEmail(deps, auth, payload);
-        if (!result.ok) throw new Error("batch item all-suppressed after pre-check");
-        ids.push(result.id);
-      }
-      if (idemKey) {
-        const recorded = await completeIdempotent(deps.db, {
-          teamId: auth.teamId,
-          key: idemKey,
-          emailIds: ids,
-        });
-        if (!recorded) {
-          const replay = await beginIdempotent(deps.db, {
+      const accepted = await deps.db.transaction(async (dbTx) => {
+        const txDb = dbTx as unknown as Db;
+        const out: { id: string; parked: boolean; startAfter?: Date }[] = [];
+        for (const payload of payloads) {
+          const result = await acceptEmail(deps, auth, payload, { tx: txDb });
+          if (!result.ok) throw new Error("batch item all-suppressed after pre-check");
+          out.push({
+            id: result.id,
+            parked: result.parked,
+            ...(payload.scheduledAt ? { startAfter: payload.scheduledAt } : {}),
+          });
+        }
+        if (idemKey) {
+          const recorded = await completeIdempotent(txDb, {
             teamId: auth.teamId,
             key: idemKey,
-            bodyHash: canonicalBodyHash(items),
+            emailIds: out.map((o) => o.id),
           });
-          if (replay.kind === "replay") {
-            return c.json({ data: replay.emailIds.map((id) => ({ id })) }, 200);
-          }
+          // Another owner recorded first: abort so this batch commits nothing.
+          if (!recorded) throw new IdempotencyTakeoverError();
+        }
+        return out;
+      });
+      for (const item of accepted) {
+        if (item.parked) continue;
+        try {
+          await deps.enqueueEmailSend(
+            item.id,
+            item.startAfter ? { startAfter: item.startAfter } : {},
+          );
+        } catch (err) {
+          console.error("batch email.send enqueue failed; reconcile sweep will recover", err);
         }
       }
-      return c.json({ data: ids.map((id) => ({ id })) }, 200);
+      return c.json({ data: accepted.map((o) => ({ id: o.id })) }, 200);
     } catch (err) {
+      if (err instanceof IdempotencyTakeoverError && idemKey) {
+        const replay = await beginIdempotent(deps.db, {
+          teamId: auth.teamId,
+          key: idemKey,
+          bodyHash: canonicalBodyHash(items),
+        });
+        if (replay.kind === "replay") {
+          return c.json({ data: replay.emailIds.map((id) => ({ id })) }, 200);
+        }
+        return c.json(
+          errorBody(409, "concurrent_idempotent_requests", "Request superseded by a retry"),
+          409,
+        );
+      }
+      // The single transaction rolled back, so nothing was committed; releasing
+      // the key lets a clean retry replay the whole batch without double-sending.
       if (idemKey) {
         await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey }).catch(() => {});
       }

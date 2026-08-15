@@ -1,11 +1,14 @@
 /**
  * A post-auth redirect target taken from a query param, constrained to an
  * in-app path so a crafted `?next=` can never bounce a signed-in user to an
- * external origin. Protocol-relative "//host" and anything not starting with a
- * single "/" fall back to `fallback`.
+ * external origin. Accepted only when it starts with a single "/" whose next
+ * char is neither "/" nor "\": browsers treat both "//host" and "/\host" as
+ * protocol-relative and would navigate off-site. Encoded forms (%2f, %5c) stay
+ * literal in the path and never decode to a second leading slash, so they fall
+ * through to `fallback` as ordinary non-matching paths.
  */
 export function safeNextPath(next: string | null | undefined, fallback: string): string {
-  return next?.startsWith("/") && !next.startsWith("//") ? next : fallback;
+  return next?.startsWith("/") && !/^\/[/\\]/.test(next) ? next : fallback;
 }
 
 /** True when `pathname` is `href` or nested under it ("/emails/123" → "/emails"). */

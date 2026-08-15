@@ -138,8 +138,11 @@ function textConditionSql(expr: SQL, op: TextOp, value: string | null): SQL {
       return sql`${expr} like ${`%${escapeLike(value ?? "")}`} escape '\\'`;
     case "is_set":
       return sql`${expr} is not null and ${expr} <> ''`;
+    // Parenthesized: this OR is AND-ed with team/audience scoping by every
+    // caller, and a bare OR would flip precedence to (scope AND …) OR (… = ''),
+    // matching contacts outside the scope — a cross-tenant leak.
     case "is_not_set":
-      return sql`${expr} is null or ${expr} = ''`;
+      return sql`(${expr} is null or ${expr} = '')`;
   }
 }
 

@@ -10,6 +10,7 @@ let db: Db;
 let close: () => Promise<void>;
 let teamId: string;
 let audienceId: string;
+let audienceBId: string;
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
@@ -53,6 +54,26 @@ beforeAll(async () => {
       createdAt: new Date("2026-08-01T00:00:00Z"),
     },
   ]);
+
+  // A second audience whose contacts must never appear in an audience-A query.
+  // Its contact carries the exact values the is_not_set OR-disjuncts test for
+  // (empty last_name, missing property) so an unparenthesized OR would leak it.
+  const [audienceB] = await db
+    .insert(schema.audiences)
+    .values({ teamId, name: "other" })
+    .returning({ id: schema.audiences.id });
+  if (!audienceB) throw new Error("audience B insert failed");
+  audienceBId = audienceB.id;
+  await db.insert(schema.contacts).values({
+    audienceId: audienceBId,
+    teamId,
+    email: "mallory@leak.test",
+    firstName: "Mallory",
+    lastName: "",
+    properties: {},
+    unsubscribed: false,
+    createdAt: new Date("2026-03-01T00:00:00Z"),
+  });
 });
 afterAll(() => close());
 
@@ -214,6 +235,42 @@ describe("segmentWhere: security (SQL injection)", () => {
         all({ field: "property:plan') = 'pro' OR ('1'='1", op: "is_set", value: null }),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("segmentWhere: OR-precedence / cross-audience scoping", () => {
+  // A bare `expr is null or expr = ''` AND-ed with audience scoping would parse
+  // as `(scope AND expr is null) OR (expr = '')`, so any contact in ANY audience
+  // with an empty value leaks in. Parenthesizing the disjunction keeps the
+  // AND-composition intact. mallory (audience B, last_name '') is the tripwire.
+  it("is_not_set stays scoped to its audience (no cross-audience leak)", async () => {
+    expect(await matched(all({ field: "last_name", op: "is_not_set", value: null }))).toEqual([
+      "bob@other.test",
+      "carol@example.com",
+    ]);
+    // The leaked row would be from audience B — assert it is truly seeded and
+    // would otherwise match, so this test can't pass by B being empty.
+    const bRows = await db
+      .select({ email: schema.contacts.email })
+      .from(schema.contacts)
+      .where(
+        and(
+          eq(schema.contacts.audienceId, audienceBId),
+          segmentWhere(schema.contacts, all({ field: "last_name", op: "is_not_set", value: null })),
+        ),
+      );
+    expect(bRows.map((r) => r.email)).toEqual(["mallory@leak.test"]);
+  });
+
+  it("generates a parenthesized disjunction for is_not_set", () => {
+    const { sql: text } = db
+      .select()
+      .from(schema.contacts)
+      .where(
+        segmentWhere(schema.contacts, all({ field: "last_name", op: "is_not_set", value: null })),
+      )
+      .toSQL();
+    expect(text).toMatch(/\([^()]*is null or[^()]*=\s*''\)/i);
   });
 });
 
