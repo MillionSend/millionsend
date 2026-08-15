@@ -249,6 +249,54 @@ it("a mid-processing failure never burns the idempotency gate: retry records the
   expect(events).toHaveLength(1);
 });
 
+async function engagementCounters(): Promise<{ opened: number; clicked: number }> {
+  const [row] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  return { opened: row?.opened ?? 0, clicked: row?.clicked ?? 0 };
+}
+
+it("opened counts UNIQUE engagement: two opens of one email advance it once", async () => {
+  const before = await engagementCounters();
+  await insertSentEmail("mid-open-unique");
+  await processSesEvent(db, makeEvent({ eventType: "Open", sesMessageId: "mid-open-unique" }));
+  await processSesEvent(db, makeEvent({ eventType: "Open", sesMessageId: "mid-open-unique" }));
+  const after = await engagementCounters();
+  expect(after.opened - before.opened).toBe(1);
+});
+
+it("opens across two distinct emails each count", async () => {
+  const before = await engagementCounters();
+  await insertSentEmail("mid-open-a");
+  await insertSentEmail("mid-open-b");
+  await processSesEvent(db, makeEvent({ eventType: "Open", sesMessageId: "mid-open-a" }));
+  await processSesEvent(db, makeEvent({ eventType: "Open", sesMessageId: "mid-open-b" }));
+  const after = await engagementCounters();
+  expect(after.opened - before.opened).toBe(2);
+});
+
+it("a click increments clicked once", async () => {
+  const before = await engagementCounters();
+  await insertSentEmail("mid-click");
+  await processSesEvent(
+    db,
+    makeEvent({ eventType: "Click", sesMessageId: "mid-click", click: { link: "https://x.test" } }),
+  );
+  const after = await engagementCounters();
+  expect(after.clicked - before.clicked).toBe(1);
+});
+
+it("an SNS redelivery of an open never double-counts", async () => {
+  const before = await engagementCounters();
+  await insertSentEmail("mid-open-redeliver");
+  const event = makeEvent({ eventType: "Open", sesMessageId: "mid-open-redeliver" });
+  await processSesEvent(db, event, { snsMessageId: "sns-open-1" });
+  await processSesEvent(db, event, { snsMessageId: "sns-open-1" });
+  const after = await engagementCounters();
+  expect(after.opened - before.opened).toBe(1);
+});
+
 it("unknown event types are a no-op", async () => {
   const emailId = await insertSentEmail("mid-unknown");
   await processSesEvent(db, makeEvent({ eventType: "Subscription", sesMessageId: "mid-unknown" }));

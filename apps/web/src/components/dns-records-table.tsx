@@ -7,13 +7,18 @@ import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { Table } from "@/components/table";
 import { zoneRelativeName } from "@/lib/zone";
 
-const GROUPS = ["verification", "sending", "dmarc"] as const;
+const GROUPS = ["verification", "sending", "dmarc", "tracking"] as const;
 
-/** Rows per group as dnsRecordsForDomain emits them (packages/ses). */
+/**
+ * Rows per group as dnsRecordsForDomain emits them (packages/ses). Tracking is
+ * 0 here: the branded-tracking CNAME only exists once a subdomain is set, so it
+ * never appears in the loading skeleton.
+ */
 const GROUP_ROWS: Record<(typeof GROUPS)[number], number> = {
   verification: 1,
   sending: 2,
   dmarc: 1,
+  tracking: 0,
 };
 
 export type DnsRecord = {
@@ -112,7 +117,7 @@ export function DnsRecordsTableSkeleton({ showStatus = false }: { showStatus?: b
   const t = useTranslations("domains");
   return (
     <div style={{ display: "grid", gap: 20 }}>
-      {GROUPS.map((group) => (
+      {GROUPS.filter((group) => GROUP_ROWS[group] > 0).map((group) => (
         <div key={group} style={{ maxWidth: 1000 }}>
           <p className="ms-microlabel" style={{ margin: "0 0 8px" }}>
             {t(`detail.groups.${group}`)}

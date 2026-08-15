@@ -26,6 +26,7 @@ const COMPLAINT = { threshold: WARN_COMPLAINT_RATE, lineTop: 14 };
 
 type Bar = { day: string; height: number; title: string };
 type DayCounts = { day: string; sent: number; bounced: number; complained: number };
+type EngagementDay = { day: string; delivered: number; opened: number; clicked: number };
 
 function rateBars(
   days: DayCounts[],
@@ -39,6 +40,28 @@ function rateBars(
     return {
       day: d.day,
       height: Math.min(BAR_AREA, Math.round((rate / geometry.threshold) * pxPerThreshold)),
+      title: `${d.day} · ${fmtPct.format(rate)}`,
+    };
+  });
+}
+
+/**
+ * Engagement has no risk threshold (higher is better), so bars scale to the
+ * window's own peak rate instead of a fixed line. Rate is against delivered —
+ * a message must land before it can be opened or clicked.
+ */
+function engagementBars(
+  days: EngagementDay[],
+  count: (d: EngagementDay) => number,
+  fmtPct: Intl.NumberFormat,
+): Bar[] {
+  const rates = days.map((d) => (d.delivered > 0 ? count(d) / d.delivered : 0));
+  const max = Math.max(0, ...rates);
+  return days.map((d, i) => {
+    const rate = rates[i] ?? 0;
+    return {
+      day: d.day,
+      height: max > 0 ? Math.round((rate / max) * BAR_AREA) : 0,
       title: `${d.day} · ${fmtPct.format(rate)}`,
     };
   });
@@ -58,17 +81,26 @@ function KpiValue({ label, children }: { label: string; children: React.ReactNod
 function RateCard(props: {
   label: string;
   headline: string;
-  riskLabel: string;
-  lineTop: number;
   color: string;
   bars: Bar[];
   rowLabel: string;
   rowCount: string;
   rowPct: string;
+  // Bounce/complaint: dashed danger line the bars are scaled against.
+  risk?: { label: string; lineTop: number };
+  // Engagement: neutral denominator note (no threshold — higher is better).
+  note?: string;
 }) {
   return (
     <div className="ms-kpi-card" style={{ flex: 1 }}>
-      <div className="ms-microlabel">{props.label}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <div className="ms-microlabel">{props.label}</div>
+        {props.note ? (
+          <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
+            {props.note}
+          </span>
+        ) : null}
+      </div>
       <div
         className="ms-digits"
         style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1, marginTop: 6 }}
@@ -91,28 +123,30 @@ function RateCard(props: {
             />
           ))}
         </div>
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: props.lineTop,
-            borderTop: "1px dashed var(--ms-danger)",
-          }}
-        >
-          <span
-            className="ms-mono"
+        {props.risk ? (
+          <div
             style={{
               position: "absolute",
+              left: 0,
               right: 0,
-              top: -16,
-              fontSize: 10,
-              color: "var(--ms-danger)",
+              top: props.risk.lineTop,
+              borderTop: "1px dashed var(--ms-danger)",
             }}
           >
-            {props.riskLabel}
-          </span>
-        </div>
+            <span
+              className="ms-mono"
+              style={{
+                position: "absolute",
+                right: 0,
+                top: -16,
+                fontSize: 10,
+                color: "var(--ms-danger)",
+              }}
+            >
+              {props.risk.label}
+            </span>
+          </div>
+        ) : null}
       </div>
       <div
         style={{
@@ -173,41 +207,43 @@ function MetricsSkeleton() {
           <Skeleton width="100%" height={228} radius="var(--ms-r-input)" />
         </div>
       </div>
-      <div className="ms-card-row" style={{ display: "flex", gap: 18, marginTop: 18 }}>
-        {[0, 1].map((card) => (
-          <div key={card} className="ms-kpi-card" style={{ flex: 1 }}>
-            <div className="ms-microlabel" style={{ display: "flex" }}>
-              <Skeleton width={110} height="1lh" />
+      {[0, 1].map((row) => (
+        <div key={row} className="ms-card-row" style={{ display: "flex", gap: 18, marginTop: 18 }}>
+          {[0, 1].map((card) => (
+            <div key={card} className="ms-kpi-card" style={{ flex: 1 }}>
+              <div className="ms-microlabel" style={{ display: "flex" }}>
+                <Skeleton width={110} height="1lh" />
+              </div>
+              <div
+                className="ms-digits"
+                style={{
+                  fontSize: "var(--ms-fs-kpi)",
+                  lineHeight: 1.1,
+                  marginTop: 6,
+                  display: "flex",
+                }}
+              >
+                <Skeleton width={80} height="1lh" />
+              </div>
+              <div style={{ marginTop: 16, display: "flex" }}>
+                <Skeleton width="100%" height={BAR_AREA} radius="var(--ms-r-input)" />
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  fontSize: 13,
+                  padding: "7px 0",
+                  borderTop: "1px solid var(--ms-line)",
+                  marginTop: 12,
+                }}
+              >
+                <Skeleton width={120} height="1lh" />
+              </div>
             </div>
-            <div
-              className="ms-digits"
-              style={{
-                fontSize: "var(--ms-fs-kpi)",
-                lineHeight: 1.1,
-                marginTop: 6,
-                display: "flex",
-              }}
-            >
-              <Skeleton width={80} height="1lh" />
-            </div>
-            <div style={{ marginTop: 16, display: "flex" }}>
-              <Skeleton width="100%" height={BAR_AREA} radius="var(--ms-r-input)" />
-            </div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                fontSize: 13,
-                padding: "7px 0",
-                borderTop: "1px solid var(--ms-line)",
-                marginTop: 12,
-              }}
-            >
-              <Skeleton width={120} height="1lh" />
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ))}
     </>
   );
 }
@@ -304,8 +340,7 @@ export default function MetricsPage() {
               headline={
                 data.totals.sent > 0 ? pct1.format(data.totals.bounced / data.totals.sent) : "—"
               }
-              riskLabel={t("bounce.risk")}
-              lineTop={BOUNCE.lineTop}
+              risk={{ label: t("bounce.risk"), lineTop: BOUNCE.lineTop }}
               color="var(--ms-danger)"
               bars={rateBars(data.days, (d) => d.bounced, BOUNCE, pct2)}
               rowLabel={t("bounce.bounced")}
@@ -319,14 +354,52 @@ export default function MetricsPage() {
               headline={
                 data.totals.sent > 0 ? pct2.format(data.totals.complained / data.totals.sent) : "—"
               }
-              riskLabel={t("complaint.risk")}
-              lineTop={COMPLAINT.lineTop}
+              risk={{ label: t("complaint.risk"), lineTop: COMPLAINT.lineTop }}
               color="var(--ms-warn)"
               bars={rateBars(data.days, (d) => d.complained, COMPLAINT, pct2)}
               rowLabel={t("complaint.complained")}
               rowCount={fmt.format(data.totals.complained)}
               rowPct={
                 data.totals.sent > 0 ? pct2.format(data.totals.complained / data.totals.sent) : "—"
+              }
+            />
+          </div>
+
+          <div className="ms-card-row" style={{ display: "flex", gap: 18, marginTop: 18 }}>
+            <RateCard
+              label={t("open.title")}
+              note={t("engagement.denominator")}
+              headline={
+                data.totals.delivered > 0
+                  ? pct1.format(data.totals.opened / data.totals.delivered)
+                  : "—"
+              }
+              color="var(--ms-info)"
+              bars={engagementBars(data.days, (d) => d.opened, pct1)}
+              rowLabel={t("open.opened")}
+              rowCount={fmt.format(data.totals.opened)}
+              rowPct={
+                data.totals.delivered > 0
+                  ? pct1.format(data.totals.opened / data.totals.delivered)
+                  : "—"
+              }
+            />
+            <RateCard
+              label={t("click.title")}
+              note={t("engagement.denominator")}
+              headline={
+                data.totals.delivered > 0
+                  ? pct1.format(data.totals.clicked / data.totals.delivered)
+                  : "—"
+              }
+              color="var(--ms-info)"
+              bars={engagementBars(data.days, (d) => d.clicked, pct1)}
+              rowLabel={t("click.clicked")}
+              rowCount={fmt.format(data.totals.clicked)}
+              rowPct={
+                data.totals.delivered > 0
+                  ? pct1.format(data.totals.clicked / data.totals.delivered)
+                  : "—"
               }
             />
           </div>

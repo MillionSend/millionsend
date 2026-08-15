@@ -89,7 +89,21 @@
     "groups": {
       "verification": "Domain verification (DKIM)",
       "sending": "Enable sending",
-      "dmarc": "DMARC (recommended)"
+      "dmarc": "DMARC (recommended)",
+      "tracking": "Open & click tracking"
+    },
+    "tracking": {
+      "title": "Tracking",
+      "subtitle": "SES tracks opens and clicks at the configuration-set level, for the whole account. These save as this domain's settings — they don't switch SES tracking on or off on their own.",
+      "open": "Open tracking",
+      "openHint": "Adds a 1×1 pixel so a render counts as an open.",
+      "click": "Click tracking",
+      "clickHint": "Routes links through SES to count clicks.",
+      "subdomain": "Tracking subdomain",
+      "subdomainHint": "Optional. Serves tracking links from your own domain instead of awstrack.me — add the CNAME below.",
+      "subdomainPlaceholder": "email",
+      "subdomainError": "Use a single lowercase DNS label.",
+      "error": "Couldn't save tracking settings."
     },
     "columns": {
       "type": "Type",

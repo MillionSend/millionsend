@@ -20,6 +20,17 @@
     "risk": "RISCO 0,01%",
     "complained": "Reclamações"
   },
+  "engagement": {
+    "denominator": "das entregues"
+  },
+  "open": {
+    "title": "Taxa de abertura",
+    "opened": "Aberturas"
+  },
+  "click": {
+    "title": "Taxa de cliques",
+    "clicked": "Cliques"
+  },
   "empty": "Nenhuma métrica ainda.",
   "emptyHint": "As métricas aparecem após o primeiro envio — <code>POST /emails</code>."
 }

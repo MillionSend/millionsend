@@ -9,7 +9,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 
 /**
  * Turns a VERIFIED SES event into state. Authority rules: the email row is
@@ -102,7 +102,7 @@ export async function processSesEvent(
   const deliveryIds: string[] = [];
   const applied = await db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
-    const inserted = await txDb
+    const [inserted] = await txDb
       .insert(schema.emailEvents)
       .values({
         emailId: email.id,
@@ -113,7 +113,7 @@ export async function processSesEvent(
       })
       .onConflictDoNothing()
       .returning({ id: schema.emailEvents.id });
-    if (inserted.length === 0) return false;
+    if (!inserted) return false;
 
     await applyStatusCas(txDb, email.id, status);
 
@@ -144,8 +144,31 @@ export async function processSesEvent(
           ? "bounced"
           : event.eventType === "Complaint"
             ? "complained"
-            : null;
-    if (counter) {
+            : event.eventType === "Open"
+              ? "opened"
+              : event.eventType === "Click"
+                ? "clicked"
+                : null;
+    // opened/clicked aggregate UNIQUE engagement: a recipient opening five
+    // times is one open, so the counter advances only on the first such event
+    // for this email. delivered/bounced/complained count every event.
+    const countsUnique = counter === "opened" || counter === "clicked";
+    let shouldCount = counter !== null;
+    if (counter && countsUnique) {
+      const [prior] = await txDb
+        .select({ id: schema.emailEvents.id })
+        .from(schema.emailEvents)
+        .where(
+          and(
+            eq(schema.emailEvents.emailId, email.id),
+            eq(schema.emailEvents.type, eventType),
+            ne(schema.emailEvents.id, inserted.id),
+          ),
+        )
+        .limit(1);
+      shouldCount = prior === undefined;
+    }
+    if (counter && shouldCount) {
       await txDb.execute(sql`
         insert into ${schema.usageCounters} (team_id, day, ${sql.raw(counter)})
         values (${email.teamId}, ${day}, 1)

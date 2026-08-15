@@ -38,6 +38,8 @@ async function insertCounter(
     delivered: number;
     bounced: number;
     complained: number;
+    opened: number;
+    clicked: number;
   }>,
 ): Promise<void> {
   await db.insert(schema.usageCounters).values({ teamId, day, ...counts });
@@ -61,6 +63,8 @@ describe("metrics.window", () => {
       delivered: 8,
       bounced: 1,
       complained: 0,
+      opened: 0,
+      clicked: 0,
     });
     // Days without a counter row come back as zeros.
     expect(result.days[13]).toEqual({
@@ -70,6 +74,8 @@ describe("metrics.window", () => {
       delivered: 0,
       bounced: 0,
       complained: 0,
+      opened: 0,
+      clicked: 0,
     });
     expect(result.totals).toEqual({
       accepted: 15,
@@ -77,6 +83,8 @@ describe("metrics.window", () => {
       delivered: 12,
       bounced: 1,
       complained: 1,
+      opened: 0,
+      clicked: 0,
     });
   });
 
@@ -129,8 +137,26 @@ describe("metrics.window", () => {
       delivered: 2,
       bounced: 0,
       complained: 0,
+      opened: 0,
+      clicked: 0,
     });
     expect(result.allTimeDelivered).toBe(2);
+  });
+
+  it("returns opened and clicked per day and in the window totals", async () => {
+    const teamId = await createTeam(db, "acme");
+    await insertCounter(teamId, utcDay(0), { delivered: 10, opened: 6, clicked: 2 });
+    await insertCounter(teamId, utcDay(2), { delivered: 4, opened: 1, clicked: 1 });
+
+    const result = await callerFor(teamId).metrics.window();
+
+    expect(result.days[14]).toMatchObject({ day: utcDay(0), opened: 6, clicked: 2 });
+    expect(result.days[12]).toMatchObject({ day: utcDay(2), opened: 1, clicked: 1 });
+    expect(result.totals.opened).toBe(7);
+    expect(result.totals.clicked).toBe(3);
+    // Engagement rate the page renders: opened / delivered, clicked / delivered.
+    expect(result.totals.opened / result.totals.delivered).toBeCloseTo(0.5);
+    expect(result.totals.clicked / result.totals.delivered).toBeCloseTo(3 / 14);
   });
 });
 

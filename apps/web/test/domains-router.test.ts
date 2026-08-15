@@ -378,3 +378,88 @@ describe("domains.delete", () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+describe("domains.updateTracking", () => {
+  it("persists toggles and the subdomain, and defaults are open=off click=on", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+
+    const before = await caller.domains.get({ id });
+    expect(before.openTracking).toBe(false);
+    expect(before.clickTracking).toBe(true);
+    expect(before.trackingSubdomain).toBeNull();
+
+    const result = await caller.domains.updateTracking({
+      id,
+      openTracking: true,
+      clickTracking: false,
+      trackingSubdomain: "email",
+    });
+    expect(result).toEqual({
+      openTracking: true,
+      clickTracking: false,
+      trackingSubdomain: "email",
+    });
+
+    const after = await caller.domains.get({ id });
+    expect(after.openTracking).toBe(true);
+    expect(after.clickTracking).toBe(false);
+    expect(after.trackingSubdomain).toBe("email");
+  });
+
+  it("clears the subdomain when passed an empty string", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+    await caller.domains.updateTracking({ id, trackingSubdomain: "email" });
+
+    await caller.domains.updateTracking({ id, trackingSubdomain: "" });
+    expect((await caller.domains.get({ id })).trackingSubdomain).toBeNull();
+  });
+
+  it("rejects a subdomain that is not a lowercase DNS label", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+
+    await expect(
+      caller.domains.updateTracking({ id, trackingSubdomain: "Not A Label" }),
+    ).rejects.toThrow();
+    await expect(caller.domains.updateTracking({ id, trackingSubdomain: "a.b" })).rejects.toThrow();
+  });
+
+  it("is scoped to the caller's team", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const { id } = await callerFor(teamA, fakeSes().deps).domains.create({
+      name: "example.com",
+      region: "us-east-1",
+    });
+
+    await expect(
+      callerFor(teamB, fakeSes().deps).domains.updateTracking({ id, openTracking: true }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await callerFor(teamA, fakeSes().deps).domains.get({ id })).openTracking).toBe(false);
+  });
+
+  it("surfaces the branded tracking CNAME once a subdomain is set", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const { id } = await caller.domains.create({ name: "example.com", region: "eu-west-1" });
+
+    expect((await caller.domains.records({ id })).records.some((r) => r.group === "tracking")).toBe(
+      false,
+    );
+
+    await caller.domains.updateTracking({ id, trackingSubdomain: "email" });
+    const { records } = await caller.domains.records({ id });
+    expect(records).toContainEqual({
+      group: "tracking",
+      type: "CNAME",
+      name: "email.example.com",
+      value: "r.eu-west-1.awstrack.me",
+      status: null,
+    });
+  });
+});

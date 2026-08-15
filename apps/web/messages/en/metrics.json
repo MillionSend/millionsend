@@ -20,6 +20,17 @@
     "risk": "RISK 0.01%",
     "complained": "Complained"
   },
+  "engagement": {
+    "denominator": "of delivered"
+  },
+  "open": {
+    "title": "Open rate",
+    "opened": "Opened"
+  },
+  "click": {
+    "title": "Click rate",
+    "clicked": "Clicked"
+  },
   "empty": "No metrics yet.",
   "emptyHint": "Metrics appear after your first send — <code>POST /emails</code>."
 }
