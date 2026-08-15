@@ -17,11 +17,11 @@ type Range = (typeof RANGES)[number];
 /**
  * Rate-card geometry from the canvas: 120px bar area, dashed RISK line at a
  * fixed top offset — bars scale so the threshold rate lands exactly on the
- * line (bounce line at top 6px → 114px = 4%; complaint at 14px → 106px = 0.08%).
+ * line (bounce line at top 6px → 114px = 4%; complaint at 14px → 106px = 0.01%).
  */
 const BAR_AREA = 120;
 const BOUNCE = { threshold: 0.04, lineTop: 6 };
-const COMPLAINT = { threshold: 0.0008, lineTop: 14 };
+const COMPLAINT = { threshold: 0.0001, lineTop: 14 };
 
 type Bar = { day: string; height: number; title: string };
 type DayCounts = { day: string; sent: number; bounced: number; complained: number };

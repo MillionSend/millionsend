@@ -17,7 +17,7 @@
   },
   "complaint": {
     "title": "Taxa de reclamação",
-    "risk": "RISCO 0,08%",
+    "risk": "RISCO 0,01%",
     "complained": "Reclamações"
   },
   "empty": "Nenhuma métrica ainda.",
