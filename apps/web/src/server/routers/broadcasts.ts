@@ -1,4 +1,5 @@
 import { env } from "@millionsend/config";
+import { parseSingleSender } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -9,9 +10,17 @@ import { router, teamProcedure } from "../trpc";
 import { assertAudience } from "./audience";
 
 const emailSchema = z.string().trim().pipe(z.email()).pipe(z.string().max(320));
-// Accepts a bare address or a display-name form ("Ada <ada@example.com>");
-// the send pipeline validates the address itself.
-const fromSchema = z.string().trim().min(1).max(320);
+// SECURITY: a stored broadcast `from` is emitted verbatim by the worker
+// fan-out, so it is the same trust boundary as the API's — it must parse as
+// exactly one unambiguous mailbox (parseSingleSender, shared with the API and
+// SMTP accept paths).
+const fromSchema = z
+  .string()
+  .trim()
+  .max(320)
+  .refine((v) => parseSingleSender(v) !== null, {
+    message: "From must be a single address like ada@example.com or Ada <ada@example.com>",
+  });
 const subjectSchema = z.string().trim().min(1).max(998);
 // "" clears the field — stored as null, never as an empty string.
 const nameSchema = z.string().trim().max(200);

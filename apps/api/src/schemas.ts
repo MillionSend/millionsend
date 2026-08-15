@@ -1,5 +1,5 @@
 import { z } from "@hono/zod-openapi";
-import { DAY_MS, extractAddrSpec } from "@millionsend/core";
+import { DAY_MS, extractAddrSpec, parseSingleSender } from "@millionsend/core";
 
 /**
  * Wire-compatible with Resend's documented /emails surface
@@ -11,13 +11,23 @@ const emailAddress = z.string().refine((v) => z.email().safeParse(extractAddrSpe
   message: "must be a valid email address (display names allowed)",
 });
 
+/**
+ * SECURITY: `from` is a trust boundary — multi-mailbox or ambiguous input
+ * (e.g. 'Acme <evil@a.test> <ok@b.test>') could pass domain verification for
+ * one address yet be emitted as the other, so it must parse as exactly one
+ * mailbox (parseSingleSender, the same parser verifySenderDomain uses).
+ */
+const fromAddress = z.string().refine((v) => parseSingleSender(v) !== null, {
+  message: "from must be a single address",
+});
+
 const recipientList = z
   .union([emailAddress, z.array(emailAddress).min(1).max(50)])
   .transform((v) => (Array.isArray(v) ? v : [v]));
 
 export const sendEmailRequestSchema = z
   .object({
-    from: emailAddress.openapi({ example: "Acme <onboarding@acme.dev>" }),
+    from: fromAddress.openapi({ example: "Acme <onboarding@acme.dev>" }),
     to: recipientList.openapi({ example: ["delivered@resend.dev"] }),
     subject: z.string().min(1),
     html: z.string().optional(),
@@ -37,6 +47,8 @@ export const sendEmailRequestSchema = z
     // Accepted into the schema so we can reject loudly instead of silently
     // stripping — "never an incompatible subset" (docs/resend-compatibility.md).
     attachments: z.array(z.unknown()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    topic_id: z.string().nullable().optional(),
   })
   .refine((v) => v.html !== undefined || v.text !== undefined, {
     message: "Either html or text must be provided",
@@ -61,9 +73,29 @@ export const getEmailResponseSchema = z
     text: z.string().nullable(),
     created_at: z.string(),
     scheduled_at: z.string().nullable(),
+    // RFC 5322 Message-ID ('<id@host>'); a placeholder until the send records
+    // the provider message id.
+    message_id: z.string(),
     last_event: z.string(),
   })
   .openapi("GetEmailResponse");
+
+/**
+ * Resend SDK pagination (buildPaginationQuery): ?limit=&after= / ?before=,
+ * limit 1-100 (default 20), cursors are item ids, after and before are
+ * mutually exclusive.
+ */
+export const listQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    after: z.uuid().optional(),
+    before: z.uuid().optional(),
+  })
+  .refine((q) => !(q.after && q.before), {
+    message: "after and before cannot be used together",
+  });
+
+export type ListQuery = z.infer<typeof listQuerySchema>;
 
 export const errorSchema = z
   .object({
@@ -113,6 +145,8 @@ export const createContactRequestSchema = z
     first_name: z.string().optional(),
     last_name: z.string().optional(),
     unsubscribed: z.boolean().optional(),
+    // Accepted so the handler can reject loudly instead of silently stripping.
+    properties: z.record(z.string(), z.unknown()).optional(),
   })
   .openapi("CreateContactRequest");
 
@@ -121,6 +155,8 @@ export const updateContactRequestSchema = z
     first_name: z.string().nullable().optional(),
     last_name: z.string().nullable().optional(),
     unsubscribed: z.boolean().optional(),
+    // Accepted so the handler can reject loudly instead of silently stripping.
+    properties: z.record(z.string(), z.unknown()).optional(),
   })
   .openapi("UpdateContactRequest");
 
@@ -138,7 +174,9 @@ const contactSchema = z.object({
 });
 
 export const getContactResponseSchema = contactSchema
-  .extend({ object: z.literal("contact") })
+  // `properties` is required by the SDK's GetContactResponseSuccess; contact
+  // properties are not supported yet, so it is always {}.
+  .extend({ object: z.literal("contact"), properties: z.record(z.string(), z.unknown()) })
   .openapi("GetContactResponse");
 
 export const listContactsResponseSchema = z
@@ -165,7 +203,7 @@ export const createBroadcastRequestSchema = z
     name: z.string().optional(),
     audience_id: z.uuid().optional(),
     segment_id: z.uuid().optional(),
-    from: emailAddress,
+    from: fromAddress,
     subject: z.string().min(1),
     html: z.string().optional(),
     text: z.string().optional(),
@@ -188,7 +226,7 @@ export const updateBroadcastRequestSchema = z
     name: z.string().optional(),
     audience_id: z.uuid().optional(),
     segment_id: z.uuid().optional(),
-    from: emailAddress.optional(),
+    from: fromAddress.optional(),
     subject: z.string().min(1).optional(),
     html: z.string().optional(),
     text: z.string().optional(),

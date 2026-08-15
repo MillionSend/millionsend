@@ -146,6 +146,36 @@ describe("send edge cases", () => {
   });
 });
 
+describe("get email wire shape", () => {
+  const get = (id: string) =>
+    app.request(`/emails/${id}`, { headers: { authorization: `Bearer ${token}` } });
+
+  it("maps internal queued_quota to queued and emits a placeholder message_id", async () => {
+    const res = await post({ ...validBody, to: ["wire@example.com"] });
+    const { id } = (await res.json()) as { id: string };
+    await db
+      .update(schema.emails)
+      .set({ latestStatus: "queued_quota" })
+      .where(eq(schema.emails.id, id));
+
+    const body = (await (await get(id)).json()) as { last_event: string; message_id: string };
+    // 'queued_quota' is not a member of the SDK's last_event union.
+    expect(body.last_event).toBe("queued");
+    expect(body.message_id).toBe(`<${id}@unsent.millionsend>`);
+  });
+
+  it("emits an RFC 5322 message_id from the stored SES message id", async () => {
+    const res = await post({ ...validBody, to: ["wire2@example.com"] });
+    const { id } = (await res.json()) as { id: string };
+    await db
+      .update(schema.emails)
+      .set({ sesMessageId: "0100019abc" })
+      .where(eq(schema.emails.id, id));
+    const body = (await (await get(id)).json()) as { message_id: string };
+    expect(body.message_id).toBe("<0100019abc@email.amazonses.com>");
+  });
+});
+
 describe("openapi", () => {
   it("serves the generated spec without auth", async () => {
     const res = await app.request("/openapi.json");

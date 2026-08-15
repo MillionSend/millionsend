@@ -78,6 +78,22 @@ export class Queue {
   async #ensureQueue(name: string, policy?: typeof JOB_QUEUE_POLICY): Promise<void> {
     if (this.#created.has(name)) return;
     await this.#boss.createQueue(name, policy ? { policy } : undefined).catch(() => {});
+    if (policy) {
+      // createQueue is INSERT ... ON CONFLICT DO NOTHING: a pre-existing
+      // queue keeps its stored policy, and pg-boss 12 cannot converge it —
+      // updateQueue() throws "queue policy cannot be changed after creation"
+      // (its UpdateQueueOptions omits `policy`). A queue left on "standard"
+      // silently ignores singletonKey, turning dedupe into duplicate sends,
+      // so a mismatch must fail loudly instead of degrading silently.
+      const existing = await this.#boss.getQueue(name);
+      if (existing && existing.policy !== policy) {
+        throw new Error(
+          `queue "${name}" has policy "${existing.policy}" but "${policy}" is required for ` +
+            `singletonKey dedupe; pg-boss cannot change a queue's policy after creation — ` +
+            `delete and recreate the queue`,
+        );
+      }
+    }
     this.#created.add(name);
   }
 

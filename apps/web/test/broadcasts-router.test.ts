@@ -86,6 +86,32 @@ describe("broadcasts.create / get / list", () => {
     });
   });
 
+  it("rejects a multi-mailbox or malformed from on create and update", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    const spoofed = [
+      "Acme <evil@other.test> <ok@mine.test>",
+      "a@mine.test, b@other.test",
+      "not-an-address",
+      "Ada <ada@example.com",
+    ];
+    for (const from of spoofed) {
+      await expect(
+        caller.broadcasts.create({ audienceId, ...DRAFT_INPUT, from }),
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+    }
+    const { id } = await caller.broadcasts.create({ audienceId, ...DRAFT_INPUT });
+    for (const from of spoofed) {
+      await expect(caller.broadcasts.update({ id, from })).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+    }
+    expect((await broadcastRow(id))?.from).toBe(DRAFT_INPUT.from);
+  });
+
   it("pages by keyset cursor without duplicates", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);

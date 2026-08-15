@@ -195,6 +195,60 @@ it("a redelivered SNS MessageId is fully idempotent — counters included", asyn
   expect(counter?.delivered).toBe((deliveredBefore ?? 0) + 1);
 });
 
+it("a mid-processing failure never burns the idempotency gate: retry records the suppression", async () => {
+  const emailId = await insertSentEmail("mid-retry", ["retry@example.com"]);
+  type AnyFn = (...args: unknown[]) => unknown;
+  let failNext = true;
+  // Reject the first raw-SQL execute (the status CAS / counter path) once,
+  // whether reached directly or inside a transaction — simulating a crash
+  // after the event row was inserted.
+  const failOnce = (target: object): object =>
+    new Proxy(target, {
+      get(t, prop) {
+        const value = (t as Record<PropertyKey, unknown>)[prop];
+        if (prop === "execute" && failNext) {
+          return () => {
+            failNext = false;
+            return Promise.reject(new Error("injected failure"));
+          };
+        }
+        if (prop === "transaction" && typeof value === "function") {
+          return (fn: AnyFn, ...rest: unknown[]) =>
+            (value as AnyFn).call(t, (tx: object) => fn(failOnce(tx)), ...rest);
+        }
+        return typeof value === "function" ? (value as AnyFn).bind(t) : value;
+      },
+    });
+  const flakyDb = failOnce(db) as Db;
+  const event = makeEvent({
+    eventType: "Bounce",
+    sesMessageId: "mid-retry",
+    bounce: {
+      bounceType: "Permanent",
+      bounceSubType: "General",
+      recipients: ["retry@example.com"],
+    },
+  });
+
+  await expect(processSesEvent(flakyDb, event, { snsMessageId: "sns-retry-1" })).rejects.toThrow(
+    "injected failure",
+  );
+  // Retry (SNS at-least-once / queue redelivery) must fully apply the event.
+  await processSesEvent(flakyDb, event, { snsMessageId: "sns-retry-1" });
+
+  expect(await statusOf(emailId)).toBe("bounced");
+  const supp = await db
+    .select()
+    .from(schema.suppressions)
+    .where(eq(schema.suppressions.emailHash, hashRecipient("retry@example.com")));
+  expect(supp).toHaveLength(1);
+  const events = await db
+    .select()
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, emailId));
+  expect(events).toHaveLength(1);
+});
+
 it("unknown event types are a no-op", async () => {
   const emailId = await insertSentEmail("mid-unknown");
   await processSesEvent(db, makeEvent({ eventType: "Subscription", sesMessageId: "mid-unknown" }));

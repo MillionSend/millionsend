@@ -55,6 +55,7 @@ beforeAll(async () => {
     enqueueBroadcastSend: async (broadcastId, opts) => {
       enqueued.push({ broadcastId, startAfter: opts?.startAfter });
     },
+    appBaseUrl: "https://app.example.test",
   });
   await new Promise<void>((resolve) => {
     server = serve({ fetch: app.fetch, port: 0 }, () => resolve());
@@ -144,7 +145,9 @@ describe("official resend SDK: broadcasts", () => {
     expect(enqueued).toEqual([{ broadcastId, startAfter: new Date(at) }]);
 
     const fetched = await resend.broadcasts.get(broadcastId);
-    expect(fetched.data).toMatchObject({ status: "scheduled", scheduled_at: at });
+    // Internally 'scheduled', mapped to 'queued' on the wire — the SDK's
+    // Broadcast.status union is 'draft' | 'sent' | 'queued'.
+    expect(fetched.data).toMatchObject({ status: "queued", scheduled_at: at });
   });
 
   it("update after send is a 4xx, like Resend", async () => {

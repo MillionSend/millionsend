@@ -16,7 +16,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/migrate.ts"
+    "db:migrate": "tsx src/migrate.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@millionsend/config": "workspace:*",
@@ -25,8 +26,10 @@
     "tsx": "^4.23.12"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
     "@types/node": "^22.20.1",
     "drizzle-kit": "^0.31.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }

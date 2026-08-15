@@ -5,38 +5,47 @@ import { encryptEmailBody } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
 import { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 import { reserveDailyQuota } from "./quota.js";
-import { extractAddrSpec, findSuppressed } from "./suppressions.js";
+import { parseSingleSender } from "./sender-address.js";
+import { findSuppressed } from "./suppressions.js";
 
-/** Domain part of an RFC 5322 sender (display names allowed), lowercased. */
+/**
+ * Domain part of an RFC 5322 sender, lowercased. SECURITY: strict
+ * single-mailbox parsing — multi-mailbox or ambiguous input returns null, so
+ * a From that authorizes against one domain can never be emitted as another
+ * (see parseSingleSender).
+ */
 export function senderDomain(from: string): string | null {
-  const addr = extractAddrSpec(from);
-  const at = addr.lastIndexOf("@");
-  return at > 0 ? addr.slice(at + 1).toLowerCase() : null;
+  return parseSingleSender(from)?.domain ?? null;
 }
 
 export type SenderDomainVerdict =
-  | { ok: true; domainId: string; fromDomain: string }
-  | { ok: false; fromDomain: string | null };
+  | { ok: true; domainId: string; fromDomain: string; address: string }
+  | { ok: false; reason: "invalid_sender"; fromDomain: null }
+  | { ok: false; reason: "unverified_domain"; fromDomain: string };
 
 /**
  * Sender domain must be one of the team's verified domains — otherwise any
  * key could queue mail claiming any sender. Every accept surface (HTTP API,
  * SMTP relay) runs this same rule; transport-level identities (e.g. SMTP
- * MAIL FROM) are never trusted instead.
+ * MAIL FROM) are never trusted instead. The From must parse as exactly one
+ * unambiguous mailbox (parseSingleSender); the returned `address` is the
+ * canonical addr-spec that verification applies to.
  */
 export async function verifySenderDomain(
   db: Db,
   teamId: string,
   from: string,
 ): Promise<SenderDomainVerdict> {
-  const fromDomain = senderDomain(from);
-  if (!fromDomain) return { ok: false, fromDomain: null };
+  const sender = parseSingleSender(from);
+  if (!sender) return { ok: false, reason: "invalid_sender", fromDomain: null };
   const [domain] = await db
     .select({ id: schema.domains.id, status: schema.domains.status })
     .from(schema.domains)
-    .where(and(eq(schema.domains.teamId, teamId), eq(schema.domains.name, fromDomain)));
-  if (domain?.status !== "verified") return { ok: false, fromDomain };
-  return { ok: true, domainId: domain.id, fromDomain };
+    .where(and(eq(schema.domains.teamId, teamId), eq(schema.domains.name, sender.domain)));
+  if (domain?.status !== "verified") {
+    return { ok: false, reason: "unverified_domain", fromDomain: sender.domain };
+  }
+  return { ok: true, domainId: domain.id, fromDomain: sender.domain, address: sender.address };
 }
 
 export interface AcceptEmailDeps {

@@ -108,7 +108,28 @@ describe("audiences API", () => {
       email: "zoe@example.com",
     });
     expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ statusCode: 409, name: "conflict" });
+    // 'conflict' is not a RESEND_ERROR_CODE_KEY member; the 409 keeps the
+    // semantics, the name stays SDK-parseable.
+    expect(await res.json()).toMatchObject({ statusCode: 409, name: "validation_error" });
+  });
+
+  it("serves the SDK-required properties field on contact reads", async () => {
+    const res = await call(tokenA, "GET", `/audiences/${audienceId}/contacts/${contactId}`);
+    expect((await json(res)).properties).toEqual({});
+  });
+
+  it("rejects contact properties loudly instead of stripping them", async () => {
+    const create = await call(tokenA, "POST", `/audiences/${audienceId}/contacts`, {
+      email: "props@example.com",
+      properties: { plan: "pro" },
+    });
+    expect(create.status).toBe(422);
+    expect(await create.json()).toMatchObject({ name: "validation_error" });
+
+    const patch = await call(tokenA, "PATCH", `/audiences/${audienceId}/contacts/${contactId}`, {
+      properties: { plan: "pro" },
+    });
+    expect(patch.status).toBe(422);
   });
 
   it("patches unsubscribed and clears a name with null", async () => {
@@ -149,5 +170,34 @@ describe("audiences API", () => {
     expect(await del.json()).toMatchObject({ object: "audience", deleted: true });
     const rows = await db.select().from(schema.contacts);
     expect(rows).toEqual([]);
+  });
+
+  it("paginates the audience list with limit/after/before and has_more", async () => {
+    const ids: string[] = [];
+    for (const name of ["pg-1", "pg-2", "pg-3"]) {
+      ids.push((await json(await call(tokenA, "POST", "/audiences", { name }))).id);
+    }
+
+    type Page = { data: { id: string }[]; has_more: boolean };
+    const page1 = (await json(await call(tokenA, "GET", "/audiences?limit=2"))) as unknown as Page;
+    expect(page1.data).toHaveLength(2);
+    expect(page1.has_more).toBe(true);
+
+    const cursor = page1.data[1]?.id;
+    const page2 = (await json(
+      await call(tokenA, "GET", `/audiences?limit=2&after=${cursor}`),
+    )) as unknown as Page;
+    expect(page2.data).toHaveLength(1);
+    expect(page2.has_more).toBe(false);
+    expect(page1.data.map((a) => a.id)).not.toContain(page2.data[0]?.id);
+
+    const before = (await json(
+      await call(tokenA, "GET", `/audiences?limit=5&before=${page2.data[0]?.id}`),
+    )) as unknown as Page;
+    expect(before.data.map((a) => a.id)).toEqual(page1.data.map((a) => a.id));
+
+    // An unknown cursor fails loudly rather than silently returning page one.
+    const bad = await call(tokenA, "GET", "/audiences?after=00000000-0000-4000-8000-000000000000");
+    expect(bad.status).toBe(422);
   });
 });

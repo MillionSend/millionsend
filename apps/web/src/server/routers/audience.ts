@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, ilike, inArray, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
@@ -226,29 +226,18 @@ export const audienceRouter = router({
           });
         }
         if (valid.length === 0) return { created: 0, skipped };
-        const existing = await ctx.db
-          .select({ email: sql<string>`lower(${t.email})` })
-          .from(t)
-          .where(
-            and(
-              eq(t.audienceId, input.audienceId),
-              inArray(
-                sql`lower(${t.email})`,
-                valid.map((v) => v.email.toLowerCase()),
-              ),
-            ),
-          );
-        const taken = new Set(existing.map((e) => e.email));
-        const toInsert = valid.filter((v) => !taken.has(v.email.toLowerCase()));
-        skipped += valid.length - toInsert.length;
-        if (toInsert.length > 0) {
-          await ctx.db
-            .insert(t)
-            .values(
-              toInsert.map((v) => ({ ...v, teamId: ctx.teamId, audienceId: input.audienceId })),
-            );
-        }
-        return { created: toInsert.length, skipped };
+        // ON CONFLICT, not a pre-SELECT: a concurrent import racing the same
+        // address must count as skipped, never abort the batch on the unique
+        // violation. Targetless is exact here — the only conflict a generated
+        // uuid pkey leaves possible is the case-insensitive (audienceId,
+        // lower(email)) index. `returning` yields only the rows actually
+        // inserted, so created/skipped stay exact.
+        const inserted = await ctx.db
+          .insert(t)
+          .values(valid.map((v) => ({ ...v, teamId: ctx.teamId, audienceId: input.audienceId })))
+          .onConflictDoNothing()
+          .returning({ id: t.id });
+        return { created: inserted.length, skipped: skipped + valid.length - inserted.length };
       }),
 
     update: teamProcedure

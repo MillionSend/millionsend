@@ -79,6 +79,20 @@ describe("sender domain enforcement", () => {
     expect(await res.json()).toMatchObject({ name: "validation_error" });
   });
 
+  it("rejects a multi-mailbox From spoof outright", async () => {
+    // A lenient parser could verify the last mailbox yet emit the first.
+    for (const from of [
+      "Acme <evil@evil.test> <ok@verified.test>",
+      "Acme <evil@evil.test> <ok@acme.dev>",
+      "evil@evil.test <ok@acme.dev>",
+      "evil@evil.test, ok@acme.dev",
+    ]) {
+      const res = await post({ ...base, from, to: ["a@example.com"] });
+      expect(res.status, from).toBe(422);
+      expect(await res.json()).toMatchObject({ name: "validation_error" });
+    }
+  });
+
   it("attributes accepted emails to the verified domain", async () => {
     const res = await post({ ...base, to: ["ok@example.com"] });
     const { id } = (await res.json()) as { id: string };
@@ -128,6 +142,24 @@ describe("resend-compat error surfaces", () => {
     expect(res.status).toBe(422);
     expect((await res.json()) as object).toMatchObject({
       message: expect.stringMatching(/not yet supported/i),
+    });
+  });
+
+  it("rejects headers and topic_id loudly instead of stripping them", async () => {
+    const withHeaders = await post({
+      ...base,
+      to: ["a@example.com"],
+      headers: { "X-Entity-Ref-ID": "1" },
+    });
+    expect(withHeaders.status).toBe(422);
+    expect(await withHeaders.json()).toMatchObject({
+      message: expect.stringMatching(/headers are not yet supported/),
+    });
+
+    const withTopic = await post({ ...base, to: ["a@example.com"], topic_id: "t_1" });
+    expect(withTopic.status).toBe(422);
+    expect(await withTopic.json()).toMatchObject({
+      message: expect.stringMatching(/topic_id is not yet supported/),
     });
   });
 

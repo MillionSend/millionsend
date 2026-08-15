@@ -83,7 +83,8 @@ describe("official resend SDK: audiences + contacts", () => {
     const dup = await resend.contacts.create({ audienceId, email: "ANA@example.com" });
     expect(dup.data).toBeNull();
     expect(dup.error?.statusCode).toBe(409);
-    expect(dup.error?.name).toBe("conflict");
+    // Must be a RESEND_ERROR_CODE_KEY member ('conflict' is not one).
+    expect(dup.error?.name).toBe("validation_error");
   });
 
   it("lists contacts through the SDK's segment path", async () => {
