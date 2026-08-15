@@ -1,6 +1,8 @@
 import {
+  broadcastSendSpacingMs,
   buildUnsubscribeHeaders,
   encryptEmailBody,
+  fetchDeliverabilityHealth,
   findSuppressed,
   type Keyring,
   makeUnsubscribeToken,
@@ -28,7 +30,7 @@ export interface BroadcastDeps {
   appBaseUrl: string | undefined;
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
-  enqueueEmailSend: (emailId: string) => Promise<void>;
+  enqueueEmailSend: (emailId: string, startAfter?: Date) => Promise<void>;
   /** Re-enqueue a not-yet-due scheduled broadcast at its due time. */
   reschedule?: ((broadcastId: string, at: Date) => Promise<void>) | undefined;
   batchSize?: number | undefined;
@@ -165,6 +167,17 @@ export async function sendBroadcast(
   if (!team) throw new Error(`broadcast ${broadcast.id}: team ${broadcast.teamId} not found`);
   const dailyLimit = deps.isCloud ? PLAN_DAILY_LIMIT[team.plan] : null;
 
+  // Graduated throttle: a team over the deliverability risk line (warning or
+  // paused) drips its fan-out so reputation can recover, instead of bursting.
+  // A broadcast that reaches fan-out already "paused" (scheduled while healthy,
+  // degraded since) is throttled here, not hard-halted — the initiation guards
+  // (tRPC + API) are what block NEW paused sends; the fan-out's only job is to
+  // avoid the burst. Evaluated once so the whole campaign shares one drip base.
+  const health = await fetchDeliverabilityHealth(db, broadcast.teamId);
+  const spacingMs = broadcastSendSpacingMs(health.status);
+  const startMs = Date.now();
+  let emitted = 0;
+
   const replyTo = broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null;
   const batchSize = deps.batchSize ?? 100;
   let cursor = "";
@@ -267,8 +280,13 @@ export async function sendBroadcast(
       // null → this contact was fanned out by a previous run; its job is
       // already queued (or the sends.reconcile sweep recovers it).
       if (accepted && !accepted.parked) {
+        // Only rows this run actually enqueues advance the drip — re-run
+        // conflicts (accepted === null) don't, so a resumed fan-out keeps
+        // spacing tight instead of leaving gaps for already-queued contacts.
+        const startAfter = spacingMs > 0 ? new Date(startMs + emitted * spacingMs) : undefined;
+        emitted += 1;
         try {
-          await deps.enqueueEmailSend(accepted.id);
+          await deps.enqueueEmailSend(accepted.id, startAfter);
         } catch (err) {
           console.error("email.send enqueue failed; reconcile sweep will recover", err);
         }

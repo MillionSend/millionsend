@@ -3,9 +3,11 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  broadcastSendSpacingMs,
   evaluateDeliverability,
   fetchDeliverabilityHealth,
   MIN_GUARDRAIL_VOLUME,
+  THROTTLED_BROADCAST_RATE_PER_SECOND,
 } from "../src/deliverability.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
@@ -93,6 +95,19 @@ describe("evaluateDeliverability", () => {
     expect(r.complaintRate).toBe(0);
     expect(r.status).toBe("ok");
     expect(r.reasons).toEqual([]);
+  });
+});
+
+describe("broadcastSendSpacingMs", () => {
+  const spacing = Math.ceil(1000 / THROTTLED_BROADCAST_RATE_PER_SECOND);
+
+  it("fans out at full rate (no spacing) when ok", () => {
+    expect(broadcastSendSpacingMs("ok")).toBe(0);
+  });
+
+  it("drips at the throttled rate for warning and paused", () => {
+    expect(broadcastSendSpacingMs("warning")).toBe(spacing);
+    expect(broadcastSendSpacingMs("paused")).toBe(spacing);
   });
 });
 

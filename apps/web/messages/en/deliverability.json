@@ -1,8 +1,8 @@
 {
   "banner": {
     "warning": {
-      "bounce": "Your bounce rate ({rate}) is approaching the limit.",
-      "complaint": "Your complaint rate ({rate}) is approaching the limit."
+      "bounce": "Your bounce rate ({rate}) is approaching the limit. New broadcasts are being sent at a reduced rate until it recovers.",
+      "complaint": "Your complaint rate ({rate}) is approaching the limit. New broadcasts are being sent at a reduced rate until it recovers."
     },
     "paused": {
       "bounce": "Broadcasts are paused: your bounce rate ({rate}) is above the {limit} limit.",

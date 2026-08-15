@@ -31,6 +31,14 @@ export const MIN_GUARDRAIL_VOLUME = 1000;
 /** Trailing window, in UTC calendar days, that rates are computed over. */
 export const GUARDRAIL_WINDOW_DAYS = 7;
 
+/**
+ * Reduced per-second fan-out rate for a team in the "tolerance" band (warning
+ * or paused): sends continue but are dripped so reputation can recover. Well
+ * under SES's 14/s default so a large campaign still drains, just not in a
+ * burst.
+ */
+export const THROTTLED_BROADCAST_RATE_PER_SECOND = 5;
+
 export type DeliverabilityStatus = "ok" | "warning" | "paused";
 
 export interface DeliverabilityReason {
@@ -49,6 +57,16 @@ export interface DeliverabilityEvaluation {
 export interface DeliverabilityHealth extends DeliverabilityEvaluation {
   sent: number;
   windowDays: number;
+}
+
+/**
+ * Milliseconds to space consecutive broadcast enqueues by, given a team's
+ * standing. "ok" fans out at full rate (0 spacing); "warning" and "paused"
+ * both drip at THROTTLED_BROADCAST_RATE_PER_SECOND — the fan-out throttles
+ * rather than halts (initiation guards block new paused sends upstream).
+ */
+export function broadcastSendSpacingMs(status: DeliverabilityStatus): number {
+  return status === "ok" ? 0 : Math.ceil(1000 / THROTTLED_BROADCAST_RATE_PER_SECOND);
 }
 
 function tierFor(rate: number, warn: number, pause: number): "warning" | "paused" | null {

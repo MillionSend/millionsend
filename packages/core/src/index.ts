@@ -37,6 +37,7 @@ export {
 } from "./crypto/envelope.js";
 export { EnvKeyring, type Keyring } from "./crypto/keyring.js";
 export {
+  broadcastSendSpacingMs,
   type DeliverabilityEvaluation,
   type DeliverabilityHealth,
   type DeliverabilityReason,
@@ -47,6 +48,7 @@ export {
   MIN_GUARDRAIL_VOLUME,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
+  THROTTLED_BROADCAST_RATE_PER_SECOND,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
 } from "./deliverability.js";
