@@ -17,8 +17,14 @@ import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
 import { isUniqueViolation } from "@/lib/db-errors";
+import { combineRecordStatus, sesGateFromRecordStatus } from "@/lib/dns-record-status";
 import { resolveBaseUrl } from "../auth";
-import { checkDnsRecords, type DnsResolver, nodeDnsResolver } from "../dns-check";
+import {
+  checkDnsRecords,
+  type DnsResolver,
+  type LiveDnsStatus,
+  nodeDnsResolver,
+} from "../dns-check";
 import { router, teamProcedure } from "../trpc";
 
 // Lowercase registrable hostname with at least two labels; SES identities are
@@ -134,14 +140,28 @@ function recordCheck(sesStatus: string): "verified" | "pending" | "failed" {
   return "pending";
 }
 
-function statusFromVerification(v: {
-  dkimStatus: DkimVerificationStatus;
-  verifiedForSending: boolean;
-}): DomainStatus {
-  if (v.dkimStatus === "SUCCESS" && v.verifiedForSending) return "verified";
-  if (v.dkimStatus === "FAILED") return "failed";
-  if (v.dkimStatus === "TEMPORARY_FAILURE") return "temporary_failure";
-  return "pending";
+/**
+ * SECURITY: the send gate keys off the stored domains.status, so this is the
+ * one place strictness is decided. A domain is `verified` ONLY when every
+ * REQUIRED record (those SES checks — DKIM, MX, SPF; non-null SES status)
+ * passes BOTH gates: our live DNS lookup found it AND SES verified it. Optional
+ * records (DMARC, tracking CNAME; null SES status) never gate. A live-MISSING
+ * SPF thus keeps the domain `pending` even when SES's mail-from reads success.
+ * DKIM hard/temporary SES failures surface before the all-records check.
+ */
+function strictDomainStatus(
+  dkimStatus: DkimVerificationStatus,
+  records: { status: TrackedDnsRecord["status"]; live: LiveDnsStatus | undefined }[],
+): DomainStatus {
+  if (dkimStatus === "FAILED") return "failed";
+  if (dkimStatus === "TEMPORARY_FAILURE") return "temporary_failure";
+  const required = records.filter((r) => r.status !== null);
+  const allVerified = required.every(
+    (r) =>
+      combineRecordStatus({ live: r.live, sesGate: sesGateFromRecordStatus(r.status) }) ===
+      "verified",
+  );
+  return allVerified ? "verified" : "pending";
 }
 
 /**
@@ -329,7 +349,10 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         value: record.value,
         status: live[i] ?? "missing",
       }));
-      const status = statusFromVerification(verification);
+      const status = strictDomainStatus(
+        verification.dkimStatus,
+        records.map((record, i) => ({ status: record.status, live: live[i] })),
+      );
       const now = new Date();
       await ctx.db
         .update(schema.domains)
