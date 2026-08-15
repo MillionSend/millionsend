@@ -6,13 +6,12 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
 import {
-  createTeam,
-  createTestDb,
   SNS_TEST_CERT_URL,
   SNS_TEST_TOPIC_ARN,
   signSnsMessage,
   snsTestCertPem,
-} from "@millionsend/test-utils";
+} from "@millionsend/ses/test-support";
+import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { Resend } from "resend";
 import { afterAll, beforeAll, expect, it } from "vitest";

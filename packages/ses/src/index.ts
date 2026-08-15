@@ -5,6 +5,12 @@ export {
   type SesAccountOverview,
 } from "./account.js";
 export {
+  checkDnsRecords,
+  type DnsCheckRecord,
+  type DnsResolver,
+  nodeDnsResolver,
+} from "./dns-check.js";
+export {
   applyDomainConfiguration,
   type DomainConfiguration,
   domainConfigurationSetName,
@@ -29,6 +35,11 @@ export {
   type SesIdentityClient,
   type SesRegion,
 } from "./domain-identity.js";
+export {
+  computeDomainVerification,
+  type DomainVerificationResult,
+  type TrackedDnsRecord,
+} from "./domain-verification.js";
 export {
   type ParsedSesEvent,
   parseSesEvent,

@@ -2,10 +2,10 @@ import { createSign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonicalString, type SnsMessage } from "@millionsend/ses";
+import { canonicalString, type SnsMessage } from "../src/sns-verify.js";
 
 // The committed TEST-ONLY keypair lives with the ses package's own suite.
-const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "../../ses/test/fixtures");
+const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures");
 
 export const SNS_TEST_TOPIC_ARN = "arn:aws:sns:us-east-1:123456789012:millionsend-events";
 export const SNS_TEST_CERT_URL =

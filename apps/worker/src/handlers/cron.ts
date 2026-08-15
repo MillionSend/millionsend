@@ -8,7 +8,12 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, eq, isNull, lt, lte, or } from "drizzle-orm";
+import {
+  computeDomainVerification,
+  type DnsResolver,
+  type SesIdentityClient,
+} from "@millionsend/ses";
+import { and, asc, eq, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
 /**
  * Safety net for webhook.deliver jobs lost between the delivery-row insert
@@ -250,4 +255,93 @@ export async function purgeExpiredApiRequests(
     .where(lt(schema.apiRequests.createdAt, cutoff))
     .returning({ id: schema.apiRequests.id });
   return purged.length;
+}
+
+/** Domains whose live DNS is re-checked at most this often (bounds SES/DNS load). */
+const REVERIFY_STALE_MS = 10 * 60 * 1000;
+/** Upper bound on domains reverified per run; oldest lastCheckedAt first. */
+const REVERIFY_BATCH = 100;
+
+export interface ReverifyDomainsDeps {
+  clientForRegion: (region: string) => SesIdentityClient;
+  resolver: DnsResolver;
+  now?: Date;
+  batchSize?: number;
+}
+
+export interface ReverifyResult {
+  checked: number;
+  failed: number;
+  capped: boolean;
+}
+
+/**
+ * Background re-verification of sender domains. The send gate keys off the
+ * stored domains.status (verifySenderDomain), so a required DNS record removed
+ * AFTER a domain verified would keep passing the gate until someone reopened
+ * the domain page. Running computeDomainVerification on a schedule closes that
+ * window: a verified domain that lost a required record now computes `pending`
+ * and is demoted, blocking further sends; a pending domain gone fully live is
+ * promoted. Terminally-failed domains are skipped (SES DKIM hard-failed —
+ * re-adding is the only path forward); temporary_failure and pending are not.
+ *
+ * verifiedAt is stamped on first promotion only; a demotion keeps the historical
+ * value. One domain's DNS/SES error is caught and logged so it can't abort the
+ * batch. The batch is capped and ordered oldest-first, so a cap just defers the
+ * freshest-checked domains to the next run rather than dropping any.
+ */
+export async function reverifyDomains(db: Db, deps: ReverifyDomainsDeps): Promise<ReverifyResult> {
+  const now = deps.now ?? new Date();
+  const batchSize = deps.batchSize ?? REVERIFY_BATCH;
+  const staleBefore = new Date(now.getTime() - REVERIFY_STALE_MS);
+  const due = await db
+    .select({
+      id: schema.domains.id,
+      name: schema.domains.name,
+      region: schema.domains.region,
+      mailFromSubdomain: schema.domains.mailFromSubdomain,
+      dkimSelector: schema.domains.dkimSelector,
+      dkimPublicKey: schema.domains.dkimPublicKey,
+      trackingSubdomain: schema.domains.trackingSubdomain,
+      verifiedAt: schema.domains.verifiedAt,
+    })
+    .from(schema.domains)
+    .where(
+      and(
+        ne(schema.domains.status, "failed"),
+        or(isNull(schema.domains.lastCheckedAt), lt(schema.domains.lastCheckedAt, staleBefore)),
+      ),
+    )
+    // Never-checked domains (NULL) are the most stale, so they sort first.
+    .orderBy(sql`${schema.domains.lastCheckedAt} asc nulls first`)
+    .limit(batchSize + 1);
+
+  const capped = due.length > batchSize;
+  const batch = capped ? due.slice(0, batchSize) : due;
+  if (capped) {
+    console.warn(`domains.reverify: batch capped at ${batchSize}; remainder deferred to next run`);
+  }
+
+  let failed = 0;
+  for (const domain of batch) {
+    try {
+      const { status } = await computeDomainVerification(
+        deps.clientForRegion(domain.region),
+        deps.resolver,
+        domain,
+      );
+      await db
+        .update(schema.domains)
+        .set({
+          status,
+          lastCheckedAt: now,
+          ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
+        })
+        .where(eq(schema.domains.id, domain.id));
+    } catch (err) {
+      failed += 1;
+      console.warn(`domains.reverify: ${domain.name} failed`, err);
+    }
+  }
+  return { checked: batch.length, failed, capped };
 }

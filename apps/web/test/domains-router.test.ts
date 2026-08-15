@@ -1,11 +1,10 @@
 import { createPublicKey } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import type { DkimVerificationStatus, SesIdentityClient } from "@millionsend/ses";
+import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DnsResolver } from "@/server/dns-check";
 import { createDomainsRouter, type DomainsSesDeps } from "@/server/routers/domains";
 import { type Context, createCallerFactory, router } from "@/server/trpc";
 

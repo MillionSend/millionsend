@@ -15,6 +15,10 @@
     "./deliverability": {
       "types": "./src/deliverability.ts",
       "default": "./src/deliverability.ts"
+    },
+    "./domain-status": {
+      "types": "./src/domain-status.ts",
+      "default": "./src/domain-status.ts"
     }
   },
   "scripts": {
