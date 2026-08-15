@@ -430,6 +430,109 @@ describe("audience.contacts.update", () => {
   });
 });
 
+describe("audience.properties.list", () => {
+  it("derives distinct keys with coverage counts and a sample value", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    await caller.audience.contacts.add({
+      audienceId,
+      email: "ada@example.com",
+      properties: { plan: "pro", city: "London" },
+    });
+    await caller.audience.contacts.add({
+      audienceId,
+      email: "grace@example.com",
+      properties: { plan: "free" },
+    });
+    // A contact with no properties at all: counts toward the coverage
+    // denominator but contributes no key.
+    await caller.audience.contacts.add({ audienceId, email: "alan@example.com" });
+
+    const props = await caller.audience.properties.list();
+    // Sorted by coverage desc: plan (2) before city (1).
+    expect(props.map((p) => p.key)).toEqual(["plan", "city"]);
+    expect(props.every((p) => p.totalContacts === 3)).toBe(true);
+    const plan = props.find((p) => p.key === "plan");
+    const city = props.find((p) => p.key === "city");
+    expect(plan?.contactCount).toBe(2);
+    expect(city?.contactCount).toBe(1);
+    expect(["pro", "free"]).toContain(plan?.sampleValue);
+    expect(city?.sampleValue).toBe("London");
+  });
+
+  it("ignores empty-string values and counts only non-empty coverage", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    await caller.audience.contacts.add({
+      audienceId,
+      email: "ada@example.com",
+      properties: { plan: "pro", note: "" },
+    });
+    await caller.audience.contacts.add({
+      audienceId,
+      email: "grace@example.com",
+      properties: { plan: "" },
+    });
+
+    const props = await caller.audience.properties.list();
+    // `note` (only ever "") and the empty `plan` value never count.
+    expect(props.map((p) => p.key)).toEqual(["plan"]);
+    expect(props[0]?.contactCount).toBe(1);
+    expect(props[0]?.totalContacts).toBe(2);
+    expect(props[0]?.sampleValue).toBe("pro");
+  });
+
+  it("returns no rows when every contact's map is empty", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    await caller.audience.contacts.add({ audienceId, email: "ada@example.com" });
+    expect(await caller.audience.properties.list()).toEqual([]);
+  });
+
+  it("never surfaces another team's properties", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const a = callerFor(teamA);
+    const b = callerFor(teamB);
+    const { id: aAudience } = await a.audience.audiences.create({ name: "A's" });
+    await a.audience.contacts.add({
+      audienceId: aAudience,
+      email: "ada@example.com",
+      properties: { secret: "A-only" },
+    });
+    const { id: bAudience } = await b.audience.audiences.create({ name: "B's" });
+    await b.audience.contacts.add({
+      audienceId: bAudience,
+      email: "bob@example.com",
+      properties: { plan: "pro" },
+    });
+
+    expect((await b.audience.properties.list()).map((p) => p.key)).toEqual(["plan"]);
+    expect((await a.audience.properties.list()).map((p) => p.key)).toEqual(["secret"]);
+  });
+
+  it("returns a hostile property key as data, never executing it", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    const hostile = `x")-- drop`;
+    await caller.audience.contacts.add({
+      audienceId,
+      email: "ada@example.com",
+      properties: { [hostile]: "harmless" },
+    });
+
+    const props = await caller.audience.properties.list();
+    expect(props.map((p) => p.key)).toEqual([hostile]);
+    expect(props[0]?.sampleValue).toBe("harmless");
+    // The contact survives — nothing was dropped or truncated.
+    expect((await caller.audience.audiences.get({ id: audienceId })).contacts).toBe(1);
+  });
+});
+
 describe("unsubscribe route", () => {
   const secretKey = deriveUnsubscribeKey(Buffer.from(TEST_KEK, "base64"));
 

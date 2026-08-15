@@ -22,11 +22,15 @@
     "allContacts": "Todos os contatos",
     "anyTopic": "Qualquer tópico"
   },
-  "placeholder": {
-    "properties": "0 propriedades.",
-    "segments": "0 segmentos.",
-    "topics": "0 tópicos.",
-    "notAvailable": "Ainda não disponível."
+  "properties": {
+    "title": "Audiência",
+    "name": "Nome",
+    "coverage": "Cobertura",
+    "example": "Valor de exemplo",
+    "empty": "Nenhuma propriedade ainda.",
+    "emptyHint": "Propriedades vêm de campos personalizados de contato — defina-as em um contato ou pela API.",
+    "loadError": "Não foi possível carregar as propriedades.",
+    "retry": "Tentar novamente"
   },
   "list": {
     "title": "Audiência",
