@@ -1,5 +1,6 @@
 import { verifyClickToken } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
+import { enqueueWebhookDelivery } from "../../../../server/queue";
 import { recordEngagement, trackingKey } from "../../record";
 
 /**
@@ -19,6 +20,6 @@ export async function GET(_request: Request, ctx: { params: Promise<{ token: str
   // guard keeps a malformed destination from reaching Response.redirect.
   if (!parsed || !/^https?:\/\//i.test(parsed.url)) return new Response(null, { status: 404 });
 
-  await recordEngagement(getDb(), parsed.emailId, "clicked");
+  await recordEngagement(getDb(), parsed.emailId, "clicked", enqueueWebhookDelivery);
   return Response.redirect(parsed.url, 302);
 }

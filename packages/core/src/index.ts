@@ -85,6 +85,7 @@ export {
 } from "./tracking.js";
 export {
   buildUnsubscribeHeaders,
+  buildUnsubscribeUrl,
   deriveUnsubscribeKey,
   makeUnsubscribeToken,
   verifyUnsubscribeToken,

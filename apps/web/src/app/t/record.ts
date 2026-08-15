@@ -1,5 +1,10 @@
 import { env } from "@millionsend/config";
-import { applyStatusCas, deriveTrackingKey, utcDay } from "@millionsend/core";
+import {
+  applyStatusCas,
+  deriveTrackingKey,
+  enqueueWebhookDeliveries,
+  utcDay,
+} from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -29,17 +34,26 @@ export async function recordEngagement(
   db: Db,
   emailId: string,
   type: "opened" | "clicked",
+  enqueueWebhookDelivery?: (deliveryId: string) => Promise<void>,
 ): Promise<void> {
   // A raw non-uuid string must never reach a uuid column — Postgres would 500.
   if (!z.uuid().safeParse(emailId).success) return;
 
   const [email] = await db
-    .select({ id: schema.emails.id, teamId: schema.emails.teamId })
+    .select({
+      id: schema.emails.id,
+      teamId: schema.emails.teamId,
+      from: schema.emails.from,
+      to: schema.emails.to,
+      subject: schema.emails.subject,
+    })
     .from(schema.emails)
     .where(eq(schema.emails.id, emailId))
     .limit(1);
   if (!email) return;
 
+  const occurredAt = new Date();
+  const deliveryIds: string[] = [];
   await db.transaction(async (txRaw) => {
     const tx = txRaw as unknown as Db;
     const [prior] = await tx
@@ -53,13 +67,38 @@ export async function recordEngagement(
     // (email_id, type) unique index if it ever matters.
     if (prior) return;
 
-    await tx.insert(schema.emailEvents).values({ emailId: email.id, type, occurredAt: new Date() });
+    await tx.insert(schema.emailEvents).values({ emailId: email.id, type, occurredAt });
     await applyStatusCas(tx, email.id, type);
     await tx.execute(sql`
       insert into ${schema.usageCounters} (team_id, day, ${sql.raw(type)})
-      values (${email.teamId}, ${utcDay(new Date())}, 1)
+      values (${email.teamId}, ${utcDay(occurredAt)}, 1)
       on conflict (team_id, day) do update
         set ${sql.raw(type)} = ${schema.usageCounters}.${sql.raw(type)} + 1
     `);
+
+    // Fan the first unique open/click out to the team's webhook endpoints,
+    // mirroring the SES path: delivery rows join this transaction (so the
+    // webhooks.reconcile sweep can recover a lost enqueue), the queue send
+    // happens after commit. Only reached on the unique first hit — the `prior`
+    // guard above makes a second open/click a no-op, so no re-delivery.
+    await enqueueWebhookDeliveries(tx, {
+      teamId: email.teamId,
+      email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
+      type: `email.${type}`,
+      occurredAt,
+      enqueue: async (deliveryId) => {
+        deliveryIds.push(deliveryId);
+      },
+    });
   });
+
+  if (enqueueWebhookDelivery) {
+    for (const deliveryId of deliveryIds) {
+      try {
+        await enqueueWebhookDelivery(deliveryId);
+      } catch (err) {
+        console.error("webhook.deliver enqueue failed; reconcile sweep will recover", err);
+      }
+    }
+  }
 }

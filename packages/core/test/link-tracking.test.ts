@@ -50,6 +50,22 @@ describe("rewriteForTracking — click", () => {
     expect(out).toContain('href="{{{UNSUBSCRIBE_URL}}}"');
     expect(out).toContain("/t/c/");
   });
+
+  it("leaves an already-expanded unsubscribe link under skipHrefPrefix un-wrapped, still wrapping ordinary links", () => {
+    // Broadcast path: {{{UNSUBSCRIBE_URL}}} was substituted to a real https URL
+    // before encryption, so the {{{-token guard no longer covers it — the prefix
+    // must exclude it from /t/c to avoid a bogus click and an extra redirect hop.
+    const unsub = "https://app.example.com/unsubscribe/abc.def";
+    const src = `<a href="https://acme.example/go">go</a><a href="${unsub}">unsub</a>`;
+    const out = rewriteForTracking(
+      src,
+      opts({ click: true, skipHrefPrefix: "https://app.example.com/unsubscribe/" }),
+    );
+    expect(out).toContain(`href="${unsub}"`);
+    expect(out).toContain("/t/c/"); // the ordinary link is still wrapped
+    // The unsubscribe href never passes through the redirect.
+    expect(out).not.toMatch(/t\/c\/[^"']*unsubscribe/);
+  });
 });
 
 describe("rewriteForTracking — open pixel", () => {
