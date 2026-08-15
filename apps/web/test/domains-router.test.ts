@@ -379,7 +379,7 @@ describe("domains.delete", () => {
   });
 });
 
-describe("domains.updateTracking", () => {
+describe("domains.updateConfiguration", () => {
   it("persists toggles and the subdomain, and defaults are open=off click=on", async () => {
     const teamId = await createTeam(db);
     const caller = callerFor(teamId, fakeSes().deps);
@@ -389,32 +389,48 @@ describe("domains.updateTracking", () => {
     expect(before.openTracking).toBe(false);
     expect(before.clickTracking).toBe(true);
     expect(before.trackingSubdomain).toBeNull();
+    expect(before.tlsMode).toBe("opportunistic");
 
-    const result = await caller.domains.updateTracking({
+    const result = await caller.domains.updateConfiguration({
       id,
       openTracking: true,
       clickTracking: false,
       trackingSubdomain: "email",
+      tlsMode: "enforced",
     });
     expect(result).toEqual({
       openTracking: true,
       clickTracking: false,
       trackingSubdomain: "email",
+      tlsMode: "enforced",
     });
 
     const after = await caller.domains.get({ id });
     expect(after.openTracking).toBe(true);
     expect(after.clickTracking).toBe(false);
     expect(after.trackingSubdomain).toBe("email");
+    expect(after.tlsMode).toBe("enforced");
+  });
+
+  it("rejects an unknown tlsMode", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+
+    await expect(
+      // @ts-expect-error — exercising the enum guard with an out-of-range value
+      caller.domains.updateConfiguration({ id, tlsMode: "strict" }),
+    ).rejects.toThrow();
+    expect((await caller.domains.get({ id })).tlsMode).toBe("opportunistic");
   });
 
   it("clears the subdomain when passed an empty string", async () => {
     const teamId = await createTeam(db);
     const caller = callerFor(teamId, fakeSes().deps);
     const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
-    await caller.domains.updateTracking({ id, trackingSubdomain: "email" });
+    await caller.domains.updateConfiguration({ id, trackingSubdomain: "email" });
 
-    await caller.domains.updateTracking({ id, trackingSubdomain: "" });
+    await caller.domains.updateConfiguration({ id, trackingSubdomain: "" });
     expect((await caller.domains.get({ id })).trackingSubdomain).toBeNull();
   });
 
@@ -424,9 +440,11 @@ describe("domains.updateTracking", () => {
     const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
 
     await expect(
-      caller.domains.updateTracking({ id, trackingSubdomain: "Not A Label" }),
+      caller.domains.updateConfiguration({ id, trackingSubdomain: "Not A Label" }),
     ).rejects.toThrow();
-    await expect(caller.domains.updateTracking({ id, trackingSubdomain: "a.b" })).rejects.toThrow();
+    await expect(
+      caller.domains.updateConfiguration({ id, trackingSubdomain: "a.b" }),
+    ).rejects.toThrow();
   });
 
   it("is scoped to the caller's team", async () => {
@@ -438,7 +456,7 @@ describe("domains.updateTracking", () => {
     });
 
     await expect(
-      callerFor(teamB, fakeSes().deps).domains.updateTracking({ id, openTracking: true }),
+      callerFor(teamB, fakeSes().deps).domains.updateConfiguration({ id, openTracking: true }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect((await callerFor(teamA, fakeSes().deps).domains.get({ id })).openTracking).toBe(false);
   });
@@ -452,7 +470,7 @@ describe("domains.updateTracking", () => {
       false,
     );
 
-    await caller.domains.updateTracking({ id, trackingSubdomain: "email" });
+    await caller.domains.updateConfiguration({ id, trackingSubdomain: "email" });
     const { records } = await caller.domains.records({ id });
     expect(records).toContainEqual({
       group: "tracking",

@@ -81,7 +81,10 @@
     "created": "Criado",
     "status": "Status",
     "region": "Região",
-    "dnsTitle": "Registros DNS",
+    "tabs": {
+      "records": "Registros",
+      "configuration": "Configuração"
+    },
     "recordsHeading": "Adicione estes registros em {provider}",
     "recordsHeadingGeneric": "Adicione estes registros no seu provedor de DNS",
     "recordsSublineProvider": "provedor detectado pelos registros NS · verificações a cada 30 s",
@@ -93,17 +96,28 @@
       "tracking": "Rastreamento de aberturas e cliques"
     },
     "tracking": {
-      "title": "Rastreamento",
-      "subtitle": "O SES rastreia aberturas e cliques no nível do conjunto de configurações, para toda a conta. Isto salva como as configurações deste domínio — não liga nem desliga o rastreamento do SES por conta própria.",
       "open": "Rastreamento de aberturas",
       "openHint": "Adiciona um pixel 1×1 para que uma renderização conte como abertura.",
       "click": "Rastreamento de cliques",
       "clickHint": "Encaminha os links pelo SES para contar cliques.",
       "subdomain": "Subdomínio de rastreamento",
-      "subdomainHint": "Opcional. Serve os links de rastreamento pelo seu próprio domínio em vez de awstrack.me — adicione o CNAME abaixo.",
+      "subdomainHint": "Opcional. Serve os links de rastreamento pelo seu próprio domínio em vez de awstrack.me — adicione o CNAME mostrado em Registros.",
       "subdomainPlaceholder": "email",
-      "subdomainError": "Use um único rótulo DNS em minúsculas.",
-      "error": "Não foi possível salvar as configurações de rastreamento."
+      "subdomainError": "Use um único rótulo DNS em minúsculas."
+    },
+    "configuration": {
+      "note": "O SES aplica rastreamento e TLS no nível do conjunto de configurações, para toda a conta. Isto salva como as configurações deste domínio — não altera o comportamento do SES por conta própria.",
+      "trackingMetrics": "Ativar métricas de rastreamento",
+      "update": "Atualizar",
+      "subdomainActive": "Subdomínio personalizado definido — adicione o CNAME em Registros.",
+      "subdomainNeutral": "Usando awstrack.me para os links de rastreamento.",
+      "enabled": "Ativado",
+      "disabled": "Desativado",
+      "tls": "TLS (Transport Layer Security)",
+      "tlsOpportunistic": "Oportunista",
+      "tlsEnforced": "Obrigatório",
+      "tlsOpportunisticHint": "Tenta usar TLS e recai para texto puro se o servidor destinatário não oferecer suporte.",
+      "tlsEnforcedHint": "Exige TLS — mensagens para servidores sem suporte não são entregues."
     },
     "columns": {
       "type": "Tipo",
