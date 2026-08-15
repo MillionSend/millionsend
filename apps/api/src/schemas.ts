@@ -148,3 +148,105 @@ export const listContactsResponseSchema = z
 export const removeContactResponseSchema = z
   .object({ object: z.literal("contact"), contact: z.uuid(), deleted: z.literal(true) })
   .openapi("RemoveContactResponse");
+
+/**
+ * Broadcasts. The resend SDK (v6) sends both `audience_id` and `segment_id`
+ * for the target (the user sets one); unsupported knobs (preview_text,
+ * topic_id, send-on-create) are accepted into the schema and rejected loudly
+ * — "never an incompatible subset" (docs/resend-compatibility.md).
+ */
+
+const replyToList = z
+  .union([emailAddress, z.array(emailAddress).min(1).max(50)])
+  .transform((v) => (Array.isArray(v) ? v : [v]));
+
+export const createBroadcastRequestSchema = z
+  .object({
+    name: z.string().optional(),
+    audience_id: z.uuid().optional(),
+    segment_id: z.uuid().optional(),
+    from: emailAddress,
+    subject: z.string().min(1),
+    html: z.string().optional(),
+    text: z.string().optional(),
+    reply_to: replyToList.optional(),
+    preview_text: z.string().optional(),
+    topic_id: z.string().nullable().optional(),
+    send: z.boolean().optional(),
+    scheduled_at: z.string().optional(),
+  })
+  .refine((v) => v.html !== undefined || v.text !== undefined, {
+    message: "Either html or text must be provided",
+  })
+  .refine((v) => v.audience_id !== undefined || v.segment_id !== undefined, {
+    message: "audience_id is required",
+  })
+  .openapi("CreateBroadcastRequest");
+
+export const updateBroadcastRequestSchema = z
+  .object({
+    name: z.string().optional(),
+    audience_id: z.uuid().optional(),
+    segment_id: z.uuid().optional(),
+    from: emailAddress.optional(),
+    subject: z.string().min(1).optional(),
+    html: z.string().optional(),
+    text: z.string().optional(),
+    reply_to: replyToList.optional(),
+    preview_text: z.string().optional(),
+    topic_id: z.string().nullable().optional(),
+  })
+  .openapi("UpdateBroadcastRequest");
+
+export const sendBroadcastRequestSchema = z
+  .object({
+    // ISO only — natural-language schedules ("in 2 days") are not supported.
+    scheduled_at: z.iso
+      .datetime({ offset: true })
+      .refine((v) => new Date(v).getTime() <= Date.now() + 30 * DAY_MS, {
+        message: "scheduled_at cannot be more than 30 days in the future",
+      })
+      .optional(),
+  })
+  .openapi("SendBroadcastRequest");
+
+export const broadcastIdResponseSchema = z.object({ id: z.uuid() }).openapi("BroadcastIdResponse");
+
+const broadcastListItemSchema = z.object({
+  id: z.uuid(),
+  name: z.string().nullable(),
+  audience_id: z.uuid().nullable(),
+  segment_id: z.uuid().nullable(),
+  status: z.string(),
+  created_at: z.string(),
+  scheduled_at: z.string().nullable(),
+  sent_at: z.string().nullable(),
+});
+
+export const listBroadcastsResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    data: z.array(broadcastListItemSchema),
+    has_more: z.boolean(),
+  })
+  .openapi("ListBroadcastsResponse");
+
+export const getBroadcastResponseSchema = broadcastListItemSchema
+  .extend({
+    object: z.literal("broadcast"),
+    from: z.string(),
+    subject: z.string(),
+    reply_to: z.array(z.string()).nullable(),
+    preview_text: z.string().nullable(),
+    html: z.string().nullable(),
+    text: z.string().nullable(),
+  })
+  .openapi("GetBroadcastResponse");
+
+export const removeBroadcastResponseSchema = z
+  .object({ object: z.literal("broadcast"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveBroadcastResponse");
+
+export const cancelBroadcastResponseSchema = z
+  .object({ object: z.literal("broadcast"), id: z.uuid() })
+  .openapi("CancelBroadcastResponse");

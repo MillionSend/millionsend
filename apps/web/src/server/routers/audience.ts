@@ -11,8 +11,11 @@ const emailSchema = z.string().trim().pipe(z.email()).pipe(z.string().max(320));
 // "" clears the field — stored as null, never as an empty string.
 const personName = z.string().trim().max(200);
 
-/** Guards every contact procedure keyed by audienceId: NOT_FOUND outside the team. */
-async function assertAudience(ctx: { db: Db; teamId: string }, audienceId: string): Promise<void> {
+/** Guards every procedure keyed by audienceId (contacts, broadcasts): NOT_FOUND outside the team. */
+export async function assertAudience(
+  ctx: { db: Db; teamId: string },
+  audienceId: string,
+): Promise<void> {
   const a = schema.audiences;
   const [row] = await ctx.db
     .select({ id: a.id })

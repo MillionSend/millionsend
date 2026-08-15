@@ -2,6 +2,7 @@ export * from "./api-keys.js";
 export * from "./audiences.js";
 export * from "./audit.js";
 export * from "./auth.js";
+export * from "./broadcasts.js";
 export * from "./domains.js";
 export * from "./emails.js";
 export * from "./idempotency.js";

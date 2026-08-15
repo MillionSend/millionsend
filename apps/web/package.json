@@ -15,6 +15,7 @@
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",
+    "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
     "@tanstack/react-query": "^5.101.4",
     "@trpc/client": "^11.18.0",

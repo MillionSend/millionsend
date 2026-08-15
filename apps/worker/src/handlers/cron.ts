@@ -44,6 +44,38 @@ export async function reconcileWebhookDeliveries(
   return stalled.length;
 }
 
+/**
+ * Safety net for broadcast.send jobs lost between the schedule commit and the
+ * enqueue (or a worker crash mid-fan-out). Scheduled broadcasts past due and
+ * sending broadcasts whose fan-out went quiet are re-enqueued; the handler's
+ * status re-check plus the (broadcastId, contactId) unique index make a stray
+ * extra job harmless.
+ */
+export async function reconcileStalledBroadcasts(
+  db: Db,
+  deps: { enqueue: (broadcastId: string) => Promise<void>; now?: Date },
+): Promise<number> {
+  const now = deps.now ?? new Date();
+  const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
+  const stalled = await db
+    .select({ id: schema.broadcasts.id })
+    .from(schema.broadcasts)
+    .where(
+      or(
+        and(
+          eq(schema.broadcasts.status, "scheduled"),
+          lt(schema.broadcasts.scheduledAt, staleBefore),
+        ),
+        and(eq(schema.broadcasts.status, "sending"), lt(schema.broadcasts.updatedAt, staleBefore)),
+      ),
+    )
+    .orderBy(asc(schema.broadcasts.createdAt));
+  for (const broadcast of stalled) {
+    await deps.enqueue(broadcast.id);
+  }
+  return stalled.length;
+}
+
 export interface DrainDeps {
   isCloud: boolean;
   /** startAfter defers the job for emails scheduled beyond the drain time. */
