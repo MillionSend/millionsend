@@ -293,6 +293,72 @@ export const cancelBroadcastResponseSchema = z
   .openapi("CancelBroadcastResponse");
 
 /**
+ * Segments (MillionSend extension, docs/resend-compatibility.md). A segment is a
+ * saved filter over an audience's contacts. Exposed under /segments2 — the
+ * resend SDK's /segments path is the audiences alias and must stay distinct.
+ * The filter's field/operator semantics are validated by @millionsend/core's
+ * `segmentFilterSchema` in the handler (422 on a bad shape); this schema only
+ * pins the wire structure for OpenAPI and basic type checks.
+ */
+const segmentFilterInputSchema = z
+  .object({
+    match: z.enum(["all", "any"]),
+    conditions: z.array(
+      z.object({
+        field: z.string(),
+        op: z.string(),
+        // Present but nullable; presence ops (is_set/is_not_set) send null.
+        value: z.string().nullable(),
+      }),
+    ),
+  })
+  .openapi("SegmentFilter");
+
+export const createSegmentRequestSchema = z
+  .object({
+    name: z.string().min(1),
+    audience_id: z.uuid(),
+    filter: segmentFilterInputSchema,
+  })
+  .openapi("CreateSegmentRequest");
+
+export const updateSegmentRequestSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    filter: segmentFilterInputSchema.optional(),
+  })
+  .openapi("UpdateSegmentRequest");
+
+const segmentBaseSchema = z.object({
+  object: z.literal("segment"),
+  id: z.uuid(),
+  name: z.string(),
+  audience_id: z.uuid(),
+  filter: segmentFilterInputSchema,
+  created_at: z.string(),
+});
+
+export const segmentResponseSchema = segmentBaseSchema.openapi("SegmentResponse");
+
+// GET carries the live count of matching contacts (the translator's live-count
+// consumer); list omits it to stay one query per page.
+export const getSegmentResponseSchema = segmentBaseSchema
+  .extend({ contact_count: z.number() })
+  .openapi("GetSegmentResponse");
+
+export const listSegmentsResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    data: z.array(segmentBaseSchema),
+    has_more: z.boolean(),
+  })
+  .openapi("ListSegmentsResponse");
+
+export const removeSegmentResponseSchema = z
+  .object({ object: z.literal("segment"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveSegmentResponse");
+
+/**
  * Topics. Wire-compatible with the resend SDK's `topics` and
  * `contacts.topics` surfaces: default_subscription is 'opt_in'/'opt_out'
  * (opt_in = subscribed unless the contact opts out) and is fixed at creation.

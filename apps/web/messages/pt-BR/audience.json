@@ -133,5 +133,69 @@
     "deleteTitle": "Excluir tópico",
     "deleteBody": "{name} é excluído, junto com a inscrição de cada contato nele. Isto não pode ser desfeito.",
     "deleteConfirm": "Excluir tópico"
+  },
+  "segments": {
+    "title": "Audiência",
+    "create": "Criar segmento",
+    "name": "Nome",
+    "audience": "Audiência",
+    "count": "Contatos",
+    "created": "Criado",
+    "menu": "Ações do segmento",
+    "delete": "Excluir",
+    "empty": "Nenhum segmento ainda.",
+    "emptyHint": "Um segmento é um filtro salvo sobre uma audiência — mire uma transmissão apenas nos contatos que correspondem.",
+    "loadError": "Não foi possível carregar os segmentos.",
+    "retry": "Tentar de novo",
+    "createTitle": "Criar segmento",
+    "deleteTitle": "Excluir segmento",
+    "deleteBody": "{name} é excluído. Transmissões já enviadas a ele mantêm seu histórico.",
+    "deleteConfirm": "Excluir segmento",
+    "field": {
+      "email": "E-mail",
+      "first_name": "Nome",
+      "last_name": "Sobrenome",
+      "unsubscribed": "Inscrição",
+      "created_at": "Criado",
+      "property": "Propriedade personalizada"
+    },
+    "op": {
+      "equals": "é igual a",
+      "not_equals": "é diferente de",
+      "contains": "contém",
+      "starts_with": "começa com",
+      "ends_with": "termina com",
+      "is_set": "está preenchido",
+      "is_not_set": "está vazio",
+      "is_true": "está descadastrado",
+      "is_false": "está inscrito",
+      "before": "é antes de",
+      "after": "é depois de"
+    },
+    "builder": {
+      "nameLabel": "Nome",
+      "namePlaceholder": "ex.: Ativos em São Paulo",
+      "audienceLabel": "Audiência",
+      "audiencePick": "Escolha uma audiência",
+      "conditionsLabel": "Condições",
+      "noConditions": "Sem condições — corresponde a todos os contatos da audiência.",
+      "addCondition": "Adicionar condição",
+      "fieldLabel": "Campo",
+      "opLabel": "Operador",
+      "propertyKeyPlaceholder": "Chave da propriedade",
+      "valuePlaceholder": "Valor",
+      "noValue": "Nenhum valor necessário",
+      "removeRow": "Remover condição",
+      "match": {
+        "all": "Corresponder a tudo",
+        "any": "Corresponder a qualquer"
+      },
+      "matchCount": "{count} contatos correspondem.",
+      "counting": "Contando…",
+      "countError": "Não foi possível contar as correspondências.",
+      "pickAudienceFirst": "Escolha uma audiência para pré-visualizar a contagem.",
+      "save": "Salvar segmento",
+      "saveError": "Não foi possível salvar o segmento. Tente de novo."
+    }
   }
 }

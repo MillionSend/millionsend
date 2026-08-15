@@ -1,3 +1,4 @@
+export type { SegmentCondition, SegmentFilter } from "@millionsend/db/schema";
 export {
   type AcceptEmailAuth,
   type AcceptEmailDeps,
@@ -62,6 +63,11 @@ export {
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
+export {
+  SegmentFilterError,
+  segmentFilterSchema,
+  segmentWhere,
+} from "./segment-filter.js";
 export { parseSingleSender } from "./sender-address.js";
 export { isBlockedIp, type PostJsonOptions, type PostJsonResult, postJson } from "./ssrf.js";
 export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";

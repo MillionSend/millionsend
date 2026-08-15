@@ -8,6 +8,7 @@ export * from "./domains.js";
 export * from "./emails.js";
 export * from "./idempotency.js";
 export * from "./instance-settings.js";
+export * from "./segments.js";
 export * from "./suppressions.js";
 export * from "./teams.js";
 export * from "./templates.js";

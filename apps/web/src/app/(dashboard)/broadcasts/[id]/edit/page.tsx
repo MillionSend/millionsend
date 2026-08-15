@@ -43,6 +43,7 @@ export default function EditBroadcastPage() {
         id: broadcast.id,
         audienceId: broadcast.audienceId,
         topicId: broadcast.topicId,
+        segmentId: broadcast.segmentId,
         name: broadcast.name,
         from: broadcast.from,
         subject: broadcast.subject,
