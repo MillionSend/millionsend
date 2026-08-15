@@ -133,3 +133,33 @@ describe("metrics.window", () => {
     expect(result.allTimeDelivered).toBe(2);
   });
 });
+
+describe("metrics.health", () => {
+  it("pauses when the window bounce rate crosses the SES enforcement line", async () => {
+    const teamId = await createTeam(db, "acme");
+    // 120/2000 = 6% > 5% pause line, above the 1000 volume floor.
+    await insertCounter(teamId, utcDay(0), { accepted: 2000, bounced: 120 });
+
+    const result = await callerFor(teamId).metrics.health();
+
+    expect(result.status).toBe("paused");
+    expect(result.bounceRate).toBeCloseTo(0.06);
+    expect(result.reasons).toContainEqual({ metric: "bounce", rate: 0.06, tier: "paused" });
+    expect(result.thresholds).toEqual({
+      warnBounce: 0.04,
+      warnComplaint: 0.0001,
+      pauseBounce: 0.05,
+      pauseComplaint: 0.001,
+    });
+  });
+
+  it("stays ok below the volume floor regardless of rate", async () => {
+    const teamId = await createTeam(db, "acme");
+    await insertCounter(teamId, utcDay(0), { accepted: 100, bounced: 50 });
+
+    const result = await callerFor(teamId).metrics.health();
+
+    expect(result.status).toBe("ok");
+    expect(result.reasons).toEqual([]);
+  });
+});

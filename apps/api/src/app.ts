@@ -8,7 +8,10 @@ import {
   completeIdempotent,
   decryptEmailBody,
   extractTokenPrefix,
+  fetchDeliverabilityHealth,
   type Keyring,
+  PAUSE_BOUNCE_RATE,
+  PAUSE_COMPLAINT_RATE,
   releaseIdempotent,
   verifySenderDomain,
 } from "@millionsend/core";
@@ -1092,6 +1095,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           description: "Broadcast scheduled",
         },
         400: jsonErr("Not a draft"),
+        403: jsonErr("Sending paused"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
       },
@@ -1121,6 +1125,26 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             "APP_BASE_URL is not set. Unsubscribe links are built from it. Set it, restart, send again.",
           ),
           422,
+        );
+      }
+      // Server-authoritative deliverability guardrail: a raw API client must not
+      // bypass what the dashboard enforces. If the team's trailing-window bounce
+      // or complaint rate has crossed SES's own pause line, block new broadcast
+      // sends here — before scheduling — so we stop sending before SES pauses the
+      // whole account. `sending_paused` is a MillionSend-specific error outside
+      // Resend's SDK union (see docs/resend-compatibility.md, known deltas).
+      const health = await fetchDeliverabilityHealth(db, auth.teamId);
+      const paused = health.reasons.find((r) => r.tier === "paused");
+      if (paused) {
+        const limit = paused.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
+        const pct = (r: number) => `${(r * 100).toFixed(2)}%`;
+        return c.json(
+          errorBody(
+            403,
+            "sending_paused",
+            `Sending is paused: your ${paused.metric} rate of ${pct(paused.rate)} over the last ${health.windowDays} days is at or above the ${pct(limit)} limit. Lower it before sending new broadcasts.`,
+          ),
+          403,
         );
       }
       // Same boundary as /emails: only a verified team domain may appear as

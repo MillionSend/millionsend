@@ -1,4 +1,12 @@
-import { DAY_MS, utcDay } from "@millionsend/core";
+import {
+  DAY_MS,
+  fetchDeliverabilityHealth,
+  PAUSE_BOUNCE_RATE,
+  PAUSE_COMPLAINT_RATE,
+  utcDay,
+  WARN_BOUNCE_RATE,
+  WARN_COMPLAINT_RATE,
+} from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -58,4 +66,23 @@ export const metricsRouter = router({
 
       return { days, totals, allTimeDelivered: Number(allTime?.delivered ?? 0) };
     }),
+
+  /**
+   * Current deliverability standing plus the thresholds it was judged against,
+   * so the banner and the send guard read one source (never a re-hardcoded
+   * rate). Rates come from the same trailing-window usage_counters sum the
+   * chart reads.
+   */
+  health: teamProcedure.query(async ({ ctx }) => {
+    const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId);
+    return {
+      ...health,
+      thresholds: {
+        warnBounce: WARN_BOUNCE_RATE,
+        warnComplaint: WARN_COMPLAINT_RATE,
+        pauseBounce: PAUSE_BOUNCE_RATE,
+        pauseComplaint: PAUSE_COMPLAINT_RATE,
+      },
+    };
+  }),
 });

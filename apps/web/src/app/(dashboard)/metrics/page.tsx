@@ -1,5 +1,6 @@
 "use client";
 
+import { WARN_BOUNCE_RATE, WARN_COMPLAINT_RATE } from "@millionsend/core/deliverability";
 import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
@@ -20,8 +21,8 @@ type Range = (typeof RANGES)[number];
  * line (bounce line at top 6px → 114px = 4%; complaint at 14px → 106px = 0.01%).
  */
 const BAR_AREA = 120;
-const BOUNCE = { threshold: 0.04, lineTop: 6 };
-const COMPLAINT = { threshold: 0.0001, lineTop: 14 };
+const BOUNCE = { threshold: WARN_BOUNCE_RATE, lineTop: 6 };
+const COMPLAINT = { threshold: WARN_COMPLAINT_RATE, lineTop: 14 };
 
 type Bar = { day: string; height: number; title: string };
 type DayCounts = { day: string; sent: number; bounced: number; complained: number };

@@ -11,6 +11,7 @@ const NAMESPACES = [
   "audience",
   "auth",
   "broadcasts",
+  "deliverability",
   "nav",
   "emails",
   "bounce-guidance",

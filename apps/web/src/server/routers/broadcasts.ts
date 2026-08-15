@@ -1,13 +1,71 @@
 import { env } from "@millionsend/config";
-import { parseSingleSender } from "@millionsend/core";
+import {
+  fetchDeliverabilityHealth,
+  PAUSE_BOUNCE_RATE,
+  PAUSE_COMPLAINT_RATE,
+  parseSingleSender,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, sql } from "drizzle-orm";
+import { cookies } from "next/headers";
+import { createTranslator } from "next-intl";
 import { z } from "zod";
+import enDeliverability from "../../../messages/en/deliverability.json";
+import ptBRDeliverability from "../../../messages/pt-BR/deliverability.json";
+import { type AppLocale, DEFAULT_LOCALE, LOCALE_COOKIE, LOCALES } from "../../i18n/request";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
 import { assertAudience } from "./audience";
+
+const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
+  en: enDeliverability,
+  "pt-BR": ptBRDeliverability,
+};
+
+/**
+ * Request locale for a server-thrown message. Outside an HTTP request (tests,
+ * background jobs) `cookies()` throws — fall back to the default locale.
+ */
+async function activeLocale(): Promise<AppLocale> {
+  try {
+    const value = (await cookies()).get(LOCALE_COOKIE)?.value;
+    return (LOCALES as readonly string[]).includes(value ?? "")
+      ? (value as AppLocale)
+      : DEFAULT_LOCALE;
+  } catch {
+    return DEFAULT_LOCALE;
+  }
+}
+
+/**
+ * PRECONDITION_FAILED when the team's trailing-window rates crossed a SES
+ * enforcement line (fetchDeliverabilityHealth === "paused"); null otherwise.
+ * "warning" never blocks. The message names the offending metric, its rate,
+ * and the limit it passed, in the caller's locale.
+ */
+async function deliverabilityGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | null> {
+  const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId);
+  const reason =
+    health.status === "paused" ? health.reasons.find((r) => r.tier === "paused") : null;
+  if (!reason) return null;
+  const locale = await activeLocale();
+  const t = createTranslator({
+    locale,
+    messages: { deliverability: DELIVERABILITY_MESSAGES[locale] },
+    namespace: "deliverability",
+  });
+  const pct = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 2 });
+  const limit = reason.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
+  return new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message: t(`sendGuard.${reason.metric}`, {
+      rate: pct.format(reason.rate),
+      limit: pct.format(limit),
+    }),
+  });
+}
 
 const emailSchema = z.string().trim().pipe(z.email()).pipe(z.string().max(320));
 // SECURITY: a stored broadcast `from` is emitted verbatim by the worker
@@ -239,6 +297,11 @@ export const broadcastsRouter = router({
             "APP_BASE_URL is not set. Unsubscribe links are built from it. Set it, restart, send again.",
         });
       }
+      // Deliverability pause is enforced here, before anything is committed or
+      // enqueued: a paused account must not schedule a new fan-out. "warning"
+      // does not block.
+      const guardError = await deliverabilityGuard(ctx);
+      if (guardError) throw guardError;
       const scheduledAt = input.scheduledAt ?? new Date();
       const b = schema.broadcasts;
       // status filter re-checked in the UPDATE so two concurrent sends cannot

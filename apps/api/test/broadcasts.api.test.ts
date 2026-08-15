@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey } from "@millionsend/core";
+import { EnvKeyring, generateApiKey, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi } from "../src/app.js";
 
@@ -34,6 +35,45 @@ const draftBody = () => ({
   subject: "hello",
   html: "<p>hi</p>",
 });
+
+// A fresh team with its own key, verified domain, audience, and one draft
+// broadcast — isolated so seeding its usage_counters can't affect the shared
+// team-A happy-path tests.
+async function makeSendableTeam(slug: string) {
+  const teamId = await createTeam(db, slug);
+  const key = generateApiKey("live");
+  await db.insert(schema.apiKeys).values({
+    teamId,
+    name: slug,
+    tokenPrefix: key.tokenPrefix,
+    keyHash: key.keyHash,
+    last4: key.last4,
+  });
+  await db.insert(schema.domains).values({
+    teamId,
+    name: "acme.dev",
+    region: "us-east-1",
+    status: "verified",
+    verifiedAt: new Date(),
+  });
+  const [aud] = await db
+    .insert(schema.audiences)
+    .values({ teamId, name: "news" })
+    .returning({ id: schema.audiences.id });
+  if (!aud) throw new Error("audience insert failed");
+  const [bc] = await db
+    .insert(schema.broadcasts)
+    .values({
+      teamId,
+      audienceId: aud.id,
+      from: "Acme <hi@acme.dev>",
+      subject: "s",
+      html: "<p>hi</p>",
+    })
+    .returning({ id: schema.broadcasts.id });
+  if (!bc) throw new Error("broadcast insert failed");
+  return { teamId, token: key.token, broadcastId: bc.id };
+}
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
@@ -237,5 +277,68 @@ describe("broadcasts API", () => {
     expect(canceled.status).toBe(200);
     const after = await call(tokenA, "GET", `/broadcasts/${broadcastId}`);
     expect(await after.json()).toMatchObject({ status: "canceled" });
+  });
+});
+
+describe("broadcasts API deliverability guardrail", () => {
+  let enqueued: string[];
+  let guarded: ReturnType<typeof createApi>;
+
+  const sendGuarded = (token: string, id: string) =>
+    guarded.request(`/broadcasts/${id}/send`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: "{}",
+    });
+
+  beforeAll(() => {
+    enqueued = [];
+    guarded = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: true,
+      enqueueEmailSend: async () => {},
+      enqueueBroadcastSend: async (id) => {
+        enqueued.push(id);
+      },
+      appBaseUrl: "https://app.example.test",
+    });
+  });
+
+  it("403s sending_paused when past the complaint pause line, leaving the draft unsent", async () => {
+    const { teamId, token, broadcastId } = await makeSendableTeam("bc-paused");
+    // Over the floor (1000) and over the 0.1% complaint pause line.
+    await db.insert(schema.usageCounters).values({
+      teamId,
+      day: utcDay(),
+      accepted: 2000,
+      complained: 5,
+    });
+
+    const res = await sendGuarded(token, broadcastId);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ statusCode: 403, name: "sending_paused" });
+
+    const [row] = await db
+      .select({ status: schema.broadcasts.status })
+      .from(schema.broadcasts)
+      .where(eq(schema.broadcasts.id, broadcastId));
+    expect(row?.status).toBe("draft");
+    expect(enqueued).not.toContain(broadcastId);
+  });
+
+  it("sends normally at volume over the floor but under the warn line", async () => {
+    const { teamId, token, broadcastId } = await makeSendableTeam("bc-healthy");
+    // Over the floor, but 0.05% bounce / 0% complaint — below both warn lines.
+    await db.insert(schema.usageCounters).values({
+      teamId,
+      day: utcDay(),
+      accepted: 2000,
+      bounced: 1,
+    });
+
+    const res = await sendGuarded(token, broadcastId);
+    expect(res.status).toBe(200);
+    expect(enqueued).toContain(broadcastId);
   });
 });
