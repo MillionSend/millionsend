@@ -56,7 +56,10 @@
     "saveDraft": "Salvar rascunho",
     "send": "Enviar",
     "saveError": "Não foi possível salvar o rascunho.",
-    "back": "Transmissões"
+    "back": "Transmissões",
+    "segmentLabel": "Segmento",
+    "segmentNone": "Audiência inteira",
+    "segmentHint": "Restringe este envio aos contatos que correspondem a um segmento salvo."
   },
   "guard": {
     "title": "Enviar transmissão",
@@ -91,6 +94,7 @@
     "cancelTitle": "Cancelar envio",
     "cancelBody": "\"{name}\" não será enviada.",
     "cancelConfirm": "Cancelar envio",
-    "keep": "Manter"
+    "keep": "Manter",
+    "segment": "Segmento"
   }
 }

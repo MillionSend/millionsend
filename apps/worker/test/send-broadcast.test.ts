@@ -649,3 +649,56 @@ it("reconcile re-enqueues past-due scheduled and stale sending broadcasts", asyn
   expect(enqueued).toContain(stale);
   expect(enqueued).not.toContain(fresh);
 });
+
+it("a segment broadcast fans out only to matching contacts, composing with the topic filter", async () => {
+  const [aud] = await db
+    .insert(schema.audiences)
+    .values({ teamId, name: "seg-aud" })
+    .returning({ id: schema.audiences.id });
+  if (!aud) throw new Error("audience insert failed");
+  const inserted = await db
+    .insert(schema.contacts)
+    .values([
+      { audienceId: aud.id, teamId, email: "vip-in@example.com", properties: { tier: "vip" } },
+      { audienceId: aud.id, teamId, email: "vip-out@example.com", properties: { tier: "vip" } },
+      { audienceId: aud.id, teamId, email: "basic@example.com", properties: { tier: "basic" } },
+    ])
+    .returning({ id: schema.contacts.id, email: schema.contacts.email });
+  const ids = Object.fromEntries(inserted.map((c) => [c.email, c.id]));
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "seg-topic", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  // vip-out opts out of the topic: the segment matches it, the topic filter must
+  // still exclude it — both predicates apply.
+  await db.insert(schema.contactTopicSubscriptions).values({
+    contactId: ids["vip-out@example.com"] as string,
+    topicId: topic.id,
+    subscribed: false,
+  });
+  const [segment] = await db
+    .insert(schema.segments)
+    .values({
+      teamId,
+      audienceId: aud.id,
+      name: "vips",
+      filter: {
+        match: "all",
+        conditions: [{ field: "property:tier", op: "equals", value: "vip" }],
+      },
+    })
+    .returning({ id: schema.segments.id });
+  if (!segment) throw new Error("segment insert failed");
+
+  const broadcastId = await insertBroadcast({
+    audienceId: aud.id,
+    segmentId: segment.id,
+    topicId: topic.id,
+  });
+  expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
+
+  const rows = await emailsOf(broadcastId);
+  // basic@ fails the segment; vip-out@ passes the segment but fails the topic.
+  expect(rows.map((r) => r.to[0]).sort()).toEqual(["vip-in@example.com"]);
+});

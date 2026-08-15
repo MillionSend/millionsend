@@ -10,10 +10,11 @@ import {
   PLAN_DAILY_LIMIT,
   parseSingleSender,
   reserveDailyQuota,
+  segmentWhere,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
 
 /**
  * Fans a broadcast out into individual email rows and email.send jobs — the
@@ -197,6 +198,29 @@ export async function sendBroadcast(
   const startMs = Date.now();
   let emitted = 0;
 
+  // Optional segment: AND its parameterized filter into the contact scan. The
+  // segment must belong to this broadcast's team and audience — a mismatch is a
+  // tampered/foreign reference, so refuse rather than mail the wrong people.
+  let segmentPredicate: SQL | undefined;
+  if (broadcast.segmentId) {
+    const [segment] = await db
+      .select({ filter: schema.segments.filter })
+      .from(schema.segments)
+      .where(
+        and(
+          eq(schema.segments.id, broadcast.segmentId),
+          eq(schema.segments.teamId, broadcast.teamId),
+          eq(schema.segments.audienceId, broadcast.audienceId),
+        ),
+      );
+    if (!segment) {
+      throw new Error(
+        `broadcast ${broadcast.id}: segment ${broadcast.segmentId} not found for its team/audience`,
+      );
+    }
+    segmentPredicate = segmentWhere(schema.contacts, segment.filter);
+  }
+
   const replyTo = broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null;
   const batchSize = deps.batchSize ?? 100;
   let cursor = "";
@@ -215,6 +239,7 @@ export async function sendBroadcast(
           eq(schema.contacts.audienceId, broadcast.audienceId),
           eq(schema.contacts.unsubscribed, false),
           gt(sql`${schema.contacts.id}::text`, cursor),
+          segmentPredicate,
         ),
       )
       .orderBy(asc(sql`${schema.contacts.id}::text`))

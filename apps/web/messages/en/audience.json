@@ -133,5 +133,69 @@
     "deleteTitle": "Delete topic",
     "deleteBody": "{name} is deleted, along with every contact's subscription to it. This cannot be undone.",
     "deleteConfirm": "Delete topic"
+  },
+  "segments": {
+    "title": "Audience",
+    "create": "Create segment",
+    "name": "Name",
+    "audience": "Audience",
+    "count": "Contacts",
+    "created": "Created",
+    "menu": "Segment actions",
+    "delete": "Delete",
+    "empty": "No segments yet.",
+    "emptyHint": "A segment is a saved filter over an audience — aim a broadcast at just the contacts that match.",
+    "loadError": "Could not load segments.",
+    "retry": "Retry",
+    "createTitle": "Create segment",
+    "deleteTitle": "Delete segment",
+    "deleteBody": "{name} is deleted. Broadcasts already sent to it keep their history.",
+    "deleteConfirm": "Delete segment",
+    "field": {
+      "email": "Email",
+      "first_name": "First name",
+      "last_name": "Last name",
+      "unsubscribed": "Subscription",
+      "created_at": "Created",
+      "property": "Custom property"
+    },
+    "op": {
+      "equals": "equals",
+      "not_equals": "does not equal",
+      "contains": "contains",
+      "starts_with": "starts with",
+      "ends_with": "ends with",
+      "is_set": "is set",
+      "is_not_set": "is not set",
+      "is_true": "is unsubscribed",
+      "is_false": "is subscribed",
+      "before": "is before",
+      "after": "is after"
+    },
+    "builder": {
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. Active in São Paulo",
+      "audienceLabel": "Audience",
+      "audiencePick": "Pick an audience",
+      "conditionsLabel": "Conditions",
+      "noConditions": "No conditions — matches every contact in the audience.",
+      "addCondition": "Add condition",
+      "fieldLabel": "Field",
+      "opLabel": "Operator",
+      "propertyKeyPlaceholder": "Property key",
+      "valuePlaceholder": "Value",
+      "noValue": "No value needed",
+      "removeRow": "Remove condition",
+      "match": {
+        "all": "Match all",
+        "any": "Match any"
+      },
+      "matchCount": "{count} contacts match.",
+      "counting": "Counting…",
+      "countError": "Could not count matches.",
+      "pickAudienceFirst": "Pick an audience to preview the count.",
+      "save": "Save segment",
+      "saveError": "Could not save the segment. Try again."
+    }
   }
 }

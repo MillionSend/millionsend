@@ -56,7 +56,10 @@
     "saveDraft": "Save draft",
     "send": "Send",
     "saveError": "Couldn't save the draft.",
-    "back": "Broadcasts"
+    "back": "Broadcasts",
+    "segmentLabel": "Segment",
+    "segmentNone": "Whole audience",
+    "segmentHint": "Narrows this send to the contacts matching a saved segment."
   },
   "guard": {
     "title": "Send broadcast",
@@ -91,6 +94,7 @@
     "cancelTitle": "Cancel send",
     "cancelBody": "\"{name}\" will not be sent.",
     "cancelConfirm": "Cancel send",
-    "keep": "Keep it"
+    "keep": "Keep it",
+    "segment": "Segment"
   }
 }
