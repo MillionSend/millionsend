@@ -2,8 +2,10 @@ import { createHmac, hkdfSync, timingSafeEqual } from "node:crypto";
 
 /**
  * Signed one-click unsubscribe tokens (RFC 8058). Token format:
- * `base64url(contactId).base64url(HMAC-SHA256(base64url(contactId)))` —
- * self-contained, no DB lookup needed to authenticate the link.
+ * `base64url(payload).base64url(HMAC-SHA256(base64url(payload)))` where the raw
+ * payload is `contactId` (global unsubscribe) or `contactId.topicId`
+ * (topic-scoped). Both are UUIDs, so a single "." separates them unambiguously.
+ * Self-contained: no DB lookup needed to authenticate the link.
  */
 
 // Domain-separation label: the signing key is HKDF-derived from the master
@@ -19,13 +21,24 @@ function sign(payload: string, secretKey: Buffer): Buffer {
   return createHmac("sha256", secretKey).update(payload).digest();
 }
 
-export function makeUnsubscribeToken(params: { contactId: string; secretKey: Buffer }): string {
-  const payload = Buffer.from(params.contactId, "utf8").toString("base64url");
+export function makeUnsubscribeToken(params: {
+  contactId: string;
+  topicId?: string | null;
+  secretKey: Buffer;
+}): string {
+  const raw = params.topicId ? `${params.contactId}.${params.topicId}` : params.contactId;
+  const payload = Buffer.from(raw, "utf8").toString("base64url");
   return `${payload}.${sign(payload, params.secretKey).toString("base64url")}`;
 }
 
-/** @returns the contactId, or null for any malformed/tampered token. */
-export function verifyUnsubscribeToken(token: string, secretKey: Buffer): string | null {
+/**
+ * @returns the signed contactId and optional topicId, or null for any
+ * malformed/tampered token.
+ */
+export function verifyUnsubscribeToken(
+  token: string,
+  secretKey: Buffer,
+): { contactId: string; topicId: string | null } | null {
   const dot = token.indexOf(".");
   if (dot < 1) return null;
   const payload = token.slice(0, dot);
@@ -35,8 +48,10 @@ export function verifyUnsubscribeToken(token: string, secretKey: Buffer): string
   const mac = Buffer.from(token.slice(dot + 1), "utf8");
   const expected = Buffer.from(sign(payload, secretKey).toString("base64url"), "utf8");
   if (mac.length !== expected.length || !timingSafeEqual(mac, expected)) return null;
-  const contactId = Buffer.from(payload, "base64url").toString("utf8");
-  return contactId.length > 0 ? contactId : null;
+  const parts = Buffer.from(payload, "base64url").toString("utf8").split(".");
+  const contactId = parts[0] ?? "";
+  if (contactId.length === 0 || parts.length > 2) return null;
+  return { contactId, topicId: parts[1] || null };
 }
 
 /** RFC 8058 one-click unsubscribe headers for outgoing mail. */

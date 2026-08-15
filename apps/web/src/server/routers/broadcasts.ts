@@ -18,6 +18,7 @@ import { type AppLocale, DEFAULT_LOCALE, LOCALE_COOKIE, LOCALES } from "../../i1
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
 import { assertAudience } from "./audience";
+import { assertTopic, topicMembershipSql } from "./topics";
 
 const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
   en: enDeliverability,
@@ -170,8 +171,12 @@ export const broadcastsRouter = router({
     const row = await getOwnBroadcast(ctx, input.id);
     const a = schema.audiences;
     const e = schema.emails;
+    const tp = schema.topics;
     const [audience] = row.audienceId
       ? await ctx.db.select({ name: a.name }).from(a).where(eq(a.id, row.audienceId)).limit(1)
+      : [];
+    const [topic] = row.topicId
+      ? await ctx.db.select({ name: tp.name }).from(tp).where(eq(tp.id, row.topicId)).limit(1)
       : [];
     // "Delivered" counts the delivered rung and everything above it on the
     // status ladder — an opened or clicked email was necessarily delivered.
@@ -188,6 +193,7 @@ export const broadcastsRouter = router({
       ...row,
       replyTo: firstReplyTo(row.replyTo),
       audienceName: audience?.name ?? null,
+      topicName: topic?.name ?? null,
       stats: stats ?? { total: 0, delivered: 0, bounced: 0, complained: 0 },
     };
   }),
@@ -196,6 +202,9 @@ export const broadcastsRouter = router({
     .input(
       z.object({
         audienceId: z.uuid(),
+        // null / omitted = all-audience send; a topic scopes both the
+        // recipient filter and each recipient's unsubscribe link.
+        topicId: z.uuid().nullable().optional(),
         name: nameSchema.optional(),
         from: fromSchema,
         subject: subjectSchema,
@@ -206,12 +215,14 @@ export const broadcastsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertAudience(ctx, input.audienceId);
+      if (input.topicId) await assertTopic(ctx, input.topicId);
       const b = schema.broadcasts;
       const [row] = await ctx.db
         .insert(b)
         .values({
           teamId: ctx.teamId,
           audienceId: input.audienceId,
+          topicId: input.topicId ?? null,
           name: input.name || null,
           from: input.from,
           subject: input.subject,
@@ -229,6 +240,7 @@ export const broadcastsRouter = router({
       z.object({
         id: z.uuid(),
         audienceId: z.uuid().optional(),
+        topicId: z.uuid().nullable().optional(),
         name: nameSchema.optional(),
         from: fromSchema.optional(),
         subject: subjectSchema.optional(),
@@ -241,11 +253,13 @@ export const broadcastsRouter = router({
       const row = await getOwnBroadcast(ctx, input.id);
       assertDraft(row);
       if (input.audienceId) await assertAudience(ctx, input.audienceId);
+      if (input.topicId) await assertTopic(ctx, input.topicId);
       const b = schema.broadcasts;
       await ctx.db
         .update(b)
         .set({
           ...(input.audienceId !== undefined ? { audienceId: input.audienceId } : {}),
+          ...(input.topicId !== undefined ? { topicId: input.topicId } : {}),
           ...(input.name !== undefined ? { name: input.name || null } : {}),
           ...(input.from !== undefined ? { from: input.from } : {}),
           ...(input.subject !== undefined ? { subject: input.subject } : {}),
@@ -341,22 +355,38 @@ export const broadcastsRouter = router({
     return { id: input.id };
   }),
 
-  /** Guard-rail number: how many contacts a send would email right now. */
+  /**
+   * Guard-rail number: how many contacts a send would email right now. A
+   * topicId narrows the count to that topic's subscribers per the SUBSCRIPTION
+   * RULE (globally subscribed AND topic-subscribed), matching the worker's
+   * topic-scoped fan-out; without one it is the whole non-unsubscribed audience.
+   */
   recipientCount: teamProcedure
-    .input(z.object({ audienceId: z.uuid() }))
+    .input(z.object({ audienceId: z.uuid(), topicId: z.uuid().nullable().optional() }))
     .query(async ({ ctx, input }) => {
       await assertAudience(ctx, input.audienceId);
       const c = schema.contacts;
+      const base = [
+        eq(c.teamId, ctx.teamId),
+        eq(c.audienceId, input.audienceId),
+        eq(c.unsubscribed, false),
+      ];
+      if (!input.topicId) {
+        const [row] = await ctx.db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(c)
+          .where(and(...base));
+        return { count: row?.count ?? 0 };
+      }
+      await assertTopic(ctx, input.topicId);
+      const t = schema.topics;
+      const s = schema.contactTopicSubscriptions;
       const [row] = await ctx.db
         .select({ count: sql<number>`count(*)::int` })
         .from(c)
-        .where(
-          and(
-            eq(c.teamId, ctx.teamId),
-            eq(c.audienceId, input.audienceId),
-            eq(c.unsubscribed, false),
-          ),
-        );
+        .innerJoin(t, eq(t.id, input.topicId))
+        .leftJoin(s, and(eq(s.topicId, input.topicId), eq(s.contactId, c.id)))
+        .where(and(...base, topicMembershipSql(s, t)));
       return { count: row?.count ?? 0 };
     }),
 });

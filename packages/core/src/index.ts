@@ -66,6 +66,7 @@ export { parseSingleSender } from "./sender-address.js";
 export { isBlockedIp, type PostJsonOptions, type PostJsonResult, postJson } from "./ssrf.js";
 export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";
 export { extractAddrSpec, findSuppressed, hashRecipient } from "./suppressions.js";
+export { isSubscribedToTopic } from "./topics.js";
 export {
   buildUnsubscribeHeaders,
   deriveUnsubscribeKey,

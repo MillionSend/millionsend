@@ -138,7 +138,10 @@ it("fans out to subscribed contacts only, personalizes, and marks sent", async (
   expect(body.text).not.toContain("{{{UNSUBSCRIBE_URL}}}");
   const match = body.html?.match(new RegExp(`${BASE_URL}/unsubscribe/([^"]+)`));
   expect(match).toBeTruthy();
-  expect(verifyUnsubscribeToken(match?.[1] ?? "", secretKey)).toBe(first.contactId);
+  expect(verifyUnsubscribeToken(match?.[1] ?? "", secretKey)).toEqual({
+    contactId: first.contactId,
+    topicId: null,
+  });
 });
 
 it("suppressed recipients are skipped like unsubscribed ones", async () => {
@@ -557,6 +560,76 @@ it("fan-out personalizes merge fields per contact in html and text", async () =>
   expect(body.html).toContain(`${BASE_URL}/unsubscribe/`);
   expect(body.html).not.toContain("{{{UNSUBSCRIBE_URL}}}");
   expect(body.text).toBe("Hi <b>Ada</b> friend on <b>pro</b> ");
+});
+
+async function seedTopicAudience(
+  label: string,
+  defaultSubscribed: boolean,
+): Promise<{ audienceId: string; topicId: string; ids: Record<string, string> }> {
+  const [aud] = await db
+    .insert(schema.audiences)
+    .values({ teamId, name: label })
+    .returning({ id: schema.audiences.id });
+  if (!aud) throw new Error("audience insert failed");
+  const inserted = await db
+    .insert(schema.contacts)
+    .values([
+      { audienceId: aud.id, teamId, email: `${label}-default@example.com` },
+      { audienceId: aud.id, teamId, email: `${label}-out@example.com` },
+      { audienceId: aud.id, teamId, email: `${label}-in@example.com` },
+    ])
+    .returning({ id: schema.contacts.id, email: schema.contacts.email });
+  const ids = Object.fromEntries(inserted.map((c) => [c.email, c.id]));
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: label, defaultSubscribed })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  await db.insert(schema.contactTopicSubscriptions).values([
+    { contactId: ids[`${label}-out@example.com`] as string, topicId: topic.id, subscribed: false },
+    { contactId: ids[`${label}-in@example.com`] as string, topicId: topic.id, subscribed: true },
+  ]);
+  return { audienceId: aud.id, topicId: topic.id, ids };
+}
+
+it("opt-in topic: default (no row) and explicit-in send; explicit opt-out is skipped", async () => {
+  const { audienceId: aud, topicId } = await seedTopicAudience("optin", true);
+  const broadcastId = await insertBroadcast({ audienceId: aud, topicId });
+
+  expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
+
+  const rows = await emailsOf(broadcastId);
+  expect(rows.map((r) => r.to[0]).sort()).toEqual([
+    "optin-default@example.com",
+    "optin-in@example.com",
+  ]);
+  // The per-recipient token is topic-scoped.
+  const first = rows[0];
+  if (!first?.bodyCiphertext || !first.bodyIv || !first.bodyWrappedDek) throw new Error("no body");
+  const body = await decryptEmailBody(
+    {
+      ciphertext: first.bodyCiphertext,
+      iv: first.bodyIv,
+      wrappedDek: first.bodyWrappedDek,
+      keyVersion: first.bodyKeyVersion ?? 0,
+    },
+    keyring,
+  );
+  const token = body.html?.match(new RegExp(`${BASE_URL}/unsubscribe/([^"]+)`))?.[1] ?? "";
+  expect(verifyUnsubscribeToken(token, secretKey)).toEqual({
+    contactId: first.contactId,
+    topicId,
+  });
+});
+
+it("opt-out topic: default (no row) is skipped; only explicit-in sends", async () => {
+  const { audienceId: aud, topicId } = await seedTopicAudience("optout", false);
+  const broadcastId = await insertBroadcast({ audienceId: aud, topicId });
+
+  expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
+
+  const rows = await emailsOf(broadcastId);
+  expect(rows.map((r) => r.to[0]).sort()).toEqual(["optout-in@example.com"]);
 });
 
 it("reconcile re-enqueues past-due scheduled and stale sending broadcasts", async () => {

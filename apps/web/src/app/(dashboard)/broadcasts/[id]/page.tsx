@@ -144,6 +144,11 @@ export default function BroadcastDetailPage() {
               </span>
             )}
           </div>
+          {broadcast?.topicName ? (
+            <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 4 }}>
+              {t("detail.topic")}: {broadcast.topicName}
+            </div>
+          ) : null}
         </div>
         <div>
           <Microlabel>{broadcast?.sentAt ? t("detail.sent") : t("detail.scheduled")}</Microlabel>

@@ -143,7 +143,7 @@ describe("broadcasts API", () => {
   });
 
   it("rejects unsupported Resend knobs loudly instead of stripping them", async () => {
-    for (const extra of [{ send: true }, { preview_text: "peek" }, { topic_id: "t_1" }]) {
+    for (const extra of [{ send: true }, { preview_text: "peek" }]) {
       const res = await call(tokenA, "POST", "/broadcasts", { ...draftBody(), ...extra });
       expect(res.status, JSON.stringify(extra)).toBe(422);
     }

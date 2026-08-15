@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import en from "../../../../../messages/en/unsubscribe.json";
 import ptBR from "../../../../../messages/pt-BR/unsubscribe.json";
-import { contactForToken } from "../../lookup";
+import { targetForToken } from "../../lookup";
 
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 
@@ -23,18 +23,27 @@ function pickMessages(acceptLanguage: string | null): (typeof MESSAGES)[keyof ty
   return MESSAGES.en;
 }
 
-/** "{email}" slot → mono span, keeping the sentence order the catalog chose. */
-function fillEmail(template: string, email: string) {
-  const [before, after] = template.split("{email}");
-  return (
-    <>
-      {before}
-      <span className="ms-mono" style={{ overflowWrap: "anywhere" }}>
-        {email}
-      </span>
-      {after}
-    </>
-  );
+/** "{email}"/"{topic}" slots → mono span, keeping the catalog's sentence order. */
+function fillSlots(template: string, slots: Record<string, string>) {
+  // One split per slot, in the order they appear — the catalog never repeats a
+  // slot, so a single pass keeps the surrounding text intact.
+  const parts: React.ReactNode[] = [];
+  let rest = template;
+  let key = 0;
+  const re = /\{(email|topic)\}/;
+  let match = re.exec(rest);
+  while (match) {
+    parts.push(rest.slice(0, match.index));
+    parts.push(
+      <span key={key++} className="ms-mono" style={{ overflowWrap: "anywhere" }}>
+        {slots[match[1] as "email" | "topic"]}
+      </span>,
+    );
+    rest = rest.slice(match.index + match[0].length);
+    match = re.exec(rest);
+  }
+  parts.push(rest);
+  return <>{parts}</>;
 }
 
 function Wordmark() {
@@ -67,10 +76,24 @@ export default async function UnsubscribeConfirmPage({
 }) {
   const [{ token }, query, headerList] = await Promise.all([params, searchParams, headers()]);
   const m = pickMessages(headerList.get("accept-language"));
-  const contact = await contactForToken(getDb(), token);
-  // Already-unsubscribed reads as done: the action is idempotent and the
-  // page never asks for something that would change nothing.
-  const done = contact !== null && (query.done === "1" || contact.unsubscribed);
+  const target = await targetForToken(getDb(), token);
+  // Already-unsubscribed reads as done: the action is idempotent and the page
+  // never asks for something that would change nothing.
+  const done = target !== null && (query.done === "1" || target.alreadyDone);
+  const topicName = target?.topic?.name;
+
+  const confirmText =
+    target && topicName
+      ? fillSlots(m.confirmTopic, { email: target.email, topic: topicName })
+      : target
+        ? fillSlots(m.confirm, { email: target.email })
+        : null;
+  const doneText =
+    target && topicName
+      ? fillSlots(m.doneDetailTopic, { email: target.email, topic: topicName })
+      : target
+        ? fillSlots(m.doneDetail, { email: target.email })
+        : null;
 
   return (
     <main
@@ -89,7 +112,7 @@ export default async function UnsubscribeConfirmPage({
         className="ms-card"
         style={{ padding: "28px 32px", width: "100%", maxWidth: 420, textAlign: "center" }}
       >
-        {contact === null ? (
+        {target === null ? (
           <p style={{ margin: 0, fontSize: 15, color: "var(--ms-bone)" }}>{m.invalid}</p>
         ) : done ? (
           <>
@@ -97,13 +120,13 @@ export default async function UnsubscribeConfirmPage({
               {m.done}
             </p>
             <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--ms-muted)" }}>
-              {fillEmail(m.doneDetail, contact.email)}
+              {doneText}
             </p>
           </>
         ) : (
           <>
             <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
-              {fillEmail(m.confirm, contact.email)}
+              {confirmText}
             </p>
             {/* Plain form POST to the canonical route — the page ships no JS. */}
             <form method="post" action={`/unsubscribe/${encodeURIComponent(token)}`}>

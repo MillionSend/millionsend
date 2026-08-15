@@ -1,9 +1,12 @@
 import { getDb, schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
-import { contactForToken } from "../lookup";
+import { targetForToken } from "../lookup";
 
 /**
- * Public unsubscribe endpoint — the signed token is the only credential.
+ * Public unsubscribe endpoint — the signed token is the only credential, and
+ * it carries the scope: a topic-scoped token unsubscribes from that topic
+ * only, a bare token unsubscribes globally.
+ *
  * This path is what buildUnsubscribeHeaders puts in List-Unsubscribe, so it
  * takes both verbs: a browser GET lands on the hosted confirm page (which
  * lives one segment over — page.tsx and route.ts can't share a segment),
@@ -22,13 +25,26 @@ export async function GET(request: Request, ctx: { params: Promise<{ token: stri
 export async function POST(request: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
   const db = getDb();
-  const contact = await contactForToken(db, token);
-  if (!contact) return new Response(null, { status: 404 });
+  const target = await targetForToken(db, token);
+  if (!target) return new Response(null, { status: 404 });
 
-  await db
-    .update(schema.contacts)
-    .set({ unsubscribed: true, updatedAt: new Date() })
-    .where(eq(schema.contacts.id, contact.id));
+  if (target.topic) {
+    // Topic-scoped: write the explicit opt-out override, leaving the global
+    // unsubscribed flag and every other topic untouched.
+    const s = schema.contactTopicSubscriptions;
+    await db
+      .insert(s)
+      .values({ contactId: target.contactId, topicId: target.topic.id, subscribed: false })
+      .onConflictDoUpdate({
+        target: [s.contactId, s.topicId],
+        set: { subscribed: false, updatedAt: new Date() },
+      });
+  } else {
+    await db
+      .update(schema.contacts)
+      .set({ unsubscribed: true, updatedAt: new Date() })
+      .where(eq(schema.contacts.id, target.contactId));
+  }
 
   const body = await request.text().catch(() => "");
   if (new URLSearchParams(body).get("List-Unsubscribe") === "One-Click") {

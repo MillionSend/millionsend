@@ -15,6 +15,7 @@ import { ContentPreview } from "./parts";
 export interface ComposerInitial {
   id: string;
   audienceId: string | null;
+  topicId: string | null;
   name: string | null;
   from: string;
   subject: string;
@@ -65,6 +66,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 
   const [audienceId, setAudienceId] = useState(initial?.audienceId ?? "");
+  const [topicId, setTopicId] = useState(initial?.topicId ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [from, setFrom] = useState(initial?.from ?? "");
   const [subject, setSubject] = useState(initial?.subject ?? "");
@@ -78,6 +80,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const [templateId, setTemplateId] = useState("");
 
   const audiences = useQuery(trpc.audience.audiences.list.queryOptions());
+  const topics = useQuery(trpc.topics.list.queryOptions());
   const templates = useQuery(trpc.templates.list.queryOptions({ limit: 50 }));
   const templateOptions = templates.data?.items ?? [];
 
@@ -94,7 +97,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   }
   const recipientCount = useQuery(
     trpc.broadcasts.recipientCount.queryOptions(
-      { audienceId },
+      { audienceId, topicId: topicId || null },
       { enabled: guardOpen && !!audienceId },
     ),
   );
@@ -115,6 +118,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
       await updateMutation.mutateAsync({
         id: initial.id,
         audienceId,
+        topicId: topicId || null,
         ...(name.trim() ? { name: name.trim() } : { name: "" }),
         from: from.trim(),
         subject: subject.trim(),
@@ -126,6 +130,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     }
     const { id } = await createMutation.mutateAsync({
       audienceId,
+      ...(topicId ? { topicId } : {}),
       ...(name.trim() ? { name: name.trim() } : {}),
       from: from.trim(),
       subject: subject.trim(),
@@ -228,6 +233,32 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
             ]}
           />
         </div>
+
+        {(topics.data?.length ?? 0) > 0 ? (
+          <div className="ms-field">
+            <label htmlFor="bc-topic">{t("composer.topicLabel")}</label>
+            <Select
+              id="bc-topic"
+              value={topicId}
+              onChange={setTopicId}
+              ariaLabel={t("composer.topicLabel")}
+              width="100%"
+              options={[
+                { value: "", label: t("composer.topicNone") },
+                ...(topics.data ?? []).map((topic) => ({ value: topic.id, label: topic.name })),
+              ]}
+            />
+            <p
+              style={{
+                margin: "6px 0 0",
+                color: "var(--ms-muted)",
+                fontSize: "var(--ms-fs-label)",
+              }}
+            >
+              {t("composer.topicHint")}
+            </p>
+          </div>
+        ) : null}
 
         {templateOptions.length > 0 ? (
           <div className="ms-field">

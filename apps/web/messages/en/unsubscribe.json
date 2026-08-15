@@ -1,7 +1,9 @@
 {
   "confirm": "Unsubscribe {email}?",
+  "confirmTopic": "Unsubscribe {email} from {topic}?",
   "button": "Unsubscribe",
   "done": "You're unsubscribed.",
   "doneDetail": "{email} won't receive these emails anymore.",
+  "doneDetailTopic": "{email} won't receive {topic} emails anymore.",
   "invalid": "This link is not valid."
 }

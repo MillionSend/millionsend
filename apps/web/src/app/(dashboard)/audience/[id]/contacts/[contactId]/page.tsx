@@ -24,6 +24,53 @@ function MetaItem({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
+/** Zero-CSS toggle: an ARIA switch styled from tokens, on = success steel. */
+function TopicSwitch({
+  on,
+  label,
+  disabled,
+  onToggle,
+}: {
+  on: boolean;
+  label: string;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onToggle}
+      style={{
+        flexShrink: 0,
+        width: 34,
+        height: 20,
+        padding: 2,
+        border: 0,
+        borderRadius: 999,
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.6 : 1,
+        background: on ? "var(--ms-success)" : "var(--ms-line-strong)",
+        transition: "background var(--ms-motion-fast, 120ms) ease",
+        display: "flex",
+        justifyContent: on ? "flex-end" : "flex-start",
+      }}
+    >
+      <span
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: "50%",
+          background: "var(--ms-bone)",
+        }}
+      />
+    </button>
+  );
+}
+
 export default function ContactDetailPage() {
   const { contactId } = useParams<{ id: string; contactId: string }>();
   const t = useTranslations("audience");
@@ -59,6 +106,18 @@ export default function ContactDetailPage() {
       },
     }),
   );
+
+  const topicsQuery = useQuery(
+    trpc.audience.contacts.topics.queryOptions({ contactId }, { retry: false }),
+  );
+  const setTopicMutation = useMutation(
+    trpc.audience.contacts.setTopic.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries(trpc.audience.contacts.topics.pathFilter()),
+    }),
+  );
+  const pendingTopicId = setTopicMutation.isPending
+    ? setTopicMutation.variables?.topicId
+    : undefined;
 
   // Stable identities: Modal's focus effect depends on onClose.
   const closeEdit = useCallback(() => setEditOpen(false), []);
@@ -236,6 +295,57 @@ export default function ContactDetailPage() {
             <Skeleton width={160} height={14} />
             <Skeleton width={70} height={14} />
             <Skeleton width={120} height={14} />
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding: "20px 0", borderBottom: "1px solid var(--ms-line)" }}>
+        <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
+          {t("detail.topics")}
+        </p>
+        {row && topicsQuery.isSuccess ? (
+          topicsQuery.data.length === 0 ? (
+            <p style={{ margin: "8px 0 0", fontSize: 14, color: "var(--ms-muted)" }}>
+              {t("detail.noTopics")}
+            </p>
+          ) : (
+            <div style={{ display: "grid", gap: 14, margin: "12px 0 0" }}>
+              {topicsQuery.data.map((topic) => (
+                <div key={topic.id} style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, color: "var(--ms-bone)" }}>{topic.name}</div>
+                    {topic.description ? (
+                      <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>
+                        {topic.description}
+                      </div>
+                    ) : null}
+                  </div>
+                  <TopicSwitch
+                    on={topic.subscribed}
+                    label={t("detail.topicToggle", { name: topic.name })}
+                    disabled={pendingTopicId === topic.id}
+                    onToggle={() =>
+                      setTopicMutation.mutate({
+                        contactId,
+                        topicId: topic.id,
+                        subscribed: !topic.subscribed,
+                      })
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          )
+        ) : (
+          <div style={{ display: "grid", gap: 14, margin: "12px 0 0" }}>
+            {[64, 48].map((w) => (
+              <div key={w} style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <div style={{ flex: 1 }}>
+                  <Skeleton width={`${w + 40}px`} height={14} />
+                </div>
+                <Skeleton width={34} height={20} radius={999} />
+              </div>
+            ))}
           </div>
         )}
       </div>

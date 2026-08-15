@@ -358,6 +358,34 @@ describe("broadcasts.recipientCount", () => {
 
     expect(await caller.broadcasts.recipientCount({ audienceId })).toEqual({ count: 2 });
   });
+
+  it("scopes the count to a topic's subscribers per the subscription rule", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
+    const { id: a } = await caller.audience.contacts.add({ audienceId, email: "a@example.com" });
+    const { id: b } = await caller.audience.contacts.add({ audienceId, email: "b@example.com" });
+    const { id: c } = await caller.audience.contacts.add({ audienceId, email: "c@example.com" });
+    // Globally unsubscribed: excluded from every topic regardless of overrides.
+    await caller.audience.contacts.update({ id: c, unsubscribed: true });
+
+    // Opt-in topic: b opts out, c is global-unsub → only a remains.
+    const optIn = await caller.topics.create({ name: "In", defaultSubscribed: true });
+    await caller.audience.contacts.setTopic({ contactId: b, topicId: optIn.id, subscribed: false });
+    expect(await caller.broadcasts.recipientCount({ audienceId, topicId: optIn.id })).toEqual({
+      count: 1,
+    });
+
+    // Opt-out topic: nobody counts until they explicitly opt in (a does).
+    const optOut = await caller.topics.create({ name: "Out", defaultSubscribed: false });
+    expect(await caller.broadcasts.recipientCount({ audienceId, topicId: optOut.id })).toEqual({
+      count: 0,
+    });
+    await caller.audience.contacts.setTopic({ contactId: a, topicId: optOut.id, subscribed: true });
+    expect(await caller.broadcasts.recipientCount({ audienceId, topicId: optOut.id })).toEqual({
+      count: 1,
+    });
+  });
 });
 
 describe("delivery stats", () => {
