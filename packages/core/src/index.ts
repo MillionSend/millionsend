@@ -37,6 +37,20 @@ export {
 } from "./crypto/envelope.js";
 export { EnvKeyring, type Keyring } from "./crypto/keyring.js";
 export {
+  type DeliverabilityEvaluation,
+  type DeliverabilityHealth,
+  type DeliverabilityReason,
+  type DeliverabilityStatus,
+  evaluateDeliverability,
+  fetchDeliverabilityHealth,
+  GUARDRAIL_WINDOW_DAYS,
+  MIN_GUARDRAIL_VOLUME,
+  PAUSE_BOUNCE_RATE,
+  PAUSE_COMPLAINT_RATE,
+  WARN_BOUNCE_RATE,
+  WARN_COMPLAINT_RATE,
+} from "./deliverability.js";
+export {
   beginIdempotent,
   completeIdempotent,
   type IdempotencyBegin,

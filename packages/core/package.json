@@ -11,6 +11,10 @@
     "./bounce-guidance": {
       "types": "./src/bounce-guidance.ts",
       "default": "./src/bounce-guidance.ts"
+    },
+    "./deliverability": {
+      "types": "./src/deliverability.ts",
+      "default": "./src/deliverability.ts"
     }
   },
   "scripts": {

@@ -1,3 +1,4 @@
+import { utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -281,6 +282,45 @@ describe("broadcasts.send", () => {
     await expect(caller.broadcasts.send({ id })).rejects.toMatchObject({
       code: "PRECONDITION_FAILED",
     });
+  });
+});
+
+describe("broadcasts.send deliverability guard", () => {
+  async function seedWindowCounter(
+    teamId: string,
+    counts: { accepted: number; complained?: number; bounced?: number },
+  ) {
+    await db.insert(schema.usageCounters).values({ teamId, day: utcDay(Date.now()), ...counts });
+  }
+
+  it("blocks the send when the window complaint rate is over the pause line", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { id } = await seedDraft(teamId);
+    // 3/2000 = 0.15% > 0.1% pause line, and 2000 > the 1000 volume floor.
+    await seedWindowCounter(teamId, { accepted: 2000, complained: 3 });
+
+    const enqueued: string[] = [];
+    const caller = callerFor(teamId, {
+      enqueueBroadcastSend: async (broadcastId) => {
+        enqueued.push(broadcastId);
+      },
+    });
+    await expect(caller.broadcasts.send({ id })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("0.1%"),
+    });
+    expect(enqueued).toEqual([]);
+    expect((await broadcastRow(id))?.status).toBe("draft");
+  });
+
+  it("does not pause a tiny sample below the volume floor at the same rate", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { id } = await seedDraft(teamId);
+    // 3/500 = 0.6% (well over the rate line) but 500 < the 1000 volume floor.
+    await seedWindowCounter(teamId, { accepted: 500, complained: 3 });
+
+    await callerFor(teamId).broadcasts.send({ id });
+    expect((await broadcastRow(id))?.status).toBe("scheduled");
   });
 });
 

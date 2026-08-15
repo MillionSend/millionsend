@@ -2,6 +2,7 @@ import { getDb } from "@millionsend/db";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { DeliverabilityBanner } from "@/components/deliverability-banner";
 import { getAuth } from "@/server/auth";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership } from "@/server/membership";
 
@@ -19,7 +20,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <AppShell teamName={membership.teamName} userEmail={session.user.email}>
       {/* Canvas main-block padding: 32px 40px (DESIGN.md Layout); 16px below 900px. */}
       <main className="ms-main" style={{ flex: 1, minWidth: 0, padding: "32px 40px" }}>
-        <div style={{ maxWidth: 1120, margin: "0 auto" }}>{children}</div>
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <DeliverabilityBanner />
+          {children}
+        </div>
       </main>
     </AppShell>
   );
