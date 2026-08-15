@@ -153,7 +153,6 @@
     "bannerLookingBodyGeneric": "This may take a few hours depending on your DNS provider's propagation time.",
     "bannerVerified": "Domain verified.",
     "bannerVerifiedBody": "Ready to send emails.",
-    "recordsCount": "{found} of {total} records",
     "deleteDomain": "Delete domain",
     "deleteBody": "This permanently deletes the domain and its DNS configuration. Sending from it stops immediately.",
     "deleteConfirmLabel": "Type the domain to confirm",
