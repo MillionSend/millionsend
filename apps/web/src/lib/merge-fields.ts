@@ -36,11 +36,26 @@ export const MERGE_NAME_RE = /^[A-Za-z0-9_]+$/;
  */
 export const MERGE_TOKEN_RE = /\{\{\{([A-Za-z0-9_]+)(?:\|([^{}]*))?\}\}\}/g;
 
-/** Builtins first, then each valid contact-property key not shadowing a builtin. */
+/**
+ * Builtins first, then each valid contact-property key not shadowing a builtin.
+ * Callers pass the union of derived (in-use) keys and typed property
+ * definitions, so a defined key is insertable before any contact carries a
+ * value; duplicates across those two sources collapse to one option.
+ *
+ * Fallback precedence, for a future reader: a token's own `|fallback` always
+ * wins. A definition's fallbackValue is only the default when the token has
+ * none — and even then it is advisory in the editor, because the send worker
+ * resolves tokens without reading definitions. Wiring it into the worker is a
+ * separate change.
+ */
 export function buildMergeOptions(propertyKeys: string[]): MergeFieldOption[] {
-  const custom = propertyKeys
-    .filter((key) => MERGE_NAME_RE.test(key) && !BUILTIN_NAMES.has(key))
-    .map((key): MergeFieldOption => ({ name: key, builtin: false }));
+  const seen = new Set(BUILTIN_NAMES);
+  const custom: MergeFieldOption[] = [];
+  for (const key of propertyKeys) {
+    if (!MERGE_NAME_RE.test(key) || seen.has(key)) continue;
+    seen.add(key);
+    custom.push({ name: key, builtin: false });
+  }
   return [...MERGE_BUILTINS, ...custom];
 }
 

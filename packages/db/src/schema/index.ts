@@ -4,6 +4,7 @@ export * from "./audiences.js";
 export * from "./audit.js";
 export * from "./auth.js";
 export * from "./broadcasts.js";
+export * from "./contact-properties.js";
 export * from "./domains.js";
 export * from "./emails.js";
 export * from "./idempotency.js";

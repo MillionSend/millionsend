@@ -102,11 +102,17 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const templateOptions = templates.data?.items ?? [];
 
   // Merge-field picker options and preview sample values both derive from the
-  // team's contact-property keys in use.
+  // team's contact-property keys in use, plus its typed definitions so a
+  // defined key is insertable before any contact carries a value.
   const properties = useQuery(trpc.audience.properties.list.queryOptions());
+  const definedProps = useQuery(trpc.audience.properties.defineList.queryOptions());
   const mergeFields = useMemo(
-    () => buildMergeOptions((properties.data ?? []).map((p) => p.key)),
-    [properties.data],
+    () =>
+      buildMergeOptions([
+        ...(properties.data ?? []).map((p) => p.key),
+        ...(definedProps.data ?? []).map((p) => p.key),
+      ]),
+    [properties.data, definedProps.data],
   );
   const previewSamples = useMemo(
     () => Object.fromEntries((properties.data ?? []).map((p) => [p.key, p.sampleValue])),
