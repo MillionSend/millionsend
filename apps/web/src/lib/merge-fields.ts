@@ -55,3 +55,17 @@ export function parseMergeToken(token: string): { name: string; fallback?: strin
   const name = match[1] as string;
   return match[2] !== undefined ? { name, fallback: match[2] } : { name };
 }
+
+/**
+ * True when every `{{{…}}}` group in `html` is a well-formed merge token. The
+ * Maily editor only inserts valid names, so a malformed group (a stray brace,
+ * a space, a fallback with a brace) means the html was tampered with or
+ * hand-edited — the send worker would ship it as literal broken text. A save
+ * guard rejects such html before it can become a send.
+ */
+export function hasWellFormedMergeTokens(html: string): boolean {
+  for (const match of html.matchAll(/\{\{\{[\s\S]*?\}\}\}/g)) {
+    if (parseMergeToken(match[0]) === null) return false;
+  }
+  return true;
+}

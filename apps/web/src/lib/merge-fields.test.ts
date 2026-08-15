@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMergeOptions,
+  hasWellFormedMergeTokens,
   MERGE_BUILTINS,
   MERGE_TOKEN_RE,
   makeMergeToken,
@@ -46,5 +47,20 @@ describe("token round-trip", () => {
       ["FIRST_NAME", "hi"],
       ["plan", undefined],
     ]);
+  });
+});
+
+describe("hasWellFormedMergeTokens", () => {
+  it("passes html whose every triple-brace group is a valid token", () => {
+    expect(hasWellFormedMergeTokens("<p>Hi {{{FIRST_NAME|there}}}</p>")).toBe(true);
+    expect(hasWellFormedMergeTokens("<a href='{{{UNSUBSCRIBE_URL}}}'>x</a>")).toBe(true);
+    expect(hasWellFormedMergeTokens("<p>no tokens here</p>")).toBe(true);
+  });
+
+  it("rejects a triple-brace group that is not a well-formed token", () => {
+    // A space or a brace in the name is what a tampered/hand-edited doc would
+    // leak — the worker would ship it as literal text, so the save is blocked.
+    expect(hasWellFormedMergeTokens("<p>{{{FIRST NAME}}}</p>")).toBe(false);
+    expect(hasWellFormedMergeTokens("<p>{{{bad-name}}}</p>")).toBe(false);
   });
 });

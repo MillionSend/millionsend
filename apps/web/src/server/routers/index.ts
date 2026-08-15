@@ -3,6 +3,7 @@ import { apiKeysRouter } from "./api-keys";
 import { audienceRouter } from "./audience";
 import { broadcastsRouter } from "./broadcasts";
 import { domainsRouter } from "./domains";
+import { emailRouter } from "./email";
 import { emailsRouter } from "./emails";
 import { logsRouter } from "./logs";
 import { metricsRouter } from "./metrics";
@@ -17,6 +18,7 @@ import { webhooksRouter } from "./webhooks";
 export const appRouter = router({
   audience: audienceRouter,
   broadcasts: broadcastsRouter,
+  email: emailRouter,
   emails: emailsRouter,
   domains: domainsRouter,
   apiKeys: apiKeysRouter,

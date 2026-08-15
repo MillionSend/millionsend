@@ -12,10 +12,11 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { createTranslator } from "next-intl";
 import { z } from "zod";
-import { blockDocSchema } from "@/lib/email-blocks/model";
+import { mailyDocumentSchema } from "@/lib/email-doc";
 import enDeliverability from "../../../messages/en/deliverability.json";
 import ptBRDeliverability from "../../../messages/pt-BR/deliverability.json";
 import { type AppLocale, DEFAULT_LOCALE, LOCALE_COOKIE, LOCALES } from "../../i18n/request";
+import { resolveEditorSave } from "../email-content";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
 import { assertAudience } from "./audience";
@@ -86,8 +87,8 @@ const subjectSchema = z.string().trim().min(1).max(998);
 // "" clears the field — stored as null, never as an empty string.
 const nameSchema = z.string().trim().max(200);
 const bodySchema = z.string().max(500_000);
-// Block-editor source of truth; null clears it back to a legacy raw-HTML row.
-const documentSchema = blockDocSchema.nullable();
+// Maily editor source of truth; null clears it back to a legacy raw-HTML row.
+const documentSchema = mailyDocumentSchema.nullable();
 
 type BroadcastRow = typeof schema.broadcasts.$inferSelect;
 
@@ -230,6 +231,7 @@ export const broadcastsRouter = router({
       await assertAudience(ctx, input.audienceId);
       if (input.topicId) await assertTopic(ctx, input.topicId);
       if (input.segmentId) await assertSegmentInAudience(ctx, input.segmentId, input.audienceId);
+      const saved = await resolveEditorSave(input);
       const b = schema.broadcasts;
       const [row] = await ctx.db
         .insert(b)
@@ -242,9 +244,9 @@ export const broadcastsRouter = router({
           from: input.from,
           subject: input.subject,
           replyTo: input.replyTo ? encodeReplyTo(input.replyTo) : null,
-          html: input.html || null,
-          text: input.text || null,
-          document: input.document ?? null,
+          html: saved.html || null,
+          text: saved.text || null,
+          document: saved.document ?? null,
         })
         .returning({ id: b.id });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -279,20 +281,21 @@ export const broadcastsRouter = router({
           input.audienceId ?? row.audienceId ?? "",
         );
       }
+      const saved = await resolveEditorSave(input);
       const b = schema.broadcasts;
       await ctx.db
         .update(b)
         .set({
-          ...(input.audienceId !== undefined ? { audienceId: input.audienceId } : {}),
-          ...(input.topicId !== undefined ? { topicId: input.topicId } : {}),
-          ...(input.segmentId !== undefined ? { segmentId: input.segmentId } : {}),
-          ...(input.name !== undefined ? { name: input.name || null } : {}),
-          ...(input.from !== undefined ? { from: input.from } : {}),
-          ...(input.subject !== undefined ? { subject: input.subject } : {}),
-          ...(input.replyTo !== undefined ? { replyTo: encodeReplyTo(input.replyTo) } : {}),
-          ...(input.html !== undefined ? { html: input.html || null } : {}),
-          ...(input.text !== undefined ? { text: input.text || null } : {}),
-          ...(input.document !== undefined ? { document: input.document } : {}),
+          ...(saved.audienceId !== undefined ? { audienceId: saved.audienceId } : {}),
+          ...(saved.topicId !== undefined ? { topicId: saved.topicId } : {}),
+          ...(saved.segmentId !== undefined ? { segmentId: saved.segmentId } : {}),
+          ...(saved.name !== undefined ? { name: saved.name || null } : {}),
+          ...(saved.from !== undefined ? { from: saved.from } : {}),
+          ...(saved.subject !== undefined ? { subject: saved.subject } : {}),
+          ...(saved.replyTo !== undefined ? { replyTo: encodeReplyTo(saved.replyTo) } : {}),
+          ...(saved.html !== undefined ? { html: saved.html || null } : {}),
+          ...(saved.text !== undefined ? { text: saved.text || null } : {}),
+          ...(saved.document !== undefined ? { document: saved.document } : {}),
           updatedAt: new Date(),
         })
         .where(and(eq(b.id, input.id), eq(b.teamId, ctx.teamId)));

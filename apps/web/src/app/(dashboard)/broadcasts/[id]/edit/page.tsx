@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
-import { parseBlockDoc } from "@/lib/email-blocks/model";
 import { useTRPC } from "@/lib/trpc";
 import { BroadcastComposer, ComposerSkeleton } from "../../composer";
 
@@ -51,7 +50,7 @@ export default function EditBroadcastPage() {
         replyTo: broadcast.replyTo,
         html: broadcast.html,
         text: broadcast.text,
-        document: parseBlockDoc(broadcast.document),
+        document: broadcast.document,
       }}
     />
   );

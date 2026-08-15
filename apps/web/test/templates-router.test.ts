@@ -37,17 +37,17 @@ const TEMPLATE_INPUT = {
   text: "Hi {{{FIRST_NAME|there}}}",
 };
 
+// A Maily/Tiptap doc: a paragraph carrying a variable node. The variable
+// serializes to the worker's {{{FIRST_NAME|there}}} token when rendered.
 const SAMPLE_DOC = {
-  version: 1 as const,
-  blocks: [
+  type: "doc" as const,
+  content: [
     {
-      type: "text" as const,
-      id: "b1",
-      html: "<p>Hi {{{FIRST_NAME|there}}}</p>",
-      align: "left" as const,
-      color: "#111111",
-      fontSize: 16,
-      padding: 12,
+      type: "paragraph",
+      content: [
+        { type: "text", text: "Hi " },
+        { type: "variable", attrs: { id: "FIRST_NAME", fallback: "there" } },
+      ],
     },
   ],
 };
@@ -141,31 +141,59 @@ describe("templates.list keyset paging", () => {
 });
 
 describe("templates.document", () => {
-  it("round-trips a block document through create and get", async () => {
+  it("round-trips a Maily document and renders send html with the token", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id } = await caller.templates.create({ ...TEMPLATE_INPUT, document: SAMPLE_DOC });
-    expect((await caller.templates.get({ id })).document).toEqual(SAMPLE_DOC);
+    // A Maily document is the source: the client-sent html is ignored and the
+    // send html is re-rendered from the document server-side.
+    const { id } = await caller.templates.create({
+      name: "Doc",
+      html: "<p>ignored</p>",
+      document: SAMPLE_DOC,
+    });
+    const got = await caller.templates.get({ id });
+    expect(got.document).toEqual(SAMPLE_DOC);
+    expect(got.html).toContain("{{{FIRST_NAME|there}}}");
     // A legacy row (no document) stays null and still opens.
     const { id: legacyId } = await caller.templates.create(TEMPLATE_INPUT);
     expect((await caller.templates.get({ id: legacyId })).document).toBeNull();
+  });
+
+  it("re-renders html from the document on update", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id } = await caller.templates.create({ name: "Doc", html: "<p>old</p>" });
+    // Update carries only the document; html is re-derived from it, not sent.
+    await caller.templates.update({ id, document: SAMPLE_DOC });
+    expect((await templateRow(id))?.html).toContain("{{{FIRST_NAME|there}}}");
   });
 
   it("clears the document back to legacy raw-HTML when updated to null", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
     const { id } = await caller.templates.create({ ...TEMPLATE_INPUT, document: SAMPLE_DOC });
-    await caller.templates.update({ id, document: null });
-    expect((await templateRow(id))?.document).toBeNull();
+    await caller.templates.update({ id, document: null, html: "<p>raw</p>" });
+    const row = await templateRow(id);
+    expect(row?.document).toBeNull();
+    expect(row?.html).toBe("<p>raw</p>");
   });
 
-  it("rejects a malformed document via the zod guard", async () => {
+  it("rejects a non-Maily document via the zod guard", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
     await expect(
       // biome-ignore lint/suspicious/noExplicitAny: deliberately wrong shape
       caller.templates.create({ ...TEMPLATE_INPUT, document: { version: 2, blocks: [] } as any }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("email.render", () => {
+  it("renders a Maily document to html + text with the worker token, unresolved", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { html, text } = await callerFor(teamId).email.render({ document: SAMPLE_DOC });
+    expect(html).toContain("{{{FIRST_NAME|there}}}");
+    expect(text).toContain("Hi");
   });
 });
 

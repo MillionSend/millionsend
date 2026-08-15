@@ -48,17 +48,17 @@ const DRAFT_INPUT = {
   html: "<p>Hi</p>",
 };
 
+// A Maily/Tiptap doc: a paragraph carrying a variable node. The variable
+// serializes to the worker's {{{FIRST_NAME|there}}} token when rendered.
 const SAMPLE_DOC = {
-  version: 1 as const,
-  blocks: [
+  type: "doc" as const,
+  content: [
     {
-      type: "text" as const,
-      id: "b1",
-      html: "<p>Hi {{{FIRST_NAME|there}}}</p>",
-      align: "left" as const,
-      color: "#111111",
-      fontSize: 16,
-      padding: 12,
+      type: "paragraph",
+      content: [
+        { type: "text", text: "Hi " },
+        { type: "variable", attrs: { id: "FIRST_NAME", fallback: "there" } },
+      ],
     },
   ],
 };
@@ -149,7 +149,7 @@ describe("broadcasts.create / get / list", () => {
 });
 
 describe("broadcasts.document", () => {
-  it("round-trips a block document through create, get, and update", async () => {
+  it("round-trips a Maily document, rendering send html from it, then clears it", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
     const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
@@ -158,10 +158,15 @@ describe("broadcasts.document", () => {
       ...DRAFT_INPUT,
       document: SAMPLE_DOC,
     });
-    expect((await caller.broadcasts.get({ id })).document).toEqual(SAMPLE_DOC);
+    const got = await caller.broadcasts.get({ id });
+    expect(got.document).toEqual(SAMPLE_DOC);
+    // Send html is re-rendered from the document, not the client-sent DRAFT html.
+    expect(got.html).toContain("{{{FIRST_NAME|there}}}");
     // Clearing back to a legacy raw-HTML draft.
-    await caller.broadcasts.update({ id, document: null });
-    expect((await broadcastRow(id))?.document).toBeNull();
+    await caller.broadcasts.update({ id, document: null, html: "<p>raw</p>" });
+    const row = await broadcastRow(id);
+    expect(row?.document).toBeNull();
+    expect(row?.html).toBe("<p>raw</p>");
   });
 
   it("leaves the document null on a legacy raw-HTML draft", async () => {
