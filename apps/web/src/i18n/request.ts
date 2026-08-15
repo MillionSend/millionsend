@@ -10,6 +10,7 @@ const NAMESPACES = [
   "common",
   "audience",
   "auth",
+  "broadcasts",
   "nav",
   "emails",
   "domains",

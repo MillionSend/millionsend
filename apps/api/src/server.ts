@@ -30,6 +30,13 @@ const app = createApi({
       { dedupeKey: emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) },
     );
   },
+  enqueueBroadcastSend: async (broadcastId, opts) => {
+    await queue.send(
+      "broadcast.send",
+      { broadcastId },
+      { dedupeKey: broadcastId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) },
+    );
+  },
   ...(snsTopicArns
     ? {
         sns: {

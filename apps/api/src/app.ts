@@ -29,18 +29,26 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { createMiddleware } from "hono/factory";
 import {
   audienceResponseSchema,
+  broadcastIdResponseSchema,
+  cancelBroadcastResponseSchema,
   contactIdResponseSchema,
   createAudienceRequestSchema,
+  createBroadcastRequestSchema,
   createContactRequestSchema,
   errorSchema,
+  getBroadcastResponseSchema,
   getContactResponseSchema,
   getEmailResponseSchema,
   listAudiencesResponseSchema,
+  listBroadcastsResponseSchema,
   listContactsResponseSchema,
   removeAudienceResponseSchema,
+  removeBroadcastResponseSchema,
   removeContactResponseSchema,
+  sendBroadcastRequestSchema,
   sendEmailRequestSchema,
   sendEmailResponseSchema,
+  updateBroadcastRequestSchema,
   updateContactRequestSchema,
 } from "./schemas.js";
 
@@ -63,6 +71,14 @@ export interface ApiDeps {
    * without a producer would strand it in "queued" forever.
    */
   enqueueEmailSend: (emailId: string, opts?: { startAfter?: Date }) => Promise<void>;
+  /**
+   * Hands a scheduled broadcast to the fan-out queue. Optional: without it a
+   * send still commits (status scheduled) and the broadcasts.reconcile sweep
+   * picks the broadcast up.
+   */
+  enqueueBroadcastSend?:
+    | ((broadcastId: string, opts?: { startAfter?: Date }) => Promise<void>)
+    | undefined;
   /** SES event ingestion; omitted → the endpoint does not exist (404). */
   sns?: SnsIngestDeps | undefined;
 }
@@ -447,6 +463,371 @@ function registerAudienceRoutes(
   );
 }
 
+function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
+  const db = deps.db;
+  const jsonErr = (description: string) => ({
+    content: { "application/json": { schema: errorSchema } },
+    description,
+  });
+  const idParam = z.object({ id: z.uuid() });
+
+  const findBroadcast = async (teamId: string, id: string) =>
+    (
+      await db
+        .select()
+        .from(schema.broadcasts)
+        .where(and(eq(schema.broadcasts.id, id), eq(schema.broadcasts.teamId, teamId)))
+    )[0];
+
+  const findAudience = async (teamId: string, id: string) =>
+    (
+      await db
+        .select({ id: schema.audiences.id })
+        .from(schema.audiences)
+        .where(and(eq(schema.audiences.id, id), eq(schema.audiences.teamId, teamId)))
+    )[0];
+
+  // Accepted into the request schema so unsupported Resend knobs fail loudly
+  // instead of being silently stripped (docs/resend-compatibility.md).
+  const unsupported = (body: {
+    preview_text?: string | undefined;
+    topic_id?: string | null | undefined;
+    send?: boolean | undefined;
+    scheduled_at?: string | undefined;
+  }): string | null => {
+    if (body.preview_text !== undefined) return "preview_text is not yet supported";
+    if (body.topic_id != null) return "topic_id is not yet supported";
+    if (body.send) return "send-on-create is not supported; use POST /broadcasts/{id}/send";
+    if (body.scheduled_at !== undefined) {
+      return "scheduled_at on create is not supported; use POST /broadcasts/{id}/send";
+    }
+    return null;
+  };
+
+  const parseReplyTo = (stored: string | null): string[] | null =>
+    stored === null ? null : (JSON.parse(stored) as string[]);
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/broadcasts",
+      request: {
+        body: { content: { "application/json": { schema: createBroadcastRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: broadcastIdResponseSchema } },
+          description: "Broadcast created as draft",
+        },
+        404: jsonErr("Audience not found"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const rejected = unsupported(body);
+      if (rejected) return c.json(errorBody(422, "validation_error", rejected), 422);
+      // The SDK sends the target as audience_id and/or segment_id.
+      const audienceId = body.audience_id ?? body.segment_id;
+      if (!audienceId || !(await findAudience(auth.teamId, audienceId))) {
+        return c.json(errorBody(404, "not_found", "Audience not found"), 404);
+      }
+      const [row] = await db
+        .insert(schema.broadcasts)
+        .values({
+          teamId: auth.teamId,
+          audienceId,
+          name: body.name ?? null,
+          from: body.from,
+          subject: body.subject,
+          replyTo: body.reply_to ? JSON.stringify(body.reply_to) : null,
+          html: body.html ?? null,
+          text: body.text ?? null,
+        })
+        .returning({ id: schema.broadcasts.id });
+      if (!row) throw new Error("broadcast insert returned no row");
+      return c.json({ id: row.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/broadcasts",
+      responses: {
+        200: {
+          content: { "application/json": { schema: listBroadcastsResponseSchema } },
+          description: "Broadcasts",
+        },
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const rows = await db
+        .select()
+        .from(schema.broadcasts)
+        .where(eq(schema.broadcasts.teamId, auth.teamId))
+        .orderBy(asc(schema.broadcasts.createdAt));
+      return c.json(
+        {
+          object: "list" as const,
+          data: rows.map((r) => ({
+            id: r.id,
+            name: r.name,
+            audience_id: r.audienceId,
+            segment_id: r.audienceId,
+            status: r.status,
+            created_at: r.createdAt.toISOString(),
+            scheduled_at: r.scheduledAt?.toISOString() ?? null,
+            sent_at: r.sentAt?.toISOString() ?? null,
+          })),
+          has_more: false,
+        },
+        200,
+      );
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/broadcasts/{id}",
+      request: { params: idParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: getBroadcastResponseSchema } },
+          description: "Broadcast",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const broadcast = await findBroadcast(auth.teamId, c.req.valid("param").id);
+      if (!broadcast) return c.json(errorBody(404, "not_found", "Broadcast not found"), 404);
+      return c.json(
+        {
+          object: "broadcast" as const,
+          id: broadcast.id,
+          name: broadcast.name,
+          audience_id: broadcast.audienceId,
+          segment_id: broadcast.audienceId,
+          from: broadcast.from,
+          subject: broadcast.subject,
+          reply_to: parseReplyTo(broadcast.replyTo),
+          preview_text: null,
+          html: broadcast.html,
+          text: broadcast.text,
+          status: broadcast.status,
+          created_at: broadcast.createdAt.toISOString(),
+          scheduled_at: broadcast.scheduledAt?.toISOString() ?? null,
+          sent_at: broadcast.sentAt?.toISOString() ?? null,
+        },
+        200,
+      );
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "patch",
+      path: "/broadcasts/{id}",
+      request: {
+        params: idParam,
+        body: { content: { "application/json": { schema: updateBroadcastRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: broadcastIdResponseSchema } },
+          description: "Broadcast updated",
+        },
+        400: jsonErr("Not a draft"),
+        404: jsonErr("Not found"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const rejected = unsupported(body);
+      if (rejected) return c.json(errorBody(422, "validation_error", rejected), 422);
+      const broadcast = await findBroadcast(auth.teamId, id);
+      if (!broadcast) return c.json(errorBody(404, "not_found", "Broadcast not found"), 404);
+      if (broadcast.status !== "draft") {
+        return c.json(errorBody(400, "invalid_state", "Only draft broadcasts can be updated"), 400);
+      }
+      const audienceId = body.audience_id ?? body.segment_id;
+      if (audienceId !== undefined && !(await findAudience(auth.teamId, audienceId))) {
+        return c.json(errorBody(404, "not_found", "Audience not found"), 404);
+      }
+      const [row] = await db
+        .update(schema.broadcasts)
+        .set({
+          updatedAt: new Date(),
+          ...(body.name !== undefined ? { name: body.name } : {}),
+          ...(audienceId !== undefined ? { audienceId } : {}),
+          ...(body.from !== undefined ? { from: body.from } : {}),
+          ...(body.subject !== undefined ? { subject: body.subject } : {}),
+          ...(body.html !== undefined ? { html: body.html } : {}),
+          ...(body.text !== undefined ? { text: body.text } : {}),
+          ...(body.reply_to !== undefined ? { replyTo: JSON.stringify(body.reply_to) } : {}),
+        })
+        // Status re-checked in the WHERE: a send racing this update must not
+        // let a draft-only edit land on a scheduled/sending broadcast.
+        .where(and(eq(schema.broadcasts.id, id), eq(schema.broadcasts.status, "draft")))
+        .returning({ id: schema.broadcasts.id });
+      if (!row) {
+        return c.json(errorBody(400, "invalid_state", "Only draft broadcasts can be updated"), 400);
+      }
+      return c.json({ id: row.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: "/broadcasts/{id}",
+      request: { params: idParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: removeBroadcastResponseSchema } },
+          description: "Broadcast deleted",
+        },
+        400: jsonErr("Not a draft"),
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const broadcast = await findBroadcast(auth.teamId, id);
+      if (!broadcast) return c.json(errorBody(404, "not_found", "Broadcast not found"), 404);
+      if (broadcast.status !== "draft") {
+        return c.json(errorBody(400, "invalid_state", "Only draft broadcasts can be deleted"), 400);
+      }
+      const [row] = await db
+        .delete(schema.broadcasts)
+        .where(and(eq(schema.broadcasts.id, id), eq(schema.broadcasts.status, "draft")))
+        .returning({ id: schema.broadcasts.id });
+      if (!row) {
+        return c.json(errorBody(400, "invalid_state", "Only draft broadcasts can be deleted"), 400);
+      }
+      return c.json({ object: "broadcast" as const, id: row.id, deleted: true as const }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/broadcasts/{id}/send",
+      request: {
+        params: idParam,
+        body: { content: { "application/json": { schema: sendBroadcastRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: broadcastIdResponseSchema } },
+          description: "Broadcast scheduled",
+        },
+        400: jsonErr("Not a draft"),
+        404: jsonErr("Not found"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const broadcast = await findBroadcast(auth.teamId, id);
+      if (!broadcast) return c.json(errorBody(404, "not_found", "Broadcast not found"), 404);
+      if (broadcast.status !== "draft") {
+        return c.json(errorBody(400, "invalid_state", "Only draft broadcasts can be sent"), 400);
+      }
+      if (!broadcast.audienceId) {
+        return c.json(errorBody(422, "validation_error", "The audience no longer exists"), 422);
+      }
+      // Same boundary as /emails: only a verified team domain may appear as
+      // the sender.
+      const fromDomain = senderDomain(broadcast.from);
+      const domain = fromDomain
+        ? (
+            await db
+              .select({ status: schema.domains.status })
+              .from(schema.domains)
+              .where(
+                and(eq(schema.domains.teamId, auth.teamId), eq(schema.domains.name, fromDomain)),
+              )
+          )[0]
+        : undefined;
+      if (domain?.status !== "verified") {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            `The ${fromDomain ?? "sender"} domain is not verified for this team`,
+          ),
+          422,
+        );
+      }
+      const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at) : new Date();
+      const [row] = await db
+        .update(schema.broadcasts)
+        .set({ status: "scheduled", scheduledAt, updatedAt: new Date() })
+        .where(and(eq(schema.broadcasts.id, id), eq(schema.broadcasts.status, "draft")))
+        .returning({ id: schema.broadcasts.id });
+      if (!row) {
+        return c.json(errorBody(400, "invalid_state", "Only draft broadcasts can be sent"), 400);
+      }
+      // Enqueue failure must not undo the commit — the reconcile sweep
+      // re-enqueues scheduled broadcasts whose job was lost.
+      try {
+        await deps.enqueueBroadcastSend?.(row.id, { startAfter: scheduledAt });
+      } catch (err) {
+        console.error("broadcast.send enqueue failed; reconcile sweep will recover", err);
+      }
+      return c.json({ id: row.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/broadcasts/{id}/cancel",
+      request: { params: idParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: cancelBroadcastResponseSchema } },
+          description: "Broadcast canceled",
+        },
+        400: jsonErr("Not scheduled"),
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const broadcast = await findBroadcast(auth.teamId, id);
+      if (!broadcast) return c.json(errorBody(404, "not_found", "Broadcast not found"), 404);
+      // Scheduled only: the fan-out handler re-checks status, so a cancel
+      // that wins this update beats a racing send job.
+      const [row] = await db
+        .update(schema.broadcasts)
+        .set({ status: "canceled", updatedAt: new Date() })
+        .where(and(eq(schema.broadcasts.id, id), eq(schema.broadcasts.status, "scheduled")))
+        .returning({ id: schema.broadcasts.id });
+      if (!row) {
+        return c.json(
+          errorBody(400, "invalid_state", "Only scheduled broadcasts can be canceled"),
+          400,
+        );
+      }
+      return c.json({ object: "broadcast" as const, id: row.id }, 200);
+    },
+  );
+}
+
 export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   const app = new OpenAPIHono<Env>({
     defaultHook: (result, c) => {
@@ -528,6 +909,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     app.use(`/${prefix}/*`, requireApiKey);
     registerAudienceRoutes(app, deps.db, prefix);
   }
+
+  app.use("/broadcasts", requireApiKey);
+  app.use("/broadcasts/*", requireApiKey);
+  registerBroadcastRoutes(app, deps);
 
   const sendRoute = createRoute({
     method: "post",

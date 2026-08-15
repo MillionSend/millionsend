@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { broadcasts } from "./broadcasts.js";
 import { bytea } from "./custom-types.js";
 import { domains } from "./domains.js";
 import { teams } from "./teams.js";
@@ -72,6 +73,10 @@ export const emails = pgTable(
       .references(() => teams.id, { onDelete: "cascade" }),
     domainId: uuid("domain_id").references(() => domains.id, { onDelete: "set null" }),
     apiKeyId: uuid("api_key_id"),
+    broadcastId: uuid("broadcast_id").references(() => broadcasts.id, { onDelete: "set null" }),
+    // No FK: the contact may be deleted later and per-broadcast stats must
+    // survive it.
+    contactId: uuid("contact_id"),
     sesMessageId: text("ses_message_id"),
     from: text("from").notNull(),
     to: jsonb("to").$type<string[]>().notNull(),
@@ -98,6 +103,11 @@ export const emails = pgTable(
       .where(sql`${t.sesMessageId} is not null`),
     // Partial index drives the retention purge scan (rows whose body still exists).
     index("emails_body_unpurged_idx").on(t.createdAt).where(isNull(t.bodyPurgedAt)),
+    // Fan-out idempotency spine: re-running a broadcast fan-out can never
+    // insert (and thus never send) a second email to the same contact.
+    uniqueIndex("emails_broadcast_contact_idx")
+      .on(t.broadcastId, t.contactId)
+      .where(sql`${t.broadcastId} is not null`),
   ],
 );
 

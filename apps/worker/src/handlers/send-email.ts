@@ -1,8 +1,10 @@
 import {
   applyStatusCas,
+  buildUnsubscribeHeaders,
   decryptEmailBody,
   enqueueWebhookDeliveries,
   type Keyring,
+  makeUnsubscribeToken,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -33,6 +35,12 @@ export interface SendDeps {
   reschedule?: ((emailId: string, at: Date) => Promise<void>) | undefined;
   /** Enqueue a webhook.deliver job; email.sent webhooks are skipped when absent. */
   enqueueWebhookDelivery?: ((deliveryId: string) => Promise<void>) | undefined;
+  /**
+   * RFC 8058 one-click unsubscribe config for broadcast emails. Broadcast
+   * rows (contactId set) REFUSE to send without it — a marketing email must
+   * never go out missing List-Unsubscribe headers.
+   */
+  unsubscribe?: { secretKey: Buffer; baseUrl: string } | undefined;
 }
 
 export type SendOutcome = "sent" | "skipped" | "deferred" | "failed";
@@ -71,6 +79,22 @@ export async function sendEmail(
     deps.keyring,
   );
 
+  const headers: Record<string, string> = { "X-MillionSend-Email-ID": email.id };
+  if (email.contactId) {
+    if (!deps.unsubscribe) {
+      // Throwing (before the claim) keeps the email queued and the job
+      // retrying loudly rather than sending without unsubscribe headers.
+      throw new Error(`email ${email.id} is a broadcast send but unsubscribe is not configured`);
+    }
+    Object.assign(
+      headers,
+      buildUnsubscribeHeaders(
+        deps.unsubscribe.baseUrl,
+        makeUnsubscribeToken({ contactId: email.contactId, secretKey: deps.unsubscribe.secretKey }),
+      ),
+    );
+  }
+
   const mime = await buildRawMime({
     from: email.from,
     to: email.to,
@@ -80,7 +104,7 @@ export async function sendEmail(
     subject: email.subject,
     ...(body.html ? { html: body.html } : {}),
     ...(body.text ? { text: body.text } : {}),
-    headers: { "X-MillionSend-Email-ID": email.id },
+    headers,
   });
 
   // SES identities are verified per region: the send must target the

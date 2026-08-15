@@ -1,5 +1,6 @@
 import { env } from "@millionsend/config";
 import {
+  deriveUnsubscribeKey,
   EnvKeyring,
   getInstanceSettings,
   postJson,
@@ -10,11 +11,13 @@ import { Queue } from "@millionsend/queue";
 import {
   drainQuotaParked,
   purgeExpiredEmailBodies,
+  reconcileStalledBroadcasts,
   reconcileStalledSends,
   reconcileWebhookDeliveries,
 } from "./handlers/cron.js";
 import { deliverWebhook } from "./handlers/deliver-webhook.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
+import { sendBroadcast } from "./handlers/send-broadcast.js";
 import { createTokenBucket, sendEmail } from "./handlers/send-email.js";
 import { createSesSender } from "./ses-sender.js";
 
@@ -26,6 +29,12 @@ if (!env.MASTER_ENCRYPTION_KEY) {
 
 const db = getDb();
 const keyring = EnvKeyring.fromBase64(env.MASTER_ENCRYPTION_KEY);
+const unsubscribeSecretKey = deriveUnsubscribeKey(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64"));
+// Absent APP_BASE_URL doesn't stop the worker — transactional mail still
+// flows — but broadcast fan-out and broadcast sends refuse loudly.
+const unsubscribe = env.APP_BASE_URL
+  ? { secretKey: unsubscribeSecretKey, baseUrl: env.APP_BASE_URL }
+  : undefined;
 const ses = createSesSender(env.AWS_REGION);
 // The bucket is the messages/second control; worker concurrency is not a
 // rate limit and must never be treated as one. In-memory ⇒ single worker
@@ -71,6 +80,29 @@ await queue.work("email.send", async (payload) => {
       defaultConfigurationSet: env.SES_CONFIGURATION_SET,
       reschedule: (emailId, at) => enqueueSend(emailId, at),
       enqueueWebhookDelivery: enqueueWebhook,
+      ...(unsubscribe ? { unsubscribe } : {}),
+    },
+    payload,
+  );
+});
+
+const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise<void> => {
+  await queue.send(
+    "broadcast.send",
+    { broadcastId },
+    { dedupeKey: broadcastId, ...(startAfter ? { startAfter } : {}) },
+  );
+};
+
+await queue.work("broadcast.send", async (payload) => {
+  await sendBroadcast(
+    db,
+    {
+      keyring,
+      unsubscribeSecretKey,
+      appBaseUrl: env.APP_BASE_URL,
+      enqueueEmailSend: (emailId) => enqueueSend(emailId),
+      reschedule: (broadcastId, at) => enqueueBroadcast(broadcastId, at),
     },
     payload,
   );
@@ -117,6 +149,12 @@ await queue.scheduleCrons({
   "webhooks.reconcile": async () => {
     const requeued = await reconcileWebhookDeliveries(db, { enqueue: enqueueWebhook });
     if (requeued > 0) console.log(`webhooks.reconcile: requeued=${requeued}`);
+  },
+  "broadcasts.reconcile": async () => {
+    const requeued = await reconcileStalledBroadcasts(db, {
+      enqueue: (broadcastId) => enqueueBroadcast(broadcastId),
+    });
+    if (requeued > 0) console.log(`broadcasts.reconcile: requeued=${requeued}`);
   },
 });
 

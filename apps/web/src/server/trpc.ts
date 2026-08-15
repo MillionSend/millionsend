@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import superjson from "superjson";
 import { getAuth } from "./auth";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership, type TeamRole } from "./membership";
+import { getQueue } from "./queue";
 
 export interface SessionUser {
   id: string;
@@ -28,7 +29,25 @@ export interface Context {
   role: TeamRole | null;
   /** Persists the team selection (ACTIVE_TEAM_COOKIE). Absent outside HTTP requests (tests). */
   setActiveTeamCookie?: (teamId: string) => void;
+  /**
+   * Hands a scheduled broadcast to the fan-out queue (same optional seam as
+   * the API's ApiDeps.enqueueBroadcastSend). Absent in tests; without it a
+   * send still commits and the broadcasts.reconcile sweep picks it up.
+   */
+  enqueueBroadcastSend?: (broadcastId: string, opts?: { startAfter?: Date }) => Promise<void>;
 }
+
+const enqueueBroadcastSend = async (
+  broadcastId: string,
+  opts?: { startAfter?: Date },
+): Promise<void> => {
+  const queue = await getQueue();
+  await queue.send(
+    "broadcast.send",
+    { broadcastId },
+    { dedupeKey: broadcastId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) },
+  );
+};
 
 export async function createContext({ headers }: { headers: Headers }): Promise<Context> {
   const db = getDb();
@@ -45,6 +64,7 @@ export async function createContext({ headers }: { headers: Headers }): Promise<
     session,
     teamId: membership?.teamId ?? null,
     role: membership?.role ?? null,
+    enqueueBroadcastSend,
     setActiveTeamCookie: (teamId) =>
       cookieStore.set(ACTIVE_TEAM_COOKIE, teamId, {
         httpOnly: true,

@@ -9,6 +9,7 @@ import { PgBoss } from "pg-boss";
 
 export interface JobPayloads {
   "email.send": { emailId: string };
+  "broadcast.send": { broadcastId: string };
   // snsMessageId rides along for durable idempotency in the handler; queue
   // dedupe alone cannot cover an SNS redelivery after the job completed.
   "ses.event": { event: SerializedSesEvent; snsMessageId: string };
@@ -53,6 +54,8 @@ export const CRON_JOBS = {
   "idempotency.purge": "30 * * * *",
   // Every 15 min: re-enqueue webhook deliveries whose job was lost.
   "webhooks.reconcile": "*/15 * * * *",
+  // Every 15 min: re-enqueue broadcasts stuck in scheduled/sending.
+  "broadcasts.reconcile": "*/15 * * * *",
 } as const;
 
 export type CronJobName = keyof typeof CRON_JOBS;
