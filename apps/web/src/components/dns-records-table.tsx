@@ -21,6 +21,8 @@ const GROUP_ROWS: Record<(typeof GROUPS)[number], number> = {
   tracking: 0,
 };
 
+export type LiveDnsStatus = "found" | "missing" | "mismatch";
+
 export type DnsRecord = {
   group: (typeof GROUPS)[number];
   type: string;
@@ -28,7 +30,21 @@ export type DnsRecord = {
   value: string;
   priority?: number;
   status: "verified" | "pending" | "failed" | null;
+  /** Live DNS verdict from the last Check DNS; absent until one runs. */
+  live?: LiveDnsStatus | undefined;
 };
+
+const LIVE_BADGE: Record<LiveDnsStatus, string> = {
+  found: "ms-badge-success",
+  missing: "ms-badge-warn",
+  mismatch: "ms-badge-danger",
+};
+
+/** Live DNS badge (Found / Missing / Mismatch), distinct from the SES status badge. */
+function LiveDnsBadge({ status }: { status: LiveDnsStatus }) {
+  const t = useTranslations("domains");
+  return <span className={`ms-badge ${LIVE_BADGE[status]}`}>{t(`detail.live.${status}`)}</span>;
+}
 
 function RecordsTable({
   children,
@@ -99,7 +115,13 @@ export function DnsRecordsTable({
                     <td>{t("detail.ttlAuto")}</td>
                     <td>{record.priority ?? "—"}</td>
                     {showStatus ? (
-                      <td>{record.status ? <DomainStatusBadge status={record.status} /> : "—"}</td>
+                      <td>
+                        <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {record.status ? <DomainStatusBadge status={record.status} /> : null}
+                          {record.live ? <LiveDnsBadge status={record.live} /> : null}
+                          {!record.status && !record.live ? "—" : null}
+                        </span>
+                      </td>
                     ) : null}
                   </tr>
                 );

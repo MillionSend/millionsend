@@ -5,6 +5,7 @@ import type { DkimVerificationStatus, SesIdentityClient } from "@millionsend/ses
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DnsResolver } from "@/server/dns-check";
 import { createDomainsRouter, type DomainsSesDeps } from "@/server/routers/domains";
 import { type Context, createCallerFactory, router } from "@/server/trpc";
 
@@ -24,6 +25,19 @@ interface FakeSesState {
   dkimStatus?: DkimVerificationStatus;
   verifiedForSending?: boolean;
   nsHosts?: string[];
+  dns?: Partial<DnsResolver>;
+}
+
+const ENOTFOUND = Object.assign(new Error("queryTxt ENOTFOUND"), { code: "ENOTFOUND" });
+
+// Default resolver answers nothing (every record reads Missing) and touches no
+// network; individual tests override the methods they exercise.
+function fakeDns(overrides: Partial<DnsResolver> = {}): DnsResolver {
+  return {
+    resolveTxt: overrides.resolveTxt ?? (async () => []),
+    resolveMx: overrides.resolveMx ?? (async () => []),
+    resolveCname: overrides.resolveCname ?? (async () => []),
+  };
 }
 
 /** Fake SesIdentityClient discriminating on AWS command class names. */
@@ -51,6 +65,7 @@ function fakeSes(state: FakeSesState = {}) {
   const deps: DomainsSesDeps = {
     clientForRegion: () => client,
     resolveNs: async () => state.nsHosts ?? [],
+    dns: fakeDns(state.dns ?? {}),
   };
   return { deps, calls };
 }
@@ -274,6 +289,64 @@ describe("domains.verify", () => {
     const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(row?.status).toBe("pending");
     expect(row?.verifiedAt).toBeNull();
+  });
+});
+
+describe("domains.verify live DNS", () => {
+  async function verifiedCaller(dns: Partial<DnsResolver>) {
+    const teamId = await createTeam(db);
+    const { deps } = fakeSes({ dns });
+    const caller = callerFor(teamId, deps);
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+    return { caller, id };
+  }
+
+  it("marks a present, matching record Found", async () => {
+    const { caller, id } = await verifiedCaller({
+      resolveTxt: async (name) =>
+        name === "send.example.com" ? [["v=spf1 include:amazonses.com ~all"]] : [],
+    });
+    const { liveDns } = await caller.domains.verify({ id });
+    const spf = liveDns.find((r) => r.type === "TXT" && r.name === "send.example.com");
+    expect(spf?.status).toBe("found");
+  });
+
+  it("marks a removed record Missing when the name does not resolve", async () => {
+    const { caller, id } = await verifiedCaller({
+      resolveTxt: async () => {
+        throw ENOTFOUND;
+      },
+    });
+    const { liveDns } = await caller.domains.verify({ id });
+    expect(liveDns.find((r) => r.name === "_dmarc.example.com")?.status).toBe("missing");
+  });
+
+  it("marks a present-but-wrong value Mismatch", async () => {
+    const { caller, id } = await verifiedCaller({
+      resolveTxt: async (name) =>
+        name === "millionsend._domainkey.example.com" ? [["v=DKIM1; k=rsa; p=WRONGKEY"]] : [],
+    });
+    const { liveDns } = await caller.domains.verify({ id });
+    expect(liveDns.find((r) => r.name === "millionsend._domainkey.example.com")?.status).toBe(
+      "mismatch",
+    );
+  });
+
+  it("never throws when DNS lookups fail with NXDOMAIN or timeout", async () => {
+    const { caller, id } = await verifiedCaller({
+      resolveTxt: async () => {
+        throw ENOTFOUND;
+      },
+      resolveMx: async () => {
+        throw new Error("query timed out");
+      },
+      resolveCname: async () => {
+        throw ENOTFOUND;
+      },
+    });
+    const result = await caller.domains.verify({ id });
+    expect(result.liveDns.length).toBeGreaterThan(0);
+    expect(result.liveDns.every((r) => r.status === "missing")).toBe(true);
   });
 });
 

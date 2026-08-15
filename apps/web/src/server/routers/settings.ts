@@ -13,6 +13,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gt, gte, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
+import { isHttpUrl } from "@/lib/http-url";
 import { resolveBaseUrl } from "../auth";
 import { protectedProcedure, router, teamProcedure } from "../trpc";
 
@@ -43,6 +44,38 @@ function requireAuthSecret(): string {
 function inviteAcceptUrl(inviteId: string): string {
   return `${resolveBaseUrl(env.APP_BASE_URL)}/invite/${signInviteToken(inviteId, requireAuthSecret())}`;
 }
+
+/**
+ * Hostname a self-hoster points their app's SMTP client at: an explicit
+ * override, else the deployment's own APP_BASE_URL host (the relay runs
+ * inside the same deployment), else localhost for the quickstart.
+ */
+function smtpPublicHost(): string {
+  if (env.SMTP_PUBLIC_HOST) return env.SMTP_PUBLIC_HOST;
+  return new URL(resolveBaseUrl(env.APP_BASE_URL)).hostname;
+}
+
+/** Literal shown in the SMTP tab's password field — never a real secret. */
+const SMTP_PASSWORD_PLACEHOLDER = "YOUR_API_KEY";
+
+// Trimmed empty strings clear the field. Kept nullable so the client can send
+// null explicitly and the get/update round-trip is symmetric.
+const nullableText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .transform((v) => (v === "" ? null : v))
+    .nullable();
+
+// http(s) only: the value becomes a Location header after unsubscribe, so a
+// javascript:/data: URL must never be storable.
+const nullableHttpUrl = z
+  .string()
+  .trim()
+  .transform((v) => (v === "" ? null : v))
+  .nullable()
+  .refine((v) => v === null || isHttpUrl(v), { message: "must be an http(s) URL" });
 
 export const settingsRouter = router({
   team: router({
@@ -202,6 +235,56 @@ export const settingsRouter = router({
 
         ctx.setActiveTeamCookie?.(teamId);
         return { teamId };
+      }),
+  }),
+
+  smtp: router({
+    // Read-only connection facts. The password is deliberately the literal
+    // placeholder, never a real key: the SMTP relay authenticates with any
+    // ms_ API key, which the operator mints on the API keys screen.
+    get: teamProcedure.query(() => ({
+      host: smtpPublicHost(),
+      // Raw process.env carries no zod default under SKIP_ENV_VALIDATION, so
+      // fall back to the relay's default listen port.
+      port: Number(env.SMTP_PORT) || 2587,
+      user: "millionsend",
+      passwordPlaceholder: SMTP_PASSWORD_PLACEHOLDER,
+    })),
+  }),
+
+  unsubscribe: router({
+    get: teamProcedure.query(async ({ ctx }) => {
+      const [team] = await ctx.db
+        .select({
+          brandName: schema.teams.unsubscribeBrandName,
+          message: schema.teams.unsubscribeMessage,
+          redirectUrl: schema.teams.unsubscribeRedirectUrl,
+        })
+        .from(schema.teams)
+        .where(eq(schema.teams.id, ctx.teamId));
+      if (!team) throw new TRPCError({ code: "NOT_FOUND" });
+      return team;
+    }),
+
+    update: teamProcedure
+      .input(
+        z.object({
+          brandName: nullableText(80),
+          message: nullableText(500),
+          redirectUrl: nullableHttpUrl,
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        assertCanManageMembers(ctx.role);
+        await ctx.db
+          .update(schema.teams)
+          .set({
+            unsubscribeBrandName: input.brandName,
+            unsubscribeMessage: input.message,
+            unsubscribeRedirectUrl: input.redirectUrl,
+          })
+          .where(eq(schema.teams.id, ctx.teamId));
+        return input;
       }),
   }),
 

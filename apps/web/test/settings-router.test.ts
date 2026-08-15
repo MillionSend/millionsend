@@ -94,6 +94,94 @@ describe("settings.members", () => {
   });
 });
 
+describe("settings.smtp", () => {
+  it("exposes connection facts but never a real secret — the password is the placeholder", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    const smtp = await callerFor("u1", teamId, "owner").settings.smtp.get();
+    expect(smtp.user).toBe("millionsend");
+    expect(smtp.port).toBe(2587);
+    expect(smtp.host.length).toBeGreaterThan(0);
+    expect(smtp.passwordPlaceholder).toBe("YOUR_API_KEY");
+    // No field may carry an ms_ API key.
+    expect(JSON.stringify(smtp)).not.toMatch(/ms_/);
+  });
+});
+
+describe("settings.unsubscribe", () => {
+  it("get returns the team's customization, null by default", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    const cfg = await callerFor("u1", teamId, "owner").settings.unsubscribe.get();
+    expect(cfg).toEqual({ brandName: null, message: null, redirectUrl: null });
+  });
+
+  it("update stores brand/message/redirect for owners and admins, clearing on empty", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "admin");
+    const caller = callerFor("u1", teamId, "admin");
+    await caller.settings.unsubscribe.update({
+      brandName: "Acme",
+      message: "Sorry to see you go.",
+      redirectUrl: "https://acme.com/bye",
+    });
+    expect(await caller.settings.unsubscribe.get()).toEqual({
+      brandName: "Acme",
+      message: "Sorry to see you go.",
+      redirectUrl: "https://acme.com/bye",
+    });
+    // Empty strings clear back to null.
+    await caller.settings.unsubscribe.update({ brandName: "", message: "", redirectUrl: "" });
+    expect(await caller.settings.unsubscribe.get()).toEqual({
+      brandName: null,
+      message: null,
+      redirectUrl: null,
+    });
+  });
+
+  it("update is forbidden for role member", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "member");
+    await expect(
+      callerFor("u1", teamId, "member").settings.unsubscribe.update({
+        brandName: "Hijack",
+        message: null,
+        redirectUrl: null,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("update rejects a non-http(s) redirect URL", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    const caller = callerFor("u1", teamId, "owner");
+    for (const redirectUrl of ["javascript:alert(1)", "ftp://x.com", "not a url"]) {
+      await expect(
+        caller.settings.unsubscribe.update({ brandName: null, message: null, redirectUrl }),
+      ).rejects.toThrow();
+    }
+    // The rejected writes never landed.
+    expect((await caller.settings.unsubscribe.get()).redirectUrl).toBeNull();
+  });
+
+  it("update is scoped to the caller's team", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    await addMember(teamA, "alice", "owner");
+    await addMember(teamB, "carol", "owner");
+    await callerFor("alice", teamA, "owner").settings.unsubscribe.update({
+      brandName: "A",
+      message: null,
+      redirectUrl: null,
+    });
+    expect(await callerFor("carol", teamB, "owner").settings.unsubscribe.get()).toEqual({
+      brandName: null,
+      message: null,
+      redirectUrl: null,
+    });
+  });
+});
+
 describe("settings.usage", () => {
   async function insertCounter(teamId: string, day: string, accepted: number): Promise<void> {
     await db.insert(schema.usageCounters).values({ teamId, day, accepted, delivered: accepted });

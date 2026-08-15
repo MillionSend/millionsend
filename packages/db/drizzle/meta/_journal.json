@@ -134,6 +134,13 @@
       "when": 1786775859234,
       "tag": "0018_perfect_solo",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786806648240,
+      "tag": "0019_fuzzy_mesmero",
+      "breakpoints": true
     }
   ]
 }

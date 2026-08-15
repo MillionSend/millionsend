@@ -2,7 +2,37 @@
   "tabs": {
     "settings": "Configurações",
     "usage": "Uso",
-    "ses": "SES"
+    "ses": "SES",
+    "smtp": "SMTP",
+    "unsubscribe": "Página de cancelamento"
+  },
+  "smtp": {
+    "title": "SMTP",
+    "intro": "Envie e-mails usando SMTP em vez da API REST.",
+    "subtitle": "Aponte o cliente SMTP do seu app para o relay desta implantação.",
+    "host": "Host",
+    "port": "Porta",
+    "portNote": "Para conexão criptografada/TLS use 587 ou 2465.",
+    "user": "Usuário",
+    "password": "Senha",
+    "passwordNote": "Use qualquer chave de API como senha.",
+    "passwordLink": "Chaves de API",
+    "passwordTooltip": "O relay autentica com qualquer uma das suas chaves de API — cole uma no lugar de YOUR_API_KEY. As chaves nunca são exibidas aqui.",
+    "docs": "Documentação do SMTP"
+  },
+  "unsubscribe": {
+    "title": "Página de cancelamento",
+    "subtitle": "Personalize a página hospedada que os destinatários veem ao cancelar a inscrição.",
+    "brandName": "Nome da marca",
+    "brandNamePlaceholder": "Sua organização",
+    "message": "Mensagem personalizada",
+    "messagePlaceholder": "Exibida acima da confirmação de cancelamento.",
+    "redirectUrl": "URL de redirecionamento",
+    "redirectUrlNote": "Para onde enviar os destinatários após o cancelamento. Deixe em branco para mantê-los na página de confirmação.",
+    "redirectUrlInvalid": "Informe uma URL http(s).",
+    "save": "Salvar",
+    "saved": "Salvo",
+    "error": "Não foi possível salvar."
   },
   "ses": {
     "title": "Conecte seu AWS SES",

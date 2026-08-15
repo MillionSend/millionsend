@@ -11,5 +11,10 @@ export const teams = pgTable("teams", {
   plan: planEnum("plan").notNull().default("free"),
   // SES tenant name for cloud reputation isolation; null on self-host.
   sesTenantName: text("ses_tenant_name"),
+  // Per-team customization of the hosted unsubscribe confirm page. All null =
+  // the built-in defaults (wordmark, generic copy, in-place done state).
+  unsubscribeBrandName: text("unsubscribe_brand_name"),
+  unsubscribeMessage: text("unsubscribe_message"),
+  unsubscribeRedirectUrl: text("unsubscribe_redirect_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

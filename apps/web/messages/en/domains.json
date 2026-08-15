@@ -132,7 +132,13 @@
       "status": "Status"
     },
     "ttlAuto": "Auto",
-    "verify": "Verify DNS records",
+    "checkDns": "Check DNS",
+    "checkDnsTooltip": "Re-reads live DNS for every record and refreshes the SES verification status. Live results catch a record you just removed; SES can lag before it de-verifies a domain whose records are gone.",
+    "live": {
+      "found": "Found",
+      "missing": "Missing",
+      "mismatch": "Mismatch"
+    },
     "goToProvider": "Go to {provider}",
     "moreActions": "More actions",
     "forwardInstructions": "Forward instructions",

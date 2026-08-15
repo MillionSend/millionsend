@@ -58,6 +58,9 @@ export const env = createEnv({
 
     // SMTP relay (PROCESS=smtp) listen port.
     SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(2587),
+    // Public hostname self-hosters point their app's SMTP client at. Defaults
+    // to the APP_BASE_URL host; set when the relay is reachable elsewhere.
+    SMTP_PUBLIC_HOST: z.string().optional(),
     // STARTTLS certificate for the SMTP relay. Both set → STARTTLS is
     // offered and required before AUTH; unset → plaintext (run the relay
     // inside your own network or behind a TLS-terminating load balancer).
