@@ -231,3 +231,23 @@ export async function purgeExpiredEmailBodies(
     .returning({ id: schema.emails.id });
   return purged.length;
 }
+
+/**
+ * Deletes api_requests rows past the SAME effective retention window as
+ * email bodies (instance setting > env default): request logs carry
+ * request/response payload fragments, so they age out with content.
+ */
+export async function purgeExpiredApiRequests(
+  db: Db,
+  params: { defaultRetentionDays: number; now?: Date },
+): Promise<number> {
+  const { emailRetentionDays } = await getInstanceSettings(db);
+  const retentionDays = emailRetentionDays ?? params.defaultRetentionDays;
+  const now = params.now ?? new Date();
+  const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
+  const purged = await db
+    .delete(schema.apiRequests)
+    .where(lt(schema.apiRequests.createdAt, cutoff))
+    .returning({ id: schema.apiRequests.id });
+  return purged.length;
+}

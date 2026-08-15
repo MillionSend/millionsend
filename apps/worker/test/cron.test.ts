@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   drainQuotaParked,
+  purgeExpiredApiRequests,
   purgeExpiredEmailBodies,
   reconcileStalledSends,
 } from "../src/handlers/cron.js";
@@ -256,6 +257,33 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
   // the wall clock must never enter this test or the absolute fixture dates
   // silently expire.
   expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(0);
+});
+
+it("api-request purge deletes old rows but not fresh ones, honoring the instance override", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  const insertRequest = async (createdAt: Date) => {
+    const [row] = await db
+      .insert(schema.apiRequests)
+      .values({ teamId, method: "POST", path: "/emails", statusCode: 200, createdAt })
+      .returning({ id: schema.apiRequests.id });
+    if (!row) throw new Error("insert failed");
+    return row.id;
+  };
+  const old = await insertRequest(new Date("2026-07-01T00:00:00Z"));
+  const fresh = await insertRequest(new Date("2026-08-01T00:00:00Z"));
+
+  expect(await purgeExpiredApiRequests(db, { defaultRetentionDays: 30, now })).toBe(1);
+  const remaining = await db.select({ id: schema.apiRequests.id }).from(schema.apiRequests);
+  expect(remaining.map((r) => r.id)).toEqual([fresh]);
+  expect(remaining.map((r) => r.id)).not.toContain(old);
+
+  // Second run with the same fixed clock: nothing left to purge.
+  expect(await purgeExpiredApiRequests(db, { defaultRetentionDays: 30, now })).toBe(0);
+
+  // Same effective window as email bodies: the instance setting wins.
+  await db.insert(schema.instanceSettings).values({ emailRetentionDays: 10 });
+  expect(await purgeExpiredApiRequests(db, { defaultRetentionDays: 30, now })).toBe(1);
+  expect(await db.select().from(schema.apiRequests)).toHaveLength(0);
 });
 
 it("retention purge prefers the instance setting over the env-derived default", async () => {

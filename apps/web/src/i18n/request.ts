@@ -15,6 +15,7 @@ const NAMESPACES = [
   "emails",
   "domains",
   "api-keys",
+  "logs",
   "metrics",
   "onboarding",
   "settings",
