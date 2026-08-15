@@ -10,6 +10,7 @@ export * from "./idempotency.js";
 export * from "./instance-settings.js";
 export * from "./segments.js";
 export * from "./suppressions.js";
+export * from "./team-invitations.js";
 export * from "./teams.js";
 export * from "./templates.js";
 export * from "./topics.js";

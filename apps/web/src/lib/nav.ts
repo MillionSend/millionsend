@@ -1,3 +1,13 @@
+/**
+ * A post-auth redirect target taken from a query param, constrained to an
+ * in-app path so a crafted `?next=` can never bounce a signed-in user to an
+ * external origin. Protocol-relative "//host" and anything not starting with a
+ * single "/" fall back to `fallback`.
+ */
+export function safeNextPath(next: string | null | undefined, fallback: string): string {
+  return next?.startsWith("/") && !next.startsWith("//") ? next : fallback;
+}
+
 /** True when `pathname` is `href` or nested under it ("/emails/123" → "/emails"). */
 export function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { ExportCsvLink } from "@/components/export-csv-link";
 import { CodeGlyph } from "@/components/icons/nav-icons";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
@@ -113,6 +114,13 @@ export default function EmailsPage() {
     setRange("all");
   }
 
+  const exportParams = new URLSearchParams();
+  if (deferredSearch) exportParams.set("search", deferredSearch);
+  if (status !== "all") exportParams.set("status", status);
+  if (apiKeyId !== "all") exportParams.set("apiKeyId", apiKeyId);
+  if (since) exportParams.set("since", since.toISOString());
+  const exportQuery = exportParams.toString();
+
   const filterSummary = [
     ...(deferredSearch ? [`"${deferredSearch}"`] : []),
     ...(status !== "all" ? [t("list.statusFilter", { status: common(`status.${status}`) })] : []),
@@ -126,6 +134,9 @@ export default function EmailsPage() {
         {...(subtitle ? { subtitle } : {})}
         actions={
           <>
+            <ExportCsvLink
+              href={exportQuery ? `/export/emails?${exportQuery}` : "/export/emails"}
+            />
             <Link className="ms-btn ms-btn-secondary" href="/emails/suppressions">
               {t("list.suppressionList")}
             </Link>

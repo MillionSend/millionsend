@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { ExportCsvLink } from "@/components/export-csv-link";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
@@ -99,10 +100,13 @@ export function DomainsView() {
         title={t("list.title")}
         {...(summary ? { subtitle: summary } : {})}
         actions={
-          <Link href="/domains/new" className="ms-btn ms-btn-primary">
-            <PlusGlyph size={14} />
-            {t("list.addDomain")}
-          </Link>
+          <>
+            <ExportCsvLink href="/export/domains" />
+            <Link href="/domains/new" className="ms-btn ms-btn-primary">
+              <PlusGlyph size={14} />
+              {t("list.addDomain")}
+            </Link>
+          </>
         }
       />
 
