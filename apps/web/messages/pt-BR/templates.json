@@ -1,0 +1,47 @@
+{
+  "list": {
+    "title": "Modelos",
+    "new": "Novo modelo",
+    "name": "Nome",
+    "updated": "Atualizado",
+    "menu": "Ações do modelo",
+    "edit": "Editar",
+    "duplicate": "Duplicar",
+    "delete": "Excluir",
+    "empty": "Nenhum modelo ainda.",
+    "emptyHint": "Escreva uma vez. Envie quando quiser.",
+    "loadMore": "Carregar mais",
+    "loadError": "Não foi possível carregar os modelos.",
+    "retry": "Tentar novamente",
+    "deleteTitle": "Excluir modelo",
+    "deleteBody": "\"{name}\" será excluído. Transmissões que partiram dele mantêm sua cópia.",
+    "deleteConfirm": "Excluir"
+  },
+  "editor": {
+    "newTitle": "Novo modelo",
+    "editTitle": "Editar modelo",
+    "back": "Modelos",
+    "notFound": "Modelo não encontrado.",
+    "nameLabel": "Nome",
+    "nameHint": "Rótulo interno. Os destinatários nunca o veem.",
+    "subjectLabel": "Assunto",
+    "optional": "opcional",
+    "htmlLabel": "Conteúdo HTML",
+    "htmlPlaceholder": "<html>…</html>",
+    "editTab": "Editar",
+    "previewTab": "Pré-visualizar",
+    "noHtml": "Nenhum HTML ainda.",
+    "mergeHint": "<code>{first}</code> insere o primeiro nome do contato — a parte depois de | é a reserva para campos vazios. Também <code>{last}</code> e <code>{email}</code>. <code>{unsub}</code> vira o link de descadastro de cada destinatário.",
+    "textToggleShow": "Alternativa em texto simples",
+    "textToggleHide": "Ocultar alternativa em texto simples",
+    "textLabel": "Texto simples",
+    "save": "Salvar",
+    "saveAndClose": "Salvar e fechar",
+    "saveError": "Não foi possível salvar o modelo."
+  },
+  "picker": {
+    "label": "Começar de um modelo",
+    "none": "Em branco",
+    "hint": "Copia o conteúdo para cá. Edições futuras do modelo não mudam nada."
+  }
+}

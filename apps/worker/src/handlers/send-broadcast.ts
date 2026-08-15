@@ -35,6 +35,49 @@ export type BroadcastOutcome = "sent" | "skipped" | "deferred" | "canceled";
 /** Literal token replaced per recipient with their hosted unsubscribe URL. */
 const UNSUBSCRIBE_URL_TOKEN = "{{{UNSUBSCRIBE_URL}}}";
 
+// Resend's broadcast merge syntax: {{{FIRST_NAME}}} or {{{FIRST_NAME|there}}}.
+// Only the three contact fields match; any other {{{…}}} stays literal.
+const MERGE_TOKEN = /\{\{\{(FIRST_NAME|LAST_NAME|EMAIL)(?:\|([^{}]*))?\}\}\}/g;
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+export interface MergeContact {
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+}
+
+/**
+ * Substitutes contact merge tokens. A null/empty field falls back to the
+ * token's `|fallback` text, or to "" without one — the raw token must never
+ * reach an inbox. Contact values are user data landing in markup, so the
+ * html body gets them escaped; fallbacks are the author's own content and
+ * stay literal.
+ */
+export function applyMergeFields(
+  content: string,
+  contact: MergeContact,
+  opts: { html: boolean },
+): string {
+  return content.replace(MERGE_TOKEN, (_match, field: string, fallback: string | undefined) => {
+    const value =
+      field === "EMAIL"
+        ? contact.email
+        : field === "FIRST_NAME"
+          ? contact.firstName
+          : contact.lastName;
+    if (!value) return fallback ?? "";
+    return opts.html ? escapeHtml(value) : value;
+  });
+}
+
 export async function sendBroadcast(
   db: Db,
   deps: BroadcastDeps,
@@ -102,7 +145,12 @@ export async function sendBroadcast(
   let cursor = "";
   for (;;) {
     const contacts = await db
-      .select({ id: schema.contacts.id, email: schema.contacts.email })
+      .select({
+        id: schema.contacts.id,
+        email: schema.contacts.email,
+        firstName: schema.contacts.firstName,
+        lastName: schema.contacts.lastName,
+      })
       .from(schema.contacts)
       .where(
         and(
@@ -133,10 +181,17 @@ export async function sendBroadcast(
       // "<url>" → url; reusing the header builder keeps link and header
       // pointing at the exact same page.
       const unsubscribeUrl = headers["List-Unsubscribe"].slice(1, -1);
-      const personalize = (s: string | null) =>
-        s === null ? null : s.replaceAll(UNSUBSCRIBE_URL_TOKEN, unsubscribeUrl);
+      // Unsubscribe first: replaced segments are not rescanned, so a hostile
+      // contact field containing the token can never inject the URL swap.
+      const personalize = (s: string | null, opts: { html: boolean }) =>
+        s === null
+          ? null
+          : applyMergeFields(s.replaceAll(UNSUBSCRIBE_URL_TOKEN, unsubscribeUrl), contact, opts);
       const encrypted = await encryptEmailBody(
-        { html: personalize(broadcast.html), text: personalize(broadcast.text) },
+        {
+          html: personalize(broadcast.html, { html: true }),
+          text: personalize(broadcast.text, { html: false }),
+        },
         deps.keyring,
       );
       const [row] = await db

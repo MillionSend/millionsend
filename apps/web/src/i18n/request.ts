@@ -19,6 +19,7 @@ const NAMESPACES = [
   "onboarding",
   "settings",
   "placeholders",
+  "templates",
   "webhooks",
 ] as const;
 

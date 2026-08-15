@@ -12,7 +12,11 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { reconcileStalledBroadcasts } from "../src/handlers/cron.js";
-import { type BroadcastDeps, sendBroadcast } from "../src/handlers/send-broadcast.js";
+import {
+  applyMergeFields,
+  type BroadcastDeps,
+  sendBroadcast,
+} from "../src/handlers/send-broadcast.js";
 import { type SesSender, sendEmail } from "../src/handlers/send-email.js";
 
 let db: Db;
@@ -253,6 +257,80 @@ it("missing APP_BASE_URL fails the fan-out loudly, sending nothing", async () =>
     .from(schema.broadcasts)
     .where(eq(schema.broadcasts.id, broadcastId));
   expect(broadcast?.status).toBe("scheduled");
+});
+
+it("applyMergeFields substitutes contact fields, with fallbacks for null and empty", () => {
+  const contact = { email: "ada@example.com", firstName: "Ada", lastName: null };
+  expect(
+    applyMergeFields("Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}} ({{{EMAIL}}})", contact, {
+      html: false,
+    }),
+  ).toBe("Hi Ada friend (ada@example.com)");
+  // Empty string counts as absent, same as null.
+  expect(
+    applyMergeFields("{{{FIRST_NAME|there}}}", { ...contact, firstName: "" }, { html: false }),
+  ).toBe("there");
+  // Absent field without a fallback yields "" — the raw token never ships.
+  expect(applyMergeFields("Hi {{{LAST_NAME}}}.", contact, { html: false })).toBe("Hi .");
+});
+
+it("applyMergeFields leaves unknown tokens untouched", () => {
+  const contact = { email: "ada@example.com", firstName: "Ada", lastName: null };
+  expect(applyMergeFields("{{{NOPE}}} {{{FULL_NAME|x}}}", contact, { html: false })).toBe(
+    "{{{NOPE}}} {{{FULL_NAME|x}}}",
+  );
+});
+
+it("applyMergeFields html-escapes contact values in html bodies only", () => {
+  const contact = {
+    email: "ada@example.com",
+    firstName: "<img src=x onerror=alert(1)>\"&'",
+    lastName: null,
+  };
+  expect(applyMergeFields("<p>{{{FIRST_NAME}}}</p>", contact, { html: true })).toBe(
+    "<p>&lt;img src=x onerror=alert(1)&gt;&quot;&amp;&#39;</p>",
+  );
+  expect(applyMergeFields("{{{FIRST_NAME}}}", contact, { html: false })).toBe(contact.firstName);
+});
+
+it("fan-out personalizes merge fields per contact in html and text", async () => {
+  const [audience] = await db
+    .insert(schema.audiences)
+    .values({ teamId, name: "merge" })
+    .returning({ id: schema.audiences.id });
+  if (!audience) throw new Error("audience insert failed");
+  await db.insert(schema.contacts).values({
+    audienceId: audience.id,
+    teamId,
+    email: "hostile@example.com",
+    firstName: "<b>Ada</b>",
+    lastName: null,
+  });
+  const broadcastId = await insertBroadcast({
+    audienceId: audience.id,
+    html: '<p>Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}}</p>{{{NOPE}}}<a href="{{{UNSUBSCRIBE_URL}}}">bye</a>',
+    text: "Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}} {{{NOPE}}}",
+  });
+
+  expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
+  const [email] = await emailsOf(broadcastId);
+  if (!email?.bodyCiphertext || !email.bodyIv || !email.bodyWrappedDek) throw new Error("no body");
+  const body = await decryptEmailBody(
+    {
+      ciphertext: email.bodyCiphertext,
+      iv: email.bodyIv,
+      wrappedDek: email.bodyWrappedDek,
+      keyVersion: email.bodyKeyVersion ?? 0,
+    },
+    keyring,
+  );
+  // Hostile name escaped in html, raw in text; null field → fallback;
+  // unknown token untouched; unsubscribe URL still swapped in.
+  expect(body.html).toContain("Hi &lt;b&gt;Ada&lt;/b&gt; friend");
+  expect(body.html).toContain("{{{NOPE}}}");
+  expect(body.html).toContain(`${BASE_URL}/unsubscribe/`);
+  expect(body.html).not.toContain("{{{UNSUBSCRIBE_URL}}}");
+  expect(body.text).toBe("Hi <b>Ada</b> friend {{{NOPE}}}");
 });
 
 it("reconcile re-enqueues past-due scheduled and stale sending broadcasts", async () => {

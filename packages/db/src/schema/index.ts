@@ -9,5 +9,6 @@ export * from "./idempotency.js";
 export * from "./instance-settings.js";
 export * from "./suppressions.js";
 export * from "./teams.js";
+export * from "./templates.js";
 export * from "./usage.js";
 export * from "./webhooks.js";
