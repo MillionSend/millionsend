@@ -1,10 +1,15 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { DomainStatusBadge } from "@/app/(dashboard)/domains/domain-status";
 import { CopyChip } from "@/components/copy-chip";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { Table } from "@/components/table";
+import {
+  combineRecordStatus,
+  type LiveDnsStatus,
+  type RecordStatus,
+  sesGateFromRecordStatus,
+} from "@/lib/dns-record-status";
 import { zoneRelativeName } from "@/lib/zone";
 
 const GROUPS = ["verification", "sending", "dmarc", "tracking"] as const;
@@ -21,8 +26,6 @@ const GROUP_ROWS: Record<(typeof GROUPS)[number], number> = {
   tracking: 0,
 };
 
-export type LiveDnsStatus = "found" | "missing" | "mismatch";
-
 export type DnsRecord = {
   group: (typeof GROUPS)[number];
   type: string;
@@ -34,16 +37,27 @@ export type DnsRecord = {
   live?: LiveDnsStatus | undefined;
 };
 
-const LIVE_BADGE: Record<LiveDnsStatus, string> = {
-  found: "ms-badge-success",
+// verified reads success; a record still pending at AWS or missing/wrong in our
+// lookup warns; a present-but-wrong record is the danger case; checking is neutral.
+const RECORD_STATUS_TONE: Record<RecordStatus, string> = {
+  verified: "ms-badge-success",
+  pending: "ms-badge-warn",
+  checking: "ms-badge-neutral",
   missing: "ms-badge-warn",
   mismatch: "ms-badge-danger",
 };
 
-/** Live DNS badge (Found / Missing / Mismatch), distinct from the SES status badge. */
-function LiveDnsBadge({ status }: { status: LiveDnsStatus }) {
+/**
+ * The single source-of-truth Status badge: our live DNS lookup gated by AWS's
+ * verification. Sized to its label (inline-block) — never stretched to the cell.
+ */
+function RecordStatusBadge({ status }: { status: RecordStatus }) {
   const t = useTranslations("domains");
-  return <span className={`ms-badge ${LIVE_BADGE[status]}`}>{t(`detail.live.${status}`)}</span>;
+  return (
+    <span className={`ms-badge ${RECORD_STATUS_TONE[status]}`}>
+      {t(`detail.recordStatus.${status}`)}
+    </span>
+  );
 }
 
 function RecordsTable({
@@ -115,12 +129,13 @@ export function DnsRecordsTable({
                     <td>{t("detail.ttlAuto")}</td>
                     <td>{record.priority ?? "—"}</td>
                     {showStatus ? (
-                      <td>
-                        <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {record.status ? <DomainStatusBadge status={record.status} /> : null}
-                          {record.live ? <LiveDnsBadge status={record.live} /> : null}
-                          {!record.status && !record.live ? "—" : null}
-                        </span>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        <RecordStatusBadge
+                          status={combineRecordStatus({
+                            live: record.live,
+                            sesGate: sesGateFromRecordStatus(record.status),
+                          })}
+                        />
                       </td>
                     ) : null}
                   </tr>

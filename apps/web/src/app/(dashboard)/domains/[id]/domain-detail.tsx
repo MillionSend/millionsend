@@ -436,8 +436,15 @@ export function DomainDetail({ id }: { id: string }) {
   const status = verify.data?.status ?? domain.data?.status;
   const checking = status === "pending" || status === "temporary_failure";
 
-  // Canvas: "checks run every 30 s" — the page re-checks SES itself while pending.
+  // Live DNS must be real on load: the SES status can still read 'verified' for
+  // a record removed seconds ago, so re-check every record's live DNS on mount.
+  // Until it returns, each row's live is unknown and shows 'checking', not green.
   const verifyMutate = verify.mutate;
+  useEffect(() => {
+    verifyMutate({ id });
+  }, [id, verifyMutate]);
+
+  // Canvas: "checks run every 30 s" — the page re-checks SES itself while pending.
   useEffect(() => {
     if (!checking) return;
     const timer = setInterval(() => verifyMutate({ id }), 30_000);

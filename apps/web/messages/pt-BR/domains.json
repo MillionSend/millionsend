@@ -134,10 +134,12 @@
     "ttlAuto": "Auto",
     "checkDns": "Checar DNS",
     "checkDnsTooltip": "Relê o DNS ao vivo de cada registro e atualiza o status de verificação do SES. Os resultados ao vivo detectam um registro que você acabou de remover; o SES pode demorar para desverificar um domínio cujos registros já não existem.",
-    "live": {
-      "found": "Encontrado",
+    "recordStatus": {
+      "checking": "Checando",
       "missing": "Ausente",
-      "mismatch": "Divergente"
+      "mismatch": "Divergente",
+      "pending": "Pendente",
+      "verified": "Verificado"
     },
     "goToProvider": "Ir para {provider}",
     "moreActions": "Mais ações",

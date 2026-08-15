@@ -134,10 +134,12 @@
     "ttlAuto": "Auto",
     "checkDns": "Check DNS",
     "checkDnsTooltip": "Re-reads live DNS for every record and refreshes the SES verification status. Live results catch a record you just removed; SES can lag before it de-verifies a domain whose records are gone.",
-    "live": {
-      "found": "Found",
+    "recordStatus": {
+      "checking": "Checking",
       "missing": "Missing",
-      "mismatch": "Mismatch"
+      "mismatch": "Mismatch",
+      "pending": "Pending",
+      "verified": "Verified"
     },
     "goToProvider": "Go to {provider}",
     "moreActions": "More actions",
