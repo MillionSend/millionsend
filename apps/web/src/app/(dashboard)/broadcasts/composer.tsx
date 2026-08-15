@@ -56,6 +56,7 @@ export function ComposerSkeleton() {
 
 export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const t = useTranslations("broadcasts");
+  const tTemplates = useTranslations("templates");
   const common = useTranslations("common");
   const locale = useLocale();
   const trpc = useTRPC();
@@ -74,8 +75,23 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const [textOpen, setTextOpen] = useState(Boolean(initial?.text));
   const [guardOpen, setGuardOpen] = useState(false);
   const [schedule, setSchedule] = useState("");
+  const [templateId, setTemplateId] = useState("");
 
   const audiences = useQuery(trpc.audience.audiences.list.queryOptions());
+  const templates = useQuery(trpc.templates.list.queryOptions({ limit: 50 }));
+  const templateOptions = templates.data?.items ?? [];
+
+  /** Copies the template's content in as a starting snapshot — no link back;
+   * later template edits change nothing here. */
+  async function applyTemplate(id: string) {
+    setTemplateId(id);
+    if (!id) return;
+    const template = await queryClient.fetchQuery(trpc.templates.get.queryOptions({ id }));
+    if (template.subject) setSubject(template.subject);
+    setHtml(template.html);
+    setText(template.text ?? "");
+    setTextOpen(Boolean(template.text));
+  }
   const recipientCount = useQuery(
     trpc.broadcasts.recipientCount.queryOptions(
       { audienceId },
@@ -212,6 +228,35 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
             ]}
           />
         </div>
+
+        {templateOptions.length > 0 ? (
+          <div className="ms-field">
+            <label htmlFor="bc-template">{tTemplates("picker.label")}</label>
+            <Select
+              id="bc-template"
+              value={templateId}
+              onChange={(value) => void applyTemplate(value)}
+              ariaLabel={tTemplates("picker.label")}
+              width="100%"
+              options={[
+                { value: "", label: tTemplates("picker.none") },
+                ...templateOptions.map((template) => ({
+                  value: template.id,
+                  label: template.name,
+                })),
+              ]}
+            />
+            <p
+              style={{
+                margin: "6px 0 0",
+                color: "var(--ms-muted)",
+                fontSize: "var(--ms-fs-label)",
+              }}
+            >
+              {tTemplates("picker.hint")}
+            </p>
+          </div>
+        ) : null}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <div className="ms-field">

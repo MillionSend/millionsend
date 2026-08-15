@@ -1,0 +1,47 @@
+{
+  "list": {
+    "title": "Templates",
+    "new": "New template",
+    "name": "Name",
+    "updated": "Updated",
+    "menu": "Template actions",
+    "edit": "Edit",
+    "duplicate": "Duplicate",
+    "delete": "Delete",
+    "empty": "No templates yet.",
+    "emptyHint": "Write it once. Send it whenever.",
+    "loadMore": "Load more",
+    "loadError": "Couldn't load templates.",
+    "retry": "Retry",
+    "deleteTitle": "Delete template",
+    "deleteBody": "\"{name}\" will be deleted. Broadcasts that started from it keep their copy.",
+    "deleteConfirm": "Delete"
+  },
+  "editor": {
+    "newTitle": "New template",
+    "editTitle": "Edit template",
+    "back": "Templates",
+    "notFound": "Template not found.",
+    "nameLabel": "Name",
+    "nameHint": "Internal label. Recipients never see it.",
+    "subjectLabel": "Subject",
+    "optional": "optional",
+    "htmlLabel": "HTML content",
+    "htmlPlaceholder": "<html>…</html>",
+    "editTab": "Edit",
+    "previewTab": "Preview",
+    "noHtml": "No HTML yet.",
+    "mergeHint": "<code>{first}</code> inserts the contact's first name — the part after | is the fallback for empty fields. Also <code>{last}</code> and <code>{email}</code>. <code>{unsub}</code> becomes each recipient's unsubscribe link.",
+    "textToggleShow": "Plain-text fallback",
+    "textToggleHide": "Hide plain-text fallback",
+    "textLabel": "Plain text",
+    "save": "Save",
+    "saveAndClose": "Save & close",
+    "saveError": "Couldn't save the template."
+  },
+  "picker": {
+    "label": "Start from a template",
+    "none": "Blank",
+    "hint": "Copies its content here. Later template edits change nothing."
+  }
+}
