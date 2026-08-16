@@ -41,7 +41,14 @@ export function DraftBanner({
         {common("draftRestore")}
       </button>
       <span aria-hidden="true"> · </span>
-      <button type="button" style={linkButtonStyle} onClick={onDiscard}>
+      <button
+        type="button"
+        style={linkButtonStyle}
+        onClick={() => {
+          // Discarding is irreversible — the draft is the only copy.
+          if (window.confirm(common("draftDiscardConfirm"))) onDiscard();
+        }}
+      >
         {common("draftDiscard")}
       </button>
     </p>
