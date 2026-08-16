@@ -19,8 +19,11 @@ services:
     environment:
       PROCESS: all
     ports:
-      - "3000:3000" # web dashboard
-      - "3001:3001" # api
+      # Host ports are .env-tunable. WEB_PORT remaps only the host side (the
+      # web process is fixed at 3000 inside the container); PORT is also the
+      # api's own listen port via env_file, so both sides move together.
+      - "${WEB_PORT:-3000}:3000" # web dashboard
+      - "${PORT:-3001}:${PORT:-3001}" # api
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,7 +35,9 @@ services:
     environment:
       PROCESS: smtp
     ports:
-      - "2587:2587" # smtp relay
+      # SMTP_PORT is also the relay's listen port via env_file, so both sides
+      # of the mapping move together.
+      - "${SMTP_PORT:-2587}:${SMTP_PORT:-2587}" # smtp relay
     depends_on:
       postgres:
         condition: service_healthy
