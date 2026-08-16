@@ -2,6 +2,7 @@ import { getDb } from "@millionsend/db";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { ConfirmDialogHost } from "@/components/confirm-dialog";
 import { DeliverabilityBanner } from "@/components/deliverability-banner";
 import { getAuth } from "@/server/auth";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership } from "@/server/membership";
@@ -25,6 +26,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           {children}
         </div>
       </main>
+      <ConfirmDialogHost />
     </AppShell>
   );
 }

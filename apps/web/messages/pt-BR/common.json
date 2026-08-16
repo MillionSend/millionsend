@@ -66,5 +66,7 @@
   "draftRecovered": "Alterações não salvas recuperadas ({time}).",
   "draftRestore": "Restaurar",
   "draftDiscard": "Descartar",
-  "draftDiscardConfirm": "Descartar o rascunho recuperado? Isso não pode ser desfeito."
+  "draftDiscardConfirm": "Descartar o rascunho recuperado? Isso não pode ser desfeito.",
+  "confirmTitle": "Tem certeza?",
+  "confirm": "Confirmar"
 }

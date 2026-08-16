@@ -1,6 +1,7 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { formatRelative } from "@/lib/format";
 
 const linkButtonStyle: React.CSSProperties = {
@@ -46,7 +47,13 @@ export function DraftBanner({
         style={linkButtonStyle}
         onClick={() => {
           // Discarding is irreversible — the draft is the only copy.
-          if (window.confirm(common("draftDiscardConfirm"))) onDiscard();
+          void confirmDialog({
+            message: common("draftDiscardConfirm"),
+            confirmLabel: common("draftDiscard"),
+            danger: true,
+          }).then((ok) => {
+            if (ok) onDiscard();
+          });
         }}
       >
         {common("draftDiscard")}

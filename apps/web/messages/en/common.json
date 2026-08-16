@@ -66,5 +66,7 @@
   "draftRecovered": "Recovered unsaved changes ({time}).",
   "draftRestore": "Restore",
   "draftDiscard": "Discard",
-  "draftDiscardConfirm": "Discard the recovered draft? This can't be undone."
+  "draftDiscardConfirm": "Discard the recovered draft? This can't be undone.",
+  "confirmTitle": "Are you sure?",
+  "confirm": "Confirm"
 }
