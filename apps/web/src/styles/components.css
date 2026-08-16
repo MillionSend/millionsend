@@ -917,6 +917,13 @@ svg:focus {
   padding: 1px 5px;
 }
 
+/* Add-domain horizontal step bar: the vertical StepRail is a desktop affordance;
+   this labelled horizontal sequence takes over on narrow screens (rules below).
+   Hidden by default so desktop keeps the rail. */
+.ms-stepbar {
+  display: none;
+}
+
 /* ============================================================================
    RESPONSIVE — mobile pass (breakpoint 900px; DESIGN.md Layout).
    Media queries only: desktop ≥900px keeps every rule above pixel-identical.
@@ -1019,6 +1026,68 @@ svg:focus {
   .ms-step > * {
     min-width: 0;
   }
+  /* The vertical rail would wrap to its own line above the card and read as if
+     the card were step 02 — swap it for the labelled horizontal step bar. */
+  .ms-stepper > .ms-stepper-rail {
+    display: none;
+  }
+  .ms-stepbar {
+    display: flex;
+    flex-basis: 100%;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .ms-stepbar-step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  /* First step grows so its trailing hairline connector spans to the next. */
+  .ms-stepbar-step:not(:last-child) {
+    flex: 1;
+  }
+  .ms-stepbar-step:not(:last-child)::after {
+    content: "";
+    flex: 1;
+    min-width: 16px;
+    height: 1px;
+    background: var(--ms-line);
+  }
+  .ms-stepbar-dot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--ms-line-strong);
+    border-radius: 999px;
+    font-size: 10.5px;
+    color: var(--ms-faint);
+  }
+  .ms-stepbar-text {
+    font-size: 12px;
+    color: var(--ms-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ms-stepbar-step.current .ms-stepbar-dot {
+    color: var(--ms-ink);
+    border-color: var(--ms-bone);
+    background: var(--ms-bone);
+  }
+  .ms-stepbar-step.current .ms-stepbar-text {
+    color: var(--ms-bone);
+  }
+  .ms-stepbar-step.done .ms-stepbar-dot {
+    color: var(--ms-success);
+    border-color: var(--ms-success);
+  }
 
   /* Onboarding odometer boxes shrink with the viewport (7 boxes at 320px). */
   .ms-odo-boxes {
@@ -1054,10 +1123,8 @@ svg:focus {
     flex-wrap: wrap;
     gap: 20px 32px !important;
   }
-  /* Stepper rails: decorative add-domain rail hides; numbered rails shrink. */
-  .ms-stepper > .ms-stepper-rail {
-    display: none;
-  }
+  /* Stepper rails: the add-domain rail is already swapped for the horizontal
+     step bar at ≤899px; here the step-02 numbered marker rails shrink. */
   .ms-stepper {
     gap: 24px !important;
   }

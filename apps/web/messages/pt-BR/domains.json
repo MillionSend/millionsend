@@ -38,6 +38,10 @@
     "title": "Adicionar domínio",
     "stepLine": "passo 1 de 2 · domínio e região → registros DNS",
     "stepLine2": "passo 2 de 2 · adicione os registros no seu provedor de DNS",
+    "steps": {
+      "one": "Domínio e região",
+      "two": "Registros DNS"
+    },
     "cardTitle": "Domínio",
     "recapSubtitle": "Adicionado ao seu time.",
     "recordsTitle": "Preencha seus registros DNS",

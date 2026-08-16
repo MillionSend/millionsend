@@ -34,6 +34,34 @@ function isConflict(error: unknown): boolean {
   return (error as { data?: { code?: string } } | null)?.data?.code === "CONFLICT";
 }
 
+/**
+ * Horizontal step indicator shown in place of the vertical rail on narrow
+ * screens (≤899px), where a wrapped vertical rail floats its numbers above the
+ * card and reads as if the card were step 02. Labelled and connected so the two
+ * steps stay legible as a sequence. Desktop keeps the vertical rail.
+ */
+function MobileStepBar({ active }: { active: 1 | 2 }) {
+  const t = useTranslations("domains");
+  return (
+    <ol className="ms-stepbar">
+      {(["one", "two"] as const).map((key, index) => {
+        const num = index + 1;
+        const state = num < active ? "done" : num === active ? "current" : "upcoming";
+        return (
+          <li
+            key={key}
+            className={`ms-stepbar-step ${state}`}
+            {...(num === active ? { "aria-current": "step" } : {})}
+          >
+            <span className="ms-stepbar-dot ms-mono">{num < active ? "✓" : `0${num}`}</span>
+            <span className="ms-stepbar-text">{t(`new.steps.${key}`)}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 /** The canvas stepper rail on step 01: 01 lit, 02 faint below the hairline. */
 function StepRail() {
   return (
@@ -270,6 +298,7 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
     <>
       <AwsCredentialsBanner />
       <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
+        <MobileStepBar active={1} />
         <StepRail />
 
         <form
