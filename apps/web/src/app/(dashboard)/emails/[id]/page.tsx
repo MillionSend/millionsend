@@ -14,7 +14,12 @@ import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { formatDurationShort, formatRelative, formatUtcTimestampMs } from "@/lib/format";
+import {
+  formatDayTime,
+  formatDurationShort,
+  formatRelative,
+  formatUtcTimestampMs,
+} from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
@@ -627,10 +632,10 @@ export default function EmailDetailPage() {
                     {opens ? <span aria-hidden="true">›</span> : null}
                   </span>
                   <span
-                    className="ms-mono"
-                    style={{ fontSize: 11, color: "var(--ms-muted)", marginTop: 7 }}
+                    title={formatUtcTimestampMs(event.occurredAt)}
+                    style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 7 }}
                   >
-                    {formatUtcTimestampMs(event.occurredAt)}
+                    {formatDayTime(event.occurredAt, locale)}
                   </span>
                   {detail ? (
                     <span

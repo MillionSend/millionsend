@@ -17,55 +17,60 @@ export function PageHeader({
   leading?: React.ReactNode;
 }) {
   return (
-    <header
-      className="ms-page-header"
-      style={{
-        display: "flex",
-        alignItems: breadcrumb || subtitle ? "flex-end" : "center",
-        justifyContent: "space-between",
-        gap: 16,
-        marginBottom: 28,
-      }}
-    >
-      {leading ? (
-        <span style={{ flex: "none", alignSelf: "center", display: "inline-flex" }}>{leading}</span>
-      ) : null}
-      <div style={leading ? { flex: 1, minWidth: 0 } : undefined}>
-        {breadcrumb ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 13,
-              lineHeight: 1,
-              marginBottom: 10,
-            }}
-          >
-            {breadcrumb}
-          </div>
-        ) : null}
-        <h1
-          className="ms-display"
-          // Erode 500 reads thin at title sizes; section titles carry 600.
+    <header className="ms-page-header" style={{ marginBottom: 28 }}>
+      {breadcrumb ? (
+        <div
           style={{
-            fontSize: "var(--ms-fs-h1)",
-            fontWeight: 600,
-            color: "var(--ms-bone)",
-            margin: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+            lineHeight: 1,
+            marginBottom: 10,
           }}
         >
-          {title}
-        </h1>
-        {subtitle ? (
-          <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 8 }}>
-            {subtitle}
-          </div>
+          {breadcrumb}
+        </div>
+      ) : null}
+      <div
+        style={{
+          display: "flex",
+          alignItems: subtitle ? "flex-end" : "center",
+          justifyContent: "space-between",
+          gap: 16,
+        }}
+      >
+        {leading ? (
+          <span style={{ flex: "none", alignSelf: "center", display: "inline-flex" }}>
+            {leading}
+          </span>
+        ) : null}
+        <div style={leading ? { flex: 1, minWidth: 0 } : undefined}>
+          <h1
+            className="ms-display"
+            // Erode 500 reads thin at title sizes; section titles carry 600.
+            style={{
+              fontSize: "var(--ms-fs-h1)",
+              fontWeight: 600,
+              color: "var(--ms-bone)",
+              margin: 0,
+            }}
+          >
+            {title}
+          </h1>
+          {subtitle ? (
+            <div
+              className="ms-mono"
+              style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 8 }}
+            >
+              {subtitle}
+            </div>
+          ) : null}
+        </div>
+        {actions ? (
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>{actions}</div>
         ) : null}
       </div>
-      {actions ? (
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>{actions}</div>
-      ) : null}
     </header>
   );
 }
