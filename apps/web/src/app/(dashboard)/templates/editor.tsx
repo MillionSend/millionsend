@@ -62,6 +62,7 @@ export function EditorSkeleton() {
 
 export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   const t = useTranslations("templates");
+  const common = useTranslations("common");
   const trpc = useTRPC();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -80,7 +81,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   const savedDoc = useRef<string | null>(
     initial !== undefined ? JSON.stringify(initial.document ?? null) : null,
   );
-  useUnsavedChangesWarning(dirty);
+  useUnsavedChangesWarning(dirty, common("unsavedWarn"));
 
   // Merge-field picker options and preview sample values both derive from the
   // team's contact-property keys in use, plus its typed definitions so a

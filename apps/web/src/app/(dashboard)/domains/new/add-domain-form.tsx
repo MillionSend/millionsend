@@ -48,7 +48,7 @@ function DnsRecordsStep({ id }: { id: string }) {
       <MobileStepBar steps={[t("new.steps.one"), t("new.steps.two")]} active={2} />
       {/* Step 01 — done: recap of the created domain */}
       <div className="ms-step" style={{ display: "flex", gap: 44 }}>
-        <MarkerRail marker="✓" color="var(--ms-success)" />
+        <MarkerRail marker="01" done color="var(--ms-success)" />
         <div style={{ flex: 1, minWidth: 0, paddingBottom: 28 }}>
           <div
             style={{

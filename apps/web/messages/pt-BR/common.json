@@ -61,5 +61,6 @@
     "canceled": "Cancelado",
     "verified": "Verificado",
     "pending": "Pendente"
-  }
+  },
+  "unsavedWarn": "Você tem alterações não salvas. Sair desta página?"
 }
