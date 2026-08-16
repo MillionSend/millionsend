@@ -454,8 +454,13 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
                     cursor: "pointer",
                   }}
                 >
-                  {t("new.preview.toMe")}{" "}
-                  <ChevronGlyph size={10} direction={detailsOpen ? "up" : "down"} />
+                  {t("new.preview.toMe")}
+                  {/* Optical nudge: flex-center aligns to the text line box, which
+                      reserves descender space, leaving a small glyph above the
+                      lowercase optical center. 1px down re-centers it. */}
+                  <span style={{ display: "inline-flex", transform: "translateY(1px)" }}>
+                    <ChevronGlyph size={10} direction={detailsOpen ? "up" : "down"} />
+                  </span>
                 </button>
               </div>
             </div>
