@@ -2,6 +2,19 @@
 
 import { useEffect, useRef } from "react";
 
+/* Programmatic navigations (router.push from a component, e.g. the From
+   field's add-domain shortcut) never touch an anchor or the history stack the
+   guards below watch — so guarded pages register here, and any shared
+   component about to router.push calls confirmUnsavedNavigation() first.
+   Editor pages render one at a time, so a single slot suffices. */
+let activeGuard: { isDirty: () => boolean; message: () => string } | null = null;
+
+/** True when navigation may proceed: no dirty guard, or the user confirmed. */
+export function confirmUnsavedNavigation(): boolean {
+  if (!activeGuard?.isDirty()) return true;
+  return window.confirm(activeGuard.message());
+}
+
 /**
  * Guards against losing unsaved changes on every navigation kind:
  *
@@ -23,6 +36,15 @@ export function useUnsavedChangesWarning(dirty: boolean, message: string) {
   dirtyRef.current = dirty;
   const messageRef = useRef(message);
   messageRef.current = message;
+
+  // Register for programmatic navigations (confirmUnsavedNavigation above).
+  useEffect(() => {
+    const guard = { isDirty: () => dirtyRef.current, message: () => messageRef.current };
+    activeGuard = guard;
+    return () => {
+      if (activeGuard === guard) activeGuard = null;
+    };
+  }, []);
 
   // Native prompt for browser-level exits.
   useEffect(() => {

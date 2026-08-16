@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AudienceSelect } from "@/components/audience-select";
+import { DraftBanner } from "@/components/draft-banner";
 import { FromField } from "@/components/from-field";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
@@ -18,8 +19,23 @@ import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { useLocalDraft } from "@/lib/use-local-draft";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { ContentPreview } from "./parts";
+
+/** Everything a crash would lose — mirrored into the local draft. */
+interface ComposerDraft {
+  audienceId: string;
+  topicId: string;
+  segmentId: string;
+  name: string;
+  from: string;
+  subject: string;
+  replyTo: string;
+  html: string;
+  text: string;
+  document: unknown;
+}
 
 // Client-only: the Maily editor pulls in tiptap and touches the DOM, so it
 // must not render on the server. The ghost holds the field's height meanwhile.
@@ -109,6 +125,50 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     initial !== undefined ? JSON.stringify(initial.document ?? null) : null,
   );
   useUnsavedChangesWarning(dirty, common("unsavedWarn"));
+
+  // Local crash-recovery draft (browser-only, one key per broadcast).
+  const [editorNonce, setEditorNonce] = useState(0);
+  const draftState = useMemo<ComposerDraft>(
+    () => ({ audienceId, topicId, segmentId, name, from, subject, replyTo, html, text, document }),
+    [audienceId, topicId, segmentId, name, from, subject, replyTo, html, text, document],
+  );
+  const draft = useLocalDraft<ComposerDraft>({
+    storageKey: `ms-draft:broadcast:${initial?.id ?? "new"}`,
+    state: draftState,
+    initialState: {
+      audienceId: initial?.audienceId ?? "",
+      topicId: initial?.topicId ?? "",
+      segmentId: initial?.segmentId ?? "",
+      name: initial?.name ?? "",
+      from: initial?.from ?? "",
+      subject: initial?.subject ?? "",
+      replyTo: initial?.replyTo ?? "",
+      html: initial?.html ?? "",
+      text: initial?.text ?? "",
+      document: initial?.document ?? null,
+    },
+  });
+
+  function restoreDraft(data: ComposerDraft) {
+    setAudienceId(data.audienceId);
+    setTopicId(data.topicId);
+    setSegmentId(data.segmentId);
+    setName(data.name);
+    setFrom(data.from);
+    setSubject(data.subject);
+    setReplyTo(data.replyTo);
+    setHtml(data.html);
+    setText(data.text);
+    setDocument(data.document);
+    if (data.audienceId) setStep(2);
+    // The editor and From field seed once from their mount value — remount them.
+    setEditorNonce((n) => n + 1);
+    // A restored draft is unsaved by definition: poison the baseline so the
+    // editor's next emit differs and the leave-guard arms immediately.
+    savedDoc.current = "__restored__";
+    setDirty(true);
+    draft.acceptRecovered();
+  }
 
   const audiences = useQuery(trpc.audience.audiences.list.queryOptions());
   const topics = useQuery(trpc.topics.list.queryOptions());
@@ -204,6 +264,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
       });
       savedDoc.current = JSON.stringify(document);
       setDirty(false);
+      draft.markSaved();
       return initial.id;
     }
     const { id } = await createMutation.mutateAsync({
@@ -220,6 +281,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     });
     savedDoc.current = JSON.stringify(document);
     setDirty(false);
+    draft.markSaved();
     return id;
   }
 
@@ -293,6 +355,17 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
           </>
         }
       />
+
+      {draft.recovered ? (
+        <DraftBanner
+          savedAt={draft.recovered.savedAt}
+          onRestore={() => {
+            const r = draft.recovered;
+            if (r) restoreDraft(r.data);
+          }}
+          onDiscard={draft.discardRecovered}
+        />
+      ) : null}
 
       {step === 1 ? (
         <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
@@ -527,7 +600,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                 </div>
               ) : null}
 
-              <FromField id="bc-from" value={from} onChange={setFrom} />
+              <FromField key={editorNonce} id="bc-from" value={from} onChange={setFrom} />
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div className="ms-field">
@@ -593,7 +666,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                 </div>
                 {tab === "edit" ? (
                   <MailyEditor
-                    key={templateId}
+                    key={`${templateId}:${editorNonce}`}
                     value={{ document, html }}
                     onChange={(v) => {
                       setDocument(v.document);
