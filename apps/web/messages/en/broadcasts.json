@@ -34,7 +34,6 @@
     "nameLabel": "Name",
     "nameHint": "Internal label. Recipients never see it.",
     "fromLabel": "From",
-    "fromPlaceholder": "Ada <ada@yourdomain.com>",
     "subjectLabel": "Subject",
     "replyToLabel": "Reply-to",
     "optional": "optional",
@@ -58,7 +57,12 @@
     "back": "Broadcasts",
     "segmentLabel": "Segment",
     "segmentNone": "Whole audience",
-    "segmentHint": "Narrows this send to the contacts matching a saved segment."
+    "segmentHint": "Narrows this send to the contacts matching a saved segment.",
+    "fromNamePlaceholder": "Ada",
+    "fromLocalPlaceholder": "news",
+    "fromLocalLabel": "Sender address (before the @)",
+    "fromDomainLabel": "Sending domain",
+    "fromAddDomain": "Add domain"
   },
   "guard": {
     "title": "Send broadcast",

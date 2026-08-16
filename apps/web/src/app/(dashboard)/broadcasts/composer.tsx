@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { FromField } from "@/components/from-field";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -382,17 +383,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
         ) : null}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <div className="ms-field">
-            <label htmlFor="bc-from">{t("composer.fromLabel")}</label>
-            <input
-              id="bc-from"
-              className="ms-input mono"
-              style={{ width: "100%" }}
-              placeholder={t("composer.fromPlaceholder")}
-              value={from}
-              onChange={(event) => setFrom(event.target.value)}
-            />
-          </div>
+          <FromField id="bc-from" value={from} onChange={setFrom} />
           <div className="ms-field">
             <label htmlFor="bc-reply-to">
               {t("composer.replyToLabel")}{" "}

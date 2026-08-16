@@ -34,7 +34,6 @@
     "nameLabel": "Nome",
     "nameHint": "Rótulo interno. Os destinatários nunca o veem.",
     "fromLabel": "De",
-    "fromPlaceholder": "Ada <ada@seudominio.com>",
     "subjectLabel": "Assunto",
     "replyToLabel": "Responder para",
     "optional": "opcional",
@@ -58,7 +57,12 @@
     "back": "Transmissões",
     "segmentLabel": "Segmento",
     "segmentNone": "Audiência inteira",
-    "segmentHint": "Restringe este envio aos contatos que correspondem a um segmento salvo."
+    "segmentHint": "Restringe este envio aos contatos que correspondem a um segmento salvo.",
+    "fromNamePlaceholder": "Ada",
+    "fromLocalPlaceholder": "novidades",
+    "fromLocalLabel": "Endereço do remetente (antes do @)",
+    "fromDomainLabel": "Domínio de envio",
+    "fromAddDomain": "Adicionar domínio"
   },
   "guard": {
     "title": "Enviar transmissão",
