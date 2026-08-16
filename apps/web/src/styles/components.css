@@ -80,6 +80,34 @@
   opacity: 1;
   color: var(--ms-bone);
 }
+/* Bare "…" trigger for table row menus: just the glyph on a 28px hit area,
+   no box — quieter than ms-btn-icon, which is kept for detail-header menus
+   where it sits alongside other buttons. */
+.ms-menu-trigger-bare {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ms-faint);
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    color var(--ms-dur-fast) var(--ms-ease),
+    background var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-menu-trigger-bare:hover,
+.ms-menu-trigger-bare[aria-expanded="true"] {
+  color: var(--ms-bone);
+  background: var(--ms-panel-raised);
+}
+.ms-menu-trigger-bare:focus-visible {
+  outline: none;
+  box-shadow: var(--ms-focus-ring);
+}
 .ms-keycap {
   font: 500 var(--ms-fs-micro) var(--ms-font-sans);
   border-radius: var(--ms-r-chip);

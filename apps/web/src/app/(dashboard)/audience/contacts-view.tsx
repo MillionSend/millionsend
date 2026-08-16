@@ -432,6 +432,7 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
           }))}
         />
         <PopoverMenu
+          boxed
           ariaLabel={t("manage.menu")}
           items={[
             { label: t("manage.create"), onSelect: () => setCreateOpen(true) },
