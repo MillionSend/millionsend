@@ -287,9 +287,6 @@ export default function EmailsPage() {
                   <td>{row.subject}</td>
                   <td className="right">
                     <RelativeTime date={row.createdAt} />
-                    <span aria-hidden="true" style={{ color: "var(--ms-faint)", marginLeft: 12 }}>
-                      …
-                    </span>
                   </td>
                 </tr>
               ))}

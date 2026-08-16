@@ -1,16 +1,22 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { PlusGlyph } from "@/components/icons/nav-icons";
+import { Modal } from "@/components/modal";
+import { ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
+import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
+import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { AwsCredentialsBanner } from "./aws-credentials-banner";
@@ -46,7 +52,25 @@ export function DomainsView() {
   const t = useTranslations("domains");
   const common = useTranslations("common");
   const trpc = useTRPC();
+  const router = useRouter();
   const domains = useQuery(trpc.domains.list.queryOptions());
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+  const deleteMutation = useMutation(
+    trpc.domains.delete.mutationOptions({
+      onSuccess: () => {
+        setDeleteTarget(null);
+        setConfirmText("");
+        domains.refetch();
+      },
+    }),
+  );
+  // Stable identity: Modal's focus effect depends on onClose.
+  const closeDelete = useCallback(() => {
+    setDeleteTarget(null);
+    setConfirmText("");
+  }, []);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -208,18 +232,34 @@ export function DomainsView() {
                       <RegionLabel region={domain.region} />
                     </td>
                     <td className="right">
-                      <RelativeTime date={domain.createdAt} />
-                      <Link
-                        href={`/domains/${domain.id}`}
-                        aria-label={t("list.rowDetails")}
+                      <span
                         style={{
-                          color: "var(--ms-faint)",
-                          marginLeft: 12,
-                          textDecoration: "none",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 10,
+                          justifyContent: "flex-end",
                         }}
                       >
-                        …
-                      </Link>
+                        <RelativeTime date={domain.createdAt} />
+                        <PopoverMenu
+                          ariaLabel={t("detail.moreActions")}
+                          items={[
+                            {
+                              label: t("list.rowDetails"),
+                              onSelect: () => router.push(`/domains/${domain.id}`),
+                            },
+                            null,
+                            {
+                              label: t("detail.deleteDomain"),
+                              danger: true,
+                              onSelect: () => {
+                                setConfirmText("");
+                                setDeleteTarget({ id: domain.id, name: domain.name });
+                              },
+                            },
+                          ]}
+                        />
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -239,6 +279,57 @@ export function DomainsView() {
           ) : null}
         </>
       )}
+
+      <Modal open={deleteTarget !== null} onClose={closeDelete} title={t("detail.deleteDomain")}>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (deleteTarget && confirmText === deleteTarget.name && !deleteMutation.isPending) {
+              deleteMutation.mutate({ id: deleteTarget.id });
+            }
+          }}
+        >
+          <p
+            style={{
+              margin: "10px 0 14px",
+              color: "var(--ms-muted)",
+              fontSize: 13.5,
+              lineHeight: 1.6,
+            }}
+          >
+            {t("detail.deleteBody")}
+          </p>
+          {deleteTarget ? <CopyChip value={deleteTarget.name} /> : null}
+          <div className="ms-field" style={{ marginTop: 14 }}>
+            <label htmlFor="domain-delete-confirm">{t("detail.deleteConfirmLabel")}</label>
+            <input
+              id="domain-delete-confirm"
+              type="text"
+              className="ms-input mono"
+              style={{ width: "100%" }}
+              placeholder={deleteTarget?.name}
+              autoComplete="off"
+              spellCheck={false}
+              disabled={deleteMutation.isPending}
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+            />
+          </div>
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>
+              {common("cancel")} <span className="ms-keycap">Esc</span>
+            </button>
+            <button
+              type="submit"
+              className="ms-btn ms-btn-destructive"
+              disabled={confirmText !== deleteTarget?.name || deleteMutation.isPending}
+            >
+              <BtnSpinner on={deleteMutation.isPending} />
+              {t("detail.deleteDomain")} <span className="ms-keycap">↵</span>
+            </button>
+          </ModalFooter>
+        </form>
+      </Modal>
     </>
   );
 }
