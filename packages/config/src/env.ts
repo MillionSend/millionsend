@@ -112,6 +112,13 @@ export const env = createEnv({
     // internet-reachable dashboard from handing strangers the SES account.
     ALLOW_SIGNUP: boolFromString,
 
+    // Social login for the dashboard. A provider's sign-in button appears
+    // only when BOTH its client id and secret are set.
+    GOOGLE_CLIENT_ID: z.string().optional(),
+    GOOGLE_CLIENT_SECRET: z.string().optional(),
+    GITHUB_CLIENT_ID: z.string().optional(),
+    GITHUB_CLIENT_SECRET: z.string().optional(),
+
     // Cloud-only (billing).
     STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
