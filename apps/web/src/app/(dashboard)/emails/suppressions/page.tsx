@@ -9,6 +9,7 @@ import { CodeGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
+import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
@@ -237,15 +238,16 @@ export default function SuppressionsPage() {
                     <RelativeTime date={row.createdAt} />
                   </td>
                   <td className="right" style={{ width: 40 }}>
-                    <button
-                      type="button"
-                      className="ms-btn ms-btn-ghost"
-                      style={{ padding: "0 4px", color: "var(--ms-faint)" }}
-                      aria-label={t("suppressions.remove")}
-                      onClick={() => setRemoveTarget({ id: row.id, email: row.email })}
-                    >
-                      …
-                    </button>
+                    <PopoverMenu
+                      ariaLabel={t("suppressions.remove")}
+                      items={[
+                        {
+                          label: t("suppressions.remove"),
+                          danger: true,
+                          onSelect: () => setRemoveTarget({ id: row.id, email: row.email }),
+                        },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}
