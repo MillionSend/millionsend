@@ -77,6 +77,9 @@ BETTER_AUTH_SECRET=
 # dashboard (e.g. https://mail.example.com). Sign-in is only accepted from
 # this origin; SNS subscriptions and hosted unsubscribe pages derive from it.
 # The default matches the docker-compose setup on the host machine.
+# MUST match the exact scheme+host+port you open the dashboard on — including
+# a custom WEB_PORT (e.g. http://localhost:3009). A mismatch makes login and
+# signup fail with an "invalid origin" error.
 APP_BASE_URL=http://localhost:3000
 
 # --- AWS SES (bring your own account) ---
@@ -103,8 +106,14 @@ SES_CONFIGURATION_SET=
 # this is true. Keep false when the dashboard is reachable from the internet.
 ALLOW_SIGNUP=false
 
-# API port (the web dashboard is always 3000).
+# API port. Under docker compose this moves both the container's listen port
+# and the published host port together.
 PORT=3001
+
+# Host port the compose file publishes the web dashboard on (the web process
+# itself is always 3000 inside the container). Remember to keep APP_BASE_URL
+# in sync with wherever the dashboard is actually reachable.
+WEB_PORT=3000
 
 # SMTP relay (the optional smtp compose service) listen port. Clients
 # authenticate with username "millionsend" and an ms_ API key as the password.
@@ -118,6 +127,21 @@ SMTP_TLS_KEY_PATH=
 
 # Leave false. true enables hosted-cloud behavior (KMS, Stripe billing).
 IS_CLOUD=false
+
+# --- Social login (optional) ---
+
+# OAuth credentials for the dashboard's social sign-in. Each provider's
+# "Continue with …" button appears only when BOTH its id and secret are set.
+# Register this callback URL on the OAuth app: {APP_BASE_URL}/api/auth/callback/<provider>
+# e.g. https://mail.example.com/api/auth/callback/google
+
+# Google: https://console.cloud.google.com/apis/credentials (OAuth client ID, type Web application)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# GitHub: https://github.com/settings/developers (New OAuth App)
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
 `;
 }
 
