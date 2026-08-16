@@ -353,6 +353,7 @@ export function WebhookDetail({ id }: { id: string }) {
               ) : null}
             </div>
             <PopoverMenu
+              boxed
               ariaLabel={t("detail.moreActions")}
               items={[
                 {

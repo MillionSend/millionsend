@@ -556,6 +556,7 @@ export function DomainDetail({ id }: { id: string }) {
             </button>
             <div style={{ position: "relative" }}>
               <PopoverMenu
+                boxed
                 ariaLabel={t("detail.moreActions")}
                 items={[
                   {
