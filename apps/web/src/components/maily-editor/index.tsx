@@ -33,7 +33,9 @@ import { isMailyDoc, type MailyDoc } from "@/lib/email-doc";
 import { MERGE_FIELDS_I18N_NS, type MergeFieldOption, makeMergeToken } from "@/lib/merge-fields";
 import { VariableIcon } from "./icons";
 import { EditorToolbar, type TiptapEditor } from "./toolbar";
+import { createVariableNodeView } from "./variable-node-view";
 import type { PickerField } from "./variable-picker";
+import { makeVariableSuggestionsPopover } from "./variable-suggestions";
 
 /**
  * Maily-backed email editor (Tiptap). Formatting rides on our own toolbar (the
@@ -168,11 +170,29 @@ export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) 
 
   const extensions = useMemo(
     () => [
-      VariableExtension.configure({
+      // Extended with our own node view: the in-content pill and its edit
+      // popover become ours (translated Variable/Default labels, aligned rows)
+      // instead of Maily's hardcoded-English VariableView. The '@' popover is
+      // likewise ours via variableSuggestionsPopover — same ref contract
+      // ({moveUp, moveDown, select}) that Maily's VariableList drives.
+      VariableExtension.extend({
+        addNodeView() {
+          return createVariableNodeView({
+            variable: t("varpop.variable"),
+            fallback: t("varpop.fallback"),
+            fallbackPlaceholder: t("varpop.fallbackPlaceholder"),
+          }) as never;
+        },
+      }).configure({
         variables: ({ query }) =>
           variablesRef.current.filter((v) => v.name.toLowerCase().startsWith(query.toLowerCase())),
         suggestion: getVariableSuggestions(),
         renderVariable,
+        variableSuggestionsPopover: makeVariableSuggestionsPopover({
+          header: t("suggest.header"),
+          navigate: t("suggest.navigate"),
+          empty: t("suggest.empty"),
+        }),
       }),
       // Same-name extensions replace Maily's defaults — that is how the slash
       // menu and placeholder become localizable at all.

@@ -118,6 +118,30 @@
   color: var(--ms-bone);
   font: 400 var(--ms-fs-ui) / 1.6 var(--ms-font-sans);
 }
+/* Maily's prose styles pin their palette via --mly-tw-prose-* custom props
+   defined ON the content element (near-black headings/body) — invisible on the
+   dark theme. Re-declare them with our tokens; unlayered, so this wins over
+   the layered .mly:prose definitions. The sent email is unaffected (its html
+   is rendered server-side with inline styles). */
+.ms-maily .ms-maily-content {
+  --mly-tw-prose-body: var(--ms-bone);
+  --mly-tw-prose-headings: var(--ms-bone);
+  --mly-tw-prose-lead: var(--ms-muted);
+  --mly-tw-prose-links: var(--ms-bone);
+  --mly-tw-prose-bold: var(--ms-bone);
+  --mly-tw-prose-counters: var(--ms-muted);
+  --mly-tw-prose-bullets: var(--ms-faint);
+  --mly-tw-prose-hr: var(--ms-line-strong);
+  --mly-tw-prose-quotes: var(--ms-bone);
+  --mly-tw-prose-quote-borders: var(--ms-line-strong);
+  --mly-tw-prose-captions: var(--ms-muted);
+  --mly-tw-prose-kbd: var(--ms-bone);
+  --mly-tw-prose-code: var(--ms-bone);
+  --mly-tw-prose-pre-code: var(--ms-bone);
+  --mly-tw-prose-pre-bg: var(--ms-inset);
+  --mly-tw-prose-th-borders: var(--ms-line-strong);
+  --mly-tw-prose-td-borders: var(--ms-line);
+}
 .ms-maily .ProseMirror:focus {
   outline: none;
 }
@@ -129,8 +153,158 @@
 /* ---- in-content variable pill ------------------------------------------- */
 /* The node-view wrapper is inline-block, which baseline-aligns the pill and
    floats it above the text's optical middle — middle-align it instead. */
-.ms-maily .ProseMirror .react-component {
+.ms-maily .ProseMirror .react-component,
+.ms-maily .ProseMirror .ms-varview {
   vertical-align: middle;
+}
+.ms-varview {
+  position: relative;
+  display: inline-block;
+}
+.ms-maily-varpill.is-selected {
+  box-shadow: var(--ms-focus-ring);
+}
+
+/* The pill's edit popover: Variable name + Default fallback, label column
+   aligned via grid so nothing floats off-center. */
+.ms-varpop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: var(--ms-z-popover);
+  display: grid;
+  gap: 6px;
+  min-width: 240px;
+  padding: 10px;
+  background: var(--ms-panel);
+  border: 1px solid var(--ms-line-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  animation: ms-fade var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-varpop[hidden] {
+  display: none;
+}
+.ms-varpop-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.ms-varpop-label {
+  color: var(--ms-muted);
+  font: 400 12px var(--ms-font-sans);
+}
+.ms-varpop-name {
+  font-family: var(--ms-font-mono);
+  font-size: 12px;
+  color: var(--ms-bone);
+  background: var(--ms-inset);
+  border: 1px solid var(--ms-line);
+  border-radius: 7px;
+  padding: 5px 8px;
+}
+.ms-varpop-input {
+  appearance: none;
+  font-family: var(--ms-font-mono);
+  font-size: 12px;
+  color: var(--ms-bone);
+  background: var(--ms-inset);
+  border: 1px solid var(--ms-line);
+  border-radius: 7px;
+  padding: 5px 8px;
+  outline: none;
+}
+.ms-varpop-input:focus {
+  border-color: var(--ms-line-strong);
+}
+.ms-varpop-input::placeholder {
+  color: var(--ms-faint);
+}
+
+/* ---- '@' variable-suggestions popover ----------------------------------- */
+.ms-varsuggest {
+  width: 250px;
+  background: var(--ms-panel);
+  border: 1px solid var(--ms-line-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.ms-varsuggest-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--ms-line);
+  color: var(--ms-muted);
+  font-size: var(--ms-fs-micro);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ms-varsuggest-list {
+  max-height: 210px;
+  overflow-y: auto;
+  padding: 4px;
+  display: grid;
+  gap: 2px;
+}
+.ms-varsuggest-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ms-bone);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.ms-varsuggest-item[data-active],
+.ms-varsuggest-item:hover {
+  background: var(--ms-panel-raised);
+}
+.ms-varsuggest-braces {
+  color: var(--ms-muted);
+  flex-shrink: 0;
+}
+.ms-varsuggest-empty {
+  margin: 0;
+  padding: 10px;
+  color: var(--ms-muted);
+  font-size: 12.5px;
+}
+.ms-varsuggest-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-top: 1px solid var(--ms-line);
+  color: var(--ms-muted);
+  font-size: 11.5px;
+}
+.ms-varsuggest-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ms-varsuggest kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--ms-line-strong);
+  border-radius: 5px;
+  background: var(--ms-panel-raised);
+  color: var(--ms-muted);
+  font-family: var(--ms-font-mono);
+  font-size: 10.5px;
 }
 .ms-maily-varpill {
   display: inline-flex;
