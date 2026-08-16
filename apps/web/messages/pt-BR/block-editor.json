@@ -84,5 +84,15 @@
   "ph": {
     "body": "Escreva algo, ou / para blocos",
     "heading": "Título {level}"
+  },
+  "varpop": {
+    "variable": "Variável",
+    "fallback": "Valor padrão",
+    "fallbackPlaceholder": "ex.: João"
+  },
+  "suggest": {
+    "header": "Variáveis",
+    "navigate": "Navegar",
+    "empty": "Nenhum campo corresponde."
   }
 }
