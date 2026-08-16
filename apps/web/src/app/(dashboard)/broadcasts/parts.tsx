@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Skeleton } from "@/components/skeleton";
 import { MERGE_TOKEN_RE } from "@/lib/merge-fields";
+import { useTheme } from "@/lib/use-theme";
 
 // Stand-in values so every merge pill reads as real content in the preview
 // rather than a raw {{{TOKEN}}}. UNSUBSCRIBE_URL becomes a dead "#" — the
@@ -85,9 +86,23 @@ export function StatBlock({ label, value }: { label: string; value: string | nul
   );
 }
 
+/*
+ * Approximation of how dark-mode mail clients (Gmail's auto-darkening, Apple
+ * Mail with supported-color-schemes) transform a light email: invert + rotate
+ * hues, then re-invert media so photos and logos keep their real colors. Full
+ * invert(1) both ways keeps images pixel-exact. Preview-only — nothing here
+ * ships in a send.
+ */
+const DARK_CLIENT_SIM = `<style>
+  html { filter: invert(1) hue-rotate(180deg); background: #fff; }
+  img, video, [style*="background-image"] { filter: invert(1) hue-rotate(180deg); }
+</style>`;
+
 /**
  * Sandboxed render of broadcast HTML; scripts never run. Every merge token is
- * shown as a sample value so the preview reads like a real send.
+ * shown as a sample value so the preview reads like a real send. When the app
+ * theme is dark, the preview simulates a dark-mode client instead of always
+ * showing the light rendering.
  */
 export function ContentPreview({
   html,
@@ -98,6 +113,7 @@ export function ContentPreview({
   title: string;
   samples?: Record<string, string>;
 }) {
+  const dark = useTheme() === "dark";
   return (
     <div
       style={{
@@ -110,14 +126,14 @@ export function ContentPreview({
       <iframe
         title={title}
         sandbox=""
-        srcDoc={fillMergeSamples(html, samples)}
+        srcDoc={fillMergeSamples(html, samples) + (dark ? DARK_CLIENT_SIM : "")}
         style={{
           width: 560,
           maxWidth: "100%",
           height: 480,
           border: 0,
           borderRadius: 8,
-          background: "#ffffff",
+          background: dark ? "#111113" : "#ffffff",
         }}
       />
     </div>
