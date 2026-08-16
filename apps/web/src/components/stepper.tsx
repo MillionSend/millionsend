@@ -47,16 +47,19 @@ export function StepRail({ current = 1, total = 2 }: { current?: number; total?:
   );
 }
 
-/** Left rail of one step row on the second screen: marker (✓ or number) above
- * the connector line. */
+/** Left rail of one step row on the second screen: the step number (plus a ✓
+ * when done) above the connector line. */
 export function MarkerRail({
   marker,
   color,
   line = true,
+  done = false,
 }: {
   marker: string;
   color: string;
   line?: boolean;
+  /** Completed step: keeps the number and appends a check to its right. */
+  done?: boolean;
 }) {
   return (
     <div
@@ -70,8 +73,19 @@ export function MarkerRail({
         alignItems: "center",
       }}
     >
-      <span className="ms-mono" style={{ fontSize: 11, color }}>
+      <span
+        className="ms-mono"
+        style={{
+          fontSize: 11,
+          color,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 3,
+          whiteSpace: "nowrap",
+        }}
+      >
         {marker}
+        {done ? <span>✓</span> : null}
       </span>
       {line ? (
         <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />

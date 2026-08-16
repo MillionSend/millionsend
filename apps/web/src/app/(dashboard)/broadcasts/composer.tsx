@@ -16,6 +16,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { MarkerRail, MobileStepBar, StepRail } from "@/components/stepper";
 import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
+import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { ContentPreview } from "./parts";
@@ -107,7 +108,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const savedDoc = useRef<string | null>(
     initial !== undefined ? JSON.stringify(initial.document ?? null) : null,
   );
-  useUnsavedChangesWarning(dirty);
+  useUnsavedChangesWarning(dirty, common("unsavedWarn"));
 
   const audiences = useQuery(trpc.audience.audiences.list.queryOptions());
   const topics = useQuery(trpc.topics.list.queryOptions());
@@ -429,13 +430,14 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
 
           {/* Step 01 — done: targeting recap with a way back */}
           <div className="ms-step" style={{ display: "flex", gap: 44 }}>
-            <MarkerRail marker="✓" color="var(--ms-success)" />
+            <MarkerRail marker="01" done color="var(--ms-success)" />
             <div style={{ flex: 1, minWidth: 0, paddingBottom: 24 }}>
               <div
                 style={{
                   maxWidth: 720,
-                  background: "var(--ms-panel)",
-                  border: "1px solid var(--ms-line)",
+                  backgroundColor: "var(--ms-ground)",
+                  backgroundImage: statusGlow("success", 15),
+                  border: "1px solid var(--ms-success-border)",
                   borderRadius: "var(--ms-r-card)",
                   padding: "12px 16px",
                   boxSizing: "border-box",
@@ -455,7 +457,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {selectedAudience?.name ?? t("composer.audiencePick")}
+                    {selectedAudience?.name ?? t("composer.audiencePick")}{" "}
+                    <span style={{ color: "var(--ms-success)", fontWeight: 400 }}>✓</span>
                     {name.trim() ? (
                       <span style={{ color: "var(--ms-muted)", fontWeight: 400 }}>
                         {" "}
