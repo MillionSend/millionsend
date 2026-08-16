@@ -38,6 +38,10 @@
     "title": "Add domain",
     "stepLine": "step 1 of 2 · domain & region → DNS records",
     "stepLine2": "step 2 of 2 · add the records at your DNS provider",
+    "steps": {
+      "one": "Domain & region",
+      "two": "DNS records"
+    },
     "cardTitle": "Domain",
     "recapSubtitle": "Added to your team.",
     "recordsTitle": "Fill in your DNS records",
