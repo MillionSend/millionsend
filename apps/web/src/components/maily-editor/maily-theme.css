@@ -12,7 +12,9 @@
   --mly-color-gray-100: var(--ms-panel-raised);
   --mly-color-gray-200: var(--ms-line);
   --mly-color-gray-300: var(--ms-line-strong);
-  --mly-color-gray-400: var(--ms-faint);
+  /* gray-400 renders slash-menu descriptions and footer hints — muted, not
+     faint, so the copy stays readable on both themes. */
+  --mly-color-gray-400: var(--ms-muted);
   --mly-color-gray-500: var(--ms-muted);
   --mly-color-gray-600: var(--ms-muted);
   --mly-color-gray-700: var(--ms-bone);
@@ -99,6 +101,16 @@
   background: transparent !important;
   box-shadow: none !important;
 }
+/* Maily's body div ships mt-4 + rounded + border + bg-white + p-4 — inside our
+   already-bordered surface that reads as a duplicated inner border and a gap
+   below the toolbar. Flatten it; the ProseMirror rule below owns the padding. */
+.ms-maily-surface .ms-maily-body {
+  margin-top: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
 .ms-maily .ProseMirror {
   min-height: 280px;
   padding: 16px 18px;
@@ -112,6 +124,31 @@
 /* Placeholder text uses our faint token, not Maily's baked gray. */
 .ms-maily .ProseMirror p.is-editor-empty:first-child::before {
   color: var(--ms-faint);
+}
+
+/* ---- in-content variable pill ------------------------------------------- */
+/* The node-view wrapper is inline-block, which baseline-aligns the pill and
+   floats it above the text's optical middle — middle-align it instead. */
+.ms-maily .ProseMirror .react-component {
+  vertical-align: middle;
+}
+.ms-maily-varpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--ms-line-strong);
+  border-radius: 999px;
+  background: var(--ms-panel-raised);
+  color: var(--ms-bone);
+  font-family: var(--ms-font-mono);
+  font-size: 0.82em;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ms-maily-varpill svg {
+  color: var(--ms-muted);
 }
 
 /* ---- variable "Insert" picker ------------------------------------------ */
@@ -151,6 +188,7 @@
 .ms-maily-picker-list {
   max-height: 320px;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 4px;
 }
 .ms-maily-picker-empty {
@@ -165,9 +203,11 @@
 }
 .ms-maily-picker-pick {
   display: grid;
-  grid-template-columns: 1fr auto;
+  /* minmax(0,…) lets both cells shrink so a long token never widens the panel. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
   gap: 2px 10px;
   width: 100%;
+  min-width: 0;
   padding: 8px 10px;
   border: 0;
   border-radius: 8px;
@@ -182,6 +222,9 @@
 .ms-maily-picker-label {
   color: var(--ms-bone);
   font: 500 13px var(--ms-font-sans);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ms-maily-picker-token {
   grid-row: 1;
@@ -189,12 +232,16 @@
   align-self: center;
   color: var(--ms-muted);
   font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ms-maily-picker-desc {
   grid-column: 1 / -1;
   color: var(--ms-muted);
   font-size: 11.5px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .ms-maily-picker-fallback {
   width: calc(100% - 8px);
@@ -244,9 +291,47 @@
 }
 
 /* ---- Maily's tippy popups (slash + variable suggestions) --------------- */
+/* Maily scopes its Tailwind preflight to #mly-editor, but these popups mount
+   on <body> via tippy — so they inherit raw UA styles: bordered button chrome
+   turned each slash item into a giant card, and default <p> margins bloated
+   the copy. Recreate the preflight for the portals, in @layer base so Maily's
+   own utility classes (its spacing/typography) still win over the reset. */
+@layer base {
+  [data-tippy-root] *,
+  [data-tippy-root] ::before,
+  [data-tippy-root] ::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0 solid;
+  }
+  [data-tippy-root] button {
+    appearance: none;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: inherit;
+    cursor: pointer;
+  }
+  [data-tippy-root] input {
+    font: inherit;
+    color: inherit;
+  }
+  [data-tippy-root] kbd {
+    font-family: var(--ms-font-mono);
+    font-size: 0.9em;
+  }
+}
 /* Colour comes from the token remap above; here we only tame the heavy shadow
    and round the corners so the popup reads like our other menus. */
 [data-tippy-root] .tippy-box {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
   border-radius: 10px;
+}
+/* The keyboard-hints footer under the slash list is hardcoded English inside
+   Maily (untranslatable) and adds noise — the ↑↓/Enter interactions still
+   work; product call: hide it. #slash-command is the scroll area, the footer
+   is its only sibling. */
+[data-tippy-root] #slash-command + div {
+  display: none;
 }

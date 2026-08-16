@@ -515,14 +515,6 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               )}
             </div>
           )}
-          <p
-            style={{ margin: "8px 0 0", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}
-          >
-            <span className="ms-mono" style={{ color: "var(--ms-bone)" }}>
-              {"{{{UNSUBSCRIBE_URL}}}"}
-            </span>{" "}
-            {t("composer.unsubHint")}
-          </p>
         </div>
 
         {saveError && !guardOpen ? (

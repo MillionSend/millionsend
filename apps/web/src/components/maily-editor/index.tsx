@@ -2,7 +2,26 @@
 
 import { Editor, type EditorProps } from "@maily-to/core";
 import {
+  blockquote,
+  bulletList,
+  button,
+  columns,
+  divider,
+  heading1,
+  heading2,
+  heading3,
+  image,
+  orderedList,
+  section,
+  spacer,
+  text,
+} from "@maily-to/core/blocks";
+import {
+  DEFAULT_RENDER_VARIABLE_FUNCTION,
+  getSlashCommandSuggestions,
   getVariableSuggestions,
+  PlaceholderExtension,
+  SlashCommandExtension,
   type Variable,
   VariableExtension,
 } from "@maily-to/core/extensions";
@@ -12,7 +31,8 @@ import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { isMailyDoc, type MailyDoc } from "@/lib/email-doc";
 import { htmlToText } from "@/lib/html";
-import { MERGE_FIELDS_I18N_NS, type MergeFieldOption } from "@/lib/merge-fields";
+import { MERGE_FIELDS_I18N_NS, type MergeFieldOption, makeMergeToken } from "@/lib/merge-fields";
+import { VariableIcon } from "./icons";
 import { EditorToolbar, type TiptapEditor } from "./toolbar";
 import type { PickerField } from "./variable-picker";
 
@@ -24,6 +44,12 @@ import type { PickerField } from "./variable-picker";
  * value — send html is re-rendered on save. A stored document that is not Maily
  * JSON (a pre-Maily template) imports through `contentHtml`, so it still edits
  * in place with no raw-html tab.
+ *
+ * The slash menu and empty-state placeholder are rebuilt from Maily's blocks
+ * with our i18n strings (Maily ships hardcoded English; passing same-name
+ * extensions replaces its defaults). The in-content variable pill is ours too:
+ * themed, centered, and without Maily's required-⚠, which its default pill
+ * shows for every variable lacking a fallback.
  *
  * Prop shape mirrors the previous editor so the pages are untouched.
  */
@@ -46,11 +72,40 @@ export interface MailyEditorProps {
 
 type MailyContent = NonNullable<EditorProps["contentJson"]>;
 
+/** The curated slash-menu blocks, paired with their i18n key. */
+const SLASH_BLOCKS = [
+  [text, "text"],
+  [heading1, "heading1"],
+  [heading2, "heading2"],
+  [heading3, "heading3"],
+  [bulletList, "bulletList"],
+  [orderedList, "orderedList"],
+  [image, "image"],
+  [button, "button"],
+  [divider, "divider"],
+  [spacer, "spacer"],
+  [blockquote, "blockquote"],
+  [columns, "columns"],
+  [section, "section"],
+] as const;
+
+/** Node types that render their own inner placeholder (or none at all). */
+const NO_PLACEHOLDER_NODES = new Set([
+  "columns",
+  "column",
+  "section",
+  "repeat",
+  "show",
+  "blockquote",
+  "htmlCodeBlock",
+]);
+
 function emptyMailyDoc(): MailyDoc {
   return { type: "doc", content: [{ type: "paragraph" }] };
 }
 
 export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) {
+  const t = useTranslations("block-editor");
   const tf = useTranslations(MERGE_FIELDS_I18N_NS);
 
   const [editor, setEditor] = useState<TiptapEditor | null>(null);
@@ -94,15 +149,57 @@ export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) 
       })),
     [mergeFields, tf],
   );
+
+  // Our in-content pill: themed, vertically centered, labelled with the human
+  // name and carrying the raw token in the tooltip. Maily's default pill is
+  // skipped for content variables only — the bubble/button variants keep it.
+  const renderVariable = useCallback<typeof DEFAULT_RENDER_VARIABLE_FUNCTION>((opts) => {
+    if (opts.from !== "content-variable") return DEFAULT_RENDER_VARIABLE_FUNCTION(opts);
+    const { variable, fallback } = opts;
+    return (
+      <span
+        className="ms-maily-varpill"
+        title={makeMergeToken(variable.name, fallback || undefined)}
+      >
+        <VariableIcon size={11} />
+        {variable.label || variable.name}
+      </span>
+    );
+  }, []);
+
   const extensions = useMemo(
     () => [
       VariableExtension.configure({
         variables: ({ query }) =>
           variables.filter((v) => v.name.toLowerCase().startsWith(query.toLowerCase())),
         suggestion: getVariableSuggestions(),
+        renderVariable,
+      }),
+      // Same-name extensions replace Maily's defaults — that is how the slash
+      // menu and placeholder become localizable at all.
+      SlashCommandExtension.configure({
+        suggestion: getSlashCommandSuggestions([
+          {
+            title: t("slash.group"),
+            commands: SLASH_BLOCKS.map(([block, key]) => ({
+              ...block,
+              title: t(`slash.${key}.title`),
+              description: t(`slash.${key}.desc`),
+            })),
+          },
+        ]),
+      }),
+      PlaceholderExtension.configure({
+        placeholder: ({ node }) => {
+          if (node.type.name === "heading") {
+            return t("ph.heading", { level: node.attrs.level as number });
+          }
+          return NO_PLACEHOLDER_NODES.has(node.type.name) ? "" : t("ph.body");
+        },
+        includeChildren: true,
       }),
     ],
-    [variables],
+    [variables, renderVariable, t],
   );
 
   const fields = useMemo<PickerField[]>(

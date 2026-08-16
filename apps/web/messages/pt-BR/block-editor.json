@@ -65,5 +65,64 @@
   "view": {
     "imagePlaceholder": "Sem imagem — defina uma URL no painel",
     "spacer": "Espaço · {h}px"
+  },
+  "slash": {
+    "group": "Blocos",
+    "text": {
+      "title": "Texto",
+      "desc": "Parágrafo de texto simples."
+    },
+    "heading1": {
+      "title": "Título 1",
+      "desc": "Título grande de seção."
+    },
+    "heading2": {
+      "title": "Título 2",
+      "desc": "Título médio de seção."
+    },
+    "heading3": {
+      "title": "Título 3",
+      "desc": "Título pequeno de seção."
+    },
+    "bulletList": {
+      "title": "Lista com marcadores",
+      "desc": "Uma lista simples com marcadores."
+    },
+    "orderedList": {
+      "title": "Lista numerada",
+      "desc": "Uma lista numerada."
+    },
+    "image": {
+      "title": "Imagem",
+      "desc": "Imagem em largura total."
+    },
+    "button": {
+      "title": "Botão",
+      "desc": "Um botão de chamada para ação."
+    },
+    "divider": {
+      "title": "Divisor",
+      "desc": "Linha horizontal entre seções."
+    },
+    "spacer": {
+      "title": "Espaçador",
+      "desc": "Respiro vertical."
+    },
+    "blockquote": {
+      "title": "Citação",
+      "desc": "Destaque um trecho como citação."
+    },
+    "columns": {
+      "title": "Colunas",
+      "desc": "Colunas lado a lado."
+    },
+    "section": {
+      "title": "Seção",
+      "desc": "Agrupe conteúdo em uma caixa estilizada."
+    }
+  },
+  "ph": {
+    "body": "Escreva algo, ou / para blocos",
+    "heading": "Título {level}"
   }
 }

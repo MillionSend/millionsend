@@ -65,5 +65,64 @@
   "view": {
     "imagePlaceholder": "No image — set a URL in the panel",
     "spacer": "Spacer · {h}px"
+  },
+  "slash": {
+    "group": "Blocks",
+    "text": {
+      "title": "Text",
+      "desc": "Plain paragraph text."
+    },
+    "heading1": {
+      "title": "Heading 1",
+      "desc": "Large section heading."
+    },
+    "heading2": {
+      "title": "Heading 2",
+      "desc": "Medium section heading."
+    },
+    "heading3": {
+      "title": "Heading 3",
+      "desc": "Small section heading."
+    },
+    "bulletList": {
+      "title": "Bullet list",
+      "desc": "A simple bulleted list."
+    },
+    "orderedList": {
+      "title": "Numbered list",
+      "desc": "A numbered list."
+    },
+    "image": {
+      "title": "Image",
+      "desc": "Full-width image."
+    },
+    "button": {
+      "title": "Button",
+      "desc": "A call-to-action button."
+    },
+    "divider": {
+      "title": "Divider",
+      "desc": "A horizontal rule between sections."
+    },
+    "spacer": {
+      "title": "Spacer",
+      "desc": "Vertical breathing room."
+    },
+    "blockquote": {
+      "title": "Quote",
+      "desc": "Set text apart as a quote."
+    },
+    "columns": {
+      "title": "Columns",
+      "desc": "Side-by-side layout columns."
+    },
+    "section": {
+      "title": "Section",
+      "desc": "Group content in a styled box."
+    }
+  },
+  "ph": {
+    "body": "Write something, or / for blocks",
+    "heading": "Heading {level}"
   }
 }
