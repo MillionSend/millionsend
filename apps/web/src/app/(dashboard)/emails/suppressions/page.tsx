@@ -4,8 +4,10 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { ApiDocsButton } from "@/components/api-sheet";
+import { EmailStatusIcon } from "@/components/email-status-icon";
 import { EmptyState } from "@/components/empty-state";
-import { CodeGlyph, PlusGlyph } from "@/components/icons/nav-icons";
+import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -135,9 +137,7 @@ export default function SuppressionsPage() {
         {...(subtitle ? { subtitle } : {})}
         actions={
           <>
-            <a className="ms-btn ms-btn-icon" href="#emails-api" aria-label={t("list.apiDocs")}>
-              <CodeGlyph size={14} />
-            </a>
+            <ApiDocsButton />
             <button
               type="button"
               className="ms-btn ms-btn-primary"
@@ -223,11 +223,14 @@ export default function SuppressionsPage() {
               {items.map((row) => (
                 <tr key={row.id}>
                   <td className="ms-mono" style={{ fontSize: 13 }}>
-                    {row.email ? (
-                      <Link href={`/emails/suppressions/${row.id}`}>{row.email}</Link>
-                    ) : (
-                      <span style={{ color: "var(--ms-faint)" }}>—</span>
-                    )}
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                      <EmailStatusIcon status={REASON_DOT[row.reason]} />
+                      {row.email ? (
+                        <Link href={`/emails/suppressions/${row.id}`}>{row.email}</Link>
+                      ) : (
+                        <span style={{ color: "var(--ms-faint)" }}>—</span>
+                      )}
+                    </span>
                   </td>
                   <td>
                     <span className={`ms-badge ms-badge-${REASON_VARIANT[row.reason]}`}>
@@ -273,6 +276,7 @@ export default function SuppressionsPage() {
             size={limit}
             onSize={setLimit}
             sizeLabel={(size) => t("suppressions.pageSize", { count: size })}
+            singlePage={!query.hasNextPage && (query.data?.pages.length ?? 1) === 1}
           />
         </>
       )}

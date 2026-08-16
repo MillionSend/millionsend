@@ -550,6 +550,7 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
             size={limit}
             onSize={setLimit}
             sizeLabel={(size) => t("contacts.pageSize", { count: size })}
+            singlePage={!query.hasNextPage && (query.data?.pages.length ?? 1) === 1}
           />
         </>
       )}

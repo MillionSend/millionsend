@@ -135,5 +135,12 @@
       "details": "Details",
       "removeNote": "Removing an address that bounced permanently will likely bounce again — remove it only after the mailbox is fixed."
     }
+  },
+  "apiSheet": {
+    "title": "Emails API",
+    "send": "Send email",
+    "batch": "Send batch emails",
+    "retrieve": "Retrieve email",
+    "keyHint": "Replace ms_xxxxxxxxx with an API key from the API Keys page. Every SDK also honors the MILLIONSEND_API_KEY and MILLIONSEND_BASE_URL environment variables."
   }
 }

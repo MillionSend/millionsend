@@ -274,12 +274,16 @@ table.ms-table {
 .ms-table.dense td {
   padding: 8px 12px;
 }
+/* Row hover: no background wash — the row's link underlines instead (quieter,
+   and the affordance sits on the thing you'd click). */
 .ms-table tbody tr.hoverable:hover td {
-  background: var(--ms-panel-raised);
   cursor: pointer;
 }
 .ms-table a {
   color: var(--ms-bone);
+  text-decoration: none;
+}
+.ms-table tbody tr:hover a {
   text-decoration: underline dotted var(--ms-faint);
   text-underline-offset: 3px;
 }

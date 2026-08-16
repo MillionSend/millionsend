@@ -135,5 +135,12 @@
       "details": "Detalhes",
       "removeNote": "Remover um endereço que devolveu permanentemente provavelmente devolverá de novo — remova apenas depois que a caixa postal for corrigida."
     }
+  },
+  "apiSheet": {
+    "title": "API de Emails",
+    "send": "Enviar email",
+    "batch": "Enviar emails em lote",
+    "retrieve": "Consultar email",
+    "keyHint": "Substitua ms_xxxxxxxxx por uma chave da página de Chaves de API. Todos os SDKs também aceitam as variáveis de ambiente MILLIONSEND_API_KEY e MILLIONSEND_BASE_URL."
   }
 }
