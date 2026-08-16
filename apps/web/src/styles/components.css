@@ -1027,9 +1027,10 @@ svg:focus {
     min-width: 0;
   }
   /* The vertical rail would wrap to its own line above the card and read as if
-     the card were step 02 — swap it for the labelled horizontal step bar. */
+     the card were step 02 — swap it for the labelled horizontal step bar.
+     !important overrides the rail's inline display:flex. */
   .ms-stepper > .ms-stepper-rail {
-    display: none;
+    display: none !important;
   }
   .ms-stepbar {
     display: flex;
@@ -1076,10 +1077,11 @@ svg:focus {
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Active step: same outlined circle as an upcoming step, lifted to white
+     border + white number (never a filled disc, which hides the number). */
   .ms-stepbar-step.current .ms-stepbar-dot {
-    color: var(--ms-ink);
+    color: var(--ms-bone);
     border-color: var(--ms-bone);
-    background: var(--ms-bone);
   }
   .ms-stepbar-step.current .ms-stepbar-text {
     color: var(--ms-bone);
