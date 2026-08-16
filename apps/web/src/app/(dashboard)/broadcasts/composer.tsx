@@ -356,17 +356,6 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
         }
       />
 
-      {draft.recovered ? (
-        <DraftBanner
-          savedAt={draft.recovered.savedAt}
-          onRestore={() => {
-            const r = draft.recovered;
-            if (r) restoreDraft(r.data);
-          }}
-          onDiscard={draft.discardRecovered}
-        />
-      ) : null}
-
       {step === 1 ? (
         <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
           <MobileStepBar steps={[t("composer.steps.one"), t("composer.steps.two")]} active={1} />
@@ -495,6 +484,16 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                 {t("composer.continue")}
               </button>
             </div>
+            {draft.recovered ? (
+              <DraftBanner
+                savedAt={draft.recovered.savedAt}
+                onRestore={() => {
+                  const r = draft.recovered;
+                  if (r) restoreDraft(r.data);
+                }}
+                onDiscard={draft.discardRecovered}
+              />
+            ) : null}
           </form>
         </div>
       ) : (
@@ -705,6 +704,16 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                     )}
                   </div>
                 )}
+                {draft.recovered ? (
+                  <DraftBanner
+                    savedAt={draft.recovered.savedAt}
+                    onRestore={() => {
+                      const r = draft.recovered;
+                      if (r) restoreDraft(r.data);
+                    }}
+                    onDiscard={draft.discardRecovered}
+                  />
+                ) : null}
               </div>
 
               {saveError && !guardOpen ? (

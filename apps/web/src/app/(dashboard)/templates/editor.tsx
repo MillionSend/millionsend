@@ -263,17 +263,6 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
         }
       />
 
-      {draft.recovered ? (
-        <DraftBanner
-          savedAt={draft.recovered.savedAt}
-          onRestore={() => {
-            const r = draft.recovered;
-            if (r) restoreDraft(r.data);
-          }}
-          onDiscard={draft.discardRecovered}
-        />
-      ) : null}
-
       <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 720 }}>
         <div className="ms-field">
           <label htmlFor="tpl-name">{t("editor.nameLabel")}</label>
@@ -378,6 +367,16 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
               )}
             </div>
           )}
+          {draft.recovered ? (
+            <DraftBanner
+              savedAt={draft.recovered.savedAt}
+              onRestore={() => {
+                const r = draft.recovered;
+                if (r) restoreDraft(r.data);
+              }}
+              onDiscard={draft.discardRecovered}
+            />
+          ) : null}
         </div>
 
         {saveError ? (
