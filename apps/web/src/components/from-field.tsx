@@ -61,11 +61,17 @@ export function FromField({
 
   const options = useMemo<SelectOption[]>(() => {
     const rows = domains.data ?? [];
-    const opts: SelectOption[] = rows.map((d) => ({
-      value: d.name,
-      label: d.name,
-      hint: common(`status.${d.status === "temporary_failure" ? "pending" : d.status}`),
-    }));
+    // Verification status rides as a badge so it stays visible on the trigger
+    // after selection, not only inside the open list.
+    const TONE = { verified: "success", pending: "warn", failed: "danger" } as const;
+    const opts: SelectOption[] = rows.map((d) => {
+      const status = d.status === "temporary_failure" ? "pending" : d.status;
+      return {
+        value: d.name,
+        label: d.name,
+        badge: { label: common(`status.${status}`), tone: TONE[status] ?? "neutral" },
+      };
+    });
     // A draft may reference a domain the team no longer has — keep it pickable
     // so opening the draft doesn't silently rewrite the sender.
     if (parts.domain && !rows.some((d) => d.name === parts.domain)) {

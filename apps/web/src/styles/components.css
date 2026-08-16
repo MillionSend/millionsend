@@ -1043,9 +1043,9 @@ svg:focus {
     padding: 0;
     list-style: none;
   }
-  /* Step 02 hosts the bar in a plain column (no flex gap), so it carries its
-     own spacing there. */
-  .ms-dns-step > .ms-stepbar {
+  /* Second-screen hosts (domain step 02, broadcast step 02) render the bar in
+     a plain column with no flex gap, so it carries its own spacing there. */
+  .ms-step-col > .ms-stepbar {
     margin-bottom: 20px;
   }
   .ms-stepbar-step {

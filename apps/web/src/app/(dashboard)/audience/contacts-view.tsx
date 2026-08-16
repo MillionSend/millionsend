@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { AudienceSelect } from "@/components/audience-select";
+import { CreateAudienceModal } from "@/components/create-audience-modal";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { ChevronGlyph, PlusGlyph } from "@/components/icons/nav-icons";
@@ -153,75 +155,6 @@ function AddContactsSplit({ onManual, onCsv }: { onManual: () => void; onCsv: ()
         </div>
       ) : null}
     </div>
-  );
-}
-
-/** Create-audience modal, shared by the manage menu and the empty-audience page. */
-export function CreateAudienceModal({
-  open,
-  onClose,
-  onCreated,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onCreated: (id: string) => void;
-}) {
-  const t = useTranslations("audience");
-  const common = useTranslations("common");
-  const trpc = useTRPC();
-  const [name, setName] = useState("");
-  const create = useMutation(
-    trpc.audience.audiences.create.mutationOptions({
-      onSuccess: ({ id }) => {
-        setName("");
-        onCreated(id);
-      },
-    }),
-  );
-
-  return (
-    <Modal open={open} onClose={onClose} title={t("list.createTitle")}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (create.isPending || name.trim().length === 0) return;
-          create.mutate({ name: name.trim() });
-        }}
-      >
-        <div className="ms-field">
-          <label htmlFor="audience-name">{t("list.nameLabel")}</label>
-          <input
-            id="audience-name"
-            className={`ms-input${create.isError ? " error" : ""}`}
-            style={{ width: "100%" }}
-            placeholder={t("list.namePlaceholder")}
-            disabled={create.isPending}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </div>
-        {create.isError ? (
-          <p
-            style={{ margin: "8px 0 0", color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}
-          >
-            {t("list.createError")}
-          </p>
-        ) : null}
-        <ModalFooter>
-          <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>
-            {common("cancel")} <span className="ms-keycap">Esc</span>
-          </button>
-          <button
-            type="submit"
-            className="ms-btn ms-btn-primary"
-            disabled={create.isPending || name.trim().length === 0}
-          >
-            <BtnSpinner on={create.isPending} />
-            {t("list.createConfirm")} <span className="ms-keycap">↵</span>
-          </button>
-        </ModalFooter>
-      </form>
-    </Modal>
   );
 }
 
@@ -416,7 +349,7 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
         className="ms-filter-row"
         style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
       >
-        <Select
+        <AudienceSelect
           value={audienceId}
           onChange={(id) => {
             if (id === audienceId) return;

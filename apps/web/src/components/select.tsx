@@ -12,6 +12,9 @@ export interface SelectOption {
   hint?: string;
   /** Leading adornment in the option row, e.g. a <StatusDot>. */
   adornment?: React.ReactNode;
+  /** Status badge after the label — shown in the option row AND on the trigger
+   * while the option is selected (e.g. a domain's Verified/Pending). */
+  badge?: { label: string; tone: "success" | "info" | "warn" | "danger" | "neutral" };
 }
 
 /* Search input appears only when the list is long enough for scanning to hurt. */
@@ -204,8 +207,26 @@ export function Select({
           opacity: disabled ? 0.4 : 1,
         }}
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {selected?.label ?? ""}
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            overflow: "hidden",
+            minWidth: 0,
+          }}
+        >
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {selected?.label ?? ""}
+          </span>
+          {selected?.badge ? (
+            <span
+              className={`ms-badge ms-badge-${selected.badge.tone}`}
+              style={{ flexShrink: 0, fontSize: 10.5, padding: "1px 7px" }}
+            >
+              {selected.badge.label}
+            </span>
+          ) : null}
         </span>
         <span style={{ flexShrink: 0, display: "flex", color: "var(--ms-faint)" }}>
           <ChevronGlyph />
@@ -285,6 +306,14 @@ export function Select({
                         </span>
                       ) : null}
                     </span>
+                    {option.badge ? (
+                      <span
+                        className={`ms-badge ms-badge-${option.badge.tone}`}
+                        style={{ flexShrink: 0, fontSize: 10.5, padding: "1px 7px" }}
+                      >
+                        {option.badge.label}
+                      </span>
+                    ) : null}
                   </span>
                   {option.value === value ? <span aria-hidden="true">✓</span> : null}
                 </button>

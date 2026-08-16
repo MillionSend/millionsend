@@ -191,13 +191,17 @@ export function TeamSwitcher({ teamName }: { teamName: string }) {
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
                   {team.teamName}
                 </span>
+              </span>
+              {/* Right cluster: the active ✓ sits just left of the plan pill,
+                  so the pill is always the right-most element of the row. */}
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flex: "none" }}>
+                {team.teamId === data?.activeTeamId ? (
+                  <span aria-hidden="true" style={{ color: "var(--ms-muted)" }}>
+                    ✓
+                  </span>
+                ) : null}
                 <PlanBadge plan={team.plan} />
               </span>
-              {team.teamId === data?.activeTeamId ? (
-                <span aria-hidden="true" style={{ color: "var(--ms-muted)", flex: "none" }}>
-                  ✓
-                </span>
-              ) : null}
             </button>
           ))}
           <hr className="ms-menu-sep" />

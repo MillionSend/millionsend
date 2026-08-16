@@ -13,6 +13,7 @@ import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { MarkerRail, MobileStepBar, StepRail } from "@/components/stepper";
 import { Tooltip } from "@/components/tooltip";
 import { isAwsCredentialError } from "@/lib/aws-errors";
 import { codeRichTags } from "@/lib/code-rich-tags";
@@ -34,92 +35,6 @@ function isConflict(error: unknown): boolean {
   return (error as { data?: { code?: string } } | null)?.data?.code === "CONFLICT";
 }
 
-/**
- * Horizontal step indicator shown in place of the vertical rail on narrow
- * screens (≤899px), where a wrapped vertical rail floats its numbers above the
- * card and reads as if the card were step 02. Labelled and connected so the two
- * steps stay legible as a sequence. Desktop keeps the vertical rail.
- */
-function MobileStepBar({ active }: { active: 1 | 2 }) {
-  const t = useTranslations("domains");
-  return (
-    <ol className="ms-stepbar">
-      {(["one", "two"] as const).map((key, index) => {
-        const num = index + 1;
-        const state = num < active ? "done" : num === active ? "current" : "upcoming";
-        return (
-          <li
-            key={key}
-            className={`ms-stepbar-step ${state}`}
-            {...(num === active ? { "aria-current": "step" } : {})}
-          >
-            <span className="ms-stepbar-dot ms-mono">{num < active ? "✓" : `0${num}`}</span>
-            <span className="ms-stepbar-text">{t(`new.steps.${key}`)}</span>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-/** The canvas stepper rail on step 01: 01 lit, 02 faint below the hairline. */
-function StepRail() {
-  return (
-    <div
-      aria-hidden="true"
-      className="ms-stepper-rail"
-      style={{
-        width: 30,
-        flex: "none",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        alignSelf: "stretch",
-      }}
-    >
-      <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-bone)" }}>
-        01
-      </span>
-      <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />
-      <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-faint)", marginTop: 6 }}>
-        02
-      </span>
-    </div>
-  );
-}
-
-/** Left rail of one stepper row: marker (✓ or number) above the connector line. */
-function MarkerRail({
-  marker,
-  color,
-  line = true,
-}: {
-  marker: string;
-  color: string;
-  line?: boolean;
-}) {
-  return (
-    <div
-      aria-hidden="true"
-      className="ms-stepper-rail"
-      style={{
-        width: 30,
-        flex: "none",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-      }}
-    >
-      <span className="ms-mono" style={{ fontSize: 11, color }}>
-        {marker}
-      </span>
-      {line ? (
-        <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />
-      ) : null}
-    </div>
-  );
-}
-
 /** Wizard step 02: the created domain's DNS records, rendered in-page after create. */
 function DnsRecordsStep({ id }: { id: string }) {
   const t = useTranslations("domains");
@@ -129,8 +44,8 @@ function DnsRecordsStep({ id }: { id: string }) {
   const records = useQuery(trpc.domains.records.queryOptions({ id }));
   const provider = records.data?.provider ?? null;
   return (
-    <div className="ms-dns-step" style={{ display: "flex", flexDirection: "column" }}>
-      <MobileStepBar active={2} />
+    <div className="ms-step-col" style={{ display: "flex", flexDirection: "column" }}>
+      <MobileStepBar steps={[t("new.steps.one"), t("new.steps.two")]} active={2} />
       {/* Step 01 — done: recap of the created domain */}
       <div className="ms-step" style={{ display: "flex", gap: 44 }}>
         <MarkerRail marker="✓" color="var(--ms-success)" />
@@ -299,8 +214,8 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
     <>
       <AwsCredentialsBanner />
       <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
-        <MobileStepBar active={1} />
-        <StepRail />
+        <MobileStepBar steps={[t("new.steps.one"), t("new.steps.two")]} active={1} />
+        <StepRail current={1} />
 
         <form
           onSubmit={onSubmit}

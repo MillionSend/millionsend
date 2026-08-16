@@ -4,13 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { CreateAudienceModal } from "@/components/create-audience-modal";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { PageHeader } from "@/components/page-header";
 import { readLastAudience, writeLastAudience } from "@/lib/last-audience";
 import { useTRPC } from "@/lib/trpc";
 import { AudienceTabs } from "./audience-tabs";
-import { AudienceContactsView, CreateAudienceModal } from "./contacts-view";
+import { AudienceContactsView } from "./contacts-view";
 
 /**
  * The Contacts tab's landing page: renders the Contacts surface of the

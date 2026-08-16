@@ -61,7 +61,13 @@
     "fromLocalPlaceholder": "novidades",
     "fromLocalLabel": "Endereço do remetente (antes do @)",
     "fromDomainLabel": "Domínio de envio",
-    "fromAddDomain": "Adicionar domínio"
+    "fromAddDomain": "Adicionar domínio",
+    "steps": {
+      "one": "Audiência e nome",
+      "two": "Conteúdo"
+    },
+    "continue": "Continuar",
+    "stepChange": "Alterar"
   },
   "guard": {
     "title": "Enviar transmissão",

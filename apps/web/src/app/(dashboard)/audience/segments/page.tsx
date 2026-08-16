@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AudienceSelect } from "@/components/audience-select";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
@@ -352,7 +353,7 @@ export default function SegmentsPage() {
             </div>
             <div className="ms-field">
               <label htmlFor="seg-audience">{t("builder.audienceLabel")}</label>
-              <Select
+              <AudienceSelect
                 id="seg-audience"
                 value={audienceId}
                 onChange={setAudienceId}
