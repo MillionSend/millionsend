@@ -61,8 +61,21 @@ export function PopoverMenu({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
+  /** Close and hand focus back to the trigger (Escape / item selection). */
+  const closeToTrigger = () => {
+    setOpen(false);
+    triggerRef.current?.focus({ preventScroll: true });
+  };
+
   useEffect(() => {
     if (!open) return;
+    // The portal breaks DOM-order tabbing, so the menu pattern takes over:
+    // focus moves to the first item on open (preventScroll keeps the capture
+    // scroll-close below from firing on the focus itself).
+    panelRef.current
+      ?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')
+      ?.focus({ preventScroll: true });
+
     function onPointerDown(event: PointerEvent) {
       const target = event.target as Node;
       // A click on a menu item must reach its onClick; only truly-outside
@@ -70,39 +83,68 @@ export function PopoverMenu({
       if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
       setOpen(false);
     }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
     // The fixed panel is pinned to a rect captured at open; any scroll (capture
     // catches nested overflow containers) or resize detaches it, so close.
     function onReflow() {
       setOpen(false);
     }
     document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
     window.addEventListener("scroll", onReflow, true);
     window.addEventListener("resize", onReflow);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("scroll", onReflow, true);
       window.removeEventListener("resize", onReflow);
     };
   }, [open]);
 
+  /** Roving focus over the enabled menu items, per the WAI menu pattern. */
+  function onPanelKeyDown(event: React.KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      closeToTrigger();
+      return;
+    }
+    if (event.key === "Tab") {
+      // Tab exits a menu; close so the sequence continues from the trigger.
+      closeToTrigger();
+      return;
+    }
+    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const nodes = Array.from(
+      panelRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [],
+    );
+    if (nodes.length === 0) return;
+    const current = nodes.indexOf(document.activeElement as HTMLElement);
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? nodes.length - 1
+          : event.key === "ArrowDown"
+            ? (current + 1 + nodes.length) % nodes.length
+            : (current - 1 + nodes.length) % nodes.length;
+    nodes[next]?.focus({ preventScroll: true });
+  }
+
   // Read at render (the trigger is already mounted when `open` flips true), as
   // in tooltip.tsx — a menu is transient, so no scroll/resize tracking is kept.
+  // Offsets resolve against the layout viewport (documentElement.client*), not
+  // window.inner* — the latter includes a classic scrollbar and would shift
+  // right-aligned panels by its width.
   const rect = open ? triggerRef.current?.getBoundingClientRect() : undefined;
   let position: React.CSSProperties | undefined;
   if (rect) {
+    const viewportW = document.documentElement.clientWidth;
+    const viewportH = document.documentElement.clientHeight;
     const estHeight = items.length * 32 + 12;
-    const flipUp =
-      rect.bottom + GAP + estHeight > window.innerHeight &&
-      rect.top > window.innerHeight - rect.bottom;
+    const flipUp = rect.bottom + GAP + estHeight > viewportH && rect.top > viewportH - rect.bottom;
     position = {
       position: "fixed",
-      ...(flipUp ? { bottom: window.innerHeight - rect.top + GAP } : { top: rect.bottom + GAP }),
-      ...(align === "right" ? { right: window.innerWidth - rect.right } : { left: rect.left }),
+      ...(flipUp ? { bottom: viewportH - rect.top + GAP } : { top: rect.bottom + GAP }),
+      ...(align === "right" ? { right: viewportW - rect.right } : { left: rect.left }),
       width: "max-content",
     };
   }
@@ -122,7 +164,13 @@ export function PopoverMenu({
       </button>
       {open && position
         ? createPortal(
-            <div ref={panelRef} role="menu" className="ms-menu" style={position}>
+            <div
+              ref={panelRef}
+              role="menu"
+              className="ms-menu"
+              style={position}
+              onKeyDown={onPanelKeyDown}
+            >
               {items.map((item, index) =>
                 item === null ? (
                   // biome-ignore lint/suspicious/noArrayIndexKey: separators are positional and static
@@ -135,7 +183,7 @@ export function PopoverMenu({
                     className={item.danger ? "ms-menu-item danger" : "ms-menu-item"}
                     disabled={item.disabled}
                     onClick={() => {
-                      setOpen(false);
+                      closeToTrigger();
                       item.onSelect();
                     }}
                   >

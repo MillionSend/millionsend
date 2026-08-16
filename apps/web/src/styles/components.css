@@ -1034,12 +1034,19 @@ svg:focus {
   }
   .ms-stepbar {
     display: flex;
-    flex-basis: 100%;
+    /* width (not flex-basis) claims the full line in the step-01 row-wrap
+       stepper AND behaves in the step-02 column container. */
+    width: 100%;
     align-items: center;
     gap: 8px;
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+  /* Step 02 hosts the bar in a plain column (no flex gap), so it carries its
+     own spacing there. */
+  .ms-dns-step > .ms-stepbar {
+    margin-bottom: 20px;
   }
   .ms-stepbar-step {
     display: flex;

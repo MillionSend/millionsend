@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Select, type SelectOption } from "@/components/select";
 import { composeFromAddress, type FromParts, splitFromAddress } from "@/lib/from-address";
 import { useTRPC } from "@/lib/trpc";
@@ -45,12 +45,19 @@ export function FromField({
   }
 
   // Default to the first verified domain (else the first) once the list loads,
-  // so the selector never sits empty when the team has domains.
+  // so the selector never sits empty when the team has domains. Emits through
+  // onChange like a user edit — otherwise the parent's `from` could disagree
+  // with what the field displays once the local part is typed.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
   useEffect(() => {
     if (parts.domain || !domains.data || domains.data.length === 0) return;
     const preferred = domains.data.find((d) => d.status === "verified") ?? domains.data[0];
-    if (preferred) setParts((prev) => (prev.domain ? prev : { ...prev, domain: preferred.name }));
-  }, [domains.data, parts.domain]);
+    if (!preferred) return;
+    const next = { ...parts, domain: preferred.name };
+    setParts(next);
+    onChangeRef.current(composeFromAddress(next));
+  }, [domains.data, parts]);
 
   const options = useMemo<SelectOption[]>(() => {
     const rows = domains.data ?? [];

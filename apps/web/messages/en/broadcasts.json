@@ -44,7 +44,6 @@
     "topicNone": "All contacts",
     "topicHint": "Scopes the send and each recipient's unsubscribe to this topic.",
     "htmlLabel": "Body",
-    "htmlPlaceholder": "<html>…</html>",
     "editTab": "Edit",
     "previewTab": "Preview",
     "noHtml": "No HTML yet.",

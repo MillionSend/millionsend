@@ -17,6 +17,7 @@ export function LinkControl({ editor }: { editor: TiptapEditor | null }) {
   const [open, setOpen] = useState(false);
   const [href, setHref] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   useDismiss(rootRef, open, () => setOpen(false));
   useEffect(() => {
@@ -48,8 +49,20 @@ export function LinkControl({ editor }: { editor: TiptapEditor | null }) {
   }
 
   return (
-    <div ref={rootRef} style={{ position: "relative" }}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: Escape-anywhere dismissal for the popover; interactive children handle their own input
+    <div
+      ref={rootRef}
+      style={{ position: "relative" }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          e.stopPropagation();
+          setOpen(false);
+          triggerRef.current?.focus();
+        }
+      }}
+    >
       <button
+        ref={triggerRef}
         type="button"
         className="ms-maily-tool"
         data-active={active || undefined}
@@ -75,8 +88,6 @@ export function LinkControl({ editor }: { editor: TiptapEditor | null }) {
               if (e.key === "Enter") {
                 e.preventDefault();
                 apply();
-              } else if (e.key === "Escape") {
-                setOpen(false);
               }
             }}
           />
