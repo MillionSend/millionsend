@@ -32,11 +32,18 @@ export function VariablePicker({
   const [query, setQuery] = useState("");
   const [fallbacks, setFallbacks] = useState<Record<string, string>>({});
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   useDismiss(rootRef, open, () => setOpen(false));
   useEffect(() => {
     if (open) searchRef.current?.focus();
   }, [open]);
+
+  /** Close and hand focus back to the trigger, so Escape never drops to body. */
+  function closeToTrigger() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
 
   const q = query.trim().toLowerCase();
   const shown = q
@@ -56,8 +63,19 @@ export function VariablePicker({
   }
 
   return (
-    <div ref={rootRef} style={{ position: "relative" }}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: Escape-anywhere dismissal for the popover; interactive children handle their own input
+    <div
+      ref={rootRef}
+      style={{ position: "relative" }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          e.stopPropagation();
+          closeToTrigger();
+        }
+      }}
+    >
       <button
+        ref={triggerRef}
         type="button"
         className="ms-maily-tool ms-maily-tool-labeled"
         aria-haspopup="dialog"
@@ -80,8 +98,7 @@ export function VariablePicker({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Escape") setOpen(false);
-                else if (e.key === "Enter" && shown[0]) insert(shown[0]);
+                if (e.key === "Enter" && shown[0]) insert(shown[0]);
               }}
             />
           </div>
@@ -113,7 +130,6 @@ export function VariablePicker({
                       }
                       onKeyDown={(e) => {
                         if (e.key === "Enter") insert(field);
-                        else if (e.key === "Escape") setOpen(false);
                       }}
                     />
                   ) : null}

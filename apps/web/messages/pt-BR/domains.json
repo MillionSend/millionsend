@@ -153,7 +153,8 @@
     "deleteConfirmLabel": "Digite o domínio para confirmar",
     "error": "Não foi possível carregar o domínio.",
     "recordsError": "Não foi possível carregar os registros DNS.",
-    "retry": "Tentar novamente"
+    "retry": "Tentar novamente",
+    "deleteError": "Não foi possível excluir o domínio. Tente novamente."
   },
   "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code> — veja <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Abrir configuração do SES"

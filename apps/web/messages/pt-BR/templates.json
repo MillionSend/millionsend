@@ -27,7 +27,6 @@
     "subjectLabel": "Assunto",
     "optional": "opcional",
     "htmlLabel": "Corpo",
-    "htmlPlaceholder": "<html>…</html>",
     "editTab": "Editar",
     "previewTab": "Pré-visualizar",
     "noHtml": "Nenhum HTML ainda.",

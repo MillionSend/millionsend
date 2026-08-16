@@ -129,7 +129,8 @@ function DnsRecordsStep({ id }: { id: string }) {
   const records = useQuery(trpc.domains.records.queryOptions({ id }));
   const provider = records.data?.provider ?? null;
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
+    <div className="ms-dns-step" style={{ display: "flex", flexDirection: "column" }}>
+      <MobileStepBar active={2} />
       {/* Step 01 — done: recap of the created domain */}
       <div className="ms-step" style={{ display: "flex", gap: 44 }}>
         <MarkerRail marker="✓" color="var(--ms-success)" />

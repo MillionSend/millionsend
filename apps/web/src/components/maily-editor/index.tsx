@@ -30,7 +30,6 @@ import "./maily-theme.css";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { isMailyDoc, type MailyDoc } from "@/lib/email-doc";
-import { htmlToText } from "@/lib/html";
 import { MERGE_FIELDS_I18N_NS, type MergeFieldOption, makeMergeToken } from "@/lib/merge-fields";
 import { VariableIcon } from "./icons";
 import { EditorToolbar, type TiptapEditor } from "./toolbar";
@@ -43,7 +42,9 @@ import type { PickerField } from "./variable-picker";
  * server-side (see lib/email-render.ts), so the html here is only the last-known
  * value — send html is re-rendered on save. A stored document that is not Maily
  * JSON (a pre-Maily template) imports through `contentHtml`, so it still edits
- * in place with no raw-html tab.
+ * in place with no raw-html tab — but the lossy conversion is only emitted
+ * after the first real edit, so opening and saving untouched preserves the
+ * stored html byte-for-byte.
  *
  * The slash menu and empty-state placeholder are rebuilt from Maily's blocks
  * with our i18n strings (Maily ships hardcoded English; passing same-name
@@ -59,9 +60,8 @@ export interface MailyEditorValue {
 }
 
 export interface MailyEditorChange {
-  document: unknown | null;
-  html: string;
-  text: string;
+  /** The Maily/Tiptap document; send html is re-rendered from it on save. */
+  document: unknown;
 }
 
 export interface MailyEditorProps {
@@ -124,19 +124,13 @@ export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) 
   );
   const liveDoc = useRef<MailyDoc>(initialDoc ?? emptyMailyDoc());
 
-  // Refs so the emit path is a stable callback (Maily re-inits if onUpdate's
-  // identity changes); html carries the last-known render, refreshed by parent.
+  // Refs so the emit path is a stable callback — Maily re-inits if onUpdate's
+  // identity changes.
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  const htmlRef = useRef(value.html);
-  htmlRef.current = value.html;
 
   const emit = useCallback(() => {
-    onChangeRef.current({
-      document: liveDoc.current,
-      html: htmlRef.current,
-      text: htmlToText(htmlRef.current),
-    });
+    onChangeRef.current({ document: liveDoc.current });
   }, []);
 
   // Restrict variables to the merge-field list; a *function* source never
@@ -149,6 +143,11 @@ export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) 
       })),
     [mergeFields, tf],
   );
+  // The '@' suggestion closure is captured when the Tiptap editor is created
+  // (Maily's useEditor never re-applies extensions), so it must read the list
+  // through a ref or async-loaded contact-property fields would never appear.
+  const variablesRef = useRef(variables);
+  variablesRef.current = variables;
 
   // Our in-content pill: themed, vertically centered, labelled with the human
   // name and carrying the raw token in the tooltip. Maily's default pill is
@@ -171,7 +170,7 @@ export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) 
     () => [
       VariableExtension.configure({
         variables: ({ query }) =>
-          variables.filter((v) => v.name.toLowerCase().startsWith(query.toLowerCase())),
+          variablesRef.current.filter((v) => v.name.toLowerCase().startsWith(query.toLowerCase())),
         suggestion: getVariableSuggestions(),
         renderVariable,
       }),
@@ -199,7 +198,7 @@ export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) 
         includeChildren: true,
       }),
     ],
-    [variables, renderVariable, t],
+    [renderVariable, t],
   );
 
   const fields = useMemo<PickerField[]>(
@@ -226,14 +225,21 @@ export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) 
     [],
   );
 
+  // A contentHtml seed means a pre-Maily raw-HTML document, and Tiptap's parse
+  // of it is lossy. Emitting it from onCreate would hand the parent a converted
+  // document with zero user action — an untouched open-then-save would then
+  // silently rewrite the stored html. So the conversion is only emitted from
+  // onUpdate, i.e. after a deliberate edit; until then the stored html stands.
+  const seededFromHtml = seed.current.contentHtml !== undefined;
+
   const onCreate = useCallback(
     (ed: TiptapEditor) => {
       liveDoc.current = ed.getJSON() as MailyDoc;
       setEditor(ed);
       ed.on("transaction", () => setTick((n) => n + 1));
-      emit();
+      if (!seededFromHtml) emit();
     },
-    [emit],
+    [emit, seededFromHtml],
   );
   const onUpdate = useCallback(
     (ed: TiptapEditor) => {

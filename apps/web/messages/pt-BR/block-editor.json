@@ -1,7 +1,5 @@
 {
   "toolbar": {
-    "text": "Texto",
-    "image": "Imagem",
     "variables": "Variáveis",
     "formatting": "Formatação",
     "h1": "Título 1",
@@ -13,42 +11,8 @@
     "alignRight": "Alinhar à direita",
     "clear": "Limpar formatação"
   },
-  "block": {
-    "heading": "Título",
-    "text": "Texto",
-    "image": "Imagem",
-    "button": "Botão",
-    "divider": "Divisória",
-    "spacer": "Espaço",
-    "variable": "Variável",
-    "html": "HTML personalizado"
-  },
-  "canvas": {
-    "empty": "Adicione um bloco para começar, ou digite / dentro de um bloco de texto."
-  },
-  "row": {
-    "moveUp": "Mover para cima",
-    "moveDown": "Mover para baixo",
-    "remove": "Excluir bloco"
-  },
   "panel": {
-    "level": "Nível",
-    "color": "Cor",
-    "fontSize": "Tamanho da fonte",
-    "align": "Alinhamento",
-    "label": "Rótulo",
-    "href": "Link",
-    "bgColor": "Fundo",
-    "textColor": "Cor do texto",
-    "radius": "Raio da borda",
-    "src": "URL da imagem",
-    "alt": "Texto alternativo",
-    "width": "Largura",
     "link": "Link",
-    "thickness": "Espessura",
-    "height": "Altura",
-    "customHtml": "HTML",
-    "padding": "Espaçamento",
     "linkPrompt": "URL do link (deixe vazio para remover)",
     "bold": "Negrito",
     "italic": "Itálico",
@@ -61,10 +25,6 @@
     "search": "Buscar campos…",
     "fallback": "Valor padrão (opcional)",
     "empty": "Nenhum campo corresponde."
-  },
-  "view": {
-    "imagePlaceholder": "Sem imagem — defina uma URL no painel",
-    "spacer": "Espaço · {h}px"
   },
   "slash": {
     "group": "Blocos",

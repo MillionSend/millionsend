@@ -315,6 +315,17 @@ export function DomainsView() {
               onChange={(e) => setConfirmText(e.target.value)}
             />
           </div>
+          {deleteMutation.isError ? (
+            <p
+              style={{
+                margin: "8px 0 0",
+                color: "var(--ms-danger)",
+                fontSize: "var(--ms-fs-label)",
+              }}
+            >
+              {t("detail.deleteError")}
+            </p>
+          ) : null}
           <ModalFooter>
             <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>
               {common("cancel")} <span className="ms-keycap">Esc</span>

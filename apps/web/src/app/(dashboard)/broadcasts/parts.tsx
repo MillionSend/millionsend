@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Skeleton } from "@/components/skeleton";
+import { escapeHtml } from "@/lib/html";
 import { MERGE_TOKEN_RE } from "@/lib/merge-fields";
 import { useTheme } from "@/lib/use-theme";
 
@@ -17,12 +18,12 @@ const PREVIEW_SAMPLES: Record<string, string> = {
 };
 
 /** Fill every merge token with a preview sample; `samples` supplies real
- * per-contact-property values where the caller has them. */
+ * per-contact-property values where the caller has them. Values are
+ * HTML-escaped — contact-controlled property strings must read as text in the
+ * preview, never as markup. */
 function fillMergeSamples(html: string, samples: Record<string, string>): string {
-  return html.replace(
-    MERGE_TOKEN_RE,
-    (_m, name: string, fallback: string | undefined) =>
-      PREVIEW_SAMPLES[name] ?? samples[name] ?? fallback ?? name,
+  return html.replace(MERGE_TOKEN_RE, (_m, name: string, fallback: string | undefined) =>
+    escapeHtml(PREVIEW_SAMPLES[name] ?? samples[name] ?? fallback ?? name),
   );
 }
 

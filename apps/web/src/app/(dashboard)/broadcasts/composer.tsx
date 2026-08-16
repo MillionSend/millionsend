@@ -122,7 +122,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
 
   // Send html is rendered server-side (Maily needs juice), so a design-mode
   // edit cannot emit it — this debounced render both feeds the preview and
-  // supplies the html we persist. Code/legacy mode carries its raw html instead.
+  // supplies the html we persist. A legacy raw-html document keeps its stored
+  // html untouched until the first real edit converts it (see MailyEditor).
   const [debouncedDoc, setDebouncedDoc] = useState<unknown>(document);
   useEffect(() => {
     const id = setTimeout(() => setDebouncedDoc(document), 350);
@@ -467,15 +468,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
             <MailyEditor
               key={templateId}
               value={{ document, html }}
-              onChange={(v) => {
-                setDocument(v.document);
-                // A null document is the code/legacy escape hatch: its raw html
-                // is authoritative. A design edit's html comes from the render.
-                if (v.document === null) {
-                  setHtml(v.html);
-                  setText(v.text);
-                }
-              }}
+              onChange={(v) => setDocument(v.document)}
               mergeFields={mergeFields}
             />
           ) : (
