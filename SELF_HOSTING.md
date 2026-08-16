@@ -2,6 +2,10 @@
 
 MillionSend sends through your own AWS SES account. Two containers: Postgres and one
 app container running the api (port 3001), worker, and web dashboard (port 3000).
+All three ports are `.env`-tunable: `WEB_PORT` republishes the dashboard on another
+host port, `PORT` moves the api, and `SMTP_PORT` moves the optional relay. If you
+change where the dashboard is reachable, update `APP_BASE_URL` to match — it is
+baked into unsubscribe and tracking links.
 
 Prerequisites: Docker with Compose; an AWS account with SES access in your chosen
 region (sandbox accounts can only send to verified recipients — request production
