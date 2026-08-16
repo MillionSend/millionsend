@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AudienceSelect } from "@/components/audience-select";
 import { FromField } from "@/components/from-field";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
@@ -12,9 +13,11 @@ import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { MarkerRail, MobileStepBar, StepRail } from "@/components/stepper";
 import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
 import { useTRPC } from "@/lib/trpc";
+import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { ContentPreview } from "./parts";
 
 // Client-only: the Maily editor pulls in tiptap and touches the DOM, so it
@@ -93,12 +96,25 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const [guardOpen, setGuardOpen] = useState(false);
   const [schedule, setSchedule] = useState("");
   const [templateId, setTemplateId] = useState("");
+  // Editing an existing draft lands on step 2 (targeting is a recap there);
+  // a new broadcast starts at step 1: audience + name.
+  const [step, setStep] = useState<1 | 2>(initial ? 2 : 1);
+
+  // Unsaved-body tracking for the native leave warning: the baseline is the
+  // last-persisted document (or the editor's very first emit for a new one);
+  // any later emit that differs arms beforeunload until the next save.
+  const [dirty, setDirty] = useState(false);
+  const savedDoc = useRef<string | null>(
+    initial !== undefined ? JSON.stringify(initial.document ?? null) : null,
+  );
+  useUnsavedChangesWarning(dirty);
 
   const audiences = useQuery(trpc.audience.audiences.list.queryOptions());
   const topics = useQuery(trpc.topics.list.queryOptions());
   const segments = useQuery(trpc.segments.list.queryOptions());
   // Segments are audience-scoped; only offer ones that filter the chosen audience.
   const audienceSegments = (segments.data ?? []).filter((s) => s.audienceId === audienceId);
+  const selectedAudience = (audiences.data ?? []).find((a) => a.id === audienceId) ?? null;
   const templates = useQuery(trpc.templates.list.queryOptions({ limit: 50 }));
   const templateOptions = templates.data?.items ?? [];
 
@@ -185,6 +201,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
         text,
         document,
       });
+      savedDoc.current = JSON.stringify(document);
+      setDirty(false);
       return initial.id;
     }
     const { id } = await createMutation.mutateAsync({
@@ -199,6 +217,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
       ...(text ? { text } : {}),
       ...(document ? { document } : {}),
     });
+    savedDoc.current = JSON.stringify(document);
+    setDirty(false);
     return id;
   }
 
@@ -273,240 +293,353 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
         }
       />
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 720 }}>
-        <div className="ms-field">
-          <label htmlFor="bc-audience">{t("composer.audienceLabel")}</label>
-          <Select
-            id="bc-audience"
-            value={audienceId}
-            onChange={(value) => {
-              setAudienceId(value);
-              // A segment belongs to one audience; switching audiences drops it.
-              setSegmentId("");
+      {step === 1 ? (
+        <div className="ms-stepper" style={{ display: "flex", gap: 44, alignItems: "flex-start" }}>
+          <MobileStepBar steps={[t("composer.steps.one"), t("composer.steps.two")]} active={1} />
+          <StepRail current={1} />
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (audienceId !== "") setStep(2);
             }}
-            ariaLabel={t("composer.audienceLabel")}
-            width="100%"
-            options={[
-              { value: "", label: t("composer.audiencePick") },
-              ...(audiences.data ?? []).map((a) => ({
-                value: a.id,
-                label: a.name,
-                hint: t("composer.audienceHint", {
-                  count: nf.format(a.contacts - a.unsubscribed),
-                }),
-              })),
-            ]}
-          />
-        </div>
-
-        {(topics.data?.length ?? 0) > 0 ? (
-          <div className="ms-field">
-            <label htmlFor="bc-topic">{t("composer.topicLabel")}</label>
-            <Select
-              id="bc-topic"
-              value={topicId}
-              onChange={setTopicId}
-              ariaLabel={t("composer.topicLabel")}
-              width="100%"
-              options={[
-                { value: "", label: t("composer.topicNone") },
-                ...(topics.data ?? []).map((topic) => ({ value: topic.id, label: topic.name })),
-              ]}
-            />
-            <p
-              style={{
-                margin: "6px 0 0",
-                color: "var(--ms-muted)",
-                fontSize: "var(--ms-fs-label)",
-              }}
-            >
-              {t("composer.topicHint")}
-            </p>
-          </div>
-        ) : null}
-
-        {audienceSegments.length > 0 ? (
-          <div className="ms-field">
-            <label htmlFor="bc-segment">{t("composer.segmentLabel")}</label>
-            <Select
-              id="bc-segment"
-              value={segmentId}
-              onChange={setSegmentId}
-              ariaLabel={t("composer.segmentLabel")}
-              width="100%"
-              options={[
-                { value: "", label: t("composer.segmentNone") },
-                ...audienceSegments.map((segment) => ({
-                  value: segment.id,
-                  label: segment.name,
-                })),
-              ]}
-            />
-            <p
-              style={{
-                margin: "6px 0 0",
-                color: "var(--ms-muted)",
-                fontSize: "var(--ms-fs-label)",
-              }}
-            >
-              {t("composer.segmentHint")}
-            </p>
-          </div>
-        ) : null}
-
-        {templateOptions.length > 0 ? (
-          <div className="ms-field">
-            <label htmlFor="bc-template">{tTemplates("picker.label")}</label>
-            <Select
-              id="bc-template"
-              value={templateId}
-              onChange={(value) => void applyTemplate(value)}
-              ariaLabel={tTemplates("picker.label")}
-              width="100%"
-              options={[
-                { value: "", label: tTemplates("picker.none") },
-                ...templateOptions.map((template) => ({
-                  value: template.id,
-                  label: template.name,
-                })),
-              ]}
-            />
-            <p
-              style={{
-                margin: "6px 0 0",
-                color: "var(--ms-muted)",
-                fontSize: "var(--ms-fs-label)",
-              }}
-            >
-              {tTemplates("picker.hint")}
-            </p>
-          </div>
-        ) : null}
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <FromField id="bc-from" value={from} onChange={setFrom} />
-          <div className="ms-field">
-            <label htmlFor="bc-reply-to">
-              {t("composer.replyToLabel")}{" "}
-              <span style={{ color: "var(--ms-faint)", textTransform: "none" }}>
-                — {t("composer.optional")}
-              </span>
-            </label>
-            <input
-              id="bc-reply-to"
-              className="ms-input mono"
-              style={{ width: "100%" }}
-              value={replyTo}
-              onChange={(event) => setReplyTo(event.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="ms-field">
-          <label htmlFor="bc-subject">{t("composer.subjectLabel")}</label>
-          <input
-            id="bc-subject"
-            className="ms-input"
-            style={{ width: "100%" }}
-            value={subject}
-            onChange={(event) => setSubject(event.target.value)}
-          />
-        </div>
-
-        <div className="ms-field">
-          <label htmlFor="bc-name">
-            {t("composer.nameLabel")}{" "}
-            <span style={{ color: "var(--ms-faint)", textTransform: "none" }}>
-              — {t("composer.optional")}
-            </span>
-          </label>
-          <input
-            id="bc-name"
-            className="ms-input"
-            style={{ width: "100%" }}
-            placeholder={t("composer.nameHint")}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </div>
-
-        <div className="ms-field">
-          <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 6,
+              width: 520,
+              flex: "none",
+              background: "var(--ms-panel)",
+              border: "1px solid var(--ms-line-strong)",
+              borderRadius: "var(--ms-r-card)",
+              padding: 24,
+              boxSizing: "border-box",
             }}
           >
-            <label htmlFor="bc-html" style={{ marginBottom: 0 }}>
-              {t("composer.htmlLabel")}
-            </label>
-            <div style={{ display: "flex", gap: 6 }}>
-              {(["edit", "preview"] as const).map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  style={{
-                    fontSize: 13,
-                    padding: "4px 10px",
-                    borderRadius: 8,
-                    border: 0,
-                    cursor: "pointer",
-                    background: tab === key ? "var(--ms-panel-raised)" : "none",
-                    color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
-                    font: "inherit",
-                  }}
-                  onClick={() => setTab(key)}
-                >
-                  {t(key === "edit" ? "composer.editTab" : "composer.previewTab")}
-                </button>
-              ))}
+            <div style={{ fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
+              {t("composer.steps.one")}
             </div>
-          </div>
-          {tab === "edit" ? (
-            <MailyEditor
-              key={templateId}
-              value={{ document, html }}
-              onChange={(v) => setDocument(v.document)}
-              mergeFields={mergeFields}
-            />
-          ) : (
-            <div
-              style={{
-                border: "1px solid var(--ms-line)",
-                borderRadius: "var(--ms-r-input)",
-                overflow: "hidden",
-              }}
-            >
-              {html ? (
-                <ContentPreview
-                  html={html}
-                  title={t("composer.previewTab")}
-                  samples={previewSamples}
+
+            <div className="ms-field" style={{ marginTop: 16 }}>
+              <label htmlFor="bc-audience">{t("composer.audienceLabel")}</label>
+              <AudienceSelect
+                id="bc-audience"
+                value={audienceId}
+                onChange={(value) => {
+                  setAudienceId(value);
+                  // A segment belongs to one audience; switching audiences drops it.
+                  setSegmentId("");
+                }}
+                ariaLabel={t("composer.audienceLabel")}
+                width="100%"
+                options={[
+                  { value: "", label: t("composer.audiencePick") },
+                  ...(audiences.data ?? []).map((a) => ({
+                    value: a.id,
+                    label: a.name,
+                    hint: t("composer.audienceHint", {
+                      count: nf.format(a.contacts - a.unsubscribed),
+                    }),
+                  })),
+                ]}
+              />
+            </div>
+
+            <div className="ms-field" style={{ marginTop: 16 }}>
+              <label htmlFor="bc-name">
+                {t("composer.nameLabel")}{" "}
+                <span style={{ color: "var(--ms-faint)", textTransform: "none" }}>
+                  — {t("composer.optional")}
+                </span>
+              </label>
+              <input
+                id="bc-name"
+                className="ms-input"
+                style={{ width: "100%" }}
+                placeholder={t("composer.nameHint")}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </div>
+
+            {(topics.data?.length ?? 0) > 0 ? (
+              <div className="ms-field" style={{ marginTop: 16 }}>
+                <label htmlFor="bc-topic">{t("composer.topicLabel")}</label>
+                <Select
+                  id="bc-topic"
+                  value={topicId}
+                  onChange={setTopicId}
+                  ariaLabel={t("composer.topicLabel")}
+                  width="100%"
+                  options={[
+                    { value: "", label: t("composer.topicNone") },
+                    ...(topics.data ?? []).map((topic) => ({
+                      value: topic.id,
+                      label: topic.name,
+                    })),
+                  ]}
                 />
-              ) : (
                 <p
                   style={{
-                    margin: 0,
-                    padding: "16px 18px",
+                    margin: "6px 0 0",
                     color: "var(--ms-muted)",
-                    fontSize: "var(--ms-fs-ui)",
+                    fontSize: "var(--ms-fs-label)",
                   }}
                 >
-                  {t("composer.noHtml")}
+                  {t("composer.topicHint")}
                 </p>
-              )}
-            </div>
-          )}
-        </div>
+              </div>
+            ) : null}
 
-        {saveError && !guardOpen ? (
-          <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
-            {t("composer.saveError")}
-          </p>
-        ) : null}
-      </div>
+            {audienceSegments.length > 0 ? (
+              <div className="ms-field" style={{ marginTop: 16 }}>
+                <label htmlFor="bc-segment">{t("composer.segmentLabel")}</label>
+                <Select
+                  id="bc-segment"
+                  value={segmentId}
+                  onChange={setSegmentId}
+                  ariaLabel={t("composer.segmentLabel")}
+                  width="100%"
+                  options={[
+                    { value: "", label: t("composer.segmentNone") },
+                    ...audienceSegments.map((segment) => ({
+                      value: segment.id,
+                      label: segment.name,
+                    })),
+                  ]}
+                />
+                <p
+                  style={{
+                    margin: "6px 0 0",
+                    color: "var(--ms-muted)",
+                    fontSize: "var(--ms-fs-label)",
+                  }}
+                >
+                  {t("composer.segmentHint")}
+                </p>
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: 20 }}>
+              <button type="submit" className="ms-btn ms-btn-primary" disabled={audienceId === ""}>
+                {t("composer.continue")}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : (
+        <div className="ms-step-col" style={{ display: "flex", flexDirection: "column" }}>
+          <MobileStepBar steps={[t("composer.steps.one"), t("composer.steps.two")]} active={2} />
+
+          {/* Step 01 — done: targeting recap with a way back */}
+          <div className="ms-step" style={{ display: "flex", gap: 44 }}>
+            <MarkerRail marker="✓" color="var(--ms-success)" />
+            <div style={{ flex: 1, minWidth: 0, paddingBottom: 24 }}>
+              <div
+                style={{
+                  maxWidth: 720,
+                  background: "var(--ms-panel)",
+                  border: "1px solid var(--ms-line)",
+                  borderRadius: "var(--ms-r-card)",
+                  padding: "12px 16px",
+                  boxSizing: "border-box",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: "var(--ms-bone)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {selectedAudience?.name ?? t("composer.audiencePick")}
+                    {name.trim() ? (
+                      <span style={{ color: "var(--ms-muted)", fontWeight: 400 }}>
+                        {" "}
+                        · {name.trim()}
+                      </span>
+                    ) : null}
+                  </div>
+                  {selectedAudience ? (
+                    <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>
+                      {t("composer.audienceHint", {
+                        count: nf.format(selectedAudience.contacts - selectedAudience.unsubscribed),
+                      })}
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-secondary"
+                  onClick={() => setStep(1)}
+                >
+                  {t("composer.stepChange")}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Step 02 — content */}
+          <div className="ms-step" style={{ display: "flex", gap: 44 }}>
+            <MarkerRail marker="02" color="var(--ms-bone)" line={false} />
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
+                flexDirection: "column",
+                gap: 18,
+                maxWidth: 720,
+              }}
+            >
+              {templateOptions.length > 0 ? (
+                <div className="ms-field">
+                  <label htmlFor="bc-template">{tTemplates("picker.label")}</label>
+                  <Select
+                    id="bc-template"
+                    value={templateId}
+                    onChange={(value) => void applyTemplate(value)}
+                    ariaLabel={tTemplates("picker.label")}
+                    width="100%"
+                    options={[
+                      { value: "", label: tTemplates("picker.none") },
+                      ...templateOptions.map((template) => ({
+                        value: template.id,
+                        label: template.name,
+                      })),
+                    ]}
+                  />
+                  <p
+                    style={{
+                      margin: "6px 0 0",
+                      color: "var(--ms-muted)",
+                      fontSize: "var(--ms-fs-label)",
+                    }}
+                  >
+                    {tTemplates("picker.hint")}
+                  </p>
+                </div>
+              ) : null}
+
+              <FromField id="bc-from" value={from} onChange={setFrom} />
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div className="ms-field">
+                  <label htmlFor="bc-reply-to">
+                    {t("composer.replyToLabel")}{" "}
+                    <span style={{ color: "var(--ms-faint)", textTransform: "none" }}>
+                      — {t("composer.optional")}
+                    </span>
+                  </label>
+                  <input
+                    id="bc-reply-to"
+                    className="ms-input mono"
+                    style={{ width: "100%" }}
+                    value={replyTo}
+                    onChange={(event) => setReplyTo(event.target.value)}
+                  />
+                </div>
+                <div className="ms-field">
+                  <label htmlFor="bc-subject">{t("composer.subjectLabel")}</label>
+                  <input
+                    id="bc-subject"
+                    className="ms-input"
+                    style={{ width: "100%" }}
+                    value={subject}
+                    onChange={(event) => setSubject(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="ms-field">
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 6,
+                  }}
+                >
+                  <label htmlFor="bc-html" style={{ marginBottom: 0 }}>
+                    {t("composer.htmlLabel")}
+                  </label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {(["edit", "preview"] as const).map((key) => (
+                      <button
+                        key={key}
+                        type="button"
+                        style={{
+                          fontSize: 13,
+                          padding: "4px 10px",
+                          borderRadius: 8,
+                          border: 0,
+                          cursor: "pointer",
+                          background: tab === key ? "var(--ms-panel-raised)" : "none",
+                          color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
+                          font: "inherit",
+                        }}
+                        onClick={() => setTab(key)}
+                      >
+                        {t(key === "edit" ? "composer.editTab" : "composer.previewTab")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {tab === "edit" ? (
+                  <MailyEditor
+                    key={templateId}
+                    value={{ document, html }}
+                    onChange={(v) => {
+                      setDocument(v.document);
+                      const snapshot = JSON.stringify(v.document);
+                      // First emit of a brand-new document is the baseline, not an edit.
+                      if (savedDoc.current === null) savedDoc.current = snapshot;
+                      else if (snapshot !== savedDoc.current) setDirty(true);
+                    }}
+                    mergeFields={mergeFields}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      border: "1px solid var(--ms-line)",
+                      borderRadius: "var(--ms-r-input)",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {html ? (
+                      <ContentPreview
+                        html={html}
+                        title={t("composer.previewTab")}
+                        samples={previewSamples}
+                      />
+                    ) : (
+                      <p
+                        style={{
+                          margin: 0,
+                          padding: "16px 18px",
+                          color: "var(--ms-muted)",
+                          fontSize: "var(--ms-fs-ui)",
+                        }}
+                      >
+                        {t("composer.noHtml")}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {saveError && !guardOpen ? (
+                <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
+                  {t("composer.saveError")}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
 
       <Modal open={guardOpen} onClose={closeGuard} title={t("guard.title")}>
         <form

@@ -61,7 +61,13 @@
     "fromLocalPlaceholder": "news",
     "fromLocalLabel": "Sender address (before the @)",
     "fromDomainLabel": "Sending domain",
-    "fromAddDomain": "Add domain"
+    "fromAddDomain": "Add domain",
+    "steps": {
+      "one": "Audience & name",
+      "two": "Content"
+    },
+    "continue": "Continue",
+    "stepChange": "Change"
   },
   "guard": {
     "title": "Send broadcast",

@@ -4,13 +4,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
 import { useTRPC } from "@/lib/trpc";
+import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { ContentPreview } from "../broadcasts/parts";
 
 // Client-only: the Maily editor pulls in tiptap and touches the DOM, so it
@@ -72,6 +73,15 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   const [document, setDocument] = useState<unknown>(initial?.document ?? null);
   const [tab, setTab] = useState<"edit" | "preview">("edit");
 
+  // Unsaved-body tracking for the native leave warning: the baseline is the
+  // last-persisted document (or the editor's very first emit for a new one);
+  // any later emit that differs arms beforeunload until the next save.
+  const [dirty, setDirty] = useState(false);
+  const savedDoc = useRef<string | null>(
+    initial !== undefined ? JSON.stringify(initial.document ?? null) : null,
+  );
+  useUnsavedChangesWarning(dirty);
+
   // Merge-field picker options and preview sample values both derive from the
   // team's contact-property keys in use, plus its typed definitions so a
   // defined key is insertable before any contact carries a value.
@@ -129,6 +139,8 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
         text,
         document,
       });
+      savedDoc.current = JSON.stringify(document);
+      setDirty(false);
       return initial.id;
     }
     const { id } = await createMutation.mutateAsync({
@@ -138,6 +150,8 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
       ...(text ? { text } : {}),
       ...(document ? { document } : {}),
     });
+    savedDoc.current = JSON.stringify(document);
+    setDirty(false);
     return id;
   }
 
@@ -268,7 +282,13 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
           {tab === "edit" ? (
             <MailyEditor
               value={{ document, html }}
-              onChange={(v) => setDocument(v.document)}
+              onChange={(v) => {
+                setDocument(v.document);
+                const snapshot = JSON.stringify(v.document);
+                // First emit of a brand-new document is the baseline, not an edit.
+                if (savedDoc.current === null) savedDoc.current = snapshot;
+                else if (snapshot !== savedDoc.current) setDirty(true);
+              }}
               mergeFields={mergeFields}
             />
           ) : (
