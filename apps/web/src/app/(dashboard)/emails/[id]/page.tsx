@@ -353,6 +353,7 @@ export default function EmailDetailPage() {
   const [drawer, setDrawer] = useState<"bounced" | "suppressed" | null>(null);
 
   const query = useQuery(trpc.emails.get.queryOptions({ id }, { retry: false }));
+  const sesEnv = useQuery(trpc.system.sesEnv.queryOptions());
   const email = query.data;
   const recipient = email?.to[0] ?? null;
 
@@ -392,6 +393,10 @@ export default function EmailDetailPage() {
   }
 
   const events = email.events;
+  // Ingestion off (no SNS topics) means nothing after the locally-recorded
+  // "sent" can ever arrive — the timeline says so instead of silently stalling.
+  const eventsStalled =
+    sesEnv.data?.snsTopicsConfigured === false && events[events.length - 1]?.type === "sent";
   const eventLabel = (type: EventType) =>
     type === "rendering_failure" ? t("detail.event.rendering_failure") : common(`status.${type}`);
 
@@ -706,6 +711,72 @@ export default function EmailDetailPage() {
                 </div>
               );
             })}
+            {eventsStalled ? (
+              <>
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 44,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "0 6px",
+                    alignSelf: "flex-start",
+                  }}
+                >
+                  <span className="ms-mono" style={{ fontSize: 10.5 }}>
+                    &nbsp;
+                  </span>
+                  <span
+                    style={{
+                      height: 0,
+                      borderTop: "1px dashed var(--ms-line-strong)",
+                      width: "100%",
+                    }}
+                  />
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    textAlign: "center",
+                    flex: "none",
+                    maxWidth: 250,
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 34,
+                      height: 34,
+                      flex: "none",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: 10,
+                      border: "1px dashed var(--ms-line-strong)",
+                      color: "var(--ms-muted)",
+                      fontSize: 15,
+                      fontWeight: 600,
+                    }}
+                  >
+                    ?
+                  </span>
+                  <span
+                    style={{
+                      marginTop: 10,
+                      fontSize: 12,
+                      color: "var(--ms-muted)",
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    {t("detail.eventsUnreachable")}
+                  </span>
+                </div>
+              </>
+            ) : null}
           </div>
         )}
       </div>
