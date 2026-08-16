@@ -44,7 +44,7 @@
     "topicLabel": "Tópico",
     "topicNone": "Todos os contatos",
     "topicHint": "Restringe o envio e o cancelamento de cada destinatário a este tópico.",
-    "htmlLabel": "Conteúdo HTML",
+    "htmlLabel": "Corpo",
     "htmlPlaceholder": "<html>…</html>",
     "editTab": "Editar",
     "previewTab": "Pré-visualizar",

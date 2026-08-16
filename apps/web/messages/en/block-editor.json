@@ -1,13 +1,17 @@
 {
-  "mode": {
-    "design": "Design",
-    "code": "Code",
-    "designLocked": "Editing raw HTML disables the visual editor for this content."
-  },
   "toolbar": {
     "text": "Text",
     "image": "Image",
-    "variables": "Variables"
+    "variables": "Variables",
+    "formatting": "Formatting",
+    "h1": "Heading 1",
+    "h2": "Heading 2",
+    "bulletList": "Bullet list",
+    "orderedList": "Numbered list",
+    "alignLeft": "Align left",
+    "alignCenter": "Align center",
+    "alignRight": "Align right",
+    "clear": "Clear formatting"
   },
   "block": {
     "heading": "Heading",
@@ -21,9 +25,6 @@
   },
   "canvas": {
     "empty": "Add a block to begin, or type / inside a text block."
-  },
-  "code": {
-    "placeholder": "<html>…</html>"
   },
   "row": {
     "moveUp": "Move up",
@@ -52,7 +53,9 @@
     "bold": "Bold",
     "italic": "Italic",
     "underline": "Underline",
-    "strike": "Strikethrough"
+    "strike": "Strikethrough",
+    "apply": "Apply",
+    "removeLink": "Remove link"
   },
   "picker": {
     "search": "Search fields…",

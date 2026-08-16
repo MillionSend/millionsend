@@ -2,5 +2,12 @@
   "firstName": "Nome",
   "lastName": "Sobrenome",
   "email": "E-mail",
-  "unsubscribeUrl": "Link de descadastro"
+  "unsubscribeUrl": "Link de descadastro",
+  "desc": {
+    "firstName": "O primeiro nome do contato.",
+    "lastName": "O sobrenome do contato.",
+    "email": "O endereço de e-mail do contato.",
+    "unsubscribeUrl": "O link de descadastro exclusivo de cada destinatário.",
+    "custom": "Uma propriedade personalizada do contato."
+  }
 }

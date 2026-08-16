@@ -44,7 +44,7 @@
     "topicLabel": "Topic",
     "topicNone": "All contacts",
     "topicHint": "Scopes the send and each recipient's unsubscribe to this topic.",
-    "htmlLabel": "HTML content",
+    "htmlLabel": "Body",
     "htmlPlaceholder": "<html>…</html>",
     "editTab": "Edit",
     "previewTab": "Preview",
