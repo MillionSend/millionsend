@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { Fragment, useEffect, useState } from "react";
 import {
   type DnsRecord,
@@ -16,7 +16,6 @@ import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import { isAwsCredentialError } from "@/lib/aws-errors";
 import { codeRichTags } from "@/lib/code-rich-tags";
-import { formatMailDate } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { AwsCredentialsBanner } from "../aws-credentials-banner";
@@ -229,7 +228,6 @@ function DnsRecordsStep({ id }: { id: string }) {
 
 export function AddDomainForm({ userEmail }: { userEmail: string }) {
   const t = useTranslations("domains");
-  const locale = useLocale();
   const router = useRouter();
   const trpc = useTRPC();
   const team = useQuery(trpc.settings.team.get.queryOptions());
@@ -482,8 +480,6 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
                   [
                     ["from", `${teamName} <${t("new.preview.user")}@${previewDomain}>`],
                     ["to", userEmail],
-                    ["date", formatMailDate(new Date(), locale)],
-                    ["subject", t("new.preview.subject")],
                     ["mailedBy", `${returnPath || "send"}.${previewDomain}`],
                     ["signedBy", previewDomain],
                     ["security", t("new.preview.details.securityValue")],
