@@ -20,6 +20,25 @@ export class InvalidEmailDocumentError extends Error {
 }
 
 /**
+ * Maily hardcodes light-only color-scheme metas, which tells dark-mode clients
+ * (Apple Mail, and the Gmail variants that honor the declaration) to keep the
+ * email white. Declaring both schemes lets those clients apply their own dark
+ * adaptation. Exact-match replaces; if a Maily upgrade changes the markup the
+ * html passes through unchanged (still valid, just light-locked again).
+ */
+function declareDarkScheme(html: string): string {
+  return html
+    .replace(
+      '<meta name="color-scheme" content="light"/>',
+      '<meta name="color-scheme" content="light dark"/>',
+    )
+    .replace(
+      '<meta name="supported-color-schemes" content="light"/>',
+      '<meta name="supported-color-schemes" content="light dark"/>',
+    );
+}
+
+/**
  * Render a stored Maily document to send-ready html + derived plain text. The
  * variable formatter emits our exact worker token grammar ({{{NAME}}} /
  * {{{NAME|fallback}}}) and never sets a value, so tokens ship unresolved for the
@@ -33,6 +52,6 @@ export async function renderEmailDocument(
   maily.setVariableFormatter(({ variable, fallback }) =>
     makeMergeToken(variable, fallback || undefined),
   );
-  const html = await maily.render();
+  const html = declareDarkScheme(await maily.render());
   return { html, text: htmlToText(html) };
 }
