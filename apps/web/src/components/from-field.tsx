@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Select, type SelectOption } from "@/components/select";
 import { composeFromAddress, type FromParts, splitFromAddress } from "@/lib/from-address";
 import { useTRPC } from "@/lib/trpc";
+import { confirmUnsavedNavigation } from "@/lib/use-unsaved-warning";
 
 const ADD_DOMAIN = "__add-domain__";
 
@@ -124,8 +125,12 @@ export function FromField({
               ariaLabel={t("composer.fromDomainLabel")}
               value={parts.domain}
               onChange={(next) => {
-                if (next === ADD_DOMAIN) router.push("/domains/new");
-                else update({ domain: next });
+                if (next === ADD_DOMAIN) {
+                  // Programmatic push — the anchor/back guards never see it.
+                  if (confirmUnsavedNavigation()) router.push("/domains/new");
+                } else {
+                  update({ domain: next });
+                }
               }}
               options={options}
             />

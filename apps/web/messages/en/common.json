@@ -62,5 +62,8 @@
     "verified": "Verified",
     "pending": "Pending"
   },
-  "unsavedWarn": "You have unsaved changes. Leave this page?"
+  "unsavedWarn": "You have unsaved changes. Leave this page?",
+  "draftRecovered": "Recovered unsaved changes ({time}).",
+  "draftRestore": "Restore",
+  "draftDiscard": "Discard"
 }

@@ -5,12 +5,14 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DraftBanner } from "@/components/draft-banner";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
 import { useTRPC } from "@/lib/trpc";
+import { useLocalDraft } from "@/lib/use-local-draft";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { ContentPreview } from "../broadcasts/parts";
 
@@ -20,6 +22,15 @@ const MailyEditor = dynamic(() => import("@/components/maily-editor").then((m) =
   ssr: false,
   loading: () => <Skeleton width="100%" height={340} radius="var(--ms-r-input)" />,
 });
+
+/** Everything a crash would lose — mirrored into the local draft. */
+interface TemplateDraft {
+  name: string;
+  subject: string;
+  html: string;
+  text: string;
+  document: unknown;
+}
 
 export interface EditorInitial {
   id: string;
@@ -83,6 +94,39 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   );
   useUnsavedChangesWarning(dirty, common("unsavedWarn"));
 
+  // Local crash-recovery draft (browser-only, one key per template).
+  const [editorNonce, setEditorNonce] = useState(0);
+  const draftState = useMemo<TemplateDraft>(
+    () => ({ name, subject, html, text, document }),
+    [name, subject, html, text, document],
+  );
+  const draft = useLocalDraft<TemplateDraft>({
+    storageKey: `ms-draft:template:${initial?.id ?? "new"}`,
+    state: draftState,
+    initialState: {
+      name: initial?.name ?? "",
+      subject: initial?.subject ?? "",
+      html: initial?.html ?? "",
+      text: initial?.text ?? "",
+      document: initial?.document ?? null,
+    },
+  });
+
+  function restoreDraft(data: TemplateDraft) {
+    setName(data.name);
+    setSubject(data.subject);
+    setHtml(data.html);
+    setText(data.text);
+    setDocument(data.document);
+    // The editor seeds once from its mount value — remount it.
+    setEditorNonce((n) => n + 1);
+    // A restored draft is unsaved by definition: poison the baseline so the
+    // editor's next emit differs and the leave-guard arms immediately.
+    savedDoc.current = "__restored__";
+    setDirty(true);
+    draft.acceptRecovered();
+  }
+
   // Merge-field picker options and preview sample values both derive from the
   // team's contact-property keys in use, plus its typed definitions so a
   // defined key is insertable before any contact carries a value.
@@ -142,6 +186,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
       });
       savedDoc.current = JSON.stringify(document);
       setDirty(false);
+      draft.markSaved();
       return initial.id;
     }
     const { id } = await createMutation.mutateAsync({
@@ -153,6 +198,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
     });
     savedDoc.current = JSON.stringify(document);
     setDirty(false);
+    draft.markSaved();
     return id;
   }
 
@@ -216,6 +262,17 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
           </>
         }
       />
+
+      {draft.recovered ? (
+        <DraftBanner
+          savedAt={draft.recovered.savedAt}
+          onRestore={() => {
+            const r = draft.recovered;
+            if (r) restoreDraft(r.data);
+          }}
+          onDiscard={draft.discardRecovered}
+        />
+      ) : null}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 720 }}>
         <div className="ms-field">
@@ -282,6 +339,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
           </div>
           {tab === "edit" ? (
             <MailyEditor
+              key={editorNonce}
               value={{ document, html }}
               onChange={(v) => {
                 setDocument(v.document);
