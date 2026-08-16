@@ -5,9 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useMemo, useState } from "react";
+import { ApiDocsButton } from "@/components/api-sheet";
+import { EmailStatusIcon } from "@/components/email-status-icon";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
-import { CodeGlyph } from "@/components/icons/nav-icons";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
@@ -140,9 +141,7 @@ export default function EmailsPage() {
             <Link className="ms-btn ms-btn-secondary" href="/emails/suppressions">
               {t("list.suppressionList")}
             </Link>
-            <a className="ms-btn ms-btn-icon" href="#emails-api" aria-label={t("list.apiDocs")}>
-              <CodeGlyph size={14} />
-            </a>
+            <ApiDocsButton />
           </>
         }
       />
@@ -272,9 +271,12 @@ export default function EmailsPage() {
                   onClick={() => router.push(`/emails/${row.id}`)}
                 >
                   <td className="ms-mono" style={{ fontSize: 13 }}>
-                    <Link href={`/emails/${row.id}`} onClick={(event) => event.stopPropagation()}>
-                      {row.to[0] ?? row.subject}
-                    </Link>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                      <EmailStatusIcon status={row.latestStatus} />
+                      <Link href={`/emails/${row.id}`} onClick={(event) => event.stopPropagation()}>
+                        {row.to[0] ?? row.subject}
+                      </Link>
+                    </span>
                     {row.to.length > 1 ? (
                       <span style={{ color: "var(--ms-muted)", marginLeft: 8 }}>
                         +{row.to.length - 1}
@@ -312,6 +314,7 @@ export default function EmailsPage() {
             size={limit}
             onSize={setLimit}
             sizeLabel={(size) => t("list.pageSize", { count: size })}
+            singlePage={!query.hasNextPage && (query.data?.pages.length ?? 1) === 1}
           />
         </>
       )}

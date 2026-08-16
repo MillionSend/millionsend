@@ -5,6 +5,7 @@ export function PageHeader({
   subtitle,
   breadcrumb,
   actions,
+  leading,
 }: {
   title: string;
   /** Mono proof strip under the H1 — the resource's own numbers. */
@@ -12,6 +13,8 @@ export function PageHeader({
   /** Breadcrumb row above the H1 ("Emails / Email details"). */
   breadcrumb?: React.ReactNode;
   actions?: React.ReactNode;
+  /** Identity mark beside the title block (e.g. the email's status tile). */
+  leading?: React.ReactNode;
 }) {
   return (
     <header
@@ -24,7 +27,10 @@ export function PageHeader({
         marginBottom: 28,
       }}
     >
-      <div>
+      {leading ? (
+        <span style={{ flex: "none", alignSelf: "center", display: "inline-flex" }}>{leading}</span>
+      ) : null}
+      <div style={leading ? { flex: 1, minWidth: 0 } : undefined}>
         {breadcrumb ? (
           <div
             style={{

@@ -6,10 +6,11 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
+import { ApiDocsButton } from "@/components/api-sheet";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
+import { EmailStatusIcon, EventIconTile } from "@/components/email-status-icon";
 import { GuidanceBlock } from "@/components/guidance-block";
-import { CodeGlyph } from "@/components/icons/nav-icons";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -461,12 +462,9 @@ export default function EmailDetailPage() {
           </>
         }
         title={recipient ?? email.subject}
+        leading={<EmailStatusIcon status={email.latestStatus} size={42} />}
         subtitle={sublineParts.join(" · ")}
-        actions={
-          <a className="ms-btn ms-btn-icon" href="#emails-api" aria-label={t("list.apiDocs")}>
-            <CodeGlyph size={14} />
-          </a>
-        }
+        actions={<ApiDocsButton />}
       />
 
       {hardBounced ? (
@@ -569,7 +567,8 @@ export default function EmailDetailPage() {
               backgroundSize: "18px 18px",
               backgroundPosition: "center",
               display: "flex",
-              alignItems: "center",
+              alignItems: "flex-start",
+              gap: 6,
               overflowX: "auto",
             }}
           >
@@ -587,62 +586,79 @@ export default function EmailDetailPage() {
                   : type === "suppressed"
                     ? ("suppressed" as const)
                     : null;
+              // Icon-tile node: glyph tile, status pill, timestamp, detail —
+              // the connector line meets the tiles at their vertical center.
               const card = (
                 <>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ position: "relative", display: "inline-flex" }}>
+                    <EventIconTile type={type} />
                     {latest ? (
                       <span
                         style={{
-                          width: 6,
-                          height: 6,
+                          position: "absolute",
+                          top: -3,
+                          right: -3,
+                          width: 7,
+                          height: 7,
                           borderRadius: "50%",
-                          background: "var(--ms-steel)",
+                          background: EVENT_COLOR[type],
                           animation: "ms-pulse 2s infinite",
-                          flex: "none",
                         }}
                       />
                     ) : null}
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: EVENT_COLOR[type] }}>
-                      {eventLabel(type)}
-                    </span>
-                    {opens ? (
-                      <span style={{ marginLeft: "auto", color: "var(--ms-faint)", fontSize: 12 }}>
-                        ›
-                      </span>
-                    ) : null}
-                  </div>
-                  <div
+                  </span>
+                  <span
+                    style={{
+                      marginTop: 10,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      padding: "3px 9px",
+                      borderRadius: "var(--ms-r-chip)",
+                      border: `1px solid color-mix(in srgb, ${EVENT_COLOR[type]} 35%, var(--ms-line))`,
+                      background: `color-mix(in srgb, ${EVENT_COLOR[type]} 10%, var(--ms-panel))`,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: EVENT_COLOR[type],
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {eventLabel(type)}
+                    {opens ? <span aria-hidden="true">›</span> : null}
+                  </span>
+                  <span
                     className="ms-mono"
-                    style={{ fontSize: 11.5, color: "var(--ms-muted)", marginTop: 7 }}
+                    style={{ fontSize: 11, color: "var(--ms-muted)", marginTop: 7 }}
                   >
                     {formatUtcTimestampMs(event.occurredAt)}
-                  </div>
+                  </span>
                   {detail ? (
-                    <div
+                    <span
                       className="ms-mono"
                       style={{
-                        fontSize: 11.5,
+                        fontSize: 11,
                         color: "var(--ms-muted)",
                         marginTop: 3,
+                        maxWidth: 220,
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                       }}
                     >
                       {detail}
-                    </div>
+                    </span>
                   ) : null}
                 </>
               );
               const cardStyle: React.CSSProperties = {
-                background: "var(--ms-panel)",
-                border: "1px solid var(--ms-line)",
-                borderRadius: 12,
-                padding: "12px 16px",
-                width: 264,
-                boxSizing: "border-box",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                textAlign: "center",
+                background: "none",
+                border: 0,
+                padding: 0,
                 flex: "none",
-                textAlign: "left",
               };
               return (
                 <div key={event.id} style={{ display: "contents" }}>
@@ -650,12 +666,14 @@ export default function EmailDetailPage() {
                     <div
                       style={{
                         flex: 1,
-                        minWidth: 36,
+                        minWidth: 44,
                         display: "flex",
                         flexDirection: "column",
                         alignItems: "center",
-                        gap: 5,
-                        padding: "0 4px",
+                        gap: 4,
+                        padding: "0 6px",
+                        alignSelf: "flex-start",
+                        marginTop: 0,
                       }}
                     >
                       <span

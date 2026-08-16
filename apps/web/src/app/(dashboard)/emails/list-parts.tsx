@@ -153,18 +153,24 @@ export function StateCard({
 
 export const PAGE_SIZES = [25, 40, 50] as const;
 
-/** "Page 1 – N of M" footer with the page-size chooser at the right. */
+/** "Page 1 – N of M" footer with the page-size chooser at the right. The
+ * chooser only renders when paging is real — on a single first page at the
+ * smallest size it could never change what's shown. */
 export function ListFooter({
   left,
   size,
   onSize,
   sizeLabel,
+  singlePage = false,
 }: {
   left: string;
   size: number;
   onSize: (size: number) => void;
   sizeLabel: (size: number) => string;
+  /** True when everything already fits one page (no next page, page 1). */
+  singlePage?: boolean;
 }) {
+  const showChooser = !singlePage || size !== PAGE_SIZES[0];
   return (
     <div
       style={{
@@ -177,12 +183,14 @@ export function ListFooter({
       }}
     >
       <span>{left}</span>
-      <Select
-        value={String(size)}
-        onChange={(next) => onSize(Number(next))}
-        options={PAGE_SIZES.map((s) => ({ value: String(s), label: sizeLabel(s) }))}
-        ariaLabel={sizeLabel(size)}
-      />
+      {showChooser ? (
+        <Select
+          value={String(size)}
+          onChange={(next) => onSize(Number(next))}
+          options={PAGE_SIZES.map((s) => ({ value: String(s), label: sizeLabel(s) }))}
+          ariaLabel={sizeLabel(size)}
+        />
+      ) : null}
     </div>
   );
 }
