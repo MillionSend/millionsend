@@ -2,5 +2,12 @@
   "firstName": "First name",
   "lastName": "Last name",
   "email": "Email",
-  "unsubscribeUrl": "Unsubscribe link"
+  "unsubscribeUrl": "Unsubscribe link",
+  "desc": {
+    "firstName": "The contact's first name.",
+    "lastName": "The contact's last name.",
+    "email": "The contact's email address.",
+    "unsubscribeUrl": "Each recipient's unique one-click unsubscribe link.",
+    "custom": "A custom contact property."
+  }
 }

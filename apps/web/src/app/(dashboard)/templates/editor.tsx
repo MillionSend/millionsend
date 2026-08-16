@@ -306,21 +306,6 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
               )}
             </div>
           )}
-          <p
-            style={{ margin: "8px 0 0", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}
-          >
-            {t.rich("editor.mergeHint", {
-              code: (chunks) => (
-                <span className="ms-mono" style={{ color: "var(--ms-bone)" }}>
-                  {chunks}
-                </span>
-              ),
-              first: "{{{FIRST_NAME|there}}}",
-              last: "{{{LAST_NAME}}}",
-              email: "{{{EMAIL}}}",
-              unsub: "{{{UNSUBSCRIBE_URL}}}",
-            })}
-          </p>
         </div>
 
         {saveError ? (

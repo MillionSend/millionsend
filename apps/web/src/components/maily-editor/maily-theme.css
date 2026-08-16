@@ -1,0 +1,252 @@
+/*
+ * Theme bridge for the Maily editor. Maily ships a light-only palette built on
+ * --mly-color-* tokens and Tailwind utilities; remapping those tokens to our
+ * --ms-* tokens makes the whole editor — content, slash/variable popups (which
+ * mount on <body>, hence the global :root scope) and pills — follow the app
+ * theme in both light and dark. Our own toolbar/picker/link chrome is styled
+ * directly below.
+ */
+:root {
+  --mly-color-white: var(--ms-panel);
+  --mly-color-gray-50: var(--ms-panel-raised);
+  --mly-color-gray-100: var(--ms-panel-raised);
+  --mly-color-gray-200: var(--ms-line);
+  --mly-color-gray-300: var(--ms-line-strong);
+  --mly-color-gray-400: var(--ms-faint);
+  --mly-color-gray-500: var(--ms-muted);
+  --mly-color-gray-600: var(--ms-muted);
+  --mly-color-gray-700: var(--ms-bone);
+  --mly-color-gray-900: var(--ms-bone);
+  --mly-color-gray-950: var(--ms-bone);
+  --mly-color-soft-gray: var(--ms-line);
+  --mly-color-midnight-gray: var(--ms-bone);
+  --mly-color-black: var(--ms-bone);
+}
+
+/* ---- container ---------------------------------------------------------- */
+.ms-maily {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- toolbar ------------------------------------------------------------ */
+.ms-maily-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--ms-line);
+  border-bottom: 0;
+  border-radius: var(--ms-r-input) var(--ms-r-input) 0 0;
+  background: var(--ms-panel);
+}
+.ms-maily-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  min-width: 30px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ms-muted);
+  cursor: pointer;
+  transition:
+    background var(--ms-dur-fast) var(--ms-ease),
+    color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-maily-tool:hover:not(:disabled),
+.ms-maily-tool[data-active] {
+  background: var(--ms-panel-raised);
+  color: var(--ms-bone);
+}
+.ms-maily-tool:disabled {
+  color: var(--ms-faint);
+  cursor: default;
+}
+.ms-maily-tool:focus-visible {
+  outline: none;
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-maily-tool-labeled {
+  gap: 6px;
+  padding: 0 10px;
+  font: 500 12.5px var(--ms-font-sans);
+}
+.ms-maily-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--ms-line);
+  margin: 0 5px;
+}
+.ms-maily-toolbar-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+/* ---- editing surface ---------------------------------------------------- */
+.ms-maily-surface {
+  border: 1px solid var(--ms-line);
+  border-radius: 0 0 var(--ms-r-input) var(--ms-r-input);
+  background: var(--ms-panel);
+}
+/* Neutralise Maily's own frame — our surface provides the border/rounding. */
+.ms-maily-wrap {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.ms-maily .ProseMirror {
+  min-height: 280px;
+  padding: 16px 18px;
+  outline: none;
+  color: var(--ms-bone);
+  font: 400 var(--ms-fs-ui) / 1.6 var(--ms-font-sans);
+}
+.ms-maily .ProseMirror:focus {
+  outline: none;
+}
+/* Placeholder text uses our faint token, not Maily's baked gray. */
+.ms-maily .ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--ms-faint);
+}
+
+/* ---- variable "Insert" picker ------------------------------------------ */
+.ms-maily-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--ms-z-popover);
+  width: 340px;
+  max-width: min(340px, calc(100vw - 24px));
+  background: var(--ms-panel);
+  border: 1px solid var(--ms-line-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  animation: ms-fade var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-maily-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--ms-line);
+  color: var(--ms-muted);
+}
+.ms-maily-picker-search input {
+  flex: 1;
+  border: 0;
+  background: none;
+  outline: none;
+  color: var(--ms-bone);
+  font: 400 13px var(--ms-font-sans);
+}
+.ms-maily-picker-search input::placeholder {
+  color: var(--ms-faint);
+}
+.ms-maily-picker-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.ms-maily-picker-empty {
+  margin: 0;
+  padding: 16px;
+  text-align: center;
+  color: var(--ms-muted);
+  font-size: 13px;
+}
+.ms-maily-picker-row {
+  padding: 2px;
+}
+.ms-maily-picker-pick {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-maily-picker-pick:hover {
+  background: var(--ms-panel-raised);
+}
+.ms-maily-picker-label {
+  color: var(--ms-bone);
+  font: 500 13px var(--ms-font-sans);
+}
+.ms-maily-picker-token {
+  grid-row: 1;
+  grid-column: 2;
+  align-self: center;
+  color: var(--ms-muted);
+  font-size: 11.5px;
+}
+.ms-maily-picker-desc {
+  grid-column: 1 / -1;
+  color: var(--ms-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.ms-maily-picker-fallback {
+  width: calc(100% - 8px);
+  margin: 2px 4px 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--ms-line);
+  border-radius: 7px;
+  background: var(--ms-inset);
+  color: var(--ms-bone);
+  font-size: 12px;
+  outline: none;
+}
+.ms-maily-picker-fallback:focus {
+  border-color: var(--ms-line-strong);
+}
+.ms-maily-picker-fallback::placeholder {
+  color: var(--ms-faint);
+}
+
+/* ---- link box ----------------------------------------------------------- */
+.ms-maily-linkbox {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: var(--ms-z-popover);
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  background: var(--ms-panel);
+  border: 1px solid var(--ms-line-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  animation: ms-fade var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-maily-linkbox input {
+  width: 240px;
+  padding: 6px 9px;
+  border: 1px solid var(--ms-line);
+  border-radius: 7px;
+  background: var(--ms-inset);
+  color: var(--ms-bone);
+  font-size: 12.5px;
+  outline: none;
+}
+.ms-maily-linkbox input:focus {
+  border-color: var(--ms-line-strong);
+}
+
+/* ---- Maily's tippy popups (slash + variable suggestions) --------------- */
+/* Colour comes from the token remap above; here we only tame the heavy shadow
+   and round the corners so the popup reads like our other menus. */
+[data-tippy-root] .tippy-box {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  border-radius: 10px;
+}

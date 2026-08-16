@@ -1,13 +1,17 @@
 {
-  "mode": {
-    "design": "Design",
-    "code": "Código",
-    "designLocked": "Editar o HTML bruto desativa o editor visual para este conteúdo."
-  },
   "toolbar": {
     "text": "Texto",
     "image": "Imagem",
-    "variables": "Variáveis"
+    "variables": "Variáveis",
+    "formatting": "Formatação",
+    "h1": "Título 1",
+    "h2": "Título 2",
+    "bulletList": "Lista com marcadores",
+    "orderedList": "Lista numerada",
+    "alignLeft": "Alinhar à esquerda",
+    "alignCenter": "Centralizar",
+    "alignRight": "Alinhar à direita",
+    "clear": "Limpar formatação"
   },
   "block": {
     "heading": "Título",
@@ -21,9 +25,6 @@
   },
   "canvas": {
     "empty": "Adicione um bloco para começar, ou digite / dentro de um bloco de texto."
-  },
-  "code": {
-    "placeholder": "<html>…</html>"
   },
   "row": {
     "moveUp": "Mover para cima",
@@ -52,7 +53,9 @@
     "bold": "Negrito",
     "italic": "Itálico",
     "underline": "Sublinhado",
-    "strike": "Tachado"
+    "strike": "Tachado",
+    "apply": "Aplicar",
+    "removeLink": "Remover link"
   },
   "picker": {
     "search": "Buscar campos…",
