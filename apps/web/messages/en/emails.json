@@ -51,6 +51,7 @@
     "apiKey": "API key",
     "events": "Email events",
     "noEvents": "0 events.",
+    "eventsUnreachable": "No further events will arrive — delivery events need a public https APP_BASE_URL. Re-run setup to enable them.",
     "event": {
       "rendering_failure": "Rendering failure"
     },
