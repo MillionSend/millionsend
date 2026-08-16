@@ -1,0 +1,90 @@
+/* Auth screens (login/signup) only — the shared control grammar stays in
+   styles/components.css; these rules just retune it for the auth column:
+   38px controls, full-width centered buttons, and the one backdrop glow. */
+
+.screen {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  /* Soft steel glow above the column — token-based so paper theme holds. */
+  background: radial-gradient(
+    640px 460px at 50% 18%,
+    color-mix(in srgb, var(--ms-steel) 9%, transparent),
+    transparent 70%
+  );
+}
+
+.column {
+  width: 360px;
+  max-width: 100%;
+  display: grid;
+  gap: 16px;
+  justify-items: center;
+}
+
+/* Composed with the global .ms-display (Erode 500) — this only sizes/centers. */
+.headline {
+  margin: 8px 0 0;
+  font-size: var(--ms-fs-h2);
+  color: var(--ms-bone);
+  text-align: center;
+}
+
+.subline {
+  margin: -8px 0 8px;
+  color: var(--ms-muted);
+  font-size: var(--ms-fs-label);
+  text-align: center;
+}
+
+/* One auth-screen control height; inputs and buttons align at 38px. */
+.control {
+  width: 100%;
+  height: 38px;
+}
+
+.button {
+  composes: control;
+  justify-content: center;
+}
+
+.form {
+  width: 100%;
+  display: grid;
+  gap: 14px;
+}
+
+.field {
+  width: 100%;
+}
+
+.divider {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ms-faint);
+  font-size: var(--ms-fs-label);
+}
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--ms-line);
+}
+
+.error {
+  margin: 0;
+  color: var(--ms-danger);
+  font-size: var(--ms-fs-label);
+}
+
+.footnote {
+  margin: 8px 0 0;
+  color: var(--ms-muted);
+  font-size: var(--ms-fs-label);
+  text-align: center;
+}

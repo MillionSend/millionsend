@@ -40,6 +40,19 @@ export async function assertSignupAllowed(db: Db, allowSignup: boolean): Promise
   }
 }
 
+/**
+ * Which social sign-in buttons the auth screens should render. A provider
+ * counts as enabled only when both its client id and secret are set — the
+ * same condition that mounts it in `createAuth`, so the UI can never offer a
+ * provider the server would reject.
+ */
+export function enabledSocialProviders(): { google: boolean; github: boolean } {
+  return {
+    google: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
+    github: Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
+  };
+}
+
 function createAuth() {
   // env.ts leaves BETTER_AUTH_SECRET optional (api/worker don't need it);
   // the web process is the one that must refuse to run without it.
@@ -58,6 +71,14 @@ function createAuth() {
       },
     }),
     emailAndPassword: { enabled: true },
+    socialProviders: {
+      ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+        ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } }
+        : {}),
+      ...(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
+        ? { github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } }
+        : {}),
+    },
     secret: env.BETTER_AUTH_SECRET,
     baseURL,
     ...(env.APP_BASE_URL ? { trustedOrigins: [env.APP_BASE_URL] } : {}),
