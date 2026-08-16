@@ -127,9 +127,7 @@ export function FromField({
               onChange={(next) => {
                 if (next === ADD_DOMAIN) {
                   // Programmatic push — the anchor/back guards never see it.
-                  void confirmUnsavedNavigation().then((ok) => {
-                    if (ok) router.push("/domains/new");
-                  });
+                  if (confirmUnsavedNavigation()) router.push("/domains/new");
                 } else {
                   update({ domain: next });
                 }
