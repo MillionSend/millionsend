@@ -267,9 +267,73 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       console.log(dim("AWS step skipped."));
     }
 
+    // --- social login step (before launch, so the stack starts with it) ---
+    await socialLoginStep(rl, appBaseUrl, writeEnv);
+
     return await launchStep(rl, interactive, state, env === null ? [] : missingSecrets(env));
   } finally {
     rl.close();
+  }
+}
+
+const SOCIAL_PROVIDERS = [
+  {
+    name: "Google",
+    idKey: "GOOGLE_CLIENT_ID",
+    secretKey: "GOOGLE_CLIENT_SECRET",
+    consoleHint:
+      "https://console.cloud.google.com/apis/credentials — OAuth client ID, type Web application",
+    callbackPath: "/api/auth/callback/google",
+  },
+  {
+    name: "GitHub",
+    idKey: "GITHUB_CLIENT_ID",
+    secretKey: "GITHUB_CLIENT_SECRET",
+    consoleHint: "https://github.com/settings/developers — New OAuth App",
+    callbackPath: "/api/auth/callback/github",
+  },
+] as const;
+
+/**
+ * Optional social-login step: Google/GitHub OAuth credentials for the
+ * dashboard's "Continue with …" buttons. Env-only (touches no AWS resource);
+ * every question defaults to skip, so piped/EOF runs sail through unchanged.
+ */
+async function socialLoginStep(
+  rl: LineReader,
+  appBaseUrl: string,
+  writeEnv: (entries: Record<string, string>) => boolean,
+): Promise<void> {
+  console.log("");
+  const wanted = await offer(
+    rl,
+    'Optional: social login. Google/GitHub OAuth credentials add "Continue with …" buttons to the dashboard sign-in. Configure now?',
+    false,
+  );
+  if (!wanted) {
+    console.log(dim("Skipped — set GOOGLE_/GITHUB_CLIENT_ID and _SECRET in .env any time."));
+    return;
+  }
+  for (const provider of SOCIAL_PROVIDERS) {
+    if (!(await offer(rl, `\nSet up ${provider.name} sign-in?`, false))) continue;
+    console.log(dim(`Create the OAuth app: ${provider.consoleHint}`));
+    console.log(dim(`Register this callback URL: ${appBaseUrl}${provider.callbackPath}`));
+    const id = (await rl.question(`${provider.idKey} (empty skips): `)).trim();
+    if (id === "") continue;
+    const secret = (await rl.question(`${provider.secretKey}: `)).trim();
+    if (secret === "") {
+      console.log(dim("No secret — skipped."));
+      continue;
+    }
+    const entries = { [provider.idKey]: id, [provider.secretKey]: secret };
+    if (writeEnv(entries)) {
+      console.log(dim(`${provider.name} credentials written to .env.`));
+    } else {
+      const block = Object.entries(entries)
+        .map(([key, value]) => `${key}=${value}`)
+        .join("\n");
+      console.log(`No .env here — paste into .env where MillionSend runs:\n\n${block}\n`);
+    }
   }
 }
 

@@ -30,6 +30,16 @@ export function formatDay(date: Date | string | number, locale: string): string 
   return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(new Date(date));
 }
 
+/** Natural day+time stamp ("Aug 16, 8:12 PM" / "16 de ago., 20:12"). */
+export function formatDayTime(date: Date | string | number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+  }).format(new Date(date));
+}
+
 /** Ledger timestamp: UTC ISO-8601 to the second ("2026-08-13 14:02:11Z"). */
 export function formatUtcTimestamp(date: Date | string | number): string {
   return `${new Date(date).toISOString().slice(0, 19).replace("T", " ")}Z`;
