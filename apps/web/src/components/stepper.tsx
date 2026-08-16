@@ -75,17 +75,24 @@ export function MarkerRail({
     >
       <span
         className="ms-mono"
-        style={{
-          fontSize: 11,
-          color,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 3,
-          whiteSpace: "nowrap",
-        }}
+        style={{ position: "relative", fontSize: 11, color, whiteSpace: "nowrap" }}
       >
         {marker}
-        {done ? <span>✓</span> : null}
+        {done ? (
+          // Absolutely positioned so the ✓ never shifts the number off the
+          // rail's vertical centerline shared with the other step markers.
+          <span
+            style={{
+              position: "absolute",
+              left: "100%",
+              top: "50%",
+              transform: "translateY(-50%)",
+              paddingLeft: 4,
+            }}
+          >
+            ✓
+          </span>
+        ) : null}
       </span>
       {line ? (
         <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />
