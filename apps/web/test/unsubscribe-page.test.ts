@@ -23,13 +23,9 @@ afterEach(async () => {
 });
 
 async function seedContact(teamId: string): Promise<string> {
-  const [audience] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "Newsletter" })
-    .returning({ id: schema.audiences.id });
   const [contact] = await db
     .insert(schema.contacts)
-    .values({ teamId, audienceId: audience?.id ?? "", email: "ada@x.com" })
+    .values({ teamId, email: "ada@x.com" })
     .returning({ id: schema.contacts.id });
   return contact?.id ?? "";
 }

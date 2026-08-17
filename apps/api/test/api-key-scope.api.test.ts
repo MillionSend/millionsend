@@ -70,7 +70,7 @@ afterAll(() => close());
 
 describe("sending_access keys are confined to the send surface", () => {
   it("403s on a management route", async () => {
-    const res = await call(sendKey, "GET", "/audiences");
+    const res = await call(sendKey, "GET", "/contacts");
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ statusCode: 403, name: "restricted_api_key" });
   });
@@ -114,7 +114,7 @@ describe("domain-scoped keys may only send from their domain", () => {
 
 describe("full_access, unrestricted keys are unaffected", () => {
   it("reaches management and both domains", async () => {
-    expect((await call(fullKey, "GET", "/audiences")).status).toBe(200);
+    expect((await call(fullKey, "GET", "/contacts")).status).toBe(200);
     expect((await call(fullKey, "POST", "/emails", fromAcme)).status).toBe(200);
     expect((await call(fullKey, "POST", "/emails", fromOther)).status).toBe(200);
   });

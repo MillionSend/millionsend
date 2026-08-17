@@ -32,14 +32,9 @@ beforeAll(async () => {
     keyHash: key.keyHash,
     last4: key.last4,
   });
-  const [audience] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "newsletter" })
-    .returning({ id: schema.audiences.id });
-  if (!audience) throw new Error("audience insert failed");
   const [contact] = await db
     .insert(schema.contacts)
-    .values({ audienceId: audience.id, teamId, email: "reader@acme.dev" })
+    .values({ teamId, email: "reader@acme.dev" })
     .returning({ id: schema.contacts.id });
   if (!contact) throw new Error("contact insert failed");
   contactId = contact.id;

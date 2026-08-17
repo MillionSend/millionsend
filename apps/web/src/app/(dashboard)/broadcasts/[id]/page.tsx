@@ -131,14 +131,10 @@ export default function BroadcastDetailPage() {
           </div>
         </div>
         <div>
-          <Microlabel>{t("detail.audience")}</Microlabel>
+          <Microlabel>{t("detail.targeting")}</Microlabel>
           <div style={{ fontSize: 14, marginTop: 6 }}>
             {broadcast ? (
-              broadcast.audienceId && broadcast.audienceName ? (
-                <Link href={`/audience/${broadcast.audienceId}`}>{broadcast.audienceName}</Link>
-              ) : (
-                <span style={{ color: "var(--ms-faint)" }}>—</span>
-              )
+              (broadcast.segmentName ?? t("composer.segmentNone"))
             ) : (
               <span style={{ display: "flex" }}>
                 <Skeleton width={110} height="1lh" />
@@ -148,11 +144,6 @@ export default function BroadcastDetailPage() {
           {broadcast?.topicName ? (
             <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 4 }}>
               {t("detail.topic")}: {broadcast.topicName}
-            </div>
-          ) : null}
-          {broadcast?.segmentName ? (
-            <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 4 }}>
-              {t("detail.segment")}: {broadcast.segmentName}
             </div>
           ) : null}
         </div>

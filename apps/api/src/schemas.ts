@@ -127,36 +127,9 @@ export const errorSchema = z
   .openapi("ErrorResponse");
 
 /**
- * Audiences/contacts. The resend SDK (v6+) reaches this surface through two
- * prefixes: `resend.audiences.*` hits /segments (object: "segment") while
- * `resend.contacts.*` hits /audiences/{id}/contacts (and /segments/{id}/contacts
- * for list) — both prefixes serve the same handlers, so `object` is a string.
+ * Contacts are team-global (one row per (team, lower(email))); the resend SDK
+ * (v6+) reaches this surface through the top-level /contacts paths.
  */
-
-export const createAudienceRequestSchema = z
-  .object({ name: z.string().min(1) })
-  .openapi("CreateAudienceRequest");
-
-export const audienceResponseSchema = z
-  .object({
-    object: z.string(),
-    id: z.uuid(),
-    name: z.string(),
-    created_at: z.string().optional(),
-  })
-  .openapi("AudienceResponse");
-
-export const listAudiencesResponseSchema = z
-  .object({
-    object: z.literal("list"),
-    data: z.array(z.object({ id: z.uuid(), name: z.string(), created_at: z.string() })),
-    has_more: z.boolean(),
-  })
-  .openapi("ListAudiencesResponse");
-
-export const removeAudienceResponseSchema = z
-  .object({ object: z.string(), id: z.uuid(), deleted: z.literal(true) })
-  .openapi("RemoveAudienceResponse");
 
 export const createContactRequestSchema = z
   .object({
@@ -211,10 +184,10 @@ export const removeContactResponseSchema = z
   .openapi("RemoveContactResponse");
 
 /**
- * Broadcasts. The resend SDK (v6) sends both `audience_id` and `segment_id`
- * for the target (the user sets one); unsupported knobs (preview_text,
- * topic_id, send-on-create) are accepted into the schema and rejected loudly
- * — "never an incompatible subset" (docs/resend-compatibility.md).
+ * Broadcasts. Targeting is an optional segment_id and/or topic_id; neither
+ * set means every contact of the team. Unsupported knobs (preview_text,
+ * send-on-create) are accepted into the schema and rejected loudly — "never
+ * an incompatible subset" (docs/resend-compatibility.md).
  */
 
 const replyToList = z
@@ -224,7 +197,6 @@ const replyToList = z
 export const createBroadcastRequestSchema = z
   .object({
     name: z.string().optional(),
-    audience_id: z.uuid().optional(),
     segment_id: z.uuid().optional(),
     from: fromAddress,
     subject: z.string().min(1),
@@ -239,15 +211,11 @@ export const createBroadcastRequestSchema = z
   .refine((v) => v.html !== undefined || v.text !== undefined, {
     message: "Either html or text must be provided",
   })
-  .refine((v) => v.audience_id !== undefined || v.segment_id !== undefined, {
-    message: "audience_id is required",
-  })
   .openapi("CreateBroadcastRequest");
 
 export const updateBroadcastRequestSchema = z
   .object({
     name: z.string().optional(),
-    audience_id: z.uuid().optional(),
     segment_id: z.uuid().optional(),
     from: fromAddress.optional(),
     subject: z.string().min(1).optional(),
@@ -276,7 +244,6 @@ export const broadcastIdResponseSchema = z.object({ id: z.uuid() }).openapi("Bro
 const broadcastListItemSchema = z.object({
   id: z.uuid(),
   name: z.string().nullable(),
-  audience_id: z.uuid().nullable(),
   segment_id: z.uuid().nullable(),
   status: z.string(),
   created_at: z.string(),
@@ -314,12 +281,11 @@ export const cancelBroadcastResponseSchema = z
   .openapi("CancelBroadcastResponse");
 
 /**
- * Segments (MillionSend extension, docs/resend-compatibility.md). A segment is a
- * saved filter over an audience's contacts. Exposed under /segments2 — the
- * resend SDK's /segments path is the audiences alias and must stay distinct.
- * The filter's field/operator semantics are validated by @millionsend/core's
- * `segmentFilterSchema` in the handler (422 on a bad shape); this schema only
- * pins the wire structure for OpenAPI and basic type checks.
+ * Segments (MillionSend extension, docs/resend-compatibility.md). A segment
+ * is a saved filter over the team's contacts. The filter's field/operator
+ * semantics are validated by @millionsend/core's `segmentFilterSchema` in the
+ * handler (422 on a bad shape); this schema only pins the wire structure for
+ * OpenAPI and basic type checks.
  */
 const segmentFilterInputSchema = z
   .object({
@@ -338,7 +304,6 @@ const segmentFilterInputSchema = z
 export const createSegmentRequestSchema = z
   .object({
     name: z.string().min(1),
-    audience_id: z.uuid(),
     filter: segmentFilterInputSchema,
   })
   .openapi("CreateSegmentRequest");
@@ -354,7 +319,6 @@ const segmentBaseSchema = z.object({
   object: z.literal("segment"),
   id: z.uuid(),
   name: z.string(),
-  audience_id: z.uuid(),
   filter: segmentFilterInputSchema,
   created_at: z.string(),
 });

@@ -19,8 +19,7 @@ import { type AppLocale, DEFAULT_LOCALE, LOCALE_COOKIE, LOCALES } from "../../i1
 import { resolveEditorSave } from "../email-content";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
-import { assertAudience } from "./audience";
-import { assertSegmentInAudience, segmentPredicate } from "./segments";
+import { assertSegment, segmentPredicate } from "./segments";
 import { assertTopic, topicMembershipSql } from "./topics";
 
 const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
@@ -141,7 +140,7 @@ export const broadcastsRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const b = schema.broadcasts;
-      const a = schema.audiences;
+      const sg = schema.segments;
       const e = schema.emails;
       const filters = [eq(b.teamId, ctx.teamId)];
       if (input.cursor) {
@@ -154,7 +153,7 @@ export const broadcastsRouter = router({
           name: b.name,
           subject: b.subject,
           status: b.status,
-          audienceName: a.name,
+          segmentName: sg.name,
           recipients: sql<number>`count(${e.id})::int`,
           scheduledAt: b.scheduledAt,
           sentAt: b.sentAt,
@@ -162,10 +161,10 @@ export const broadcastsRouter = router({
           cursorCreatedAt: createdAtCursorField(b),
         })
         .from(b)
-        .leftJoin(a, eq(a.id, b.audienceId))
+        .leftJoin(sg, eq(sg.id, b.segmentId))
         .leftJoin(e, eq(e.broadcastId, b.id))
         .where(and(...filters))
-        .groupBy(b.id, a.name)
+        .groupBy(b.id, sg.name)
         .orderBy(desc(b.createdAt), desc(b.id))
         .limit(input.limit + 1);
       return paginate(rows, input.limit);
@@ -174,12 +173,8 @@ export const broadcastsRouter = router({
   /** Detail surface: full content plus the stat strip's aggregate over fanned-out emails. */
   get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
     const row = await getOwnBroadcast(ctx, input.id);
-    const a = schema.audiences;
     const e = schema.emails;
     const tp = schema.topics;
-    const [audience] = row.audienceId
-      ? await ctx.db.select({ name: a.name }).from(a).where(eq(a.id, row.audienceId)).limit(1)
-      : [];
     const [topic] = row.topicId
       ? await ctx.db.select({ name: tp.name }).from(tp).where(eq(tp.id, row.topicId)).limit(1)
       : [];
@@ -201,7 +196,6 @@ export const broadcastsRouter = router({
     return {
       ...row,
       replyTo: firstReplyTo(row.replyTo),
-      audienceName: audience?.name ?? null,
       topicName: topic?.name ?? null,
       segmentName: segment?.name ?? null,
       stats: stats ?? { total: 0, delivered: 0, bounced: 0, complained: 0 },
@@ -211,12 +205,11 @@ export const broadcastsRouter = router({
   create: teamProcedure
     .input(
       z.object({
-        audienceId: z.uuid(),
-        // null / omitted = all-audience send; a topic scopes both the
+        // null / omitted = all-contacts send; a topic scopes both the
         // recipient filter and each recipient's unsubscribe link.
         topicId: z.uuid().nullable().optional(),
-        // null / omitted = whole audience; a segment narrows recipients to its
-        // filter. Must target the same audience as this send.
+        // null / omitted = all contacts; a segment narrows recipients to its
+        // filter.
         segmentId: z.uuid().nullable().optional(),
         name: nameSchema.optional(),
         from: fromSchema,
@@ -228,16 +221,14 @@ export const broadcastsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertAudience(ctx, input.audienceId);
       if (input.topicId) await assertTopic(ctx, input.topicId);
-      if (input.segmentId) await assertSegmentInAudience(ctx, input.segmentId, input.audienceId);
+      if (input.segmentId) await assertSegment(ctx, input.segmentId);
       const saved = await resolveEditorSave(input);
       const b = schema.broadcasts;
       const [row] = await ctx.db
         .insert(b)
         .values({
           teamId: ctx.teamId,
-          audienceId: input.audienceId,
           topicId: input.topicId ?? null,
           segmentId: input.segmentId ?? null,
           name: input.name || null,
@@ -257,7 +248,6 @@ export const broadcastsRouter = router({
     .input(
       z.object({
         id: z.uuid(),
-        audienceId: z.uuid().optional(),
         topicId: z.uuid().nullable().optional(),
         segmentId: z.uuid().nullable().optional(),
         name: nameSchema.optional(),
@@ -272,21 +262,13 @@ export const broadcastsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const row = await getOwnBroadcast(ctx, input.id);
       assertDraft(row);
-      if (input.audienceId) await assertAudience(ctx, input.audienceId);
       if (input.topicId) await assertTopic(ctx, input.topicId);
-      if (input.segmentId) {
-        await assertSegmentInAudience(
-          ctx,
-          input.segmentId,
-          input.audienceId ?? row.audienceId ?? "",
-        );
-      }
+      if (input.segmentId) await assertSegment(ctx, input.segmentId);
       const saved = await resolveEditorSave(input);
       const b = schema.broadcasts;
       await ctx.db
         .update(b)
         .set({
-          ...(saved.audienceId !== undefined ? { audienceId: saved.audienceId } : {}),
           ...(saved.topicId !== undefined ? { topicId: saved.topicId } : {}),
           ...(saved.segmentId !== undefined ? { segmentId: saved.segmentId } : {}),
           ...(saved.name !== undefined ? { name: saved.name || null } : {}),
@@ -324,14 +306,6 @@ export const broadcastsRouter = router({
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "Only drafts can be sent.",
-        });
-      }
-      // ON DELETE SET NULL: a null audienceId means the audience was deleted
-      // after this draft was written.
-      if (!row.audienceId) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "The audience no longer exists. Pick another one.",
         });
       }
       if (!env.APP_BASE_URL) {
@@ -389,29 +363,23 @@ export const broadcastsRouter = router({
    * Guard-rail number: how many contacts a send would email right now. A
    * topicId narrows the count to that topic's subscribers per the SUBSCRIPTION
    * RULE (globally subscribed AND topic-subscribed), matching the worker's
-   * topic-scoped fan-out; without one it is the whole non-unsubscribed audience.
+   * topic-scoped fan-out; without one it is every non-unsubscribed contact.
    */
   recipientCount: teamProcedure
     .input(
       z.object({
-        audienceId: z.uuid(),
         topicId: z.uuid().nullable().optional(),
         segmentId: z.uuid().nullable().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
-      await assertAudience(ctx, input.audienceId);
       const c = schema.contacts;
-      const base = [
-        eq(c.teamId, ctx.teamId),
-        eq(c.audienceId, input.audienceId),
-        eq(c.unsubscribed, false),
-      ];
+      const base = [eq(c.teamId, ctx.teamId), eq(c.unsubscribed, false)];
       // A segment narrows recipients to its filter via the shared translator,
       // AND'd on top of the global-unsubscribe and topic rules.
       if (input.segmentId) {
-        const segment = await assertSegmentInAudience(ctx, input.segmentId, input.audienceId);
-        // undefined = empty filter (whole audience); nothing to AND in then.
+        const segment = await assertSegment(ctx, input.segmentId);
+        // undefined = empty filter (all contacts); nothing to AND in then.
         const predicate = segmentPredicate(segment.filter);
         if (predicate) base.push(predicate);
       }

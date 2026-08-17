@@ -24,33 +24,45 @@ import { type SesSender, sendEmail } from "../src/handlers/send-email.js";
 let db: Db;
 let close: () => Promise<void>;
 let teamId: string;
-let audienceId: string;
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
 const secretKey = deriveUnsubscribeKey(randomBytes(32));
 const BASE_URL = "https://app.example.com";
 
-beforeAll(async () => {
-  ({ db, close } = await createTestDb());
-  teamId = await createTeam(db, "bc-worker");
+/**
+ * Contacts are team-global, so each test needing an isolated contact set gets
+ * its own team with a verified `<label>.dev` sender domain.
+ */
+async function seedTeam(
+  label: string,
+  contacts: (Partial<typeof schema.contacts.$inferInsert> & { email: string })[],
+): Promise<{ teamId: string; ids: Record<string, string> }> {
+  const tId = await createTeam(db, label);
   await db.insert(schema.domains).values({
-    teamId,
-    name: "acme.dev",
+    teamId: tId,
+    name: `${label}.dev`,
     region: "us-east-1",
     status: "verified",
     verifiedAt: new Date(),
     sesConfigurationSet: "ms-set",
   });
-  const [audience] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "news" })
-    .returning({ id: schema.audiences.id });
-  if (!audience) throw new Error("audience insert failed");
-  audienceId = audience.id;
-  await db.insert(schema.contacts).values([
-    { audienceId, teamId, email: "a@example.com" },
-    { audienceId, teamId, email: "b@example.com" },
-    { audienceId, teamId, email: "gone@example.com", unsubscribed: true },
-  ]);
+  const ids: Record<string, string> = {};
+  if (contacts.length > 0) {
+    const inserted = await db
+      .insert(schema.contacts)
+      .values(contacts.map((c) => ({ ...c, teamId: tId })))
+      .returning({ id: schema.contacts.id, email: schema.contacts.email });
+    for (const c of inserted) ids[c.email] = c.id;
+  }
+  return { teamId: tId, ids };
+}
+
+beforeAll(async () => {
+  ({ db, close } = await createTestDb());
+  ({ teamId } = await seedTeam("acme", [
+    { email: "a@example.com" },
+    { email: "b@example.com" },
+    { email: "gone@example.com", unsubscribed: true },
+  ]));
 });
 afterAll(() => close());
 
@@ -87,7 +99,6 @@ async function insertBroadcast(
     .insert(schema.broadcasts)
     .values({
       teamId,
-      audienceId,
       from: "Acme <hi@acme.dev>",
       subject: "launch",
       html: '<p>Hi</p><a href="{{{UNSUBSCRIBE_URL}}}">bye</a>',
@@ -104,7 +115,7 @@ async function insertBroadcast(
 const emailsOf = (broadcastId: string) =>
   db.select().from(schema.emails).where(eq(schema.emails.broadcastId, broadcastId));
 
-it("fans out to subscribed contacts only, personalizes, and marks sent", async () => {
+it("a broadcast with no segment or topic fans out to ALL subscribed team contacts, personalizes, and marks sent", async () => {
   const broadcastId = await insertBroadcast();
   const { deps, enqueued } = makeDeps();
 
@@ -147,7 +158,7 @@ it("fans out to subscribed contacts only, personalizes, and marks sent", async (
 it("suppressed recipients are skipped like unsubscribed ones", async () => {
   const [extra] = await db
     .insert(schema.contacts)
-    .values({ audienceId, teamId, email: "bounced@example.com" })
+    .values({ teamId, email: "bounced@example.com" })
     .returning({ id: schema.contacts.id });
   if (!extra) throw new Error("contact insert failed");
   await db.insert(schema.suppressions).values({
@@ -300,30 +311,15 @@ it("a cancel racing the sending claim fans out nothing", async () => {
 });
 
 it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", async () => {
-  const qTeamId = await createTeam(db, "bc-quota");
-  await db.insert(schema.domains).values({
-    teamId: qTeamId,
-    name: "quota.dev",
-    region: "us-east-1",
-    status: "verified",
-    verifiedAt: new Date(),
-    sesConfigurationSet: "ms-set",
-  });
-  const [aud] = await db
-    .insert(schema.audiences)
-    .values({ teamId: qTeamId, name: "q" })
-    .returning({ id: schema.audiences.id });
-  if (!aud) throw new Error("audience insert failed");
-  await db.insert(schema.contacts).values([
-    { audienceId: aud.id, teamId: qTeamId, email: "q1@example.com" },
-    { audienceId: aud.id, teamId: qTeamId, email: "q2@example.com" },
-    { audienceId: aud.id, teamId: qTeamId, email: "q3@example.com" },
+  const { teamId: qTeamId } = await seedTeam("quota", [
+    { email: "q1@example.com" },
+    { email: "q2@example.com" },
+    { email: "q3@example.com" },
   ]);
   // Free plan cap is 100/day; 98 already accepted → headroom for 2 of 3.
   await db.insert(schema.usageCounters).values({ teamId: qTeamId, day: utcDay(), accepted: 98 });
   const broadcastId = await insertBroadcast({
     teamId: qTeamId,
-    audienceId: aud.id,
     from: "Acme <hi@quota.dev>",
   });
   const { deps, enqueued } = makeDeps({ isCloud: true });
@@ -350,29 +346,14 @@ async function seedThrottleTeam(
   label: string,
   counter: Partial<typeof schema.usageCounters.$inferInsert>,
 ): Promise<{ broadcastId: string }> {
-  const tId = await createTeam(db, label);
-  await db.insert(schema.domains).values({
-    teamId: tId,
-    name: `${label}.dev`,
-    region: "us-east-1",
-    status: "verified",
-    verifiedAt: new Date(),
-    sesConfigurationSet: "ms-set",
-  });
-  const [aud] = await db
-    .insert(schema.audiences)
-    .values({ teamId: tId, name: "t" })
-    .returning({ id: schema.audiences.id });
-  if (!aud) throw new Error("audience insert failed");
-  await db.insert(schema.contacts).values([
-    { audienceId: aud.id, teamId: tId, email: "t1@example.com" },
-    { audienceId: aud.id, teamId: tId, email: "t2@example.com" },
-    { audienceId: aud.id, teamId: tId, email: "t3@example.com" },
+  const { teamId: tId } = await seedTeam(label, [
+    { email: "t1@example.com" },
+    { email: "t2@example.com" },
+    { email: "t3@example.com" },
   ]);
   await db.insert(schema.usageCounters).values({ teamId: tId, day: utcDay(), ...counter });
   const broadcastId = await insertBroadcast({
     teamId: tId,
-    audienceId: aud.id,
     from: `Acme <hi@${label}.dev>`,
   });
   return { broadcastId };
@@ -521,21 +502,17 @@ it("applyMergeFields html-escapes contact values in html bodies only", () => {
 });
 
 it("fan-out personalizes merge fields per contact in html and text", async () => {
-  const [audience] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "merge" })
-    .returning({ id: schema.audiences.id });
-  if (!audience) throw new Error("audience insert failed");
-  await db.insert(schema.contacts).values({
-    audienceId: audience.id,
-    teamId,
-    email: "hostile@example.com",
-    firstName: "<b>Ada</b>",
-    lastName: null,
-    properties: { plan: "<b>pro</b>" },
-  });
+  const { teamId: mergeTeamId } = await seedTeam("merge", [
+    {
+      email: "hostile@example.com",
+      firstName: "<b>Ada</b>",
+      lastName: null,
+      properties: { plan: "<b>pro</b>" },
+    },
+  ]);
   const broadcastId = await insertBroadcast({
-    audienceId: audience.id,
+    teamId: mergeTeamId,
+    from: "Acme <hi@merge.dev>",
     html: '<p>Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}} on {{{plan}}}</p>{{{NOPE}}}<a href="{{{UNSUBSCRIBE_URL}}}">bye</a>',
     text: "Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}} on {{{plan}}} {{{NOPE}}}",
   });
@@ -562,39 +539,34 @@ it("fan-out personalizes merge fields per contact in html and text", async () =>
   expect(body.text).toBe("Hi <b>Ada</b> friend on <b>pro</b> ");
 });
 
-async function seedTopicAudience(
+async function seedTopicTeam(
   label: string,
   defaultSubscribed: boolean,
-): Promise<{ audienceId: string; topicId: string; ids: Record<string, string> }> {
-  const [aud] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: label })
-    .returning({ id: schema.audiences.id });
-  if (!aud) throw new Error("audience insert failed");
-  const inserted = await db
-    .insert(schema.contacts)
-    .values([
-      { audienceId: aud.id, teamId, email: `${label}-default@example.com` },
-      { audienceId: aud.id, teamId, email: `${label}-out@example.com` },
-      { audienceId: aud.id, teamId, email: `${label}-in@example.com` },
-    ])
-    .returning({ id: schema.contacts.id, email: schema.contacts.email });
-  const ids = Object.fromEntries(inserted.map((c) => [c.email, c.id]));
+): Promise<{ teamId: string; topicId: string; ids: Record<string, string> }> {
+  const { teamId: tId, ids } = await seedTeam(label, [
+    { email: `${label}-default@example.com` },
+    { email: `${label}-out@example.com` },
+    { email: `${label}-in@example.com` },
+  ]);
   const [topic] = await db
     .insert(schema.topics)
-    .values({ teamId, name: label, defaultSubscribed })
+    .values({ teamId: tId, name: label, defaultSubscribed })
     .returning({ id: schema.topics.id });
   if (!topic) throw new Error("topic insert failed");
   await db.insert(schema.contactTopicSubscriptions).values([
     { contactId: ids[`${label}-out@example.com`] as string, topicId: topic.id, subscribed: false },
     { contactId: ids[`${label}-in@example.com`] as string, topicId: topic.id, subscribed: true },
   ]);
-  return { audienceId: aud.id, topicId: topic.id, ids };
+  return { teamId: tId, topicId: topic.id, ids };
 }
 
 it("opt-in topic: default (no row) and explicit-in send; explicit opt-out is skipped", async () => {
-  const { audienceId: aud, topicId } = await seedTopicAudience("optin", true);
-  const broadcastId = await insertBroadcast({ audienceId: aud, topicId });
+  const { teamId: tId, topicId } = await seedTopicTeam("optin", true);
+  const broadcastId = await insertBroadcast({
+    teamId: tId,
+    from: "Acme <hi@optin.dev>",
+    topicId,
+  });
 
   expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
 
@@ -623,8 +595,12 @@ it("opt-in topic: default (no row) and explicit-in send; explicit opt-out is ski
 });
 
 it("opt-out topic: default (no row) is skipped; only explicit-in sends", async () => {
-  const { audienceId: aud, topicId } = await seedTopicAudience("optout", false);
-  const broadcastId = await insertBroadcast({ audienceId: aud, topicId });
+  const { teamId: tId, topicId } = await seedTopicTeam("optout", false);
+  const broadcastId = await insertBroadcast({
+    teamId: tId,
+    from: "Acme <hi@optout.dev>",
+    topicId,
+  });
 
   expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
 
@@ -651,23 +627,14 @@ it("reconcile re-enqueues past-due scheduled and stale sending broadcasts", asyn
 });
 
 it("a segment broadcast fans out only to matching contacts, composing with the topic filter", async () => {
-  const [aud] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "seg-aud" })
-    .returning({ id: schema.audiences.id });
-  if (!aud) throw new Error("audience insert failed");
-  const inserted = await db
-    .insert(schema.contacts)
-    .values([
-      { audienceId: aud.id, teamId, email: "vip-in@example.com", properties: { tier: "vip" } },
-      { audienceId: aud.id, teamId, email: "vip-out@example.com", properties: { tier: "vip" } },
-      { audienceId: aud.id, teamId, email: "basic@example.com", properties: { tier: "basic" } },
-    ])
-    .returning({ id: schema.contacts.id, email: schema.contacts.email });
-  const ids = Object.fromEntries(inserted.map((c) => [c.email, c.id]));
+  const { teamId: tId, ids } = await seedTeam("seg", [
+    { email: "vip-in@example.com", properties: { tier: "vip" } },
+    { email: "vip-out@example.com", properties: { tier: "vip" } },
+    { email: "basic@example.com", properties: { tier: "basic" } },
+  ]);
   const [topic] = await db
     .insert(schema.topics)
-    .values({ teamId, name: "seg-topic", defaultSubscribed: true })
+    .values({ teamId: tId, name: "seg-topic", defaultSubscribed: true })
     .returning({ id: schema.topics.id });
   if (!topic) throw new Error("topic insert failed");
   // vip-out opts out of the topic: the segment matches it, the topic filter must
@@ -680,8 +647,7 @@ it("a segment broadcast fans out only to matching contacts, composing with the t
   const [segment] = await db
     .insert(schema.segments)
     .values({
-      teamId,
-      audienceId: aud.id,
+      teamId: tId,
       name: "vips",
       filter: {
         match: "all",
@@ -692,7 +658,8 @@ it("a segment broadcast fans out only to matching contacts, composing with the t
   if (!segment) throw new Error("segment insert failed");
 
   const broadcastId = await insertBroadcast({
-    audienceId: aud.id,
+    teamId: tId,
+    from: "Acme <hi@seg.dev>",
     segmentId: segment.id,
     topicId: topic.id,
   });
@@ -701,4 +668,20 @@ it("a segment broadcast fans out only to matching contacts, composing with the t
   const rows = await emailsOf(broadcastId);
   // basic@ fails the segment; vip-out@ passes the segment but fails the topic.
   expect(rows.map((r) => r.to[0]).sort()).toEqual(["vip-in@example.com"]);
+});
+
+it("a foreign-team segment on a broadcast refuses the fan-out, sending nothing", async () => {
+  // A tampered/foreign segmentId must never scope (or widen) a send.
+  const { teamId: otherTeam } = await seedTeam("foreignseg", []);
+  const [foreign] = await db
+    .insert(schema.segments)
+    .values({ teamId: otherTeam, name: "not-yours", filter: { match: "all", conditions: [] } })
+    .returning({ id: schema.segments.id });
+  if (!foreign) throw new Error("segment insert failed");
+  const broadcastId = await insertBroadcast({ segmentId: foreign.id });
+  const { deps, enqueued } = makeDeps();
+
+  await expect(sendBroadcast(db, deps, { broadcastId })).rejects.toThrow(/not found for its team/);
+  expect(await emailsOf(broadcastId)).toHaveLength(0);
+  expect(enqueued).toHaveLength(0);
 });

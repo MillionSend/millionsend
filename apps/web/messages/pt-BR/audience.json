@@ -5,17 +5,6 @@
     "segments": "Segmentos",
     "topics": "Tópicos"
   },
-  "switcher": {
-    "label": "Selecionar audiência"
-  },
-  "manage": {
-    "menu": "Gerenciar audiências",
-    "create": "Criar audiência",
-    "rename": "Renomear audiência",
-    "delete": "Excluir audiência",
-    "renameTitle": "Renomear audiência",
-    "renameConfirm": "Renomear"
-  },
   "filters": {
     "segment": "Segmento",
     "topic": "Tópico",
@@ -53,24 +42,7 @@
     "deleteConfirm": "Excluir propriedade"
   },
   "list": {
-    "title": "Audiência",
-    "create": "Criar audiência",
-    "name": "Nome",
-    "contacts": "Contatos",
-    "unsubscribed": "Descadastrados",
-    "created": "Criada",
-    "menu": "Ações da audiência",
-    "delete": "Excluir",
-    "loadError": "Não foi possível carregar as audiências.",
-    "retry": "Tentar novamente",
-    "createTitle": "Criar audiência",
-    "nameLabel": "Nome",
-    "namePlaceholder": "ex. Newsletter",
-    "createConfirm": "Criar",
-    "createError": "Não foi possível criar a audiência. Tente novamente.",
-    "deleteTitle": "Excluir audiência",
-    "deleteBody": "{name} e {count, plural, one {seu # contato} other {seus # contatos}} serão removidos. Isso não pode ser desfeito.",
-    "deleteConfirm": "Excluir audiência"
+    "title": "Audiência"
   },
   "contacts": {
     "stats": {
@@ -102,15 +74,13 @@
     "loadMore": "Carregar mais",
     "pageOf": "Página 1 – {pages} de {total} contatos",
     "pageSize": "{count} linhas",
-    "notFound": "Audiência não encontrada.",
-    "back": "Audiência",
     "addTitle": "Adicionar contato",
     "emailLabel": "E-mail",
     "emailPlaceholder": "ada@example.com",
     "firstNameLabel": "Nome (opcional)",
     "lastNameLabel": "Sobrenome (opcional)",
     "addConfirm": "Adicionar contato",
-    "addExists": "Já está nesta audiência.",
+    "addExists": "Este contato já existe.",
     "addInvalid": "Informe um endereço de e-mail válido.",
     "importTitle": "Importar CSV",
     "importBody": "A primeira coluna é o e-mail, ou use os cabeçalhos email, first_name, last_name.",
@@ -122,11 +92,10 @@
     "importError": "Não foi possível importar os contatos.",
     "importDone": "Concluir",
     "deleteTitle": "Excluir contato",
-    "deleteBody": "{email} será removido desta audiência.",
+    "deleteBody": "{email} será removido dos seus contatos.",
     "deleteConfirm": "Excluir contato"
   },
   "detail": {
-    "eyebrow": "Contato",
     "email": "E-mail",
     "created": "Criado",
     "status": "Status",
@@ -179,13 +148,12 @@
     "title": "Audiência",
     "create": "Criar segmento",
     "name": "Nome",
-    "audience": "Audiência",
     "count": "Contatos",
     "created": "Criado",
     "menu": "Ações do segmento",
     "delete": "Excluir",
     "empty": "Nenhum segmento ainda.",
-    "emptyHint": "Um segmento é um filtro salvo sobre uma audiência — mire uma transmissão apenas nos contatos que correspondem.",
+    "emptyHint": "Um segmento é um filtro salvo sobre seus contatos — mire uma transmissão apenas nos contatos que correspondem.",
     "loadError": "Não foi possível carregar os segmentos.",
     "retry": "Tentar de novo",
     "createTitle": "Criar segmento",
@@ -216,10 +184,8 @@
     "builder": {
       "nameLabel": "Nome",
       "namePlaceholder": "ex.: Ativos em São Paulo",
-      "audienceLabel": "Audiência",
-      "audiencePick": "Escolha uma audiência",
       "conditionsLabel": "Condições",
-      "noConditions": "Sem condições — corresponde a todos os contatos da audiência.",
+      "noConditions": "Sem condições — corresponde a todos os contatos.",
       "addCondition": "Adicionar condição",
       "fieldLabel": "Campo",
       "opLabel": "Operador",
@@ -234,7 +200,6 @@
       "matchCount": "{count} contatos correspondem.",
       "counting": "Contando…",
       "countError": "Não foi possível contar as correspondências.",
-      "pickAudienceFirst": "Escolha uma audiência para pré-visualizar a contagem.",
       "save": "Salvar segmento",
       "saveError": "Não foi possível salvar o segmento. Tente de novo."
     }

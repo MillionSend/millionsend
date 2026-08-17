@@ -38,7 +38,7 @@ export interface BroadcastDeps {
   batchSize?: number | undefined;
 }
 
-export type BroadcastOutcome = "sent" | "skipped" | "deferred" | "canceled";
+export type BroadcastOutcome = "sent" | "skipped" | "deferred";
 
 /** Literal token replaced per recipient with their hosted unsubscribe URL. */
 const UNSUBSCRIBE_URL_TOKEN = "{{{UNSUBSCRIBE_URL}}}";
@@ -121,15 +121,6 @@ export async function sendBroadcast(
       `broadcast ${broadcast.id}: APP_BASE_URL is required for unsubscribe links; refusing to send`,
     );
   }
-  if (!broadcast.audienceId) {
-    // Audience deleted after scheduling: there is no one to send to.
-    await db
-      .update(schema.broadcasts)
-      .set({ status: "canceled", updatedAt: new Date() })
-      .where(eq(schema.broadcasts.id, broadcast.id));
-    return "canceled";
-  }
-
   // Resolve the sender's verified domain (region + configuration set for the
   // per-email send). Verified at schedule time; a loud failure here means it
   // was un-verified since.
@@ -199,7 +190,7 @@ export async function sendBroadcast(
   let emitted = 0;
 
   // Optional segment: AND its parameterized filter into the contact scan. The
-  // segment must belong to this broadcast's team and audience — a mismatch is a
+  // segment must belong to this broadcast's team — a mismatch is a
   // tampered/foreign reference, so refuse rather than mail the wrong people.
   let segmentPredicate: SQL | undefined;
   if (broadcast.segmentId) {
@@ -210,12 +201,11 @@ export async function sendBroadcast(
         and(
           eq(schema.segments.id, broadcast.segmentId),
           eq(schema.segments.teamId, broadcast.teamId),
-          eq(schema.segments.audienceId, broadcast.audienceId),
         ),
       );
     if (!segment) {
       throw new Error(
-        `broadcast ${broadcast.id}: segment ${broadcast.segmentId} not found for its team/audience`,
+        `broadcast ${broadcast.id}: segment ${broadcast.segmentId} not found for its team`,
       );
     }
     segmentPredicate = segmentWhere(schema.contacts, segment.filter);
@@ -236,7 +226,7 @@ export async function sendBroadcast(
       .from(schema.contacts)
       .where(
         and(
-          eq(schema.contacts.audienceId, broadcast.audienceId),
+          eq(schema.contacts.teamId, broadcast.teamId),
           eq(schema.contacts.unsubscribed, false),
           gt(sql`${schema.contacts.id}::text`, cursor),
           segmentPredicate,

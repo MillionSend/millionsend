@@ -33,23 +33,18 @@ function callerFor(teamId: string) {
 }
 
 describe("contact export", () => {
-  it("returns the expected columns scoped to the audience", async () => {
+  it("returns the expected columns scoped to the team", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
     await caller.audience.contacts.add({
-      audienceId,
       email: "a@example.com",
       firstName: "Ada",
       properties: { plan: "pro" },
     });
-    const { id: unsub } = await caller.audience.contacts.add({
-      audienceId,
-      email: "b@example.com",
-    });
+    const { id: unsub } = await caller.audience.contacts.add({ email: "b@example.com" });
     await caller.audience.contacts.update({ id: unsub, unsubscribed: true });
 
-    const rows = await contactRowsForExport(db, teamId, { audienceId });
+    const rows = await contactRowsForExport(db, teamId, {});
     expect(rows).toHaveLength(2);
 
     const headers = contactColumns(rows).map((c) => c.header);
@@ -72,22 +67,20 @@ describe("contact export", () => {
   it("honors the search filter", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "N" });
-    await caller.audience.contacts.add({ audienceId, email: "match@example.com" });
-    await caller.audience.contacts.add({ audienceId, email: "other@example.com" });
+    await caller.audience.contacts.add({ email: "match@example.com" });
+    await caller.audience.contacts.add({ email: "other@example.com" });
 
-    const rows = await contactRowsForExport(db, teamId, { audienceId, search: "match" });
+    const rows = await contactRowsForExport(db, teamId, { search: "match" });
     expect(rows.map((r) => r.email)).toEqual(["match@example.com"]);
   });
 
-  it("yields nothing for another team's audience id", async () => {
+  it("never exports another team's contacts", async () => {
     const teamA = await createTeam(db, "team-a");
     const teamB = await createTeam(db, "team-b");
-    const { id: audienceId } = await callerFor(teamA).audience.audiences.create({ name: "A" });
-    await callerFor(teamA).audience.contacts.add({ audienceId, email: "a@example.com" });
+    await callerFor(teamA).audience.contacts.add({ email: "a@example.com" });
 
-    // Same audience id, but the caller's team is B — the teamId gate returns no rows.
-    const leaked = await contactRowsForExport(db, teamB, { audienceId });
+    // The caller's team is B — the teamId gate returns no rows.
+    const leaked = await contactRowsForExport(db, teamB, {});
     expect(leaked).toEqual([]);
   });
 });
@@ -98,9 +91,12 @@ describe("buildExport dispatch", () => {
     expect(await buildExport(db, teamId, "nope", new URLSearchParams())).toBeNull();
   });
 
-  it("returns null when contacts export omits the audience id", async () => {
+  it("builds a whole-team contacts export with no params", async () => {
     const teamId = await createTeam(db, "team-a");
-    expect(await buildExport(db, teamId, "contacts", new URLSearchParams())).toBeNull();
+    await callerFor(teamId).audience.contacts.add({ email: "a@example.com" });
+    const result = await buildExport(db, teamId, "contacts", new URLSearchParams());
+    expect(result?.filename).toBe("contacts.csv");
+    expect(result?.csv).toContain("a@example.com");
   });
 
   it("builds a scoped api-keys export without leaking the full secret", async () => {
@@ -118,29 +114,26 @@ describe("contact export with segment and topic filters", () => {
   it("exports exactly the segment's contacts, matching the live filtered count", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "N" });
-    await caller.audience.contacts.add({ audienceId, email: "keep@x.com" });
-    await caller.audience.contacts.add({ audienceId, email: "drop@y.com" });
+    await caller.audience.contacts.add({ email: "keep@x.com" });
+    await caller.audience.contacts.add({ email: "drop@y.com" });
     const { id: segmentId } = await caller.segments.create({
-      audienceId,
       name: "X domain",
       filter: endsWith("@x.com"),
     });
 
-    const rows = await contactRowsForExport(db, teamId, { audienceId, segmentId });
+    const rows = await contactRowsForExport(db, teamId, { segmentId });
     expect(rows.map((r) => r.email)).toEqual(["keep@x.com"]);
     // The export and the on-screen list agree on the row count.
-    const listed = await caller.audience.contacts.list({ audienceId, segmentId });
+    const listed = await caller.audience.contacts.list({ segmentId });
     expect(listed.total).toBe(rows.length);
   });
 
   it("exports only contacts subscribed to the topic", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "N" });
-    const { id: inId } = await caller.audience.contacts.add({ audienceId, email: "in@x.com" });
-    const { id: outId } = await caller.audience.contacts.add({ audienceId, email: "out@x.com" });
-    await caller.audience.contacts.add({ audienceId, email: "absent@x.com" });
+    const { id: inId } = await caller.audience.contacts.add({ email: "in@x.com" });
+    const { id: outId } = await caller.audience.contacts.add({ email: "out@x.com" });
+    await caller.audience.contacts.add({ email: "absent@x.com" });
     // Opt-out topic: only an explicit subscribed=true row is a member.
     const { id: topicId } = await caller.topics.create({
       name: "Digest",
@@ -151,7 +144,7 @@ describe("contact export with segment and topic filters", () => {
       { contactId: outId, topicId, subscribed: false },
     ]);
 
-    const rows = await contactRowsForExport(db, teamId, { audienceId, topicId });
+    const rows = await contactRowsForExport(db, teamId, { topicId });
     expect(rows.map((r) => r.email)).toEqual(["in@x.com"]);
   });
 
@@ -160,48 +153,37 @@ describe("contact export with segment and topic filters", () => {
     const teamB = await createTeam(db, "team-b");
     const callerA = callerFor(teamA);
     const callerB = callerFor(teamB);
-    const { id: audienceA } = await callerA.audience.audiences.create({ name: "A" });
-    await callerA.audience.contacts.add({ audienceId: audienceA, email: "a@x.com" });
+    await callerA.audience.contacts.add({ email: "a@x.com" });
     const { id: segmentA } = await callerA.segments.create({
-      audienceId: audienceA,
       name: "all",
       filter: { match: "all", conditions: [] },
     });
     const { id: topicB } = await callerB.topics.create({ name: "T", defaultSubscribed: true });
 
     // Team B asking for team A's segment → shared guard rejects → no rows.
-    expect(
-      await contactRowsForExport(db, teamB, { audienceId: audienceA, segmentId: segmentA }),
-    ).toEqual([]);
+    expect(await contactRowsForExport(db, teamB, { segmentId: segmentA })).toEqual([]);
     // Team A asking for team B's topic → shared guard rejects → no rows.
-    expect(
-      await contactRowsForExport(db, teamA, { audienceId: audienceA, topicId: topicB }),
-    ).toEqual([]);
-    // A wholly unknown id likewise yields nothing rather than the whole audience.
-    expect(
-      await contactRowsForExport(db, teamA, { audienceId: audienceA, segmentId: randomUUID() }),
-    ).toEqual([]);
+    expect(await contactRowsForExport(db, teamA, { topicId: topicB })).toEqual([]);
+    // A wholly unknown id likewise yields nothing rather than every contact.
+    expect(await contactRowsForExport(db, teamA, { segmentId: randomUUID() })).toEqual([]);
   });
 
   it("still neutralizes a formula payload in a segment-filtered export", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "N" });
     // Direct insert: the formula lives in a stored field, not user add() input.
     await db.insert(schema.contacts).values({
       teamId,
-      audienceId,
       email: "evil@x.com",
       firstName: "=cmd()",
       properties: {},
     });
     const { id: segmentId } = await caller.segments.create({
-      audienceId,
       name: "X",
       filter: endsWith("@x.com"),
     });
 
-    const rows = await contactRowsForExport(db, teamId, { audienceId, segmentId });
+    const rows = await contactRowsForExport(db, teamId, { segmentId });
     const csv = toCsv(rows, contactColumns(rows), { bom: true });
     // The guard prefixes a quote so the cell is never a live spreadsheet formula.
     expect(csv).toContain("'=cmd()");
@@ -212,16 +194,14 @@ describe("buildExport carries the segment/topic query params", () => {
   it("applies segmentId from the query string, mirroring the export link", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "N" });
-    await caller.audience.contacts.add({ audienceId, email: "keep@x.com" });
-    await caller.audience.contacts.add({ audienceId, email: "drop@y.com" });
+    await caller.audience.contacts.add({ email: "keep@x.com" });
+    await caller.audience.contacts.add({ email: "drop@y.com" });
     const { id: segmentId } = await caller.segments.create({
-      audienceId,
       name: "X",
       filter: endsWith("@x.com"),
     });
 
-    const params = new URLSearchParams({ audienceId, segmentId });
+    const params = new URLSearchParams({ segmentId });
     const result = await buildExport(db, teamId, "contacts", params);
     expect(result?.csv).toContain("keep@x.com");
     expect(result?.csv).not.toContain("drop@y.com");
@@ -230,12 +210,11 @@ describe("buildExport carries the segment/topic query params", () => {
   it("ignores a non-uuid segment param instead of erroring", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "N" });
-    await caller.audience.contacts.add({ audienceId, email: "a@x.com" });
+    await caller.audience.contacts.add({ email: "a@x.com" });
 
-    const params = new URLSearchParams({ audienceId, segmentId: "not-a-uuid" });
+    const params = new URLSearchParams({ segmentId: "not-a-uuid" });
     const result = await buildExport(db, teamId, "contacts", params);
-    // The bad param is dropped; the audience still exports normally.
+    // The bad param is dropped; the team still exports normally.
     expect(result?.csv).toContain("a@x.com");
   });
 });

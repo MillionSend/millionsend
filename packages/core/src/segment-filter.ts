@@ -167,10 +167,10 @@ function conditionSql(
 
 /**
  * Builds the Drizzle predicate for `filter` over `contacts`. Always returns a
- * usable predicate: an empty condition set becomes `true` (matches everyone in
- * the audience) per the contract, so callers can drop it straight into `and(...)`
- * without a special case. Throws `SegmentFilterError` on an unknown
- * field/operator or malformed shape.
+ * usable predicate: an empty condition set becomes `true` (matches every
+ * contact in the caller's scope) per the contract, so callers can drop it
+ * straight into `and(...)` without a special case. Throws `SegmentFilterError`
+ * on an unknown field/operator or malformed shape.
  */
 export function segmentWhere(contacts: ContactsTable, filter: SegmentFilter): SQL {
   const parsed = segmentFilterSchema.safeParse(filter);

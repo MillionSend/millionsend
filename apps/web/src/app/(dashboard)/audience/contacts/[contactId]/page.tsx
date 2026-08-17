@@ -73,7 +73,7 @@ function TopicSwitch({
 }
 
 export default function ContactDetailPage() {
-  const { contactId } = useParams<{ id: string; contactId: string }>();
+  const { contactId } = useParams<{ contactId: string }>();
   const t = useTranslations("audience");
   const common = useTranslations("common");
   const trpc = useTRPC();
@@ -103,7 +103,7 @@ export default function ContactDetailPage() {
     trpc.audience.contacts.delete.mutationOptions({
       onSuccess: () => {
         invalidate();
-        router.push(`/audience/${query.data?.audienceId}`);
+        router.push("/audience");
       },
     }),
   );
@@ -147,8 +147,7 @@ export default function ContactDetailPage() {
           breadcrumb={
             <>
               <Crumb href="/audience" label={t("list.title")} />
-              <Crumb href={`/audience/${row.audienceId}`} label={row.audienceName} />
-              <CrumbEnd label={t("detail.eyebrow")} />
+              <CrumbEnd label={row.email} />
             </>
           }
           title={row.email}

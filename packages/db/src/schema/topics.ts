@@ -1,5 +1,5 @@
 import { boolean, index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import { contacts } from "./audiences.js";
+import { contacts } from "./contacts.js";
 import { teams } from "./teams.js";
 
 export const topics = pgTable(

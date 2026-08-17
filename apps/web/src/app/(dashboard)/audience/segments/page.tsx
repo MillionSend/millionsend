@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AudienceSelect } from "@/components/audience-select";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
@@ -39,8 +38,7 @@ function SegmentsHead() {
   return (
     <thead>
       <tr>
-        <th style={{ width: "38%" }}>{t("name")}</th>
-        <th style={{ width: "28%" }}>{t("audience")}</th>
+        <th style={{ width: "50%" }}>{t("name")}</th>
         <th className="right">{t("count")}</th>
         <th className="right">{t("created")}</th>
         {/* Overflow-action column — no header label. */}
@@ -50,7 +48,7 @@ function SegmentsHead() {
   );
 }
 
-/** Mirrors the loaded segments table: name text, audience, a count, time, action. */
+/** Mirrors the loaded segments table: name text, a count, time, action. */
 function SegmentsSkeleton() {
   return (
     <Table>
@@ -60,9 +58,6 @@ function SegmentsSkeleton() {
           <tr key={width}>
             <td>
               <Skeleton width={width} height={13} />
-            </td>
-            <td>
-              <Skeleton width="52%" height={13} />
             </td>
             <td className="right">
               <Skeleton width={34} />
@@ -182,14 +177,12 @@ export default function SegmentsPage() {
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [audienceId, setAudienceId] = useState("");
   const [name, setName] = useState("");
   const [match, setMatch] = useState<MatchMode>("all");
   const [rows, setRows] = useState<BuilderRow[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const query = useQuery(trpc.segments.list.queryOptions());
-  const audiences = useQuery(trpc.audience.audiences.list.queryOptions());
 
   // Debounced snapshot of the filter drives the live count so each keystroke in
   // a value input doesn't fire a query.
@@ -201,15 +194,11 @@ export default function SegmentsPage() {
   }, [filter]);
 
   const countQuery = useQuery(
-    trpc.segments.count.queryOptions(
-      { audienceId, filter: debounced },
-      { enabled: createOpen && audienceId !== "" },
-    ),
+    trpc.segments.count.queryOptions({ filter: debounced }, { enabled: createOpen }),
   );
 
   const invalidate = () => queryClient.invalidateQueries(trpc.segments.pathFilter());
   const resetBuilder = () => {
-    setAudienceId("");
     setName("");
     setMatch("all");
     setRows([]);
@@ -235,7 +224,7 @@ export default function SegmentsPage() {
   const closeCreate = useCallback(() => setCreateOpen(false), []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
 
-  const canSave = audienceId !== "" && name.trim() !== "" && !createMutation.isPending;
+  const canSave = name.trim() !== "" && !createMutation.isPending;
 
   return (
     <>
@@ -303,9 +292,6 @@ export default function SegmentsPage() {
                 <td>
                   <div style={{ fontSize: 14, color: "var(--ms-bone)" }}>{row.name}</div>
                 </td>
-                <td style={{ color: "var(--ms-muted)" }}>
-                  {row.audienceName ?? <span style={{ color: "var(--ms-faint)" }}>—</span>}
-                </td>
                 <td className="right ms-mono" style={{ fontSize: 13 }}>
                   {nf.format(row.count)}
                 </td>
@@ -335,37 +321,20 @@ export default function SegmentsPage() {
           onSubmit={(event) => {
             event.preventDefault();
             if (!canSave) return;
-            createMutation.mutate({ audienceId, name: name.trim(), filter });
+            createMutation.mutate({ name: name.trim(), filter });
           }}
         >
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div className="ms-field">
-              <label htmlFor="seg-name">{t("builder.nameLabel")}</label>
-              <input
-                id="seg-name"
-                className={`ms-input${createMutation.isError ? " error" : ""}`}
-                style={{ width: "100%" }}
-                placeholder={t("builder.namePlaceholder")}
-                disabled={createMutation.isPending}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </div>
-            <div className="ms-field">
-              <label htmlFor="seg-audience">{t("builder.audienceLabel")}</label>
-              <AudienceSelect
-                id="seg-audience"
-                value={audienceId}
-                onChange={setAudienceId}
-                ariaLabel={t("builder.audienceLabel")}
-                width="100%"
-                disabled={createMutation.isPending}
-                options={[
-                  { value: "", label: t("builder.audiencePick") },
-                  ...(audiences.data ?? []).map((a) => ({ value: a.id, label: a.name })),
-                ]}
-              />
-            </div>
+          <div className="ms-field">
+            <label htmlFor="seg-name">{t("builder.nameLabel")}</label>
+            <input
+              id="seg-name"
+              className={`ms-input${createMutation.isError ? " error" : ""}`}
+              style={{ width: "100%" }}
+              placeholder={t("builder.namePlaceholder")}
+              disabled={createMutation.isPending}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
           </div>
 
           <div className="ms-field" style={{ marginTop: 16 }}>
@@ -424,9 +393,7 @@ export default function SegmentsPage() {
               fontSize: "var(--ms-fs-ui)",
             }}
           >
-            {audienceId === "" ? (
-              <span style={{ color: "var(--ms-faint)" }}>{t("builder.pickAudienceFirst")}</span>
-            ) : countQuery.isPending ? (
+            {countQuery.isPending ? (
               <span style={{ color: "var(--ms-muted)" }}>{t("builder.counting")}</span>
             ) : countQuery.isError ? (
               <span style={{ color: "var(--ms-danger)" }}>{t("builder.countError")}</span>

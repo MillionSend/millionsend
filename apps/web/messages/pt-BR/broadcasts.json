@@ -11,7 +11,7 @@
     "new": "Nova transmissão",
     "name": "Nome",
     "status": "Status",
-    "audience": "Audiência",
+    "targeting": "Direcionamento",
     "recipients": "Destinatários",
     "created": "Criada",
     "menu": "Ações da transmissão",
@@ -37,9 +37,6 @@
     "subjectLabel": "Assunto",
     "replyToLabel": "Responder para",
     "optional": "opcional",
-    "audienceLabel": "Audiência",
-    "audiencePick": "Escolha uma audiência",
-    "audienceHint": "{count} inscritos",
     "topicLabel": "Tópico",
     "topicNone": "Todos os contatos",
     "topicHint": "Restringe o envio e o cancelamento de cada destinatário a este tópico.",
@@ -55,7 +52,7 @@
     "saveError": "Não foi possível salvar o rascunho.",
     "back": "Transmissões",
     "segmentLabel": "Segmento",
-    "segmentNone": "Audiência inteira",
+    "segmentNone": "Todos os contatos",
     "segmentHint": "Restringe este envio aos contatos que correspondem a um segmento salvo.",
     "fromNamePlaceholder": "Ada",
     "fromLocalPlaceholder": "novidades",
@@ -63,7 +60,7 @@
     "fromDomainLabel": "Domínio de envio",
     "fromAddDomain": "Adicionar domínio",
     "steps": {
-      "one": "Audiência e nome",
+      "one": "Direcionamento e nome",
       "two": "Conteúdo"
     },
     "continue": "Continuar",
@@ -84,7 +81,7 @@
     "eyebrow": "Transmissão",
     "notFound": "Transmissão não encontrada.",
     "status": "Status",
-    "audience": "Audiência",
+    "targeting": "Direcionamento",
     "topic": "Tópico",
     "scheduled": "Agendada",
     "sent": "Enviada",
@@ -102,7 +99,6 @@
     "cancelTitle": "Cancelar envio",
     "cancelBody": "\"{name}\" não será enviada.",
     "cancelConfirm": "Cancelar envio",
-    "keep": "Manter",
-    "segment": "Segmento"
+    "keep": "Manter"
   }
 }

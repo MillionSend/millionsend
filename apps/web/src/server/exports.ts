@@ -5,7 +5,7 @@ import { and, desc, eq, gte, ilike, isNull, or, type SQL, sql } from "drizzle-or
 import { z } from "zod";
 import { type CsvColumn, toCsv } from "@/lib/csv-export";
 import { escapeLike } from "@/lib/sql";
-import { assertSegmentInAudience, segmentPredicate } from "./routers/segments";
+import { assertSegment, segmentPredicate } from "./routers/segments";
 import { assertTopic, topicMembershipSql } from "./routers/topics";
 
 /**
@@ -25,21 +25,19 @@ interface ContactExportRow {
 }
 
 /**
- * Contacts of one audience, teamId-scoped, matching the same optional segment
- * and topic filters as audience.contacts.list — so a filtered on-screen view
- * exports the same rows. teamId AND audienceId both gate the query and
- * contacts.teamId is denormalized, so a cross-team audienceId matches no rows —
- * it can never leak another team's contacts. A foreign or wrong-audience
- * segment/topic is rejected by the shared router guards and yields zero rows
- * (an export never errors on it), so a tampered link can't reveal other data.
+ * The team's contacts, matching the same optional segment and topic filters as
+ * audience.contacts.list — so a filtered on-screen view exports the same rows.
+ * A foreign segment/topic is rejected by the shared router guards and yields
+ * zero rows (an export never errors on it), so a tampered link can't reveal
+ * other data.
  */
 export async function contactRowsForExport(
   db: Db,
   teamId: string,
-  filters: { audienceId: string; search?: string; segmentId?: string; topicId?: string },
+  filters: { search?: string; segmentId?: string; topicId?: string },
 ): Promise<ContactExportRow[]> {
   const t = schema.contacts;
-  const conds: SQL[] = [eq(t.teamId, teamId), eq(t.audienceId, filters.audienceId)];
+  const conds: SQL[] = [eq(t.teamId, teamId)];
   if (filters.search) {
     const pattern = `%${escapeLike(filters.search)}%`;
     const match = or(
@@ -52,10 +50,10 @@ export async function contactRowsForExport(
   const ctx = { db, teamId };
   try {
     // Segment filter AND's the ONE core translator's predicate; the shared guard
-    // rejects a foreign or wrong-audience segment before it can widen the scope.
+    // rejects a foreign segment before it can widen the scope.
     if (filters.segmentId) {
-      const segment = await assertSegmentInAudience(ctx, filters.segmentId, filters.audienceId);
-      // undefined = empty filter (whole audience); nothing to AND in then.
+      const segment = await assertSegment(ctx, filters.segmentId);
+      // undefined = empty filter (all contacts); nothing to AND in then.
       const predicate = segmentPredicate(segment.filter);
       if (predicate) conds.push(predicate);
     }
@@ -228,14 +226,11 @@ export async function buildExport(
 ): Promise<{ filename: string; csv: string } | null> {
   switch (resource) {
     case "contacts": {
-      const audienceId = params.get("audienceId");
-      if (!audienceId) return null;
       const search = params.get("search") ?? undefined;
       // Non-uuid segment/topic params never reach the id-keyed guard query.
       const segmentId = asUuid(params.get("segmentId"));
       const topicId = asUuid(params.get("topicId"));
       const rows = await contactRowsForExport(db, teamId, {
-        audienceId,
         ...(search ? { search } : {}),
         ...(segmentId ? { segmentId } : {}),
         ...(topicId ? { topicId } : {}),

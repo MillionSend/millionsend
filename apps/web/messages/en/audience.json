@@ -5,17 +5,6 @@
     "segments": "Segments",
     "topics": "Topics"
   },
-  "switcher": {
-    "label": "Select audience"
-  },
-  "manage": {
-    "menu": "Manage audiences",
-    "create": "Create audience",
-    "rename": "Rename audience",
-    "delete": "Delete audience",
-    "renameTitle": "Rename audience",
-    "renameConfirm": "Rename"
-  },
   "filters": {
     "segment": "Segment",
     "topic": "Topic",
@@ -53,24 +42,7 @@
     "deleteConfirm": "Delete property"
   },
   "list": {
-    "title": "Audience",
-    "create": "Create audience",
-    "name": "Name",
-    "contacts": "Contacts",
-    "unsubscribed": "Unsubscribed",
-    "created": "Created",
-    "menu": "Audience actions",
-    "delete": "Delete",
-    "loadError": "Could not load audiences.",
-    "retry": "Retry",
-    "createTitle": "Create audience",
-    "nameLabel": "Name",
-    "namePlaceholder": "e.g. Newsletter",
-    "createConfirm": "Create",
-    "createError": "Could not create the audience. Try again.",
-    "deleteTitle": "Delete audience",
-    "deleteBody": "{name} and {count, plural, one {its # contact} other {its # contacts}} are removed. This cannot be undone.",
-    "deleteConfirm": "Delete audience"
+    "title": "Audience"
   },
   "contacts": {
     "stats": {
@@ -102,15 +74,13 @@
     "loadMore": "Load more",
     "pageOf": "Page 1 – {pages} of {total} contacts",
     "pageSize": "{count} rows",
-    "notFound": "Audience not found.",
-    "back": "Audience",
     "addTitle": "Add contact",
     "emailLabel": "Email",
     "emailPlaceholder": "ada@example.com",
     "firstNameLabel": "First name (optional)",
     "lastNameLabel": "Last name (optional)",
     "addConfirm": "Add contact",
-    "addExists": "Already in this audience.",
+    "addExists": "This contact already exists.",
     "addInvalid": "Enter a valid email address.",
     "importTitle": "Import CSV",
     "importBody": "First column is the email address, or use headers email, first_name, last_name.",
@@ -122,11 +92,10 @@
     "importError": "Could not import contacts.",
     "importDone": "Done",
     "deleteTitle": "Delete contact",
-    "deleteBody": "{email} is removed from this audience.",
+    "deleteBody": "{email} is removed from your contacts.",
     "deleteConfirm": "Delete contact"
   },
   "detail": {
-    "eyebrow": "Contact",
     "email": "Email",
     "created": "Created",
     "status": "Status",
@@ -179,13 +148,12 @@
     "title": "Audience",
     "create": "Create segment",
     "name": "Name",
-    "audience": "Audience",
     "count": "Contacts",
     "created": "Created",
     "menu": "Segment actions",
     "delete": "Delete",
     "empty": "No segments yet.",
-    "emptyHint": "A segment is a saved filter over an audience — aim a broadcast at just the contacts that match.",
+    "emptyHint": "A segment is a saved filter over your contacts — aim a broadcast at just the contacts that match.",
     "loadError": "Could not load segments.",
     "retry": "Retry",
     "createTitle": "Create segment",
@@ -216,10 +184,8 @@
     "builder": {
       "nameLabel": "Name",
       "namePlaceholder": "e.g. Active in São Paulo",
-      "audienceLabel": "Audience",
-      "audiencePick": "Pick an audience",
       "conditionsLabel": "Conditions",
-      "noConditions": "No conditions — matches every contact in the audience.",
+      "noConditions": "No conditions — matches every contact.",
       "addCondition": "Add condition",
       "fieldLabel": "Field",
       "opLabel": "Operator",
@@ -234,7 +200,6 @@
       "matchCount": "{count} contacts match.",
       "counting": "Counting…",
       "countError": "Could not count matches.",
-      "pickAudienceFirst": "Pick an audience to preview the count.",
       "save": "Save segment",
       "saveError": "Could not save the segment. Try again."
     }

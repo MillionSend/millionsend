@@ -11,29 +11,15 @@ import {
 } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
 
-// No unique(teamId, name): Resend allows duplicate audience names.
-export const audiences = pgTable(
-  "audiences",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    teamId: uuid("team_id")
-      .notNull()
-      .references(() => teams.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [index("audiences_team_idx").on(t.teamId)],
-);
-
+/**
+ * Team-global contacts (the Resend "new contacts experience" model): one row
+ * per email address per team. Segments (saved filters) and topics reference
+ * contacts directly — there is no audience container.
+ */
 export const contacts = pgTable(
   "contacts",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    audienceId: uuid("audience_id")
-      .notNull()
-      .references(() => audiences.id, { onDelete: "cascade" }),
-    // Denormalized from the audience so tenant-scoped scans and the API's
-    // teamId guard never need a join.
     teamId: uuid("team_id")
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
@@ -51,8 +37,8 @@ export const contacts = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // Case-insensitive uniqueness: one contact per address per audience.
-    uniqueIndex("contacts_audience_email_idx").on(t.audienceId, sql`lower(${t.email})`),
+    // Case-insensitive uniqueness: one contact per address per team.
+    uniqueIndex("contacts_team_email_idx").on(t.teamId, sql`lower(${t.email})`),
     index("contacts_team_idx").on(t.teamId),
   ],
 );
