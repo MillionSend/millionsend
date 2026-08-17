@@ -86,8 +86,10 @@ Without Docker (Node 24+, pnpm 11, local Postgres): `pnpm install`, point
 <summary><b>AWS setup</b></summary>
 
 The AWS step of `npx @millionsend/setup` creates everything MillionSend needs in
-AWS — IAM policy + user + access key, and, with an https `APP_BASE_URL`, the SNS
-event topic and SES configuration set.
+AWS — IAM policy + user + access key, the SNS event topic, and the SES
+configuration set. With an https `APP_BASE_URL` events are pushed to your host;
+otherwise setup adds an SQS queue the worker long-polls, so events work without
+any public URL.
 
 Run it anywhere Node 18+ and your AWS admin credentials live — laptop or server; the
 MillionSend server never needs admin credentials. It verifies your AWS identity,
@@ -111,19 +113,24 @@ quick-create link and a pre-filled shell script that create the same resources.
 <details>
 <summary><b>SES events (bounces, complaints, deliveries)</b></summary>
 
-The setup CLI configures this when `APP_BASE_URL` is a public https URL. Without it,
-sends work but you get no delivery events and no automatic suppression of bounced
-addresses.
+The setup CLI always configures this. A public https `APP_BASE_URL` gets an SNS
+subscription pushing to your host; any other `APP_BASE_URL` gets an SQS queue
+(`millionsend-events`) that the worker long-polls — its URL lands in `.env` as
+`SQS_QUEUE_URL`. Either way `SNS_TOPIC_ARNS` gates ingestion: events are only
+accepted from topics on that allowlist.
 
 Manual equivalent: an SNS standard topic (same region as SES) subscribed to
-`https://<your-host>/ses/events`, its ARN in `.env` as `SNS_TOPIC_ARNS`; an SES
-configuration set with an event destination pointing at the topic (event types: Send,
-Delivery, Delivery Delay, Bounce, Complaint, Open, Click, Reject, Rendering Failure),
-its name in `.env` as `SES_CONFIGURATION_SET`. Restart after setting both. Without
-`SES_CONFIGURATION_SET`, sends go out without a configuration set and emit no events.
+`https://<your-host>/ses/events` (or to an SQS queue whose policy lets the topic
+send and whose URL is in `.env` as `SQS_QUEUE_URL`), its ARN in `.env` as
+`SNS_TOPIC_ARNS`; an SES configuration set with an event destination pointing at
+the topic (event types: Send, Delivery, Delivery Delay, Bounce, Complaint, Open,
+Click, Reject, Rendering Failure), its name in `.env` as `SES_CONFIGURATION_SET`.
+Restart after setting them. Without `SES_CONFIGURATION_SET`, sends go out without
+a configuration set and emit no events.
 
-The SNS subscription confirms itself once the app runs with `SNS_TOPIC_ARNS` set; if
-it stays pending, use "Request confirmation" on it in the SNS console.
+The https SNS subscription confirms itself once the app runs with
+`SNS_TOPIC_ARNS` set; if it stays pending, use "Request confirmation" on it in
+the SNS console. Same-account SQS subscriptions need no confirmation.
 
 </details>
 

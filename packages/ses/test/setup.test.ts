@@ -20,6 +20,13 @@ import {
   SetTopicAttributesCommand,
   SubscribeCommand,
 } from "@aws-sdk/client-sns";
+import {
+  CreateQueueCommand,
+  DeleteQueueCommand,
+  GetQueueAttributesCommand,
+  GetQueueUrlCommand,
+  SetQueueAttributesCommand,
+} from "@aws-sdk/client-sqs";
 import { describe, expect, it } from "vitest";
 import {
   httpsOrigin,
@@ -54,6 +61,12 @@ function fakeClients(options: { errors?: Record<string, Error>; accessKeys?: str
     if (command instanceof CreateTopicCommand) {
       return { TopicArn: "arn:aws:sns:us-east-1:123456789012:millionsend-events" };
     }
+    if (command instanceof CreateQueueCommand || command instanceof GetQueueUrlCommand) {
+      return { QueueUrl: "https://sqs.us-east-1.amazonaws.com/123456789012/millionsend-events" };
+    }
+    if (command instanceof GetQueueAttributesCommand) {
+      return { Attributes: { QueueArn: "arn:aws:sqs:us-east-1:123456789012:millionsend-events" } };
+    }
     if (command instanceof ListAccessKeysCommand) {
       return {
         AccessKeyMetadata: (options.accessKeys ?? []).map((id) => ({ AccessKeyId: id })),
@@ -61,7 +74,7 @@ function fakeClients(options: { errors?: Record<string, Error>; accessKeys?: str
     }
     return {};
   };
-  const clients: SetupClients = { iam: { send }, sns: { send }, ses: { send } };
+  const clients: SetupClients = { iam: { send }, sns: { send }, sqs: { send }, ses: { send } };
   return { clients, calls };
 }
 
@@ -85,11 +98,11 @@ describe("httpsOrigin", () => {
 });
 
 describe("setupPlan", () => {
-  it("includes the events resources only for an https appBaseUrl", () => {
-    expect(setupPlan(input).join("\n")).toContain("SNS topic millionsend-events");
-    const withoutEvents = setupPlan({ region: "us-east-1", appBaseUrl: "http://x" }).join("\n");
-    expect(withoutEvents).not.toContain("SNS topic");
-    expect(withoutEvents).toContain("events skipped");
+  it("routes events to https or the SQS queue depending on appBaseUrl", () => {
+    expect(setupPlan(input).join("\n")).toContain("subscribed to https://mail.example.com");
+    const viaQueue = setupPlan({ region: "us-east-1", appBaseUrl: "http://x" }).join("\n");
+    expect(viaQueue).toContain("delivering to SQS queue millionsend-events");
+    expect(viaQueue).toContain("SES configuration set millionsend");
   });
 });
 
@@ -101,6 +114,7 @@ describe("runSetup", () => {
       accessKeyId: "AKIATEST",
       secretAccessKey: "secret123",
       topicArn: "arn:aws:sns:us-east-1:123456789012:millionsend-events",
+      queueUrl: null,
     });
     expect(calls.map((c) => c.constructor)).toEqual([
       CreatePolicyCommand,
@@ -121,12 +135,51 @@ describe("runSetup", () => {
     expect(attach.input.PolicyArn).toBe("arn:aws:iam::123456789012:policy/millionsend-ses");
   });
 
-  it("skips the events part without an https appBaseUrl", async () => {
+  it("creates the SQS events queue instead of an https subscription without https", async () => {
     const { clients, calls } = fakeClients();
     const result = await runSetup(clients, { ...input, appBaseUrl: null });
-    expect(result.topicArn).toBeNull();
-    expect(calls.some((c) => c instanceof CreateTopicCommand)).toBe(false);
-    expect(calls.some((c) => c instanceof CreateConfigurationSetCommand)).toBe(false);
+    expect(result.topicArn).toBe("arn:aws:sns:us-east-1:123456789012:millionsend-events");
+    expect(result.queueUrl).toBe(
+      "https://sqs.us-east-1.amazonaws.com/123456789012/millionsend-events",
+    );
+    expect(calls.map((c) => c.constructor)).toEqual([
+      CreatePolicyCommand,
+      CreateUserCommand,
+      AttachUserPolicyCommand,
+      CreateAccessKeyCommand,
+      CreateTopicCommand,
+      SetTopicAttributesCommand,
+      CreateQueueCommand,
+      GetQueueAttributesCommand,
+      SetQueueAttributesCommand,
+      SubscribeCommand,
+      CreateConfigurationSetCommand,
+      CreateConfigurationSetEventDestinationCommand,
+    ]);
+    const subscribe = calls.find((c) => c instanceof SubscribeCommand) as SubscribeCommand;
+    expect(subscribe.input.Protocol).toBe("sqs");
+    expect(subscribe.input.Endpoint).toBe("arn:aws:sqs:us-east-1:123456789012:millionsend-events");
+    const policy = calls.find(
+      (c) => c instanceof SetQueueAttributesCommand,
+    ) as SetQueueAttributesCommand;
+    const doc = JSON.parse(policy.input.Attributes?.Policy ?? "{}") as {
+      Statement: Array<{ Principal: Record<string, string> }>;
+    };
+    expect(doc.Statement[0]?.Principal).toEqual({ Service: "sns.amazonaws.com" });
+    expect(doc.Statement[1]?.Principal).toEqual({
+      AWS: "arn:aws:iam::123456789012:user/millionsend",
+    });
+  });
+
+  it("adopts an existing queue when CreateQueue reports a name conflict", async () => {
+    const { clients, calls } = fakeClients({
+      errors: { CreateQueueCommand: namedError("QueueNameExists") },
+    });
+    const result = await runSetup(clients, { ...input, appBaseUrl: null });
+    expect(result.queueUrl).toBe(
+      "https://sqs.us-east-1.amazonaws.com/123456789012/millionsend-events",
+    );
+    expect(calls.some((c) => c instanceof GetQueueUrlCommand)).toBe(true);
   });
 
   it("tolerates already-existing resources on a rerun", async () => {
@@ -164,6 +217,8 @@ describe("runTeardown", () => {
     expect(calls.map((c) => c.constructor)).toEqual([
       DeleteConfigurationSetCommand,
       DeleteTopicCommand,
+      GetQueueUrlCommand,
+      DeleteQueueCommand,
       ListAccessKeysCommand,
       DeleteAccessKeyCommand,
       DeleteAccessKeyCommand,
@@ -179,6 +234,7 @@ describe("runTeardown", () => {
     const { clients, calls } = fakeClients({
       errors: {
         DeleteConfigurationSetCommand: namedError("NotFoundException"),
+        GetQueueUrlCommand: namedError("QueueDoesNotExist"),
         ListAccessKeysCommand: namedError("NoSuchEntityException"),
         DetachUserPolicyCommand: namedError("NoSuchEntityException"),
         DeleteUserCommand: namedError("NoSuchEntityException"),
@@ -193,7 +249,7 @@ describe("runTeardown", () => {
 
 describe("setupEnvEntries / upsertEnv", () => {
   it("emits event keys only when a topic was created", () => {
-    const base = { accessKeyId: "id", secretAccessKey: "secret", topicArn: null };
+    const base = { accessKeyId: "id", secretAccessKey: "secret", topicArn: null, queueUrl: null };
     expect(Object.keys(setupEnvEntries("us-east-1", base))).toEqual([
       "AWS_REGION",
       "AWS_ACCESS_KEY_ID",
@@ -203,6 +259,9 @@ describe("setupEnvEntries / upsertEnv", () => {
       SNS_TOPIC_ARNS: "arn:x",
       SES_CONFIGURATION_SET: "millionsend",
     });
+    expect(
+      setupEnvEntries("us-east-1", { ...base, topicArn: "arn:x", queueUrl: "https://sqs/q" }),
+    ).toMatchObject({ SQS_QUEUE_URL: "https://sqs/q" });
   });
 
   it("replaces existing lines and appends missing ones", () => {

@@ -51,7 +51,7 @@
     "apiKey": "API key",
     "events": "Email events",
     "noEvents": "0 events.",
-    "eventsUnreachable": "No further events will arrive — delivery events need a public https APP_BASE_URL. Re-run setup to enable them.",
+    "eventsUnreachable": "No further events will arrive — event ingestion isn't configured. Re-run setup to create the events queue (no public URL needed).",
     "event": {
       "rendering_failure": "Rendering failure"
     },

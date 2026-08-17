@@ -218,13 +218,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     };
 
     // One APP_BASE_URL prompt feeds both the .env write and the SES events
-    // decision in the AWS step (events need an https URL, as ever).
+    // route in the AWS step: https gets a push subscription, anything else
+    // gets an SQS queue the worker polls.
     const defaultBase =
       envValue(env, "APP_BASE_URL") || process.env.APP_BASE_URL || "http://localhost:3000";
     const appBaseUrl =
       (
         await rl.question(
-          `APP_BASE_URL — the URL the dashboard is opened at (an https URL enables SES event ingestion) [${defaultBase}]: `,
+          `APP_BASE_URL — the URL the dashboard is opened at (events are pushed to https URLs; others poll an SQS queue) [${defaultBase}]: `,
         )
       ).trim() || defaultBase;
     if (env !== null && appBaseUrl !== envValue(env, "APP_BASE_URL")) {
