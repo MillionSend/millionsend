@@ -155,6 +155,13 @@
       "when": 1786933793448,
       "tag": "0021_tan_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786934267867,
+      "tag": "0022_purple_tarantula",
+      "breakpoints": true
     }
   ]
 }

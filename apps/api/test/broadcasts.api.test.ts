@@ -13,7 +13,6 @@ let app: ReturnType<typeof createApi>;
 let tokenA: string;
 let tokenB: string;
 let teamA: string;
-let audienceId: string;
 
 const json = async (res: Response) =>
   (await res.json()) as { id: string; data?: unknown[] } & Record<string, unknown>;
@@ -30,15 +29,14 @@ async function call(token: string, method: string, path: string, body?: unknown)
 }
 
 const draftBody = () => ({
-  audience_id: audienceId,
   from: "Acme <hi@acme.dev>",
   subject: "hello",
   html: "<p>hi</p>",
 });
 
-// A fresh team with its own key, verified domain, audience, and one draft
-// broadcast — isolated so seeding its usage_counters can't affect the shared
-// team-A happy-path tests.
+// A fresh team with its own key, verified domain, and one draft broadcast —
+// isolated so seeding its usage_counters can't affect the shared team-A
+// happy-path tests.
 async function makeSendableTeam(slug: string) {
   const teamId = await createTeam(db, slug);
   const key = generateApiKey("live");
@@ -56,20 +54,9 @@ async function makeSendableTeam(slug: string) {
     status: "verified",
     verifiedAt: new Date(),
   });
-  const [aud] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "news" })
-    .returning({ id: schema.audiences.id });
-  if (!aud) throw new Error("audience insert failed");
   const [bc] = await db
     .insert(schema.broadcasts)
-    .values({
-      teamId,
-      audienceId: aud.id,
-      from: "Acme <hi@acme.dev>",
-      subject: "s",
-      html: "<p>hi</p>",
-    })
+    .values({ teamId, from: "Acme <hi@acme.dev>", subject: "s", html: "<p>hi</p>" })
     .returning({ id: schema.broadcasts.id });
   if (!bc) throw new Error("broadcast insert failed");
   return { teamId, token: key.token, broadcastId: bc.id };
@@ -100,12 +87,6 @@ beforeAll(async () => {
     status: "verified",
     verifiedAt: new Date(),
   });
-  const [audience] = await db
-    .insert(schema.audiences)
-    .values({ teamId: teamA, name: "news" })
-    .returning({ id: schema.audiences.id });
-  if (!audience) throw new Error("audience insert failed");
-  audienceId = audience.id;
   app = createApi({
     db,
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
@@ -135,11 +116,18 @@ describe("broadcasts API", () => {
     expect(broadcastId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it("422s a create without html or text, or without an audience", async () => {
+  it("422s a create without html or text", async () => {
     const { html: _html, ...noBody } = draftBody();
     expect((await call(tokenA, "POST", "/broadcasts", noBody)).status).toBe(422);
-    const { audience_id: _aud, ...noAudience } = draftBody();
-    expect((await call(tokenA, "POST", "/broadcasts", noAudience)).status).toBe(422);
+  });
+
+  it("422s a create with an unknown segment_id", async () => {
+    const res = await call(tokenA, "POST", "/broadcasts", {
+      ...draftBody(),
+      segment_id: crypto.randomUUID(),
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ name: "validation_error" });
   });
 
   it("rejects unsupported Resend knobs loudly instead of stripping them", async () => {
@@ -201,7 +189,6 @@ describe("broadcasts API", () => {
       .insert(schema.broadcasts)
       .values({
         teamId: teamA,
-        audienceId,
         from: "Acme <evil@evil.test> <ok@acme.dev>",
         subject: "s",
         html: "<p>hi</p>",
@@ -249,10 +236,6 @@ describe("broadcasts API", () => {
     const list = await call(tokenB, "GET", "/broadcasts");
     expect((await json(list)).data).toEqual([]);
 
-    // Team B cannot even create against team A's audience.
-    const create = await call(tokenB, "POST", "/broadcasts", draftBody());
-    expect(create.status).toBe(404);
-
     for (const [method, path, body] of [
       ["GET", `/broadcasts/${broadcastId}`, undefined],
       ["PATCH", `/broadcasts/${broadcastId}`, { subject: "stolen" }],
@@ -269,15 +252,19 @@ describe("broadcasts API", () => {
     expect(await still.json()).toMatchObject({ status: "draft", subject: "hello" });
   });
 
-  it("draft update cannot move the broadcast to a foreign audience", async () => {
+  it("draft update cannot move the broadcast to a foreign segment", async () => {
     const [foreign] = await db
-      .insert(schema.audiences)
-      .values({ teamId: await createTeam(db, "bc-team-c"), name: "foreign" })
-      .returning({ id: schema.audiences.id });
+      .insert(schema.segments)
+      .values({
+        teamId: await createTeam(db, "bc-team-c"),
+        name: "foreign",
+        filter: { match: "any", conditions: [] },
+      })
+      .returning({ id: schema.segments.id });
     const res = await call(tokenA, "PATCH", `/broadcasts/${broadcastId}`, {
-      audience_id: foreign?.id,
+      segment_id: foreign?.id,
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(422);
   });
 
   it("send → queued on the wire; update and delete then 400; cancel → canceled", async () => {
@@ -366,7 +353,6 @@ describe("domain-scoped keys cannot cross domains on broadcasts", () => {
   let scopedToken: string;
   let fullToken: string;
   let scopeTeam: string;
-  let audId: string;
   let enq: string[];
   let scopedApp: ReturnType<typeof createApi>;
   const fromOther = "Other <hi@other-scope.dev>";
@@ -381,22 +367,17 @@ describe("domain-scoped keys cannot cross domains on broadcasts", () => {
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
 
-  const draft = (from: string) => ({ audience_id: audId, from, subject: "hi", html: "<p>hi</p>" });
+  const draft = (from: string) => ({ from, subject: "hi", html: "<p>hi</p>" });
 
   beforeAll(async () => {
     const team = await makeSendableTeam("bc-scope");
     scopeTeam = team.teamId;
     fullToken = team.token;
-    const [aud] = await db
-      .select({ id: schema.audiences.id })
-      .from(schema.audiences)
-      .where(eq(schema.audiences.teamId, scopeTeam));
     const [acme] = await db
       .select({ id: schema.domains.id })
       .from(schema.domains)
       .where(eq(schema.domains.teamId, scopeTeam));
-    if (!aud || !acme) throw new Error("seed missing");
-    audId = aud.id;
+    if (!acme) throw new Error("seed missing");
     await db.insert(schema.domains).values({
       teamId: scopeTeam,
       name: "other-scope.dev",
@@ -445,13 +426,7 @@ describe("domain-scoped keys cannot cross domains on broadcasts", () => {
   it("403s a scoped key sending from another domain, leaving it unsent", async () => {
     const [bc] = await db
       .insert(schema.broadcasts)
-      .values({
-        teamId: scopeTeam,
-        audienceId: audId,
-        from: fromOther,
-        subject: "s",
-        html: "<p>hi</p>",
-      })
+      .values({ teamId: scopeTeam, from: fromOther, subject: "s", html: "<p>hi</p>" })
       .returning({ id: schema.broadcasts.id });
     if (!bc) throw new Error("insert failed");
     const res = await req(scopedToken, "POST", `/broadcasts/${bc.id}/send`, {});
@@ -468,13 +443,7 @@ describe("domain-scoped keys cannot cross domains on broadcasts", () => {
   it("lets the scoped key send from its own domain", async () => {
     const [bc] = await db
       .insert(schema.broadcasts)
-      .values({
-        teamId: scopeTeam,
-        audienceId: audId,
-        from: "Acme <hi@acme.dev>",
-        subject: "s",
-        html: "<p>hi</p>",
-      })
+      .values({ teamId: scopeTeam, from: "Acme <hi@acme.dev>", subject: "s", html: "<p>hi</p>" })
       .returning({ id: schema.broadcasts.id });
     if (!bc) throw new Error("insert failed");
     const res = await req(scopedToken, "POST", `/broadcasts/${bc.id}/send`, {});

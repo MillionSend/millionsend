@@ -4,9 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { AudienceSelect } from "@/components/audience-select";
-import { CreateAudienceModal } from "@/components/create-audience-modal";
+import { useCallback, useDeferredValue, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { GrowthSparkline } from "@/components/growth-sparkline";
@@ -21,7 +19,6 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
-import { writeLastAudience } from "@/lib/last-audience";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, SearchBox, StateCard } from "../emails/list-parts";
 import { AudienceTabs } from "./audience-tabs";
@@ -159,12 +156,8 @@ function AddContactsSplit({ onManual, onCsv }: { onManual: () => void; onCsv: ()
   );
 }
 
-/**
- * The Contacts surface for one audience, shared by /audience (default audience)
- * and /audience/[id]. Parents key it by audienceId so switching audiences
- * remounts with a clean search/filter/paging state.
- */
-export function AudienceContactsView({ audienceId }: { audienceId: string }) {
+/** The team's Contacts surface, rendered at /audience. */
+export function AudienceContactsView() {
   const t = useTranslations("audience");
   const common = useTranslations("common");
   const locale = useLocale();
@@ -194,49 +187,33 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; email: string } | null>(null);
 
-  // Audience management modals.
-  const [createOpen, setCreateOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [renameName, setRenameName] = useState("");
-  const [deleteAudOpen, setDeleteAudOpen] = useState(false);
-
-  const team = useQuery(trpc.team.list.queryOptions());
-  const activeTeamId = team.data?.activeTeamId ?? null;
-  const audiences = useQuery(trpc.audience.audiences.list.queryOptions());
   const segments = useQuery(trpc.segments.list.queryOptions());
-  const growth = useQuery(trpc.audience.audiences.growth.queryOptions({ audienceId }));
+  const stats = useQuery(trpc.audience.contacts.stats.queryOptions());
+  const growth = useQuery(trpc.audience.contacts.growth.queryOptions());
   const topics = useQuery(trpc.topics.list.queryOptions());
-
-  const current = audiences.data?.find((a) => a.id === audienceId) ?? null;
-  const audienceSegments = (segments.data ?? []).filter((s) => s.audienceId === audienceId);
-
-  // Persist so returning to /audience lands on the audience last viewed.
-  useEffect(() => {
-    if (activeTeamId && current) writeLastAudience(activeTeamId, audienceId);
-  }, [activeTeamId, audienceId, current]);
 
   const query = useInfiniteQuery(
     trpc.audience.contacts.list.infiniteQueryOptions(
       {
-        audienceId,
         limit,
         ...(deferredSearch ? { search: deferredSearch } : {}),
         ...(segmentId ? { segmentId } : {}),
         ...(topicId ? { topicId } : {}),
       },
-      { getNextPageParam: (page) => page.nextCursor, enabled: current !== null },
+      { getNextPageParam: (page) => page.nextCursor },
     ),
   );
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
   const filtered = deferredSearch !== "" || segmentId !== "" || topicId !== "";
 
-  // Export mirrors the on-screen view: audience + search box + the active
-  // segment and topic filters, so a filtered download matches the table.
-  const exportParams = new URLSearchParams({ audienceId });
+  // Export mirrors the on-screen view: the search box plus the active segment
+  // and topic filters, so a filtered download matches the table.
+  const exportParams = new URLSearchParams();
   if (deferredSearch) exportParams.set("search", deferredSearch);
   if (segmentId) exportParams.set("segmentId", segmentId);
   if (topicId) exportParams.set("topicId", topicId);
+  const exportQs = exportParams.toString();
 
   const invalidate = () => queryClient.invalidateQueries(trpc.audience.pathFilter());
 
@@ -264,30 +241,9 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
     }),
   );
 
-  const renameAudience = useMutation(
-    trpc.audience.audiences.rename.mutationOptions({
-      onSuccess: () => {
-        setRenameOpen(false);
-        invalidate();
-      },
-    }),
-  );
-  const deleteAudience = useMutation(
-    trpc.audience.audiences.delete.mutationOptions({
-      onSuccess: () => {
-        setDeleteAudOpen(false);
-        invalidate();
-        router.push("/audience");
-      },
-    }),
-  );
-
   // Stable identities: Modal's focus effect depends on onClose.
   const closeAdd = useCallback(() => setAddOpen(false), []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
-  const closeCreate = useCallback(() => setCreateOpen(false), []);
-  const closeRename = useCallback(() => setRenameOpen(false), []);
-  const closeDeleteAud = useCallback(() => setDeleteAudOpen(false), []);
   const closeImport = useCallback(() => {
     setImportOpen(false);
     setImportRows(null);
@@ -304,7 +260,6 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
       let skipped = 0;
       for (let i = 0; i < importRows.length; i += IMPORT_BATCH) {
         const res = await addManyMutation.mutateAsync({
-          audienceId,
           rows: importRows.slice(i, i + IMPORT_BATCH),
         });
         created += res.created;
@@ -319,72 +274,18 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
     }
   }
 
-  // The audience exists nowhere in the team (bad id, or deleted) — mirror the
-  // old per-audience not-found rather than render an empty shell.
-  if (audiences.isSuccess && !current) {
-    return (
-      <>
-        <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-          {t("contacts.notFound")}
-        </p>
-        <Link href="/audience" style={{ fontSize: "var(--ms-fs-ui)" }}>
-          ← {t("contacts.back")}
-        </Link>
-      </>
-    );
-  }
-
   return (
     <>
       <PageHeader
         title={t("list.title")}
         actions={
           <>
-            <ExportCsvLink href={`/export/contacts?${exportParams.toString()}`} />
+            <ExportCsvLink href={`/export/contacts${exportQs ? `?${exportQs}` : ""}`} />
             <AddContactsSplit onManual={() => setAddOpen(true)} onCsv={() => setImportOpen(true)} />
           </>
         }
       />
       <AudienceTabs />
-
-      {(audiences.data?.length ?? 0) > 1 ? (
-        <div
-          className="ms-filter-row"
-          style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
-        >
-          <AudienceSelect
-            value={audienceId}
-            onChange={(id) => {
-              if (id === audienceId) return;
-              if (activeTeamId) writeLastAudience(activeTeamId, id);
-              router.push(`/audience/${id}`);
-            }}
-            ariaLabel={t("switcher.label")}
-            width={220}
-            options={(audiences.data ?? []).map((a) => ({
-              value: a.id,
-              label: a.name,
-              hint: nf.format(a.contacts),
-            }))}
-          />
-          <PopoverMenu
-            boxed
-            ariaLabel={t("manage.menu")}
-            items={[
-              { label: t("manage.create"), onSelect: () => setCreateOpen(true) },
-              {
-                label: t("manage.rename"),
-                onSelect: () => {
-                  setRenameName(current?.name ?? "");
-                  setRenameOpen(true);
-                },
-              },
-              null,
-              { label: t("manage.delete"), danger: true, onSelect: () => setDeleteAudOpen(true) },
-            ]}
-          />
-        </div>
-      ) : null}
 
       <div
         className="ms-meta-grid"
@@ -400,15 +301,15 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
       >
         <StatBlock
           label={t("contacts.stats.all")}
-          value={current ? nf.format(current.contacts) : null}
+          value={stats.data ? nf.format(stats.data.contacts) : null}
         />
         <StatBlock
           label={t("contacts.stats.subscribers")}
-          value={current ? nf.format(current.contacts - current.unsubscribed) : null}
+          value={stats.data ? nf.format(stats.data.contacts - stats.data.unsubscribed) : null}
         />
         <StatBlock
           label={t("contacts.stats.unsubscribed")}
-          value={current ? nf.format(current.unsubscribed) : null}
+          value={stats.data ? nf.format(stats.data.unsubscribed) : null}
         />
         <div>
           <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
@@ -433,7 +334,7 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
           onChange={setSearch}
           placeholder={t("contacts.searchPlaceholder")}
         />
-        {audienceSegments.length > 0 ? (
+        {(segments.data ?? []).length > 0 ? (
           <Select
             value={segmentId}
             onChange={setSegmentId}
@@ -441,7 +342,7 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
             width={180}
             options={[
               { value: "", label: t("filters.allContacts") },
-              ...audienceSegments.map((s) => ({ value: s.id, label: s.name })),
+              ...(segments.data ?? []).map((s) => ({ value: s.id, label: s.name })),
             ]}
           />
         ) : null}
@@ -459,7 +360,7 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
         ) : null}
       </div>
 
-      {query.isPending || audiences.isPending ? (
+      {query.isPending ? (
         <ContactsSkeleton />
       ) : query.isError ? (
         <StateCard
@@ -492,7 +393,7 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
             <tbody>
               {items.map((row) => {
                 const name = [row.firstName, row.lastName].filter(Boolean).join(" ");
-                const detailHref = `/audience/${audienceId}/contacts/${row.id}`;
+                const detailHref = `/audience/contacts/${row.id}`;
                 return (
                   <tr key={row.id} className="hoverable" onClick={() => router.push(detailHref)}>
                     <td className="ms-mono" style={{ fontSize: 13 }}>
@@ -577,7 +478,6 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
             event.preventDefault();
             if (addMutation.isPending || newEmail.trim().length === 0) return;
             addMutation.mutate({
-              audienceId,
               email: newEmail.trim(),
               ...(newFirst.trim() ? { firstName: newFirst.trim() } : {}),
               ...(newLast.trim() ? { lastName: newLast.trim() } : {}),
@@ -753,93 +653,6 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
             >
               <BtnSpinner on={deleteMutation.isPending} />
               {t("contacts.deleteConfirm")} <span className="ms-keycap">↵</span>
-            </button>
-          </ModalFooter>
-        </form>
-      </Modal>
-
-      <CreateAudienceModal
-        open={createOpen}
-        onClose={closeCreate}
-        onCreated={(id) => {
-          setCreateOpen(false);
-          invalidate();
-          if (activeTeamId) writeLastAudience(activeTeamId, id);
-          router.push(`/audience/${id}`);
-        }}
-      />
-
-      <Modal open={renameOpen} onClose={closeRename} title={t("manage.renameTitle")}>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (renameAudience.isPending || renameName.trim().length === 0) return;
-            renameAudience.mutate({ id: audienceId, name: renameName.trim() });
-          }}
-        >
-          <div className="ms-field">
-            <label htmlFor="audience-rename">{t("list.nameLabel")}</label>
-            <input
-              id="audience-rename"
-              className={`ms-input${renameAudience.isError ? " error" : ""}`}
-              style={{ width: "100%" }}
-              placeholder={t("list.namePlaceholder")}
-              disabled={renameAudience.isPending}
-              value={renameName}
-              onChange={(event) => setRenameName(event.target.value)}
-            />
-          </div>
-          {renameAudience.isError ? (
-            <p
-              style={{
-                margin: "8px 0 0",
-                color: "var(--ms-danger)",
-                fontSize: "var(--ms-fs-label)",
-              }}
-            >
-              {t("list.createError")}
-            </p>
-          ) : null}
-          <ModalFooter>
-            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeRename}>
-              {common("cancel")} <span className="ms-keycap">Esc</span>
-            </button>
-            <button
-              type="submit"
-              className="ms-btn ms-btn-primary"
-              disabled={renameAudience.isPending || renameName.trim().length === 0}
-            >
-              <BtnSpinner on={renameAudience.isPending} />
-              {t("manage.renameConfirm")} <span className="ms-keycap">↵</span>
-            </button>
-          </ModalFooter>
-        </form>
-      </Modal>
-
-      <Modal open={deleteAudOpen} onClose={closeDeleteAud} title={t("list.deleteTitle")}>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!deleteAudience.isPending) deleteAudience.mutate({ id: audienceId });
-          }}
-        >
-          <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-            {t("list.deleteBody", {
-              name: current?.name ?? "—",
-              count: current?.contacts ?? 0,
-            })}
-          </p>
-          <ModalFooter>
-            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDeleteAud}>
-              {common("cancel")} <span className="ms-keycap">Esc</span>
-            </button>
-            <button
-              type="submit"
-              className="ms-btn ms-btn-destructive"
-              disabled={deleteAudience.isPending}
-            >
-              <BtnSpinner on={deleteAudience.isPending} />
-              {t("list.deleteConfirm")} <span className="ms-keycap">↵</span>
             </button>
           </ModalFooter>
         </form>

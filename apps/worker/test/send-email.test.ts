@@ -123,14 +123,9 @@ it("sends a queued email: MIME, join key, status, event row", async () => {
 });
 
 it("a broadcast send carries the RFC bulk-mail headers", async () => {
-  const [audience] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "bulk-news" })
-    .returning({ id: schema.audiences.id });
-  if (!audience) throw new Error("audience insert failed");
   const [broadcast] = await db
     .insert(schema.broadcasts)
-    .values({ teamId, audienceId: audience.id, from: "Acme <a@acme.dev>", subject: "hi" })
+    .values({ teamId, from: "Acme <a@acme.dev>", subject: "hi" })
     .returning({ id: schema.broadcasts.id });
   if (!broadcast) throw new Error("broadcast insert failed");
 

@@ -24,9 +24,9 @@ the [Discussions](https://github.com/orgs/MillionSend/discussions) to follow alo
 | Metrics | ✅ | Daily sends with bounce and complaint rates tracked against SES thresholds. |
 | Webhooks (Standard Webhooks) | ✅ | Signed event deliveries with per-endpoint event selection and a delivery log. |
 | Domains + BYODKIM | ✅ | Guided DNS verification; bring your own DKIM key or let SES manage it. |
-| Audiences & Contacts | ✅ | Contact lists with subscribe state and CSV import. |
+| Contacts | ✅ | Team-wide contacts with subscribe state, segments, topics, and CSV import. |
 | One-click unsubscribe (RFC 8058) | ✅ | `List-Unsubscribe` headers plus a hosted unsubscribe page. |
-| Broadcasts | ✅ | Compose, schedule, and send to an audience; cancel while scheduled. |
+| Broadcasts | ✅ | Compose, schedule, and send to all contacts, a segment, or a topic; cancel while scheduled. |
 | Templates + merge fields | ✅ | Reusable templates with per-contact merge fields. |
 | API request logs | ✅ | Every API request recorded with request/response bodies, secrets redacted. |
 | SMTP relay | ✅ | Drop-in SMTP on port 2587; authenticate with an API key. |

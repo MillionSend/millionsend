@@ -65,9 +65,8 @@ const SAMPLE_DOC = {
 
 async function seedDraft(teamId: string) {
   const caller = callerFor(teamId);
-  const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
-  const { id } = await caller.broadcasts.create({ audienceId, ...DRAFT_INPUT });
-  return { caller, audienceId, id };
+  const { id } = await caller.broadcasts.create(DRAFT_INPUT);
+  return { caller, id };
 }
 
 async function broadcastRow(id: string) {
@@ -76,19 +75,20 @@ async function broadcastRow(id: string) {
 }
 
 describe("broadcasts.create / get / list", () => {
-  it("creates a draft and lists it with audience name and zero recipients", async () => {
+  it("creates a draft and lists it with zero recipients and no segment", async () => {
     const teamId = await createTeam(db, "team-a");
-    const { caller, audienceId, id } = await seedDraft(teamId);
+    const { caller, id } = await seedDraft(teamId);
 
     const got = await caller.broadcasts.get({ id });
     expect(got).toMatchObject({
       id,
-      audienceId,
-      audienceName: "Newsletter",
       status: "draft",
       from: DRAFT_INPUT.from,
       subject: DRAFT_INPUT.subject,
       html: DRAFT_INPUT.html,
+      segmentId: null,
+      segmentName: null,
+      topicName: null,
       stats: { total: 0, delivered: 0, bounced: 0, complained: 0 },
     });
 
@@ -96,7 +96,7 @@ describe("broadcasts.create / get / list", () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       id,
-      audienceName: "Newsletter",
+      segmentName: null,
       status: "draft",
       recipients: 0,
     });
@@ -105,7 +105,6 @@ describe("broadcasts.create / get / list", () => {
   it("rejects a multi-mailbox or malformed from on create and update", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
     const spoofed = [
       "Acme <evil@other.test> <ok@mine.test>",
       "a@mine.test, b@other.test",
@@ -113,13 +112,11 @@ describe("broadcasts.create / get / list", () => {
       "Ada <ada@example.com",
     ];
     for (const from of spoofed) {
-      await expect(
-        caller.broadcasts.create({ audienceId, ...DRAFT_INPUT, from }),
-      ).rejects.toMatchObject({
+      await expect(caller.broadcasts.create({ ...DRAFT_INPUT, from })).rejects.toMatchObject({
         code: "BAD_REQUEST",
       });
     }
-    const { id } = await caller.broadcasts.create({ audienceId, ...DRAFT_INPUT });
+    const { id } = await caller.broadcasts.create(DRAFT_INPUT);
     for (const from of spoofed) {
       await expect(caller.broadcasts.update({ id, from })).rejects.toMatchObject({
         code: "BAD_REQUEST",
@@ -131,9 +128,8 @@ describe("broadcasts.create / get / list", () => {
   it("pages by keyset cursor without duplicates", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
     for (let i = 0; i < 3; i++) {
-      await caller.broadcasts.create({ audienceId, ...DRAFT_INPUT, subject: `s${i}` });
+      await caller.broadcasts.create({ ...DRAFT_INPUT, subject: `s${i}` });
     }
 
     const page1 = await caller.broadcasts.list({ limit: 2 });
@@ -152,9 +148,7 @@ describe("broadcasts.document", () => {
   it("round-trips a Maily document, rendering send html from it, then clears it", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
     const { id } = await caller.broadcasts.create({
-      audienceId,
       ...DRAFT_INPUT,
       document: SAMPLE_DOC,
     });
@@ -178,10 +172,8 @@ describe("broadcasts.document", () => {
   it("rejects a malformed document via the zod guard", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
     await expect(
       caller.broadcasts.create({
-        audienceId,
         ...DRAFT_INPUT,
         // biome-ignore lint/suspicious/noExplicitAny: deliberately wrong shape
         document: { version: 1, blocks: [{ type: "nope" }] } as any,
@@ -194,7 +186,8 @@ describe("tenant isolation", () => {
   it("blocks every cross-team read and write", async () => {
     const teamA = await createTeam(db, "team-a");
     const teamB = await createTeam(db, "team-b");
-    const { audienceId, id } = await seedDraft(teamA);
+    const { caller: a, id } = await seedDraft(teamA);
+    await a.audience.contacts.add({ email: "a@example.com" });
 
     const b = callerFor(teamB);
     await expect(b.broadcasts.get({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });
@@ -204,12 +197,8 @@ describe("tenant isolation", () => {
     await expect(b.broadcasts.delete({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(b.broadcasts.send({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });
     await expect(b.broadcasts.cancel({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });
-    await expect(b.broadcasts.recipientCount({ audienceId })).rejects.toMatchObject({
-      code: "NOT_FOUND",
-    });
-    await expect(b.broadcasts.create({ audienceId, ...DRAFT_INPUT })).rejects.toMatchObject({
-      code: "NOT_FOUND",
-    });
+    // recipientCount is team-scoped: A's contact never counts for B.
+    expect(await b.broadcasts.recipientCount({})).toEqual({ count: 0 });
     // list is scoped, not errored; the broadcast survives all of it.
     expect((await b.broadcasts.list({})).items).toEqual([]);
     expect((await broadcastRow(id))?.subject).toBe(DRAFT_INPUT.subject);
@@ -291,16 +280,6 @@ describe("broadcasts.send", () => {
       message: expect.stringContaining("APP_BASE_URL"),
     });
     expect((await broadcastRow(id))?.status).toBe("draft");
-  });
-
-  it("blocks sending after the audience was deleted (audienceId nulled)", async () => {
-    const teamId = await createTeam(db, "team-a");
-    const { caller, audienceId, id } = await seedDraft(teamId);
-    await caller.audience.audiences.delete({ id: audienceId });
-    expect((await broadcastRow(id))?.audienceId).toBeNull();
-    await expect(caller.broadcasts.send({ id })).rejects.toMatchObject({
-      code: "PRECONDITION_FAILED",
-    });
   });
 
   it("hands the broadcast to the fan-out queue with scheduledAt as startAfter", async () => {
@@ -404,42 +383,37 @@ describe("broadcasts.recipientCount", () => {
   it("counts only subscribed contacts", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
-    await caller.audience.contacts.add({ audienceId, email: "a@example.com" });
-    await caller.audience.contacts.add({ audienceId, email: "b@example.com" });
-    const { id: unsubbed } = await caller.audience.contacts.add({
-      audienceId,
-      email: "c@example.com",
-    });
+    await caller.audience.contacts.add({ email: "a@example.com" });
+    await caller.audience.contacts.add({ email: "b@example.com" });
+    const { id: unsubbed } = await caller.audience.contacts.add({ email: "c@example.com" });
     await caller.audience.contacts.update({ id: unsubbed, unsubscribed: true });
 
-    expect(await caller.broadcasts.recipientCount({ audienceId })).toEqual({ count: 2 });
+    expect(await caller.broadcasts.recipientCount({})).toEqual({ count: 2 });
   });
 
   it("scopes the count to a topic's subscribers per the subscription rule", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
-    const { id: a } = await caller.audience.contacts.add({ audienceId, email: "a@example.com" });
-    const { id: b } = await caller.audience.contacts.add({ audienceId, email: "b@example.com" });
-    const { id: c } = await caller.audience.contacts.add({ audienceId, email: "c@example.com" });
+    const { id: a } = await caller.audience.contacts.add({ email: "a@example.com" });
+    const { id: b } = await caller.audience.contacts.add({ email: "b@example.com" });
+    const { id: c } = await caller.audience.contacts.add({ email: "c@example.com" });
     // Globally unsubscribed: excluded from every topic regardless of overrides.
     await caller.audience.contacts.update({ id: c, unsubscribed: true });
 
     // Opt-in topic: b opts out, c is global-unsub → only a remains.
     const optIn = await caller.topics.create({ name: "In", defaultSubscribed: true });
     await caller.audience.contacts.setTopic({ contactId: b, topicId: optIn.id, subscribed: false });
-    expect(await caller.broadcasts.recipientCount({ audienceId, topicId: optIn.id })).toEqual({
+    expect(await caller.broadcasts.recipientCount({ topicId: optIn.id })).toEqual({
       count: 1,
     });
 
     // Opt-out topic: nobody counts until they explicitly opt in (a does).
     const optOut = await caller.topics.create({ name: "Out", defaultSubscribed: false });
-    expect(await caller.broadcasts.recipientCount({ audienceId, topicId: optOut.id })).toEqual({
+    expect(await caller.broadcasts.recipientCount({ topicId: optOut.id })).toEqual({
       count: 0,
     });
     await caller.audience.contacts.setTopic({ contactId: a, topicId: optOut.id, subscribed: true });
-    expect(await caller.broadcasts.recipientCount({ audienceId, topicId: optOut.id })).toEqual({
+    expect(await caller.broadcasts.recipientCount({ topicId: optOut.id })).toEqual({
       count: 1,
     });
   });

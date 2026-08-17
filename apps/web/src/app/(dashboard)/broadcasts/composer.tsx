@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AudienceSelect } from "@/components/audience-select";
 import { DraftBanner } from "@/components/draft-banner";
 import { FromField } from "@/components/from-field";
 import { Modal } from "@/components/modal";
@@ -25,7 +24,6 @@ import { ContentPreview } from "./parts";
 
 /** Everything a crash would lose — mirrored into the local draft. */
 interface ComposerDraft {
-  audienceId: string;
   topicId: string;
   segmentId: string;
   name: string;
@@ -46,7 +44,6 @@ const MailyEditor = dynamic(() => import("@/components/maily-editor").then((m) =
 
 export interface ComposerInitial {
   id: string;
-  audienceId: string | null;
   topicId: string | null;
   segmentId: string | null;
   name: string | null;
@@ -99,7 +96,6 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const queryClient = useQueryClient();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 
-  const [audienceId, setAudienceId] = useState(initial?.audienceId ?? "");
   const [topicId, setTopicId] = useState(initial?.topicId ?? "");
   const [segmentId, setSegmentId] = useState(initial?.segmentId ?? "");
   const [name, setName] = useState(initial?.name ?? "");
@@ -114,7 +110,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const [schedule, setSchedule] = useState("");
   const [templateId, setTemplateId] = useState("");
   // Editing an existing draft lands on step 2 (targeting is a recap there);
-  // a new broadcast starts at step 1: audience + name.
+  // a new broadcast starts at step 1: targeting + name.
   const [step, setStep] = useState<1 | 2>(initial ? 2 : 1);
 
   // Unsaved-body tracking for the native leave warning: the baseline is the
@@ -129,14 +125,13 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   // Local crash-recovery draft (browser-only, one key per broadcast).
   const [editorNonce, setEditorNonce] = useState(0);
   const draftState = useMemo<ComposerDraft>(
-    () => ({ audienceId, topicId, segmentId, name, from, subject, replyTo, html, text, document }),
-    [audienceId, topicId, segmentId, name, from, subject, replyTo, html, text, document],
+    () => ({ topicId, segmentId, name, from, subject, replyTo, html, text, document }),
+    [topicId, segmentId, name, from, subject, replyTo, html, text, document],
   );
   const draft = useLocalDraft<ComposerDraft>({
     storageKey: `ms-draft:broadcast:${initial?.id ?? "new"}`,
     state: draftState,
     initialState: {
-      audienceId: initial?.audienceId ?? "",
       topicId: initial?.topicId ?? "",
       segmentId: initial?.segmentId ?? "",
       name: initial?.name ?? "",
@@ -149,8 +144,9 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     },
   });
 
+  // Older stored drafts may carry extra fields (e.g. a dropped audienceId);
+  // only the known fields are read, so they restore cleanly.
   function restoreDraft(data: ComposerDraft) {
-    setAudienceId(data.audienceId);
     setTopicId(data.topicId);
     setSegmentId(data.segmentId);
     setName(data.name);
@@ -160,7 +156,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     setHtml(data.html);
     setText(data.text);
     setDocument(data.document);
-    if (data.audienceId) setStep(2);
+    setStep(2);
     // The editor and From field seed once from their mount value — remount them.
     setEditorNonce((n) => n + 1);
     // A restored draft is unsaved by definition: poison the baseline so the
@@ -170,12 +166,10 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     draft.acceptRecovered();
   }
 
-  const audiences = useQuery(trpc.audience.audiences.list.queryOptions());
   const topics = useQuery(trpc.topics.list.queryOptions());
   const segments = useQuery(trpc.segments.list.queryOptions());
-  // Segments are audience-scoped; only offer ones that filter the chosen audience.
-  const audienceSegments = (segments.data ?? []).filter((s) => s.audienceId === audienceId);
-  const selectedAudience = (audiences.data ?? []).find((a) => a.id === audienceId) ?? null;
+  const selectedTopic = (topics.data ?? []).find((topic) => topic.id === topicId) ?? null;
+  const selectedSegment = (segments.data ?? []).find((s) => s.id === segmentId) ?? null;
   const templates = useQuery(trpc.templates.list.queryOptions({ limit: 50 }));
   const templateOptions = templates.data?.items ?? [];
 
@@ -231,8 +225,8 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   }
   const recipientCount = useQuery(
     trpc.broadcasts.recipientCount.queryOptions(
-      { audienceId, topicId: topicId || null, segmentId: segmentId || null },
-      { enabled: guardOpen && !!audienceId },
+      { topicId: topicId || null, segmentId: segmentId || null },
+      { enabled: guardOpen },
     ),
   );
 
@@ -240,7 +234,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const updateMutation = useMutation(trpc.broadcasts.update.mutationOptions());
   const sendMutation = useMutation(trpc.broadcasts.send.mutationOptions());
 
-  const complete = audienceId !== "" && from.trim() !== "" && subject.trim() !== "";
+  const complete = from.trim() !== "" && subject.trim() !== "";
   const saving = createMutation.isPending || updateMutation.isPending;
   const sending = saving || sendMutation.isPending;
 
@@ -251,7 +245,6 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     if (initial) {
       await updateMutation.mutateAsync({
         id: initial.id,
-        audienceId,
         topicId: topicId || null,
         segmentId: segmentId || null,
         ...(name.trim() ? { name: name.trim() } : { name: "" }),
@@ -268,7 +261,6 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
       return initial.id;
     }
     const { id } = await createMutation.mutateAsync({
-      audienceId,
       ...(topicId ? { topicId } : {}),
       ...(segmentId ? { segmentId } : {}),
       ...(name.trim() ? { name: name.trim() } : {}),
@@ -363,7 +355,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              if (audienceId !== "") setStep(2);
+              setStep(2);
             }}
             style={{
               width: 520,
@@ -377,31 +369,6 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
           >
             <div style={{ fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
               {t("composer.steps.one")}
-            </div>
-
-            <div className="ms-field" style={{ marginTop: 16 }}>
-              <label htmlFor="bc-audience">{t("composer.audienceLabel")}</label>
-              <AudienceSelect
-                id="bc-audience"
-                value={audienceId}
-                onChange={(value) => {
-                  setAudienceId(value);
-                  // A segment belongs to one audience; switching audiences drops it.
-                  setSegmentId("");
-                }}
-                ariaLabel={t("composer.audienceLabel")}
-                width="100%"
-                options={[
-                  { value: "", label: t("composer.audiencePick") },
-                  ...(audiences.data ?? []).map((a) => ({
-                    value: a.id,
-                    label: a.name,
-                    hint: t("composer.audienceHint", {
-                      count: nf.format(a.contacts - a.unsubscribed),
-                    }),
-                  })),
-                ]}
-              />
             </div>
 
             <div className="ms-field" style={{ marginTop: 16 }}>
@@ -450,7 +417,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               </div>
             ) : null}
 
-            {audienceSegments.length > 0 ? (
+            {(segments.data?.length ?? 0) > 0 ? (
               <div className="ms-field" style={{ marginTop: 16 }}>
                 <label htmlFor="bc-segment">{t("composer.segmentLabel")}</label>
                 <Select
@@ -461,7 +428,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                   width="100%"
                   options={[
                     { value: "", label: t("composer.segmentNone") },
-                    ...audienceSegments.map((segment) => ({
+                    ...(segments.data ?? []).map((segment) => ({
                       value: segment.id,
                       label: segment.name,
                     })),
@@ -480,7 +447,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
             ) : null}
 
             <div style={{ marginTop: 20 }}>
-              <button type="submit" className="ms-btn ms-btn-primary" disabled={audienceId === ""}>
+              <button type="submit" className="ms-btn ms-btn-primary">
                 {t("composer.continue")}
               </button>
             </div>
@@ -529,7 +496,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {selectedAudience?.name ?? t("composer.audiencePick")}{" "}
+                    {selectedSegment?.name ?? t("composer.segmentNone")}{" "}
                     <span style={{ color: "var(--ms-success)", fontWeight: 400 }}>✓</span>
                     {name.trim() ? (
                       <span style={{ color: "var(--ms-muted)", fontWeight: 400 }}>
@@ -538,11 +505,9 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                       </span>
                     ) : null}
                   </div>
-                  {selectedAudience ? (
+                  {selectedTopic ? (
                     <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>
-                      {t("composer.audienceHint", {
-                        count: nf.format(selectedAudience.contacts - selectedAudience.unsubscribed),
-                      })}
+                      {t("composer.topicLabel")}: {selectedTopic.name}
                     </p>
                   ) : null}
                 </div>

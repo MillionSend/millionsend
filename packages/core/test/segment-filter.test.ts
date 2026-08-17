@@ -9,22 +9,14 @@ import { SegmentFilterError, segmentFilterSchema, segmentWhere } from "../src/se
 let db: Db;
 let close: () => Promise<void>;
 let teamId: string;
-let audienceId: string;
-let audienceBId: string;
+let teamBId: string;
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
   teamId = await createTeam(db, "seg");
-  const [audience] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "all" })
-    .returning({ id: schema.audiences.id });
-  if (!audience) throw new Error("audience insert failed");
-  audienceId = audience.id;
 
   await db.insert(schema.contacts).values([
     {
-      audienceId,
       teamId,
       email: "alice@example.com",
       firstName: "Alice",
@@ -34,7 +26,6 @@ beforeAll(async () => {
       createdAt: new Date("2026-01-01T00:00:00Z"),
     },
     {
-      audienceId,
       teamId,
       email: "bob@other.test",
       firstName: "Bob",
@@ -44,7 +35,6 @@ beforeAll(async () => {
       createdAt: new Date("2026-06-01T00:00:00Z"),
     },
     {
-      audienceId,
       teamId,
       email: "carol@example.com",
       firstName: null,
@@ -55,18 +45,12 @@ beforeAll(async () => {
     },
   ]);
 
-  // A second audience whose contacts must never appear in an audience-A query.
-  // Its contact carries the exact values the is_not_set OR-disjuncts test for
-  // (empty last_name, missing property) so an unparenthesized OR would leak it.
-  const [audienceB] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "other" })
-    .returning({ id: schema.audiences.id });
-  if (!audienceB) throw new Error("audience B insert failed");
-  audienceBId = audienceB.id;
+  // A second team whose contact must never appear in a team-A query. It
+  // carries the exact values the is_not_set OR-disjuncts test for (empty
+  // last_name, missing property) so an unparenthesized OR would leak it.
+  teamBId = await createTeam(db, "seg-b");
   await db.insert(schema.contacts).values({
-    audienceId: audienceBId,
-    teamId,
+    teamId: teamBId,
     email: "mallory@leak.test",
     firstName: "Mallory",
     lastName: "",
@@ -77,12 +61,12 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
-/** Emails matching the filter within the seeded audience, sorted. */
+/** Emails matching the filter within the seeded team, sorted. */
 async function matched(filter: SegmentFilter): Promise<string[]> {
   const rows = await db
     .select({ email: schema.contacts.email })
     .from(schema.contacts)
-    .where(and(eq(schema.contacts.audienceId, audienceId), segmentWhere(schema.contacts, filter)));
+    .where(and(eq(schema.contacts.teamId, teamId), segmentWhere(schema.contacts, filter)));
   return rows.map((r) => r.email).sort();
 }
 
@@ -198,7 +182,7 @@ describe("segmentWhere: match combination and empty", () => {
     ).toEqual(["alice@example.com", "bob@other.test"]);
   });
 
-  it("empty conditions matches everyone in the audience (both match modes)", async () => {
+  it("empty conditions matches every team contact (both match modes)", async () => {
     expect(await matched({ match: "all", conditions: [] })).toEqual([
       "alice@example.com",
       "bob@other.test",
@@ -238,24 +222,24 @@ describe("segmentWhere: security (SQL injection)", () => {
   });
 });
 
-describe("segmentWhere: OR-precedence / cross-audience scoping", () => {
-  // A bare `expr is null or expr = ''` AND-ed with audience scoping would parse
-  // as `(scope AND expr is null) OR (expr = '')`, so any contact in ANY audience
+describe("segmentWhere: OR-precedence / cross-team scoping", () => {
+  // A bare `expr is null or expr = ''` AND-ed with team scoping would parse
+  // as `(scope AND expr is null) OR (expr = '')`, so any contact in ANY team
   // with an empty value leaks in. Parenthesizing the disjunction keeps the
-  // AND-composition intact. mallory (audience B, last_name '') is the tripwire.
-  it("is_not_set stays scoped to its audience (no cross-audience leak)", async () => {
+  // AND-composition intact. mallory (team B, last_name '') is the tripwire.
+  it("is_not_set stays scoped to its team (no cross-team leak)", async () => {
     expect(await matched(all({ field: "last_name", op: "is_not_set", value: null }))).toEqual([
       "bob@other.test",
       "carol@example.com",
     ]);
-    // The leaked row would be from audience B — assert it is truly seeded and
+    // The leaked row would be from team B — assert it is truly seeded and
     // would otherwise match, so this test can't pass by B being empty.
     const bRows = await db
       .select({ email: schema.contacts.email })
       .from(schema.contacts)
       .where(
         and(
-          eq(schema.contacts.audienceId, audienceBId),
+          eq(schema.contacts.teamId, teamBId),
           segmentWhere(schema.contacts, all({ field: "last_name", op: "is_not_set", value: null })),
         ),
       );

@@ -18,7 +18,6 @@ let close: () => Promise<void>;
 let app: ReturnType<typeof createApi>;
 let tokenA: string;
 let tokenB: string;
-let audienceA: string;
 let contactA: string;
 
 async function call(token: string, method: string, path: string, body?: unknown) {
@@ -61,15 +60,9 @@ beforeAll(async () => {
     status: "verified",
     verifiedAt: new Date(),
   });
-  const [aud] = await db
-    .insert(schema.audiences)
-    .values({ teamId: a.teamId, name: "news" })
-    .returning({ id: schema.audiences.id });
-  if (!aud) throw new Error("audience insert failed");
-  audienceA = aud.id;
   const [contact] = await db
     .insert(schema.contacts)
-    .values({ audienceId: aud.id, teamId: a.teamId, email: "reader@acme.dev" })
+    .values({ teamId: a.teamId, email: "reader@acme.dev" })
     .returning({ id: schema.contacts.id });
   if (!contact) throw new Error("contact insert failed");
   contactA = contact.id;
@@ -152,7 +145,6 @@ describe("topics teamId isolation", () => {
     const topicB = (await json(res)).id ?? "";
     // Team A referencing team B's topic → 404.
     const created = await call(tokenA, "POST", "/broadcasts", {
-      audience_id: audienceA,
       from: "Acme <hi@acme.dev>",
       subject: "s",
       html: "<p>hi</p>",
@@ -163,7 +155,6 @@ describe("topics teamId isolation", () => {
 
   it("broadcast create+get round-trips an owned topic_id", async () => {
     const created = await call(tokenA, "POST", "/broadcasts", {
-      audience_id: audienceA,
       from: "Acme <hi@acme.dev>",
       subject: "s",
       html: "<p>hi</p>",
@@ -177,7 +168,6 @@ describe("topics teamId isolation", () => {
 
   it("broadcast create with a non-uuid topic_id is a 422", async () => {
     const res = await call(tokenA, "POST", "/broadcasts", {
-      audience_id: audienceA,
       from: "Acme <hi@acme.dev>",
       subject: "s",
       html: "<p>hi</p>",

@@ -26,7 +26,7 @@ function BroadcastsHead() {
       <tr>
         <th style={{ width: "30%" }}>{t("list.name")}</th>
         <th style={{ width: "13%" }}>{t("list.status")}</th>
-        <th style={{ width: "20%" }}>{t("list.audience")}</th>
+        <th style={{ width: "20%" }}>{t("list.targeting")}</th>
         <th className="right" style={{ width: "13%" }}>
           {t("list.recipients")}
         </th>
@@ -167,9 +167,7 @@ export default function BroadcastsPage() {
                     <td>
                       <StatusPill status={status} />
                     </td>
-                    <td>
-                      {row.audienceName ?? <span style={{ color: "var(--ms-faint)" }}>—</span>}
-                    </td>
+                    <td>{row.segmentName ?? t("composer.segmentNone")}</td>
                     <td className="right ms-digits">
                       {row.recipients > 0 ? (
                         nf.format(row.recipients)

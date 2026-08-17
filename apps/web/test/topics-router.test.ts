@@ -37,8 +37,7 @@ function callerFor(teamId: string) {
 }
 
 async function seedContact(caller: ReturnType<typeof callerFor>, email = "ada@example.com") {
-  const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
-  const { id } = await caller.audience.contacts.add({ audienceId, email });
+  const { id } = await caller.audience.contacts.add({ email });
   return id;
 }
 

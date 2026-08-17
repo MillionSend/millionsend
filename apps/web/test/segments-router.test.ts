@@ -36,7 +36,6 @@ function callerFor(teamId: string) {
 
 async function insertContact(
   teamId: string,
-  audienceId: string,
   o: {
     email: string;
     firstName?: string;
@@ -47,7 +46,6 @@ async function insertContact(
 ) {
   await db.insert(schema.contacts).values({
     teamId,
-    audienceId,
     email: o.email,
     firstName: o.firstName ?? null,
     properties: o.properties ?? {},
@@ -65,19 +63,17 @@ describe("segments CRUD and isolation", () => {
   it("creates, lists with live count, gets, updates, and deletes", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "Newsletter" });
-    await insertContact(teamId, audienceId, { email: "ada@x.com" });
-    await insertContact(teamId, audienceId, { email: "bob@y.com" });
+    await insertContact(teamId, { email: "ada@x.com" });
+    await insertContact(teamId, { email: "bob@y.com" });
 
     const { id } = await caller.segments.create({
-      audienceId,
       name: "X domain",
       filter: filterOf("all", [{ field: "email", op: "ends_with", value: "@x.com" }]),
     });
 
     const listed = await caller.segments.list();
     expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ id, name: "X domain", audienceName: "Newsletter", count: 1 });
+    expect(listed[0]).toMatchObject({ id, name: "X domain", count: 1 });
 
     const got = await caller.segments.get({ id });
     expect(got.count).toBe(1);
@@ -94,28 +90,26 @@ describe("segments CRUD and isolation", () => {
     expect(await caller.segments.list()).toEqual([]);
   });
 
-  it("blocks cross-team list/get/delete/count and foreign-audience create", async () => {
+  it("blocks cross-team list/get/update/delete and scopes count to the caller's team", async () => {
     const teamA = await createTeam(db, "team-a");
     const teamB = await createTeam(db, "team-b");
     const a = callerFor(teamA);
     const b = callerFor(teamB);
-    const { id: audienceId } = await a.audience.audiences.create({ name: "A's" });
+    await insertContact(teamA, { email: "ada@x.com" });
     const { id: segId } = await a.segments.create({
-      audienceId,
       name: "seg",
       filter: filterOf("all", []),
     });
 
     expect(await b.segments.list()).toEqual([]);
     await expect(b.segments.get({ id: segId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(b.segments.update({ id: segId, name: "hijack" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
     await expect(b.segments.delete({ id: segId })).rejects.toMatchObject({ code: "NOT_FOUND" });
-    // B cannot count against A's audience, nor create a segment over it.
-    await expect(
-      b.segments.count({ audienceId, filter: filterOf("all", []) }),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    await expect(
-      b.segments.create({ audienceId, name: "x", filter: filterOf("all", []) }),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // count is team-scoped: A's contact never inflates B's preview.
+    expect(await b.segments.count({ filter: filterOf("all", []) })).toEqual({ count: 0 });
+    expect((await a.segments.get({ id: segId })).name).toBe("seg");
   });
 });
 
@@ -123,30 +117,29 @@ describe("segments count matches known filters (the same predicate the worker fa
   async function seed() {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "N" });
-    await insertContact(teamId, audienceId, {
+    await insertContact(teamId, {
       email: "ada@x.com",
       firstName: "Ada",
       properties: { plan: "pro" },
     });
-    await insertContact(teamId, audienceId, {
+    await insertContact(teamId, {
       email: "bob@x.com",
       properties: { plan: "free" },
       unsubscribed: true,
     });
-    await insertContact(teamId, audienceId, {
+    await insertContact(teamId, {
       email: "cyd@y.com",
       createdAt: new Date("2020-01-01T00:00:00Z"),
     });
-    return { caller, audienceId };
+    return { caller };
   }
 
   it("counts text, property, boolean, date, empty, and match=any filters", async () => {
-    const { caller, audienceId } = await seed();
+    const { caller } = await seed();
     const c = (m: "all" | "any", conds: { field: string; op: string; value: string | null }[]) =>
-      caller.segments.count({ audienceId, filter: filterOf(m, conds) });
+      caller.segments.count({ filter: filterOf(m, conds) });
 
-    expect((await c("all", [])).count).toBe(3); // empty = whole audience
+    expect((await c("all", [])).count).toBe(3); // empty = every team contact
     expect((await c("all", [{ field: "email", op: "ends_with", value: "@x.com" }])).count).toBe(2);
     expect((await c("all", [{ field: "property:plan", op: "equals", value: "pro" }])).count).toBe(
       1,
@@ -176,9 +169,8 @@ describe("segments count matches known filters (the same predicate the worker fa
   });
 
   it("treats a value as data, not SQL (injection attempt matches nothing)", async () => {
-    const { caller, audienceId } = await seed();
+    const { caller } = await seed();
     const evil = await caller.segments.count({
-      audienceId,
       filter: filterOf("all", [{ field: "email", op: "equals", value: "x' OR '1'='1" }]),
     });
     expect(evil.count).toBe(0);
@@ -189,24 +181,20 @@ describe("segments reject a malformed filter with 422", () => {
   it("rejects an unknown field and an unsupported operator on count and create", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "N" });
 
     await expect(
       caller.segments.count({
-        audienceId,
         filter: filterOf("all", [{ field: "ssn", op: "equals", value: "x" }]),
       }),
     ).rejects.toMatchObject({ code: "UNPROCESSABLE_CONTENT" });
     await expect(
       caller.segments.count({
-        audienceId,
         filter: filterOf("all", [{ field: "email", op: "bogus", value: "x" }]),
       }),
     ).rejects.toMatchObject({ code: "UNPROCESSABLE_CONTENT" });
     // A bad filter is rejected at create time, not stored to blow up on read.
     await expect(
       caller.segments.create({
-        audienceId,
         name: "bad",
         filter: filterOf("all", [{ field: "email", op: "bogus", value: "x" }]),
       }),
@@ -237,17 +225,14 @@ describe("broadcast create carries a segmentId", () => {
   it("stores the segment, surfaces its name, counts against it, and rejects a foreign one", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
-    const { id: audienceId } = await caller.audience.audiences.create({ name: "N" });
-    await insertContact(teamId, audienceId, { email: "ada@x.com" });
-    await insertContact(teamId, audienceId, { email: "bob@y.com" });
+    await insertContact(teamId, { email: "ada@x.com" });
+    await insertContact(teamId, { email: "bob@y.com" });
     const { id: segmentId } = await caller.segments.create({
-      audienceId,
       name: "X only",
       filter: filterOf("all", [{ field: "email", op: "ends_with", value: "@x.com" }]),
     });
 
     const { id: broadcastId } = await caller.broadcasts.create({
-      audienceId,
       segmentId,
       from: "Ada <ada@example.com>",
       subject: "Hi",
@@ -256,26 +241,24 @@ describe("broadcast create carries a segmentId", () => {
     expect(detail.segmentId).toBe(segmentId);
     expect(detail.segmentName).toBe("X only");
 
-    // Guard-rail count reflects the segment (1 of 2 contacts), not the whole audience.
-    const scoped = await caller.broadcasts.recipientCount({ audienceId, segmentId });
+    // Guard-rail count reflects the segment (1 of 2 contacts), not the whole team.
+    const scoped = await caller.broadcasts.recipientCount({ segmentId });
     expect(scoped.count).toBe(1);
-    const whole = await caller.broadcasts.recipientCount({ audienceId });
+    const whole = await caller.broadcasts.recipientCount({});
     expect(whole.count).toBe(2);
 
-    // A segment from another audience cannot scope this send.
-    const { id: other } = await caller.audience.audiences.create({ name: "Other" });
-    const { id: foreign } = await caller.segments.create({
-      audienceId: other,
+    // Another team's segment cannot scope this send.
+    const teamB = await createTeam(db, "team-b");
+    const { id: foreign } = await callerFor(teamB).segments.create({
       name: "elsewhere",
       filter: filterOf("all", []),
     });
     await expect(
       caller.broadcasts.create({
-        audienceId,
         segmentId: foreign,
         from: "Ada <ada@example.com>",
         subject: "Hi",
       }),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });

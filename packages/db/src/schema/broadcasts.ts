@@ -1,5 +1,4 @@
 import { index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
-import { audiences } from "./audiences.js";
 import { segments } from "./segments.js";
 import { teams } from "./teams.js";
 import { topics } from "./topics.js";
@@ -24,14 +23,11 @@ export const broadcasts = pgTable(
     teamId: uuid("team_id")
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
-    // SET NULL, not CASCADE: deleting an audience must not erase the send
-    // history of broadcasts already sent to it.
-    audienceId: uuid("audience_id").references(() => audiences.id, { onDelete: "set null" }),
     // SET NULL, not CASCADE: deleting a topic must not erase the send history
     // of broadcasts already sent under it. A null topicId is a global send.
     topicId: uuid("topic_id").references(() => topics.id, { onDelete: "set null" }),
-    // Optional MillionSend segment (a filtered subset of the audience). SET NULL
-    // on delete: the fan-out treats a null segmentId as "whole audience", so a
+    // Optional segment (a saved filter over the team's contacts). SET NULL on
+    // delete: the fan-out treats a null segmentId as "all contacts", so a
     // deleted segment gracefully widens the target rather than orphaning the row.
     segmentId: uuid("segment_id").references(() => segments.id, { onDelete: "set null" }),
     // Internal label, never rendered into the email.

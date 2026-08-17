@@ -9,22 +9,20 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi } from "../src/app.js";
 
 /**
- * Wire-compat gate for the SDK's top-level /contacts surface: when audienceId
- * is omitted, resend v6 hits GET/POST/PATCH/DELETE /contacts and
- * /contacts/{idOrEmail} directly. Also covers list pagination
- * (limit/after/before), which the SDK sends as query params.
+ * Wire-compat gate for the SDK's top-level /contacts surface: resend v6 hits
+ * GET/POST/PATCH/DELETE /contacts and /contacts/{idOrEmail} directly. Also
+ * covers list pagination (limit/after/before), which the SDK sends as query
+ * params.
  */
 
 let db: Db;
 let closeDb: () => Promise<void>;
 let server: ServerType;
 let resend: Resend;
-let teamId: string;
-let audienceId: string;
 
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
-  teamId = await createTeam(db, "contacts-root");
+  const teamId = await createTeam(db, "contacts-root");
   const key = generateApiKey("test");
   await db.insert(schema.apiKeys).values({
     teamId,
@@ -33,12 +31,6 @@ beforeAll(async () => {
     keyHash: key.keyHash,
     last4: key.last4,
   });
-  const [audience] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "root" })
-    .returning({ id: schema.audiences.id });
-  if (!audience) throw new Error("audience insert failed");
-  audienceId = audience.id;
   const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
   const app = createApi({ db, keyring, isCloud: true, enqueueEmailSend: async () => {} });
   await new Promise<void>((resolve) => {
@@ -57,44 +49,54 @@ afterAll(async () => {
 describe("official resend SDK: top-level /contacts", () => {
   let contactId: string;
 
-  it("rejects audience-less create loudly (contacts require an audience)", async () => {
-    const created = await resend.contacts.create({ email: "no-home@example.com" });
-    expect(created.data).toBeNull();
-    expect(created.error?.statusCode).toBe(422);
-    expect(created.error?.name).toBe("validation_error");
-    expect(created.error?.message).toContain("audience_id is required");
+  it("creates a contact", async () => {
+    const created = await resend.contacts.create({ email: "root@example.com" });
+    expect(created.error).toBeNull();
+    expect(created.data).toMatchObject({ object: "contact", id: expect.any(String) });
+    contactId = created.data?.id ?? "";
+  });
+
+  it("409s a duplicate email, case-insensitively", async () => {
+    for (const email of ["root@example.com", "Root@Example.COM"]) {
+      const dup = await resend.contacts.create({ email });
+      expect(dup.data).toBeNull();
+      expect(dup.error?.statusCode).toBe(409);
+      expect(dup.error?.name).toBe("validation_error");
+      expect(dup.error?.message).toBe("Contact already exists");
+    }
+  });
+
+  it("422s an invalid email", async () => {
+    const bad = await resend.contacts.create({ email: "not-an-email" });
+    expect(bad.data).toBeNull();
+    expect(bad.error?.statusCode).toBe(422);
+    expect(bad.error?.name).toBe("validation_error");
   });
 
   it("stores custom properties and rejects nested values", async () => {
     const created = await resend.contacts.create({
-      audienceId,
       email: "props@example.com",
       properties: { plan: "pro", seats: 2 },
     });
     expect(created.error).toBeNull();
     const id = created.data?.id ?? "";
-    const fetched = await resend.contacts.get({ audienceId, id });
+    const fetched = await resend.contacts.get(id);
     expect((fetched.data as unknown as { properties: Record<string, string> }).properties).toEqual({
       plan: "pro",
       seats: "2",
     });
 
     const nested = await resend.contacts.create({
-      audienceId,
       email: "nested@example.com",
       properties: { plan: { name: "pro" } as unknown as string },
     });
     expect(nested.data).toBeNull();
     expect(nested.error?.statusCode).toBe(422);
     expect(nested.error?.message).toContain("properties");
-    await resend.contacts.remove({ audienceId, id });
+    await resend.contacts.remove(id);
   });
 
   it("gets a contact by bare id and by email, with the required properties field", async () => {
-    const created = await resend.contacts.create({ audienceId, email: "root@example.com" });
-    expect(created.error).toBeNull();
-    contactId = created.data?.id ?? "";
-
     // string form → GET /contacts/{id}
     const byId = await resend.contacts.get(contactId);
     expect(byId.error).toBeNull();
@@ -105,13 +107,13 @@ describe("official resend SDK: top-level /contacts", () => {
       properties: {},
     });
 
-    // {email} without audienceId → GET /contacts/{email}
+    // {email} → GET /contacts/{email}
     const byEmail = await resend.contacts.get({ email: "root@example.com" });
     expect(byEmail.error).toBeNull();
     expect(byEmail.data?.id).toBe(contactId);
   });
 
-  it("updates by id without an audienceId, storing properties", async () => {
+  it("updates by id, storing properties", async () => {
     const updated = await resend.contacts.update({ id: contactId, unsubscribed: true });
     expect(updated.error).toBeNull();
     expect(updated.data?.id).toBe(contactId);
@@ -140,7 +142,7 @@ describe("official resend SDK: top-level /contacts", () => {
   });
 
   it("is tenant-isolated: another team's key cannot reach a contact by email", async () => {
-    const created = await resend.contacts.create({ audienceId, email: "mine@example.com" });
+    const created = await resend.contacts.create({ email: "mine@example.com" });
     expect(created.error).toBeNull();
 
     const otherTeam = await createTeam(db, "contacts-root-b");
@@ -167,7 +169,7 @@ describe("official resend SDK: top-level /contacts", () => {
   it("paginates the team-wide contact list with limit/after/before", async () => {
     const emails = ["pg1@example.com", "pg2@example.com", "pg3@example.com"];
     for (const email of emails) {
-      const created = await resend.contacts.create({ audienceId, email });
+      const created = await resend.contacts.create({ email });
       expect(created.error).toBeNull();
     }
 

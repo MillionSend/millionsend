@@ -18,7 +18,7 @@ let db: Db;
 let closeDb: () => Promise<void>;
 let server: ServerType;
 let resend: Resend;
-let audienceId: string;
+let segmentId: string;
 const enqueued: { broadcastId: string; startAfter?: Date | undefined }[] = [];
 
 beforeAll(async () => {
@@ -39,12 +39,12 @@ beforeAll(async () => {
     status: "verified",
     verifiedAt: new Date(),
   });
-  const [audience] = await db
-    .insert(schema.audiences)
-    .values({ teamId, name: "newsletter" })
-    .returning({ id: schema.audiences.id });
-  if (!audience) throw new Error("audience insert failed");
-  audienceId = audience.id;
+  const [segment] = await db
+    .insert(schema.segments)
+    .values({ teamId, name: "newsletter", filter: { match: "any", conditions: [] } })
+    .returning({ id: schema.segments.id });
+  if (!segment) throw new Error("segment insert failed");
+  segmentId = segment.id;
 
   const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
   const app = createApi({
@@ -75,7 +75,7 @@ describe("official resend SDK: broadcasts", () => {
 
   it("creates a broadcast as a draft", async () => {
     const created = await resend.broadcasts.create({
-      audienceId,
+      segmentId,
       name: "launch",
       from: "Acme <hello@acme.dev>",
       subject: "We launched",
@@ -94,8 +94,7 @@ describe("official resend SDK: broadcasts", () => {
       {
         id: broadcastId,
         name: "launch",
-        audience_id: audienceId,
-        segment_id: audienceId,
+        segment_id: segmentId,
         status: "draft",
         created_at: expect.any(String),
         scheduled_at: null,
@@ -111,7 +110,7 @@ describe("official resend SDK: broadcasts", () => {
       object: "broadcast",
       id: broadcastId,
       name: "launch",
-      audience_id: audienceId,
+      segment_id: segmentId,
       from: "Acme <hello@acme.dev>",
       subject: "We launched",
       reply_to: ["support@acme.dev"],
@@ -172,7 +171,7 @@ describe("official resend SDK: broadcasts", () => {
 
   it("removes a draft, then get 404s", async () => {
     const draft = await resend.broadcasts.create({
-      audienceId,
+      segmentId,
       from: "Acme <hello@acme.dev>",
       subject: "never sent",
       text: "bye",

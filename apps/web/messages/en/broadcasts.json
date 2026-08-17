@@ -11,7 +11,7 @@
     "new": "New broadcast",
     "name": "Name",
     "status": "Status",
-    "audience": "Audience",
+    "targeting": "Targeting",
     "recipients": "Recipients",
     "created": "Created",
     "menu": "Broadcast actions",
@@ -37,9 +37,6 @@
     "subjectLabel": "Subject",
     "replyToLabel": "Reply-to",
     "optional": "optional",
-    "audienceLabel": "Audience",
-    "audiencePick": "Pick an audience",
-    "audienceHint": "{count} subscribers",
     "topicLabel": "Topic",
     "topicNone": "All contacts",
     "topicHint": "Scopes the send and each recipient's unsubscribe to this topic.",
@@ -55,7 +52,7 @@
     "saveError": "Couldn't save the draft.",
     "back": "Broadcasts",
     "segmentLabel": "Segment",
-    "segmentNone": "Whole audience",
+    "segmentNone": "All contacts",
     "segmentHint": "Narrows this send to the contacts matching a saved segment.",
     "fromNamePlaceholder": "Ada",
     "fromLocalPlaceholder": "news",
@@ -63,7 +60,7 @@
     "fromDomainLabel": "Sending domain",
     "fromAddDomain": "Add domain",
     "steps": {
-      "one": "Audience & name",
+      "one": "Targeting & name",
       "two": "Content"
     },
     "continue": "Continue",
@@ -84,7 +81,7 @@
     "eyebrow": "Broadcast",
     "notFound": "Broadcast not found.",
     "status": "Status",
-    "audience": "Audience",
+    "targeting": "Targeting",
     "topic": "Topic",
     "scheduled": "Scheduled",
     "sent": "Sent",
@@ -102,7 +99,6 @@
     "cancelTitle": "Cancel send",
     "cancelBody": "\"{name}\" will not be sent.",
     "cancelConfirm": "Cancel send",
-    "keep": "Keep it",
-    "segment": "Segment"
+    "keep": "Keep it"
   }
 }
