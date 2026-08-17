@@ -25,10 +25,12 @@ import { eq, sql } from "drizzle-orm";
  * events and counters at the redirect endpoints), and the per-domain config set
  * no longer subscribes to OPEN/CLICK. A stray legacy OPEN/CLICK event therefore
  * finds no mapping here and is ignored entirely — never double-counting the
- * app-layer engagement.
+ * app-layer engagement. Send is absent for the same reason: the worker records
+ * the authoritative "sent" event locally at send time, so SES's Send (still
+ * emitted by event destinations created before it was dropped from
+ * SES_EVENT_TYPES) would only duplicate it.
  */
 const STATUS_BY_EVENT: Record<string, EmailStatus | undefined> = {
-  Send: "sent",
   Delivery: "delivered",
   DeliveryDelay: "delivery_delayed",
   Bounce: "bounced",
@@ -41,7 +43,6 @@ const EVENT_TYPE_BY_EVENT: Record<
   string,
   (typeof schema.emailEventTypeEnum.enumValues)[number] | undefined
 > = {
-  Send: "sent",
   Delivery: "delivered",
   DeliveryDelay: "delivery_delayed",
   Bounce: "bounced",

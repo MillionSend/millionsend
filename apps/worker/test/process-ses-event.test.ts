@@ -141,14 +141,15 @@ it("out-of-order events never regress the status ladder", async () => {
   const emailId = await insertSentEmail("mid-order");
   await processSesEvent(db, makeEvent({ eventType: "Delivery", sesMessageId: "mid-order" }));
   expect(await statusOf(emailId)).toBe("delivered");
-  // A late Send ranks below delivered: event row recorded, status unchanged.
+  // SES Send events are ignored entirely — the worker's own "sent" event is
+  // the authoritative record, so no row and no status change.
   await processSesEvent(db, makeEvent({ eventType: "Send", sesMessageId: "mid-order" }));
   expect(await statusOf(emailId)).toBe("delivered");
   const events = await db
     .select()
     .from(schema.emailEvents)
     .where(eq(schema.emailEvents.emailId, emailId));
-  expect(events).toHaveLength(2);
+  expect(events).toHaveLength(1);
 });
 
 it("unknown sesMessageId is ignored entirely", async () => {

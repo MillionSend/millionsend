@@ -17,9 +17,10 @@ export const SETUP_NAMES = {
  * OPEN and CLICK: engagement is tracked app-layer (we rewrite links and inject
  * the pixel ourselves), and subscribing to OPEN/CLICK is what makes SES rewrite
  * links / inject its own pixel. Omitting them keeps SES out of the message body.
+ * SEND is excluded too: the worker records the "sent" event locally at send
+ * time, so SES's copy would only duplicate the timeline.
  */
 export const SES_EVENT_TYPES = [
-  "SEND",
   "DELIVERY",
   "DELIVERY_DELAY",
   "BOUNCE",
