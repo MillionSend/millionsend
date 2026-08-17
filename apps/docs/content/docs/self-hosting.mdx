@@ -1,0 +1,228 @@
+---
+title: Self-hosting
+description: Deploy MillionSend on your own infrastructure with Docker Compose and your own AWS SES account.
+---
+
+MillionSend sends through your own AWS SES account. A deployment is two
+containers: Postgres and one app container running the API (port 3001), the
+worker, and the web dashboard (port 3000). An optional third container runs
+the SMTP relay (port 2587).
+
+**Prerequisites:** Docker with Compose; an AWS account with SES access in your
+chosen region (sandbox accounts can only send to verified recipients —
+request production access to send to anyone); a sending domain you control.
+Domain verification (DKIM records) is done from the dashboard after boot.
+
+## Quickstart (no clone)
+
+One command, in an empty directory (Node 18+):
+
+```sh
+mkdir millionsend && cd millionsend
+npx @millionsend/setup
+```
+
+The wizard detects what is already there and offers each step — create `.env`
+from a built-in template with generated secrets, provision the AWS resources
+(below), download the standalone compose file, and `docker compose up -d`.
+Every step is skippable and safe to re-run; `--dry-run` prints the full plan
+and touches nothing.
+
+The manual equivalent runs the same prebuilt image
+`ghcr.io/millionsend/millionsend:edge` (multi-arch, published on every push to
+main; pin a version tag in the compose file for production — `:edge` is a
+moving head):
+
+```sh
+mkdir millionsend && cd millionsend
+curl -O https://raw.githubusercontent.com/MillionSend/millionsend/main/deploy/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/MillionSend/millionsend/main/.env.example
+```
+
+Fill in `.env` (see the [environment reference](#environment-reference) —
+everything else defaults to a working local setup), then:
+
+```sh
+docker compose up -d
+```
+
+Migrations run automatically on boot. Dashboard: `http://localhost:3000`.
+API: `http://localhost:3001`.
+
+## From source
+
+For contributors, or when you want to modify the code:
+
+```sh
+git clone https://github.com/MillionSend/millionsend.git
+cd millionsend
+cp .env.example .env   # fill it as in the quickstart
+docker compose up --build -d
+```
+
+The root `docker-compose.yml` builds the image locally from the `Dockerfile`.
+To run a clone against the published image instead:
+`docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml up -d`.
+
+Without Docker (Node 24+, pnpm 11, local Postgres): `pnpm install`, point
+`DATABASE_URL` at your Postgres, `pnpm --filter @millionsend/db db:migrate`,
+then run `pnpm --filter @millionsend/api dev`,
+`pnpm --filter @millionsend/worker dev`, and
+`pnpm --filter @millionsend/web dev` in separate terminals.
+
+## Environment reference
+
+From `.env.example`. Only the first three are required; everything else has
+working local defaults.
+
+### Required
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Postgres connection string. The default matches the compose `postgres` service. |
+| `MASTER_ENCRYPTION_KEY` | Encryption key for email bodies at rest. Generate with `openssl rand -base64 32`. Losing it makes stored bodies unrecoverable; changing it orphans old bodies. Back it up with the database. |
+| `BETTER_AUTH_SECRET` | Dashboard session signing secret. Generate with `openssl rand -base64 32`. |
+| `APP_BASE_URL` | Public base URL of the deployment — the origin browsers use to reach the dashboard (e.g. `https://mail.example.com`). Sign-in is only accepted from this origin; SNS subscriptions, unsubscribe links, and tracking links derive from it. It must match the exact scheme+host+port you open the dashboard on — including a custom `WEB_PORT` — or login and signup fail with an "invalid origin" error. Default `http://localhost:3000`. |
+
+### AWS SES
+
+| Variable | Purpose |
+| --- | --- |
+| `AWS_REGION` | SES region (default `us-east-1`). |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | IAM credentials with `ses:SendEmail` / `ses:SendRawEmail`. Omit to use the default AWS credential chain (instance profile, SSO, …). |
+| `SNS_TOPIC_ARNS` | Comma-separated SNS topic ARNs allowed to deliver SES events. Unset disables event ingestion entirely. |
+| `SQS_QUEUE_URL` | SQS queue the worker long-polls for SES events when the deployment has no public HTTPS URL for SNS to push to. Leave unset when SNS delivers to `https://<your-host>/ses/events` directly. |
+| `SES_CONFIGURATION_SET` | SES configuration set applied to sends that have no per-domain configuration set. Unset sends without one (and without delivery events). |
+
+### Optional
+
+| Variable | Purpose |
+| --- | --- |
+| `ALLOW_SIGNUP` | The first user can always register; after that signup stays closed unless this is `true`. Keep `false` when the dashboard is reachable from the internet. |
+| `PORT` | API port (default `3001`). Under compose this moves both the container's listen port and the published host port together. |
+| `WEB_PORT` | Host port the compose file publishes the dashboard on (the web process is always 3000 inside the container). Keep `APP_BASE_URL` in sync. |
+| `DOCS_PORT` | Host port the compose file publishes this documentation site on (the docs process is always 3002 inside the container). |
+| `SMTP_PORT` | SMTP relay listen port (default `2587`). |
+| `SMTP_TLS_CERT_PATH` / `SMTP_TLS_KEY_PATH` | STARTTLS keypair for the SMTP relay (PEM paths inside the container). Both set: STARTTLS is offered and required before AUTH. Unset: plaintext — keep the port inside your own network or behind a TLS-terminating load balancer. |
+| `IS_CLOUD` | Leave `false`. `true` enables hosted-cloud behavior (KMS, Stripe billing). |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials for "Continue with Google". The button appears only when both are set. Callback URL: `{APP_BASE_URL}/api/auth/callback/google`. |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Same, for GitHub. Callback URL: `{APP_BASE_URL}/api/auth/callback/github`. |
+
+## AWS setup
+
+The AWS step of `npx @millionsend/setup` creates everything MillionSend needs
+in AWS — IAM policy + user + access key, the SNS event topic, and the SES
+configuration set. With an HTTPS `APP_BASE_URL` events are pushed to your
+host; otherwise setup adds an SQS queue (`millionsend-events`) that the worker
+long-polls, so events work without any public URL.
+
+Run it anywhere Node 18+ and your AWS admin credentials live — laptop or
+server; the MillionSend server never needs admin credentials. It verifies your
+AWS identity, shows the plan, creates everything, and writes the `AWS_*` lines
+into the `.env` in the current directory (no `.env` there → it prints them to
+paste where MillionSend runs). `--dry-run` prints the full plan and exits.
+
+`npx @millionsend/setup teardown` deletes everything the setup created,
+including all access keys of the `millionsend` IAM user, so a running server
+stops sending. Re-running setup is safe, but each run mints a new access key —
+delete stale ones in the IAM console.
+
+No Node on the server? The same CLI ships inside the image:
+
+```sh
+docker run --rm -it --user root -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:edge setup
+```
+
+Prefer not to run a CLI? The dashboard's **Settings → SES** page offers a
+CloudFormation quick-create link and a pre-filled shell script that create the
+same resources.
+
+## SES events (bounces, complaints, deliveries)
+
+The setup CLI always configures this. A public HTTPS `APP_BASE_URL` gets an
+SNS subscription pushing to your host; any other `APP_BASE_URL` gets an SQS
+queue (`millionsend-events`) that the worker long-polls — its URL lands in
+`.env` as `SQS_QUEUE_URL`. Either way `SNS_TOPIC_ARNS` gates ingestion: events
+are only accepted from topics on that allowlist.
+
+Manual equivalent: an SNS standard topic (same region as SES) subscribed to
+`https://<your-host>/ses/events` (or to an SQS queue whose policy lets the
+topic send and whose URL is in `.env` as `SQS_QUEUE_URL`), its ARN in `.env`
+as `SNS_TOPIC_ARNS`; an SES configuration set with an event destination
+pointing at the topic, its name in `.env` as `SES_CONFIGURATION_SET`. Restart
+after setting them. Without `SES_CONFIGURATION_SET`, sends go out without a
+configuration set and emit no events.
+
+The HTTPS SNS subscription confirms itself once the app runs with
+`SNS_TOPIC_ARNS` set; if it stays pending, use "Request confirmation" on it in
+the SNS console. Same-account SQS subscriptions need no confirmation.
+
+## SMTP relay
+
+A drop-in SMTP relay for software that speaks SMTP instead of HTTP — legacy
+apps, CMS plugins, anything with an "SMTP settings" form. Messages go through
+the same accept pipeline as `POST /emails`: same domain verification,
+suppression checks, request logging, and delivery events.
+
+Connection details:
+
+- **Host:** wherever the `smtp` service is reachable (the compose files
+  publish it on the Docker host).
+- **Port:** `2587` (`SMTP_PORT` to change).
+- **Username:** `millionsend` (fixed).
+- **Password:** an `ms_` API key from the dashboard.
+- **Encryption:** plaintext by default; STARTTLS is offered (and required
+  before AUTH) when `SMTP_TLS_CERT_PATH` and `SMTP_TLS_KEY_PATH` point at a
+  PEM keypair. Without one, keep the port inside your own network or behind a
+  TLS-terminating load balancer.
+
+Nodemailer example:
+
+```js
+import nodemailer from "nodemailer";
+
+const transport = nodemailer.createTransport({
+  host: "localhost",
+  port: 2587,
+  auth: { user: "millionsend", pass: "ms_..." },
+});
+
+await transport.sendMail({
+  from: "you@yourdomain.com",
+  to: "someone@example.com",
+  subject: "Hello",
+  html: "<p>Sent over SMTP.</p>",
+});
+```
+
+The `smtp` service is already defined in the compose files and starts with
+`docker compose up`. It is optional — remove the service if you only send
+through the HTTP API.
+
+## Documentation site
+
+The image can also serve this documentation site: a `docs` compose service
+runs with `PROCESS=docs` and publishes port `3002` (host side tunable via
+`DOCS_PORT`). It needs no database and is entirely optional.
+
+## Signup policy
+
+The first user to register becomes the initial account — no configuration
+needed. After that, registration is closed: anyone with an account can create
+API keys that send through your SES account, so signup stays off unless you
+opt in with `ALLOW_SIGNUP=true`. Keep port 3000 off the public internet unless
+you have opened signup deliberately.
+
+## Operations
+
+- Send rate and email retention are managed in the dashboard: **Settings →
+  Instance** (owner/admin). Defaults are 14/s and 30 days until changed there;
+  the worker picks up a rate change within a minute, retention on the next
+  purge run.
+- One worker container only: the SES rate limiter is in-memory, so N worker
+  replicas send at N × the configured send rate. Scale the worker vertically,
+  or divide the rate by the replica count.
+- To run processes in separate containers, set `PROCESS` to `api`, `worker`,
+  `web`, `smtp`, or `docs` per container (default `all` = api + worker + web).
+- Email bodies are encrypted at rest with `MASTER_ENCRYPTION_KEY` and purged
+  after the retention window. Back up the key with the database.

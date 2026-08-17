@@ -1,0 +1,31 @@
+---
+title: Topics
+description: Granular subscription categories with per-contact opt-in state.
+---
+
+Topics are subscription categories — "Product updates", "Newsletter",
+"Promotions" — that give recipients finer control than a single global
+unsubscribe.
+
+Each topic has a `default_subscription` of `opt_in` or `opt_out`, fixed at
+creation:
+
+- `opt_in` — every contact is subscribed unless they opt out.
+- `opt_out` — contacts are only included after they explicitly opt in.
+
+## How topics apply
+
+- **Broadcasts** can target a topic. The fan-out includes only contacts whose
+  effective subscription for that topic is "subscribed" (their explicit choice
+  if they made one, the topic default otherwise), and always excludes globally
+  unsubscribed contacts.
+- **The hosted unsubscribe page** lists the team's topics, so a recipient can
+  opt out of one category while staying subscribed to the rest — or
+  unsubscribe from everything.
+
+## API
+
+`POST/GET/DELETE /topics` and `GET /topics/{id}` manage topics; a contact's
+choices are written with `PATCH /contacts/{id}/topics`, passing entries like
+`{ "id": "<topic-id>", "subscription": "opt_in" }`. See the
+[API reference](/api-reference).

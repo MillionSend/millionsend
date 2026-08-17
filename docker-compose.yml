@@ -43,5 +43,17 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  docs:
+    build: .
+    env_file: .env
+    environment:
+      PROCESS: docs
+    ports:
+      # DOCS_PORT remaps only the host side (the docs process is fixed at
+      # 3002 inside the container). No database dependency: the docs site is
+      # static content.
+      - "${DOCS_PORT:-3002}:3002" # documentation site
+    restart: unless-stopped
+
 volumes:
   pgdata:

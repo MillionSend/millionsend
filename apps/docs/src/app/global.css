@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/black.css";
+@import "fumadocs-ui/css/preset.css";
+@import "fumadocs-openapi/css/preset.css";
+
+/*
+ * MillionSend brand ("Rollover"): void black surfaces, bone text, one steel
+ * accent. Dark is the primary theme; light keeps the neutral preset.
+ */
+.dark {
+  --color-fd-background: hsl(240, 2%, 4%);
+  --color-fd-foreground: hsl(42, 29%, 94%);
+  --color-fd-card: hsl(240, 3%, 5%);
+  --color-fd-card-foreground: hsl(42, 29%, 94%);
+  --color-fd-popover: hsl(240, 3%, 6%);
+  --color-fd-popover-foreground: hsl(42, 29%, 94%);
+  --color-fd-border: hsl(240, 5%, 13%);
+  --color-fd-primary: hsl(42, 29%, 94%);
+  --color-fd-primary-foreground: hsl(240, 2%, 4%);
+  --color-fd-muted: hsl(240, 3%, 8%);
+  --color-fd-muted-foreground: hsl(212, 8%, 63%);
+  --color-fd-accent: hsl(240, 4%, 12%);
+  --color-fd-accent-foreground: hsl(42, 29%, 94%);
+  --color-fd-ring: hsl(212, 8%, 54%);
+}

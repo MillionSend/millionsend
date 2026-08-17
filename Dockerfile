@@ -12,6 +12,7 @@ FROM deps AS build
 COPY . .
 RUN pnpm install --frozen-lockfile --offline
 RUN pnpm --filter @millionsend/web build
+RUN pnpm --filter @millionsend/docs build
 
 # The runtime keeps the full workspace (source + node_modules): api and worker
 # run TypeScript directly via tsx (which resolves NodeNext ".js" specifiers to
@@ -24,7 +25,7 @@ ENV NODE_ENV=production
 RUN groupadd --system millionsend && useradd --system --gid millionsend millionsend
 COPY --from=build --chown=millionsend:millionsend /app /app
 USER millionsend
-EXPOSE 3000 3001
+EXPOSE 3000 3001 3002
 # ENTRYPOINT (not CMD) so `docker compose run millionsend setup` reaches
 # start.mjs as argv instead of replacing the command.
 ENTRYPOINT ["node", "scripts/start.mjs"]

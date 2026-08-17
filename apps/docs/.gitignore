@@ -1,0 +1,9 @@
+# Build artifacts
+.next/
+.source/
+next-env.d.ts
+*.tsbuildinfo
+
+# Generated from apps/api at build time (scripts/generate-openapi.ts)
+/public/openapi.json
+/content/docs/api-reference/endpoints/

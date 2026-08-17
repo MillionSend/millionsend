@@ -1,0 +1,44 @@
+---
+title: Domains
+description: Verify sending domains with guided DNS, BYODKIM, and per-domain configuration.
+---
+
+Every email must be sent from a domain your team has **verified** — the API
+rejects any other `from` address with `422`. Domains are added and verified in
+the dashboard.
+
+## Verification
+
+Adding a domain creates an SES identity in your chosen region and shows the
+DNS records to add:
+
+- **DKIM** — a single `millionsend._domainkey` TXT record. MillionSend
+  generates an RSA-2048 keypair per domain and hands the private key to SES
+  (BYODKIM), so verification is one TXT record instead of three CNAMEs. The
+  private key is never stored.
+- **MAIL FROM** — MX and SPF (TXT) records for the bounce subdomain.
+
+Two verification signals are shown side by side:
+
+- **SES status** — what SES reports. SES caches verification and can lag
+  after you change records.
+- **Live DNS check** — MillionSend resolves each record itself and reports
+  Found / Missing / Mismatch immediately.
+
+## Per-domain configuration
+
+Once verified, a domain's **Configuration** tab controls:
+
+- **Click tracking** — off by default. When on, links are rewritten through
+  MillionSend's own redirect endpoint to record `email.clicked` events. When
+  off, your links ship untouched.
+- **Open tracking** — off by default. When on, a tracking pixel records
+  `email.opened` events. Tracking is app-layer (MillionSend's endpoints, or
+  your custom tracking subdomain) — never SES's link rewriting.
+- **TLS mode** — `opportunistic` (default) or `enforced`, applied via the
+  domain's SES configuration set.
+
+## API keys and domains
+
+An API key can be scoped to a single domain; such a key can only send from
+that domain (other domains return `403 restricted_api_key`).

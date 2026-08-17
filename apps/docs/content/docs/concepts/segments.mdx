@@ -1,0 +1,28 @@
+---
+title: Segments
+description: Saved filters over your contacts, usable as broadcast targets.
+---
+
+A segment is a **saved filter** over the team's contacts — it stores a filter
+expression, not a member list. Membership is evaluated live: a contact that
+starts matching the filter is in the segment immediately, and the contact
+count you see is computed at read time.
+
+Filters match on contact fields (email, name, subscribe state, creation date)
+and on [custom properties](/concepts/contacts#what-a-contact-holds), with
+operators such as equals, contains, is-set / is-not-set, and date comparisons.
+Conditions combine with and/or.
+
+## Using segments
+
+- **Broadcasts** — target a segment instead of all contacts. The fan-out
+  resolves membership at send time using the same filter translator as the
+  contact count, so what you preview is what sends.
+- **Dashboard filtering** — the Contacts view can be filtered by segment, and
+  CSV export respects the active segment filter.
+
+## API
+
+`POST/GET/PATCH/DELETE /segments` and `GET /segments/{id}` (which includes the
+live `contact_count`) — see the [API reference](/api-reference). Invalid
+filter expressions are rejected with `422` and never stored.

@@ -1,0 +1,46 @@
+---
+title: Contacts
+description: Team-global contacts with subscribe state and custom properties.
+---
+
+Contacts are **team-global**: one list per team, one row per email address
+(case-insensitive unique). There is no "audiences" concept — a contact belongs
+to your team directly, and you target subsets with
+[segments](/concepts/segments) and [topics](/concepts/topics).
+
+If you are migrating from Resend: the Resend SDK's contact methods work
+against MillionSend whenever `audienceId` is omitted — the contact paths are
+the same, minus the audience nesting.
+
+## What a contact holds
+
+- `email` — the identity. Creating a second contact with the same email (any
+  casing) returns `409`.
+- `first_name`, `last_name`
+- `unsubscribed` — the global subscribe state. Unsubscribed contacts are
+  excluded from every broadcast.
+- `properties` — a flat map of custom string values (`plan: "pro"`,
+  `city: "Berlin"`). Nested objects and arrays are rejected with `422`.
+  Properties feed template merge fields and segment filters.
+
+## API
+
+Contacts are managed via `POST/GET/PATCH/DELETE /contacts` and
+`GET /contacts/{id}` — see the [API reference](/api-reference). The `{id}`
+path segment accepts either the contact UUID or its email address; email
+matching is case-insensitive.
+
+Topic subscriptions are set per contact with `PATCH /contacts/{id}/topics`.
+
+## CSV import and export
+
+The dashboard imports contacts from CSV (parsed client-side, then created in
+bulk) and exports the current list — including segment or topic filtered
+views — back to CSV.
+
+## Unsubscribes
+
+Broadcast emails carry RFC 8058 one-click `List-Unsubscribe` headers and a
+hosted unsubscribe page. A recipient can unsubscribe globally or opt out of
+individual [topics](/concepts/topics). Global unsubscribes set
+`unsubscribed: true` on the contact.
