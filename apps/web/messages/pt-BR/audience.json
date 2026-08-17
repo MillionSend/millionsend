@@ -61,8 +61,6 @@
     "created": "Criada",
     "menu": "Ações da audiência",
     "delete": "Excluir",
-    "empty": "Nenhuma audiência ainda.",
-    "emptyHint": "Uma audiência guarda contatos e seu estado de inscrição.",
     "loadError": "Não foi possível carregar as audiências.",
     "retry": "Tentar novamente",
     "createTitle": "Criar audiência",
