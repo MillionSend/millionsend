@@ -51,7 +51,7 @@
     "apiKey": "Chave de API",
     "events": "Eventos do e-mail",
     "noEvents": "0 eventos.",
-    "eventsUnreachable": "Nenhum outro evento vai chegar — a ingestão de eventos não está configurada. Rode o setup novamente para criar a fila de eventos (não precisa de URL pública).",
+    "eventsUnreachable": "Ingestão de eventos desligada — rode o setup para ativá-la.",
     "event": {
       "rendering_failure": "Falha de renderização"
     },
