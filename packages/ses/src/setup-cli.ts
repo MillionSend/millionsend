@@ -7,8 +7,12 @@ import { SES_REGIONS, type SesRegion } from "./domain-identity.js";
 import {
   createSetupClients,
   envTemplate,
+  eventsPlan,
+  httpsOrigin,
+  runEventsSetup,
   runSetup,
   runTeardown,
+  SETUP_NAMES,
   setupEnvEntries,
   setupPlan,
   teardownPlan,
@@ -258,14 +262,39 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
     // --- aws step ---
     const hasKeys = (envValue(env, "AWS_ACCESS_KEY_ID") ?? "") !== "";
+    const hasEvents = (envValue(env, "SNS_TOPIC_ARNS") ?? "") !== "";
     if (hasKeys) console.log(dim("\nAWS access key already in .env."));
-    const awsPrompt = hasKeys
-      ? "Re-run the AWS setup (mints a NEW access key)?"
-      : "\nCreate the AWS resources now (IAM user + key, SNS events, SES configuration set)?";
-    if (await offer(rl, awsPrompt, interactive && !hasKeys)) {
-      await awsStep(rl, interactive, appBaseUrl, writeEnv);
+    if (hasKeys && !hasEvents) {
+      // The common re-run trap: sends work but events were never set up, and
+      // a full re-run both mints an unwanted key and can hit the 2-key IAM
+      // limit. Offer the events-only path first — it touches no IAM.
+      const choice = await selectPrompt(rl, {
+        label: "Event ingestion (delivered/bounce tracking) is not set up. Add it?",
+        initial: interactive ? "events" : "skip",
+        options: [
+          {
+            value: "events",
+            label: "Add event ingestion",
+            hint: "SNS topic + queue + configuration set; keeps the existing key",
+          },
+          { value: "full", label: "Full AWS re-run", hint: "also mints a NEW access key" },
+          { value: "skip", label: "Skip" },
+        ],
+      });
+      if (choice === "skip") {
+        console.log(dim("AWS step skipped."));
+      } else {
+        await awsStep(rl, interactive, appBaseUrl, writeEnv, choice === "events");
+      }
     } else {
-      console.log(dim("AWS step skipped."));
+      const awsPrompt = hasKeys
+        ? "Re-run the AWS setup (mints a NEW access key)?"
+        : "\nCreate the AWS resources now (IAM user + key, SNS events, SES configuration set)?";
+      if (await offer(rl, awsPrompt, interactive && !hasKeys)) {
+        await awsStep(rl, interactive, appBaseUrl, writeEnv);
+      } else {
+        console.log(dim("AWS step skipped."));
+      }
     }
 
     // --- social login step (before launch, so the stack starts with it) ---
@@ -417,14 +446,17 @@ async function chooseRegion(rl: LineReader): Promise<string | null> {
 
 /**
  * The AWS provisioning step: identity, region, plan, create, keys into .env.
- * Failures print their hint and return — the wizard continues to the launch
- * step, since a stack can boot (not send) without AWS keys.
+ * eventsOnly skips the IAM part (no new access key) and provisions just the
+ * events pipeline. Failures print their hint and return — the wizard
+ * continues to the launch step, since a stack can boot (not send) without
+ * AWS keys.
  */
 async function awsStep(
   rl: LineReader,
   interactive: boolean,
   appBaseUrl: string,
   writeEnv: (entries: Record<string, string>) => boolean,
+  eventsOnly = false,
 ): Promise<void> {
   const accountId = await resolveIdentity(rl);
   if (accountId === null) return;
@@ -432,17 +464,28 @@ async function awsStep(
   if (region === null) return;
 
   console.log("\nPlan:");
-  for (const line of setupPlan({ region, appBaseUrl })) console.log(`  · ${line}`);
+  const plan = eventsOnly ? eventsPlan : setupPlan;
+  for (const line of plan({ region, appBaseUrl })) console.log(`  · ${line}`);
   if (!(await offer(rl, "\nProceed?", interactive))) return;
 
-  let result: Awaited<ReturnType<typeof runSetup>>;
+  const input = {
+    region,
+    accountId,
+    appBaseUrl,
+    onStep: (line: string) => console.log(`==> ${line}`),
+  };
+  let entries: Record<string, string>;
   try {
-    result = await runSetup(createSetupClients(region), {
-      region,
-      accountId,
-      appBaseUrl,
-      onStep: (line) => console.log(`==> ${line}`),
-    });
+    if (eventsOnly) {
+      const events = await runEventsSetup(createSetupClients(region), input);
+      entries = {
+        SNS_TOPIC_ARNS: events.topicArn,
+        SES_CONFIGURATION_SET: SETUP_NAMES.configurationSet,
+        ...(events.queueUrl ? { SQS_QUEUE_URL: events.queueUrl } : {}),
+      };
+    } else {
+      entries = setupEnvEntries(region, await runSetup(createSetupClients(region), input));
+    }
   } catch (error) {
     console.error(
       `AWS setup failed: ${(error as Error).message}\nFix that and re-run — resources it already created are adopted, not duplicated.`,
@@ -450,16 +493,15 @@ async function awsStep(
     return;
   }
 
-  const entries = setupEnvEntries(region, result);
   if (writeEnv(entries)) {
-    console.log("\nAWS keys written to .env.");
+    console.log(`\n${eventsOnly ? "Event ingestion values" : "AWS keys"} written to .env.`);
   } else {
     const block = Object.entries(entries)
       .map(([key, value]) => `${key}=${value}`)
       .join("\n");
     console.log(`\nDone. Paste into .env where MillionSend runs, then restart it:\n\n${block}\n`);
   }
-  if (result.topicArn) {
+  if (httpsOrigin(appBaseUrl)) {
     console.log(
       "The SNS subscription confirms itself once the app runs with these values;\nif it stays pending, use 'Request confirmation' on it in the SNS console.",
     );

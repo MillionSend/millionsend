@@ -30,6 +30,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   httpsOrigin,
+  runEventsSetup,
   runSetup,
   runTeardown,
   type SetupClients,
@@ -169,6 +170,18 @@ describe("runSetup", () => {
     expect(doc.Statement[1]?.Principal).toEqual({
       AWS: "arn:aws:iam::123456789012:user/millionsend",
     });
+  });
+
+  it("runEventsSetup provisions events without touching IAM", async () => {
+    const { clients, calls } = fakeClients();
+    const result = await runEventsSetup(clients, { ...input, appBaseUrl: null });
+    expect(result).toEqual({
+      topicArn: "arn:aws:sns:us-east-1:123456789012:millionsend-events",
+      queueUrl: "https://sqs.us-east-1.amazonaws.com/123456789012/millionsend-events",
+    });
+    expect(calls.some((c) => c instanceof CreatePolicyCommand)).toBe(false);
+    expect(calls.some((c) => c instanceof CreateAccessKeyCommand)).toBe(false);
+    expect(calls.some((c) => c instanceof CreateConfigurationSetCommand)).toBe(true);
   });
 
   it("adopts an existing queue when CreateQueue reports a name conflict", async () => {
