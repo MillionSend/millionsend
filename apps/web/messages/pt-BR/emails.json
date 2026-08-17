@@ -51,7 +51,7 @@
     "apiKey": "Chave de API",
     "events": "Eventos do e-mail",
     "noEvents": "0 eventos.",
-    "eventsUnreachable": "Nenhum outro evento vai chegar — eventos de entrega exigem uma APP_BASE_URL https pública. Rode o setup novamente para ativá-los.",
+    "eventsUnreachable": "Nenhum outro evento vai chegar — a ingestão de eventos não está configurada. Rode o setup novamente para criar a fila de eventos (não precisa de URL pública).",
     "event": {
       "rendering_failure": "Falha de renderização"
     },

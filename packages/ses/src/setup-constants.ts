@@ -7,6 +7,7 @@ export const SETUP_NAMES = {
   policy: "millionsend-ses",
   user: "millionsend",
   topic: "millionsend-events",
+  queue: "millionsend-events",
   configurationSet: "millionsend",
   eventDestination: "millionsend-events",
 } as const;
@@ -95,6 +96,12 @@ AWS_SECRET_ACCESS_KEY=
 # See SELF_HOSTING.md for the SNS setup checklist.
 SNS_TOPIC_ARNS=
 
+# SQS queue the worker long-polls for SES events when this deployment has no
+# public https URL for SNS to push to (setup creates it in that case). Only
+# messages from topics in SNS_TOPIC_ARNS are accepted. Leave unset when SNS
+# delivers to https://<your-host>/ses/events directly.
+SQS_QUEUE_URL=
+
 # SES configuration set applied to sends that have no per-domain configuration
 # set. Point its event destination at the SNS topic above so delivery events
 # reach MillionSend. Unset sends without a configuration set.
@@ -170,6 +177,34 @@ export function snsTopicPolicy(topicArn: string, accountId: string): object {
         Action: "sns:Publish",
         Resource: topicArn,
         Condition: { StringEquals: { "AWS:SourceAccount": accountId } },
+      },
+    ],
+  };
+}
+
+/**
+ * Events-queue policy: only the events topic may write, and the millionsend
+ * IAM user may consume. The consume grant lives here (resource policy) rather
+ * than in SES_IAM_POLICY because a same-account resource policy suffices on
+ * SQS, and the identity policy — created once, adopted on re-runs — could not
+ * gain new statements on deployments that predate the queue.
+ */
+export function sqsQueuePolicy(queueArn: string, topicArn: string, accountId: string): object {
+  return {
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Effect: "Allow",
+        Principal: { Service: "sns.amazonaws.com" },
+        Action: "sqs:SendMessage",
+        Resource: queueArn,
+        Condition: { ArnEquals: { "aws:SourceArn": topicArn } },
+      },
+      {
+        Effect: "Allow",
+        Principal: { AWS: `arn:aws:iam::${accountId}:user/${SETUP_NAMES.user}` },
+        Action: ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
+        Resource: queueArn,
       },
     ],
   };

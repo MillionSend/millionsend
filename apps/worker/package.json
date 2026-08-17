@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.750.0",
+    "@aws-sdk/client-sqs": "^3.1111.0",
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",

@@ -1,3 +1,4 @@
+import { SQSClient } from "@aws-sdk/client-sqs";
 import { env } from "@millionsend/config";
 import {
   deriveTrackingKey,
@@ -24,6 +25,7 @@ import { processSesEvent } from "./handlers/process-ses-event.js";
 import { sendBroadcast } from "./handlers/send-broadcast.js";
 import { createTokenBucket, sendEmail } from "./handlers/send-email.js";
 import { createSesSender } from "./ses-sender.js";
+import { startSqsPoller } from "./sqs-poller.js";
 
 if (!env.MASTER_ENCRYPTION_KEY) {
   // Cloud KMS keyring arrives with the AWS package; until then both modes
@@ -145,6 +147,37 @@ await queue.work("ses.event", async (payload) => {
     enqueueWebhookDelivery: enqueueWebhook,
   });
 });
+
+// SES events over SQS for deployments without a public https URL. The topic
+// allowlist gates it exactly like the https endpoint — a queue URL without
+// the allowlist stays inert instead of accepting arbitrary payloads.
+if (env.SQS_QUEUE_URL) {
+  const allowedTopicArns = env.SNS_TOPIC_ARNS ?? [];
+  if (allowedTopicArns.length === 0) {
+    console.warn("SQS_QUEUE_URL is set but SNS_TOPIC_ARNS is empty — SQS event polling disabled");
+  } else {
+    startSqsPoller({
+      sqs: new SQSClient({
+        region: env.AWS_REGION,
+        ...(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
+          ? {
+              credentials: {
+                accessKeyId: env.AWS_ACCESS_KEY_ID,
+                secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+              },
+            }
+          : {}),
+      }),
+      queueUrl: env.SQS_QUEUE_URL,
+      allowedTopicArns,
+      enqueueSesEvent: async (event, snsMessageId) => {
+        await queue.send("ses.event", { event, snsMessageId }, { dedupeKey: snsMessageId });
+      },
+      log: (line) => console.warn(line),
+    });
+    console.log(`sqs poller: long-polling ${env.SQS_QUEUE_URL}`);
+  }
+}
 
 await queue.work("webhook.deliver", async (payload) => {
   await deliverWebhook(

@@ -27,11 +27,23 @@ import {
   SubscribeCommand,
 } from "@aws-sdk/client-sns";
 import {
+  CreateQueueCommand,
+  type CreateQueueCommandOutput,
+  DeleteQueueCommand,
+  GetQueueAttributesCommand,
+  type GetQueueAttributesCommandOutput,
+  GetQueueUrlCommand,
+  type GetQueueUrlCommandOutput,
+  SetQueueAttributesCommand,
+  SQSClient,
+} from "@aws-sdk/client-sqs";
+import {
   httpsOrigin,
   SES_EVENT_TYPES,
   SES_IAM_POLICY,
   SETUP_NAMES,
   snsTopicPolicy,
+  sqsQueuePolicy,
 } from "./setup-constants.js";
 
 export * from "./setup-constants.js";
@@ -61,6 +73,13 @@ type SetupSnsCommand =
   | SubscribeCommand
   | DeleteTopicCommand;
 
+type SetupSqsCommand =
+  | CreateQueueCommand
+  | GetQueueUrlCommand
+  | GetQueueAttributesCommand
+  | SetQueueAttributesCommand
+  | DeleteQueueCommand;
+
 type SetupSesCommand =
   | CreateConfigurationSetCommand
   | CreateConfigurationSetEventDestinationCommand
@@ -76,6 +95,9 @@ export interface SetupIamClient {
 export interface SetupSnsClient {
   send(command: SetupSnsCommand): Promise<unknown>;
 }
+export interface SetupSqsClient {
+  send(command: SetupSqsCommand): Promise<unknown>;
+}
 export interface SetupSesClient {
   send(command: SetupSesCommand): Promise<unknown>;
 }
@@ -83,6 +105,7 @@ export interface SetupSesClient {
 export interface SetupClients {
   iam: SetupIamClient;
   sns: SetupSnsClient;
+  sqs: SetupSqsClient;
   ses: SetupSesClient;
 }
 
@@ -94,6 +117,7 @@ export function createSetupClients(region: string): SetupClients {
   return {
     iam: new IAMClient({ region }),
     sns: new SNSClient({ region }),
+    sqs: new SQSClient({ region }),
     ses: new SESv2Client({ region }),
   };
 }
@@ -101,7 +125,7 @@ export function createSetupClients(region: string): SetupClients {
 export interface SetupInput {
   region: string;
   accountId: string;
-  /** Events part (SNS topic + configuration set) is included only for a valid https URL. */
+  /** An https URL gets events pushed to it; anything else gets an SQS queue the worker polls. */
   appBaseUrl?: string | null | undefined;
   onStep?: ((line: string) => void) | undefined;
 }
@@ -109,8 +133,9 @@ export interface SetupInput {
 export interface SetupResult {
   accessKeyId: string;
   secretAccessKey: string;
-  /** null when the events part was skipped. */
   topicArn: string | null;
+  /** null when events are delivered over https instead of a polled queue. */
+  queueUrl: string | null;
 }
 
 /** Human-readable plan of what runSetup creates with the same input. */
@@ -120,17 +145,11 @@ export function setupPlan(input: Pick<SetupInput, "region" | "appBaseUrl">): str
     `IAM policy ${SETUP_NAMES.policy} (minimal SES send + identity actions)`,
     `IAM user ${SETUP_NAMES.user} with the policy attached`,
     `Access key for ${SETUP_NAMES.user} — a NEW key on every run`,
+    origin
+      ? `SNS topic ${SETUP_NAMES.topic} in ${input.region}, subscribed to ${origin}/ses/events`
+      : `SNS topic ${SETUP_NAMES.topic} in ${input.region}, delivering to SQS queue ${SETUP_NAMES.queue} (no public https URL — the worker polls it)`,
+    `SES configuration set ${SETUP_NAMES.configurationSet} publishing ${SES_EVENT_TYPES.length} event types to the topic`,
   ];
-  if (origin) {
-    lines.push(
-      `SNS topic ${SETUP_NAMES.topic} in ${input.region}, subscribed to ${origin}/ses/events`,
-      `SES configuration set ${SETUP_NAMES.configurationSet} publishing ${SES_EVENT_TYPES.length} event types to the topic`,
-    );
-  } else {
-    lines.push(
-      "(events skipped: no https APP_BASE_URL — sends work, but no bounce/delivery events)",
-    );
-  }
   return lines;
 }
 
@@ -195,22 +214,23 @@ export async function runSetup(clients: SetupClients, input: SetupInput): Promis
   const secretAccessKey = key.AccessKey?.SecretAccessKey;
   if (!accessKeyId || !secretAccessKey) throw new Error("CreateAccessKey returned no key material");
 
-  let topicArn: string | null = null;
+  step(`SNS topic ${SETUP_NAMES.topic}`);
+  // CreateTopic is idempotent: it returns the existing topic's ARN.
+  const topic = (await clients.sns.send(
+    new CreateTopicCommand({ Name: SETUP_NAMES.topic }),
+  )) as CreateTopicCommandOutput;
+  if (!topic.TopicArn) throw new Error("CreateTopic returned no ARN");
+  const topicArn = topic.TopicArn;
+  await clients.sns.send(
+    new SetTopicAttributesCommand({
+      TopicArn: topicArn,
+      AttributeName: "Policy",
+      AttributeValue: JSON.stringify(snsTopicPolicy(topicArn, input.accountId)),
+    }),
+  );
+
+  let queueUrl: string | null = null;
   if (origin) {
-    step(`SNS topic ${SETUP_NAMES.topic}`);
-    // CreateTopic is idempotent: it returns the existing topic's ARN.
-    const topic = (await clients.sns.send(
-      new CreateTopicCommand({ Name: SETUP_NAMES.topic }),
-    )) as CreateTopicCommandOutput;
-    if (!topic.TopicArn) throw new Error("CreateTopic returned no ARN");
-    topicArn = topic.TopicArn;
-    await clients.sns.send(
-      new SetTopicAttributesCommand({
-        TopicArn: topicArn,
-        AttributeName: "Policy",
-        AttributeValue: JSON.stringify(snsTopicPolicy(topicArn, input.accountId)),
-      }),
-    );
     // Re-subscribing the same endpoint returns the existing subscription.
     await clients.sns.send(
       new SubscribeCommand({
@@ -219,33 +239,71 @@ export async function runSetup(clients: SetupClients, input: SetupInput): Promis
         Endpoint: `${origin}/ses/events`,
       }),
     );
-
-    step(`SES configuration set ${SETUP_NAMES.configurationSet}`);
-    await ignoring(
-      clients.ses.send(
-        new CreateConfigurationSetCommand({
-          ConfigurationSetName: SETUP_NAMES.configurationSet,
-        }),
-      ),
-      ["AlreadyExistsException"],
+  } else {
+    // No public https URL for SNS to push to — deliver into an SQS queue the
+    // worker long-polls instead. A same-account SNS→SQS subscription needs no
+    // confirmation handshake.
+    step(`SQS events queue ${SETUP_NAMES.queue}`);
+    let url: string | undefined;
+    try {
+      const created = (await clients.sqs.send(
+        new CreateQueueCommand({ QueueName: SETUP_NAMES.queue }),
+      )) as CreateQueueCommandOutput;
+      url = created.QueueUrl;
+    } catch (error) {
+      // Attribute drift on an existing queue: adopt it instead of failing.
+      if (!["QueueNameExists", "QueueAlreadyExists"].includes(errorName(error))) throw error;
+      const existing = (await clients.sqs.send(
+        new GetQueueUrlCommand({ QueueName: SETUP_NAMES.queue }),
+      )) as GetQueueUrlCommandOutput;
+      url = existing.QueueUrl;
+    }
+    if (!url) throw new Error("CreateQueue returned no URL");
+    const attrs = (await clients.sqs.send(
+      new GetQueueAttributesCommand({ QueueUrl: url, AttributeNames: ["QueueArn"] }),
+    )) as GetQueueAttributesCommandOutput;
+    const queueArn = attrs.Attributes?.QueueArn;
+    if (!queueArn) throw new Error("GetQueueAttributes returned no QueueArn");
+    // Overwritten on every run, so re-runs heal a hand-edited policy.
+    await clients.sqs.send(
+      new SetQueueAttributesCommand({
+        QueueUrl: url,
+        Attributes: {
+          Policy: JSON.stringify(sqsQueuePolicy(queueArn, topicArn, input.accountId)),
+        },
+      }),
     );
-    await ignoring(
-      clients.ses.send(
-        new CreateConfigurationSetEventDestinationCommand({
-          ConfigurationSetName: SETUP_NAMES.configurationSet,
-          EventDestinationName: SETUP_NAMES.eventDestination,
-          EventDestination: {
-            Enabled: true,
-            MatchingEventTypes: [...SES_EVENT_TYPES],
-            SnsDestination: { TopicArn: topicArn },
-          },
-        }),
-      ),
-      ["AlreadyExistsException"],
+    await clients.sns.send(
+      new SubscribeCommand({ TopicArn: topicArn, Protocol: "sqs", Endpoint: queueArn }),
     );
+    queueUrl = url;
   }
 
-  return { accessKeyId, secretAccessKey, topicArn };
+  step(`SES configuration set ${SETUP_NAMES.configurationSet}`);
+  await ignoring(
+    clients.ses.send(
+      new CreateConfigurationSetCommand({
+        ConfigurationSetName: SETUP_NAMES.configurationSet,
+      }),
+    ),
+    ["AlreadyExistsException"],
+  );
+  await ignoring(
+    clients.ses.send(
+      new CreateConfigurationSetEventDestinationCommand({
+        ConfigurationSetName: SETUP_NAMES.configurationSet,
+        EventDestinationName: SETUP_NAMES.eventDestination,
+        EventDestination: {
+          Enabled: true,
+          MatchingEventTypes: [...SES_EVENT_TYPES],
+          SnsDestination: { TopicArn: topicArn },
+        },
+      }),
+    ),
+    ["AlreadyExistsException"],
+  );
+
+  return { accessKeyId, secretAccessKey, topicArn, queueUrl };
 }
 
 /** Human-readable plan of what runTeardown deletes. */
@@ -253,6 +311,7 @@ export function teardownPlan(region: string): string[] {
   return [
     `SES configuration set ${SETUP_NAMES.configurationSet} (and its event destination)`,
     `SNS topic ${SETUP_NAMES.topic} in ${region} (and its subscriptions)`,
+    `SQS events queue ${SETUP_NAMES.queue}, if one was created`,
     `ALL access keys of IAM user ${SETUP_NAMES.user} — a running server using them stops sending`,
     `IAM user ${SETUP_NAMES.user} and policy ${SETUP_NAMES.policy}`,
   ];
@@ -280,6 +339,18 @@ export async function runTeardown(
     ),
     ["NotFoundException"],
   );
+
+  step(`SQS events queue ${SETUP_NAMES.queue}`);
+  try {
+    const existing = (await clients.sqs.send(
+      new GetQueueUrlCommand({ QueueName: SETUP_NAMES.queue }),
+    )) as GetQueueUrlCommandOutput;
+    if (existing.QueueUrl) {
+      await clients.sqs.send(new DeleteQueueCommand({ QueueUrl: existing.QueueUrl }));
+    }
+  } catch (error) {
+    if (errorName(error) !== "QueueDoesNotExist") throw error;
+  }
 
   step(`IAM user ${SETUP_NAMES.user}`);
   let keys: ListAccessKeysCommandOutput | null = null;
@@ -327,6 +398,7 @@ export function setupEnvEntries(region: string, result: SetupResult): Record<str
     entries.SNS_TOPIC_ARNS = result.topicArn;
     entries.SES_CONFIGURATION_SET = SETUP_NAMES.configurationSet;
   }
+  if (result.queueUrl) entries.SQS_QUEUE_URL = result.queueUrl;
   return entries;
 }
 

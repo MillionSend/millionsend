@@ -82,6 +82,11 @@ export const env = createEnv({
     // without a topic allowlist would accept any AWS account's topic.
     SNS_TOPIC_ARNS: z.string().optional().transform(parseSnsTopicArns),
 
+    // SQS queue the worker long-polls for SES events when SNS has no public
+    // https endpoint to push to. Requires SNS_TOPIC_ARNS — the same allowlist
+    // authenticates messages read from the queue.
+    SQS_QUEUE_URL: z.url().optional(),
+
     // SES configuration set whose event destination feeds the SNS topic
     // (SELF_HOSTING checklist). Used for sends whenever a domain has no
     // per-domain set recorded; without it SES publishes no events.
