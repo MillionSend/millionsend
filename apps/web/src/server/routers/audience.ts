@@ -2,7 +2,7 @@ import { resultRows } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
@@ -93,6 +93,37 @@ export const audienceRouter = router({
           .returning({ id: a.id });
         if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
         return { id: row.id };
+      }),
+
+    /**
+     * Daily additions and unsubscribes for the contacts-page growth chart.
+     * Unsubscribe days come from unsubscribed_at, so rows unsubscribed before
+     * that column existed carry their backfilled (approximate) time.
+     */
+    growth: teamProcedure
+      .input(z.object({ audienceId: z.uuid() }))
+      .query(async ({ ctx, input }) => {
+        const c = schema.contacts;
+        const scope = and(eq(c.audienceId, input.audienceId), eq(c.teamId, ctx.teamId));
+        const added = await ctx.db
+          .select({
+            day: sql<string>`(${c.createdAt} at time zone 'utc')::date::text`,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(c)
+          .where(scope)
+          .groupBy(sql`1`)
+          .orderBy(sql`1`);
+        const unsubscribed = await ctx.db
+          .select({
+            day: sql<string>`(${c.unsubscribedAt} at time zone 'utc')::date::text`,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(c)
+          .where(and(scope, eq(c.unsubscribed, true), isNotNull(c.unsubscribedAt)))
+          .groupBy(sql`1`)
+          .orderBy(sql`1`);
+        return { added, unsubscribed };
       }),
 
     /**
@@ -341,7 +372,12 @@ export const audienceRouter = router({
           .set({
             ...(input.firstName !== undefined ? { firstName: input.firstName || null } : {}),
             ...(input.lastName !== undefined ? { lastName: input.lastName || null } : {}),
-            ...(input.unsubscribed !== undefined ? { unsubscribed: input.unsubscribed } : {}),
+            ...(input.unsubscribed !== undefined
+              ? {
+                  unsubscribed: input.unsubscribed,
+                  unsubscribedAt: input.unsubscribed ? new Date() : null,
+                }
+              : {}),
             ...(input.properties !== undefined ? { properties: input.properties } : {}),
             updatedAt: new Date(),
           })
