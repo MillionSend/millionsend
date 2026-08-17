@@ -266,8 +266,8 @@ function EmailDetailSkeleton() {
               {index > 0 ? (
                 <div
                   style={{
-                    flex: 1,
-                    minWidth: 36,
+                    flex: "none",
+                    minWidth: 56,
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
@@ -676,8 +676,8 @@ export default function EmailDetailPage() {
                   {delta != null ? (
                     <div
                       style={{
-                        flex: 1,
-                        minWidth: 44,
+                        flex: "none",
+                        minWidth: 56,
                         display: "flex",
                         flexDirection: "column",
                         alignItems: "center",
@@ -716,8 +716,8 @@ export default function EmailDetailPage() {
               <>
                 <div
                   style={{
-                    flex: 1,
-                    minWidth: 44,
+                    flex: "none",
+                    minWidth: 56,
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
