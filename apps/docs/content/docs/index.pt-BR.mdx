@@ -1,0 +1,98 @@
+---
+title: Introdução
+description: O que é o MillionSend e como as peças se encaixam.
+---
+
+MillionSend é a plataforma de email open source. Envie um. Envie um milhão.
+
+Use de duas formas, com o mesmo código nas duas:
+
+- **MillionSend Cloud** — o serviço hospedado em
+  [millionsend.com](https://millionsend.com). Cadastre-se, verifique um
+  domínio, envie. API em `https://api.millionsend.com`.
+- **Auto-hospedado** — rode na sua própria infraestrutura com Docker Compose,
+  enviando pela **sua própria conta AWS SES**. Veja
+  [Auto-hospedagem](/pt-BR/self-hosting).
+
+As duas formas compartilham o mesmo painel, a mesma API HTTP e os mesmos
+SDKs — esta documentação cobre ambas, e as abas Nuvem / Auto-hospedado que
+você verá em algumas páginas lembram sua escolha. Em volta do núcleo de envio
+você tem um painel, uma API HTTP, SDKs, webhooks, contatos, broadcasts e um
+relay SMTP.
+
+## API compatível com Resend
+
+A API HTTP é compatível na comunicação com a do Resend: mesmos formatos de
+requisição e resposta, mesmo formato de erro. Os SDKs oficiais do Resend
+respeitam uma URL base configurável, então migrar uma integração existente
+significa trocar duas variáveis de ambiente — a chave de API e a URL base —
+sem reescrever seu código. O MillionSend também publica
+[SDKs próprios](/pt-BR/sdks) para nove linguagens, espelhando o formato dos
+SDKs do Resend.
+
+Uma diferença deliberada: **contatos são globais ao time**. Não existe o
+conceito de "audiences" — cada contato pertence diretamente ao seu time, e
+você segmenta com [segmentos](/pt-BR/concepts/segments) (filtros salvos) e
+[tópicos](/pt-BR/concepts/topics) (categorias de inscrição). Veja
+[Contatos](/pt-BR/concepts/contacts).
+
+## O que está incluído
+
+| Área | Notas |
+| --- | --- |
+| API de emails | Enviar, lote, consultar, cancelar envios agendados. Idempotência via header `Idempotency-Key`. |
+| Contatos | Contatos do time inteiro, com estado de inscrição, propriedades customizadas e importação CSV. |
+| Segmentos | Filtros salvos sobre os contatos, usáveis como alvo de broadcasts. |
+| Tópicos | Categorias granulares de inscrição, integradas à página de descadastro hospedada. |
+| Broadcasts | Componha, agende e envie para todos os contatos, um segmento ou um tópico. |
+| Templates | Templates reutilizáveis com campos de mesclagem por contato. |
+| Domínios | Verificação de DNS guiada, BYODKIM, rastreamento e TLS por domínio. |
+| Webhooks | Assinaturas Standard Webhooks, seleção de eventos por endpoint, log de entregas. |
+| Supressões | Hard bounces e reclamações suprimidos automaticamente. |
+| Descadastro em um clique | Headers `List-Unsubscribe` (RFC 8058) e página de descadastro hospedada. |
+| Relay SMTP | SMTP pronto para uso na porta 2587, autenticado com chave de API. |
+| Métricas | Envios diários com taxas de bounce e reclamação acompanhadas contra os limites do SES. |
+| Painel | Painel completo em inglês e português do Brasil. |
+
+## Arquitetura em resumo
+
+O MillionSend envia pelo AWS SES — na Nuvem isso é gerenciado para você; em
+uma implantação auto-hospedada é a sua própria conta SES, então você mantém a
+entregabilidade e o preço do SES. Uma implantação auto-hospedada são dois
+contêineres:
+
+- **Postgres** — o único banco de dados. A fila de jobs (pg-boss) também roda
+  nele; não há Redis.
+- **Contêiner do app** — roda a API (porta 3001), o worker em segundo plano e
+  o painel web (porta 3000). Um terceiro contêiner opcional roda o relay SMTP
+  (porta 2587). Os processos também podem ser separados um por contêiner com
+  a variável de ambiente `PROCESS`.
+
+Os corpos dos emails são criptografados em repouso (criptografia de envelope
+AES-256-GCM) e expurgados após uma janela de retenção. Eventos de entrega
+(bounces, reclamações, entregas) voltam do SES — na Nuvem automaticamente;
+auto-hospedado via SNS, com push para o seu host quando ele tem uma URL HTTPS
+pública, ou long polling de uma fila SQS quando não tem.
+
+## Próximos passos
+
+- [Início rápido](/pt-BR/quickstart) — do zero ao primeiro email em poucos
+  minutos, na Nuvem ou na sua própria instância.
+- [Auto-hospedagem](/pt-BR/self-hosting) — a referência completa de
+  implantação.
+- [Referência da API](/pt-BR/api-reference) — gerada a partir do código do
+  servidor, sempre em sincronia.
+
+## Para agentes de IA
+
+Toda página desta documentação está disponível como markdown puro
+acrescentando `.md` à sua URL (ou enviando `Accept: text/markdown`).
+[/llms.txt](/llms.txt) é um índice legível por máquina,
+[/llms-full.txt](/llms-full.txt) é a documentação inteira em um arquivo, e
+[/openapi.json](/openapi.json) é a especificação OpenAPI 3.1 gerada a partir
+do código da API.
+
+## Licença
+
+A plataforma é [AGPL-3.0](https://github.com/MillionSend/millionsend/blob/main/LICENSE).
+Os SDKs são publicados separadamente sob MIT.

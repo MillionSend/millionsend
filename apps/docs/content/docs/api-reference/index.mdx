@@ -9,8 +9,20 @@ definitions at build time, so they always reflect the code. The raw spec is at
 
 ## Base URL
 
-Your instance's API origin — `http://localhost:3001` on a local compose setup,
-or wherever you exposed port 3001 (e.g. `https://api.acme.dev`).
+<DeploymentTabs>
+<DeploymentTab deployment="cloud">
+
+`https://api.millionsend.com`
+
+</DeploymentTab>
+<DeploymentTab deployment="self-hosted">
+
+Your instance's API origin — `http://localhost:3001` on a local compose
+setup, or wherever you exposed port 3001 (e.g. `https://api.acme.dev`). See
+[Self-hosting](/self-hosting).
+
+</DeploymentTab>
+</DeploymentTabs>
 
 ## Authentication
 
@@ -29,8 +41,8 @@ domain, restricting which `from` addresses it may send.
 ## Resend compatibility
 
 Request and response shapes match Resend's API, so official Resend SDKs work
-against MillionSend by pointing their base URL at your instance. Notable
-deltas are deliberate and loud:
+against MillionSend by pointing their base URL at it. Notable deltas are
+deliberate and loud:
 
 - Unsupported Resend fields (e.g. `attachments`, custom `headers`) are
   rejected with `422` rather than silently dropped.

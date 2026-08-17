@@ -1,0 +1,48 @@
+---
+title: Contatos
+description: Contatos globais ao time, com estado de inscrição e propriedades customizadas.
+---
+
+Contatos são **globais ao time**: uma lista por time, uma linha por endereço
+de email (único, sem diferenciar maiúsculas). Não existe o conceito de
+"audiences" — um contato pertence diretamente ao seu time, e você segmenta
+com [segmentos](/pt-BR/concepts/segments) e [tópicos](/pt-BR/concepts/topics).
+
+Se você está migrando do Resend: os métodos de contato do SDK do Resend
+funcionam contra o MillionSend sempre que `audienceId` for omitido — os
+caminhos de contato são os mesmos, sem o aninhamento de audience.
+
+## O que um contato armazena
+
+- `email` — a identidade. Criar um segundo contato com o mesmo email
+  (qualquer capitalização) retorna `409`.
+- `first_name`, `last_name`
+- `unsubscribed` — o estado global de inscrição. Contatos descadastrados são
+  excluídos de todo broadcast.
+- `properties` — um mapa plano de valores string customizados
+  (`plan: "pro"`, `city: "Berlin"`). Objetos aninhados e arrays são
+  rejeitados com `422`. As propriedades alimentam os campos de mesclagem de
+  templates e os filtros de segmentos.
+
+## API
+
+Contatos são gerenciados via `POST/GET/PATCH/DELETE /contacts` e
+`GET /contacts/{id}` — veja a [referência da API](/pt-BR/api-reference). O
+segmento de caminho `{id}` aceita tanto o UUID do contato quanto seu endereço
+de email; a comparação de email não diferencia maiúsculas.
+
+As inscrições em tópicos são definidas por contato com
+`PATCH /contacts/{id}/topics`.
+
+## Importação e exportação CSV
+
+O painel importa contatos de CSV (interpretado no cliente e criado em lote) e
+exporta a lista atual — inclusive visões filtradas por segmento ou tópico —
+de volta para CSV.
+
+## Descadastros
+
+Emails de broadcast levam headers `List-Unsubscribe` de um clique (RFC 8058)
+e uma página de descadastro hospedada. Um destinatário pode se descadastrar
+globalmente ou sair de [tópicos](/pt-BR/concepts/topics) individuais.
+Descadastros globais definem `unsubscribed: true` no contato.

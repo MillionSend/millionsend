@@ -3,10 +3,12 @@ title: Self-hosting
 description: Deploy MillionSend on your own infrastructure with Docker Compose and your own AWS SES account.
 ---
 
-MillionSend sends through your own AWS SES account. A deployment is two
-containers: Postgres and one app container running the API (port 3001), the
-worker, and the web dashboard (port 3000). An optional third container runs
-the SMTP relay (port 2587).
+Self-hosted MillionSend sends through your own AWS SES account. A deployment
+is two containers: Postgres and one app container running the API (port
+3001), the worker, and the web dashboard (port 3000). An optional third
+container runs the SMTP relay (port 2587). (Prefer not to run
+infrastructure? [MillionSend Cloud](https://millionsend.com) is the same
+platform, hosted.)
 
 **Prerequisites:** Docker with Compose; an AWS account with SES access in your
 chosen region (sandbox accounts can only send to verified recipients —

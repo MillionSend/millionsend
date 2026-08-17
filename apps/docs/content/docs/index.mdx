@@ -5,10 +5,19 @@ description: What MillionSend is and how the pieces fit together.
 
 MillionSend is the open-source email platform. Send one. Send a million.
 
-It is a self-hostable alternative to Resend that sends through **your own AWS
-SES account** — you keep SES's deliverability and pricing, and get a product
-around it: a dashboard, an HTTP API, SDKs, webhooks, contacts, broadcasts, and
-an SMTP relay.
+Use it two ways, running the same code either way:
+
+- **MillionSend Cloud** — the hosted service at
+  [millionsend.com](https://millionsend.com). Sign up, verify a domain, send.
+  API at `https://api.millionsend.com`.
+- **Self-hosted** — run it on your own infrastructure with Docker Compose,
+  sending through **your own AWS SES account**. See
+  [Self-hosting](/self-hosting).
+
+Both share one dashboard, one HTTP API, and the same SDKs — these docs cover
+both, and the Cloud / Self-hosted tabs you'll see on some pages remember your
+choice. Around the sending core you get a dashboard, an HTTP API, SDKs,
+webhooks, contacts, broadcasts, and an SMTP relay.
 
 ## Resend-compatible API
 
@@ -44,7 +53,9 @@ target subsets with [segments](/concepts/segments) (saved filters) and
 
 ## Architecture at a glance
 
-A self-hosted deployment is two containers:
+MillionSend sends through AWS SES — on Cloud that's managed for you; on a
+self-hosted deployment it's your own SES account, so you keep SES's
+deliverability and pricing. A self-hosted deployment is two containers:
 
 - **Postgres** — the only datastore. The job queue (pg-boss) runs on it too;
   there is no Redis.
@@ -55,13 +66,14 @@ A self-hosted deployment is two containers:
 
 Email bodies are encrypted at rest (AES-256-GCM envelope encryption) and
 purged after a retention window. Delivery events (bounces, complaints,
-deliveries) flow back from SES through SNS — pushed to your host when it has a
-public HTTPS URL, or long-polled from an SQS queue when it does not.
+deliveries) flow back from SES — on Cloud automatically; self-hosted through
+SNS, pushed to your host when it has a public HTTPS URL or long-polled from an
+SQS queue when it does not.
 
 ## Where to go next
 
-- [Quickstart](/quickstart) — running locally and sending your first email in
-  a few minutes.
+- [Quickstart](/quickstart) — from zero to your first email in a few minutes,
+  on Cloud or your own instance.
 - [Self-hosting](/self-hosting) — the full deployment reference.
 - [API reference](/api-reference) — generated from the server code, always in
   sync.

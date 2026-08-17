@@ -1,14 +1,29 @@
 ---
 title: Quickstart
-description: Run MillionSend locally and send your first email.
+description: Get MillionSend and send your first email in a few minutes.
 ---
+
+MillionSend runs the same on [MillionSend Cloud](https://millionsend.com) and
+on your own infrastructure — same dashboard, same API, same SDKs. Pick your
+deployment below; the tabs remember your choice across the docs.
+
+## 1. Get MillionSend
+
+<DeploymentTabs>
+<DeploymentTab deployment="cloud">
+
+Sign up at [millionsend.com](https://millionsend.com). That's it — no
+infrastructure, no AWS account. The dashboard is at
+[millionsend.com](https://millionsend.com) and the API at
+`https://api.millionsend.com`.
+
+</DeploymentTab>
+<DeploymentTab deployment="self-hosted">
 
 You need Docker (with Compose), Node 18+, and an AWS account with SES access.
 New AWS accounts start in the SES sandbox, which can only send to verified
 recipients — [request production access](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html)
 to send to anyone.
-
-## 1. Run the setup wizard
 
 One command, in an empty directory — no clone needed:
 
@@ -18,27 +33,23 @@ npx @millionsend/setup
 ```
 
 The wizard detects what is already in the directory and offers each step:
-
-1. Create `.env` from a built-in template, generating the two required secrets
-   for you.
-2. Provision the AWS resources MillionSend needs (IAM user + policy, SNS event
-   topic, SES configuration set — and an SQS events queue when your deployment
-   has no public HTTPS URL). Run it wherever your AWS admin credentials live;
-   the server itself never needs them.
-3. Download the compose file and start the prebuilt image with
-   `docker compose up -d`.
-
-Every step is skippable and safe to re-run. `--dry-run` prints the full plan
-and touches nothing. Prefer doing it by hand? See
-[Self-hosting](/self-hosting).
+create `.env` with generated secrets, provision the AWS resources (IAM user +
+policy, SNS event topic, SES configuration set — and an SQS events queue when
+your deployment has no public HTTPS URL), then download the compose file and
+start the prebuilt image with `docker compose up -d`. Every step is skippable
+and safe to re-run; `--dry-run` prints the full plan and touches nothing.
 
 When it finishes: dashboard at `http://localhost:3000`, API at
 `http://localhost:3001`. The first user to register becomes the initial
-account — after that, signup is closed unless you opt in.
+account — after that, signup is closed unless you opt in. Prefer doing it by
+hand, or ready for production? See [Self-hosting](/self-hosting).
+
+</DeploymentTab>
+</DeploymentTabs>
 
 ## 2. Verify a sending domain
 
-SES only sends from domains it has verified.
+MillionSend only sends from domains you have verified.
 
 1. In the dashboard, go to **Domains** and add a domain you control
    (e.g. `acme.dev`).
@@ -55,10 +66,27 @@ to a single domain.
 
 ## 4. Send an email
 
+Your API base URL:
+
+<DeploymentTabs>
+<DeploymentTab deployment="cloud">
+
+`https://api.millionsend.com`
+
+</DeploymentTab>
+<DeploymentTab deployment="self-hosted">
+
+Your instance's API origin — `http://localhost:3001` on a local compose
+setup, or wherever you exposed port 3001 (e.g. `https://api.acme.dev`). The
+examples below use the Cloud URL; swap in yours.
+
+</DeploymentTab>
+</DeploymentTabs>
+
 With curl:
 
 ```sh
-curl -X POST http://localhost:3001/emails \
+curl -X POST https://api.millionsend.com/emails \
   -H "Authorization: Bearer ms_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -74,7 +102,7 @@ Or with the Node SDK (`npm install millionsend`):
 ```ts
 import { MillionSend } from "millionsend";
 
-const ms = new MillionSend("ms_...", { baseUrl: "http://localhost:3001" });
+const ms = new MillionSend("ms_...", { baseUrl: "https://api.millionsend.com" });
 
 const { data, error } = await ms.emails.send({
   from: "Acme <onboarding@acme.dev>",
@@ -88,18 +116,24 @@ else console.log("sent", data.id);
 ```
 
 Both return `{ "id": "..." }`. Watch the email move from `queued` to
-`delivered` on the **Emails** page (delivery events require the SES event
-pipeline the setup wizard configures — see
-[Self-hosting → SES events](/self-hosting#ses-events-bounces-complaints-deliveries)).
+`delivered` on the **Emails** page.
 
-Already on Resend? Point the official Resend SDK at your instance instead —
-set `RESEND_BASE_URL=http://localhost:3001` and use your `ms_` key. The wire
-format is identical.
+<Callout type="info">
+On a self-hosted instance, delivery events (delivered, bounced, complained)
+require the SES event pipeline the setup wizard configures — see
+[Self-hosting → SES events](/self-hosting#ses-events-bounces-complaints-deliveries).
+On Cloud they flow automatically.
+</Callout>
+
+Already on Resend? Point the official Resend SDK at MillionSend instead — set
+`RESEND_BASE_URL` to your base URL and use your `ms_` key. The wire format is
+identical.
 
 ## Next steps
 
-- [Self-hosting](/self-hosting) for production deployment, the environment
-  reference, and the SMTP relay.
 - [Concepts](/concepts/contacts) for contacts, segments, topics, and
   broadcasts.
+- [SDKs](/sdks) for the nine official client libraries.
 - [API reference](/api-reference) for every endpoint.
+- [Self-hosting](/self-hosting) for production deployment, the environment
+  reference, and the SMTP relay.

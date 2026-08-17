@@ -1,0 +1,30 @@
+---
+title: Segmentos
+description: Filtros salvos sobre seus contatos, usáveis como alvo de broadcasts.
+---
+
+Um segmento é um **filtro salvo** sobre os contatos do time — ele armazena
+uma expressão de filtro, não uma lista de membros. A pertinência é avaliada
+ao vivo: um contato que passa a corresponder ao filtro entra no segmento
+imediatamente, e a contagem de contatos que você vê é computada no momento da
+leitura.
+
+Os filtros atuam sobre campos do contato (email, nome, estado de inscrição,
+data de criação) e sobre
+[propriedades customizadas](/pt-BR/concepts/contacts#o-que-um-contato-armazena),
+com operadores como igual, contém, definido / não definido e comparações de
+data. As condições combinam com e/ou.
+
+## Usando segmentos
+
+- **Broadcasts** — mire um segmento em vez de todos os contatos. O fan-out
+  resolve a pertinência no momento do envio usando o mesmo tradutor de
+  filtros da contagem de contatos, então o que você prevê é o que sai.
+- **Filtro no painel** — a visão de Contatos pode ser filtrada por segmento,
+  e a exportação CSV respeita o filtro de segmento ativo.
+
+## API
+
+`POST/GET/PATCH/DELETE /segments` e `GET /segments/{id}` (que inclui o
+`contact_count` ao vivo) — veja a [referência da API](/pt-BR/api-reference).
+Expressões de filtro inválidas são rejeitadas com `422` e nunca armazenadas.
