@@ -1,0 +1,47 @@
+---
+title: Supressões
+description: Proteção automática para a sua reputação de remetente.
+---
+
+A lista de supressão protege sua reputação de remetente — e sua capacidade de
+envio — garantindo que você nunca envie repetidamente para um endereço que
+teve hard bounce ou marcou você como spam.
+
+## Como endereços são suprimidos
+
+- **Hard bounce** — o servidor de destino rejeitou o endereço
+  permanentemente.
+- **Reclamação** — o destinatário marcou uma mensagem como spam.
+
+Ambos chegam como eventos do SES e suprimem o endereço automaticamente.
+Supressões são por time.
+
+## O que a supressão faz
+
+- **Envios transacionais** (`POST /emails`, relay SMTP): destinatários
+  suprimidos são removidos de `to`/`cc`/`bcc`. Se *todos* os destinatários em
+  `to` estiverem suprimidos, o envio é rejeitado com
+  `422 All recipients are suppressed`.
+- **Broadcasts**: contatos suprimidos são pulados durante o fan-out.
+
+## Revisando e removendo
+
+O painel lista cada endereço suprimido com o motivo e a data. Você pode
+remover um endereço para permitir envios de novo — faça isso apenas quando
+souber que a causa foi corrigida (ex.: uma caixa que sempre existiu mas era
+rejeitada por um servidor mal configurado). A re-supressão é automática no
+próximo bounce ou reclamação.
+
+## Por que isso importa
+
+O SES acompanha taxas de bounce e reclamação e pausa remetentes que cruzam
+seus limites. A página de métricas do MillionSend acompanha suas taxas contra
+esses limites, e o [envio de broadcasts](/pt-BR/concepts/broadcasts#salvaguardas)
+é bloqueado automaticamente quando uma taxa cruza a linha de pausa.
+
+<Callout type="info">
+Na Nuvem, o volume de envio é regido pelos limites do seu plano.
+Auto-hospedado, os limites são as cotas e a reputação da sua própria conta
+AWS SES — cruzar os limites do SES pode pausar a conta inteira, que é
+exatamente do que a supressão protege você.
+</Callout>

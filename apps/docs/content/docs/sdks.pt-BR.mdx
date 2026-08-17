@@ -1,39 +1,41 @@
 ---
 title: SDKs
-description: Official MillionSend SDKs for nine languages, published under MIT.
+description: SDKs oficiais do MillionSend para nove linguagens, publicados sob MIT.
 ---
 
-Every SDK mirrors the shape of the corresponding official Resend SDK, so
-migrating is mostly a find-and-replace: swap the import/class and point the
-base URL at MillionSend. All SDKs are MIT-licensed and live in their own
-repositories under the [MillionSend GitHub org](https://github.com/MillionSend).
+Cada SDK espelha o formato do SDK oficial correspondente do Resend, então
+migrar é quase um localizar-e-substituir: troque o import/classe e aponte a
+URL base para o MillionSend. Todos os SDKs são licenciados sob MIT e vivem em
+repositórios próprios na
+[organização MillionSend no GitHub](https://github.com/MillionSend).
 
-Since the API is Resend wire-compatible, the official Resend SDKs also work —
-point them at MillionSend via their base-URL option (e.g. `RESEND_BASE_URL`).
+Como a API é compatível na comunicação com a do Resend, os SDKs oficiais do
+Resend também funcionam — aponte-os para o MillionSend pela opção de URL base
+(ex.: `RESEND_BASE_URL`).
 
-## Base URL
+## URL base
 
 <DeploymentTabs>
 <DeploymentTab deployment="cloud">
 
-`https://api.millionsend.com` — what every example on this page uses.
+`https://api.millionsend.com` — o que todos os exemplos desta página usam.
 
 </DeploymentTab>
 <DeploymentTab deployment="self-hosted">
 
-Your instance's API origin (e.g. `https://api.acme.dev`, or
-`http://localhost:3001` locally). Every SDK takes it through the same option
-the examples pass the Cloud URL to — `baseUrl` / `base_url` / `BaseURL`
-depending on the language's conventions — and the Node SDK also reads the
-`MILLIONSEND_BASE_URL` environment variable. See
-[Self-hosting](/self-hosting) for deploying the instance itself.
+A origem da API da sua instância (ex.: `https://api.acme.dev`, ou
+`http://localhost:3001` localmente). Todo SDK a recebe pela mesma opção em
+que os exemplos passam a URL da Nuvem — `baseUrl` / `base_url` / `BaseURL`
+conforme a convenção da linguagem — e o SDK de Node também lê a variável de
+ambiente `MILLIONSEND_BASE_URL`. Veja
+[Auto-hospedagem](/pt-BR/self-hosting) para implantar a instância em si.
 
 </DeploymentTab>
 </DeploymentTabs>
 
 ## Node.js / TypeScript
 
-[`millionsend` on npm](https://www.npmjs.com/package/millionsend) — Node 18+.
+[`millionsend` no npm](https://www.npmjs.com/package/millionsend) — Node 18+.
 
 ```sh
 npm install millionsend
@@ -54,7 +56,7 @@ const { data, error } = await ms.emails.send({
 
 ## Python
 
-[`millionsend` on PyPI](https://pypi.org/project/millionsend/) — Python 3.9+.
+[`millionsend` no PyPI](https://pypi.org/project/millionsend/) — Python 3.9+.
 
 ```sh
 pip install millionsend
@@ -96,7 +98,7 @@ sent, err := client.Emails.Send(&millionsend.SendEmailRequest{
 
 ## Ruby
 
-[`millionsend` on RubyGems](https://rubygems.org/gems/millionsend) — Ruby 3.0+.
+[`millionsend` no RubyGems](https://rubygems.org/gems/millionsend) — Ruby 3.0+.
 
 ```sh
 gem install millionsend
@@ -118,7 +120,7 @@ email = Millionsend::Emails.send(
 
 ## PHP
 
-[`millionsend/millionsend-php` on Packagist](https://packagist.org/packages/millionsend/millionsend-php) — PHP 8.1+.
+[`millionsend/millionsend-php` no Packagist](https://packagist.org/packages/millionsend/millionsend-php) — PHP 8.1+.
 
 ```sh
 composer require millionsend/millionsend-php
@@ -139,7 +141,7 @@ $email = $ms->emails->send([
 
 ## Rust
 
-[`millionsend` on crates.io](https://crates.io/crates/millionsend) — async
+[`millionsend` no crates.io](https://crates.io/crates/millionsend) — async
 (`tokio` + `reqwest`).
 
 ```toml
@@ -164,7 +166,7 @@ let sent = ms.emails.send(&SendEmailOptions {
 
 ## Java
 
-[`com.millionsend:millionsend-java` on Maven Central](https://central.sonatype.com/artifact/com.millionsend/millionsend-java) — Java 11+.
+[`com.millionsend:millionsend-java` no Maven Central](https://central.sonatype.com/artifact/com.millionsend/millionsend-java) — Java 11+.
 
 ```xml
 <dependency>
@@ -188,7 +190,7 @@ CreateEmailResponse sent = ms.emails().send(
 
 ## .NET
 
-[`MillionSend` on NuGet](https://www.nuget.org/packages/MillionSend) — targets net8.0.
+[`MillionSend` no NuGet](https://www.nuget.org/packages/MillionSend) — alvo net8.0.
 
 ```sh
 dotnet add package MillionSend
@@ -210,7 +212,7 @@ var res = await client.EmailSendAsync(new EmailMessage
 
 ## Elixir
 
-[`millionsend` on Hex](https://hex.pm/packages/millionsend) — Elixir 1.15+.
+[`millionsend` no Hex](https://hex.pm/packages/millionsend) — Elixir 1.15+.
 
 ```elixir
 # mix.exs

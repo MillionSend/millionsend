@@ -1,0 +1,73 @@
+---
+title: Referência da API
+description: A API HTTP do MillionSend — compatível com Resend, gerada a partir do código do servidor.
+---
+
+As páginas de endpoint desta seção são geradas a partir das próprias
+definições de rota da API no momento do build, então sempre refletem o
+código. A especificação bruta está em [/openapi.json](/openapi.json)
+(OpenAPI 3.1). As páginas de endpoint estão disponíveis apenas em inglês.
+
+## URL base
+
+<DeploymentTabs>
+<DeploymentTab deployment="cloud">
+
+`https://api.millionsend.com`
+
+</DeploymentTab>
+<DeploymentTab deployment="self-hosted">
+
+A origem da API da sua instância — `http://localhost:3001` em um compose
+local, ou onde você expôs a porta 3001 (ex.: `https://api.acme.dev`). Veja
+[Auto-hospedagem](/pt-BR/self-hosting).
+
+</DeploymentTab>
+</DeploymentTabs>
+
+## Autenticação
+
+Todo endpoint (exceto o webhook de ingestão de eventos do SES) exige uma
+chave de API criada no painel:
+
+```
+Authorization: Bearer ms_...
+```
+
+Chaves têm um nível de permissão: chaves de **acesso total** podem usar todos
+os endpoints, chaves de **somente envio** ficam confinadas a `/emails*`
+(qualquer outra coisa retorna `403 restricted_api_key`). Uma chave também
+pode ficar restrita a um único domínio, limitando de quais endereços `from`
+ela pode enviar.
+
+## Compatibilidade com Resend
+
+Os formatos de requisição e resposta correspondem aos da API do Resend, então
+os SDKs oficiais do Resend funcionam contra o MillionSend apontando a URL
+base para ele. As diferenças notáveis são deliberadas e explícitas:
+
+- Campos do Resend não suportados (ex.: `attachments`, `headers`
+  customizados) são rejeitados com `422` em vez de descartados em silêncio.
+- Contatos são globais ao time — endpoints de contato não recebem id de
+  audience (veja [Contatos](/pt-BR/concepts/contacts)).
+- Broadcasts suportam `canceled`, um status fora da união do Resend.
+
+## Erros
+
+Erros usam o formato do Resend:
+
+```json
+{ "statusCode": 422, "name": "validation_error", "message": "..." }
+```
+
+## Idempotência
+
+`POST /emails` e `POST /emails/batch` aceitam um header `Idempotency-Key`.
+Repetir com a mesma chave e o mesmo payload retorna a resposta original em
+vez de enviar de novo; a mesma chave com payload diferente retorna `409`.
+
+## Paginação
+
+Endpoints de listagem aceitam `limit` (1–100, padrão 20) e cursores `after` /
+`before` carregando o id de um item de uma página anterior. As respostas
+incluem `has_more`.

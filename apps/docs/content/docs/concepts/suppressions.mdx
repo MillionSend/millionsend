@@ -32,7 +32,14 @@ complaint.
 
 ## Why this matters
 
-SES tracks account-level bounce and complaint rates and pauses accounts that
-cross its thresholds. MillionSend's metrics page tracks your rates against
-those thresholds, and [broadcast sending](/concepts/broadcasts#guardrails) is
+SES tracks bounce and complaint rates and pauses senders that cross its
+thresholds. MillionSend's metrics page tracks your rates against those
+thresholds, and [broadcast sending](/concepts/broadcasts#guardrails) is
 blocked automatically when a rate crosses the pause line.
+
+<Callout type="info">
+On Cloud, sending volume is governed by your plan's limits. Self-hosted, the
+limits are your own AWS SES account's quotas and reputation — crossing SES's
+thresholds can pause the whole account, which is exactly what suppression
+protects you from.
+</Callout>

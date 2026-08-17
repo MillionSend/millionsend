@@ -1,0 +1,61 @@
+---
+title: Broadcasts
+description: Componha, agende e envie um email para muitos contatos.
+---
+
+Um broadcast é um email enviado a muitos contatos: todos eles, um
+[segmento](/pt-BR/concepts/segments) ou um [tópico](/pt-BR/concepts/topics).
+Componha no editor de blocos do painel (com campos de mesclagem por contato)
+ou crie broadcasts pela API.
+
+## Ciclo de vida
+
+```
+draft → scheduled → sending → sent
+              ↘ canceled
+```
+
+- Broadcasts são criados como **rascunhos** (`draft`). Só rascunhos podem ser
+  editados ou apagados.
+- `POST /broadcasts/{id}/send` agenda o envio — imediatamente, ou em um
+  timestamp `scheduled_at`.
+- Um broadcast **agendado** ainda pode ser cancelado com
+  `POST /broadcasts/{id}/cancel`; depois que está enviando, não.
+- Na comunicação, `scheduled` e `sending` aparecem ambos como `queued`
+  (correspondendo à união de status do SDK do Resend); `canceled` é uma
+  extensão do MillionSend.
+
+## O que o fan-out faz
+
+Cada email de destinatário passa pelo mesmo pipeline de um envio
+transacional, mais o tratamento específico de broadcast:
+
+- **Resolução de audiência** — contatos descadastrados globalmente são sempre
+  excluídos; filtros de segmento e inscrições em tópicos são avaliados no
+  momento do envio.
+- **Checagens de supressão** — endereços na
+  [lista de supressão](/pt-BR/concepts/suppressions) são pulados.
+- **Campos de mesclagem** — valores por contato (nome, propriedades
+  customizadas) são substituídos no template.
+- **Links de descadastro** — headers `List-Unsubscribe` de um clique
+  (RFC 8058) e um link de descadastro hospedado são adicionados a cada
+  mensagem.
+
+<Callout type="info">
+Em uma instância auto-hospedada, os links de descadastro são construídos a
+partir de `APP_BASE_URL`, então o envio de broadcasts é rejeitado até que ela
+esteja configurada — veja
+[Auto-hospedagem](/pt-BR/self-hosting#referência-de-ambiente). Na Nuvem isso
+é automático.
+</Callout>
+
+## Salvaguardas
+
+- Somente um **domínio verificado** do seu time pode aparecer em `from`.
+- Se sua taxa recente de bounce ou reclamação cruzou o limite de pausa do
+  SES, novos envios de broadcast são bloqueados com um erro
+  `403 sending_paused` — contendo o estrago antes que o SES pause o envio por
+  completo.
+
+Veja a [referência da API](/pt-BR/api-reference) para todos os endpoints de
+broadcast.

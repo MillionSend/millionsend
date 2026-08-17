@@ -1,0 +1,5 @@
+{
+  "title": "Conceitos",
+  "defaultOpen": true,
+  "pages": ["contacts", "segments", "topics", "broadcasts", "domains", "webhooks", "suppressions"]
+}

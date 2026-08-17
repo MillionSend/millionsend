@@ -36,14 +36,20 @@ plus broadcast-specific handling:
 - **Merge fields** — per-contact values (name, custom properties) are
   substituted into the template.
 - **Unsubscribe links** — RFC 8058 one-click `List-Unsubscribe` headers and a
-  hosted unsubscribe link are added to every message. These links are built
-  from `APP_BASE_URL`, so sending is rejected until it is configured.
+  hosted unsubscribe link are added to every message.
+
+<Callout type="info">
+On a self-hosted instance, unsubscribe links are built from `APP_BASE_URL`,
+so broadcast sending is rejected until it is configured — see
+[Self-hosting](/self-hosting#environment-reference). On Cloud this is
+automatic.
+</Callout>
 
 ## Guardrails
 
 - Only a **verified domain** of your team may appear in `from`.
-- If your trailing bounce or complaint rate has crossed SES's own pause
+- If your trailing bounce or complaint rate has crossed the SES pause
   threshold, new broadcast sends are blocked with a `403 sending_paused`
-  error — stopping you before SES pauses the whole account.
+  error — stopping the damage before SES pauses sending entirely.
 
 See the [API reference](/api-reference) for all broadcast endpoints.

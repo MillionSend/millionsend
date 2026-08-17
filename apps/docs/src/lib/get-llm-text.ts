@@ -10,7 +10,8 @@ export async function getLLMText(page: InferPageType<typeof source>): Promise<st
   const header = `# ${page.data.title} (${page.url})`;
   const description = page.data.description ? `\n\n${page.data.description}` : "";
 
-  if (page.url.startsWith("/api-reference/endpoints")) {
+  // includes(): the URL carries a locale prefix on non-default locales.
+  if (page.url.includes("/api-reference/endpoints")) {
     return `${header}${description}\n\nThis page documents a MillionSend API operation. The full machine-readable spec is at /openapi.json (OpenAPI 3.1, generated from the server code).`;
   }
 

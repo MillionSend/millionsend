@@ -8,12 +8,12 @@ import { openapi } from "@/lib/openapi";
 import { source } from "@/lib/source";
 
 interface PageParams {
-  params: Promise<{ slug?: string[] }>;
+  params: Promise<{ lang: string; slug?: string[] }>;
 }
 
 export default async function Page(props: PageParams) {
-  const params = await props.params;
-  const page = source.getPage(params.slug);
+  const { lang, slug } = await props.params;
+  const page = source.getPage(slug, lang);
   if (!page) notFound();
 
   const MDX = page.data.body;
@@ -41,8 +41,8 @@ export async function generateStaticParams() {
 }
 
 export async function generateMetadata(props: PageParams): Promise<Metadata> {
-  const params = await props.params;
-  const page = source.getPage(params.slug);
+  const { lang, slug } = await props.params;
+  const page = source.getPage(slug, lang);
   if (!page) notFound();
 
   return {

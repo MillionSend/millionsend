@@ -7,6 +7,8 @@ export const dynamic = "force-dynamic";
 
 export function GET(request: Request): Response {
   const origin = new URL(request.url).origin;
+  // Serves the default locale (English — the source of truth) only. Agents
+  // reach pt-BR pages via their locale-prefixed .md URLs (/pt-BR/<page>.md).
   const lines = source.getPages().map((page) => {
     const md = page.url === "/" ? "/index.md" : `${page.url}.md`;
     const description = page.data.description ? `: ${page.data.description}` : "";
@@ -16,7 +18,7 @@ export function GET(request: Request): Response {
   const body = [
     "# MillionSend Docs",
     "",
-    "> MillionSend is an open-source, self-hostable, Resend-compatible email platform that sends through your own AWS SES.",
+    "> MillionSend is an open-source, Resend-compatible email platform — hosted at millionsend.com (API: api.millionsend.com) or self-hosted on your own AWS SES.",
     "",
     "Every page is available as raw markdown by appending `.md` to its URL.",
     `The full documentation in one file: ${origin}/llms-full.txt`,

@@ -1,0 +1,62 @@
+---
+title: Webhooks
+description: Entregas de eventos assinadas para o ciclo de vida do email, seguindo a especificação Standard Webhooks.
+---
+
+Webhooks enviam eventos do ciclo de vida do email aos seus endpoints conforme
+acontecem. Crie endpoints no painel, escolha quais tipos de evento cada um
+recebe e inspecione cada entrega (payload, resposta, tentativas) no log de
+entregas por endpoint.
+
+## Tipos de evento
+
+| Evento | Disparado quando |
+| --- | --- |
+| `email.sent` | O SES aceitou a mensagem para entrega. |
+| `email.delivered` | O servidor do destinatário a aceitou. |
+| `email.delivery_delayed` | A entrega está sendo repetida (ex.: caixa cheia, greylisting). |
+| `email.bounced` | A mensagem teve hard bounce. O endereço também é [suprimido](/pt-BR/concepts/suppressions). |
+| `email.complained` | O destinatário marcou como spam. Também suprimido. |
+| `email.opened` | O pixel de rastreamento foi carregado (exige rastreamento de aberturas no [domínio](/pt-BR/concepts/domains)). |
+| `email.clicked` | Um link reescrito foi clicado (exige rastreamento de cliques). |
+
+## Assinaturas (Standard Webhooks)
+
+As entregas são assinadas seguindo a especificação
+[Standard Webhooks](https://www.standardwebhooks.com) — o mesmo esquema que
+Resend e Svix usam, então código de verificação existente funciona sem
+mudanças.
+
+Cada endpoint tem um segredo `whsec_...`, exibido uma única vez na criação.
+Toda requisição carrega:
+
+```
+webhook-id: <message id>
+webhook-timestamp: <unix seconds>
+webhook-signature: v1,<base64 HMAC-SHA256>
+```
+
+O conteúdo assinado é `{webhook-id}.{webhook-timestamp}.{raw body}`.
+Verifique com qualquer biblioteca Standard Webhooks, por exemplo em Node:
+
+```ts
+import { Webhook } from "standardwebhooks";
+
+const wh = new Webhook("whsec_...");
+const event = wh.verify(rawBody, {
+  "webhook-id": req.headers["webhook-id"],
+  "webhook-timestamp": req.headers["webhook-timestamp"],
+  "webhook-signature": req.headers["webhook-signature"],
+});
+```
+
+Sempre verifique contra o corpo **bruto** da requisição, e rejeite timestamps
+antigos.
+
+## Entrega e novas tentativas
+
+Uma entrega é considerada bem-sucedida em qualquer resposta 2xx. Falhas são
+repetidas com backoff exponencial (começando em segundos, limitado a horas,
+até 6 tentativas). Um job de reconciliação redespacha entregas perdidas em
+quedas, então a entrega é pelo-menos-uma-vez — torne seus handlers
+idempotentes, chaveados por `webhook-id`.

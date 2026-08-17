@@ -1,0 +1,32 @@
+---
+title: Tópicos
+description: Categorias granulares de inscrição com opt-in por contato.
+---
+
+Tópicos são categorias de inscrição — "Novidades do produto", "Newsletter",
+"Promoções" — que dão aos destinatários um controle mais fino do que um único
+descadastro global.
+
+Cada tópico tem um `default_subscription` de `opt_in` ou `opt_out`, fixado na
+criação:
+
+- `opt_in` — todo contato está inscrito, a menos que opte por sair.
+- `opt_out` — contatos só são incluídos depois de optarem explicitamente por
+  entrar.
+
+## Como os tópicos se aplicam
+
+- **Broadcasts** podem mirar um tópico. O fan-out inclui apenas contatos cuja
+  inscrição efetiva naquele tópico é "inscrito" (a escolha explícita deles,
+  se houver; o padrão do tópico caso contrário), e sempre exclui contatos
+  descadastrados globalmente.
+- **A página de descadastro hospedada** lista os tópicos do time, então um
+  destinatário pode sair de uma categoria e continuar inscrito nas outras —
+  ou se descadastrar de tudo.
+
+## API
+
+`POST/GET/DELETE /topics` e `GET /topics/{id}` gerenciam tópicos; as escolhas
+de um contato são gravadas com `PATCH /contacts/{id}/topics`, passando
+entradas como `{ "id": "<topic-id>", "subscription": "opt_in" }`. Veja a
+[referência da API](/pt-BR/api-reference).

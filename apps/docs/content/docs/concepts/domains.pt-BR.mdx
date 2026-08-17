@@ -1,0 +1,44 @@
+---
+title: Domínios
+description: Verifique domínios de envio com DNS guiado, BYODKIM e configuração por domínio.
+---
+
+Todo email precisa sair de um domínio que seu time **verificou** — a API
+rejeita qualquer outro endereço em `from` com `422`. Domínios são adicionados
+e verificados no painel.
+
+## Verificação
+
+Adicionar um domínio o registra no SES e mostra os registros DNS a criar:
+
+- **DKIM** — um único registro TXT `millionsend._domainkey`. O MillionSend
+  gera um par de chaves RSA-2048 por domínio e entrega a chave privada ao SES
+  (BYODKIM), então a verificação é um registro TXT em vez de três CNAMEs. A
+  chave privada nunca é armazenada.
+- **MAIL FROM** — registros MX e SPF (TXT) para o subdomínio de bounce.
+
+Dois sinais de verificação aparecem lado a lado:
+
+- **Status no SES** — o que o SES reporta. O SES faz cache da verificação e
+  pode atrasar depois que você muda registros.
+- **Checagem de DNS ao vivo** — o MillionSend resolve cada registro por conta
+  própria e reporta Encontrado / Faltando / Divergente imediatamente.
+
+## Configuração por domínio
+
+Depois de verificado, a aba **Configuração** de um domínio controla:
+
+- **Rastreamento de cliques** — desligado por padrão. Ligado, os links são
+  reescritos pelo endpoint de redirecionamento do próprio MillionSend para
+  registrar eventos `email.clicked`. Desligado, seus links saem intocados.
+- **Rastreamento de aberturas** — desligado por padrão. Ligado, um pixel de
+  rastreamento registra eventos `email.opened`. O rastreamento é na camada do
+  app (endpoints do MillionSend, ou seu subdomínio de rastreamento
+  customizado) — nunca a reescrita de links do SES.
+- **Modo TLS** — `opportunistic` (padrão) ou `enforced`, aplicado via
+  configuration set do SES do domínio.
+
+## Chaves de API e domínios
+
+Uma chave de API pode ficar restrita a um único domínio; essa chave só envia
+a partir daquele domínio (outros domínios retornam `403 restricted_api_key`).

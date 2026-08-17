@@ -1,0 +1,144 @@
+---
+title: Início rápido
+description: Obtenha o MillionSend e envie seu primeiro email em poucos minutos.
+---
+
+O MillionSend funciona igual no [MillionSend Cloud](https://millionsend.com)
+e na sua própria infraestrutura — mesmo painel, mesma API, mesmos SDKs.
+Escolha sua implantação abaixo; as abas lembram sua escolha em toda a
+documentação.
+
+## 1. Obtenha o MillionSend
+
+<DeploymentTabs>
+<DeploymentTab deployment="cloud">
+
+Cadastre-se em [millionsend.com](https://millionsend.com). Só isso — sem
+infraestrutura, sem conta AWS. O painel fica em
+[millionsend.com](https://millionsend.com) e a API em
+`https://api.millionsend.com`.
+
+</DeploymentTab>
+<DeploymentTab deployment="self-hosted">
+
+Você precisa de Docker (com Compose), Node 18+ e uma conta AWS com acesso ao
+SES. Contas AWS novas começam no sandbox do SES, que só envia para
+destinatários verificados —
+[solicite acesso de produção](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html)
+para enviar a qualquer um.
+
+Um comando, em um diretório vazio — sem clonar nada:
+
+```sh
+mkdir millionsend && cd millionsend
+npx @millionsend/setup
+```
+
+O assistente detecta o que já existe no diretório e oferece cada etapa: criar
+o `.env` com segredos gerados, provisionar os recursos da AWS (usuário IAM +
+política, tópico SNS de eventos, configuration set do SES — e uma fila SQS de
+eventos quando sua implantação não tem URL HTTPS pública), depois baixar o
+arquivo compose e subir a imagem pré-construída com `docker compose up -d`.
+Toda etapa pode ser pulada e é segura de repetir; `--dry-run` imprime o plano
+completo sem tocar em nada.
+
+Ao terminar: painel em `http://localhost:3000`, API em
+`http://localhost:3001`. O primeiro usuário a se registrar vira a conta
+inicial — depois disso o cadastro fica fechado, a menos que você opte por
+abri-lo. Prefere fazer manualmente, ou está indo para produção? Veja
+[Auto-hospedagem](/pt-BR/self-hosting).
+
+</DeploymentTab>
+</DeploymentTabs>
+
+## 2. Verifique um domínio de envio
+
+O MillionSend só envia a partir de domínios que você verificou.
+
+1. No painel, vá em **Domínios** e adicione um domínio que você controla
+   (ex.: `acme.dev`).
+2. Adicione os registros DNS exibidos — um registro TXT de DKIM e os
+   registros de MAIL FROM — no seu provedor de DNS.
+3. Clique em **Verificar registros DNS**. O MillionSend também resolve os
+   registros ao vivo, então você vê na hora quais ainda faltam.
+
+## 3. Crie uma chave de API
+
+Vá em **Chaves de API** e crie uma. O token `ms_` é exibido uma única vez —
+copie agora. Chaves podem ter acesso total ou somente envio, e opcionalmente
+ficar restritas a um único domínio.
+
+## 4. Envie um email
+
+Sua URL base da API:
+
+<DeploymentTabs>
+<DeploymentTab deployment="cloud">
+
+`https://api.millionsend.com`
+
+</DeploymentTab>
+<DeploymentTab deployment="self-hosted">
+
+A origem da API da sua instância — `http://localhost:3001` em um compose
+local, ou onde você expôs a porta 3001 (ex.: `https://api.acme.dev`). Os
+exemplos abaixo usam a URL da Nuvem; troque pela sua.
+
+</DeploymentTab>
+</DeploymentTabs>
+
+Com curl:
+
+```sh
+curl -X POST https://api.millionsend.com/emails \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "Acme <onboarding@acme.dev>",
+    "to": ["delivered@example.com"],
+    "subject": "Hello from MillionSend",
+    "html": "<strong>It works!</strong>"
+  }'
+```
+
+Ou com o SDK de Node (`npm install millionsend`):
+
+```ts
+import { MillionSend } from "millionsend";
+
+const ms = new MillionSend("ms_...", { baseUrl: "https://api.millionsend.com" });
+
+const { data, error } = await ms.emails.send({
+  from: "Acme <onboarding@acme.dev>",
+  to: "delivered@example.com",
+  subject: "Hello from MillionSend",
+  html: "<strong>It works!</strong>",
+});
+
+if (error) console.error(error.name, error.message);
+else console.log("sent", data.id);
+```
+
+Ambos retornam `{ "id": "..." }`. Acompanhe o email indo de `queued` a
+`delivered` na página **Emails**.
+
+<Callout type="info">
+Em uma instância auto-hospedada, eventos de entrega (entregue, bounce,
+reclamação) exigem o pipeline de eventos do SES que o assistente de setup
+configura — veja
+[Auto-hospedagem → Eventos do SES](/pt-BR/self-hosting#eventos-do-ses-bounces-reclamações-e-entregas).
+Na Nuvem eles fluem automaticamente.
+</Callout>
+
+Já usa o Resend? Aponte o SDK oficial do Resend para o MillionSend — defina
+`RESEND_BASE_URL` com a sua URL base e use sua chave `ms_`. O formato de
+comunicação é idêntico.
+
+## Próximos passos
+
+- [Conceitos](/pt-BR/concepts/contacts) para contatos, segmentos, tópicos e
+  broadcasts.
+- [SDKs](/pt-BR/sdks) para as nove bibliotecas oficiais.
+- [Referência da API](/pt-BR/api-reference) para todos os endpoints.
+- [Auto-hospedagem](/pt-BR/self-hosting) para implantação em produção,
+  referência de ambiente e o relay SMTP.
