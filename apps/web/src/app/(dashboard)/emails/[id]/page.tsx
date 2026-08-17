@@ -737,48 +737,25 @@ export default function EmailDetailPage() {
                     }}
                   />
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    textAlign: "center",
-                    flex: "none",
-                    maxWidth: 250,
-                  }}
-                >
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      width: 34,
-                      height: 34,
-                      flex: "none",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: 10,
-                      border: "1px dashed var(--ms-line-strong)",
-                      color: "var(--ms-muted)",
-                      fontSize: 15,
-                      fontWeight: 600,
-                    }}
-                  >
-                    ?
-                  </span>
-                  <span
-                    style={{
-                      marginTop: 10,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 5,
-                      fontSize: 12,
-                      color: "var(--ms-muted)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {t("detail.eventsStalled")}
-                    <Tooltip text={t("detail.eventsStalledWhy")} />
-                  </span>
+                <div style={{ flex: "none" }}>
+                  <Tooltip text={t("detail.eventsStalled")}>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 34,
+                        height: 34,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: 10,
+                        border: "1px dashed var(--ms-line-strong)",
+                        fontSize: 15,
+                        fontWeight: 600,
+                      }}
+                    >
+                      ?
+                    </span>
+                  </Tooltip>
                 </div>
               </>
             ) : null}

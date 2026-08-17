@@ -849,6 +849,9 @@ svg:focus {
   border: 1px solid var(--ms-line-strong);
   border-radius: 8px;
   padding: 8px 10px;
+  /* max-content: shrink-to-fit against the viewport edge would collapse the
+     panel to one word per line; the component clamps it back into view. */
+  width: max-content;
   /* Wide enough that typical hints render as one line; long text still wraps. */
   max-width: min(420px, calc(100vw - 32px));
   font-size: 12px;
