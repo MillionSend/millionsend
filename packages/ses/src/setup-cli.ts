@@ -271,7 +271,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     // --- social login step (before launch, so the stack starts with it) ---
     await socialLoginStep(rl, appBaseUrl, writeEnv);
 
-    return await launchStep(rl, interactive, state, env === null ? [] : missingSecrets(env));
+    return await launchStep(
+      rl,
+      interactive,
+      state,
+      env === null ? [] : missingSecrets(env),
+      appBaseUrl,
+    );
   } finally {
     rl.close();
   }
@@ -469,6 +475,7 @@ async function launchStep(
   interactive: boolean,
   state: DirState,
   secretsMissing: string[],
+  appBaseUrl: string,
 ): Promise<number> {
   console.log("");
   if (state.docker === null) {
@@ -526,7 +533,7 @@ async function launchStep(
     return 1;
   }
   console.log(
-    "\nRunning. Next steps:\n  · http://localhost:3000 — sign up (the first user becomes the owner)\n  · SES sandbox account? Set the send rate to 1 in Settings → Instance\n  · Verify a sending domain in the dashboard, then send",
+    `\nRunning. Next steps:\n  · ${appBaseUrl} — sign up (the first user becomes the owner)\n  · SES sandbox account? Set the send rate to 1 in Settings → Instance\n  · Verify a sending domain in the dashboard, then send`,
   );
   return 0;
 }

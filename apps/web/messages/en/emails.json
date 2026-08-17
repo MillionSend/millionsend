@@ -51,8 +51,7 @@
     "apiKey": "API key",
     "events": "Email events",
     "noEvents": "0 events.",
-    "eventsStalled": "No other events will show",
-    "eventsStalledWhy": "SES can only push delivery events to a public https URL, and this deployment doesn't have one. Re-run setup to create the SQS events queue the worker polls instead — new emails then get events within seconds. Emails sent before that stay as they are.",
+    "eventsStalled": "No other events will show — SES can only push delivery events to a public https URL, and this deployment doesn't have one. Re-run setup to create the SQS events queue the worker polls instead; new emails then get events within seconds. Emails sent before that stay as they are.",
     "event": {
       "rendering_failure": "Rendering failure"
     },
