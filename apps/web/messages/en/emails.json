@@ -51,7 +51,7 @@
     "apiKey": "API key",
     "events": "Email events",
     "noEvents": "0 events.",
-    "eventsUnreachable": "Event ingestion is off — re-run setup to enable it.",
+    "eventsUnreachable": "Events can't reach this deployment — re-run setup to create the events queue.",
     "event": {
       "rendering_failure": "Rendering failure"
     },
