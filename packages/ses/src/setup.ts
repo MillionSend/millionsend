@@ -138,19 +138,25 @@ export interface SetupResult {
   queueUrl: string | null;
 }
 
-/** Human-readable plan of what runSetup creates with the same input. */
-export function setupPlan(input: Pick<SetupInput, "region" | "appBaseUrl">): string[] {
+/** Plan lines for the events part alone (SNS route + configuration set). */
+export function eventsPlan(input: Pick<SetupInput, "region" | "appBaseUrl">): string[] {
   const origin = httpsOrigin(input.appBaseUrl);
-  const lines = [
-    `IAM policy ${SETUP_NAMES.policy} (minimal SES send + identity actions)`,
-    `IAM user ${SETUP_NAMES.user} with the policy attached`,
-    `Access key for ${SETUP_NAMES.user} — a NEW key on every run`,
+  return [
     origin
       ? `SNS topic ${SETUP_NAMES.topic} in ${input.region}, subscribed to ${origin}/ses/events`
       : `SNS topic ${SETUP_NAMES.topic} in ${input.region}, delivering to SQS queue ${SETUP_NAMES.queue} (no public https URL — the worker polls it)`,
     `SES configuration set ${SETUP_NAMES.configurationSet} publishing ${SES_EVENT_TYPES.length} event types to the topic`,
   ];
-  return lines;
+}
+
+/** Human-readable plan of what runSetup creates with the same input. */
+export function setupPlan(input: Pick<SetupInput, "region" | "appBaseUrl">): string[] {
+  return [
+    `IAM policy ${SETUP_NAMES.policy} (minimal SES send + identity actions)`,
+    `IAM user ${SETUP_NAMES.user} with the policy attached`,
+    `Access key for ${SETUP_NAMES.user} — a NEW key on every run`,
+    ...eventsPlan(input),
+  ];
 }
 
 function errorName(error: unknown): string {
@@ -172,7 +178,6 @@ async function ignoring(promise: Promise<unknown>, names: string[]): Promise<voi
  */
 export async function runSetup(clients: SetupClients, input: SetupInput): Promise<SetupResult> {
   const step = input.onStep ?? (() => {});
-  const origin = httpsOrigin(input.appBaseUrl);
 
   step(`IAM policy ${SETUP_NAMES.policy}`);
   await ignoring(
@@ -213,6 +218,29 @@ export async function runSetup(clients: SetupClients, input: SetupInput): Promis
   const accessKeyId = key.AccessKey?.AccessKeyId;
   const secretAccessKey = key.AccessKey?.SecretAccessKey;
   if (!accessKeyId || !secretAccessKey) throw new Error("CreateAccessKey returned no key material");
+
+  const events = await runEventsSetup(clients, input);
+  return { accessKeyId, secretAccessKey, topicArn: events.topicArn, queueUrl: events.queueUrl };
+}
+
+export interface EventsSetupResult {
+  topicArn: string;
+  /** null when events are delivered over https instead of a polled queue. */
+  queueUrl: string | null;
+}
+
+/**
+ * The events part alone: SNS topic, its delivery route (https subscription or
+ * SQS queue), and the SES configuration set. Needs no IAM changes, so a
+ * deployment that already has its access key can gain event ingestion without
+ * minting another one.
+ */
+export async function runEventsSetup(
+  clients: SetupClients,
+  input: SetupInput,
+): Promise<EventsSetupResult> {
+  const step = input.onStep ?? (() => {});
+  const origin = httpsOrigin(input.appBaseUrl);
 
   step(`SNS topic ${SETUP_NAMES.topic}`);
   // CreateTopic is idempotent: it returns the existing topic's ARN.
@@ -303,7 +331,7 @@ export async function runSetup(clients: SetupClients, input: SetupInput): Promis
     ["AlreadyExistsException"],
   );
 
-  return { accessKeyId, secretAccessKey, topicArn, queueUrl };
+  return { topicArn, queueUrl };
 }
 
 /** Human-readable plan of what runTeardown deletes. */
