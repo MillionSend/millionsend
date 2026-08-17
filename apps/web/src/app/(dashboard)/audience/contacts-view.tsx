@@ -9,6 +9,7 @@ import { AudienceSelect } from "@/components/audience-select";
 import { CreateAudienceModal } from "@/components/create-audience-modal";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
+import { GrowthSparkline } from "@/components/growth-sparkline";
 import { ChevronGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
@@ -203,6 +204,7 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
   const activeTeamId = team.data?.activeTeamId ?? null;
   const audiences = useQuery(trpc.audience.audiences.list.queryOptions());
   const segments = useQuery(trpc.segments.list.queryOptions());
+  const growth = useQuery(trpc.audience.audiences.growth.queryOptions({ audienceId }));
   const topics = useQuery(trpc.topics.list.queryOptions());
 
   const current = audiences.data?.find((a) => a.id === audienceId) ?? null;
@@ -345,48 +347,50 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
       />
       <AudienceTabs />
 
-      <div
-        className="ms-filter-row"
-        style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
-      >
-        <AudienceSelect
-          value={audienceId}
-          onChange={(id) => {
-            if (id === audienceId) return;
-            if (activeTeamId) writeLastAudience(activeTeamId, id);
-            router.push(`/audience/${id}`);
-          }}
-          ariaLabel={t("switcher.label")}
-          width={220}
-          options={(audiences.data ?? []).map((a) => ({
-            value: a.id,
-            label: a.name,
-            hint: nf.format(a.contacts),
-          }))}
-        />
-        <PopoverMenu
-          boxed
-          ariaLabel={t("manage.menu")}
-          items={[
-            { label: t("manage.create"), onSelect: () => setCreateOpen(true) },
-            {
-              label: t("manage.rename"),
-              onSelect: () => {
-                setRenameName(current?.name ?? "");
-                setRenameOpen(true);
+      {(audiences.data?.length ?? 0) > 1 ? (
+        <div
+          className="ms-filter-row"
+          style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
+        >
+          <AudienceSelect
+            value={audienceId}
+            onChange={(id) => {
+              if (id === audienceId) return;
+              if (activeTeamId) writeLastAudience(activeTeamId, id);
+              router.push(`/audience/${id}`);
+            }}
+            ariaLabel={t("switcher.label")}
+            width={220}
+            options={(audiences.data ?? []).map((a) => ({
+              value: a.id,
+              label: a.name,
+              hint: nf.format(a.contacts),
+            }))}
+          />
+          <PopoverMenu
+            boxed
+            ariaLabel={t("manage.menu")}
+            items={[
+              { label: t("manage.create"), onSelect: () => setCreateOpen(true) },
+              {
+                label: t("manage.rename"),
+                onSelect: () => {
+                  setRenameName(current?.name ?? "");
+                  setRenameOpen(true);
+                },
               },
-            },
-            null,
-            { label: t("manage.delete"), danger: true, onSelect: () => setDeleteAudOpen(true) },
-          ]}
-        />
-      </div>
+              null,
+              { label: t("manage.delete"), danger: true, onSelect: () => setDeleteAudOpen(true) },
+            ]}
+          />
+        </div>
+      ) : null}
 
       <div
         className="ms-meta-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
+          gridTemplateColumns: "repeat(3, 1fr) auto",
           gap: 22,
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
@@ -406,6 +410,18 @@ export function AudienceContactsView({ audienceId }: { audienceId: string }) {
           label={t("contacts.stats.unsubscribed")}
           value={current ? nf.format(current.unsubscribed) : null}
         />
+        <div>
+          <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
+            {t("contacts.stats.metrics")}
+          </div>
+          <div style={{ marginTop: 6, display: "flex" }}>
+            {growth.data ? (
+              <GrowthSparkline added={growth.data.added} unsubscribed={growth.data.unsubscribed} />
+            ) : (
+              <Skeleton width={200} height={52} radius={6} />
+            )}
+          </div>
+        </div>
       </div>
 
       <div

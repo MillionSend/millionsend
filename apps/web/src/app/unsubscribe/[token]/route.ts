@@ -1,5 +1,5 @@
 import { getDb, schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { postUnsubscribeLocation, targetForToken } from "../lookup";
 
 /**
@@ -42,7 +42,13 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
   } else {
     await db
       .update(schema.contacts)
-      .set({ unsubscribed: true, updatedAt: new Date() })
+      .set({
+        unsubscribed: true,
+        // coalesce keeps the FIRST unsubscribe time: mail scanners re-hit
+        // one-click links, and repeats must not walk the timestamp forward.
+        unsubscribedAt: sql`coalesce(${schema.contacts.unsubscribedAt}, now())`,
+        updatedAt: new Date(),
+      })
       .where(eq(schema.contacts.id, target.contactId));
   }
 

@@ -44,6 +44,9 @@ export const contacts = pgTable(
     // merge tokens. Non-string inputs are coerced/rejected at the API boundary.
     properties: jsonb("properties").$type<Record<string, string>>().notNull().default({}),
     unsubscribed: boolean("unsubscribed").notNull().default(false),
+    // When the contact unsubscribed (null while subscribed) — feeds the
+    // audience growth chart alongside createdAt.
+    unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

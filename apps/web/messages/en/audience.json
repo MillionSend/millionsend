@@ -76,7 +76,8 @@
     "stats": {
       "all": "All contacts",
       "subscribers": "Subscribers",
-      "unsubscribed": "Unsubscribed"
+      "unsubscribed": "Unsubscribed",
+      "metrics": "Metrics"
     },
     "searchPlaceholder": "Search by email or name…",
     "addContacts": "Add contacts",

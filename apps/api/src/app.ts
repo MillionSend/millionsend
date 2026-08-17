@@ -489,6 +489,7 @@ function registerAudienceRoutes(
             firstName: body.first_name ?? null,
             lastName: body.last_name ?? null,
             unsubscribed: body.unsubscribed ?? false,
+            ...(body.unsubscribed ? { unsubscribedAt: new Date() } : {}),
             properties,
           })
           .returning({ id: schema.contacts.id });
@@ -644,7 +645,12 @@ function registerAudienceRoutes(
           updatedAt: new Date(),
           ...(body.first_name !== undefined ? { firstName: body.first_name } : {}),
           ...(body.last_name !== undefined ? { lastName: body.last_name } : {}),
-          ...(body.unsubscribed !== undefined ? { unsubscribed: body.unsubscribed } : {}),
+          ...(body.unsubscribed !== undefined
+            ? {
+                unsubscribed: body.unsubscribed,
+                unsubscribedAt: body.unsubscribed ? new Date() : null,
+              }
+            : {}),
           ...(properties !== undefined ? { properties } : {}),
         })
         .where(contactWhere(auth.teamId, audienceId, id))
@@ -850,7 +856,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
           updatedAt: new Date(),
           ...(body.first_name !== undefined ? { firstName: body.first_name } : {}),
           ...(body.last_name !== undefined ? { lastName: body.last_name } : {}),
-          ...(body.unsubscribed !== undefined ? { unsubscribed: body.unsubscribed } : {}),
+          ...(body.unsubscribed !== undefined
+            ? {
+                unsubscribed: body.unsubscribed,
+                unsubscribedAt: body.unsubscribed ? new Date() : null,
+              }
+            : {}),
           ...(properties !== undefined ? { properties } : {}),
         })
         .where(teamContactWhere(auth.teamId, id))

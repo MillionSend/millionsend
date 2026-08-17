@@ -76,7 +76,8 @@
     "stats": {
       "all": "Todos os contatos",
       "subscribers": "Inscritos",
-      "unsubscribed": "Descadastrados"
+      "unsubscribed": "Descadastrados",
+      "metrics": "Métricas"
     },
     "searchPlaceholder": "Buscar por e-mail ou nome…",
     "addContacts": "Adicionar contatos",
