@@ -2,9 +2,10 @@
 sdks/
 org/
 
-# Internal planning and design material — private, never committed
-design/
-docs/
+# Internal planning and design material — private, never committed.
+# Root-anchored: apps/docs is the public documentation site and IS tracked.
+/design/
+/docs/
 
 # OS / editor
 .DS_Store

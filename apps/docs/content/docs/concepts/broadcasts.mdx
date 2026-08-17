@@ -1,0 +1,49 @@
+---
+title: Broadcasts
+description: Compose, schedule, and send one email to many contacts.
+---
+
+A broadcast is one email sent to many contacts: all of them, a
+[segment](/concepts/segments), or a [topic](/concepts/topics). Compose in the
+dashboard's block editor (with per-contact merge fields) or create broadcasts
+via the API.
+
+## Lifecycle
+
+```
+draft → scheduled → sending → sent
+              ↘ canceled
+```
+
+- Broadcasts are created as **drafts**. Only drafts can be edited or deleted.
+- `POST /broadcasts/{id}/send` schedules the send — immediately, or at a
+  `scheduled_at` timestamp.
+- A **scheduled** broadcast can still be canceled with
+  `POST /broadcasts/{id}/cancel`; once it is sending, it cannot.
+- On the wire, `scheduled` and `sending` both read as `queued` (matching the
+  Resend SDK's status union); `canceled` is a MillionSend extension.
+
+## What the fan-out does
+
+Every recipient email goes through the same pipeline as a transactional send,
+plus broadcast-specific handling:
+
+- **Audience resolution** — globally unsubscribed contacts are always
+  excluded; segment filters and topic subscriptions are evaluated at send
+  time.
+- **Suppression checks** — addresses on the
+  [suppression list](/concepts/suppressions) are skipped.
+- **Merge fields** — per-contact values (name, custom properties) are
+  substituted into the template.
+- **Unsubscribe links** — RFC 8058 one-click `List-Unsubscribe` headers and a
+  hosted unsubscribe link are added to every message. These links are built
+  from `APP_BASE_URL`, so sending is rejected until it is configured.
+
+## Guardrails
+
+- Only a **verified domain** of your team may appear in `from`.
+- If your trailing bounce or complaint rate has crossed SES's own pause
+  threshold, new broadcast sends are blocked with a `403 sending_paused`
+  error — stopping you before SES pauses the whole account.
+
+See the [API reference](/api-reference) for all broadcast endpoints.

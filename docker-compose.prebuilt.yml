@@ -9,3 +9,6 @@ services:
   smtp:
     image: ghcr.io/millionsend/millionsend:edge
     build: !reset null
+  docs:
+    image: ghcr.io/millionsend/millionsend:edge
+    build: !reset null

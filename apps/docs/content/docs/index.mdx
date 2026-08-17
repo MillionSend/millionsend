@@ -1,0 +1,80 @@
+---
+title: Introduction
+description: What MillionSend is and how the pieces fit together.
+---
+
+MillionSend is the open-source email platform. Send one. Send a million.
+
+It is a self-hostable alternative to Resend that sends through **your own AWS
+SES account** — you keep SES's deliverability and pricing, and get a product
+around it: a dashboard, an HTTP API, SDKs, webhooks, contacts, broadcasts, and
+an SMTP relay.
+
+## Resend-compatible API
+
+The HTTP API is wire-compatible with Resend: same request and response shapes,
+same error format. Official Resend SDKs honor a configurable base URL, so
+migrating an existing integration means changing two environment variables —
+the API key and the base URL — not rewriting your code. MillionSend also ships
+[its own SDKs](/sdks) for nine languages that mirror the Resend SDK shapes.
+
+One deliberate difference: **contacts are team-global**. There is no
+"audiences" concept — every contact belongs to your team directly, and you
+target subsets with [segments](/concepts/segments) (saved filters) and
+[topics](/concepts/topics) (opt-in categories). See
+[Contacts](/concepts/contacts).
+
+## What's included
+
+| Area | Notes |
+| --- | --- |
+| Emails API | Send, batch, get, cancel scheduled sends. Idempotency via the `Idempotency-Key` header. |
+| Contacts | Team-wide contacts with subscribe state, custom properties, and CSV import. |
+| Segments | Saved filters over contacts, usable as broadcast targets. |
+| Topics | Granular subscription categories wired into the hosted unsubscribe page. |
+| Broadcasts | Compose, schedule, and send to all contacts, a segment, or a topic. |
+| Templates | Reusable templates with per-contact merge fields. |
+| Domains | Guided DNS verification, BYODKIM, per-domain tracking and TLS settings. |
+| Webhooks | Standard Webhooks signatures, per-endpoint event selection, delivery log. |
+| Suppressions | Hard bounces and complaints suppressed automatically. |
+| One-click unsubscribe | RFC 8058 `List-Unsubscribe` headers plus a hosted unsubscribe page. |
+| SMTP relay | Drop-in SMTP on port 2587, authenticated with an API key. |
+| Metrics | Daily sends with bounce and complaint rates tracked against SES thresholds. |
+| Dashboard | Full dashboard in English and Brazilian Portuguese. |
+
+## Architecture at a glance
+
+A self-hosted deployment is two containers:
+
+- **Postgres** — the only datastore. The job queue (pg-boss) runs on it too;
+  there is no Redis.
+- **App container** — runs the API (port 3001), the background worker, and the
+  web dashboard (port 3000). An optional third container runs the SMTP relay
+  (port 2587). Processes can also be split one-per-container with the
+  `PROCESS` environment variable.
+
+Email bodies are encrypted at rest (AES-256-GCM envelope encryption) and
+purged after a retention window. Delivery events (bounces, complaints,
+deliveries) flow back from SES through SNS — pushed to your host when it has a
+public HTTPS URL, or long-polled from an SQS queue when it does not.
+
+## Where to go next
+
+- [Quickstart](/quickstart) — running locally and sending your first email in
+  a few minutes.
+- [Self-hosting](/self-hosting) — the full deployment reference.
+- [API reference](/api-reference) — generated from the server code, always in
+  sync.
+
+## For AI agents
+
+Every documentation page is available as raw markdown by appending `.md` to
+its URL (or sending `Accept: text/markdown`). [/llms.txt](/llms.txt) is a
+machine-readable index, [/llms-full.txt](/llms-full.txt) is the entire
+documentation in one file, and [/openapi.json](/openapi.json) is the OpenAPI
+3.1 spec generated from the API's code.
+
+## License
+
+The platform is [AGPL-3.0](https://github.com/MillionSend/millionsend/blob/main/LICENSE).
+SDKs are published separately under MIT.

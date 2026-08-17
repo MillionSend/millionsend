@@ -1,0 +1,59 @@
+---
+title: Webhooks
+description: Signed event deliveries for the email lifecycle, following the Standard Webhooks spec.
+---
+
+Webhooks push email lifecycle events to your endpoints as they happen. Create
+endpoints in the dashboard, choose which event types each one receives, and
+inspect every delivery (payload, response, attempts) in the per-endpoint
+delivery log.
+
+## Event types
+
+| Event | Fired when |
+| --- | --- |
+| `email.sent` | SES accepted the message for delivery. |
+| `email.delivered` | The recipient server accepted it. |
+| `email.delivery_delayed` | Delivery is being retried (e.g. mailbox full, greylisting). |
+| `email.bounced` | The message hard-bounced. The address is also [suppressed](/concepts/suppressions). |
+| `email.complained` | The recipient marked it as spam. Also suppressed. |
+| `email.opened` | The tracking pixel was loaded (requires open tracking on the [domain](/concepts/domains)). |
+| `email.clicked` | A rewritten link was clicked (requires click tracking). |
+
+## Signatures (Standard Webhooks)
+
+Deliveries are signed following the
+[Standard Webhooks](https://www.standardwebhooks.com) spec — the same scheme
+Resend and Svix use, so existing verification code works unchanged.
+
+Each endpoint has a `whsec_...` secret, shown once at creation. Every request
+carries:
+
+```
+webhook-id: <message id>
+webhook-timestamp: <unix seconds>
+webhook-signature: v1,<base64 HMAC-SHA256>
+```
+
+The signed content is `{webhook-id}.{webhook-timestamp}.{raw body}`. Verify
+with any Standard Webhooks library, e.g. in Node:
+
+```ts
+import { Webhook } from "standardwebhooks";
+
+const wh = new Webhook("whsec_...");
+const event = wh.verify(rawBody, {
+  "webhook-id": req.headers["webhook-id"],
+  "webhook-timestamp": req.headers["webhook-timestamp"],
+  "webhook-signature": req.headers["webhook-signature"],
+});
+```
+
+Always verify against the **raw** request body, and reject stale timestamps.
+
+## Delivery and retries
+
+A delivery is considered successful on any 2xx response. Failures are retried
+with exponential backoff (starting at seconds, capped at hours, up to 6
+attempts). A reconcile job re-dispatches deliveries lost to crashes, so
+delivery is at-least-once — make handlers idempotent, keyed on `webhook-id`.

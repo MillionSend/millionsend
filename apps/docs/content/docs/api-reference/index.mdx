@@ -1,0 +1,59 @@
+---
+title: API reference
+description: The MillionSend HTTP API — Resend wire-compatible, generated from the server code.
+---
+
+The endpoint pages under this section are generated from the API's own route
+definitions at build time, so they always reflect the code. The raw spec is at
+[/openapi.json](/openapi.json) (OpenAPI 3.1).
+
+## Base URL
+
+Your instance's API origin — `http://localhost:3001` on a local compose setup,
+or wherever you exposed port 3001 (e.g. `https://api.acme.dev`).
+
+## Authentication
+
+Every endpoint (except the SES event ingestion webhook) requires an API key
+created in the dashboard:
+
+```
+Authorization: Bearer ms_...
+```
+
+Keys have a permission level: **full access** keys can use every endpoint,
+**sending only** keys are confined to `/emails*` (anything else returns
+`403 restricted_api_key`). A key can additionally be scoped to a single
+domain, restricting which `from` addresses it may send.
+
+## Resend compatibility
+
+Request and response shapes match Resend's API, so official Resend SDKs work
+against MillionSend by pointing their base URL at your instance. Notable
+deltas are deliberate and loud:
+
+- Unsupported Resend fields (e.g. `attachments`, custom `headers`) are
+  rejected with `422` rather than silently dropped.
+- Contacts are team-global — contact endpoints take no audience id (see
+  [Contacts](/concepts/contacts)).
+- Broadcasts support `canceled`, a status outside Resend's union.
+
+## Errors
+
+Errors use Resend's format:
+
+```json
+{ "statusCode": 422, "name": "validation_error", "message": "..." }
+```
+
+## Idempotency
+
+`POST /emails` and `POST /emails/batch` accept an `Idempotency-Key` header.
+Retrying with the same key and payload returns the original response instead
+of sending again; the same key with a different payload returns `409`.
+
+## Pagination
+
+List endpoints accept `limit` (1–100, default 20) plus `after` / `before`
+cursors carrying an item id from a previous page. Responses include
+`has_more`.

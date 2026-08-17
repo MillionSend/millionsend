@@ -1,7 +1,8 @@
 // Self-host process supervisor. PROCESS selects what runs in this container:
-// api | worker | web | smtp | all (default all). Migrations always run first
-// so a fresh database is usable on first boot. "all" excludes smtp — the
-// SMTP relay is opt-in via its own compose service (PROCESS=smtp).
+// api | worker | web | smtp | docs | all (default all). Migrations run first
+// so a fresh database is usable on first boot — except for docs-only
+// containers, which have no database at all. "all" excludes smtp and docs —
+// both are opt-in via their own compose services.
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -40,6 +41,13 @@ const PROCESSES = {
     cwd: root,
     env: {},
   },
+  docs: {
+    command: join(root, "apps/docs/node_modules/.bin/next"),
+    args: ["start"],
+    cwd: join(root, "apps/docs"),
+    // DOCS_PORT remaps only the host side; the docs process is fixed at 3002.
+    env: { PORT: "3002" },
+  },
 };
 
 const ALL_PROCESSES = ["api", "worker", "web"];
@@ -62,20 +70,24 @@ const names = selection === "all" ? ALL_PROCESSES : [selection];
 for (const name of names) {
   if (!PROCESSES[name]) {
     console.error(
-      `start: unknown PROCESS "${selection}" (expected api | worker | web | smtp | all)`,
+      `start: unknown PROCESS "${selection}" (expected api | worker | web | smtp | docs | all)`,
     );
     process.exit(1);
   }
 }
 
-const migrate = spawnSync(
-  join(root, "packages/db/node_modules/.bin/tsx"),
-  [join(root, "packages/db/src/migrate.ts")],
-  { cwd: root, stdio: "inherit" },
-);
-if (migrate.status !== 0) {
-  console.error("start: migrations failed, not starting processes");
-  process.exit(migrate.status ?? 1);
+// The docs site is static content with no database; a docs-only container
+// must boot without DATABASE_URL (its compose service has no postgres).
+if (names.some((name) => name !== "docs")) {
+  const migrate = spawnSync(
+    join(root, "packages/db/node_modules/.bin/tsx"),
+    [join(root, "packages/db/src/migrate.ts")],
+    { cwd: root, stdio: "inherit" },
+  );
+  if (migrate.status !== 0) {
+    console.error("start: migrations failed, not starting processes");
+    process.exit(migrate.status ?? 1);
+  }
 }
 
 const children = new Map();

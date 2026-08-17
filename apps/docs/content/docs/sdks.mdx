@@ -1,0 +1,215 @@
+---
+title: SDKs
+description: Official MillionSend SDKs for nine languages, published under MIT.
+---
+
+Every SDK mirrors the shape of the corresponding official Resend SDK, so
+migrating is mostly a find-and-replace: swap the import/class and point the
+base URL at your instance. All SDKs are MIT-licensed and live in their own
+repositories under the [MillionSend GitHub org](https://github.com/MillionSend).
+
+Since the API is Resend wire-compatible, the official Resend SDKs also work —
+point them at your instance via their base-URL option (e.g.
+`RESEND_BASE_URL`).
+
+## Node.js / TypeScript
+
+[`millionsend` on npm](https://www.npmjs.com/package/millionsend) — Node 18+.
+
+```sh
+npm install millionsend
+```
+
+```ts
+import { MillionSend } from "millionsend";
+
+const ms = new MillionSend("ms_123", { baseUrl: "https://mail.acme.dev" });
+
+const { data, error } = await ms.emails.send({
+  from: "Acme <onboarding@acme.dev>",
+  to: "delivered@example.com",
+  subject: "Hello from MillionSend",
+  html: "<strong>It works!</strong>",
+});
+```
+
+## Python
+
+[`millionsend` on PyPI](https://pypi.org/project/millionsend/) — Python 3.9+.
+
+```sh
+pip install millionsend
+```
+
+```python
+import millionsend
+
+millionsend.api_key = "ms_123"
+millionsend.base_url = "https://mail.acme.dev"
+
+email = millionsend.Emails.send({
+    "from": "Acme <onboarding@acme.dev>",
+    "to": "delivered@example.com",
+    "subject": "Hello from MillionSend",
+    "html": "<strong>It works!</strong>",
+})
+```
+
+## Go
+
+[`millionsend-go`](https://github.com/MillionSend/millionsend-go) — Go 1.21+.
+
+```sh
+go get github.com/MillionSend/millionsend-go
+```
+
+```go
+client := millionsend.NewClient("ms_123")
+client.BaseURL = "https://mail.acme.dev"
+
+sent, err := client.Emails.Send(&millionsend.SendEmailRequest{
+    From:    "Acme <onboarding@acme.dev>",
+    To:      []string{"delivered@example.com"},
+    Subject: "Hello from MillionSend",
+    Html:    "<strong>It works!</strong>",
+})
+```
+
+## Ruby
+
+[`millionsend` on RubyGems](https://rubygems.org/gems/millionsend) — Ruby 3.0+.
+
+```sh
+gem install millionsend
+```
+
+```ruby
+require "millionsend"
+
+Millionsend.api_key  = "ms_123"
+Millionsend.base_url = "https://mail.acme.dev"
+
+email = Millionsend::Emails.send(
+  from: "Acme <onboarding@acme.dev>",
+  to: "delivered@example.com",
+  subject: "Hello from MillionSend",
+  html: "<strong>It works!</strong>"
+)
+```
+
+## PHP
+
+[`millionsend/millionsend-php` on Packagist](https://packagist.org/packages/millionsend/millionsend-php) — PHP 8.1+.
+
+```sh
+composer require millionsend/millionsend-php
+```
+
+```php
+use MillionSend\MillionSend;
+
+$ms = MillionSend::client('ms_123', 'https://mail.acme.dev');
+
+$email = $ms->emails->send([
+    'from' => 'Acme <onboarding@acme.dev>',
+    'to' => 'delivered@example.com',
+    'subject' => 'Hello from MillionSend',
+    'html' => '<strong>It works!</strong>',
+]);
+```
+
+## Rust
+
+[`millionsend` on crates.io](https://crates.io/crates/millionsend) — async
+(`tokio` + `reqwest`).
+
+```toml
+[dependencies]
+millionsend = "0.2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust
+use millionsend::{MillionSend, SendEmailOptions};
+
+let ms = MillionSend::with_base_url("ms_123", "https://mail.acme.dev");
+
+let sent = ms.emails.send(&SendEmailOptions {
+    from: "Acme <onboarding@acme.dev>".into(),
+    to: "delivered@example.com".into(),
+    subject: "Hello from MillionSend".into(),
+    html: Some("<strong>It works!</strong>".into()),
+    ..Default::default()
+}).await?;
+```
+
+## Java
+
+[`com.millionsend:millionsend-java` on Maven Central](https://central.sonatype.com/artifact/com.millionsend/millionsend-java) — Java 11+.
+
+```xml
+<dependency>
+  <groupId>com.millionsend</groupId>
+  <artifactId>millionsend-java</artifactId>
+  <version>0.2.0</version>
+</dependency>
+```
+
+```java
+MillionSend ms = new MillionSend("ms_123", "https://mail.acme.dev");
+
+CreateEmailResponse sent = ms.emails().send(
+    CreateEmailOptions.builder()
+        .from("Acme <onboarding@acme.dev>")
+        .to("delivered@example.com")
+        .subject("Hello from MillionSend")
+        .html("<strong>It works!</strong>")
+        .build());
+```
+
+## .NET
+
+[`MillionSend` on NuGet](https://www.nuget.org/packages/MillionSend) — targets net8.0.
+
+```sh
+dotnet add package MillionSend
+```
+
+```csharp
+using MillionSend;
+
+var client = new MillionSendClient("ms_123", "https://mail.acme.dev");
+
+var res = await client.EmailSendAsync(new EmailMessage
+{
+    From = "Acme <onboarding@acme.dev>",
+    To = "delivered@example.com",
+    Subject = "Hello from MillionSend",
+    Html = "<strong>It works!</strong>",
+});
+```
+
+## Elixir
+
+[`millionsend` on Hex](https://hex.pm/packages/millionsend) — Elixir 1.15+.
+
+```elixir
+# mix.exs
+def deps do
+  [{:millionsend, "~> 0.2"}]
+end
+```
+
+```elixir
+config :millionsend, MillionSend.Client,
+  api_key: System.get_env("MILLIONSEND_API_KEY"),
+  base_url: "https://mail.acme.dev"
+
+{:ok, email} =
+  MillionSend.Emails.send(%{
+    from: "Acme <onboarding@acme.dev>",
+    to: "delivered@example.com",
+    subject: "Hello from MillionSend",
+    html: "<strong>It works!</strong>"
+  })
+```

@@ -1,0 +1,36 @@
+{
+  "name": "@millionsend/docs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "SKIP_ENV_VALIDATION=1 tsx scripts/generate-openapi.ts",
+    "dev": "next dev -p ${DOCS_PORT:-3002}",
+    "prebuild": "SKIP_ENV_VALIDATION=1 tsx scripts/generate-openapi.ts",
+    "build": "next build",
+    "start": "next start -p ${DOCS_PORT:-3002}",
+    "postinstall": "fumadocs-mdx",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fumadocs-core": "^16.14.4",
+    "fumadocs-mdx": "^15.2.3",
+    "fumadocs-openapi": "^11.2.4",
+    "fumadocs-ui": "^16.14.4",
+    "next": "^16.3.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "shiki": "^3.14.0"
+  },
+  "devDependencies": {
+    "@millionsend/api": "workspace:*",
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/mdx": "^2.0.13",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tailwindcss": "^4.1.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
+}

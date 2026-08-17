@@ -1,0 +1,38 @@
+---
+title: Suppressions
+description: Automatic protection for your sender reputation.
+---
+
+The suppression list protects your sender reputation — and your SES account —
+by making sure you never repeatedly mail an address that hard-bounced or
+marked you as spam.
+
+## How addresses get suppressed
+
+- **Hard bounce** — the receiving server permanently rejected the address.
+- **Complaint** — the recipient marked a message as spam.
+
+Both arrive as SES events and suppress the address automatically. Suppressions
+are per team.
+
+## What suppression does
+
+- **Transactional sends** (`POST /emails`, SMTP relay): suppressed recipients
+  are stripped from `to`/`cc`/`bcc`. If *every* `to` recipient is suppressed,
+  the send is rejected with `422 All recipients are suppressed`.
+- **Broadcasts**: suppressed contacts are skipped during fan-out.
+
+## Reviewing and removing
+
+The dashboard lists every suppressed address with the reason and date. You can
+remove an address to allow sending again — do this only when you know the
+cause is fixed (e.g. a mailbox that existed all along but was rejected by a
+misconfigured server). Re-suppression is automatic on the next bounce or
+complaint.
+
+## Why this matters
+
+SES tracks account-level bounce and complaint rates and pauses accounts that
+cross its thresholds. MillionSend's metrics page tracks your rates against
+those thresholds, and [broadcast sending](/concepts/broadcasts#guardrails) is
+blocked automatically when a rate crosses the pause line.
