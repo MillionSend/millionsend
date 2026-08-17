@@ -70,10 +70,6 @@ function bounceOf(data: EventData): BounceData | null {
   const b = data?.bounce;
   return b && typeof b === "object" ? (b as BounceData) : null;
 }
-function deliveryOf(data: EventData): { smtpResponse?: string } | null {
-  const d = data?.delivery;
-  return d && typeof d === "object" ? (d as { smtpResponse?: string }) : null;
-}
 function clickOf(data: EventData): { link?: string } | null {
   const c = data?.click;
   return c && typeof c === "object" ? (c as { link?: string }) : null;
@@ -393,7 +389,13 @@ export default function EmailDetailPage() {
     );
   }
 
-  const events = email.events;
+  // One node per event type: multi-recipient emails get one SES Delivery per
+  // recipient, and app-layer tracking repeats opened/clicked — the timeline
+  // keeps the first occurrence of each type (details of later siblings stay
+  // reachable in the drawers/metrics, not here).
+  const events = email.events.filter(
+    (event, index, all) => all.findIndex((other) => other.type === event.type) === index,
+  );
   // Ingestion off (no SNS topics) means nothing after the locally-recorded
   // "sent" can ever arrive — the timeline says so instead of silently stalling.
   const eventsStalled =
@@ -437,7 +439,6 @@ export default function EmailDetailPage() {
 
   /** Second mono line inside an event card — real payload data only. */
   function eventDetail(type: EventType, data: EventData): string | null {
-    if (type === "delivered") return deliveryOf(data)?.smtpResponse ?? null;
     if (type === "bounced") {
       const b = bounceOf(data);
       if (!b) return null;
