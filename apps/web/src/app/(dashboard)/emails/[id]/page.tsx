@@ -14,6 +14,7 @@ import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { Tooltip } from "@/components/tooltip";
 import {
   formatDayTime,
   formatDurationShort,
@@ -767,12 +768,16 @@ export default function EmailDetailPage() {
                   <span
                     style={{
                       marginTop: 10,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
                       fontSize: 12,
                       color: "var(--ms-muted)",
-                      lineHeight: 1.55,
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    {t("detail.eventsUnreachable")}
+                    {t("detail.eventsStalled")}
+                    <Tooltip text={t("detail.eventsStalledWhy")} />
                   </span>
                 </div>
               </>

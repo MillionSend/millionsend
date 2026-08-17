@@ -51,7 +51,8 @@
     "apiKey": "Chave de API",
     "events": "Eventos do e-mail",
     "noEvents": "0 eventos.",
-    "eventsUnreachable": "Os eventos não têm como chegar aqui — rode o setup para criar a fila de eventos.",
+    "eventsStalled": "Nenhum outro evento vai aparecer",
+    "eventsStalledWhy": "O SES só consegue enviar eventos de entrega para uma URL https pública, e esta instalação não tem uma. Rode o setup novamente para criar a fila de eventos (SQS) que o worker consulta — novos e-mails passam a ter eventos em segundos. E-mails enviados antes disso permanecem como estão.",
     "event": {
       "rendering_failure": "Falha de renderização"
     },
