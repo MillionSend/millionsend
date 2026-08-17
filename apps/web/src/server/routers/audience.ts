@@ -2,7 +2,7 @@ import { resultRows } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
@@ -94,6 +94,32 @@ export const audienceRouter = router({
         if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
         return { id: row.id };
       }),
+
+    /**
+     * Resend-style default: contacts land in a "General" audience until the
+     * team deliberately creates more lists, so the dashboard never demands
+     * "create an audience" before the first contact. Idempotent — returns the
+     * earliest existing audience when the team already has one.
+     */
+    ensureDefault: teamProcedure.mutation(async ({ ctx }) => {
+      const a = schema.audiences;
+      const [existing] = await ctx.db
+        .select({ id: a.id })
+        .from(a)
+        .where(eq(a.teamId, ctx.teamId))
+        .orderBy(asc(a.createdAt), asc(a.id))
+        .limit(1);
+      if (existing) return { id: existing.id };
+      // ponytail: check-then-insert — a same-instant race can mint two
+      // defaults, which the multi-audience UI absorbs; add a partial unique
+      // index if it ever matters.
+      const [row] = await ctx.db
+        .insert(a)
+        .values({ teamId: ctx.teamId, name: "General" })
+        .returning({ id: a.id });
+      if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      return { id: row.id };
+    }),
 
     rename: teamProcedure
       .input(z.object({ id: z.uuid(), name: z.string().trim().min(1).max(200) }))

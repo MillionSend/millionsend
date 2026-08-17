@@ -61,8 +61,6 @@
     "created": "Created",
     "menu": "Audience actions",
     "delete": "Delete",
-    "empty": "No audiences yet.",
-    "emptyHint": "An audience holds contacts and their subscription state.",
     "loadError": "Could not load audiences.",
     "retry": "Retry",
     "createTitle": "Create audience",
