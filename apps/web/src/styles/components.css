@@ -1239,3 +1239,45 @@ svg:focus {
   appearance: none;
   margin: 0;
 }
+
+/* Horizontal tab/chip strips: keep one line, scroll quietly. */
+.ms-scroll-x {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ms-line-strong) transparent;
+}
+
+/* Syntax palette for highlighted snippets (hljs class names via lowlight),
+   scoped under .ms-hl so the tokens never bleed into plain code blocks.
+   Hues ride the design tokens so every theme stays coherent. */
+.ms-hl .hljs-keyword,
+.ms-hl .hljs-literal,
+.ms-hl .hljs-built_in,
+.ms-hl .hljs-type {
+  color: var(--ms-info);
+}
+.ms-hl .hljs-string,
+.ms-hl .hljs-regexp,
+.ms-hl .hljs-addition {
+  color: var(--ms-success);
+}
+.ms-hl .hljs-number,
+.ms-hl .hljs-symbol,
+.ms-hl .hljs-meta {
+  color: var(--ms-warn);
+}
+.ms-hl .hljs-comment,
+.ms-hl .hljs-doctag {
+  color: var(--ms-faint);
+  font-style: italic;
+}
+.ms-hl .hljs-title,
+.ms-hl .hljs-title.function_,
+.ms-hl .hljs-title.class_ {
+  color: var(--ms-bone);
+  font-weight: 600;
+}
+.ms-hl .hljs-attr,
+.ms-hl .hljs-property,
+.ms-hl .hljs-variable {
+  color: color-mix(in srgb, var(--ms-info) 45%, var(--ms-bone));
+}

@@ -2,6 +2,18 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import {
+  siDotnet,
+  siElixir,
+  siGo,
+  siNodedotjs,
+  siOpenjdk,
+  siPhp,
+  siPython,
+  siRuby,
+  siRust,
+} from "simple-icons";
+import { CodeHighlight, type HighlightLanguage } from "@/components/code-highlight";
 import { Drawer } from "@/components/drawer";
 import { CodeGlyph } from "@/components/icons/nav-icons";
 
@@ -10,17 +22,27 @@ import { CodeGlyph } from "@/components/icons/nav-icons";
 const LANGS = ["node", "python", "php", "ruby", "go", "rust", "java", "dotnet", "elixir"] as const;
 type Lang = (typeof LANGS)[number];
 
-const LANG_LABEL: Record<Lang, string> = {
-  node: "Node.js",
-  python: "Python",
-  php: "PHP",
-  ruby: "Ruby",
-  go: "Go",
-  rust: "Rust",
-  java: "Java",
-  dotnet: ".NET",
-  elixir: "Elixir",
-};
+const LANG_META: Record<Lang, { label: string; hljs: HighlightLanguage; icon: { path: string } }> =
+  {
+    node: { label: "Node.js", hljs: "javascript", icon: siNodedotjs },
+    python: { label: "Python", hljs: "python", icon: siPython },
+    php: { label: "PHP", hljs: "php", icon: siPhp },
+    ruby: { label: "Ruby", hljs: "ruby", icon: siRuby },
+    go: { label: "Go", hljs: "go", icon: siGo },
+    rust: { label: "Rust", hljs: "rust", icon: siRust },
+    // Java's own mark is trademark-restricted; OpenJDK is the ecosystem icon.
+    java: { label: "Java", hljs: "java", icon: siOpenjdk },
+    dotnet: { label: ".NET", hljs: "csharp", icon: siDotnet },
+    elixir: { label: "Elixir", hljs: "elixir", icon: siElixir },
+  };
+
+function LangIcon({ path }: { path: string }) {
+  return (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d={path} />
+    </svg>
+  );
+}
 
 interface Snippets {
   send: string;
@@ -290,10 +312,10 @@ MillionSend.Emails.send(client, %{
   },
 };
 
-function CodeBlock({ code }: { code: string }) {
+function CodeBlock({ code, language }: { code: string; language: HighlightLanguage }) {
   return (
     <pre
-      className="ms-mono"
+      className="ms-mono ms-hl"
       style={{
         margin: "10px 0 0",
         padding: "14px 16px",
@@ -306,7 +328,7 @@ function CodeBlock({ code }: { code: string }) {
         overflowX: "auto",
       }}
     >
-      {code}
+      <CodeHighlight code={code} language={language} />
     </pre>
   );
 }
@@ -336,7 +358,15 @@ export function ApiDocsButton() {
         <div
           role="tablist"
           aria-label={t("apiSheet.title")}
-          style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}
+          className="ms-scroll-x"
+          style={{
+            display: "flex",
+            gap: 4,
+            flexWrap: "nowrap",
+            marginTop: 4,
+            overflowX: "auto",
+            paddingBottom: 4,
+          }}
         >
           {LANGS.map((key) => (
             <button
@@ -354,9 +384,15 @@ export function ApiDocsButton() {
                 background: key === lang ? "var(--ms-panel-raised)" : "none",
                 color: key === lang ? "var(--ms-bone)" : "var(--ms-muted)",
                 font: "inherit",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                flex: "none",
+                whiteSpace: "nowrap",
               }}
             >
-              {LANG_LABEL[key]}
+              <LangIcon path={LANG_META[key].icon.path} />
+              {LANG_META[key].label}
             </button>
           ))}
         </div>
@@ -372,7 +408,7 @@ export function ApiDocsButton() {
             <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--ms-bone)" }}>
               {t(`apiSheet.${section}`)}
             </h3>
-            <CodeBlock code={code} />
+            <CodeBlock code={code} language={LANG_META[lang].hljs} />
           </section>
         ))}
 
