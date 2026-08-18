@@ -6,8 +6,29 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { safeNextPath } from "@/lib/nav";
+import { passwordStrength } from "@/lib/password-strength";
 import styles from "./auth.module.css";
 import { GitHubIcon, GoogleIcon } from "./social-icons";
+
+const STRENGTH_TONES = ["", "var(--ms-danger)", "var(--ms-warn)", "var(--ms-success)"] as const;
+const STRENGTH_KEYS = ["", "weak", "fair", "strong"] as const;
+
+/** Three bars + a word under the signup password field; hidden while empty. */
+function StrengthMeter({ password }: { password: string }) {
+  const t = useTranslations("auth.strength");
+  const score = passwordStrength(password);
+  if (score === 0) return null;
+  return (
+    <div className={styles.strength} style={{ color: STRENGTH_TONES[score] }} aria-live="polite">
+      <div className={styles.strengthBars}>
+        {[1, 2, 3].map((bar) => (
+          <span key={bar} className={bar <= score ? styles.strengthBarOn : styles.strengthBar} />
+        ))}
+      </div>
+      <span className={styles.strengthLabel}>{t(STRENGTH_KEYS[score])}</span>
+    </div>
+  );
+}
 
 export type SocialProviderFlags = { google: boolean; github: boolean };
 type SocialProvider = keyof SocialProviderFlags;
@@ -87,6 +108,10 @@ export function AuthForm({
 
   return (
     <main className={styles.screen}>
+      {/* biome-ignore lint/performance/noImgElement: decorative full-bleed backdrop, no optimization needed */}
+      <img src="/auth/waves-dark.webp" alt="" className={`ms-dark-only ${styles.backdrop}`} />
+      {/* biome-ignore lint/performance/noImgElement: decorative full-bleed backdrop, no optimization needed */}
+      <img src="/auth/waves-light.webp" alt="" className={`ms-light-only ${styles.backdrop}`} />
       <div className={styles.column}>
         {/* biome-ignore lint/performance/noImgElement: static SVG logo, nothing for next/image to optimize */}
         <img
@@ -161,6 +186,7 @@ export function AuthForm({
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
+            {mode === "signup" ? <StrengthMeter password={password} /> : null}
           </div>
           {errorMessage ? <p className={styles.error}>{errorMessage}</p> : null}
           <button
