@@ -84,6 +84,7 @@ export function SilkCanvas() {
     gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAG));
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return;
+    // biome-ignore lint/correctness/useHookAtTopLevel: WebGL's useProgram, not a React hook
     gl.useProgram(program);
 
     const buffer = gl.createBuffer();
@@ -144,5 +145,5 @@ export function SilkCanvas() {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className={styles.canvas} aria-hidden="true" />;
+  return <canvas ref={canvasRef} className={styles.canvas} aria-hidden="true" tabIndex={-1} />;
 }
