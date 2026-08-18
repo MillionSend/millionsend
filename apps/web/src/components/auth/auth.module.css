@@ -76,6 +76,24 @@
   justify-items: center;
 }
 
+/* Social providers: stacked on narrow screens, one row on desktop. auto-fit
+   makes a lone provider span the full width with no special case. */
+.social {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  .column {
+    width: 440px;
+  }
+  .social {
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  }
+}
+
 /* Composed with the global .ms-display (Erode 500) — this only sizes/centers. */
 .headline {
   margin: 8px 0 0;
