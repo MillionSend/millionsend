@@ -154,6 +154,26 @@ Connection details:
   one, keep the port inside your own network or behind a TLS-terminating load
   balancer.
 
+Before exposing the relay to the internet, give it a certificate — otherwise SMTP
+AUTH sends the API key in plaintext. Any PEM keypair works; if you followed the
+nginx section you already have one. Mount certbot's `live/<domain>` directory (the
+symlink directory, not a copy — renewals then apply automatically, the relay reads
+the keypair per connection) via `docker-compose.override.yml`:
+
+```yaml
+services:
+  smtp:
+    volumes:
+      - /etc/letsencrypt/live/mail.example.com:/certs:ro
+```
+
+and in `.env`:
+
+```sh
+SMTP_TLS_CERT_PATH=/certs/fullchain.pem
+SMTP_TLS_KEY_PATH=/certs/privkey.pem
+```
+
 Nodemailer example:
 
 ```js
