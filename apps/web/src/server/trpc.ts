@@ -97,3 +97,9 @@ export const teamProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (!ctx.teamId || !ctx.role) throw new TRPCError({ code: "FORBIDDEN" });
   return next({ ctx: { teamId: ctx.teamId, role: ctx.role } });
 });
+
+/** Team administration: secrets, external sinks, and sending identities. */
+export const adminProcedure = teamProcedure.use(({ ctx, next }) => {
+  if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
+  return next();
+});

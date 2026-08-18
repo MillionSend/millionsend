@@ -143,7 +143,7 @@ export const emailsRouter = router({
     const c = schema.usageCounters;
     const [usage] = await ctx.db
       .select({
-        sentToday: sql<number>`coalesce(sum(${c.accepted}) filter (where ${c.day} = ${today}), 0)::int`,
+        sentToday: sql<number>`coalesce(sum(${c.sent}) filter (where ${c.day} = ${today}), 0)::int`,
         deliveredAllTime: sql<number>`coalesce(sum(${c.delivered}), 0)::int`,
       })
       .from(c)

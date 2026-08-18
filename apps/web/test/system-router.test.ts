@@ -1,4 +1,5 @@
 import type { Db } from "@millionsend/db";
+import { schema } from "@millionsend/db";
 import type { SesAccountClient } from "@millionsend/ses";
 import { createTestDb } from "@millionsend/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -134,13 +135,17 @@ describe("system.instanceSettings", () => {
   let close: () => Promise<void>;
   beforeEach(async () => {
     ({ db, close } = await createTestDb());
+    await db.insert(schema.user).values([
+      { id: "u1", name: "u1", email: "u1@example.com", createdAt: new Date(0) },
+      { id: "u2", name: "u2", email: "u2@example.com", createdAt: new Date(1) },
+    ]);
   });
   afterEach(() => close());
 
-  function dbCaller(role: "owner" | "admin" | "member") {
+  function dbCaller(role: "owner" | "admin" | "member", userId = "u1") {
     return createCaller({
       db,
-      session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
+      session: { user: { id: userId, email: `${userId}@example.com`, name: userId } },
       teamId: "team-1",
       role,
     });
@@ -208,6 +213,23 @@ describe("system.instanceSettings", () => {
     expect(await member.system.instanceSettings.get()).toMatchObject({
       sesMaxSendRate: { value: 9, source: "db" },
     });
+  });
+
+  it("rejects a later team's owner because team ownership is not instance ownership", async () => {
+    const otherOwner = dbCaller("owner", "u2");
+    expect(await otherOwner.system.instanceSettings.get()).toMatchObject({ canEdit: false });
+    await expect(
+      otherOwner.system.instanceSettings.update({ sesMaxSendRate: 9, emailRetentionDays: 7 }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("never permits tenant users to change instance settings in cloud mode", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const operator = dbCaller("owner");
+    expect(await operator.system.instanceSettings.get()).toMatchObject({ canEdit: false });
+    await expect(
+      operator.system.instanceSettings.update({ sesMaxSendRate: 9, emailRetentionDays: 7 }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
 

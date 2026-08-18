@@ -69,7 +69,11 @@ function baseNotification(message: unknown): UnsignedSnsMessage {
 
 const deliveryPayload = {
   eventType: "Delivery",
-  mail: { messageId: "ses-mid-1", timestamp: "2026-08-14T00:00:00.000Z" },
+  mail: {
+    messageId: "ses-mid-1",
+    timestamp: "2026-08-14T00:00:00.000Z",
+    tags: { millionsend_email_id: ["00000000-0000-4000-8000-000000000001"] },
+  },
   delivery: { timestamp: "2026-08-14T00:00:01.000Z", smtpResponse: "250 OK" },
 };
 
@@ -88,6 +92,7 @@ it("valid signed notification: 200 and one job keyed by SNS MessageId", async ()
   expect(enqueued[0]?.dedupeKey).toBe("sns-mid-1");
   expect(enqueued[0]?.event.eventType).toBe("Delivery");
   expect(enqueued[0]?.event.sesMessageId).toBe("ses-mid-1");
+  expect(enqueued[0]?.event.emailId).toBe("00000000-0000-4000-8000-000000000001");
 });
 
 it("tampered message: 403, nothing enqueued", async () => {

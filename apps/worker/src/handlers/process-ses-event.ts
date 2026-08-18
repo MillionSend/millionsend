@@ -9,14 +9,14 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 
 /**
  * Turns a VERIFIED SES event into state. Authority rules: the email row is
- * located exclusively by the server-recorded sesMessageId; recipients to
- * suppress come from the event but are only ever suppressed for the team
- * that owns that email row — a forged-recipient event can never touch
- * another tenant.
+ * located by the server-recorded sesMessageId, with a server-owned SES tag as
+ * a narrow fallback for the race before that MessageId is persisted;
+ * recipients to suppress come from the event but are only ever suppressed
+ * for the team that owns that email row.
  */
 
 /**
@@ -83,16 +83,36 @@ export async function processSesEvent(
   const eventType = EVENT_TYPE_BY_EVENT[event.eventType];
   if (!status || !eventType) return;
 
-  const [email] = await db
+  let [email] = await db
     .select({
       id: schema.emails.id,
       teamId: schema.emails.teamId,
       from: schema.emails.from,
       to: schema.emails.to,
       subject: schema.emails.subject,
+      matchedByTag: sql<boolean>`false`,
     })
     .from(schema.emails)
     .where(eq(schema.emails.sesMessageId, event.sesMessageId));
+  if (!email && event.emailId && isUuid(event.emailId)) {
+    [email] = await db
+      .select({
+        id: schema.emails.id,
+        teamId: schema.emails.teamId,
+        from: schema.emails.from,
+        to: schema.emails.to,
+        subject: schema.emails.subject,
+        matchedByTag: sql<boolean>`true`,
+      })
+      .from(schema.emails)
+      .where(
+        and(
+          eq(schema.emails.id, event.emailId),
+          isNull(schema.emails.sesMessageId),
+          isNotNull(schema.emails.sentAt),
+        ),
+      );
+  }
   // Unknown message id: not ours (or purged) — never act on it.
   if (!email) return;
 
@@ -106,6 +126,23 @@ export async function processSesEvent(
   const deliveryIds: string[] = [];
   const applied = await db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
+    if (email.matchedByTag) {
+      const [joined] = await txDb
+        .update(schema.emails)
+        .set({ sesMessageId: event.sesMessageId })
+        .where(
+          and(
+            eq(schema.emails.id, email.id),
+            isNotNull(schema.emails.sentAt),
+            or(
+              isNull(schema.emails.sesMessageId),
+              eq(schema.emails.sesMessageId, event.sesMessageId),
+            ),
+          ),
+        )
+        .returning({ id: schema.emails.id });
+      if (!joined) return false;
+    }
     const [inserted] = await txDb
       .insert(schema.emailEvents)
       .values({
@@ -197,4 +234,8 @@ export async function processSesEvent(
       }
     }
   }
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

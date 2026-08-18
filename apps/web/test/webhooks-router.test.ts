@@ -27,12 +27,12 @@ afterEach(async () => {
   await close();
 });
 
-function callerFor(teamId: string) {
+function callerFor(teamId: string, role: "owner" | "admin" | "member" = "owner") {
   return createCaller({
     db,
     session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
     teamId,
-    role: "owner",
+    role,
   });
 }
 
@@ -76,6 +76,12 @@ it("annotates every event type in WEBHOOK_EVENT_META with a known group and no o
 });
 
 describe("webhooks.create", () => {
+  it("forbids ordinary members from creating an external event sink", async () => {
+    const teamId = await createTeam(db, "team-a");
+    await expect(
+      callerFor(teamId, "member").webhooks.create({ url: "https://attacker.example/hooks" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
   it("returns the whsec_ secret once and stores only ciphertext + last4", async () => {
     const teamId = await createTeam(db, "team-a");
     const { id, secret } = await callerFor(teamId).webhooks.create({

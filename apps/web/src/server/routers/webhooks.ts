@@ -13,7 +13,7 @@ import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
-import { router, teamProcedure } from "../trpc";
+import { adminProcedure, router, teamProcedure } from "../trpc";
 
 function getKeyring(): EnvKeyring {
   if (!env.MASTER_ENCRYPTION_KEY) {
@@ -143,7 +143,7 @@ export const webhooksRouter = router({
     }));
   }),
 
-  create: teamProcedure
+  create: adminProcedure
     .input(
       z.object({
         url: httpsUrl,
@@ -203,7 +203,7 @@ export const webhooksRouter = router({
     };
   }),
 
-  update: teamProcedure
+  update: adminProcedure
     .input(
       z
         .object({
@@ -238,7 +238,7 @@ export const webhooksRouter = router({
       return { id: row.id, enabled: toEnabled(row.status) };
     }),
 
-  delete: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+  delete: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
     const t = schema.webhookEndpoints;
     // Hard delete; the deliveries FK cascades, removing delivery history.
     const [row] = await ctx.db
@@ -253,80 +253,82 @@ export const webhooksRouter = router({
    * Enqueues a marked sample delivery. The retry worker's normal poll picks
    * up the pending row and signs/sends it like any real event.
    */
-  testDelivery: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
-    await requireEndpoint(ctx.db, ctx.teamId, input.id);
-    const messageId = `msg_${randomBytes(12).toString("base64url")}`;
-    const payload = {
-      type: "email.sent",
-      test: true,
-      created_at: new Date().toISOString(),
-      data: {
-        email_id: "00000000-0000-0000-0000-000000000000",
-        from: "MillionSend <test@example.com>",
-        to: ["delivered@example.com"],
-        subject: "Test event",
-      },
-    };
-    const [row] = await ctx.db
-      .insert(schema.webhookDeliveries)
-      .values({
-        endpointId: input.id,
-        messageId,
-        eventType: "email.sent",
-        payload,
-      })
-      .returning({ id: schema.webhookDeliveries.id });
-    if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-    // Delivered synchronously: a test event whose outcome appears fifteen
-    // minutes later is not a test. Bounded by the pinned client's timeout.
-    const [endpoint] = await ctx.db
-      .select()
-      .from(schema.webhookEndpoints)
-      .where(eq(schema.webhookEndpoints.id, input.id));
-    if (!endpoint) throw new TRPCError({ code: "NOT_FOUND" });
-    const secret = await decryptWebhookSecret(
-      {
-        ciphertext: endpoint.secretCiphertext,
-        iv: endpoint.secretIv,
-        wrappedDek: endpoint.secretWrappedDek,
-        keyVersion: endpoint.secretKeyVersion,
-      },
-      getKeyring(),
-    );
-    const payloadJson = JSON.stringify(payload);
-    const headers = signWebhook(secret, {
-      msgId: messageId,
-      timestamp: Math.floor(Date.now() / 1000),
-      payload: payloadJson,
-    });
-    let responseCode: number | null = null;
-    let body = "";
-    let ok = false;
-    try {
-      const res = await postJson(endpoint.url, {
-        body: payloadJson,
-        headers: { ...headers, "content-type": "application/json" },
-        allowLocalhost: env.NODE_ENV === "development",
+  testDelivery: adminProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireEndpoint(ctx.db, ctx.teamId, input.id);
+      const messageId = `msg_${randomBytes(12).toString("base64url")}`;
+      const payload = {
+        type: "email.sent",
+        test: true,
+        created_at: new Date().toISOString(),
+        data: {
+          email_id: "00000000-0000-0000-0000-000000000000",
+          from: "MillionSend <test@example.com>",
+          to: ["delivered@example.com"],
+          subject: "Test event",
+        },
+      };
+      const [row] = await ctx.db
+        .insert(schema.webhookDeliveries)
+        .values({
+          endpointId: input.id,
+          messageId,
+          eventType: "email.sent",
+          payload,
+        })
+        .returning({ id: schema.webhookDeliveries.id });
+      if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      // Delivered synchronously: a test event whose outcome appears fifteen
+      // minutes later is not a test. Bounded by the pinned client's timeout.
+      const [endpoint] = await ctx.db
+        .select()
+        .from(schema.webhookEndpoints)
+        .where(eq(schema.webhookEndpoints.id, input.id));
+      if (!endpoint) throw new TRPCError({ code: "NOT_FOUND" });
+      const secret = await decryptWebhookSecret(
+        {
+          ciphertext: endpoint.secretCiphertext,
+          iv: endpoint.secretIv,
+          wrappedDek: endpoint.secretWrappedDek,
+          keyVersion: endpoint.secretKeyVersion,
+        },
+        getKeyring(),
+      );
+      const payloadJson = JSON.stringify(payload);
+      const headers = signWebhook(secret, {
+        msgId: messageId,
+        timestamp: Math.floor(Date.now() / 1000),
+        payload: payloadJson,
       });
-      responseCode = res.status;
-      body = res.body;
-      ok = res.status >= 200 && res.status < 300;
-    } catch (err) {
-      body = err instanceof Error ? err.message : "delivery failed";
-    }
-    await ctx.db
-      .update(schema.webhookDeliveries)
-      .set({
-        status: ok ? "success" : "failed",
-        attempts: 1,
-        lastAttemptAt: new Date(),
-        lastResponseCode: responseCode,
-        lastResponseBody: body.slice(0, 1024),
-        nextAttemptAt: null,
-      })
-      .where(eq(schema.webhookDeliveries.id, row.id));
-    return { id: row.id, ok, responseCode };
-  }),
+      let responseCode: number | null = null;
+      let body = "";
+      let ok = false;
+      try {
+        const res = await postJson(endpoint.url, {
+          body: payloadJson,
+          headers: { ...headers, "content-type": "application/json" },
+          allowLocalhost: env.NODE_ENV === "development",
+        });
+        responseCode = res.status;
+        body = res.body;
+        ok = res.status >= 200 && res.status < 300;
+      } catch (err) {
+        body = err instanceof Error ? err.message : "delivery failed";
+      }
+      await ctx.db
+        .update(schema.webhookDeliveries)
+        .set({
+          status: ok ? "success" : "failed",
+          attempts: 1,
+          lastAttemptAt: new Date(),
+          lastResponseCode: responseCode,
+          lastResponseBody: body.slice(0, 1024),
+          nextAttemptAt: null,
+        })
+        .where(eq(schema.webhookDeliveries.id, row.id));
+      return { id: row.id, ok, responseCode };
+    }),
 
   deliveries: router({
     list: teamProcedure

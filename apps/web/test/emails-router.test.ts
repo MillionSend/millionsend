@@ -263,9 +263,9 @@ describe("emails.stats", () => {
     const today = utcDay();
 
     await db.insert(schema.usageCounters).values([
-      { teamId: teamA, day: today, accepted: 87, delivered: 40 },
-      { teamId: teamA, day: "2026-01-01", accepted: 200, delivered: 160 },
-      { teamId: teamB, day: today, accepted: 5, delivered: 5 },
+      { teamId: teamA, day: today, accepted: 90, sent: 87, delivered: 40 },
+      { teamId: teamA, day: "2026-01-01", accepted: 210, sent: 200, delivered: 160 },
+      { teamId: teamB, day: today, accepted: 6, sent: 5, delivered: 5 },
     ]);
     await insertEmail({ ...baseEmail(teamA), latestStatus: "queued_quota" });
     const delivered = await insertEmail({ ...baseEmail(teamA), latestStatus: "delivered" });

@@ -111,6 +111,25 @@ describe("segments CRUD and isolation", () => {
     expect(await b.segments.count({ filter: filterOf("all", []) })).toEqual({ count: 0 });
     expect((await a.segments.get({ id: segId })).name).toBe("seg");
   });
+
+  it("refuses to delete a segment referenced by a broadcast", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: segmentId } = await caller.segments.create({
+      name: "Protected",
+      filter: filterOf("all", []),
+    });
+    await caller.broadcasts.create({
+      segmentId,
+      from: "Ada <ada@example.com>",
+      subject: "Scoped",
+    });
+
+    await expect(caller.segments.delete({ id: segmentId })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    expect((await caller.segments.get({ id: segmentId })).id).toBe(segmentId);
+  });
 });
 
 describe("segments count matches known filters (the same predicate the worker fans out on)", () => {

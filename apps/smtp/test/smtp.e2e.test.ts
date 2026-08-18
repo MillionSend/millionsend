@@ -50,6 +50,7 @@ beforeAll(async () => {
     db,
     keyring,
     isCloud: true,
+    allowInsecureAuth: true,
     enqueueEmailSend: async (emailId, opts) => {
       enqueued.push({ emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) });
     },

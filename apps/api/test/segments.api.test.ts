@@ -181,6 +181,9 @@ describe("broadcasts + segments", () => {
     );
     const got = await json(await call(tokenA, "GET", `/broadcasts/${created.id}`));
     expect(got.segment_id).toBe(seg.id);
+    const deletion = await call(tokenA, "DELETE", `/segments/${String(seg.id)}`);
+    expect(deletion.status).toBe(409);
+    expect(await json(deletion)).toMatchObject({ name: "conflict" });
   });
 
   it("422s a segment_id another team owns", async () => {

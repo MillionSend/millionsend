@@ -19,6 +19,8 @@ export type SesEventType =
 export interface ParsedSesEvent {
   eventType: SesEventType;
   sesMessageId: string;
+  /** Server-owned SES message tag used only if the MessageId join races. */
+  emailId?: string;
   occurredAt: Date;
   bounce?: {
     bounceType: "Permanent" | "Transient" | "Undetermined";
@@ -69,6 +71,15 @@ export function parseSesEvent(raw: unknown): ParsedSesEvent | null {
     occurredAt,
     data: { eventType },
   };
+  const tags = mail?.tags as Record<string, unknown> | undefined;
+  const taggedEmailIds = tags?.millionsend_email_id;
+  if (
+    Array.isArray(taggedEmailIds) &&
+    taggedEmailIds.length === 1 &&
+    typeof taggedEmailIds[0] === "string"
+  ) {
+    parsed.emailId = taggedEmailIds[0];
+  }
 
   if (eventType === "Bounce") {
     const b = obj.bounce as Record<string, unknown> | undefined;

@@ -29,6 +29,14 @@ async function post(body: unknown) {
   });
 }
 
+async function postBatch(body: unknown) {
+  return app.request("/emails/batch", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 async function loggedRows() {
   return db.select().from(schema.apiRequests).orderBy(schema.apiRequests.createdAt);
 }
@@ -139,6 +147,47 @@ describe("api request logging", () => {
     const logged = rows.find((r) => r.method === "GET");
     expect(logged?.responseBody).toMatchObject({ html: "[redacted]", text: "[redacted]" });
     expect(JSON.stringify(logged?.responseBody)).not.toContain("secret");
+  });
+
+  it("recursively redacts every item in batch request logs", async () => {
+    await db.delete(schema.apiRequests);
+    const res = await postBatch([
+      validBody,
+      {
+        ...validBody,
+        to: ["second@example.com"],
+        html: "<p>second secret</p>",
+        text: "second secret",
+      },
+    ]);
+    expect(res.status).toBe(200);
+
+    const [row] = await waitForRows(1);
+    expect(row?.requestBody).toEqual([
+      expect.objectContaining({ html: "[redacted]", text: "[redacted]" }),
+      expect.objectContaining({ html: "[redacted]", text: "[redacted]" }),
+    ]);
+    expect(JSON.stringify(row?.requestBody)).not.toContain("secret");
+  });
+
+  it("rejects oversized bodies before authentication or parsing", async () => {
+    await db.delete(schema.apiRequests);
+    const res = await app.request("/emails", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        "content-length": String(25 * 1024 * 1024 + 1),
+      },
+      body: "{}",
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({
+      statusCode: 413,
+      name: "payload_too_large",
+      message: "Request body exceeds 25 MiB",
+    });
+    expect(await loggedRows()).toHaveLength(0);
   });
 
   it("stores a truncation marker instead of oversized bodies", async () => {

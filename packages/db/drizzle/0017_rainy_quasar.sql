@@ -1,1 +1,0 @@
-ALTER TYPE "public"."email_status" ADD VALUE 'canceled';

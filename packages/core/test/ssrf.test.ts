@@ -20,6 +20,17 @@ describe("isBlockedIp", () => {
     "fe80::1",
     "::ffff:127.0.0.1",
     "::ffff:10.0.0.1",
+    "::ffff:7f00:1",
+    "::ffff:a00:1",
+    "::ffff:a9fe:a9fe",
+    "::7f00:1",
+    "64:ff9b::7f00:1",
+    "64:ff9b:1::7f00:1",
+    "2002:7f00:1::",
+    "100::1",
+    "2001:db8::1",
+    "fec0::1",
+    "ff02::1",
     // Any v4-in-v6 form is rejected, even for public addresses.
     "::ffff:8.8.8.8",
     "not-an-ip",
@@ -48,6 +59,9 @@ describe("postJson guard", () => {
     );
     await expect(
       postJson("https://169.254.169.254/latest/meta-data", { body: "{}", headers: {} }),
+    ).rejects.toThrow(/blocked address/);
+    await expect(
+      postJson("https://[::ffff:7f00:1]/hook", { body: "{}", headers: {} }),
     ).rejects.toThrow(/blocked address/);
   });
 

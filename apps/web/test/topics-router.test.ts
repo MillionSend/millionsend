@@ -89,6 +89,25 @@ describe("topics CRUD", () => {
     });
     expect((await caller.topics.list()).find((t) => t.id === id)?.description).toBeNull();
   });
+
+  it("refuses to delete a topic referenced by a broadcast", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: topicId } = await caller.topics.create({
+      name: "Protected",
+      defaultSubscribed: true,
+    });
+    await caller.broadcasts.create({
+      topicId,
+      from: "Ada <ada@example.com>",
+      subject: "Scoped",
+    });
+
+    await expect(caller.topics.delete({ id: topicId })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    expect((await caller.topics.list()).map((topic) => topic.id)).toContain(topicId);
+  });
 });
 
 describe("topics tenant isolation", () => {

@@ -1,4 +1,5 @@
 export * from "./api-keys.js";
+export * from "./api-rate-limits.js";
 export * from "./api-requests.js";
 export * from "./audit.js";
 export * from "./auth.js";

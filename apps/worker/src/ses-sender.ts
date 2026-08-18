@@ -17,10 +17,11 @@ export function createSesSender(defaultRegion: string): SesSender {
     return client;
   };
   return {
-    async sendRaw({ raw, configurationSetName, region }) {
+    async sendRaw({ raw, emailId, configurationSetName, region }) {
       const out = await clientFor(region ?? defaultRegion).send(
         new SendEmailCommand({
           Content: { Raw: { Data: raw } },
+          EmailTags: [{ Name: "millionsend_email_id", Value: emailId }],
           ...(configurationSetName ? { ConfigurationSetName: configurationSetName } : {}),
         }),
       );

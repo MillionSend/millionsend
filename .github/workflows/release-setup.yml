@@ -31,6 +31,6 @@ jobs:
       - run: pnpm --filter @millionsend/setup typecheck
       # npm ≥ 11.5.1 exchanges the OIDC token itself; publish runs
       # prepublishOnly (esbuild bundle).
-      - run: npm install -g npm@latest
+      - run: npm install -g npm@11.8.0
       - run: npm publish
         working-directory: packages/setup

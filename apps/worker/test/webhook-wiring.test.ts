@@ -157,11 +157,23 @@ it("send path fans out email.sent after the claim", async () => {
   // Fresh team: endpoints created by other tests must not receive this event.
   const sendTeamId = await createTeam(db, "send-hooks-team");
   const endpointId = await insertEndpoint(sendTeamId, ["email.sent"]);
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: sendTeamId,
+      name: "acme.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
   const body = await encryptEmailBody({ html: null, text: "hi" }, keyring);
   const [email] = await db
     .insert(schema.emails)
     .values({
       teamId: sendTeamId,
+      domainId: domain.id,
       from: "a@acme.dev",
       to: ["r@example.com"],
       subject: "s",

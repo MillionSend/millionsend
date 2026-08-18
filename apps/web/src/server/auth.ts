@@ -7,22 +7,19 @@ import { APIError } from "better-auth/api";
 export type Auth = ReturnType<typeof createAuth>;
 
 /**
- * Better Auth rejects sign-ins from any origin outside its trusted set, so a
- * production deploy that silently fell back to localhost:3000 would 403 every
- * sign-in with nothing flagging the misconfiguration. Fail loudly instead;
- * the localhost default is for development only.
+ * Better Auth rejects sign-ins from origins outside its trusted set. Production
+ * must never silently trust localhost; development and tests retain the local
+ * fallback for the no-config quickstart.
  */
-/**
- * Unset APP_BASE_URL must never block the localhost quickstart (the Docker
- * image always runs NODE_ENV=production), so the default applies everywhere
- * and the real-host trap — sign-in silently rejected from any other origin —
- * is covered by one loud log line naming the variable instead.
- */
-export function resolveBaseUrl(appBaseUrl: string | undefined): string {
+export function resolveBaseUrl(
+  appBaseUrl: string | undefined,
+  nodeEnv = process.env.NODE_ENV,
+): string {
   if (appBaseUrl) return appBaseUrl;
-  console.warn(
-    "APP_BASE_URL is not set: sign-in is only accepted from http://localhost:3000. Set APP_BASE_URL when deploying to a real host.",
-  );
+  if (nodeEnv === "production") {
+    throw new Error("APP_BASE_URL is required in production");
+  }
+  console.warn("APP_BASE_URL is not set: using http://localhost:3000 outside production.");
   return "http://localhost:3000";
 }
 
@@ -70,7 +67,12 @@ function createAuth() {
         verification: schema.verification,
       },
     }),
-    emailAndPassword: { enabled: true },
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 15,
+      maxPasswordLength: 128,
+      revokeSessionsOnPasswordReset: true,
+    },
     socialProviders: {
       ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
         ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } }

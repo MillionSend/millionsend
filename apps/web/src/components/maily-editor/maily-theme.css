@@ -6,6 +6,7 @@
  * theme in both light and dark. Our own toolbar/picker/link chrome is styled
  * directly below.
  */
+/* biome-ignore-all lint/complexity/noImportantStyles: these rules must override Maily's bundled Tailwind utilities. */
 :root {
   --mly-color-white: var(--ms-panel);
   --mly-color-gray-50: var(--ms-panel-raised);
@@ -153,13 +154,13 @@
 /* ---- in-content variable pill ------------------------------------------- */
 /* The node-view wrapper is inline-block, which baseline-aligns the pill and
    floats it above the text's optical middle — middle-align it instead. */
-.ms-maily .ProseMirror .react-component,
-.ms-maily .ProseMirror .ms-varview {
-  vertical-align: middle;
-}
 .ms-varview {
   position: relative;
   display: inline-block;
+}
+.ms-maily .ProseMirror .react-component,
+.ms-maily .ProseMirror .ms-varview {
+  vertical-align: middle;
 }
 .ms-maily-varpill.is-selected {
   box-shadow: var(--ms-focus-ring);

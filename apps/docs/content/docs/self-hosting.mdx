@@ -30,10 +30,9 @@ from a built-in template with generated secrets, provision the AWS resources
 Every step is skippable and safe to re-run; `--dry-run` prints the full plan
 and touches nothing.
 
-The manual equivalent runs the same prebuilt image
-`ghcr.io/millionsend/millionsend:edge` (multi-arch, published on every push to
-main; pin a version tag in the compose file for production — `:edge` is a
-moving head):
+The manual equivalent runs the same multi-arch prebuilt image. The standalone
+compose intentionally requires a released version tag or immutable digest
+instead of silently tracking the moving `:edge` tag:
 
 ```sh
 mkdir millionsend && cd millionsend
@@ -82,6 +81,7 @@ working local defaults.
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | Postgres connection string. The default matches the compose `postgres` service. |
+| `MILLIONSEND_IMAGE` | Required by the standalone deploy compose. Select a released version tag or, preferably, an immutable `ghcr.io/millionsend/millionsend@sha256:…` digest. |
 | `MASTER_ENCRYPTION_KEY` | Encryption key for email bodies at rest. Generate with `openssl rand -base64 32`. Losing it makes stored bodies unrecoverable; changing it orphans old bodies. Back it up with the database. |
 | `BETTER_AUTH_SECRET` | Dashboard session signing secret. Generate with `openssl rand -base64 32`. |
 | `APP_BASE_URL` | Public base URL of the deployment — the origin browsers use to reach the dashboard (e.g. `https://mail.example.com`). Sign-in is only accepted from this origin; SNS subscriptions, unsubscribe links, and tracking links derive from it. It must match the exact scheme+host+port you open the dashboard on — including a custom `WEB_PORT` — or login and signup fail with an "invalid origin" error. Default `http://localhost:3000`. |
@@ -105,7 +105,8 @@ working local defaults.
 | `WEB_PORT` | Host port the compose file publishes the dashboard on (the web process is always 3000 inside the container). Keep `APP_BASE_URL` in sync. |
 | `DOCS_PORT` | Host port the compose file publishes this documentation site on (the docs process is always 3002 inside the container). |
 | `SMTP_PORT` | SMTP relay listen port (default `2587`). |
-| `SMTP_TLS_CERT_PATH` / `SMTP_TLS_KEY_PATH` | STARTTLS keypair for the SMTP relay (PEM paths inside the container). Both set: STARTTLS is offered and required before AUTH. Unset: plaintext — keep the port inside your own network or behind a TLS-terminating load balancer. |
+| `SMTP_TLS_CERT_PATH` / `SMTP_TLS_KEY_PATH` | STARTTLS keypair for the SMTP relay (PEM paths inside the container). Both set: STARTTLS is offered and required before AUTH. Without the pair, AUTH is disabled. |
+| `SMTP_ALLOW_INSECURE_AUTH` | Explicit local/private-network escape hatch for plaintext SMTP AUTH. Keep `false`; never combine `true` with a public bind. |
 | `IS_CLOUD` | Leave `false`. `true` enables hosted-cloud behavior (KMS, Stripe billing). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials for "Continue with Google". The button appears only when both are set. Callback URL: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Same, for GitHub. Callback URL: `{APP_BASE_URL}/api/auth/callback/github`. |
@@ -132,7 +133,7 @@ delete stale ones in the IAM console.
 No Node on the server? The same CLI ships inside the image:
 
 ```sh
-docker run --rm -it --user root -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:edge setup
+docker run --rm -it --user root -v ~/.aws:/root/.aws "$MILLIONSEND_IMAGE" setup
 ```
 
 Prefer not to run a CLI? The dashboard's **Settings → SES** page offers a
@@ -173,10 +174,10 @@ Connection details:
 - **Port:** `2587` (`SMTP_PORT` to change).
 - **Username:** `millionsend` (fixed).
 - **Password:** an `ms_` API key from the dashboard.
-- **Encryption:** plaintext by default; STARTTLS is offered (and required
-  before AUTH) when `SMTP_TLS_CERT_PATH` and `SMTP_TLS_KEY_PATH` point at a
-  PEM keypair. Without one, keep the port inside your own network or behind a
-  TLS-terminating load balancer.
+- **Encryption:** STARTTLS is offered (and required before AUTH) when
+  `SMTP_TLS_CERT_PATH` and `SMTP_TLS_KEY_PATH` point at a PEM keypair. Without
+  one, AUTH is disabled unless `SMTP_ALLOW_INSECURE_AUTH=true` is explicitly
+  enabled for a trusted private network.
 
 ### STARTTLS with your existing certificates
 

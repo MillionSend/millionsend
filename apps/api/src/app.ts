@@ -33,7 +33,9 @@ import {
 } from "@millionsend/ses";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
+import { secureHeaders } from "hono/secure-headers";
 import {
   batchEmailRequestSchema,
   batchEmailResponseSchema,
@@ -109,9 +111,11 @@ export interface ApiDeps {
    * router enforces).
    */
   appBaseUrl?: string | undefined;
+  /** Per-key fixed-window request cap. Defaults to 600 requests/minute. */
+  rateLimitPerMinute?: number | undefined;
 }
 
-type Env = { Variables: { auth: ApiKeyAuth } };
+type Env = { Variables: { auth: ApiKeyAuth; rateLimited: boolean } };
 
 class IdempotencyTakeoverError extends Error {
   constructor() {
@@ -191,10 +195,15 @@ async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
 const REDACTED_REQUEST_FIELDS = ["html", "text", "attachments"] as const;
 
 function redactRequestBody(body: unknown): unknown {
-  if (body === null || typeof body !== "object" || Array.isArray(body)) return body;
-  const copy: Record<string, unknown> = { ...(body as Record<string, unknown>) };
-  for (const field of REDACTED_REQUEST_FIELDS) {
-    if (field in copy) copy[field] = "[redacted]";
+  if (Array.isArray(body)) return body.map(redactRequestBody);
+  if (body === null || typeof body !== "object") return body;
+  const copy: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(body as Record<string, unknown>)) {
+    copy[field] = REDACTED_REQUEST_FIELDS.includes(
+      field as (typeof REDACTED_REQUEST_FIELDS)[number],
+    )
+      ? "[redacted]"
+      : redactRequestBody(value);
   }
   return copy;
 }
@@ -205,7 +214,9 @@ const LOGGED_JSON_MAX_BYTES = 16 * 1024;
 function capLoggedJson(value: unknown): unknown {
   if (value == null) return null;
   try {
-    if (JSON.stringify(value).length > LOGGED_JSON_MAX_BYTES) return { truncated: true };
+    if (Buffer.byteLength(JSON.stringify(value), "utf8") > LOGGED_JSON_MAX_BYTES) {
+      return { truncated: true };
+    }
   } catch {
     return null;
   }
@@ -265,6 +276,15 @@ function isUniqueViolation(err: unknown): boolean {
       return true;
     }
     e = e.cause;
+  }
+  return false;
+}
+
+function isForeignKeyViolation(err: unknown): boolean {
+  let current: unknown = err;
+  while (current instanceof Error) {
+    if ((current as Error & { code?: string }).code === "23503") return true;
+    current = current.cause;
   }
   return false;
 }
@@ -691,15 +711,24 @@ function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
           description: "Topic deleted",
         },
         404: jsonErr("Not found"),
+        409: jsonErr("Topic is in use"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
-      const [row] = await db
-        .delete(b)
-        .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)))
-        .returning({ id: b.id });
+      let row: { id: string } | undefined;
+      try {
+        [row] = await db
+          .delete(b)
+          .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)))
+          .returning({ id: b.id });
+      } catch (error) {
+        if (isForeignKeyViolation(error)) {
+          return c.json(errorBody(409, "conflict", "This topic is referenced by a broadcast"), 409);
+        }
+        throw error;
+      }
       if (!row) return c.json(errorBody(404, "not_found", "Topic not found"), 404);
       return c.json({ id: row.id, object: "topic" as const, deleted: true as const }, 200);
     },
@@ -897,15 +926,27 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
           description: "Segment deleted",
         },
         404: jsonErr("Not found"),
+        409: jsonErr("Segment is in use"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
-      const [row] = await db
-        .delete(s)
-        .where(and(eq(s.id, id), eq(s.teamId, auth.teamId)))
-        .returning({ id: s.id });
+      let row: { id: string } | undefined;
+      try {
+        [row] = await db
+          .delete(s)
+          .where(and(eq(s.id, id), eq(s.teamId, auth.teamId)))
+          .returning({ id: s.id });
+      } catch (error) {
+        if (isForeignKeyViolation(error)) {
+          return c.json(
+            errorBody(409, "conflict", "This segment is referenced by a broadcast"),
+            409,
+          );
+        }
+        throw error;
+      }
       if (!row) return c.json(errorBody(404, "not_found", "Segment not found"), 404);
       return c.json({ object: "segment" as const, id: row.id, deleted: true as const }, 200);
     },
@@ -1387,6 +1428,16 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     return c.json(errorBody(500, "internal_server_error", "An unexpected error occurred"), 500);
   });
 
+  app.use(
+    "*",
+    bodyLimit({
+      maxSize: 25 * 1024 * 1024,
+      onError: (c) =>
+        c.json(errorBody(413, "payload_too_large", "Request body exceeds 25 MiB"), 413),
+    }),
+  );
+  app.use("*", secureHeaders());
+
   app.get("/health", (c) => c.json({ ok: true }));
 
   app.doc("/openapi.json", {
@@ -1456,23 +1507,53 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     return next();
   });
 
-  app.use("/emails", requireApiKey);
-  app.use("/emails/*", requireApiKey);
+  const enforceRateLimit = createMiddleware<Env>(async (c, next) => {
+    // Exact + wildcard middleware registrations can both match one request.
+    if (c.get("rateLimited")) return next();
+    c.set("rateLimited", true);
+    const auth = c.get("auth");
+    if (!auth) return next();
+    const bucket = schema.apiRateLimits;
+    const windowStart = sql<Date>`date_trunc('minute', now())`;
+    const [row] = await deps.db
+      .insert(bucket)
+      .values({ apiKeyId: auth.apiKeyId, windowStart, count: 1 })
+      .onConflictDoUpdate({
+        target: bucket.apiKeyId,
+        set: {
+          windowStart,
+          count: sql`case when ${bucket.windowStart} = ${windowStart} then ${bucket.count} + 1 else 1 end`,
+        },
+      })
+      .returning({
+        count: bucket.count,
+        retryAfter: sql<number>`greatest(1, ceil(extract(epoch from (${bucket.windowStart} + interval '1 minute' - now()))))::int`,
+      });
+    const limit = deps.rateLimitPerMinute ?? 600;
+    if ((row?.count ?? 0) > limit) {
+      c.header("retry-after", String(row?.retryAfter ?? 60));
+      return c.json(errorBody(429, "rate_limit_exceeded", "Too many requests"), 429);
+    }
+    return next();
+  });
 
-  app.use("/contacts", requireApiKey, requireFullAccess);
-  app.use("/contacts/*", requireApiKey, requireFullAccess);
+  app.use("/emails", requireApiKey, enforceRateLimit);
+  app.use("/emails/*", requireApiKey, enforceRateLimit);
+
+  app.use("/contacts", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/contacts/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerContactRootRoutes(app, deps.db);
 
-  app.use("/segments", requireApiKey, requireFullAccess);
-  app.use("/segments/*", requireApiKey, requireFullAccess);
+  app.use("/segments", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/segments/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerSegmentRoutes(app, deps.db);
 
-  app.use("/broadcasts", requireApiKey, requireFullAccess);
-  app.use("/broadcasts/*", requireApiKey, requireFullAccess);
+  app.use("/broadcasts", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/broadcasts/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerBroadcastRoutes(app, deps);
 
-  app.use("/topics", requireApiKey, requireFullAccess);
-  app.use("/topics/*", requireApiKey, requireFullAccess);
+  app.use("/topics", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/topics/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerTopicRoutes(app, deps.db);
 
   const sendRoute = createRoute({

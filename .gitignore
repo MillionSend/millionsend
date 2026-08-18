@@ -12,6 +12,7 @@ org/
 
 # Dependencies & builds (for when code lands)
 node_modules/
+.pnpm-store/
 dist/
 build/
 .env

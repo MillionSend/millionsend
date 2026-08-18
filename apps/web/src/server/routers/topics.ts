@@ -3,6 +3,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
+import { isForeignKeyViolation } from "../db-errors";
 import { router, teamProcedure } from "../trpc";
 
 /**
@@ -75,10 +76,21 @@ export const topicsRouter = router({
 
   delete: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
     const t = schema.topics;
-    const [row] = await ctx.db
-      .delete(t)
-      .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
-      .returning({ id: t.id });
+    let row: { id: string } | undefined;
+    try {
+      [row] = await ctx.db
+        .delete(t)
+        .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
+        .returning({ id: t.id });
+    } catch (error) {
+      if (isForeignKeyViolation(error)) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "This topic is referenced by a broadcast and cannot be deleted.",
+        });
+      }
+      throw error;
+    }
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     return { id: row.id };
   }),

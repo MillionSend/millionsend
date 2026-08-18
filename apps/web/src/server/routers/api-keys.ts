@@ -3,7 +3,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { router, teamProcedure } from "../trpc";
+import { adminProcedure, router, teamProcedure } from "../trpc";
 
 /** There is no mode column; the mode is encoded in the token scheme prefix. */
 function modeFromPrefix(tokenPrefix: string): "live" | "test" {
@@ -32,7 +32,7 @@ export const apiKeysRouter = router({
     return rows.map((row) => ({ ...row, mode: modeFromPrefix(row.tokenPrefix) }));
   }),
 
-  create: teamProcedure
+  create: adminProcedure
     .input(
       z.object({
         name: z.string().trim().min(1).max(80),
@@ -84,7 +84,7 @@ export const apiKeysRouter = router({
 
   // Soft revoke: the row is kept so tokenPrefix lookups keep resolving (and
   // failing verification) instead of dangling, and last-used history survives.
-  revoke: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+  revoke: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
     const [row] = await ctx.db
       .update(schema.apiKeys)
       .set({ revokedAt: new Date() })

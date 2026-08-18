@@ -127,6 +127,9 @@ export function flowPlan(state: DirState, opts: { appBaseUrl: string; region: st
       : `secrets: offer to generate ${missing.join(" and ")}`,
   );
   lines.push(`env: APP_BASE_URL prompt (default ${opts.appBaseUrl})`);
+  if (state.composeContent === null || state.composeContent.includes("MILLIONSEND_IMAGE")) {
+    lines.push("env: require a released MILLIONSEND_IMAGE tag or immutable digest");
+  }
   for (const line of setupPlan({ region: opts.region, appBaseUrl: opts.appBaseUrl })) {
     lines.push(`aws: ${line}`);
   }

@@ -37,26 +37,35 @@ export function isBlockedIp(ip: string): boolean {
     // legitimately public v4 target arrives as a v4 address, so any v4-in-v6
     // form is only useful as a filter bypass.
     if (ip.includes(".")) return true;
-    const firstWord = ipv6FirstWord(ip);
+    const words = expandIpv6(ip);
+    const firstWord = words[0] ?? 0;
     return (
       isIpv6Loopback(ip) || // ::1 and :: (unspecified)
+      isEmbeddedIpv4(words) || // ::ffff:7f00:1, ::7f00:1, NAT64 and 6to4
+      (firstWord === 0x100 && words.slice(1, 4).every((word) => word === 0)) || // 100::/64 discard-only
+      (firstWord === 0x2001 && words[1] === 0x0db8) || // 2001:db8::/32 documentation
       (firstWord & 0xfe00) === 0xfc00 || // fc00::/7 unique local
-      (firstWord & 0xffc0) === 0xfe80 // fe80::/10 link-local
+      (firstWord & 0xffc0) === 0xfe80 || // fe80::/10 link-local
+      (firstWord & 0xffc0) === 0xfec0 || // fec0::/10 deprecated site-local
+      (firstWord & 0xff00) === 0xff00 // ff00::/8 multicast
     );
   }
   return true; // not an IP at all — never connect
 }
 
-function ipv6FirstWord(ip: string): number {
-  const head = ip.split("::")[0] ?? "";
-  const group = head.split(":")[0];
-  if (!group) return 0; // leading "::" — first group is zero
-  return Number.parseInt(group, 16);
-}
-
 function isIpv6Loopback(ip: string): boolean {
   const words = expandIpv6(ip);
   return words.slice(0, 7).every((w) => w === 0) && (words[7] === 0 || words[7] === 1);
+}
+
+function isEmbeddedIpv4(words: number[]): boolean {
+  const firstFiveZero = words.slice(0, 5).every((word) => word === 0);
+  const compatibleOrMapped = firstFiveZero && (words[5] === 0 || words[5] === 0xffff);
+  const nat64WellKnown =
+    words[0] === 0x64 && words[1] === 0xff9b && words.slice(2, 6).every((word) => word === 0);
+  const nat64Local = words[0] === 0x64 && words[1] === 0xff9b && words[2] === 1;
+  const sixToFour = words[0] === 0x2002;
+  return compatibleOrMapped || nat64WellKnown || nat64Local || sixToFour;
 }
 
 function expandIpv6(ip: string): number[] {

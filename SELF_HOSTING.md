@@ -29,10 +29,9 @@ from a built-in template with generated secrets, provision the AWS resources
 Every step is skippable and safe to re-run; `--dry-run` prints the full plan
 and touches nothing.
 
-Prefer doing it by hand? The manual equivalent runs the same prebuilt image
-`ghcr.io/millionsend/millionsend:edge` (multi-arch, published on every push to
-main; pin a version tag in the compose file for production — `:edge` is a
-moving head):
+Prefer doing it by hand? The manual equivalent runs the same multi-arch
+prebuilt image. The standalone compose intentionally requires you to select a
+released version tag or immutable digest rather than silently tracking `:edge`:
 
 ```sh
 mkdir millionsend && cd millionsend
@@ -43,6 +42,8 @@ curl -o .env https://raw.githubusercontent.com/MillionSend/millionsend/main/.env
 In `.env` (everything else defaults to a working local setup):
 
 - `MASTER_ENCRYPTION_KEY` and `BETTER_AUTH_SECRET` — `openssl rand -base64 32` each.
+- `MILLIONSEND_IMAGE` — a released image tag or, preferably, an immutable
+  `ghcr.io/millionsend/millionsend@sha256:…` digest.
 - `APP_BASE_URL` — the URL you open the dashboard at. The default
   `http://localhost:3000` works locally; set your real `https://` URL when exposing
   it, or sign-in is rejected as an untrusted origin.
@@ -102,8 +103,8 @@ run mints a new access key — delete stale ones in the IAM console.
 (`@millionsend/setup` is the self-host setup tool; `@millionsend/cli` stays reserved
 for a future end-user CLI that talks to the MillionSend API.)
 
-No Node on the server? The same CLI ships inside the image:
-`docker run --rm -it --user root -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:edge setup`.
+No Node on the server? The same CLI ships inside the selected image:
+`docker run --rm -it --user root -v ~/.aws:/root/.aws "$MILLIONSEND_IMAGE" setup`.
 
 Prefer not to run a CLI? The dashboard's Settings → SES page offers a CloudFormation
 quick-create link and a pre-filled shell script that create the same resources.
@@ -144,15 +145,15 @@ request logging, and delivery events.
 
 Connection details:
 
-- Host: wherever the `smtp` service is reachable (the compose files publish it on
-  the Docker host).
+- Host: wherever the `smtp` service is reachable (compose binds it to the Docker
+  host's loopback interface by default).
 - Port: `2587` (`SMTP_PORT` to change).
 - Username: `millionsend` (fixed).
 - Password: an `ms_` API key from the dashboard.
-- Encryption: plaintext by default; STARTTLS is offered (and required before AUTH)
-  when `SMTP_TLS_CERT_PATH` and `SMTP_TLS_KEY_PATH` point at a PEM keypair. Without
-  one, keep the port inside your own network or behind a TLS-terminating load
-  balancer.
+- Encryption: STARTTLS is offered (and required before AUTH) when
+  `SMTP_TLS_CERT_PATH` and `SMTP_TLS_KEY_PATH` point at a PEM keypair. Without
+  one, AUTH is disabled unless `SMTP_ALLOW_INSECURE_AUTH=true` is explicitly set
+  for a trusted private network.
 
 Before exposing the relay to the internet, give it a certificate — otherwise SMTP
 AUTH sends the API key in plaintext. Any PEM keypair works; if you followed the
@@ -173,6 +174,9 @@ and in `.env`:
 SMTP_TLS_CERT_PATH=/certs/fullchain.pem
 SMTP_TLS_KEY_PATH=/certs/privkey.pem
 ```
+
+For local-only plaintext testing, keep `SMTP_BIND_ADDRESS=127.0.0.1` and set
+`SMTP_ALLOW_INSECURE_AUTH=true`. Never combine that flag with a public bind.
 
 Nodemailer example:
 
@@ -292,13 +296,10 @@ Then set `APP_BASE_URL=https://mail.example.com` in `.env` and restart. It
 must be the exact public https origin of the dashboard — any other value makes
 login and signup fail with an "invalid origin" error.
 
-Bind the container ports to loopback so only nginx reaches them. Docker
-publishes ports by editing iptables directly, so a host firewall alone does
-not cover them. `WEB_PORT` and `DOCS_PORT` are the host side of their
-mappings, so `WEB_PORT=127.0.0.1:3000` / `DOCS_PORT=127.0.0.1:3002` in `.env`
-is enough for web and docs; `PORT` and `SMTP_PORT` appear on both sides of
-theirs, so cover the api (and optionally smtp) with a
-`docker-compose.override.yml` instead — the default compose file stays as is:
+The compose files bind every application port to loopback by default so only a
+local reverse proxy reaches them. Docker publishes ports by editing iptables
+directly, so do not rely on a host firewall to compensate for a public bind.
+The defaults are equivalent to:
 
 ```yaml
 services:
@@ -313,8 +314,8 @@ services:
 ```
 
 The SMTP relay (`:2587`) is TCP, not HTTP — an `http` server block cannot
-proxy it. Either publish it directly (leave its port mapping public and open
-the firewall), or keep it on loopback and pass the TCP stream through nginx's
+proxy it. To publish a service directly, set its `*_BIND_ADDRESS=0.0.0.0` and
+open only that firewall port. Prefer keeping SMTP on loopback and passing the TCP stream through nginx's
 stream module — bytes pass through untouched, so STARTTLS still terminates in
 the relay via `SMTP_TLS_CERT_PATH`/`SMTP_TLS_KEY_PATH`:
 
