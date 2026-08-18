@@ -31,10 +31,9 @@ da AWS (abaixo), baixar o arquivo compose standalone e rodar
 `docker compose up -d`. Toda etapa pode ser pulada e é segura de repetir;
 `--dry-run` imprime o plano completo sem tocar em nada.
 
-O equivalente manual usa a mesma imagem pré-construída
-`ghcr.io/millionsend/millionsend:edge` (multi-arch, publicada a cada push na
-main; fixe uma tag de versão no compose para produção — `:edge` é uma
-referência móvel):
+O equivalente manual usa a mesma imagem multi-arch pré-construída. O compose
+standalone exige de propósito uma tag de versão lançada ou um digest imutável,
+em vez de acompanhar silenciosamente a tag móvel `:edge`:
 
 ```sh
 mkdir millionsend && cd millionsend
@@ -83,6 +82,7 @@ padrões que funcionam localmente.
 | Variável | Propósito |
 | --- | --- |
 | `DATABASE_URL` | String de conexão do Postgres. O padrão corresponde ao serviço `postgres` do compose. |
+| `MILLIONSEND_IMAGE` | Obrigatória no compose standalone de implantação. Selecione uma tag de versão lançada ou, de preferência, um digest imutável `ghcr.io/millionsend/millionsend@sha256:…`. |
 | `MASTER_ENCRYPTION_KEY` | Chave de criptografia dos corpos de email em repouso. Gere com `openssl rand -base64 32`. Perdê-la torna os corpos armazenados irrecuperáveis; trocá-la órfã os corpos antigos. Faça backup junto com o banco. |
 | `BETTER_AUTH_SECRET` | Segredo de assinatura das sessões do painel. Gere com `openssl rand -base64 32`. |
 | `APP_BASE_URL` | URL base pública da implantação — a origem que os navegadores usam para acessar o painel (ex.: `https://mail.example.com`). O login só é aceito a partir dessa origem; assinaturas SNS, links de descadastro e links de rastreamento derivam dela. Precisa corresponder exatamente ao esquema+host+porta em que você abre o painel — inclusive um `WEB_PORT` customizado — ou login e cadastro falham com erro de "invalid origin". Padrão `http://localhost:3000`. |
@@ -106,7 +106,8 @@ padrões que funcionam localmente.
 | `WEB_PORT` | Porta do host em que o compose publica o painel (o processo web é sempre 3000 dentro do contêiner). Mantenha `APP_BASE_URL` em sincronia. |
 | `DOCS_PORT` | Porta do host em que o compose publica este site de documentação (o processo docs é sempre 3002 dentro do contêiner). |
 | `SMTP_PORT` | Porta do relay SMTP (padrão `2587`). |
-| `SMTP_TLS_CERT_PATH` / `SMTP_TLS_KEY_PATH` | Par de chaves STARTTLS do relay SMTP (caminhos PEM dentro do contêiner). Com ambos definidos: STARTTLS é oferecido e exigido antes do AUTH. Sem definir: texto puro — mantenha a porta dentro da sua rede ou atrás de um load balancer com TLS. |
+| `SMTP_TLS_CERT_PATH` / `SMTP_TLS_KEY_PATH` | Par de chaves STARTTLS do relay SMTP (caminhos PEM dentro do contêiner). Com ambos definidos: STARTTLS é oferecido e exigido antes do AUTH. Sem o par, o AUTH fica desativado. |
+| `SMTP_ALLOW_INSECURE_AUTH` | Escape explícito para SMTP AUTH em texto puro apenas em rede local/privada. Mantenha `false`; nunca combine `true` com bind público. |
 | `IS_CLOUD` | Deixe `false`. `true` ativa comportamento de nuvem hospedada (KMS, cobrança via Stripe). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciais OAuth do "Continuar com Google". O botão só aparece com ambas definidas. URL de callback: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
@@ -135,7 +136,7 @@ nova chave de acesso — apague as antigas no console do IAM.
 Sem Node no servidor? O mesmo CLI vem dentro da imagem:
 
 ```sh
-docker run --rm -it --user root -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:edge setup
+docker run --rm -it --user root -v ~/.aws:/root/.aws "$MILLIONSEND_IMAGE" setup
 ```
 
 Prefere não rodar um CLI? A página **Configurações → SES** do painel oferece
@@ -180,10 +181,10 @@ Dados de conexão:
 - **Porta:** `2587` (`SMTP_PORT` para mudar).
 - **Usuário:** `millionsend` (fixo).
 - **Senha:** uma chave de API `ms_` do painel.
-- **Criptografia:** texto puro por padrão; STARTTLS é oferecido (e exigido
-  antes do AUTH) quando `SMTP_TLS_CERT_PATH` e `SMTP_TLS_KEY_PATH` apontam
-  para um par PEM. Sem ele, mantenha a porta dentro da sua rede ou atrás de
-  um load balancer com TLS.
+- **Criptografia:** STARTTLS é oferecido (e exigido antes do AUTH) quando
+  `SMTP_TLS_CERT_PATH` e `SMTP_TLS_KEY_PATH` apontam para um par PEM. Sem ele,
+  o AUTH fica desativado, a menos que `SMTP_ALLOW_INSECURE_AUTH=true` seja
+  habilitado explicitamente para uma rede privada confiável.
 
 ### STARTTLS com os certificados que você já tem
 

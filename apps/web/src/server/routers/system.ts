@@ -9,6 +9,7 @@ import {
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { isAwsCredentialError } from "@/lib/aws-errors";
+import { isInstanceOperator } from "../instance-operator";
 import { router, teamProcedure } from "../trpc";
 
 /**
@@ -22,6 +23,22 @@ function effectiveSetting(dbValue: number | null, envRaw: string | undefined, fa
   if (dbValue !== null) return { value: dbValue, source: "db" as const };
   if (envRaw) return { value: Number(envRaw), source: "env" as const };
   return { value: fallback, source: "default" as const };
+}
+
+function isCloudDeployment(): boolean {
+  return process.env.IS_CLOUD === "true" || process.env.IS_CLOUD === "1";
+}
+
+async function canManageInstance(ctx: {
+  db: Parameters<typeof isInstanceOperator>[0];
+  session: { user: { id: string } };
+  role: "owner" | "admin" | "member";
+}): Promise<boolean> {
+  return (
+    !isCloudDeployment() &&
+    ctx.role !== "member" &&
+    (await isInstanceOperator(ctx.db, ctx.session.user.id))
+  );
 }
 
 /**
@@ -91,8 +108,8 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
 
     /**
      * Instance-wide (NOT team-scoped) operator settings. Reads are open to
-     * any member; writes are owner/admin only — on self-host these steer the
-     * whole deployment's SES throughput and retention compliance.
+     * any member; writes belong only to the first self-host user (the instance
+     * operator), and are never tenant-editable in cloud mode.
      */
     instanceSettings: router({
       get: teamProcedure.query(async ({ ctx }) => {
@@ -108,7 +125,7 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
             process.env.EMAIL_RETENTION_DAYS,
             EMAIL_RETENTION_DAYS_DEFAULT,
           ),
-          canEdit: ctx.role !== "member",
+          canEdit: await canManageInstance(ctx),
         };
       }),
 
@@ -122,7 +139,7 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
           }),
         )
         .mutation(async ({ ctx, input }) => {
-          if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
+          if (!(await canManageInstance(ctx))) throw new TRPCError({ code: "FORBIDDEN" });
           await ctx.db
             .insert(schema.instanceSettings)
             .values({ id: 1, ...input })

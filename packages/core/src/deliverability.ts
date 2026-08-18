@@ -78,8 +78,8 @@ function tierFor(rate: number, warn: number, pause: number): "warning" | "paused
 /**
  * Pure guardrail decision from a window's counts. Rates are always computed
  * for display, but no tier fires below MIN_GUARDRAIL_VOLUME. `sent` is the
- * accepted count (the denominator every rate divides by); zero sends yields
- * zero rates, never NaN.
+ * successfully sent count (the denominator every rate divides by); zero sends
+ * yields zero rates, never NaN.
  */
 export function evaluateDeliverability(counts: {
   sent: number;
@@ -112,7 +112,7 @@ export function evaluateDeliverability(counts: {
 
 /**
  * A team's current deliverability standing over the trailing window. Sums
- * usage_counters (sent = accepted) the same way the metrics router reads them,
+ * usage_counters using the successful SES send count as the denominator,
  * with the window's lower bound derived from utcDay so rows join on the exact
  * same UTC-day key production writes.
  */
@@ -130,7 +130,7 @@ export async function fetchDeliverabilityHealth(
   // returns bigint as a string; Number() is exact up to 2^53.
   const [row] = await db
     .select({
-      sent: sql<string>`coalesce(sum(${c.accepted}), 0)::bigint`,
+      sent: sql<string>`coalesce(sum(${c.sent}), 0)::bigint`,
       bounced: sql<string>`coalesce(sum(${c.bounced}), 0)::bigint`,
       complained: sql<string>`coalesce(sum(${c.complained}), 0)::bigint`,
     })

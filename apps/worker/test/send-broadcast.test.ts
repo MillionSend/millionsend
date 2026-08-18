@@ -362,7 +362,7 @@ async function seedThrottleTeam(
 it("throttles the fan-out drip when the team is over the risk line", async () => {
   // 90/2000 = 4.5% bounce: over WARN (4%), under PAUSE (5%), volume >= floor.
   const { broadcastId } = await seedThrottleTeam("bc-throttle", {
-    accepted: 2000,
+    sent: 2000,
     bounced: 90,
   });
   const { deps, startAfters } = makeDeps();
@@ -384,7 +384,7 @@ it("throttles the fan-out drip when the team is over the risk line", async () =>
 it("fans out at full rate (no startAfter) when the team is ok", async () => {
   // 10/2000 = 0.5% bounce: clean, over the volume floor → ok, full rate.
   const { broadcastId } = await seedThrottleTeam("bc-fullrate", {
-    accepted: 2000,
+    sent: 2000,
     bounced: 10,
   });
   const { deps, startAfters } = makeDeps();

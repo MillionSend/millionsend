@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     environment:
       POSTGRES_USER: millionsend
       POSTGRES_PASSWORD: millionsend
@@ -22,12 +22,17 @@ services:
       # Host ports are .env-tunable. WEB_PORT remaps only the host side (the
       # web process is fixed at 3000 inside the container); PORT is also the
       # api's own listen port via env_file, so both sides move together.
-      - "${WEB_PORT:-3000}:3000" # web dashboard
-      - "${PORT:-3001}:${PORT:-3001}" # api
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000" # web dashboard
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${PORT:-3001}:${PORT:-3001}" # api
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   smtp:
     build: .
@@ -37,11 +42,16 @@ services:
     ports:
       # SMTP_PORT is also the relay's listen port via env_file, so both sides
       # of the mapping move together.
-      - "${SMTP_PORT:-2587}:${SMTP_PORT:-2587}" # smtp relay
+      - "${SMTP_BIND_ADDRESS:-127.0.0.1}:${SMTP_PORT:-2587}:${SMTP_PORT:-2587}" # smtp relay
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   backup:
     # Optional scheduled pg_dump to S3-compatible storage. Stays disabled (the
@@ -50,6 +60,11 @@ services:
     build: scripts/backup
     env_file: .env
     restart: "no"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,8 +78,13 @@ services:
       # DOCS_PORT remaps only the host side (the docs process is fixed at
       # 3002 inside the container). No database dependency: the docs site is
       # static content.
-      - "${DOCS_PORT:-3002}:3002" # documentation site
+      - "${DOCS_BIND_ADDRESS:-127.0.0.1}:${DOCS_PORT:-3002}:3002" # documentation site
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
 volumes:
   pgdata:

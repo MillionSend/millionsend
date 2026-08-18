@@ -175,4 +175,11 @@ describe("topics teamId isolation", () => {
     });
     expect(res.status).toBe(422);
   });
+
+  it("returns 409 instead of widening a broadcast when its topic is deleted", async () => {
+    const res = await call(tokenA, "DELETE", `/topics/${topicA}`);
+    expect(res.status).toBe(409);
+    expect(await json(res)).toMatchObject({ name: "conflict" });
+    expect((await call(tokenA, "GET", `/topics/${topicA}`)).status).toBe(200);
+  });
 });

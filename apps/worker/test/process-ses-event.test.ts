@@ -159,6 +159,47 @@ it("unknown sesMessageId is ignored entirely", async () => {
   expect(after.length).toBe(before.length);
 });
 
+it("joins an early SES event through the server-owned email tag", async () => {
+  const [row] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "a@acme.dev",
+      to: ["early@example.com"],
+      subject: "s",
+      latestStatus: "queued",
+      sentAt: new Date(),
+    })
+    .returning({ id: schema.emails.id });
+  if (!row) throw new Error("insert failed");
+
+  await processSesEvent(db, makeEvent({ sesMessageId: "mid-arrived-first", emailId: row.id }), {
+    snsMessageId: "sns-arrived-first",
+  });
+
+  const [email] = await db.select().from(schema.emails).where(eq(schema.emails.id, row.id));
+  expect(email?.sesMessageId).toBe("mid-arrived-first");
+  expect(email?.latestStatus).toBe("delivered");
+});
+
+it("never trusts an invalid or unclaimed fallback email tag", async () => {
+  const [row] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      from: "a@acme.dev",
+      to: ["queued@example.com"],
+      subject: "s",
+      latestStatus: "queued",
+    })
+    .returning({ id: schema.emails.id });
+  if (!row) throw new Error("insert failed");
+
+  await processSesEvent(db, makeEvent({ sesMessageId: "mid-unclaimed", emailId: row.id }));
+  await processSesEvent(db, makeEvent({ sesMessageId: "mid-invalid-tag", emailId: "not-a-uuid" }));
+  expect(await statusOf(row.id)).toBe("queued");
+});
+
 it("duplicate suppression events collapse to one row", async () => {
   await insertSentEmail("mid-dupe", ["dupe@example.com"]);
   const event = makeEvent({

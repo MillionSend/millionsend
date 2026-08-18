@@ -23,6 +23,7 @@ const app = createApi({
   db: getDb(),
   keyring: EnvKeyring.fromBase64(env.MASTER_ENCRYPTION_KEY),
   isCloud: env.IS_CLOUD,
+  rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   appBaseUrl: env.APP_BASE_URL,
   enqueueEmailSend: async (emailId, opts) => {
     await queue.send(

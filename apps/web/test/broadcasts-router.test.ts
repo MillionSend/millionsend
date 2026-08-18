@@ -324,7 +324,7 @@ describe("broadcasts.send", () => {
 describe("broadcasts.send deliverability guard", () => {
   async function seedWindowCounter(
     teamId: string,
-    counts: { accepted: number; complained?: number; bounced?: number },
+    counts: { sent: number; complained?: number; bounced?: number },
   ) {
     await db.insert(schema.usageCounters).values({ teamId, day: utcDay(Date.now()), ...counts });
   }
@@ -333,7 +333,7 @@ describe("broadcasts.send deliverability guard", () => {
     const teamId = await createTeam(db, "team-a");
     const { id } = await seedDraft(teamId);
     // 3/2000 = 0.15% > 0.1% pause line, and 2000 > the 1000 volume floor.
-    await seedWindowCounter(teamId, { accepted: 2000, complained: 3 });
+    await seedWindowCounter(teamId, { sent: 2000, complained: 3 });
 
     const enqueued: string[] = [];
     const caller = callerFor(teamId, {
@@ -353,7 +353,7 @@ describe("broadcasts.send deliverability guard", () => {
     const teamId = await createTeam(db, "team-a");
     const { id } = await seedDraft(teamId);
     // 3/500 = 0.6% (well over the rate line) but 500 < the 1000 volume floor.
-    await seedWindowCounter(teamId, { accepted: 500, complained: 3 });
+    await seedWindowCounter(teamId, { sent: 500, complained: 3 });
 
     await callerFor(teamId).broadcasts.send({ id });
     expect((await broadcastRow(id))?.status).toBe("scheduled");

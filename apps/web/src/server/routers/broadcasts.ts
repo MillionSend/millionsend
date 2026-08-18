@@ -266,7 +266,7 @@ export const broadcastsRouter = router({
       if (input.segmentId) await assertSegment(ctx, input.segmentId);
       const saved = await resolveEditorSave(input);
       const b = schema.broadcasts;
-      await ctx.db
+      const [updated] = await ctx.db
         .update(b)
         .set({
           ...(saved.topicId !== undefined ? { topicId: saved.topicId } : {}),
@@ -280,7 +280,14 @@ export const broadcastsRouter = router({
           ...(saved.document !== undefined ? { document: saved.document } : {}),
           updatedAt: new Date(),
         })
-        .where(and(eq(b.id, input.id), eq(b.teamId, ctx.teamId)));
+        .where(and(eq(b.id, input.id), eq(b.teamId, ctx.teamId), eq(b.status, "draft")))
+        .returning({ id: b.id });
+      if (!updated) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Only drafts can be changed.",
+        });
+      }
       return { id: input.id };
     }),
 
@@ -288,7 +295,16 @@ export const broadcastsRouter = router({
     const row = await getOwnBroadcast(ctx, input.id);
     assertDraft(row);
     const b = schema.broadcasts;
-    await ctx.db.delete(b).where(and(eq(b.id, input.id), eq(b.teamId, ctx.teamId)));
+    const [deleted] = await ctx.db
+      .delete(b)
+      .where(and(eq(b.id, input.id), eq(b.teamId, ctx.teamId), eq(b.status, "draft")))
+      .returning({ id: b.id });
+    if (!deleted) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "Only drafts can be changed.",
+      });
+    }
     return { id: input.id };
   }),
 

@@ -80,18 +80,31 @@ function uploadedPrivateKey(calls: { name: string; input: Record<string, unknown
   return key;
 }
 
-function callerFor(teamId: string, deps: DomainsSesDeps) {
+function callerFor(
+  teamId: string,
+  deps: DomainsSesDeps,
+  role: "owner" | "admin" | "member" = "owner",
+) {
   const factory = createCallerFactory(router({ domains: createDomainsRouter(deps) }));
   const ctx: Context = {
     db,
     session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
     teamId,
-    role: "owner",
+    role,
   };
   return factory(ctx);
 }
 
 describe("domains.create", () => {
+  it("forbids ordinary members from creating SES identities", async () => {
+    const teamId = await createTeam(db);
+    await expect(
+      callerFor(teamId, fakeSes().deps, "member").domains.create({
+        name: "member.example.com",
+        region: "us-east-1",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
   it("uploads a BYODKIM key to SES and stores only the selector and public half", async () => {
     const teamId = await createTeam(db);
     const { deps, calls } = fakeSes();

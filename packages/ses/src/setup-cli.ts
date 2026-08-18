@@ -236,6 +236,25 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       writeEnv({ APP_BASE_URL: appBaseUrl });
     }
 
+    const configuredImage =
+      envValue(env, "MILLIONSEND_IMAGE") || process.env.MILLIONSEND_IMAGE || "";
+    const needsPublishedImage =
+      state.composeContent === null || state.composeContent.includes("MILLIONSEND_IMAGE");
+    let imageMissing = needsPublishedImage && configuredImage === "";
+    if (imageMissing) {
+      const image = (
+        await rl.question(
+          "MILLIONSEND_IMAGE — released image tag or immutable digest (required for the standalone compose; empty to configure later): ",
+        )
+      ).trim();
+      if (image !== "" && writeEnv({ MILLIONSEND_IMAGE: image })) {
+        imageMissing = false;
+        console.log(dim("MILLIONSEND_IMAGE written to .env."));
+      } else if (image !== "") {
+        console.log(`No .env here — add MILLIONSEND_IMAGE=${image} before starting.`);
+      }
+    }
+
     // --- secrets ---
     if (env !== null) {
       const missing = missingSecrets(env);
@@ -306,6 +325,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       state,
       env === null ? [] : missingSecrets(env),
       appBaseUrl,
+      imageMissing,
     );
   } finally {
     rl.close();
@@ -518,6 +538,7 @@ async function launchStep(
   state: DirState,
   secretsMissing: string[],
   appBaseUrl: string,
+  imageMissing: boolean,
 ): Promise<number> {
   console.log("");
   if (state.docker === null) {
@@ -564,6 +585,13 @@ async function launchStep(
         : "";
     console.log(`Start later with:${curlLine}\n  ${command}`);
     return 0;
+  }
+
+  if (composeContent.includes("MILLIONSEND_IMAGE:?") && imageMissing) {
+    console.error(
+      "MILLIONSEND_IMAGE is required — set it to a released version tag or immutable digest in .env, then re-run setup.",
+    );
+    return 1;
   }
 
   if (secretsMissing.length > 0) {

@@ -16,6 +16,11 @@ const queue = await Queue.start(env.DATABASE_URL);
 
 const certPath = env.SMTP_TLS_CERT_PATH;
 const keyPath = env.SMTP_TLS_KEY_PATH;
+if (!certPath && !env.SMTP_ALLOW_INSECURE_AUTH) {
+  throw new Error(
+    "SMTP requires TLS; set SMTP_TLS_CERT_PATH and SMTP_TLS_KEY_PATH, or explicitly set SMTP_ALLOW_INSECURE_AUTH=true only on a trusted private network",
+  );
+}
 
 const server = createSmtpServer({
   db: getDb(),
@@ -31,6 +36,7 @@ const server = createSmtpServer({
   ...(certPath && keyPath
     ? { tls: { cert: readFileSync(certPath), key: readFileSync(keyPath) } }
     : {}),
+  allowInsecureAuth: env.SMTP_ALLOW_INSECURE_AUTH,
 });
 
 server.on("error", (err) => {

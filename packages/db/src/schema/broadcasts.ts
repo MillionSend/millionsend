@@ -23,13 +23,13 @@ export const broadcasts = pgTable(
     teamId: uuid("team_id")
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
-    // SET NULL, not CASCADE: deleting a topic must not erase the send history
-    // of broadcasts already sent under it. A null topicId is a global send.
-    topicId: uuid("topic_id").references(() => topics.id, { onDelete: "set null" }),
-    // Optional segment (a saved filter over the team's contacts). SET NULL on
-    // delete: the fan-out treats a null segmentId as "all contacts", so a
-    // deleted segment gracefully widens the target rather than orphaning the row.
-    segmentId: uuid("segment_id").references(() => segments.id, { onDelete: "set null" }),
+    // RESTRICT is a safety boundary: null means "all contacts", so SET NULL
+    // could silently widen a scheduled broadcast when its topic was deleted.
+    // Keeping the referenced target also preserves historical send meaning.
+    topicId: uuid("topic_id").references(() => topics.id, { onDelete: "restrict" }),
+    // The same invariant applies to segments: deleting one must never turn a
+    // narrow campaign into an all-contacts send.
+    segmentId: uuid("segment_id").references(() => segments.id, { onDelete: "restrict" }),
     // Internal label, never rendered into the email.
     name: text("name"),
     from: text("from").notNull(),

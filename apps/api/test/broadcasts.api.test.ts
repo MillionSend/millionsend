@@ -317,7 +317,7 @@ describe("broadcasts API deliverability guardrail", () => {
     await db.insert(schema.usageCounters).values({
       teamId,
       day: utcDay(),
-      accepted: 2000,
+      sent: 2000,
       complained: 5,
     });
 
@@ -339,7 +339,7 @@ describe("broadcasts API deliverability guardrail", () => {
     await db.insert(schema.usageCounters).values({
       teamId,
       day: utcDay(),
-      accepted: 2000,
+      sent: 2000,
       bounced: 1,
     });
 

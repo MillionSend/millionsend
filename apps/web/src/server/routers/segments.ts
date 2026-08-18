@@ -4,6 +4,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { isForeignKeyViolation } from "../db-errors";
 import { router, teamProcedure } from "../trpc";
 
 const nameSchema = z.string().trim().min(1).max(200);
@@ -137,10 +138,21 @@ export const segmentsRouter = router({
 
   delete: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
     const s = schema.segments;
-    const [row] = await ctx.db
-      .delete(s)
-      .where(and(eq(s.id, input.id), eq(s.teamId, ctx.teamId)))
-      .returning({ id: s.id });
+    let row: { id: string } | undefined;
+    try {
+      [row] = await ctx.db
+        .delete(s)
+        .where(and(eq(s.id, input.id), eq(s.teamId, ctx.teamId)))
+        .returning({ id: s.id });
+    } catch (error) {
+      if (isForeignKeyViolation(error)) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "This segment is referenced by a broadcast and cannot be deleted.",
+        });
+      }
+      throw error;
+    }
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     return { id: row.id };
   }),

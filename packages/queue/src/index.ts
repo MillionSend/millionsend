@@ -20,6 +20,7 @@ export interface JobPayloads {
 export interface SerializedSesEvent {
   eventType: string;
   sesMessageId: string;
+  emailId?: string;
   occurredAt: string;
   bounce?: {
     bounceType: "Permanent" | "Transient" | "Undetermined";

@@ -1,2 +1,0 @@
-ALTER TABLE "email_events" ADD COLUMN "sns_message_id" text;--> statement-breakpoint
-CREATE UNIQUE INDEX "email_events_sns_message_id_idx" ON "email_events" USING btree ("sns_message_id") WHERE "email_events"."sns_message_id" is not null;

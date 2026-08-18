@@ -13,13 +13,14 @@ import { z } from "zod";
 /** Mirrors Resend's SMTP contract: fixed username, an API key as password. */
 export const SMTP_USERNAME = "millionsend";
 
-// The HTTP API sets no explicit body cap, so the transport ceiling applies:
 // SESv2 rejects raw messages over 40 MB, and nothing larger can ever send.
 export const MAX_MESSAGE_BYTES = 40 * 1024 * 1024;
 
 export interface SmtpDeps extends AcceptEmailDeps {
-  /** STARTTLS keypair; omitted → plaintext with AUTH still allowed. */
+  /** STARTTLS keypair; omitted → AUTH stays disabled unless explicitly allowed. */
   tls?: { key: Buffer; cert: Buffer } | undefined;
+  /** Private-network escape hatch. Never enable on an untrusted network. */
+  allowInsecureAuth?: boolean | undefined;
 }
 
 function smtpError(responseCode: number, message: string): Error {
@@ -128,11 +129,11 @@ async function handleMessage(
  */
 export function createSmtpServer(deps: SmtpDeps): SMTPServer {
   return new SMTPServer({
-    // Without a keypair STARTTLS is withdrawn and AUTH allowed in
-    // plaintext — the self-host posture (own network / TLS-terminating LB).
+    // Without a keypair STARTTLS is withdrawn. Plaintext AUTH requires an
+    // explicit opt-in; smtp-server otherwise rejects it before onAuth.
     ...(deps.tls
       ? { key: deps.tls.key, cert: deps.tls.cert }
-      : { hideSTARTTLS: true, allowInsecureAuth: true }),
+      : { hideSTARTTLS: true, allowInsecureAuth: deps.allowInsecureAuth ?? false }),
     authMethods: ["PLAIN", "LOGIN"],
     size: MAX_MESSAGE_BYTES,
     onAuth(auth, _session, callback) {

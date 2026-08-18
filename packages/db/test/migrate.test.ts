@@ -36,6 +36,16 @@ it("is idempotent across sequential runs and releases the lock", async () => {
   expect(await lockIsFree()).toBe(true);
 });
 
+it("installs the append-only audit-log trigger in the baseline", async () => {
+  await migrateLocked(db, () => migrate(db, { migrationsFolder }));
+  await client.query("insert into audit_log (action) values ('baseline-test')");
+
+  await expect(client.query("update audit_log set action = 'mutated'")).rejects.toThrow(
+    "audit_log is append-only",
+  );
+  await expect(client.query("delete from audit_log")).rejects.toThrow("audit_log is append-only");
+});
+
 it("releases the lock when the migration itself fails", async () => {
   await expect(
     migrateLocked(db, async () => {

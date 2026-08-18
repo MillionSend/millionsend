@@ -164,7 +164,7 @@ describe("metrics.health", () => {
   it("pauses when the window bounce rate crosses the SES enforcement line", async () => {
     const teamId = await createTeam(db, "acme");
     // 120/2000 = 6% > 5% pause line, above the 1000 volume floor.
-    await insertCounter(teamId, utcDay(0), { accepted: 2000, bounced: 120 });
+    await insertCounter(teamId, utcDay(0), { sent: 2000, bounced: 120 });
 
     const result = await callerFor(teamId).metrics.health();
 
@@ -181,7 +181,7 @@ describe("metrics.health", () => {
 
   it("stays ok below the volume floor regardless of rate", async () => {
     const teamId = await createTeam(db, "acme");
-    await insertCounter(teamId, utcDay(0), { accepted: 100, bounced: 50 });
+    await insertCounter(teamId, utcDay(0), { sent: 100, bounced: 50 });
 
     const result = await callerFor(teamId).metrics.health();
 

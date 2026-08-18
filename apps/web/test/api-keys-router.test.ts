@@ -17,12 +17,12 @@ afterEach(async () => {
   await close();
 });
 
-function callerFor(teamId: string) {
+function callerFor(teamId: string, role: "owner" | "admin" | "member" = "owner") {
   return createCaller({
     db,
     session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
     teamId,
-    role: "owner",
+    role,
   });
 }
 
@@ -46,6 +46,14 @@ async function createDomain(
 }
 
 describe("apiKeys.create", () => {
+  it("forbids ordinary members from minting privileged API keys", async () => {
+    const teamId = await createTeam(db, "team-a");
+    await expect(
+      callerFor(teamId, "member").apiKeys.create({ name: "escalation" }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
   it("returns an ms_-prefixed token that verifies against the stored hash", async () => {
     const teamId = await createTeam(db, "team-a");
     const { id, token } = await callerFor(teamId).apiKeys.create({ name: "Production" });
@@ -139,6 +147,14 @@ describe("apiKeys.list", () => {
 });
 
 describe("apiKeys.revoke", () => {
+  it("forbids ordinary members from revoking keys", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { id } = await callerFor(teamId).apiKeys.create({ name: "Production" });
+    await expect(callerFor(teamId, "member").apiKeys.revoke({ id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect((await keyRow(id)).revokedAt).toBeNull();
+  });
   it("blocks cross-team revocation", async () => {
     const teamA = await createTeam(db, "team-a");
     const teamB = await createTeam(db, "team-b");

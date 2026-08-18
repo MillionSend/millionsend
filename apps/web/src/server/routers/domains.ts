@@ -22,7 +22,7 @@ import { z } from "zod";
 import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { resolveBaseUrl } from "../auth";
-import { router, teamProcedure } from "../trpc";
+import { adminProcedure, router, teamProcedure } from "../trpc";
 
 // Lowercase registrable hostname with at least two labels; SES identities are
 // registered exactly as typed, so uppercase is rejected instead of normalized.
@@ -227,7 +227,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       };
     }),
 
-    create: teamProcedure
+    create: adminProcedure
       .input(
         z.object({
           name: z
@@ -297,7 +297,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       return { provider, records: buildTrackedRecords(domain, verification) };
     }),
 
-    verify: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+    verify: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
       const resolver = deps.dns ?? nodeDnsResolver;
       // The shared source of truth the worker cron also runs: SES status + live
@@ -339,7 +339,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       };
     }),
 
-    updateConfiguration: teamProcedure
+    updateConfiguration: adminProcedure
       .input(
         z.object({
           id: z.uuid(),
@@ -385,7 +385,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         };
       }),
 
-    delete: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+    delete: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
       try {
         await deleteDomainIdentity(deps.clientForRegion(domain.region), { domain: domain.name });

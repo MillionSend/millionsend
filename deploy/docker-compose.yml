@@ -1,12 +1,12 @@
 # Standalone self-host compose file — no repo clone needed. Quickstart:
 #   curl -O https://raw.githubusercontent.com/MillionSend/millionsend/main/deploy/docker-compose.yml
 #   curl -o .env https://raw.githubusercontent.com/MillionSend/millionsend/main/.env.example
-#   (generate the two secrets in .env, then)
+#   (generate the two secrets and set MILLIONSEND_IMAGE in .env, then)
 #   docker compose up -d
-# :edge tracks main; pin a version tag for production.
+# Production requires an explicit released version tag or, preferably, digest.
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     environment:
       POSTGRES_USER: millionsend
       POSTGRES_PASSWORD: millionsend
@@ -20,29 +20,39 @@ services:
       retries: 10
 
   millionsend:
-    image: ghcr.io/millionsend/millionsend:edge
+    image: "${MILLIONSEND_IMAGE:?Set MILLIONSEND_IMAGE to a released version tag or digest}"
     env_file: .env
     environment:
       PROCESS: all
     ports:
-      - "3000:3000" # web dashboard
-      - "3001:3001" # api
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000" # web dashboard
+      - "${API_BIND_ADDRESS:-127.0.0.1}:${PORT:-3001}:${PORT:-3001}" # api
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   smtp:
-    image: ghcr.io/millionsend/millionsend:edge
+    image: "${MILLIONSEND_IMAGE:?Set MILLIONSEND_IMAGE to a released version tag or digest}"
     env_file: .env
     environment:
       PROCESS: smtp
     ports:
-      - "2587:2587" # smtp relay
+      - "${SMTP_BIND_ADDRESS:-127.0.0.1}:${SMTP_PORT:-2587}:${SMTP_PORT:-2587}" # smtp relay
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
 volumes:
   pgdata:

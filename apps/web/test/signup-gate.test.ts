@@ -35,14 +35,14 @@ describe("assertSignupAllowed", () => {
 });
 
 describe("resolveBaseUrl", () => {
-  it("defaults to localhost and warns when unset — never throws", () => {
+  it("defaults to localhost and warns when unset outside production", () => {
     const warned: string[] = [];
     const original = console.warn;
     console.warn = (msg: string) => {
       warned.push(msg);
     };
     try {
-      expect(resolveBaseUrl(undefined)).toBe("http://localhost:3000");
+      expect(resolveBaseUrl(undefined, "test")).toBe("http://localhost:3000");
     } finally {
       console.warn = original;
     }
@@ -51,5 +51,9 @@ describe("resolveBaseUrl", () => {
 
   it("returns APP_BASE_URL when set", () => {
     expect(resolveBaseUrl("https://mail.example.com")).toBe("https://mail.example.com");
+  });
+
+  it("rejects an unset APP_BASE_URL in production", () => {
+    expect(() => resolveBaseUrl(undefined, "production")).toThrow(/APP_BASE_URL/);
   });
 });

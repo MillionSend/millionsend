@@ -26,9 +26,9 @@ and re-running is safe:
    sending); with an https `APP_BASE_URL`, also the SNS event topic and SES
    configuration set so bounces, complaints, and deliveries flow back into
    your instance. Keys are written into the same `.env`.
-3. **launch** — downloads the standalone `docker-compose.yml` if the
-   directory has none, then runs `docker compose up -d` (`--build` when your
-   compose file builds from source).
+3. **launch** — asks for a released image tag or immutable digest, downloads
+   the standalone `docker-compose.yml` if the directory has none, then runs
+   `docker compose up -d` (`--build` when your compose file builds from source).
 
 In a terminal every choice is interactive (arrow-key lists, Enter accepts the
 default). Piped input still works deterministically — answers one per line;

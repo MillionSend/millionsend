@@ -131,10 +131,10 @@ describe("fetchDeliverabilityHealth", () => {
 
     await db.insert(schema.usageCounters).values([
       // In window: 10_000 sent, 600 bounced (6%) → paused on its own.
-      { teamId, day: utcDay(nowMs), accepted: 5_000, bounced: 300, complained: 0 },
-      { teamId, day: inEdge, accepted: 5_000, bounced: 300, complained: 0 },
+      { teamId, day: utcDay(nowMs), accepted: 6_000, sent: 5_000, bounced: 300, complained: 0 },
+      { teamId, day: inEdge, accepted: 6_000, sent: 5_000, bounced: 300, complained: 0 },
       // Out of window: huge clean volume that would dilute the rate to safe if counted.
-      { teamId, day: outEdge, accepted: 1_000_000, bounced: 0, complained: 0 },
+      { teamId, day: outEdge, accepted: 1_000_000, sent: 1_000_000, bounced: 0, complained: 0 },
     ]);
 
     const health = await fetchDeliverabilityHealth(db, teamId, { now });

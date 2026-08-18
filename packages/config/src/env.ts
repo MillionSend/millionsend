@@ -52,6 +52,7 @@ export const env = createEnv({
   server: {
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+    API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(600),
     DATABASE_URL: z.url(),
 
     IS_CLOUD: boolFromString,
@@ -62,10 +63,13 @@ export const env = createEnv({
     // to the APP_BASE_URL host; set when the relay is reachable elsewhere.
     SMTP_PUBLIC_HOST: z.string().optional(),
     // STARTTLS certificate for the SMTP relay. Both set → STARTTLS is
-    // offered and required before AUTH; unset → plaintext (run the relay
-    // inside your own network or behind a TLS-terminating load balancer).
+    // offered and required before AUTH; unset → AUTH stays disabled unless
+    // the private-network escape hatch below is explicitly enabled.
     SMTP_TLS_CERT_PATH: z.string().optional(),
     SMTP_TLS_KEY_PATH: z.string().optional(),
+    // Explicit escape hatch for a private, trusted network. False by default
+    // because AUTH PLAIN/LOGIN exposes the API key without TLS.
+    SMTP_ALLOW_INSECURE_AUTH: boolFromString,
 
     // Envelope-encryption KEK for email bodies at rest.
     // Self-host: required. Cloud: omitted in favor of KMS_KEY_ID.
@@ -137,6 +141,9 @@ export type Env = typeof env;
 
 /** Cross-field rules that per-field schemas cannot express. */
 export function assertEnvConsistency(e: Env): void {
+  if (Boolean(e.SMTP_TLS_CERT_PATH) !== Boolean(e.SMTP_TLS_KEY_PATH)) {
+    throw new Error("SMTP_TLS_CERT_PATH and SMTP_TLS_KEY_PATH must be set together");
+  }
   if (e.IS_CLOUD) {
     for (const key of [
       "KMS_KEY_ID",

@@ -4,13 +4,17 @@ import {
   buildUnsubscribeUrl,
   decryptEmailBody,
   enqueueWebhookDeliveries,
+  findSuppressed,
+  hashRecipient,
+  isSubscribedToTopic,
   type Keyring,
   makeUnsubscribeToken,
   rewriteForTracking,
+  utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { createTransport } from "nodemailer";
 
 /**
@@ -22,6 +26,8 @@ import { createTransport } from "nodemailer";
 export interface SesSender {
   sendRaw(params: {
     raw: Buffer;
+    /** Server-owned fallback join key copied into an SES message tag. */
+    emailId: string;
     configurationSetName?: string;
     /** SES region the sending identity is verified in; sender default when absent. */
     region?: string;
@@ -53,7 +59,90 @@ export interface SendDeps {
   tracking?: { secretKey: Buffer; defaultBaseUrl?: string | undefined } | undefined;
 }
 
-export type SendOutcome = "sent" | "skipped" | "deferred" | "failed";
+export type SendOutcome = "sent" | "skipped" | "deferred" | "suppressed" | "failed";
+
+interface SendEligibility {
+  eligible: boolean;
+  topicId: string | null;
+  reason?: string;
+}
+
+async function checkSendEligibility(
+  db: Db,
+  email: typeof schema.emails.$inferSelect,
+): Promise<SendEligibility> {
+  if (!email.contactId) return { eligible: true, topicId: null };
+
+  const [contact] = await db
+    .select({ email: schema.contacts.email, unsubscribed: schema.contacts.unsubscribed })
+    .from(schema.contacts)
+    .where(and(eq(schema.contacts.id, email.contactId), eq(schema.contacts.teamId, email.teamId)))
+    .limit(1);
+  if (!contact) return { eligible: false, topicId: null, reason: "contact_missing" };
+  if (contact.unsubscribed) {
+    return { eligible: false, topicId: null, reason: "contact_unsubscribed" };
+  }
+  if (email.to.length !== 1 || hashRecipient(email.to[0] ?? "") !== hashRecipient(contact.email)) {
+    return { eligible: false, topicId: null, reason: "contact_recipient_mismatch" };
+  }
+  if ((await findSuppressed(db, email.teamId, email.to)).size > 0) {
+    return { eligible: false, topicId: null, reason: "recipient_suppressed" };
+  }
+
+  if (!email.broadcastId) return { eligible: true, topicId: null };
+  const [broadcast] = await db
+    .select({ topicId: schema.broadcasts.topicId })
+    .from(schema.broadcasts)
+    .where(
+      and(eq(schema.broadcasts.id, email.broadcastId), eq(schema.broadcasts.teamId, email.teamId)),
+    )
+    .limit(1);
+  if (!broadcast) return { eligible: false, topicId: null, reason: "broadcast_missing" };
+  if (!broadcast.topicId) return { eligible: true, topicId: null };
+
+  const [topic] = await db
+    .select({ defaultSubscribed: schema.topics.defaultSubscribed })
+    .from(schema.topics)
+    .where(and(eq(schema.topics.id, broadcast.topicId), eq(schema.topics.teamId, email.teamId)))
+    .limit(1);
+  if (!topic) return { eligible: false, topicId: broadcast.topicId, reason: "topic_missing" };
+  const [override] = await db
+    .select({ subscribed: schema.contactTopicSubscriptions.subscribed })
+    .from(schema.contactTopicSubscriptions)
+    .where(
+      and(
+        eq(schema.contactTopicSubscriptions.contactId, email.contactId),
+        eq(schema.contactTopicSubscriptions.topicId, broadcast.topicId),
+      ),
+    )
+    .limit(1);
+  if (!isSubscribedToTopic(override?.subscribed, topic.defaultSubscribed)) {
+    return { eligible: false, topicId: broadcast.topicId, reason: "topic_unsubscribed" };
+  }
+  return { eligible: true, topicId: broadcast.topicId };
+}
+
+async function suppressQueuedEmail(db: Db, emailId: string, reason: string): Promise<boolean> {
+  const [updated] = await db
+    .update(schema.emails)
+    .set({ latestStatus: "suppressed" })
+    .where(
+      and(
+        eq(schema.emails.id, emailId),
+        eq(schema.emails.latestStatus, "queued"),
+        isNull(schema.emails.sentAt),
+      ),
+    )
+    .returning({ id: schema.emails.id });
+  if (!updated) return false;
+  await db.insert(schema.emailEvents).values({
+    emailId,
+    type: "suppressed",
+    occurredAt: new Date(),
+    data: { source: "worker", reason },
+  });
+  return true;
+}
 
 export async function sendEmail(
   db: Db,
@@ -72,6 +161,13 @@ export async function sendEmail(
     // email forever; hand it back to the queue for its due time.
     await deps.reschedule?.(email.id, email.scheduledAt);
     return "deferred";
+  }
+
+  let eligibility = await checkSendEligibility(db, email);
+  if (!eligibility.eligible) {
+    return (await suppressQueuedEmail(db, email.id, eligibility.reason ?? "ineligible"))
+      ? "suppressed"
+      : "skipped";
   }
 
   const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
@@ -97,6 +193,7 @@ export async function sendEmail(
         await db
           .select({
             name: schema.domains.name,
+            status: schema.domains.status,
             sesConfigurationSet: schema.domains.sesConfigurationSet,
             region: schema.domains.region,
             clickTracking: schema.domains.clickTracking,
@@ -104,10 +201,15 @@ export async function sendEmail(
             trackingSubdomain: schema.domains.trackingSubdomain,
           })
           .from(schema.domains)
-          .where(eq(schema.domains.id, email.domainId))
+          .where(
+            and(eq(schema.domains.id, email.domainId), eq(schema.domains.teamId, email.teamId)),
+          )
       )[0]
     : undefined;
-  const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
+  if (domain?.status !== "verified") {
+    throw new Error(`email ${email.id}: sending domain is not currently verified`);
+  }
+  const configurationSet = domain.sesConfigurationSet ?? deps.defaultConfigurationSet;
 
   // App-layer engagement tracking: when the domain has click or open tracking
   // on, WE rewrite links through our redirect endpoint and inject our pixel
@@ -159,7 +261,11 @@ export async function sendEmail(
       headers,
       buildUnsubscribeHeaders(
         deps.unsubscribe.baseUrl,
-        makeUnsubscribeToken({ contactId: email.contactId, secretKey: deps.unsubscribe.secretKey }),
+        makeUnsubscribeToken({
+          contactId: email.contactId,
+          topicId: eligibility.topicId,
+          secretKey: deps.unsubscribe.secretKey,
+        }),
       ),
     );
   }
@@ -184,6 +290,16 @@ export async function sendEmail(
     headers,
   });
 
+  // Re-check immediately before the atomic claim: quota delays and throttling
+  // can leave a row queued long enough for a recipient to opt out after the
+  // broadcast fan-out first selected them.
+  eligibility = await checkSendEligibility(db, email);
+  if (!eligibility.eligible) {
+    return (await suppressQueuedEmail(db, email.id, eligibility.reason ?? "ineligible"))
+      ? "suppressed"
+      : "skipped";
+  }
+
   // Atomic claim (sentAt doubles as the claim marker): closes the
   // double-send windows — a concurrent worker on the same job, and a retry
   // after SES accepted but the post-send bookkeeping failed. Claimed rows
@@ -205,6 +321,7 @@ export async function sendEmail(
   try {
     ({ messageId } = await deps.ses.sendRaw({
       raw: mime,
+      emailId: email.id,
       ...(configurationSet ? { configurationSetName: configurationSet } : {}),
       ...(domain?.region ? { region: domain.region } : {}),
     }));
@@ -233,6 +350,14 @@ export async function sendEmail(
     occurredAt: new Date(),
     data: { source: "worker" },
   });
+  const counter = schema.usageCounters;
+  await db
+    .insert(counter)
+    .values({ teamId: email.teamId, day: utcDay(Date.now()), sent: 1 })
+    .onConflictDoUpdate({
+      target: [counter.teamId, counter.day],
+      set: { sent: sql`${counter.sent} + 1` },
+    });
   // The sentAt claim above makes this path single-shot per email, so the
   // email.sent fan-out cannot double-fire on a job retry.
   if (deps.enqueueWebhookDelivery) {

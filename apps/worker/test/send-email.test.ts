@@ -1,5 +1,13 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, encryptEmailBody, verifyClickToken, verifyOpenToken } from "@millionsend/core";
+import {
+  EnvKeyring,
+  encryptEmailBody,
+  hashRecipient,
+  utcDay,
+  verifyClickToken,
+  verifyOpenToken,
+  verifyUnsubscribeToken,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -39,6 +47,7 @@ afterAll(() => close());
 
 interface FakeSend {
   raw: Buffer;
+  emailId: string;
   configurationSetName?: string | undefined;
   region?: string | undefined;
 }
@@ -90,6 +99,15 @@ async function insertEmail(
   return row.id;
 }
 
+async function insertContact(email: string): Promise<string> {
+  const [row] = await db
+    .insert(schema.contacts)
+    .values({ teamId, email })
+    .returning({ id: schema.contacts.id });
+  if (!row) throw new Error("contact insert failed");
+  return row.id;
+}
+
 it("sends a queued email: MIME, join key, status, event row", async () => {
   const { ses, sends } = fakeSes("mid-happy");
   const deps: SendDeps = { keyring, ses };
@@ -105,6 +123,7 @@ it("sends a queued email: MIME, join key, status, event row", async () => {
   expect(mime).toContain("r@example.com");
   expect(sends[0]?.configurationSetName).toBe("ms-config-set");
   expect(sends[0]?.region).toBe("us-east-1");
+  expect(sends[0]?.emailId).toBe(emailId);
 
   // Transactional mail carries none of the bulk-class headers.
   for (const h of ["List-Id", "List-Unsubscribe", "Precedence", "Auto-Submitted"]) {
@@ -120,33 +139,155 @@ it("sends a queued email: MIME, join key, status, event row", async () => {
     .from(schema.emailEvents)
     .where(eq(schema.emailEvents.emailId, emailId));
   expect(events.map((e) => e.type)).toEqual(["sent"]);
+  const [usage] = await db
+    .select({ sent: schema.usageCounters.sent })
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.day, utcDay()));
+  expect(usage?.sent).toBe(1);
 });
 
 it("a broadcast send carries the RFC bulk-mail headers", async () => {
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "Product news", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
   const [broadcast] = await db
     .insert(schema.broadcasts)
-    .values({ teamId, from: "Acme <a@acme.dev>", subject: "hi" })
+    .values({ teamId, topicId: topic.id, from: "Acme <a@acme.dev>", subject: "hi" })
     .returning({ id: schema.broadcasts.id });
   if (!broadcast) throw new Error("broadcast insert failed");
 
   const { ses, sends } = fakeSes("mid-bulk");
-  const contactId = crypto.randomUUID();
+  const contactId = await insertContact("r@example.com");
   const emailId = await insertEmail({ broadcastId: broadcast.id, contactId });
+  const unsubscribeSecret = randomBytes(32);
   const deps: SendDeps = {
     keyring,
     ses,
-    unsubscribe: { secretKey: randomBytes(32), baseUrl: "https://app.example.com" },
+    unsubscribe: { secretKey: unsubscribeSecret, baseUrl: "https://app.example.com" },
   };
 
   expect(await sendEmail(db, deps, { emailId })).toBe("sent");
   // Unfold RFC 5322 header folding before matching; nodemailer normalizes
   // header casing, so compare case-insensitively like the transactional test.
-  const mime = (sends[0]?.raw.toString("utf8") ?? "").replace(/\r\n[ \t]/g, "").toLowerCase();
-  expect(mime).toContain(`list-id: <${broadcast.id}.acme.dev>`);
-  expect(mime).toContain("precedence: bulk");
-  expect(mime).toContain("auto-submitted: auto-generated");
-  expect(mime).toContain("list-unsubscribe:");
-  expect(mime).toContain("list-unsubscribe-post: list-unsubscribe=one-click");
+  const mime = (sends[0]?.raw.toString("utf8") ?? "").replace(/\r\n[ \t]/g, "");
+  const lowerMime = mime.toLowerCase();
+  expect(lowerMime).toContain(`list-id: <${broadcast.id}.acme.dev>`);
+  expect(lowerMime).toContain("precedence: bulk");
+  expect(lowerMime).toContain("auto-submitted: auto-generated");
+  expect(lowerMime).toContain("list-unsubscribe:");
+  expect(lowerMime).toContain("list-unsubscribe-post: list-unsubscribe=one-click");
+  const token = mime.match(/unsubscribe\/([A-Za-z0-9_.-]+)/)?.[1] ?? "";
+  expect(verifyUnsubscribeToken(token, unsubscribeSecret)).toEqual({
+    contactId,
+    topicId: topic.id,
+  });
+});
+
+it("suppresses a queued broadcast when the contact globally unsubscribes after fan-out", async () => {
+  const contactId = await insertContact("late-global@example.com");
+  const [broadcast] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId, from: "Acme <a@acme.dev>", subject: "late" })
+    .returning({ id: schema.broadcasts.id });
+  if (!broadcast) throw new Error("broadcast insert failed");
+  const emailId = await insertEmail({
+    broadcastId: broadcast.id,
+    contactId,
+    to: ["late-global@example.com"],
+  });
+  await db
+    .update(schema.contacts)
+    .set({ unsubscribed: true, unsubscribedAt: new Date() })
+    .where(eq(schema.contacts.id, contactId));
+
+  const { ses, sends } = fakeSes();
+  expect(
+    await sendEmail(
+      db,
+      {
+        keyring,
+        ses,
+        unsubscribe: { secretKey: randomBytes(32), baseUrl: "https://app.example.com" },
+      },
+      { emailId },
+    ),
+  ).toBe("suppressed");
+  expect(sends).toHaveLength(0);
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("suppressed");
+  const [event] = await db
+    .select()
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, emailId));
+  expect(event).toMatchObject({ type: "suppressed", data: { reason: "contact_unsubscribed" } });
+});
+
+it("suppresses a queued broadcast when the recipient is suppressed after fan-out", async () => {
+  const address = "late-suppression@example.com";
+  const contactId = await insertContact(address);
+  const [broadcast] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId, from: "Acme <a@acme.dev>", subject: "late" })
+    .returning({ id: schema.broadcasts.id });
+  if (!broadcast) throw new Error("broadcast insert failed");
+  const emailId = await insertEmail({ broadcastId: broadcast.id, contactId, to: [address] });
+  await db.insert(schema.suppressions).values({
+    teamId,
+    email: address,
+    emailHash: hashRecipient(address),
+    reason: "complaint",
+  });
+
+  const { ses, sends } = fakeSes();
+  expect(
+    await sendEmail(
+      db,
+      {
+        keyring,
+        ses,
+        unsubscribe: { secretKey: randomBytes(32), baseUrl: "https://app.example.com" },
+      },
+      { emailId },
+    ),
+  ).toBe("suppressed");
+  expect(sends).toHaveLength(0);
+});
+
+it("suppresses a queued broadcast when the contact opts out of its topic after fan-out", async () => {
+  const address = "late-topic@example.com";
+  const contactId = await insertContact(address);
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "Late topic", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  const [broadcast] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId, topicId: topic.id, from: "Acme <a@acme.dev>", subject: "late" })
+    .returning({ id: schema.broadcasts.id });
+  if (!broadcast) throw new Error("broadcast insert failed");
+  const emailId = await insertEmail({ broadcastId: broadcast.id, contactId, to: [address] });
+  await db.insert(schema.contactTopicSubscriptions).values({
+    contactId,
+    topicId: topic.id,
+    subscribed: false,
+  });
+
+  const { ses, sends } = fakeSes();
+  expect(
+    await sendEmail(
+      db,
+      {
+        keyring,
+        ses,
+        unsubscribe: { secretKey: randomBytes(32), baseUrl: "https://app.example.com" },
+      },
+      { emailId },
+    ),
+  ).toBe("suppressed");
+  expect(sends).toHaveLength(0);
 });
 
 it("sends through the domain's own SES region, not the deployment default", async () => {
@@ -430,8 +571,15 @@ it("broadcast: an already-expanded in-body unsubscribe link is NOT click-wrapped
   // encryption; by send-time no {{{-token remains to guard it.
   const unsubUrl = "https://app.example.com/unsubscribe/Zm9v.YmFy";
   const { ses, sends } = fakeSes("mid-unsub-body");
+  const contactId = await insertContact("tracking-unsub@example.com");
   const emailId = await insertEmail(
-    { domainId: ct.id, from: "CT <a@ct.dev>", broadcastId: null, contactId: crypto.randomUUID() },
+    {
+      domainId: ct.id,
+      from: "CT <a@ct.dev>",
+      broadcastId: null,
+      contactId,
+      to: ["tracking-unsub@example.com"],
+    },
     `<a href="${unsubUrl}">Unsubscribe</a><a href="https://dest.test/read">read</a>`,
   );
   const deps: SendDeps = {

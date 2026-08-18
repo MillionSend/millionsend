@@ -59,7 +59,7 @@ export const SES_IAM_POLICY_JSON = JSON.stringify(SES_IAM_POLICY, null, 2);
 export function envTemplate(): string {
   return `# MillionSend self-host configuration.
 # Save as .env, generate the two secrets below, and \`docker compose up -d\`.
-# Everything else has working local defaults.
+# The standalone deploy compose file also requires an explicit released image.
 
 # --- Required ---
 
@@ -67,6 +67,10 @@ export function envTemplate(): string {
 # service; for local dev without Docker, point it at your own instance
 # (e.g. postgres://postgres:postgres@localhost:5432/millionsend).
 DATABASE_URL=postgres://millionsend:millionsend@postgres:5432/millionsend
+
+# Required by deploy/docker-compose.yml. Prefer an immutable digest in
+# production, for example ghcr.io/millionsend/millionsend@sha256:<digest>.
+# MILLIONSEND_IMAGE=ghcr.io/millionsend/millionsend:<released-version>
 
 # Encryption key for email bodies at rest. Generate: openssl rand -base64 32
 # Losing it makes stored bodies unrecoverable; changing it orphans old bodies.
@@ -117,6 +121,14 @@ ALLOW_SIGNUP=false
 # API port. Under docker compose this moves both the container's listen port
 # and the published host port together.
 PORT=3001
+API_RATE_LIMIT_PER_MINUTE=600
+
+# Compose binds application ports to loopback by default. Set only the service
+# that must be reachable directly to 0.0.0.0; prefer a TLS reverse proxy.
+WEB_BIND_ADDRESS=127.0.0.1
+API_BIND_ADDRESS=127.0.0.1
+DOCS_BIND_ADDRESS=127.0.0.1
+SMTP_BIND_ADDRESS=127.0.0.1
 
 # Host port the compose file publishes the web dashboard on (the web process
 # itself is always 3000 inside the container). Remember to keep APP_BASE_URL
@@ -133,10 +145,11 @@ DOCS_PORT=3002
 SMTP_PORT=2587
 
 # STARTTLS keypair for the SMTP relay (PEM paths inside the container). Both
-# set: STARTTLS is offered and required before AUTH. Unset: plaintext — keep
-# the port inside your own network or behind a TLS-terminating load balancer.
+# set: STARTTLS is offered and required before AUTH. Without a keypair, AUTH is
+# disabled unless the private-network escape hatch below is explicitly enabled.
 SMTP_TLS_CERT_PATH=
 SMTP_TLS_KEY_PATH=
+SMTP_ALLOW_INSECURE_AUTH=false
 
 # Leave false. true enables hosted-cloud behavior (KMS, Stripe billing).
 IS_CLOUD=false

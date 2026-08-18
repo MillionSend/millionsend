@@ -2,7 +2,7 @@ import { index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-cor
 
 /**
  * Append-only, enforced in the database by a trigger that rejects
- * UPDATE/DELETE (see the audit_log_append_only custom migration) — grants
+ * UPDATE/DELETE (see the baseline migration) — grants
  * alone can't enforce this until dedicated roles exist.
  */
 export const auditLog = pgTable(
