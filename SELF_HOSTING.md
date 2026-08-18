@@ -191,6 +191,187 @@ signup deliberately.
 </details>
 
 <details>
+<summary><b>Production: nginx + TLS</b></summary>
+
+The recommended production shape: nginx on the host terminates TLS and proxies
+one hostname per service, and the compose ports bind to loopback so nginx is
+the only way in.
+
+`/etc/nginx/conf.d/millionsend.conf`:
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ""      close;
+}
+
+# Dashboard.
+server {
+    listen 80;
+    server_name mail.example.com;
+
+    # The broadcast editor posts full HTML bodies through the dashboard.
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}
+
+# API.
+server {
+    listen 80;
+    server_name api.example.com;
+
+    # POST /emails/batch takes up to 100 emails per request; html/text bodies
+    # carry no schema byte cap, but SES rejects messages over 10 MB anyway.
+    # 25m covers a full batch of large bodies without unbounded uploads.
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# Docs (optional).
+server {
+    listen 80;
+    server_name docs.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3002;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}
+```
+
+TLS and the http→https redirect in one line — certbot rewrites the blocks
+above to listen on 443 with Let's Encrypt certificates, adds the redirect,
+and installs automatic renewal:
+
+```sh
+sudo certbot --nginx --redirect -d mail.example.com -d api.example.com -d docs.example.com
+```
+
+Then set `APP_BASE_URL=https://mail.example.com` in `.env` and restart. It
+must be the exact public https origin of the dashboard — any other value makes
+login and signup fail with an "invalid origin" error.
+
+Bind the container ports to loopback so only nginx reaches them. Docker
+publishes ports by editing iptables directly, so a host firewall alone does
+not cover them. `WEB_PORT` and `DOCS_PORT` are the host side of their
+mappings, so `WEB_PORT=127.0.0.1:3000` / `DOCS_PORT=127.0.0.1:3002` in `.env`
+is enough for web and docs; `PORT` and `SMTP_PORT` appear on both sides of
+theirs, so cover the api (and optionally smtp) with a
+`docker-compose.override.yml` instead — the default compose file stays as is:
+
+```yaml
+services:
+  millionsend:
+    ports: !override
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3001:3001"
+  # With the nginx stream module below, keep the relay loopback-only too:
+  # smtp:
+  #   ports: !override
+  #     - "127.0.0.1:2587:2587"
+```
+
+The SMTP relay (`:2587`) is TCP, not HTTP — an `http` server block cannot
+proxy it. Either publish it directly (leave its port mapping public and open
+the firewall), or keep it on loopback and pass the TCP stream through nginx's
+stream module — bytes pass through untouched, so STARTTLS still terminates in
+the relay via `SMTP_TLS_CERT_PATH`/`SMTP_TLS_KEY_PATH`:
+
+```nginx
+# /etc/nginx/nginx.conf — top level, outside the http {} block
+stream {
+    server {
+        listen 2587;
+        proxy_pass 127.0.0.1:2587;
+    }
+}
+```
+
+Firewall: allow 80 and 443, plus 2587 only if the SMTP relay is used from
+outside; everything else closed:
+
+```sh
+sudo ufw default deny incoming
+sudo ufw allow 80,443/tcp
+sudo ufw allow 2587/tcp   # only if the SMTP relay is exposed
+sudo ufw enable
+```
+
+</details>
+
+<details>
+<summary><b>Backups</b></summary>
+
+The `backup` compose service takes a scheduled `pg_dump` of Postgres and
+uploads it to any S3-compatible bucket via rclone — Cloudflare R2 works out of
+the box. It is off by default: without the `BACKUP_S3_*` variables the
+container prints `backups disabled — set BACKUP_S3_* to enable` and exits 0,
+harmless.
+
+Enable it by setting all four in `.env` (the bucket must already exist; for R2
+the defaults `BACKUP_S3_PROVIDER=Cloudflare` and `BACKUP_S3_REGION=auto` are
+already right):
+
+```sh
+BACKUP_S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+BACKUP_S3_BUCKET=millionsend-backups
+BACKUP_S3_ACCESS_KEY_ID=...
+BACKUP_S3_SECRET_ACCESS_KEY=...
+```
+
+`docker compose up -d --build backup` then dumps once immediately, and after
+that on `BACKUP_CRON` (default `0 3 * * *`, UTC). Each dump is `pg_dump -Fc`
+(compressed custom format, named `millionsend-YYYYMMDD-HHMMSS.dump`), its
+uploaded size is verified against the bucket before anything else happens, and
+dumps older than `BACKUP_RETENTION_DAYS` (default 14) are pruned.
+`BACKUP_S3_PREFIX` (default `backups`) sets the object key prefix.
+
+The dumps contain email bodies encrypted with `MASTER_ENCRYPTION_KEY` — back
+that key up separately, or restored bodies are unrecoverable.
+
+The service builds from `scripts/backup` in this repo, so it is not part of
+the no-clone `deploy/docker-compose.yml`; run it from a clone, or copy
+`scripts/backup/` and the service definition from the root `docker-compose.yml`
+next to your standalone compose file.
+
+Restore (stop the app first so nothing writes mid-restore):
+
+```sh
+docker compose stop millionsend smtp
+# list the bucket, pick a dump
+docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup \
+  sh -c 'rclone lsl ":s3:$BACKUP_S3_BUCKET/${BACKUP_S3_PREFIX:-backups}"'
+# download it and restore over the current database
+docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup \
+  sh -c 'rclone copyto ":s3:$BACKUP_S3_BUCKET/${BACKUP_S3_PREFIX:-backups}/millionsend-YYYYMMDD-HHMMSS.dump" /tmp/restore.dump \
+    && pg_restore --clean --if-exists -d "$DATABASE_URL" /tmp/restore.dump'
+docker compose start millionsend smtp
+```
+
+</details>
+
+<details>
 <summary><b>Operations</b></summary>
 
 - Send rate and email retention are managed in the dashboard: Settings → Instance

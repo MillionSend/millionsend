@@ -141,6 +141,29 @@ SMTP_TLS_KEY_PATH=
 # Leave false. true enables hosted-cloud behavior (KMS, Stripe billing).
 IS_CLOUD=false
 
+# --- Backups (optional) ---
+
+# Scheduled pg_dump of the database to any S3-compatible bucket, run by the
+# \`backup\` compose service. Disabled until all four BACKUP_S3_* values below
+# are set — until then the service prints a hint and exits. The bucket must
+# already exist. Cloudflare R2 endpoint: https://<accountid>.r2.cloudflarestorage.com
+BACKUP_S3_ENDPOINT=
+BACKUP_S3_BUCKET=
+BACKUP_S3_ACCESS_KEY_ID=
+BACKUP_S3_SECRET_ACCESS_KEY=
+
+# Defaults suit Cloudflare R2. Other S3-compatibles: set rclone's provider
+# name (AWS, Minio, ...) and a real region if the endpoint needs one.
+BACKUP_S3_PROVIDER=Cloudflare
+BACKUP_S3_REGION=auto
+
+# Object key prefix inside the bucket, dump schedule (BusyBox cron syntax,
+# UTC; one dump also runs at every service start), and how many days of dumps
+# to keep before pruning.
+BACKUP_S3_PREFIX=backups
+BACKUP_CRON=0 3 * * *
+BACKUP_RETENTION_DAYS=14
+
 # --- Social login (optional) ---
 
 # OAuth credentials for the dashboard's social sign-in. Each provider's
