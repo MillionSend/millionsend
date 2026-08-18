@@ -139,27 +139,31 @@ export function AuthForm({
         <p className={styles.subline}>
           {t("subline")} <Link href={otherPage}>{t("sublineLink")}</Link>
         </p>
-        {providers.google ? (
-          <button
-            type="button"
-            className={`ms-btn ms-btn-secondary ${styles.button}`}
-            disabled={pending !== null}
-            onClick={() => onSocial("google")}
-          >
-            <GoogleIcon />
-            {tSocial("google")}
-          </button>
-        ) : null}
-        {providers.github ? (
-          <button
-            type="button"
-            className={`ms-btn ms-btn-secondary ${styles.button}`}
-            disabled={pending !== null}
-            onClick={() => onSocial("github")}
-          >
-            <GitHubIcon />
-            {tSocial("github")}
-          </button>
+        {anySocial ? (
+          <div className={styles.social}>
+            {providers.google ? (
+              <button
+                type="button"
+                className={`ms-btn ms-btn-secondary ${styles.button}`}
+                disabled={pending !== null}
+                onClick={() => onSocial("google")}
+              >
+                <GoogleIcon />
+                {tSocial("google")}
+              </button>
+            ) : null}
+            {providers.github ? (
+              <button
+                type="button"
+                className={`ms-btn ms-btn-secondary ${styles.button}`}
+                disabled={pending !== null}
+                onClick={() => onSocial("github")}
+              >
+                <GitHubIcon />
+                {tSocial("github")}
+              </button>
+            ) : null}
+          </div>
         ) : null}
         {anySocial ? <div className={styles.divider}>{tSocial("or")}</div> : null}
         <form onSubmit={onSubmit} className={styles.form}>
