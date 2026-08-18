@@ -8,12 +8,54 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  /* Soft steel glow above the column — token-based so paper theme holds. */
-  background: radial-gradient(
-    640px 460px at 50% 18%,
-    color-mix(in srgb, var(--ms-steel) 9%, transparent),
-    transparent 70%
-  );
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+/* Silk-wave backdrop (per-theme webp) drifting slowly under a scrim. The
+   negative inset gives the drift room so edges never show. */
+.backdrop {
+  position: absolute;
+  inset: -6%;
+  width: 112%;
+  height: 112%;
+  object-fit: cover;
+  z-index: -2;
+  animation: drift 70s ease-in-out infinite alternate;
+}
+@keyframes drift {
+  from {
+    transform: translate3d(-1.2%, -0.8%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(1.2%, 0.8%, 0) scale(1.06);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .backdrop {
+    animation: none;
+  }
+}
+
+/* Legibility scrim between fabric and form: ground-tinted, heavier behind
+   the column, plus the steel glow the screen always had. */
+.screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(
+      640px 460px at 50% 18%,
+      color-mix(in srgb, var(--ms-steel) 9%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      760px 620px at 50% 46%,
+      color-mix(in srgb, var(--ms-ground) 62%, transparent),
+      color-mix(in srgb, var(--ms-ground) 26%, transparent) 78%
+    );
 }
 
 .column {
@@ -80,6 +122,34 @@
   margin: 0;
   color: var(--ms-danger);
   font-size: var(--ms-fs-label);
+}
+
+/* Signup password meter: three bars + a word, tinted by score. */
+.strength {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.strengthBars {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+}
+.strengthBar {
+  flex: 1;
+  height: 3px;
+  border-radius: var(--ms-r-pill);
+  background: var(--ms-inset);
+  transition: background var(--ms-dur-fast) var(--ms-ease);
+}
+.strengthBarOn {
+  composes: strengthBar;
+  background: currentColor;
+}
+.strengthLabel {
+  font-size: var(--ms-fs-micro);
+  white-space: nowrap;
 }
 
 .footnote {

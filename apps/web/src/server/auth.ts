@@ -69,7 +69,9 @@ function createAuth() {
     }),
     emailAndPassword: {
       enabled: true,
-      minPasswordLength: 15,
+      // NIST floor: 8 with no composition rules — the signup form's strength
+      // meter nudges toward longer, the server never blocks a valid 8+.
+      minPasswordLength: 8,
       maxPasswordLength: 128,
       revokeSessionsOnPasswordReset: true,
     },
