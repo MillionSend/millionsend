@@ -30,22 +30,31 @@ float fbm(vec2 p){
   for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; }
   return v;
 }
-float height(vec2 uv, vec2 q, float t){
-  return fbm(uv * 2.2 + 2.4 * q + vec2(t * 0.6, -t * 0.4));
+// Linear drape: parallel folds along one direction, organically warped.
+// Constants picked live in the Silk Backdrop Lab: folds 9, warp 0.2,
+// speed 3, angle 115 deg, sheen 0.6.
+float height(vec2 uv, float t){
+  float a = radians(115.0);
+  vec2 d = vec2(cos(a), sin(a));
+  vec2 perp = vec2(-d.y, d.x);
+  float along = dot(uv, perp);
+  float bend = (fbm(uv * 1.1 + t * 0.15) - 0.5) * 0.44;
+  float p = (dot(uv, d) + bend) * 9.0 - t;
+  float amp = 0.6 + 0.4 * fbm(vec2(along * 0.9, p * 0.08) + t * 0.05);
+  return amp * (0.55 * sin(p) + 0.28 * sin(p * 2.17 + 1.7) + 0.17 * sin(p * 0.53 + 4.2)) * 0.5 + 0.5;
 }
 void main(){
   vec2 uv = gl_FragCoord.xy / u_res;
   uv.x *= u_res.x / u_res.y;
-  float t = u_time * 0.05;
-  vec2 q = vec2(fbm(uv * 1.6 + t), fbm(uv * 1.6 - t * 0.7));
-  float h = height(uv, q, t);
-  float hx = height(uv + vec2(0.012, 0.0), q, t) - h;
-  float hy = height(uv + vec2(0.0, 0.012), q, t) - h;
+  float t = u_time * 0.3;
+  float h = height(uv, t);
+  float hx = height(uv + vec2(0.012, 0.0), t) - h;
+  float hy = height(uv + vec2(0.0, 0.012), t) - h;
   vec3 n = normalize(vec3(-hx, -hy, 0.05));
   vec3 l = normalize(vec3(0.25, 0.7, 0.65));
   float diff = clamp(dot(n, l), 0.0, 1.0);
   float spec = pow(clamp(dot(reflect(-l, n), vec3(0.0, 0.0, 1.0)), 0.0, 1.0), 24.0);
-  vec3 col = u_base * (0.55 + 0.5 * diff) + u_sheen * spec * 0.35;
+  vec3 col = u_base * (0.55 + 0.5 * diff) + u_sheen * spec * 0.6;
   gl_FragColor = vec4(col, 1.0);
 }`;
 
