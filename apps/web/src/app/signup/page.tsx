@@ -1,3 +1,4 @@
+import { env } from "@millionsend/config";
 import { AuthForm } from "@/components/auth/auth-form";
 import { enabledSocialProviders } from "@/server/auth";
 
@@ -5,5 +6,11 @@ import { enabledSocialProviders } from "@/server/auth";
 // form as props; the form itself keeps the better-auth client mechanism.
 // ALLOW_SIGNUP stays enforced server-side by the better-auth user.create hook.
 export default function SignupPage() {
-  return <AuthForm mode="signup" providers={enabledSocialProviders()} />;
+  return (
+    <AuthForm
+      mode="signup"
+      providers={enabledSocialProviders()}
+      legal={{ termsUrl: env.TERMS_URL ?? null, privacyUrl: env.PRIVACY_URL ?? null }}
+    />
+  );
 }
