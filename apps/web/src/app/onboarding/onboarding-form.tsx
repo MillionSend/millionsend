@@ -51,7 +51,12 @@ export function OnboardingForm() {
             {t("error")}
           </p>
         ) : null}
-        <button type="submit" className="ms-btn ms-btn-primary" disabled={createTeam.isPending}>
+        <button
+          type="submit"
+          className="ms-btn ms-btn-primary"
+          style={{ justifyContent: "center" }}
+          disabled={createTeam.isPending}
+        >
           <BtnSpinner on={createTeam.isPending} />
           {t("submit")}
         </button>
