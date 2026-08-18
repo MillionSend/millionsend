@@ -171,6 +171,7 @@ export function AuthForm({
                 type="text"
                 className={`ms-input ${styles.control}`}
                 autoComplete="name"
+                placeholder={t("namePlaceholder")}
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -184,6 +185,7 @@ export function AuthForm({
               type="email"
               className={`ms-input ${styles.control}`}
               autoComplete="email"
+              placeholder={t("emailPlaceholder")}
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -198,6 +200,7 @@ export function AuthForm({
                 type="password"
                 className={`ms-input ${styles.control}`}
                 autoComplete={mode === "login" ? "current-password" : "new-password"}
+                placeholder={t("passwordPlaceholder")}
                 required
                 minLength={mode === "signup" ? 8 : undefined}
                 value={password}
