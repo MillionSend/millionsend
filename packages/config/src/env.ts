@@ -112,6 +112,12 @@ export const env = createEnv({
     // unsubscribe pages are derived from it.
     APP_BASE_URL: z.url().optional(),
 
+    // Legal pages linked from the auth screen's consent line. Both optional;
+    // the line renders only the links that are set, and disappears entirely
+    // when neither is.
+    TERMS_URL: z.url().optional(),
+    PRIVACY_URL: z.url().optional(),
+
     // Dashboard session signing secret (`openssl rand -base64 32`).
     // Required only by the web process, which asserts it at boot.
     BETTER_AUTH_SECRET: z.string().min(32).optional(),

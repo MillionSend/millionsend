@@ -162,9 +162,24 @@
   white-space: nowrap;
 }
 
-.footnote {
-  margin: 8px 0 0;
-  color: var(--ms-muted);
-  font-size: var(--ms-fs-label);
+/* Auth links underline on hover only (the emails-table affordance). */
+.column a {
+  color: var(--ms-bone);
+  text-decoration: none;
+}
+.column a:hover {
+  text-decoration: underline dotted var(--ms-faint);
+  text-underline-offset: 3px;
+}
+
+/* Consent line: quiet, small, only rendered when a legal URL exists. */
+.legal {
+  margin: 4px 0 0;
+  color: var(--ms-faint);
+  font-size: var(--ms-fs-micro);
   text-align: center;
+  line-height: 1.6;
+}
+.legal a {
+  color: var(--ms-muted);
 }

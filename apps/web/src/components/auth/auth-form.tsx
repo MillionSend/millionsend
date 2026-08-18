@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { safeNextPath } from "@/lib/nav";
 import { passwordStrength } from "@/lib/password-strength";
@@ -32,6 +32,7 @@ function StrengthMeter({ password }: { password: string }) {
 }
 
 export type SocialProviderFlags = { google: boolean; github: boolean };
+export type LegalLinks = { termsUrl: string | null; privacyUrl: string | null };
 type SocialProvider = keyof SocialProviderFlags;
 
 /**
@@ -42,12 +43,15 @@ type SocialProvider = keyof SocialProviderFlags;
 export function AuthForm({
   mode,
   providers,
+  legal,
 }: {
   mode: "login" | "signup";
   providers: SocialProviderFlags;
+  legal: LegalLinks;
 }) {
   const t = useTranslations(`auth.${mode}`);
   const tSocial = useTranslations("auth.social");
+  const tLegal = useTranslations("auth.legal");
   const tCommon = useTranslations("common");
   const router = useRouter();
   const params = useSearchParams();
@@ -65,9 +69,18 @@ export function AuthForm({
     socialFailed ? tSocial("error") : null,
   );
   const [pending, setPending] = useState<"email" | SocialProvider | null>(null);
+  // Login is email-first: the password field appears on the first "Sign in",
+  // so the common flow starts as a single field. Signup shows everything.
+  const [passwordShown, setPasswordShown] = useState(mode === "signup");
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (!passwordShown) {
+      setPasswordShown(true);
+      requestAnimationFrame(() => passwordRef.current?.focus());
+      return;
+    }
     setPending("email");
     setErrorMessage(null);
     const { error } =
@@ -176,20 +189,23 @@ export function AuthForm({
               onChange={(e) => setEmail(e.target.value)}
             />
           </div>
-          <div className={`ms-field ${styles.field}`}>
-            <label htmlFor="password">{t("password")}</label>
-            <input
-              id="password"
-              type="password"
-              className={`ms-input ${styles.control}`}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              required
-              minLength={mode === "signup" ? 8 : undefined}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            {mode === "signup" ? <StrengthMeter password={password} /> : null}
-          </div>
+          {passwordShown ? (
+            <div className={`ms-field ${styles.field}`}>
+              <label htmlFor="password">{t("password")}</label>
+              <input
+                ref={passwordRef}
+                id="password"
+                type="password"
+                className={`ms-input ${styles.control}`}
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                required
+                minLength={mode === "signup" ? 8 : undefined}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              {mode === "signup" ? <StrengthMeter password={password} /> : null}
+            </div>
+          ) : null}
           {errorMessage ? <p className={styles.error}>{errorMessage}</p> : null}
           <button
             type="submit"
@@ -199,10 +215,26 @@ export function AuthForm({
             {t("submit")}
           </button>
         </form>
-        <p className={styles.footnote}>
-          {t(mode === "login" ? "noAccount" : "haveAccount")}{" "}
-          <Link href={otherPage}>{t(mode === "login" ? "signupLink" : "loginLink")}</Link>
-        </p>
+        {legal.termsUrl || legal.privacyUrl ? (
+          <p className={styles.legal}>
+            {tLegal.rich(
+              // The sentence names only the documents that exist.
+              `${mode}.${legal.termsUrl && legal.privacyUrl ? "both" : legal.termsUrl ? "terms" : "privacy"}`,
+              {
+                terms: (chunks) => (
+                  <a href={legal.termsUrl ?? "#"} target="_blank" rel="noopener noreferrer">
+                    {chunks}
+                  </a>
+                ),
+                privacy: (chunks) => (
+                  <a href={legal.privacyUrl ?? "#"} target="_blank" rel="noopener noreferrer">
+                    {chunks}
+                  </a>
+                ),
+              },
+            )}
+          </p>
+        ) : null}
       </div>
     </main>
   );
