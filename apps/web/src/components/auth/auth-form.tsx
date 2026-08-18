@@ -8,6 +8,7 @@ import { authClient } from "@/lib/auth-client";
 import { safeNextPath } from "@/lib/nav";
 import { passwordStrength } from "@/lib/password-strength";
 import styles from "./auth.module.css";
+import { SilkCanvas } from "./silk-canvas";
 import { GitHubIcon, GoogleIcon } from "./social-icons";
 
 const STRENGTH_TONES = ["", "var(--ms-danger)", "var(--ms-warn)", "var(--ms-success)"] as const;
@@ -112,6 +113,7 @@ export function AuthForm({
       <img src="/auth/waves-dark.webp" alt="" className={`ms-dark-only ${styles.backdrop}`} />
       {/* biome-ignore lint/performance/noImgElement: decorative full-bleed backdrop, no optimization needed */}
       <img src="/auth/waves-light.webp" alt="" className={`ms-light-only ${styles.backdrop}`} />
+      <SilkCanvas />
       <div className={styles.column}>
         {/* biome-ignore lint/performance/noImgElement: static SVG logo, nothing for next/image to optimize */}
         <img
