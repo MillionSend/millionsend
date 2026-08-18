@@ -185,6 +185,35 @@ Dados de conexão:
   para um par PEM. Sem ele, mantenha a porta dentro da sua rede ou atrás de
   um load balancer com TLS.
 
+### STARTTLS com os certificados que você já tem
+
+Antes de expor o relay à internet, dê a ele um certificado — sem isso, o
+SMTP AUTH envia a chave de API em texto puro. Qualquer par PEM funciona, e se
+você seguiu o guia de nginx acima já tem um: reutilize o certificado Let's
+Encrypt que o certbot emitiu para o seu domínio. Monte-o no contêiner `smtp`
+com um `docker-compose.override.yml`:
+
+```yaml
+services:
+  smtp:
+    volumes:
+      - /etc/letsencrypt/live/mail.example.com:/certs:ro
+```
+
+e aponte as variáveis no `.env`:
+
+```sh
+SMTP_TLS_CERT_PATH=/certs/fullchain.pem
+SMTP_TLS_KEY_PATH=/certs/privkey.pem
+```
+
+Com ambos definidos, o STARTTLS passa a ser exigido antes do AUTH — as
+credenciais nunca cruzam a rede sem criptografia. Monte o diretório
+`live/<domínio>` (um symlink que o certbot mantém atualizado), não uma cópia
+dos arquivos: as renovações são aplicadas automaticamente, já que o relay lê o
+par de chaves do disco a cada conexão. Um wildcard ou qualquer outro PEM
+emitido por CA funciona da mesma forma.
+
 Exemplo com Nodemailer:
 
 ```js
