@@ -16,5 +16,8 @@ export const teams = pgTable("teams", {
   unsubscribeBrandName: text("unsubscribe_brand_name"),
   unsubscribeMessage: text("unsubscribe_message"),
   unsubscribeRedirectUrl: text("unsubscribe_redirect_url"),
+  // Public URL of the uploaded team logo (S3-compatible storage), including a
+  // ?v= cache-buster stamped at upload. Null = the initial-letter tile.
+  logoUrl: text("logo_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

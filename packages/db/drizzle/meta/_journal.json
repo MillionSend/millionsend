@@ -8,6 +8,13 @@
       "when": 1787029866675,
       "tag": "0000_melted_warpath",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787069146865,
+      "tag": "0001_common_blonde_phantom",
+      "breakpoints": true
     }
   ]
 }

@@ -18,7 +18,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!membership) redirect("/onboarding");
 
   return (
-    <AppShell teamName={membership.teamName} userEmail={session.user.email}>
+    <AppShell
+      teamName={membership.teamName}
+      teamLogoUrl={membership.logoUrl}
+      userEmail={session.user.email}
+    >
       {/* Canvas main-block padding: 32px 40px (DESIGN.md Layout); 16px below 900px. */}
       <main className="ms-main" style={{ flex: 1, minWidth: 0, padding: "32px 40px" }}>
         <div style={{ maxWidth: 1120, margin: "0 auto" }}>

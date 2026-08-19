@@ -93,7 +93,8 @@
       "verification": "Domain verification (DKIM)",
       "sending": "Enable sending",
       "dmarc": "DMARC (recommended)",
-      "tracking": "Open & click tracking"
+      "tracking": "Open & click tracking",
+      "trackingNote": "Tracking links use the default host — no DNS records needed. Set a custom subdomain in Configuration to serve them from your own domain."
     },
     "tracking": {
       "open": "Open tracking",
@@ -103,7 +104,9 @@
       "subdomain": "Tracking subdomain",
       "subdomainHint": "Optional. Serves tracking links from your own domain instead of the default host — add the CNAME shown in Records.",
       "subdomainPlaceholder": "links",
-      "subdomainError": "Use a single lowercase DNS label."
+      "subdomainError": "Use a single lowercase DNS label.",
+      "localWarning": "Tracking needs a publicly reachable URL. This deployment's APP_BASE_URL is local, so recipients can never reach the tracked links or the open pixel — the toggles stay off until a public URL is configured.",
+      "headerToggle": "Toggle open and click tracking"
     },
     "configuration": {
       "note": "Tracking is applied by MillionSend, not SES. When off, emails ship the raw, untouched links and no open pixel. When on, we rewrite links through your tracking host and inject a 1×1 open pixel, then generate the open and click events ourselves.",
@@ -114,7 +117,9 @@
       "tls": "TLS (Transport Layer Security)",
       "tlsOpportunistic": "Opportunistic",
       "tlsEnforced": "Enforced",
-      "tlsHint": "Opportunistic attempts a secure TLS connection and falls back to plaintext if the receiving server doesn't support it. Enforced requires TLS — the message is never sent unencrypted."
+      "tlsHint": "Opportunistic attempts a secure TLS connection and falls back to plaintext if the receiving server doesn't support it. Enforced requires TLS — the message is never sent unencrypted.",
+      "subdomainDnsMissing": "Tracking CNAME missing or incorrect in DNS — links won't resolve until it's added.",
+      "viewDnsRecord": "View DNS record"
     },
     "columns": {
       "type": "Type",

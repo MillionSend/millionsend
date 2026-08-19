@@ -1,8 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { sha256Hex } from "./hash.js";
 
-export type ApiKeyMode = "live" | "test";
-
 export interface GeneratedApiKey {
   /** The full secret — shown once, never stored. */
   token: string;
@@ -16,12 +14,12 @@ export interface GeneratedApiKey {
 const PREFIX_SECRET_CHARS = 6;
 
 /** 24 random bytes → 32 base64url chars → 192 bits of entropy. */
-export function generateApiKey(mode: ApiKeyMode): GeneratedApiKey {
+export function generateApiKey(): GeneratedApiKey {
   const secret = randomBytes(24).toString("base64url");
-  const token = `ms_${mode}_${secret}`;
+  const token = `ms_${secret}`;
   return {
     token,
-    tokenPrefix: `ms_${mode}_${secret.slice(0, PREFIX_SECRET_CHARS)}`,
+    tokenPrefix: `ms_${secret.slice(0, PREFIX_SECRET_CHARS)}`,
     keyHash: hashApiKey(token),
     last4: token.slice(-4),
   };
@@ -33,7 +31,7 @@ export function hashApiKey(token: string): string {
 
 /** Lookup handle for a presented token; null when the shape is not ours. */
 export function extractTokenPrefix(token: string): string | null {
-  const match = /^ms_(live|test)_[A-Za-z0-9_-]{6}/.exec(token);
+  const match = /^ms_[A-Za-z0-9_-]{6}/.exec(token);
   return match ? match[0] : null;
 }
 

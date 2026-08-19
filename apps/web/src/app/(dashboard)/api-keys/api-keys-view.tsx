@@ -16,6 +16,7 @@ import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { maskApiKey } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
@@ -75,7 +76,6 @@ export function ApiKeysView() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
-  const [mode, setMode] = useState<"live" | "test">("live");
   const [permission, setPermission] = useState<"full_access" | "sending_access">("full_access");
   // "" = any verified domain; otherwise a domain id the key is scoped to.
   const [domainId, setDomainId] = useState("");
@@ -110,7 +110,6 @@ export function ApiKeysView() {
     setCreateOpen(false);
     setRevealedToken(null);
     setName("");
-    setMode("live");
     setPermission("full_access");
     setDomainId("");
     resetCreate();
@@ -223,7 +222,10 @@ export function ApiKeysView() {
               closeCreate();
             }}
           >
-            <CopyChip value={revealedToken} />
+            {/* Grid children stretch; the chip should hug the token. */}
+            <div style={{ justifySelf: "start", maxWidth: "100%" }}>
+              <CopyChip value={revealedToken} />
+            </div>
             <p style={{ margin: 0, color: "var(--ms-warn)", fontSize: "var(--ms-fs-label)" }}>
               {t("reveal.warning")}
             </p>
@@ -239,7 +241,7 @@ export function ApiKeysView() {
             onSubmit={(event) => {
               event.preventDefault();
               if (name.trim().length === 0 || createMutation.isPending) return;
-              createMutation.mutate({ name, mode, permission, domainId: domainId || null });
+              createMutation.mutate({ name, permission, domainId: domainId || null });
             }}
           >
             <div className="ms-field">
@@ -255,22 +257,10 @@ export function ApiKeysView() {
               />
             </div>
             <div className="ms-field">
-              <label htmlFor="api-key-mode">{t("create.mode")}</label>
-              <Select
-                id="api-key-mode"
-                width="100%"
-                value={mode}
-                disabled={createMutation.isPending}
-                onChange={(value) => setMode(value === "test" ? "test" : "live")}
-                ariaLabel={t("create.mode")}
-                options={[
-                  { value: "live", label: t("create.modeLive") },
-                  { value: "test", label: t("create.modeTest") },
-                ]}
-              />
-            </div>
-            <div className="ms-field">
-              <label htmlFor="api-key-permission">{t("create.permission")}</label>
+              <div className="ms-label-row">
+                <label htmlFor="api-key-permission">{t("create.permission")}</label>
+                <Tooltip text={t("create.permissionTooltip")} />
+              </div>
               <Select
                 id="api-key-permission"
                 width="100%"
@@ -285,17 +275,6 @@ export function ApiKeysView() {
                   { value: "sending_access", label: t("create.permSending") },
                 ]}
               />
-              {permission === "sending_access" ? (
-                <p
-                  style={{
-                    margin: "6px 0 0",
-                    color: "var(--ms-muted)",
-                    fontSize: "var(--ms-fs-label)",
-                  }}
-                >
-                  {t("create.permHint")}
-                </p>
-              ) : null}
             </div>
             <div className="ms-field">
               <label htmlFor="api-key-domain">{t("create.domain")}</label>

@@ -15,6 +15,7 @@ import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { isHttpUrl } from "@/lib/http-url";
 import { resolveBaseUrl } from "../auth";
+import { uploadsEnabled } from "../storage";
 import { protectedProcedure, router, teamProcedure } from "../trpc";
 
 /**
@@ -81,11 +82,23 @@ export const settingsRouter = router({
   team: router({
     get: teamProcedure.query(async ({ ctx }) => {
       const [team] = await ctx.db
-        .select({ name: schema.teams.name, slug: schema.teams.slug, plan: schema.teams.plan })
+        .select({
+          name: schema.teams.name,
+          slug: schema.teams.slug,
+          plan: schema.teams.plan,
+          logoUrl: schema.teams.logoUrl,
+        })
         .from(schema.teams)
         .where(eq(schema.teams.id, ctx.teamId));
       if (!team) throw new TRPCError({ code: "NOT_FOUND" });
-      return { ...team, planDailyLimit: planDailyLimit(team.plan) };
+      const logoUploadsEnabled = uploadsEnabled();
+      return {
+        ...team,
+        // Storage off ⇒ stored URLs may be dead; the UI falls back to the tile.
+        logoUrl: logoUploadsEnabled ? team.logoUrl : null,
+        logoUploadsEnabled,
+        planDailyLimit: planDailyLimit(team.plan),
+      };
     }),
 
     rename: teamProcedure

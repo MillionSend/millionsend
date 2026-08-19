@@ -23,7 +23,7 @@ let resend: Resend;
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
   const teamId = await createTeam(db, "contacts-root");
-  const key = generateApiKey("test");
+  const key = generateApiKey();
   await db.insert(schema.apiKeys).values({
     teamId,
     name: "contract",
@@ -146,7 +146,7 @@ describe("official resend SDK: top-level /contacts", () => {
     expect(created.error).toBeNull();
 
     const otherTeam = await createTeam(db, "contacts-root-b");
-    const otherKey = generateApiKey("test");
+    const otherKey = generateApiKey();
     await db.insert(schema.apiKeys).values({
       teamId: otherTeam,
       name: "other",

@@ -58,7 +58,7 @@ describe("apiKeys.create", () => {
     const teamId = await createTeam(db, "team-a");
     const { id, token } = await callerFor(teamId).apiKeys.create({ name: "Production" });
 
-    expect(token).toMatch(/^ms_live_/);
+    expect(token).toMatch(/^ms_[A-Za-z0-9_-]/);
     const row = await keyRow(id);
     expect(row.teamId).toBe(teamId);
     expect(token.startsWith(row.tokenPrefix)).toBe(true);
@@ -69,10 +69,10 @@ describe("apiKeys.create", () => {
     expect(verifyApiKey(`${token}x`, row.keyHash)).toBe(false);
   });
 
-  it("encodes the requested mode in the token", async () => {
+  it("mints tokens in the ms_ scheme", async () => {
     const teamId = await createTeam(db, "team-a");
-    const { token } = await callerFor(teamId).apiKeys.create({ name: "CI", mode: "test" });
-    expect(token).toMatch(/^ms_test_/);
+    const { token } = await callerFor(teamId).apiKeys.create({ name: "CI" });
+    expect(token).toMatch(/^ms_[A-Za-z0-9_-]{32}$/);
   });
 
   it("defaults to full access and any domain", async () => {
@@ -126,7 +126,6 @@ describe("apiKeys.list", () => {
 
     const listed = await a.apiKeys.list();
     expect(listed.map((k) => k.id)).toEqual([kept.id]);
-    expect(listed[0]?.mode).toBe("live");
   });
 
   it("surfaces each key's permission and scoped domain name", async () => {

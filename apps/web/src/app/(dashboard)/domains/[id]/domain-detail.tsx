@@ -20,6 +20,7 @@ import { BtnSpinner, Spinner } from "@/components/spinner";
 import { formatRelative, formatUtcMinute } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { isLoopbackUrl } from "@/lib/url";
 import { DomainStatusBadge } from "../domain-status";
 import { RegionLabel } from "../region-label";
 
@@ -147,6 +148,33 @@ function Switch({
   );
 }
 
+/** Inline warn card used inside configuration sections. */
+function WarnCard({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div
+      role="status"
+      style={{
+        marginTop: 14,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 16,
+        flexWrap: "wrap",
+        padding: "11px 16px",
+        borderRadius: 12,
+        border: "1px solid var(--ms-warn-border)",
+        backgroundColor: "var(--ms-ground)",
+        backgroundImage: statusGlow("warn", 14),
+      }}
+    >
+      <span style={{ fontSize: 13, color: "var(--ms-warn)", lineHeight: 1.55, flex: "1 1 320px" }}>
+        {children}
+      </span>
+      {action ? <span style={{ flex: "none" }}>{action}</span> : null}
+    </div>
+  );
+}
+
 function ConfigSection({
   title,
   description,
@@ -183,12 +211,20 @@ function ConfigurationPanel({
   clickTracking,
   trackingSubdomain,
   tlsMode,
+  trackingCnameLive,
+  trackingHostLocal,
+  onShowTrackingRecords,
 }: {
   id: string;
   openTracking: boolean;
   clickTracking: boolean;
   trackingSubdomain: string | null;
   tlsMode: "opportunistic" | "enforced";
+  /** Live DNS verdict for the branded-tracking CNAME, once a check ran. */
+  trackingCnameLive: string | undefined;
+  /** APP_BASE_URL is loopback: recipients can never reach tracking URLs. */
+  trackingHostLocal: boolean;
+  onShowTrackingRecords: () => void;
 }) {
   const t = useTranslations("domains");
   const trpc = useTRPC();
@@ -251,20 +287,45 @@ function ConfigurationPanel({
             {t("detail.configuration.update")}
           </button>
         </div>
-        <p
-          style={{
-            margin: "8px 0 0",
-            fontSize: 12,
-            display: "flex",
-            gap: 6,
-            alignItems: "center",
-            color: invalid ? "var(--ms-danger)" : "var(--ms-muted)",
-          }}
-        >
-          {invalid ? (
-            t("detail.tracking.subdomainError")
-          ) : (
-            <>
+        {(() => {
+          // The subdomain only works once its CNAME resolves; until then a
+          // warn card leads straight to the record.
+          const cnameMissing = trackingSubdomain !== null && trackingCnameLive !== "found";
+          if (invalid) {
+            return (
+              <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--ms-danger)" }}>
+                {t("detail.tracking.subdomainError")}
+              </p>
+            );
+          }
+          if (cnameMissing) {
+            return (
+              <WarnCard
+                action={
+                  <button
+                    type="button"
+                    className="ms-btn ms-btn-secondary"
+                    onClick={onShowTrackingRecords}
+                  >
+                    {t("detail.configuration.viewDnsRecord")}
+                  </button>
+                }
+              >
+                {t("detail.configuration.subdomainDnsMissing")}
+              </WarnCard>
+            );
+          }
+          return (
+            <p
+              style={{
+                margin: "8px 0 0",
+                fontSize: 12,
+                display: "flex",
+                gap: 6,
+                alignItems: "center",
+                color: "var(--ms-muted)",
+              }}
+            >
               <span
                 aria-hidden
                 style={{
@@ -278,10 +339,12 @@ function ConfigurationPanel({
               {trackingSubdomain
                 ? t("detail.configuration.subdomainActive")
                 : t("detail.configuration.subdomainNeutral")}
-            </>
-          )}
-        </p>
+            </p>
+          );
+        })()}
       </ConfigSection>
+
+      {trackingHostLocal ? <WarnCard>{t("detail.tracking.localWarning")}</WarnCard> : null}
 
       <ConfigSection
         title={t("detail.tracking.click")}
@@ -289,7 +352,7 @@ function ConfigurationPanel({
       >
         <Switch
           checked={clickTracking}
-          disabled={update.isPending}
+          disabled={update.isPending || trackingHostLocal}
           onChange={(checked) => update.mutate({ id, clickTracking: checked })}
           ariaLabel={t("detail.tracking.click")}
         />
@@ -298,7 +361,7 @@ function ConfigurationPanel({
       <ConfigSection title={t("detail.tracking.open")} description={t("detail.tracking.openHint")}>
         <Switch
           checked={openTracking}
-          disabled={update.isPending}
+          disabled={update.isPending || trackingHostLocal}
           onChange={(checked) => update.mutate({ id, openTracking: checked })}
           ariaLabel={t("detail.tracking.open")}
         />
@@ -347,6 +410,20 @@ export function DomainDetail({ id }: { id: string }) {
   const [liveDns, setLiveDns] = useState<
     { type: string; name: string; value: string; status: "found" | "missing" | "mismatch" }[]
   >([]);
+  // Set when the Configuration tab sends the user to the tracking CNAME:
+  // switches to Records, pulses that group once, then clears itself.
+  const [highlightTracking, setHighlightTracking] = useState(false);
+  const sesEnv = useQuery(trpc.system.sesEnv.queryOptions());
+  // The Records-tab header switch flips open+click together (one concept there;
+  // Configuration keeps the granular toggles).
+  const updateTracking = useMutation(
+    trpc.domains.updateConfiguration.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
+        void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
+      },
+    }),
+  );
 
   const verify = useMutation(
     trpc.domains.verify.mutationOptions({
@@ -703,6 +780,18 @@ export function DomainDetail({ id }: { id: string }) {
             clickTracking={data.clickTracking}
             trackingSubdomain={data.trackingSubdomain}
             tlsMode={data.tlsMode}
+            trackingCnameLive={rows.find((r) => r.group === "tracking")?.live}
+            trackingHostLocal={isLoopbackUrl(sesEnv.data?.appBaseUrl)}
+            onShowTrackingRecords={() => {
+              setTab("records");
+              setHighlightTracking(true);
+              requestAnimationFrame(() => {
+                document
+                  .getElementById("dns-group-tracking")
+                  ?.scrollIntoView({ behavior: "smooth", block: "center" });
+              });
+              setTimeout(() => setHighlightTracking(false), 2400);
+            }}
           />
         </div>
       ) : (
@@ -732,7 +821,36 @@ export function DomainDetail({ id }: { id: string }) {
           ) : (
             <div style={{ marginTop: 22 }}>
               {records.isSuccess ? (
-                <DnsRecordsTable records={rows} domain={data.name} showStatus />
+                <DnsRecordsTable
+                  records={rows}
+                  domain={data.name}
+                  showStatus
+                  highlightGroup={highlightTracking ? "tracking" : null}
+                  forceGroups={status === "verified" ? ["tracking"] : []}
+                  groupExtras={
+                    status === "verified"
+                      ? {
+                          tracking: (
+                            <Switch
+                              checked={data.clickTracking || data.openTracking}
+                              disabled={
+                                updateTracking.isPending || isLoopbackUrl(sesEnv.data?.appBaseUrl)
+                              }
+                              onChange={(checked) =>
+                                updateTracking.mutate({
+                                  id,
+                                  clickTracking: checked,
+                                  openTracking: checked,
+                                })
+                              }
+                              ariaLabel={t("detail.tracking.headerToggle")}
+                            />
+                          ),
+                        }
+                      : {}
+                  }
+                  emptyNotes={{ tracking: t("detail.groups.trackingNote") }}
+                />
               ) : (
                 <DnsRecordsTableSkeleton showStatus />
               )}

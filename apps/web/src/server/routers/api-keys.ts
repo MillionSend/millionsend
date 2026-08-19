@@ -5,11 +5,6 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
-/** There is no mode column; the mode is encoded in the token scheme prefix. */
-function modeFromPrefix(tokenPrefix: string): "live" | "test" {
-  return tokenPrefix.startsWith("ms_test_") ? "test" : "live";
-}
-
 export const apiKeysRouter = router({
   list: teamProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db
@@ -29,14 +24,13 @@ export const apiKeysRouter = router({
       .leftJoin(schema.domains, eq(schema.apiKeys.domainId, schema.domains.id))
       .where(and(eq(schema.apiKeys.teamId, ctx.teamId), isNull(schema.apiKeys.revokedAt)))
       .orderBy(desc(schema.apiKeys.createdAt));
-    return rows.map((row) => ({ ...row, mode: modeFromPrefix(row.tokenPrefix) }));
+    return rows;
   }),
 
   create: adminProcedure
     .input(
       z.object({
         name: z.string().trim().min(1).max(80),
-        mode: z.enum(["live", "test"]).default("live"),
         permission: z.enum(schema.apiKeyPermissionEnum.enumValues).default("full_access"),
         // Null/omitted = any verified domain; a uuid scopes the key to one domain.
         domainId: z.uuid().nullish(),
@@ -63,7 +57,7 @@ export const apiKeysRouter = router({
           });
         }
       }
-      const generated = generateApiKey(input.mode);
+      const generated = generateApiKey();
       const [row] = await ctx.db
         .insert(schema.apiKeys)
         .values({

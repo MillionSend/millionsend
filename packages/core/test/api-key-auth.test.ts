@@ -23,7 +23,7 @@ beforeAll(async () => {
 afterAll(() => close());
 
 async function insertKey(overrides: Partial<typeof schema.apiKeys.$inferInsert> = {}) {
-  const key = generateApiKey("live");
+  const key = generateApiKey();
   await db.insert(schema.apiKeys).values({
     teamId,
     name: "k",

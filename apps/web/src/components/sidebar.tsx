@@ -116,11 +116,13 @@ function AppearanceRow() {
 
 export function Sidebar({
   teamName,
+  teamLogoUrl,
   userEmail,
   className,
   onNavigate,
 }: {
   teamName: string;
+  teamLogoUrl?: string | null | undefined;
   userEmail: string;
   /** Hook for the responsive drawer treatment (see components.css .ms-sidebar). */
   className?: string;
@@ -184,7 +186,7 @@ export function Sidebar({
           style={{ height: 15, display: "block" }}
         />
       </div>
-      <TeamSwitcher teamName={teamName} />
+      <TeamSwitcher teamName={teamName} teamLogoUrl={teamLogoUrl} />
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: delegated close-drawer hook; links stay the interactive elements and keyboard activation bubbles the same click */}
       <nav
         className="ms-nav"

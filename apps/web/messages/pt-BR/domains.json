@@ -93,7 +93,8 @@
       "verification": "Verificação do domínio (DKIM)",
       "sending": "Habilitar envio",
       "dmarc": "DMARC (recomendado)",
-      "tracking": "Rastreamento de aberturas e cliques"
+      "tracking": "Rastreamento de aberturas e cliques",
+      "trackingNote": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário. Defina um subdomínio em Configuração para servi-los do seu próprio domínio."
     },
     "tracking": {
       "open": "Rastreamento de aberturas",
@@ -103,7 +104,9 @@
       "subdomain": "Subdomínio de rastreamento",
       "subdomainHint": "Opcional. Serve os links de rastreamento pelo seu próprio domínio em vez do host padrão — adicione o CNAME mostrado em Registros.",
       "subdomainPlaceholder": "links",
-      "subdomainError": "Use um único rótulo DNS em minúsculas."
+      "subdomainError": "Use um único rótulo DNS em minúsculas.",
+      "localWarning": "O rastreamento precisa de uma URL acessível publicamente. A APP_BASE_URL desta instalação é local, então os destinatários nunca conseguem acessar os links rastreados nem o pixel de abertura — os controles ficam desativados até uma URL pública ser configurada.",
+      "headerToggle": "Ativar ou desativar rastreamento de abertura e cliques"
     },
     "configuration": {
       "note": "O rastreamento é aplicado pelo MillionSend, não pelo SES. Quando desativado, os emails são enviados com os links intactos e sem pixel de abertura. Quando ativado, reescrevemos os links pelo seu host de rastreamento e injetamos um pixel 1×1 de abertura, gerando os eventos de abertura e clique por conta própria.",
@@ -114,7 +117,9 @@
       "tls": "TLS (Transport Layer Security)",
       "tlsOpportunistic": "Oportunista",
       "tlsEnforced": "Obrigatório",
-      "tlsHint": "Oportunista tenta uma conexão TLS segura e recorre a texto puro se o servidor de destino não oferecer suporte. Obrigatório exige TLS — a mensagem nunca é enviada sem criptografia."
+      "tlsHint": "Oportunista tenta uma conexão TLS segura e recorre a texto puro se o servidor de destino não oferecer suporte. Obrigatório exige TLS — a mensagem nunca é enviada sem criptografia.",
+      "subdomainDnsMissing": "CNAME de rastreamento ausente ou incorreto no DNS — os links não vão resolver até ele ser adicionado.",
+      "viewDnsRecord": "Ver registro DNS"
     },
     "columns": {
       "type": "Tipo",

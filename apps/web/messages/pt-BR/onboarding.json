@@ -2,6 +2,9 @@
   "team": {
     "title": "Dê um nome ao seu time",
     "teamName": "Nome do time",
+    "logoLabel": "Logo do time (opcional)",
+    "logoAdd": "Adicionar uma logo",
+    "logoChange": "Trocar a logo",
     "submit": "Criar time",
     "error": "Falha ao criar o time. Tente de novo."
   },
@@ -59,5 +62,10 @@
       "link": "Time →"
     },
     "instance": "Taxa de envio e retenção de e-mails são configurações da instância — defina em <link>Configurações</link>."
+  },
+  "stepSes": {
+    "title": "Conecte seu AWS SES",
+    "body": "O MillionSend envia pela sua própria conta AWS SES. Conecte uma vez nas configurações — o assistente cria tudo e testa a conexão.",
+    "cta": "Abrir configuração do SES"
   }
 }

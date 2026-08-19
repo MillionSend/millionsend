@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
@@ -11,7 +11,10 @@ import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
+import { TeamLogo } from "@/components/team-logo";
 import type { AppLocale } from "@/i18n/request";
+import { TEAM_LOGO_ACCEPT, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
+import { removeTeamLogo, uploadTeamLogo } from "@/lib/team-logo-api";
 import { useTRPC } from "@/lib/trpc";
 
 // Mirrors LOCALE_COOKIE in src/i18n/request.ts — that module reads
@@ -41,7 +44,31 @@ function TeamSection() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data: team } = useQuery(trpc.settings.team.get.queryOptions());
+  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
+  const activeRole = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
+  const canManageLogo = activeRole === "owner" || activeRole === "admin";
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoError, setLogoError] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<string | null>(null);
+
+  async function runLogoChange(op: (teamId: string) => Promise<unknown>) {
+    const teamId = teamList?.activeTeamId;
+    if (!teamId || logoBusy) return;
+    setLogoBusy(true);
+    setLogoError(false);
+    try {
+      await op(teamId);
+      await queryClient.invalidateQueries(trpc.settings.team.get.queryFilter());
+      await queryClient.invalidateQueries(trpc.team.list.queryFilter());
+      // Sidebar shows the logo from the server layout.
+      router.refresh();
+    } catch {
+      setLogoError(true);
+    } finally {
+      setLogoBusy(false);
+    }
+  }
   const rename = useMutation(
     trpc.settings.team.rename.mutationOptions({
       onSuccess: async () => {
@@ -135,6 +162,76 @@ function TeamSection() {
           </p>
         ) : null}
       </form>
+      {team.logoUploadsEnabled && canManageLogo ? (
+        <div className="ms-field" style={{ marginTop: 18 }}>
+          {/* span, not label: the controls are buttons, not a labelable input. Metrics mirror .ms-field label. */}
+          <span
+            style={{
+              display: "block",
+              fontSize: "var(--ms-fs-label)",
+              color: "var(--ms-muted)",
+              marginBottom: 6,
+            }}
+          >
+            {t("team.logo.label")}
+          </span>
+          <input
+            ref={logoInputRef}
+            type="file"
+            accept={TEAM_LOGO_ACCEPT}
+            style={{ display: "none" }}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              // Re-selecting the same file must fire change again.
+              event.target.value = "";
+              if (!file) return;
+              if (file.size > TEAM_LOGO_MAX_BYTES) {
+                setLogoError(true);
+                return;
+              }
+              void runLogoChange((teamId) => uploadTeamLogo(teamId, file));
+            }}
+          />
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <TeamLogo name={team.name} logoUrl={team.logoUrl} size={40} />
+            <button
+              type="button"
+              className="ms-btn ms-btn-secondary"
+              disabled={logoBusy || !teamList}
+              onClick={() => logoInputRef.current?.click()}
+            >
+              <BtnSpinner on={logoBusy} />
+              {team.logoUrl ? t("team.logo.replace") : t("team.logo.upload")}
+            </button>
+            {team.logoUrl ? (
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                disabled={logoBusy}
+                onClick={() => void runLogoChange((teamId) => removeTeamLogo(teamId))}
+              >
+                {t("team.logo.remove")}
+              </button>
+            ) : null}
+          </div>
+          <p
+            style={{ margin: "6px 0 0", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}
+          >
+            {t("team.logo.hint")}
+          </p>
+          {logoError ? (
+            <p
+              style={{
+                margin: "6px 0 0",
+                color: "var(--ms-danger)",
+                fontSize: "var(--ms-fs-label)",
+              }}
+            >
+              {t("team.logo.error")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 22 }}>
         <div>
           <div className="ms-microlabel">{t("team.slug")}</div>

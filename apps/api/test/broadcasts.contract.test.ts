@@ -24,7 +24,7 @@ const enqueued: { broadcastId: string; startAfter?: Date | undefined }[] = [];
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
   const teamId = await createTeam(db, "bc-contract");
-  const key = generateApiKey("test");
+  const key = generateApiKey();
   await db.insert(schema.apiKeys).values({
     teamId,
     name: "contract",

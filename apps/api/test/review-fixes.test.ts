@@ -43,7 +43,7 @@ beforeAll(async () => {
     region: "us-east-1",
     status: "pending",
   });
-  const key = generateApiKey("live");
+  const key = generateApiKey();
   token = key.token;
   await db.insert(schema.apiKeys).values({
     teamId,

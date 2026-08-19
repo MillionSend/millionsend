@@ -107,7 +107,15 @@
     "saved": "Saved",
     "slug": "Slug",
     "plan": "Plan",
-    "error": "Could not save."
+    "error": "Could not save.",
+    "logo": {
+      "label": "Logo",
+      "upload": "Upload logo",
+      "replace": "Replace logo",
+      "remove": "Remove",
+      "hint": "PNG, JPEG, or WebP, up to 2 MB. Shown wherever your team appears.",
+      "error": "Could not update the logo."
+    }
   },
   "plans": {
     "free": "Free",

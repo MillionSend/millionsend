@@ -37,7 +37,7 @@ beforeAll(async () => {
     status: "verified",
     verifiedAt: new Date(),
   });
-  const key = generateApiKey("live");
+  const key = generateApiKey();
   token = key.token;
   await db.insert(schema.apiKeys).values({
     teamId,
@@ -167,7 +167,7 @@ describe("smtp relay", () => {
       })
       .returning({ id: schema.domains.id });
     if (!scopedDomain) throw new Error("domain insert failed");
-    const scopedKey = generateApiKey("live");
+    const scopedKey = generateApiKey();
     await db.insert(schema.apiKeys).values({
       teamId,
       name: "scoped",
