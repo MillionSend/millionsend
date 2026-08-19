@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatDayUtc,
   formatDurationShort,
   formatHoursMinutes,
   formatUtcMinute,
   formatUtcTimestampMs,
   maskApiKey,
 } from "@/lib/format";
+
+describe("formatDayUtc", () => {
+  it("renders the UTC day key without a local-zone shift", () => {
+    // Whatever the runner's zone, the label must be the key's own day.
+    expect(formatDayUtc("2026-08-13", "en")).toBe("Aug 13");
+    expect(formatDayUtc("2026-01-01", "en")).toBe("Jan 1");
+  });
+});
 
 describe("formatHoursMinutes", () => {
   it("renders h/m countdowns, dropping a zero hour", () => {

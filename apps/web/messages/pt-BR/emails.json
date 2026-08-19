@@ -73,6 +73,10 @@
     "whatToDo": "O que fazer",
     "copyReady": "Pronto para copiar"
   },
+  "occurrencesDrawer": {
+    "title": "{label} — {count, plural, one {# evento} other {# eventos}}",
+    "subtitle": "Mais recentes primeiro · intervalo desde o envio"
+  },
   "suppressedDrawer": {
     "title": "Detalhes da supressão",
     "origin": "Origem",

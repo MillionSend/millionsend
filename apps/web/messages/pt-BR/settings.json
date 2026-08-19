@@ -184,8 +184,9 @@
   },
   "usage": {
     "acceptedToday": "E-mails aceitos hoje",
-    "dailyLimit": "Limite diário",
-    "noLimit": "Sem limite diário.",
+    "resetsMidnightUtc": "Reinicia à meia-noite UTC",
+    "unlimited": "Ilimitado",
+    "history": "Histórico diário",
     "empty": "0 dias registrados.",
     "day": "Dia",
     "accepted": "Aceitos",

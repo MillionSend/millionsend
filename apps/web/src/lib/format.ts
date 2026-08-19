@@ -30,6 +30,18 @@ export function formatDay(date: Date | string | number, locale: string): string 
   return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(new Date(date));
 }
 
+/**
+ * Short day label for a UTC day key ("2026-08-13" → "Aug 13"), pinned to UTC —
+ * local-zone formatting would shift the day in negative-offset timezones.
+ */
+export function formatDayUtc(day: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${day}T00:00:00Z`));
+}
+
 /** Natural day+time stamp ("Aug 16, 8:12 PM" / "16 de ago., 20:12"). */
 export function formatDayTime(date: Date | string | number, locale: string): string {
   return new Intl.DateTimeFormat(locale, {

@@ -3,13 +3,15 @@
 import { WARN_BOUNCE_RATE, WARN_COMPLAINT_RATE } from "@millionsend/core/deliverability";
 import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { ChartTip, LineChart } from "@/components/line-chart";
 import { Odometer } from "@/components/odometer";
 import { PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { codeRichTags } from "@/lib/code-rich-tags";
+import { formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
 const RANGES = [7, 15, 30] as const;
@@ -21,10 +23,26 @@ type Range = (typeof RANGES)[number];
  * line (bounce line at top 6px → 114px = 4%; complaint at 14px → 106px = 0.01%).
  */
 const BAR_AREA = 120;
+const BAR_W = 4;
+const BAR_GAP = 4;
 const BOUNCE = { threshold: WARN_BOUNCE_RATE, lineTop: 6 };
 const COMPLAINT = { threshold: WARN_COMPLAINT_RATE, lineTop: 14 };
 
-type Bar = { day: string; height: number; title: string };
+/**
+ * Daily series on the main chart, in tooltip order. Sent is the muted
+ * baseline; delivered carries the one area fill; clicked takes the violet
+ * clicked hue (the info family's second step) so it separates from opened.
+ */
+const CHART_SERIES = [
+  { key: "sent", color: "var(--ms-muted)" },
+  { key: "delivered", color: "var(--ms-success)", area: true },
+  { key: "opened", color: "var(--ms-info)" },
+  { key: "clicked", color: "var(--ms-dot-clicked)" },
+  { key: "bounced", color: "var(--ms-danger)" },
+  { key: "complained", color: "var(--ms-warn)" },
+] as const;
+
+type Bar = { day: string; height: number; dayLabel: string; detail: string };
 type DayCounts = { day: string; sent: number; bounced: number; complained: number };
 type EngagementDay = { day: string; delivered: number; opened: number; clicked: number };
 
@@ -33,14 +51,18 @@ function rateBars(
   count: (d: DayCounts) => number,
   geometry: { threshold: number; lineTop: number },
   fmtPct: Intl.NumberFormat,
+  fmt: Intl.NumberFormat,
+  locale: string,
 ): Bar[] {
   const pxPerThreshold = BAR_AREA - geometry.lineTop;
   return days.map((d) => {
-    const rate = d.sent > 0 ? count(d) / d.sent : 0;
+    const c = count(d);
+    const rate = d.sent > 0 ? c / d.sent : 0;
     return {
       day: d.day,
       height: Math.min(BAR_AREA, Math.round((rate / geometry.threshold) * pxPerThreshold)),
-      title: `${d.day} · ${fmtPct.format(rate)}`,
+      dayLabel: formatDayUtc(d.day, locale),
+      detail: `${fmtPct.format(rate)} · ${fmt.format(c)}`,
     };
   });
 }
@@ -54,6 +76,8 @@ function engagementBars(
   days: EngagementDay[],
   count: (d: EngagementDay) => number,
   fmtPct: Intl.NumberFormat,
+  fmt: Intl.NumberFormat,
+  locale: string,
 ): Bar[] {
   const rates = days.map((d) => (d.delivered > 0 ? count(d) / d.delivered : 0));
   const max = Math.max(0, ...rates);
@@ -62,7 +86,8 @@ function engagementBars(
     return {
       day: d.day,
       height: max > 0 ? Math.round((rate / max) * BAR_AREA) : 0,
-      title: `${d.day} · ${fmtPct.format(rate)}`,
+      dayLabel: formatDayUtc(d.day, locale),
+      detail: `${fmtPct.format(rate)} · ${fmt.format(count(d))}`,
     };
   });
 }
@@ -91,6 +116,20 @@ function RateCard(props: {
   // Engagement: neutral denominator note (no threshold — higher is better).
   note?: string;
 }) {
+  const areaRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null);
+  const hoveredBar = hover ? props.bars[hover.index] : undefined;
+
+  // Same mechanics as the line chart: track the pointer over the whole bar
+  // area (a 4px bar is no hit target) and snap to the nearest bar's pitch.
+  function track(event: React.PointerEvent<HTMLDivElement>) {
+    if (props.bars.length === 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const index = Math.min(props.bars.length - 1, Math.max(0, Math.floor(x / (BAR_W + BAR_GAP))));
+    setHover({ index, x, y: event.clientY - rect.top });
+  }
+
   return (
     <div className="ms-kpi-card" style={{ flex: 1 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -107,22 +146,46 @@ function RateCard(props: {
       >
         {props.headline}
       </div>
-      <div style={{ position: "relative", marginTop: 16 }}>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: BAR_AREA }}>
-          {props.bars.map((bar) => (
+      <div
+        ref={areaRef}
+        style={{ position: "relative", marginTop: 16, touchAction: "pan-y" }}
+        onPointerMove={track}
+        onPointerDown={track}
+        onPointerLeave={() => setHover(null)}
+        onPointerCancel={() => setHover(null)}
+      >
+        <div style={{ display: "flex", alignItems: "flex-end", gap: BAR_GAP, height: BAR_AREA }}>
+          {props.bars.map((bar, index) => (
             <span
               key={bar.day}
-              title={bar.title}
               style={{
-                width: 4,
+                width: BAR_W,
                 height: bar.height,
                 background: props.color,
-                opacity: 0.85,
+                opacity: hover?.index === index ? 1 : 0.85,
                 borderRadius: 1,
               }}
             />
           ))}
         </div>
+        {hover && hoveredBar ? (
+          <ChartTip
+            x={hover.x}
+            y={hover.y}
+            width={areaRef.current?.clientWidth ?? 0}
+            height={BAR_AREA}
+          >
+            <div className="ms-mono" style={{ fontSize: 11, color: "var(--ms-muted)" }}>
+              {hoveredBar.dayLabel}
+            </div>
+            <div
+              className="ms-mono"
+              style={{ fontSize: 12, color: "var(--ms-bone)", marginTop: 3 }}
+            >
+              {hoveredBar.detail}
+            </div>
+          </ChartTip>
+        ) : null}
         {props.risk ? (
           <div
             style={{
@@ -250,6 +313,7 @@ function MetricsSkeleton() {
 
 export default function MetricsPage() {
   const t = useTranslations("metrics");
+  const common = useTranslations("common");
   const locale = useLocale();
   const trpc = useTRPC();
   const [days, setDays] = useState<Range>(15);
@@ -273,8 +337,6 @@ export default function MetricsPage() {
     data.allTimeDelivered === 0 &&
     data.totals.accepted === 0 &&
     data.totals.sent === 0;
-
-  const maxSent = data ? Math.max(...data.days.map((d) => d.sent)) : 0;
 
   return (
     <>
@@ -301,36 +363,32 @@ export default function MetricsPage() {
               className="ms-kpi-row"
               style={{ display: "flex", gap: 56, alignItems: "flex-start" }}
             >
-              <KpiValue label={t("kpi.emails")}>{fmt.format(data.totals.sent)}</KpiValue>
+              <KpiValue label={t("kpi.emails")}>
+                <Odometer formatted={fmt.format(data.totals.sent)} />
+              </KpiValue>
               <KpiValue label={t("kpi.deliverability")}>
-                {data.totals.sent > 0 ? pct1.format(data.totals.delivered / data.totals.sent) : "—"}
+                {data.totals.sent > 0 ? (
+                  <Odometer formatted={pct1.format(data.totals.delivered / data.totals.sent)} />
+                ) : (
+                  "—"
+                )}
               </KpiValue>
               <KpiValue label={t("kpi.allTimeDelivered")}>
                 <Odometer formatted={fmt.format(data.allTimeDelivered)} />
               </KpiValue>
             </div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "flex-end",
-                gap: 4,
-                height: 228,
-                marginTop: 18,
-              }}
-            >
-              {data.days.map((d) => (
-                <span
-                  key={d.day}
-                  title={`${d.day} · ${fmt.format(d.sent)}`}
-                  style={{
-                    flex: 1,
-                    height: maxSent > 0 ? Math.round((d.sent / maxSent) * 220) : 0,
-                    background: "var(--ms-info)",
-                    opacity: 0.85,
-                    borderRadius: 1,
-                  }}
-                />
-              ))}
+            <div style={{ marginTop: 18 }}>
+              <LineChart
+                days={data.days.map((d) => d.day)}
+                height={228}
+                series={CHART_SERIES.map((s) => ({
+                  ...s,
+                  label: common(`status.${s.key}`),
+                  values: data.days.map((d) => d[s.key]),
+                }))}
+                formatDay={(day) => formatDayUtc(day, locale)}
+                formatValue={(value) => fmt.format(value)}
+              />
             </div>
           </div>
 
@@ -342,7 +400,7 @@ export default function MetricsPage() {
               }
               risk={{ label: t("bounce.risk"), lineTop: BOUNCE.lineTop }}
               color="var(--ms-danger)"
-              bars={rateBars(data.days, (d) => d.bounced, BOUNCE, pct2)}
+              bars={rateBars(data.days, (d) => d.bounced, BOUNCE, pct2, fmt, locale)}
               rowLabel={t("bounce.bounced")}
               rowCount={fmt.format(data.totals.bounced)}
               rowPct={
@@ -356,7 +414,7 @@ export default function MetricsPage() {
               }
               risk={{ label: t("complaint.risk"), lineTop: COMPLAINT.lineTop }}
               color="var(--ms-warn)"
-              bars={rateBars(data.days, (d) => d.complained, COMPLAINT, pct2)}
+              bars={rateBars(data.days, (d) => d.complained, COMPLAINT, pct2, fmt, locale)}
               rowLabel={t("complaint.complained")}
               rowCount={fmt.format(data.totals.complained)}
               rowPct={
@@ -375,7 +433,7 @@ export default function MetricsPage() {
                   : "—"
               }
               color="var(--ms-info)"
-              bars={engagementBars(data.days, (d) => d.opened, pct1)}
+              bars={engagementBars(data.days, (d) => d.opened, pct1, fmt, locale)}
               rowLabel={t("open.opened")}
               rowCount={fmt.format(data.totals.opened)}
               rowPct={
@@ -393,7 +451,7 @@ export default function MetricsPage() {
                   : "—"
               }
               color="var(--ms-info)"
-              bars={engagementBars(data.days, (d) => d.clicked, pct1)}
+              bars={engagementBars(data.days, (d) => d.clicked, pct1, fmt, locale)}
               rowLabel={t("click.clicked")}
               rowCount={fmt.format(data.totals.clicked)}
               rowPct={

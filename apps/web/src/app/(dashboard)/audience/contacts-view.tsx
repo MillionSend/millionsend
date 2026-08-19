@@ -17,6 +17,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { StatBlock } from "@/components/stat-block";
 import { Table } from "@/components/table";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
 import { useTRPC } from "@/lib/trpc";
@@ -70,28 +71,6 @@ function ContactsSkeleton() {
         ))}
       </tbody>
     </Table>
-  );
-}
-
-/** Uppercase microlabel over big tabular digits; the ghost keeps the digit line box. */
-function StatBlock({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div>
-      <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
-        {label}
-      </div>
-      <div
-        className="ms-digits"
-        style={{
-          fontSize: "var(--ms-fs-kpi)",
-          color: "var(--ms-bone)",
-          marginTop: 6,
-          display: "flex",
-        }}
-      >
-        {value ?? <Skeleton width={64} height="1lh" />}
-      </div>
-    </div>
   );
 }
 

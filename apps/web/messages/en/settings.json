@@ -184,8 +184,9 @@
   },
   "usage": {
     "acceptedToday": "Emails accepted today",
-    "dailyLimit": "Daily limit",
-    "noLimit": "No daily limit.",
+    "resetsMidnightUtc": "Resets at midnight UTC",
+    "unlimited": "Unlimited",
+    "history": "Daily history",
     "empty": "0 days recorded.",
     "day": "Day",
     "accepted": "Accepted",

@@ -1,7 +1,6 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Skeleton } from "@/components/skeleton";
 import { escapeHtml } from "@/lib/html";
 import { MERGE_TOKEN_RE } from "@/lib/merge-fields";
 import { useTheme } from "@/lib/use-theme";
@@ -62,28 +61,6 @@ export function StatusPill({ status }: { status: BroadcastStatus }) {
       ) : null}
       {t(`status.${status}`)}
     </span>
-  );
-}
-
-/** Uppercase microlabel over big tabular digits; the ghost keeps the digit line box. */
-export function StatBlock({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div>
-      <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
-        {label}
-      </div>
-      <div
-        className="ms-digits"
-        style={{
-          fontSize: "var(--ms-fs-kpi)",
-          color: "var(--ms-bone)",
-          marginTop: 6,
-          display: "flex",
-        }}
-      >
-        {value ?? <Skeleton width={64} height="1lh" />}
-      </div>
-    </div>
   );
 }
 

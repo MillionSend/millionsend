@@ -73,6 +73,10 @@
     "whatToDo": "What to do",
     "copyReady": "Copy-ready"
   },
+  "occurrencesDrawer": {
+    "title": "{label} — {count, plural, one {# event} other {# events}}",
+    "subtitle": "Newest first · offset from send"
+  },
   "suppressedDrawer": {
     "title": "Suppressed details",
     "origin": "Origin",

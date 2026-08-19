@@ -78,7 +78,7 @@ describe("recordEngagement webhook fan-out", () => {
     expect(rows.map((r) => r.eventType)).toEqual(["email.clicked"]);
   });
 
-  it("does not re-deliver on a second open of the same email", async () => {
+  it("does not re-deliver on a second open inside the damping window", async () => {
     const teamId = await createTeam(db);
     const emailId = await seedEmail(teamId);
     const endpointId = await seedEndpoint(teamId, null); // null = all events
@@ -87,6 +87,21 @@ describe("recordEngagement webhook fan-out", () => {
     await recordEngagement(db, emailId, "opened");
 
     expect(await deliveries(endpointId)).toHaveLength(1);
+  });
+
+  it("delivers once per recorded event — a repeat open past the damping window fans out again", async () => {
+    const teamId = await createTeam(db);
+    const emailId = await seedEmail(teamId);
+    const endpointId = await seedEndpoint(teamId, ["email.opened"]);
+
+    await recordEngagement(db, emailId, "opened");
+    await db
+      .update(schema.emailEvents)
+      .set({ occurredAt: new Date(Date.now() - 120_000) })
+      .where(and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "opened")));
+    await recordEngagement(db, emailId, "opened");
+
+    expect(await deliveries(endpointId)).toHaveLength(2);
   });
 
   it("does not deliver an unsubscribed event type", async () => {

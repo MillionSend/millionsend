@@ -348,6 +348,7 @@ export default function EmailDetailPage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("preview");
   const [drawer, setDrawer] = useState<"bounced" | "suppressed" | null>(null);
+  const [groupDrawer, setGroupDrawer] = useState<EventType | null>(null);
 
   const query = useQuery(trpc.emails.get.queryOptions({ id }, { retry: false }));
   const sesEnv = useQuery(trpc.system.sesEnv.queryOptions());
@@ -389,13 +390,19 @@ export default function EmailDetailPage() {
     );
   }
 
-  // One node per event type: multi-recipient emails get one SES Delivery per
-  // recipient, and app-layer tracking repeats opened/clicked — the timeline
-  // keeps the first occurrence of each type (details of later siblings stay
-  // reachable in the drawers/metrics, not here).
-  const events = email.events.filter(
-    (event, index, all) => all.findIndex((other) => other.type === event.type) === index,
-  );
+  // One node per event type, ordered by first occurrence: multi-recipient
+  // emails get one SES Delivery per recipient, and app-layer tracking repeats
+  // opened/clicked — the node represents its type's whole group (×N chip,
+  // latest timestamp, occurrences drawer).
+  type EmailEvent = (typeof email.events)[number];
+  const groups: { type: EventType; first: EmailEvent; occurrences: EmailEvent[] }[] = [];
+  for (const event of email.events) {
+    const group = groups.find((g) => g.type === event.type);
+    if (group) group.occurrences.push(event);
+    else groups.push({ type: event.type as EventType, first: event, occurrences: [event] });
+  }
+  // First occurrence per type — the masthead/stall derivations read these.
+  const events = groups.map((group) => group.first);
   // Ingestion off (no SNS topics) means nothing after the locally-recorded
   // "sent" can ever arrive — the timeline says so instead of silently stalling.
   const eventsStalled =
@@ -404,6 +411,12 @@ export default function EmailDetailPage() {
     type === "rendering_failure" ? t("detail.event.rendering_failure") : common(`status.${type}`);
 
   const sentEvent = events.find((event) => event.type === "sent");
+  // Anchor for the occurrences drawer's "+42 min" offsets — the actual send
+  // moment when known, else creation (an email is never engaged before either).
+  const sendAt = sentEvent?.occurredAt ?? email.sentAt ?? email.createdAt;
+  const groupOccurrences = groupDrawer
+    ? (groups.find((group) => group.type === groupDrawer)?.occurrences ?? [])
+    : [];
   const terminalEvent = [...events].reverse().find((event) => event.type === email.latestStatus);
   const lastBounce = [...events].reverse().find((event) => event.type === "bounced");
   const bounce = lastBounce ? bounceOf(lastBounce.data) : null;
@@ -584,20 +597,34 @@ export default function EmailDetailPage() {
               overflowX: "auto",
             }}
           >
-            {events.map((event, index) => {
-              const type = event.type as EventType;
-              const latest = index === events.length - 1;
-              const previous = index > 0 ? events[index - 1] : undefined;
+            {groups.map((group, index) => {
+              const { type, first } = group;
+              const count = group.occurrences.length;
+              const latest = index === groups.length - 1;
+              const previous = index > 0 ? groups[index - 1] : undefined;
+              // Connector deltas run between first occurrences — the group's
+              // anchor — so the strip stays chronological even when a later
+              // repeat outlives the next type's start.
               const delta = previous
-                ? new Date(event.occurredAt).getTime() - new Date(previous.occurredAt).getTime()
+                ? new Date(first.occurredAt).getTime() -
+                  new Date(previous.first.occurredAt).getTime()
                 : null;
-              const detail = eventDetail(type, event.data);
+              // Bounced/suppressed keep their first-occurrence framing (their
+              // dedicated drawers explain the terminal fact); repeat-prone
+              // types stamp the node with the group's latest occurrence.
+              const stamped =
+                type === "bounced" || type === "suppressed"
+                  ? first
+                  : (group.occurrences[count - 1] ?? first);
+              const detail = eventDetail(type, first.data);
               const opens =
-                type === "bounced" && bounceOf(event.data)
+                type === "bounced" && bounceOf(first.data)
                   ? ("bounced" as const)
                   : type === "suppressed"
                     ? ("suppressed" as const)
-                    : null;
+                    : count > 1
+                      ? ("group" as const)
+                      : null;
               // Icon-tile node: glyph tile, status pill, timestamp, detail —
               // the connector line meets the tiles at their vertical center.
               const card = (
@@ -636,13 +663,18 @@ export default function EmailDetailPage() {
                     }}
                   >
                     {eventLabel(type)}
+                    {count > 1 ? (
+                      <span className="ms-mono" style={{ fontSize: 10, fontWeight: 500 }}>
+                        ×{count}
+                      </span>
+                    ) : null}
                     {opens ? <span aria-hidden="true">›</span> : null}
                   </span>
                   <span
-                    title={formatUtcTimestampMs(event.occurredAt)}
+                    title={formatUtcTimestampMs(stamped.occurredAt)}
                     style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 7 }}
                   >
-                    {formatDayTime(event.occurredAt, locale)}
+                    {formatDayTime(stamped.occurredAt, locale)}
                   </span>
                   {detail ? (
                     <span
@@ -673,7 +705,7 @@ export default function EmailDetailPage() {
                 flex: "none",
               };
               return (
-                <div key={event.id} style={{ display: "contents" }}>
+                <div key={first.id} style={{ display: "contents" }}>
                   {delta != null ? (
                     <div
                       style={{
@@ -703,7 +735,7 @@ export default function EmailDetailPage() {
                     <button
                       type="button"
                       style={{ ...cardStyle, color: "inherit", font: "inherit", cursor: "pointer" }}
-                      onClick={() => setDrawer(opens)}
+                      onClick={() => (opens === "group" ? setGroupDrawer(type) : setDrawer(opens))}
                     >
                       {card}
                     </button>
@@ -1018,6 +1050,66 @@ export default function EmailDetailPage() {
           <BtnSpinner on={removeMutation.isPending} />
           {t("suppressedDrawer.remove")}
         </button>
+      </Drawer>
+
+      <Drawer
+        open={groupDrawer != null}
+        onClose={() => setGroupDrawer(null)}
+        title={
+          groupDrawer
+            ? t("occurrencesDrawer.title", {
+                label: eventLabel(groupDrawer),
+                count: groupOccurrences.length,
+              })
+            : ""
+        }
+      >
+        <div className="ms-microlabel" style={{ margin: "18px 0 4px" }}>
+          {t("occurrencesDrawer.subtitle")}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {[...groupOccurrences].reverse().map((event, index) => {
+            const sinceSend = new Date(event.occurredAt).getTime() - new Date(sendAt).getTime();
+            const link = groupDrawer === "clicked" ? clickOf(event.data)?.link : undefined;
+            return (
+              <div
+                key={event.id}
+                style={{
+                  padding: "10px 0",
+                  borderBottom:
+                    index === groupOccurrences.length - 1 ? undefined : "1px solid var(--ms-line)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+                  <span style={{ fontSize: 13.5 }} title={formatUtcTimestampMs(event.occurredAt)}>
+                    {formatDayTime(event.occurredAt, locale)}
+                  </span>
+                  {sinceSend >= 0 ? (
+                    <span
+                      className="ms-mono"
+                      style={{ fontSize: 11, color: "var(--ms-muted)", marginLeft: "auto" }}
+                    >
+                      +{formatDurationShort(sinceSend)}
+                    </span>
+                  ) : null}
+                </div>
+                {link ? (
+                  <div
+                    className="ms-mono"
+                    style={{
+                      fontSize: 11,
+                      color: "var(--ms-muted)",
+                      marginTop: 3,
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {link}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       </Drawer>
     </>
   );
