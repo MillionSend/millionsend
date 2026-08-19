@@ -1,4 +1,5 @@
-import { index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, jsonb, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { contacts } from "./contacts.js";
 import { teams } from "./teams.js";
 
 /**
@@ -19,8 +20,30 @@ export const segments = pgTable(
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    filter: jsonb("filter").$type<SegmentFilter>().notNull(),
+    // Null = manual-membership-only segment (rows in segment_members); a
+    // null filter must never be read as "matches everyone".
+    filter: jsonb("filter").$type<SegmentFilter>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("segments_team_idx").on(t.teamId)],
+);
+
+// Explicit membership (contacts.create segments / contacts.segments.add);
+// coexists with `filter` on the same segment.
+export const segmentMembers = pgTable(
+  "segment_members",
+  {
+    segmentId: uuid("segment_id")
+      .notNull()
+      .references(() => segments.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.segmentId, t.contactId] }),
+    // Reverse lookup: "which segments is this contact in" (contacts.segments.list).
+    index("segment_members_contact_idx").on(t.contactId),
+  ],
 );

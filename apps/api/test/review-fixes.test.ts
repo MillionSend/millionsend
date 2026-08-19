@@ -133,36 +133,6 @@ describe("suppression hardening", () => {
 });
 
 describe("resend-compat error surfaces", () => {
-  it("rejects attachments loudly instead of stripping them", async () => {
-    const res = await post({
-      ...base,
-      to: ["a@example.com"],
-      attachments: [{ filename: "x.pdf", content: "..." }],
-    });
-    expect(res.status).toBe(422);
-    expect((await res.json()) as object).toMatchObject({
-      message: expect.stringMatching(/not yet supported/i),
-    });
-  });
-
-  it("rejects headers and topic_id loudly instead of stripping them", async () => {
-    const withHeaders = await post({
-      ...base,
-      to: ["a@example.com"],
-      headers: { "X-Entity-Ref-ID": "1" },
-    });
-    expect(withHeaders.status).toBe(422);
-    expect(await withHeaders.json()).toMatchObject({
-      message: expect.stringMatching(/headers are not yet supported/),
-    });
-
-    const withTopic = await post({ ...base, to: ["a@example.com"], topic_id: "t_1" });
-    expect(withTopic.status).toBe(422);
-    expect(await withTopic.json()).toMatchObject({
-      message: expect.stringMatching(/topic_id is not yet supported/),
-    });
-  });
-
   it("rejects invalid recipient addresses", async () => {
     for (const bad of ["", "not-an-email", [""], ["not-an-email"]]) {
       const res = await post({ ...base, to: bad });

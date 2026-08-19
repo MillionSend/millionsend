@@ -3,6 +3,7 @@ import {
   EnvKeyring,
   encryptEmailBody,
   hashRecipient,
+  sealAttachments,
   utcDay,
   verifyClickToken,
   verifyOpenToken,
@@ -77,8 +78,9 @@ function unwrapQp(mime: string): string {
 async function insertEmail(
   overrides: Partial<typeof schema.emails.$inferInsert> = {},
   bodyHtml = "<b>hi</b>",
+  bodyText = "hi",
 ): Promise<string> {
-  const encrypted = await encryptEmailBody({ html: bodyHtml, text: "hi" }, keyring);
+  const encrypted = await encryptEmailBody({ html: bodyHtml, text: bodyText }, keyring);
   const [row] = await db
     .insert(schema.emails)
     .values({
@@ -183,6 +185,71 @@ it("a broadcast send carries the RFC bulk-mail headers", async () => {
     contactId,
     topicId: topic.id,
   });
+});
+
+it("a topic send to a contact substitutes both unsubscribe tokens and carries RFC 8058 headers", async () => {
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "Tx receipts", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  const contactId = await insertContact("topic-contact@example.com");
+  const { ses, sends } = fakeSes("mid-topic");
+  const emailId = await insertEmail(
+    { topicId: topic.id, to: ["topic-contact@example.com"] },
+    '<a href="{{{UNSUBSCRIBE_URL}}}">a</a><a href="{{{RESEND_UNSUBSCRIBE_URL}}}">b</a>',
+    "bye: {{{RESEND_UNSUBSCRIBE_URL}}}",
+  );
+  const unsubscribeSecret = randomBytes(32);
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    unsubscribe: { secretKey: unsubscribeSecret, baseUrl: "https://app.example.com" },
+  };
+
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "").replace(/\r\n[ \t]/g, "");
+  expect(mime).not.toContain("{{{");
+  const lowerMime = mime.toLowerCase();
+  expect(lowerMime).toMatch(/list-unsubscribe: ?<https:\/\/app\.example\.com\/unsubscribe\//);
+  expect(lowerMime).toContain("list-unsubscribe-post: list-unsubscribe=one-click");
+  // Both html tokens and the text token expand to the same signed URL.
+  const tokens = [...mime.matchAll(/unsubscribe\/([A-Za-z0-9_.-]+)/g)].map((m) => m[1]);
+  expect(tokens.length).toBeGreaterThanOrEqual(3);
+  for (const t of tokens) {
+    expect(verifyUnsubscribeToken(t ?? "", unsubscribeSecret)).toEqual({
+      contactId,
+      topicId: topic.id,
+    });
+  }
+  // Topic sends are transactional: no bulk-mail class headers.
+  expect(lowerMime).not.toContain("precedence:");
+  expect(lowerMime).not.toContain("list-id:");
+});
+
+it("a topic send to a non-contact strips the placeholder tokens and carries no unsubscribe headers", async () => {
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "Tx alerts", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  const { ses, sends } = fakeSes("mid-topic-stranger");
+  const emailId = await insertEmail(
+    { topicId: topic.id, to: ["stranger-topic@example.com"] },
+    '<p>hi</p><a href="{{{UNSUBSCRIBE_URL}}}">a</a>',
+    "bye: {{{RESEND_UNSUBSCRIBE_URL}}}",
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    unsubscribe: { secretKey: randomBytes(32), baseUrl: "https://app.example.com" },
+  };
+
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).not.toContain("{{{");
+  expect(mime.toLowerCase()).not.toContain("list-unsubscribe");
+  expect(mime).not.toContain("/unsubscribe/");
 });
 
 it("suppresses a queued broadcast when the contact globally unsubscribes after fan-out", async () => {
@@ -445,6 +512,46 @@ it("a cancel that wins the race blocks the send claim", async () => {
 
   expect(await sendEmail(db, deps, { emailId })).toBe("skipped");
   expect(sends).toHaveLength(0);
+});
+
+it("attachments and custom headers ride the raw MIME; tracking still rewrites the html part", async () => {
+  const { ses, sends } = fakeSes("mid-attach");
+  const content = Buffer.from("hello attachment").toString("base64");
+  const emailId = await insertEmail(
+    {
+      headers: { "X-Entity-Ref-ID": "ref-1" },
+      attachments: await sealAttachments(
+        [{ filename: "hi.txt", content, contentType: "text/plain" }],
+        keyring,
+      ),
+    },
+    `<a href="https://dest.test/landing">go</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: { secretKey: trackingSecret, defaultBaseUrl: "https://track.example.com" },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+
+  // Raw MIME for structure; the qp-unwrapped copy only for URLs inside the
+  // html part (unwrapQp would also eat the base64 padding at line ends).
+  const raw = sends[0]?.raw.toString("utf8") ?? "";
+  const lower = raw.toLowerCase();
+  // Structural MIME shape: attachments force multipart/mixed with the
+  // alternative body nested inside, plus one attachment part.
+  expect(lower).toContain("content-type: multipart/mixed");
+  expect(lower).toContain("content-type: multipart/alternative");
+  expect(lower).toContain("content-type: text/plain; name=hi.txt");
+  expect(lower).toContain("content-disposition: attachment; filename=hi.txt");
+  expect(raw).toContain(content);
+  // Custom header shipped; the transport-owned join header is still ours.
+  expect(lower).toContain("x-entity-ref-id: ref-1");
+  expect(lower).toContain(`x-millionsend-email-id: ${emailId}`);
+  // Tracking rewrote the html part even on the attachment path.
+  const mime = unwrapQp(raw);
+  expect(mime).toContain("https://track.example.com/t/c/");
+  expect(mime).not.toContain("dest.test");
 });
 
 it("clickTracking on routes <a href> through /t/c and the token verifies to the original url", async () => {

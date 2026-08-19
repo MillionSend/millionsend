@@ -189,6 +189,7 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
     bodyIv: Buffer.from("iv"),
     bodyWrappedDek: Buffer.from("dek"),
     bodyKeyVersion: 1,
+    attachments: "sealed-attachments-blob",
   };
   const [old] = await db
     .insert(schema.emails)
@@ -223,6 +224,8 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
   expect(oldRow?.bodyIv).toBeNull();
   expect(oldRow?.bodyWrappedDek).toBeNull();
   expect(oldRow?.bodyKeyVersion).toBeNull();
+  // Attachments are content: purged with the body.
+  expect(oldRow?.attachments).toBeNull();
   expect(oldRow?.bodyPurgedAt).toEqual(now);
   // Metadata survives the content purge (separate lifecycles).
   expect(oldRow?.subject).toBe("old");
@@ -230,6 +233,7 @@ it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async ()
 
   const [freshRow] = await db.select().from(schema.emails).where(eq(schema.emails.id, fresh.id));
   expect(freshRow?.bodyCiphertext).not.toBeNull();
+  expect(freshRow?.attachments).toBe("sealed-attachments-blob");
 
   // An old-but-still-future-scheduled email keeps its body — the send needs it.
   const [scheduled] = await db

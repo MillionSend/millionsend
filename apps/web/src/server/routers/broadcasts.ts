@@ -19,7 +19,7 @@ import { type AppLocale, DEFAULT_LOCALE, LOCALE_COOKIE, LOCALES } from "../../i1
 import { resolveEditorSave } from "../email-content";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
-import { assertSegment, segmentPredicate } from "./segments";
+import { assertSegment, savedSegmentPredicate } from "./segments";
 import { assertTopic, topicMembershipSql } from "./topics";
 
 const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
@@ -391,13 +391,12 @@ export const broadcastsRouter = router({
     .query(async ({ ctx, input }) => {
       const c = schema.contacts;
       const base = [eq(c.teamId, ctx.teamId), eq(c.unsubscribed, false)];
-      // A segment narrows recipients to its filter via the shared translator,
-      // AND'd on top of the global-unsubscribe and topic rules.
+      // A segment narrows recipients via the shared resolver (filter matches
+      // plus manual members), AND'd on top of the global-unsubscribe and
+      // topic rules — the same predicate the worker fan-out targets.
       if (input.segmentId) {
         const segment = await assertSegment(ctx, input.segmentId);
-        // undefined = empty filter (all contacts); nothing to AND in then.
-        const predicate = segmentPredicate(segment.filter);
-        if (predicate) base.push(predicate);
+        base.push(savedSegmentPredicate(segment));
       }
       if (!input.topicId) {
         const [row] = await ctx.db

@@ -29,7 +29,7 @@
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
     "@types/node": "^22.20.1",
-    "resend": "^6.19.0",
+    "resend": "^6.20.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }

@@ -34,6 +34,7 @@ export const broadcasts = pgTable(
     name: text("name"),
     from: text("from").notNull(),
     subject: text("subject").notNull(),
+    previewText: text("preview_text"),
     // JSON-encoded string array (the wire format accepts one or many
     // addresses; a text column keeps the pinned schema contract).
     replyTo: text("reply_to"),

@@ -1,4 +1,4 @@
-import type { schema } from "@millionsend/db";
+import { schema } from "@millionsend/db";
 import type { SegmentFilter } from "@millionsend/db/schema";
 import { and, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -171,8 +171,13 @@ function conditionSql(
  * contact in the caller's scope) per the contract, so callers can drop it
  * straight into `and(...)` without a special case. Throws `SegmentFilterError`
  * on an unknown field/operator or malformed shape.
+ *
+ * A null filter (manual-membership-only segment) matches NO contacts here:
+ * its membership lives in segment_members, and treating null as match-all
+ * would silently widen a targeted send to the whole team.
  */
-export function segmentWhere(contacts: ContactsTable, filter: SegmentFilter): SQL {
+export function segmentWhere(contacts: ContactsTable, filter: SegmentFilter | null): SQL {
+  if (filter === null) return sql`false`;
   const parsed = segmentFilterSchema.safeParse(filter);
   if (!parsed.success) {
     throw new SegmentFilterError(parsed.error.issues.map((i) => i.message));
@@ -183,4 +188,22 @@ export function segmentWhere(contacts: ContactsTable, filter: SegmentFilter): SQ
   // Guaranteed non-empty here, so and()/or() never return undefined.
   const combined = match === "all" ? and(...predicates) : or(...predicates);
   return combined ?? sql`true`;
+}
+
+/**
+ * Segment RESOLUTION — "who is in this segment": a contact matching the saved
+ * filter (when one is set) OR holding an explicit segment_members row. The one
+ * resolver behind the segment contact list, contact_count, and broadcast
+ * fan-out targeting, so they can never disagree on membership. Parenthesized:
+ * every caller ANDs this with team scoping, and a bare OR would leak contacts
+ * outside the scope.
+ */
+export function segmentContactsWhere(
+  contacts: ContactsTable,
+  segment: { id: string; filter: SegmentFilter | null },
+): SQL {
+  const m = schema.segmentMembers;
+  const isMember = sql`exists (select 1 from ${m} where ${m.segmentId} = ${segment.id} and ${m.contactId} = ${contacts.id})`;
+  if (segment.filter === null) return isMember;
+  return sql`(${segmentWhere(contacts, segment.filter)} or ${isMember})`;
 }

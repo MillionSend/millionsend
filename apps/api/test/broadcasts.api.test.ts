@@ -130,11 +130,25 @@ describe("broadcasts API", () => {
     expect(await res.json()).toMatchObject({ name: "validation_error" });
   });
 
-  it("rejects unsupported Resend knobs loudly instead of stripping them", async () => {
-    for (const extra of [{ send: true }, { preview_text: "peek" }]) {
-      const res = await call(tokenA, "POST", "/broadcasts", { ...draftBody(), ...extra });
-      expect(res.status, JSON.stringify(extra)).toBe(422);
-    }
+  it("round-trips preview_text through create, GET, and PATCH; null when unset", async () => {
+    const unset = await call(tokenA, "GET", `/broadcasts/${broadcastId}`);
+    expect(await unset.json()).toMatchObject({ preview_text: null });
+
+    const created = await call(tokenA, "POST", "/broadcasts", {
+      ...draftBody(),
+      preview_text: "peek",
+    });
+    expect(created.status).toBe(200);
+    const id = (await json(created)).id;
+    expect(await (await call(tokenA, "GET", `/broadcasts/${id}`)).json()).toMatchObject({
+      preview_text: "peek",
+    });
+
+    const patched = await call(tokenA, "PATCH", `/broadcasts/${id}`, { preview_text: "peek 2" });
+    expect(patched.status).toBe(200);
+    expect(await (await call(tokenA, "GET", `/broadcasts/${id}`)).json()).toMatchObject({
+      preview_text: "peek 2",
+    });
   });
 
   it("send 422s when the sender domain is not verified for the team", async () => {
@@ -349,6 +363,157 @@ describe("broadcasts API deliverability guardrail", () => {
   });
 });
 
+describe("broadcasts send-on-create", () => {
+  let enq: { id: string; startAfter: Date | undefined }[];
+  let sendApp: ReturnType<typeof createApi>;
+
+  const post = (token: string, body: unknown, viaApp?: ReturnType<typeof createApi>) =>
+    (viaApp ?? sendApp).request("/broadcasts", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const statusOf = async (id: string) =>
+    (
+      await db
+        .select({ status: schema.broadcasts.status, scheduledAt: schema.broadcasts.scheduledAt })
+        .from(schema.broadcasts)
+        .where(eq(schema.broadcasts.id, id))
+    )[0];
+
+  beforeAll(() => {
+    enq = [];
+    sendApp = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: true,
+      enqueueEmailSend: async () => {},
+      enqueueBroadcastSend: async (id, opts) => {
+        enq.push({ id, startAfter: opts?.startAfter });
+      },
+      appBaseUrl: "https://app.example.test",
+    });
+  });
+
+  it("send: true creates and schedules in one call", async () => {
+    const res = await post(tokenA, { ...draftBody(), send: true });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    expect((await statusOf(id))?.status).toBe("scheduled");
+    expect(enq.map((e) => e.id)).toContain(id);
+  });
+
+  it("send: true with scheduled_at schedules at that time", async () => {
+    const at = new Date(Date.now() + 60 * 60 * 1000);
+    const res = await post(tokenA, {
+      ...draftBody(),
+      send: true,
+      scheduled_at: at.toISOString(),
+    });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    const row = await statusOf(id);
+    expect(row?.status).toBe("scheduled");
+    expect(row?.scheduledAt?.getTime()).toBe(at.getTime());
+    expect(enq.find((e) => e.id === id)?.startAfter?.getTime()).toBe(at.getTime());
+  });
+
+  it("422s scheduled_at without send: true", async () => {
+    const res = await post(tokenA, {
+      ...draftBody(),
+      scheduled_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ name: "validation_error" });
+  });
+
+  it("send: true with a relative scheduled_at resolves it against now", async () => {
+    const before = Date.now();
+    const res = await post(tokenA, { ...draftBody(), send: true, scheduled_at: "in 2 days" });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    const row = await statusOf(id);
+    expect(row?.status).toBe("scheduled");
+    const at = row?.scheduledAt?.getTime() ?? 0;
+    expect(at).toBeGreaterThanOrEqual(before + 2 * 86_400_000);
+    expect(at).toBeLessThanOrEqual(Date.now() + 2 * 86_400_000);
+  });
+
+  it("422s a scheduled_at more than 30 days out or unparseable", async () => {
+    for (const scheduled_at of [
+      new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString(),
+      "in 2 weeks",
+      "tomorrow",
+    ]) {
+      const res = await post(tokenA, { ...draftBody(), send: true, scheduled_at });
+      expect(res.status, scheduled_at).toBe(422);
+    }
+  });
+
+  it("422s when APP_BASE_URL is not configured, keeping the draft", async () => {
+    const bare = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: true,
+      enqueueEmailSend: async () => {},
+      enqueueBroadcastSend: async () => {},
+    });
+    const res = await post(tokenA, { ...draftBody(), subject: "no-base-url", send: true }, bare);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringContaining("APP_BASE_URL"),
+    });
+    const [row] = await db
+      .select({ status: schema.broadcasts.status })
+      .from(schema.broadcasts)
+      .where(
+        and(eq(schema.broadcasts.teamId, teamA), eq(schema.broadcasts.subject, "no-base-url")),
+      );
+    expect(row?.status).toBe("draft");
+  });
+
+  it("403s sending_paused, keeping the draft unsent", async () => {
+    const { teamId, token } = await makeSendableTeam("bc-create-paused");
+    await db.insert(schema.usageCounters).values({
+      teamId,
+      day: utcDay(),
+      sent: 2000,
+      complained: 5,
+    });
+    const res = await post(token, { ...draftBody(), subject: "paused-create", send: true });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ statusCode: 403, name: "sending_paused" });
+    const [row] = await db
+      .select({ id: schema.broadcasts.id, status: schema.broadcasts.status })
+      .from(schema.broadcasts)
+      .where(
+        and(eq(schema.broadcasts.teamId, teamId), eq(schema.broadcasts.subject, "paused-create")),
+      );
+    expect(row?.status).toBe("draft");
+    expect(enq.map((e) => e.id)).not.toContain(row?.id);
+  });
+
+  it("422s an unverified sender domain, keeping the draft", async () => {
+    const res = await post(tokenA, {
+      ...draftBody(),
+      from: "Other <hi@unverified-create.dev>",
+      send: true,
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringContaining("not verified"),
+    });
+    const [row] = await db
+      .select({ status: schema.broadcasts.status })
+      .from(schema.broadcasts)
+      .where(eq(schema.broadcasts.from, "Other <hi@unverified-create.dev>"));
+    expect(row?.status).toBe("draft");
+  });
+});
+
 describe("domain-scoped keys cannot cross domains on broadcasts", () => {
   let scopedToken: string;
   let fullToken: string;
@@ -421,6 +586,16 @@ describe("domain-scoped keys cannot cross domains on broadcasts", () => {
       .from(schema.broadcasts)
       .where(and(eq(schema.broadcasts.teamId, scopeTeam), eq(schema.broadcasts.from, fromOther)));
     expect(after.length).toBe(before.length);
+  });
+
+  it("403s a scoped key using send-on-create from another domain", async () => {
+    const res = await req(scopedToken, "POST", "/broadcasts", {
+      ...draft(fromOther),
+      send: true,
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ statusCode: 403, name: "restricted_api_key" });
+    expect(enq).toHaveLength(0);
   });
 
   it("403s a scoped key sending from another domain, leaving it unsent", async () => {

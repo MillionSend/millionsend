@@ -41,14 +41,20 @@ domain, restricting which `from` addresses it may send.
 ## Resend compatibility
 
 Request and response shapes match Resend's API, so official Resend SDKs work
-against MillionSend by pointing their base URL at it. Notable deltas are
-deliberate and loud:
+against MillionSend by pointing their base URL at it. CI runs the official
+`resend` npm package against every endpoint as a conformance gate. The few
+remaining deltas are deliberate and loud:
 
-- Unsupported Resend fields (e.g. `attachments`, custom `headers`) are
-  rejected with `422` rather than silently dropped.
-- Contacts are team-global — contact endpoints take no audience id (see
+- Attachments take inline base64 `content` only — a remote `path` URL is
+  rejected with `422` (never fetched), as is `content_id` (inline images).
+- Contacts are team-global — audience endpoints are served as aliases of
+  segments, and contact endpoints work with or without an audience id (see
   [Contacts](/concepts/contacts)).
-- Broadcasts support `canceled`, a status outside Resend's union.
+- Broadcasts support `canceled`, a status outside Resend's union, and
+  broadcast sends can return `403 sending_paused` when your bounce or
+  complaint rate crosses the SES enforcement thresholds.
+- Anything unsupported is rejected with `422` rather than silently dropped
+  (e.g. `tls` on domain update).
 
 ## Errors
 

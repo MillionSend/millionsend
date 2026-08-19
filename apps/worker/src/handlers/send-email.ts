@@ -3,13 +3,17 @@ import {
   buildUnsubscribeHeaders,
   buildUnsubscribeUrl,
   decryptEmailBody,
+  type EmailAttachment,
   enqueueWebhookDeliveries,
+  extractAddrSpec,
   findSuppressed,
   hashRecipient,
   isSubscribedToTopic,
   type Keyring,
   makeUnsubscribeToken,
+  openAttachments,
   rewriteForTracking,
+  substituteUnsubscribeUrl,
   utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -218,6 +222,43 @@ export async function sendEmail(
   const click = domain?.clickTracking ?? false;
   const open = domain?.openTracking ?? false;
   let html = body.html;
+  let text = body.text;
+
+  // Transactional topic send (topicId without contactId): the unsubscribe
+  // token signs a contactId, so it exists only when the primary recipient
+  // resolves to a contact by (team, lower(addr-spec)). Substitution runs
+  // before the tracking rewrite so the expanded link can be skipped by it.
+  let topicUnsubscribeToken: string | null = null;
+  if (email.topicId && !email.contactId && deps.unsubscribe) {
+    const addr = extractAddrSpec(email.to[0] ?? "").toLowerCase();
+    const [contact] = await db
+      .select({ id: schema.contacts.id })
+      .from(schema.contacts)
+      .where(
+        and(
+          eq(schema.contacts.teamId, email.teamId),
+          sql`lower(${schema.contacts.email}) = ${addr}`,
+        ),
+      )
+      .limit(1);
+    if (contact) {
+      topicUnsubscribeToken = makeUnsubscribeToken({
+        contactId: contact.id,
+        topicId: email.topicId,
+        secretKey: deps.unsubscribe.secretKey,
+      });
+    }
+  }
+  if (email.topicId) {
+    // No token (non-contact recipient, or unsubscribe unconfigured) → the
+    // placeholders are stripped; a literal token must never reach an inbox.
+    const url =
+      topicUnsubscribeToken && deps.unsubscribe
+        ? buildUnsubscribeUrl(deps.unsubscribe.baseUrl, topicUnsubscribeToken)
+        : "";
+    if (html) html = substituteUnsubscribeUrl(html, url);
+    if (text) text = substituteUnsubscribeUrl(text, url);
+  }
   // deps.tracking is always present in the running worker (the master key is
   // always available to derive the signing key); it is optional only so tests
   // that don't exercise tracking need not wire it, and its absence simply
@@ -233,11 +274,12 @@ export async function sendEmail(
         `tracking is enabled for email ${email.id} but APP_BASE_URL is unset and the domain has no tracking subdomain`,
       );
     }
-    // A broadcast's in-body unsubscribe link is already expanded to its real
-    // URL before encryption, so click tracking must skip it — wrapping the
-    // visible Unsubscribe link through /t/c would log a bogus click.
+    // A broadcast's (or topic send's) in-body unsubscribe link is already
+    // expanded to its real URL by now, so click tracking must skip it —
+    // wrapping the visible Unsubscribe link through /t/c would log a bogus
+    // click.
     const skipHrefPrefix =
-      email.contactId && deps.unsubscribe
+      (email.contactId || email.topicId) && deps.unsubscribe
         ? buildUnsubscribeUrl(deps.unsubscribe.baseUrl, "")
         : undefined;
     html = rewriteForTracking(html, {
@@ -250,7 +292,13 @@ export async function sendEmail(
     });
   }
 
-  const headers: Record<string, string> = { "X-MillionSend-Email-ID": email.id };
+  // Caller-supplied headers first: every transport-owned header assigned
+  // below wins on collision (reserved names are also rejected at accept —
+  // defense in depth).
+  const headers: Record<string, string> = {
+    ...email.headers,
+    "X-MillionSend-Email-ID": email.id,
+  };
   if (email.contactId) {
     if (!deps.unsubscribe) {
       // Throwing (before the claim) keeps the email queued and the job
@@ -268,6 +316,13 @@ export async function sendEmail(
         }),
       ),
     );
+  } else if (topicUnsubscribeToken && deps.unsubscribe) {
+    // Topic sends carry the same RFC 8058 one-click headers as broadcasts so
+    // the recipient can opt out of the topic without a global unsubscribe.
+    Object.assign(
+      headers,
+      buildUnsubscribeHeaders(deps.unsubscribe.baseUrl, topicUnsubscribeToken),
+    );
   }
   // Bulk-mail class signals (RFC 2919 List-Id, RFC 3834 Auto-Submitted, and
   // Precedence) so mailbox providers file broadcasts as list mail. Only for
@@ -278,6 +333,12 @@ export async function sendEmail(
     headers["Auto-Submitted"] = "auto-generated";
   }
 
+  // Sealed alongside the body columns; a corrupt blob throws and the job
+  // retries, mirroring a body decrypt failure.
+  const attachments = email.attachments
+    ? await openAttachments(email.attachments, deps.keyring)
+    : null;
+
   const mime = await buildRawMime({
     from: email.from,
     to: email.to,
@@ -286,7 +347,8 @@ export async function sendEmail(
     ...(email.replyTo ? { replyTo: email.replyTo } : {}),
     subject: email.subject,
     ...(html ? { html } : {}),
-    ...(body.text ? { text: body.text } : {}),
+    ...(text ? { text } : {}),
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
     headers,
   });
 
@@ -381,6 +443,7 @@ interface MimeInput {
   subject: string;
   html?: string;
   text?: string;
+  attachments?: EmailAttachment[];
   headers: Record<string, string>;
 }
 
@@ -395,6 +458,16 @@ async function buildRawMime(input: MimeInput): Promise<Buffer> {
     subject: input.subject,
     ...(input.html ? { html: input.html } : {}),
     ...(input.text ? { text: input.text } : {}),
+    ...(input.attachments
+      ? {
+          attachments: input.attachments.map((a) => ({
+            filename: a.filename,
+            content: a.content,
+            encoding: "base64" as const,
+            ...(a.contentType ? { contentType: a.contentType } : {}),
+          })),
+        }
+      : {}),
     headers: input.headers,
   });
   return info.message as Buffer;

@@ -151,6 +151,7 @@
     "count": "Contacts",
     "created": "Created",
     "menu": "Segment actions",
+    "manual": "Manual",
     "delete": "Delete",
     "empty": "No segments yet.",
     "emptyHint": "A segment is a saved filter over your contacts — aim a broadcast at just the contacts that match.",

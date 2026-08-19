@@ -224,6 +224,8 @@ export async function purgeExpiredEmailBodies(
       bodyIv: null,
       bodyWrappedDek: null,
       bodyKeyVersion: null,
+      // Attachments are content on the same retention clock as the body.
+      attachments: null,
       bodyPurgedAt: now,
     })
     .where(

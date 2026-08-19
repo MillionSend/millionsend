@@ -4,7 +4,12 @@ import type { SegmentFilter } from "@millionsend/db/schema";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SegmentFilterError, segmentFilterSchema, segmentWhere } from "../src/segment-filter.js";
+import {
+  SegmentFilterError,
+  segmentContactsWhere,
+  segmentFilterSchema,
+  segmentWhere,
+} from "../src/segment-filter.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -62,7 +67,7 @@ beforeAll(async () => {
 afterAll(() => close());
 
 /** Emails matching the filter within the seeded team, sorted. */
-async function matched(filter: SegmentFilter): Promise<string[]> {
+async function matched(filter: SegmentFilter | null): Promise<string[]> {
   const rows = await db
     .select({ email: schema.contacts.email })
     .from(schema.contacts)
@@ -194,6 +199,10 @@ describe("segmentWhere: match combination and empty", () => {
       "carol@example.com",
     ]);
   });
+
+  it("null filter (manual-membership-only segment) matches no contacts", async () => {
+    expect(await matched(null)).toEqual([]);
+  });
 });
 
 describe("segmentWhere: security (SQL injection)", () => {
@@ -293,5 +302,75 @@ describe("segmentFilterSchema / segmentWhere: validation", () => {
       segmentFilterSchema.safeParse(all({ field: "created_at", op: "after", value: "not-a-date" }))
         .success,
     ).toBe(false);
+  });
+});
+
+describe("segmentContactsWhere: resolution (filter OR manual membership)", () => {
+  /** Emails the segment resolves to within `team`, sorted. */
+  async function resolved(
+    segment: { id: string; filter: SegmentFilter | null },
+    team = teamId,
+  ): Promise<string[]> {
+    const rows = await db
+      .select({ email: schema.contacts.email })
+      .from(schema.contacts)
+      .where(and(eq(schema.contacts.teamId, team), segmentContactsWhere(schema.contacts, segment)));
+    return rows.map((r) => r.email).sort();
+  }
+
+  async function makeSegment(name: string, filter: SegmentFilter | null): Promise<string> {
+    const [row] = await db
+      .insert(schema.segments)
+      .values({ teamId, name, filter })
+      .returning({ id: schema.segments.id });
+    if (!row) throw new Error("segment insert failed");
+    return row.id;
+  }
+
+  async function addMember(segmentId: string, email: string): Promise<void> {
+    const [contact] = await db
+      .select({ id: schema.contacts.id })
+      .from(schema.contacts)
+      .where(and(eq(schema.contacts.teamId, teamId), eq(schema.contacts.email, email)));
+    if (!contact) throw new Error(`no contact ${email}`);
+    await db.insert(schema.segmentMembers).values({ segmentId, contactId: contact.id });
+  }
+
+  it("a null-filter segment resolves to its manual members only", async () => {
+    const id = await makeSegment("manual", null);
+    expect(await resolved({ id, filter: null })).toEqual([]);
+    await addMember(id, "carol@example.com");
+    expect(await resolved({ id, filter: null })).toEqual(["carol@example.com"]);
+  });
+
+  it("unions filter matches with manual members, without double counting", async () => {
+    const filter = all({ field: "property:plan", op: "equals", value: "pro" });
+    const id = await makeSegment("pro-plus", filter);
+    // alice matches the filter AND is a manual member; carol is member-only.
+    // A duplicate row for alice would show up twice in the sorted list.
+    await addMember(id, "alice@example.com");
+    await addMember(id, "carol@example.com");
+    expect(await resolved({ id, filter })).toEqual(["alice@example.com", "carol@example.com"]);
+  });
+
+  it("membership of one segment does not bleed into another", async () => {
+    const withMember = await makeSegment("has-member", null);
+    const empty = await makeSegment("empty", null);
+    await addMember(withMember, "bob@other.test");
+    expect(await resolved({ id: withMember, filter: null })).toEqual(["bob@other.test"]);
+    expect(await resolved({ id: empty, filter: null })).toEqual([]);
+  });
+
+  it("the OR stays parenthesized: team scoping still excludes other teams", async () => {
+    // Match-all filter → `(true or exists(...))`; if the OR leaked out of its
+    // parens, the team AND would only bind the left side and mallory (team B)
+    // would appear.
+    const filter = all();
+    const id = await makeSegment("everyone", filter);
+    expect(await resolved({ id, filter })).toEqual([
+      "alice@example.com",
+      "bob@other.test",
+      "carol@example.com",
+    ]);
   });
 });
