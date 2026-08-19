@@ -37,6 +37,7 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { bodyLimit } from "hono/body-limit";
+import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { secureHeaders } from "hono/secure-headers";
 import { registerApiKeyRoutes } from "./routes/api-keys.js";
@@ -1830,6 +1831,19 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     return c.json(errorBody(500, "internal_server_error", "An unexpected error occurred"), 500);
   });
 
+  // Wildcard CORS is safe here: auth is an explicit Authorization header
+  // (never cookies), so cross-origin pages can't ride ambient credentials.
+  // It's what lets the docs playground call the API from the browser.
+  // allowHeaders unset -> hono reflects Access-Control-Request-Headers.
+  app.use(
+    "*",
+    cors({
+      origin: "*",
+      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+      exposeHeaders: ["retry-after"],
+      maxAge: 86400,
+    }),
+  );
   app.use(
     "*",
     bodyLimit({
@@ -1845,6 +1859,16 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.doc("/openapi.json", {
     openapi: "3.1.0",
     info: { title: "MillionSend API", version: "1.0.0" },
+    // Servers drive the docs playground's target picker: Cloud first (docs
+    // convention), then a variable entry self-hosters point at their origin.
+    servers: [
+      { url: "https://api.millionsend.com", description: "MillionSend Cloud" },
+      {
+        url: "{baseUrl}",
+        description: "Self-hosted instance",
+        variables: { baseUrl: { default: "http://localhost:3001" } },
+      },
+    ],
   });
 
   // After-response request logging, authenticated requests only — an
