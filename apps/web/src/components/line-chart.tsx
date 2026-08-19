@@ -12,9 +12,10 @@ export interface LineChartSeries {
   area?: boolean;
 }
 
-/* Plot frame: full-bleed horizontally so the plot aligns with the card's
-   own padding; y labels sit inside above the gridlines, x labels below. */
-const PAD = { top: 12, right: 0, bottom: 24, left: 0 };
+/* Plot frame: the left edge is full-bleed so the plot starts on the card's
+   own padding; the right edge reserves a gutter sized to the widest y tick
+   label so the axis never overlaps the series. */
+const PAD = { top: 12, bottom: 24, left: 0 };
 /* Width one short-day x label needs — drives label thinning. */
 const X_LABEL_W = 46;
 
@@ -111,7 +112,6 @@ export function LineChart({
   }, []);
 
   const n = days.length;
-  const plotW = width - PAD.left - PAD.right;
   const plotH = height - PAD.top - PAD.bottom;
   const baseline = PAD.top + plotH;
 
@@ -120,6 +120,11 @@ export function LineChart({
   const step = Math.max(1, niceStep(peak / 4));
   const top = step * Math.ceil(peak / step);
   const ticks = Array.from({ length: Math.round(top / step) }, (_, i) => (i + 1) * step);
+
+  // Right gutter sized to the widest tick label (10px mono ≈ 6.2px/glyph).
+  const gutter = Math.ceil(8 + Math.max(...ticks.map((t) => formatValue(t).length)) * 6.2);
+  const plotW = width - PAD.left - gutter;
+  const plotEnd = PAD.left + plotW;
 
   const x = (i: number) => (n <= 1 ? PAD.left + plotW / 2 : PAD.left + (i * plotW) / (n - 1));
   const y = (v: number) => PAD.top + plotH * (1 - v / top);
@@ -159,7 +164,7 @@ export function LineChart({
                   <rect
                     x={left}
                     y={0}
-                    width={Math.min(width - left, pitch)}
+                    width={Math.min(plotEnd - left, pitch)}
                     height={baseline}
                     fill="var(--ms-panel-raised)"
                   />
@@ -170,15 +175,15 @@ export function LineChart({
             <g key={tick}>
               <line
                 x1={PAD.left}
-                x2={width - PAD.right}
+                x2={plotEnd}
                 y1={y(tick)}
                 y2={y(tick)}
                 stroke="var(--ms-line)"
                 strokeDasharray="3 4"
               />
               <text
-                x={width - 2}
-                y={y(tick) - 4}
+                x={width}
+                y={y(tick) + 3}
                 fontSize={10}
                 fontFamily="var(--ms-font-mono)"
                 fill="var(--ms-faint)"
@@ -190,7 +195,7 @@ export function LineChart({
           ))}
           <line
             x1={PAD.left}
-            x2={width - PAD.right}
+            x2={plotEnd}
             y1={baseline}
             y2={baseline}
             stroke="var(--ms-line-strong)"

@@ -156,7 +156,30 @@ function RateCard(props: {
         onPointerLeave={() => setHover(null)}
         onPointerCancel={() => setHover(null)}
       >
-        <div style={{ display: "flex", alignItems: "flex-end", gap: BAR_GAP, height: BAR_AREA }}>
+        {hover ? (
+          // Hovered-day column band (mirrors the line chart's): percent-based
+          // so it needs no measurement; the bars row is positioned to paint
+          // above it.
+          <span
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              left: `${(hover.index / props.bars.length) * 100}%`,
+              width: `${100 / props.bars.length}%`,
+              background: "var(--ms-panel-raised)",
+            }}
+          />
+        ) : null}
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "flex-end",
+            gap: BAR_GAP,
+            height: BAR_AREA,
+          }}
+        >
           {props.bars.map((bar, index) => (
             <span
               key={bar.day}
