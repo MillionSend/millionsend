@@ -160,7 +160,8 @@ function RateCard(props: {
               key={bar.day}
               style={{
                 width: BAR_W,
-                height: bar.height,
+                // 2px floor keeps zero days visible as a baseline stub.
+                height: Math.max(2, bar.height),
                 background: props.color,
                 opacity: hover?.index === index ? 1 : 0.85,
                 borderRadius: 1,

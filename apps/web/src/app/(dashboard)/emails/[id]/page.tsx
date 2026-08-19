@@ -348,7 +348,9 @@ export default function EmailDetailPage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("preview");
   const [drawer, setDrawer] = useState<"bounced" | "suppressed" | null>(null);
-  const [groupDrawer, setGroupDrawer] = useState<EventType | null>(null);
+  // Identifies an occurrence group by its first event's id — type alone is
+  // ambiguous now that each local day gets its own node per type.
+  const [groupDrawer, setGroupDrawer] = useState<string | null>(null);
 
   const query = useQuery(trpc.emails.get.queryOptions({ id }, { retry: false }));
   const sesEnv = useQuery(trpc.system.sesEnv.queryOptions());
@@ -390,18 +392,22 @@ export default function EmailDetailPage() {
     );
   }
 
-  // One node per event type, ordered by first occurrence: multi-recipient
-  // emails get one SES Delivery per recipient, and app-layer tracking repeats
-  // opened/clicked — the node represents its type's whole group (×N chip,
-  // latest timestamp, occurrences drawer).
+  // One node per (event type, viewer-local day), ordered by first occurrence:
+  // multi-recipient emails get one SES Delivery per recipient, and app-layer
+  // tracking repeats opened/clicked — same-day repeats collapse into the node
+  // (×N chip, latest timestamp, occurrences drawer), while a repeat on a
+  // later day starts a fresh node so long-lived engagement stays visible.
   type EmailEvent = (typeof email.events)[number];
+  const localDay = (at: string | Date) => new Date(at).toDateString();
   const groups: { type: EventType; first: EmailEvent; occurrences: EmailEvent[] }[] = [];
   for (const event of email.events) {
-    const group = groups.find((g) => g.type === event.type);
+    const group = groups.find(
+      (g) => g.type === event.type && localDay(g.first.occurredAt) === localDay(event.occurredAt),
+    );
     if (group) group.occurrences.push(event);
     else groups.push({ type: event.type as EventType, first: event, occurrences: [event] });
   }
-  // First occurrence per type — the masthead/stall derivations read these.
+  // First occurrence per group — the masthead/stall derivations read these.
   const events = groups.map((group) => group.first);
   // Ingestion off (no SNS topics) means nothing after the locally-recorded
   // "sent" can ever arrive — the timeline says so instead of silently stalling.
@@ -414,9 +420,10 @@ export default function EmailDetailPage() {
   // Anchor for the occurrences drawer's "+42 min" offsets — the actual send
   // moment when known, else creation (an email is never engaged before either).
   const sendAt = sentEvent?.occurredAt ?? email.sentAt ?? email.createdAt;
-  const groupOccurrences = groupDrawer
-    ? (groups.find((group) => group.type === groupDrawer)?.occurrences ?? [])
-    : [];
+  const openGroup = groupDrawer
+    ? groups.find((group) => group.first.id === groupDrawer)
+    : undefined;
+  const groupOccurrences = openGroup?.occurrences ?? [];
   const terminalEvent = [...events].reverse().find((event) => event.type === email.latestStatus);
   const lastBounce = [...events].reverse().find((event) => event.type === "bounced");
   const bounce = lastBounce ? bounceOf(lastBounce.data) : null;
@@ -735,7 +742,9 @@ export default function EmailDetailPage() {
                     <button
                       type="button"
                       style={{ ...cardStyle, color: "inherit", font: "inherit", cursor: "pointer" }}
-                      onClick={() => (opens === "group" ? setGroupDrawer(type) : setDrawer(opens))}
+                      onClick={() =>
+                        opens === "group" ? setGroupDrawer(first.id) : setDrawer(opens)
+                      }
                     >
                       {card}
                     </button>
@@ -1056,9 +1065,9 @@ export default function EmailDetailPage() {
         open={groupDrawer != null}
         onClose={() => setGroupDrawer(null)}
         title={
-          groupDrawer
+          openGroup
             ? t("occurrencesDrawer.title", {
-                label: eventLabel(groupDrawer),
+                label: eventLabel(openGroup.type),
                 count: groupOccurrences.length,
               })
             : ""
@@ -1070,7 +1079,7 @@ export default function EmailDetailPage() {
         <div style={{ display: "flex", flexDirection: "column" }}>
           {[...groupOccurrences].reverse().map((event, index) => {
             const sinceSend = new Date(event.occurredAt).getTime() - new Date(sendAt).getTime();
-            const link = groupDrawer === "clicked" ? clickOf(event.data)?.link : undefined;
+            const link = openGroup?.type === "clicked" ? clickOf(event.data)?.link : undefined;
             return (
               <div
                 key={event.id}

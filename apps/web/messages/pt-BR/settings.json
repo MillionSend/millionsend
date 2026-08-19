@@ -183,13 +183,13 @@
     "pt-BR": "Português (Brasil)"
   },
   "usage": {
-    "acceptedToday": "E-mails aceitos hoje",
+    "sentToday": "E-mails enviados hoje",
     "resetsMidnightUtc": "Reinicia à meia-noite UTC",
     "unlimited": "Ilimitado",
     "history": "Histórico diário",
     "empty": "0 dias registrados.",
     "day": "Dia",
-    "accepted": "Aceitos",
+    "sent": "Enviados",
     "delivered": "Entregues",
     "bounced": "Devolvidos",
     "complained": "Reclamações"

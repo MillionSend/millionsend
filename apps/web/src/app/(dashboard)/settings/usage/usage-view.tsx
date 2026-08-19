@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Odometer } from "@/components/odometer";
 import { Skeleton } from "@/components/skeleton";
 import { Table } from "@/components/table";
+import { formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
 /* Ring geometry — 40px face, 4px stroke, faint full-circle track. */
@@ -97,7 +98,7 @@ function HistoryHead() {
     <thead>
       <tr>
         <th>{t("day")}</th>
-        <th className="right">{t("accepted")}</th>
+        <th className="right">{t("sent")}</th>
         <th className="right">{t("delivered")}</th>
         <th className="right">{t("bounced")}</th>
         <th className="right">{t("complained")}</th>
@@ -128,16 +129,16 @@ function UsageSkeleton() {
         </div>
       </section>
 
-      <section className="ms-card" style={{ padding: 24 }}>
+      <section>
         <div className="ms-microlabel" style={{ marginBottom: 12 }}>
           {t("history")}
         </div>
-        <Table className="dense">
+        <Table>
           <HistoryHead />
           <tbody>
             {[0, 1, 2].map((row) => (
               <tr key={row}>
-                <td className="ms-mono">
+                <td>
                   <Skeleton width={80} height={13} />
                 </td>
                 {[0, 1, 2, 3].map((cell) => (
@@ -156,6 +157,7 @@ function UsageSkeleton() {
 
 export function UsageView() {
   const t = useTranslations("settings.usage");
+  const locale = useLocale();
   const trpc = useTRPC();
   const { data } = useQuery(trpc.settings.usage.recent.queryOptions({}));
   if (!data) return <UsageSkeleton />;
@@ -168,14 +170,14 @@ export function UsageView() {
         {/* The deployment's one real quota — the instance/plan daily cap.
             Self-host has none, reported honestly as unlimited. */}
         <QuotaRow
-          label={t("acceptedToday")}
+          label={t("sentToday")}
           hint={t("resetsMidnightUtc")}
           used={accepted}
           limit={limit}
         />
       </section>
 
-      <section className="ms-card" style={{ padding: 24 }}>
+      <section>
         <div className="ms-microlabel" style={{ marginBottom: 12 }}>
           {t("history")}
         </div>
@@ -184,14 +186,14 @@ export function UsageView() {
             {t("empty")}
           </p>
         ) : (
-          <Table className="dense">
+          <Table>
             <HistoryHead />
             <tbody>
               {data.rows.map((row) => (
                 <tr key={row.day}>
-                  {/* Raw UTC day key — locale date formatting would shift the
-                      day in negative-offset timezones. */}
-                  <td className="ms-mono">{row.day}</td>
+                  {/* formatDayUtc pins the label to the UTC day key — plain
+                      locale formatting would shift it in negative offsets. */}
+                  <td title={row.day}>{formatDayUtc(row.day, locale)}</td>
                   <td className="right ms-mono">{row.accepted}</td>
                   <td className="right ms-mono">{row.delivered}</td>
                   <td className="right ms-mono">{row.bounced}</td>
