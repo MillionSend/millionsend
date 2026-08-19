@@ -81,9 +81,11 @@ describe("official resend SDK: top-level /contacts", () => {
     expect(created.error).toBeNull();
     const id = created.data?.id ?? "";
     const fetched = await resend.contacts.get(id);
-    expect((fetched.data as unknown as { properties: Record<string, string> }).properties).toEqual({
-      plan: "pro",
-      seats: "2",
+    // Unregistered keys read as strings, wrapped in the SDK's
+    // ContactPropertyValue {type, value} shape.
+    expect(fetched.data?.properties).toEqual({
+      plan: { type: "string", value: "pro" },
+      seats: { type: "string", value: "2" },
     });
 
     const nested = await resend.contacts.create({
@@ -126,9 +128,7 @@ describe("official resend SDK: top-level /contacts", () => {
     });
     expect(withProps.error).toBeNull();
     const reread = await resend.contacts.get(contactId);
-    expect((reread.data as unknown as { properties: Record<string, string> }).properties).toEqual({
-      plan: "pro",
-    });
+    expect(reread.data?.properties).toEqual({ plan: { type: "string", value: "pro" } });
   });
 
   it("removes by bare id, then get 404s", async () => {

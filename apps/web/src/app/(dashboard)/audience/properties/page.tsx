@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ResourceApiButton } from "@/components/api-sheet";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
@@ -15,10 +16,13 @@ import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
+import { useUrlState } from "@/lib/url-state";
+import { ListFooter, PAGE_SIZES, SearchBox, StateCard } from "../../emails/list-parts";
 import { AudienceTabs } from "../audience-tabs";
 
 type DeleteTarget = { id: string; key: string };
 type Coverage = { contactCount: number; totalContacts: number };
+type PropertyType = "string" | "number";
 
 function PropertiesHead() {
   const t = useTranslations("audience.properties");
@@ -92,8 +96,24 @@ export default function PropertiesPage() {
   const defined = useQuery(trpc.audience.properties.defineList.queryOptions());
   const derived = useQuery(trpc.audience.properties.list.queryOptions());
 
+  const [search, setSearch] = useUrlState("q");
+  const [typeFilter, setTypeFilter] = useUrlState("type");
+  const [size, setSize] = useState<number>(PAGE_SIZES[1]);
+  const [pages, setPages] = useState(1);
+
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
+  const copyId = (id: string) => {
+    navigator.clipboard.writeText(id);
+    setCopiedId(id);
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopiedId(null), 1600);
+  };
+
   const [addOpen, setAddOpen] = useState(false);
   const [key, setKey] = useState("");
+  const [type, setType] = useState<PropertyType>("string");
   const [fallback, setFallback] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
@@ -121,11 +141,15 @@ export default function PropertiesPage() {
   const closeAdd = useCallback(() => setAddOpen(false), []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
 
+  // A number property's fallback must parse — mirrors the server's rule.
+  const fallbackInvalid =
+    type === "number" && fallback.trim() !== "" && !Number.isFinite(Number(fallback));
+
   const submitAdd = () => {
-    if (defineMutation.isPending || key.trim().length === 0) return;
+    if (defineMutation.isPending || key.trim().length === 0 || fallbackInvalid) return;
     defineMutation.mutate({
       key: key.trim(),
-      type: "string",
+      type,
       ...(fallback.trim() ? { fallbackValue: fallback.trim() } : {}),
     });
   };
@@ -138,10 +162,14 @@ export default function PropertiesPage() {
 
   const openAdd = (prefill = "") => {
     setKey(prefill);
+    setType("string");
     setFallback("");
     defineMutation.reset();
     setAddOpen(true);
   };
+
+  const typeLabel = (value: PropertyType) =>
+    value === "number" ? t("typeNumber") : t("typeString");
 
   // Coverage of the derived (in-use) keys, matched to definitions
   // case-insensitively; a key with no contact value simply has no entry.
@@ -161,7 +189,7 @@ export default function PropertiesPage() {
     [defined.data],
   );
   // Derived keys carrying real values but with no definition — a subtle row
-  // with a quick-define affordance.
+  // with a quick-define affordance. Hidden under a type filter (untyped).
   const undefinedInUse = useMemo(
     () => (derived.data ?? []).filter((p) => !definedKeys.has(p.key.toLowerCase())),
     [derived.data, definedKeys],
@@ -184,18 +212,58 @@ export default function PropertiesPage() {
   const definedRows = defined.data ?? [];
   const isEmpty = definedRows.length === 0 && undefinedInUse.length === 0;
 
+  const q = search.trim().toLowerCase();
+  const filteredDefined = definedRows.filter(
+    (row) => row.key.toLowerCase().includes(q) && (typeFilter === "" || row.type === typeFilter),
+  );
+  const filteredDerived =
+    typeFilter === "" ? undefinedInUse.filter((row) => row.key.toLowerCase().includes(q)) : [];
+  const shownDefined = filteredDefined.slice(0, pages * size);
+  const hasMore = filteredDefined.length > shownDefined.length;
+  const filtered = q !== "" || typeFilter !== "";
+  const noMatch = filteredDefined.length === 0 && filteredDerived.length === 0;
+
+  const changeSize = (next: number) => {
+    setSize(next);
+    setPages(1);
+  };
+  const clearFilters = () => {
+    setSearch("");
+    setTypeFilter("");
+  };
+
   return (
     <>
       <PageHeader
         title={t("title")}
         actions={
-          <button type="button" className="ms-btn ms-btn-primary" onClick={() => openAdd()}>
-            <PlusGlyph size={14} />
-            {t("add")}
-          </button>
+          <>
+            <button type="button" className="ms-btn ms-btn-primary" onClick={() => openAdd()}>
+              <PlusGlyph size={14} />
+              {t("add")}
+            </button>
+            <ResourceApiButton resource="contactProperties" />
+          </>
         }
       />
       <AudienceTabs />
+
+      <div
+        className="ms-filter-row"
+        style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
+      >
+        <SearchBox value={search} onChange={setSearch} placeholder={t("searchPlaceholder")} />
+        <Select
+          value={typeFilter}
+          onChange={setTypeFilter}
+          ariaLabel={t("type")}
+          options={[
+            { value: "", label: t("allTypes") },
+            { value: "string", label: t("typeString") },
+            { value: "number", label: t("typeNumber") },
+          ]}
+        />
+      </div>
 
       {defined.isPending ? (
         <PropertiesSkeleton />
@@ -230,80 +298,114 @@ export default function PropertiesPage() {
             </button>
           }
         />
+      ) : noMatch && filtered ? (
+        <StateCard
+          headline={t("noMatch")}
+          actionLabel={t("clearFilters")}
+          onAction={clearFilters}
+        />
       ) : (
-        <Table>
-          <PropertiesHead />
-          <tbody>
-            {definedRows.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <MonoKey text={row.key} />
-                </td>
-                <td style={{ color: "var(--ms-muted)", fontSize: 13 }}>
-                  {row.type === "string" ? t("typeString") : row.type}
-                </td>
-                <td>
-                  {row.fallbackValue ? (
-                    <span style={{ color: "var(--ms-muted)", fontSize: 13 }}>
-                      {row.fallbackValue}
+        <>
+          <Table>
+            <PropertiesHead />
+            <tbody>
+              {shownDefined.map((row) => (
+                <tr key={row.id}>
+                  <td>
+                    <MonoKey text={row.key} />
+                    {copiedId === row.id ? (
+                      <span style={{ marginLeft: 8, color: "var(--ms-muted)", fontSize: 12.5 }}>
+                        ✓ {common("copied")}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td style={{ color: "var(--ms-muted)", fontSize: 13 }}>{typeLabel(row.type)}</td>
+                  <td>
+                    {row.fallbackValue ? (
+                      <span style={{ color: "var(--ms-muted)", fontSize: 13 }}>
+                        {row.fallbackValue}
+                      </span>
+                    ) : (
+                      <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
+                    )}
+                  </td>
+                  <td className="right" style={{ color: "var(--ms-muted)" }}>
+                    {renderCoverage(coverageByKey.get(row.key.toLowerCase()))}
+                  </td>
+                  <td className="right" style={{ color: "var(--ms-muted)" }}>
+                    <RelativeTime date={row.createdAt} />
+                  </td>
+                  <td className="right" style={{ width: 40 }}>
+                    <PopoverMenu
+                      ariaLabel={t("menu")}
+                      items={[
+                        { label: t("copyId"), onSelect: () => copyId(row.id) },
+                        null,
+                        {
+                          label: t("delete"),
+                          danger: true,
+                          onSelect: () => setDeleteTarget({ id: row.id, key: row.key }),
+                        },
+                      ]}
+                    />
+                  </td>
+                </tr>
+              ))}
+              {filteredDerived.map((row) => (
+                <tr key={`derived-${row.key}`}>
+                  <td>
+                    <MonoKey text={row.key} />{" "}
+                    <span className="ms-badge ms-badge-neutral" style={{ marginLeft: 6 }}>
+                      {t("inUse")}
                     </span>
-                  ) : (
+                  </td>
+                  <td>
                     <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
-                  )}
-                </td>
-                <td className="right" style={{ color: "var(--ms-muted)" }}>
-                  {renderCoverage(coverageByKey.get(row.key.toLowerCase()))}
-                </td>
-                <td className="right" style={{ color: "var(--ms-muted)" }}>
-                  <RelativeTime date={row.createdAt} />
-                </td>
-                <td className="right" style={{ width: 40 }}>
-                  <PopoverMenu
-                    ariaLabel={t("menu")}
-                    items={[
-                      {
-                        label: t("delete"),
-                        danger: true,
-                        onSelect: () => setDeleteTarget({ id: row.id, key: row.key }),
-                      },
-                    ]}
-                  />
-                </td>
-              </tr>
-            ))}
-            {undefinedInUse.map((row) => (
-              <tr key={`derived-${row.key}`}>
-                <td>
-                  <MonoKey text={row.key} />{" "}
-                  <span className="ms-badge ms-badge-neutral" style={{ marginLeft: 6 }}>
-                    {t("inUse")}
-                  </span>
-                </td>
-                <td>
-                  <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
-                </td>
-                <td>
-                  <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
-                </td>
-                <td className="right" style={{ color: "var(--ms-muted)" }}>
-                  {renderCoverage(coverageByKey.get(row.key.toLowerCase()))}
-                </td>
-                <td className="right">
-                  <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
-                </td>
-                <td className="right" style={{ width: 40 }}>
-                  <button
-                    type="button"
-                    className="ms-btn ms-btn-secondary"
-                    onClick={() => openAdd(row.key)}
-                  >
-                    {t("define")}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+                  </td>
+                  <td>
+                    <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
+                  </td>
+                  <td className="right" style={{ color: "var(--ms-muted)" }}>
+                    {renderCoverage(coverageByKey.get(row.key.toLowerCase()))}
+                  </td>
+                  <td className="right">
+                    <span style={{ color: "var(--ms-faint)", fontSize: 13 }}>—</span>
+                  </td>
+                  <td className="right" style={{ width: 40 }}>
+                    <button
+                      type="button"
+                      className="ms-btn ms-btn-secondary"
+                      onClick={() => openAdd(row.key)}
+                    >
+                      {t("define")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {hasMore ? (
+            <div style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                onClick={() => setPages((prev) => prev + 1)}
+              >
+                {t("loadMore")}
+              </button>
+            </div>
+          ) : null}
+          <ListFooter
+            left={t("pageOf", {
+              pages: Math.max(1, Math.ceil(shownDefined.length / size)),
+              total: nf.format(filteredDefined.length),
+            })}
+            size={size}
+            onSize={changeSize}
+            sizeLabel={(value) => t("pageSize", { count: value })}
+            singlePage={!hasMore && pages === 1}
+          />
+        </>
       )}
 
       <Modal open={addOpen} onClose={closeAdd} onConfirm={submitAdd} title={t("addTitle")}>
@@ -327,29 +429,53 @@ export default function PropertiesPage() {
           </div>
           <div className="ms-field" style={{ marginTop: 14 }}>
             <label htmlFor="prop-type">{t("typeLabel")}</label>
-            {/* Only 'string' is defined today; the Select leaves room for more. */}
             <Select
               id="prop-type"
-              value="string"
-              onChange={() => undefined}
+              value={type}
+              onChange={(value) => setType(value === "number" ? "number" : "string")}
               ariaLabel={t("typeLabel")}
               width="100%"
               disabled={defineMutation.isPending}
-              options={[{ value: "string", label: t("typeString") }]}
+              options={[
+                { value: "string", label: t("typeString") },
+                { value: "number", label: t("typeNumber") },
+              ]}
             />
+            <p
+              style={{
+                margin: "6px 0 0",
+                color: "var(--ms-faint)",
+                fontSize: "var(--ms-fs-label)",
+              }}
+            >
+              {t("typeImmutable")}
+            </p>
           </div>
           <div className="ms-field" style={{ marginTop: 14 }}>
             <label htmlFor="prop-fallback">{t("fallbackLabel")}</label>
             <input
               id="prop-fallback"
-              className="ms-input"
+              className={`ms-input${fallbackInvalid ? " error" : ""}`}
               style={{ width: "100%" }}
-              placeholder={t("fallbackPlaceholder")}
+              placeholder={
+                type === "number" ? t("fallbackNumberPlaceholder") : t("fallbackPlaceholder")
+              }
               disabled={defineMutation.isPending}
               value={fallback}
               onChange={(event) => setFallback(event.target.value)}
             />
           </div>
+          {fallbackInvalid ? (
+            <p
+              style={{
+                margin: "10px 0 0",
+                color: "var(--ms-danger)",
+                fontSize: "var(--ms-fs-label)",
+              }}
+            >
+              {t("fallbackInvalidNumber")}
+            </p>
+          ) : null}
           {defineMutation.isError ? (
             <p
               style={{
@@ -368,7 +494,7 @@ export default function PropertiesPage() {
             <button
               type="submit"
               className="ms-btn ms-btn-primary"
-              disabled={defineMutation.isPending || key.trim().length === 0}
+              disabled={defineMutation.isPending || key.trim().length === 0 || fallbackInvalid}
             >
               <BtnSpinner on={defineMutation.isPending} />
               {t("addConfirm")} <ConfirmKeycap />

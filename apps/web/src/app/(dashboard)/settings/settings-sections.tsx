@@ -16,6 +16,7 @@ import type { AppLocale } from "@/i18n/request";
 import { TEAM_LOGO_ACCEPT, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
 import { removeTeamLogo, uploadTeamLogo } from "@/lib/team-logo-api";
 import { useTRPC } from "@/lib/trpc";
+import { ListFooter } from "../emails/list-parts";
 
 // Mirrors LOCALE_COOKIE in src/i18n/request.ts — that module reads
 // next/headers and cannot be imported from client components.
@@ -418,6 +419,10 @@ function PendingInvitations() {
           ))}
         </tbody>
       </Table>
+      <ListFooter
+        left={t("invitations.pending.pageOf", { pages: 1, total: invitations.length })}
+        singlePage
+      />
     </div>
   );
 }
@@ -478,6 +483,9 @@ function MembersSection() {
           </tbody>
         )}
       </Table>
+      {members ? (
+        <ListFooter left={t("members.pageOf", { pages: 1, total: members.length })} singlePage />
+      ) : null}
       {canManage ? <PendingInvitations /> : null}
       <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
     </SectionCard>

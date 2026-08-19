@@ -13,6 +13,7 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gt, gte, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
+import { isHexColor } from "@/lib/hex-color";
 import { isHttpUrl } from "@/lib/http-url";
 import { resolveBaseUrl } from "../auth";
 import { uploadsEnabled } from "../storage";
@@ -77,6 +78,16 @@ const nullableHttpUrl = z
   .transform((v) => (v === "" ? null : v))
   .nullable()
   .refine((v) => v === null || isHttpUrl(v), { message: "must be an http(s) URL" });
+
+// Strict 6-digit hex only: these values land in inline styles on the public
+// unsubscribe page, so this validation is a security boundary (a db CHECK
+// enforces the same shape as defense in depth).
+const nullableHexColor = z
+  .string()
+  .trim()
+  .transform((v) => (v === "" ? null : v))
+  .nullable()
+  .refine((v) => v === null || isHexColor(v), { message: "must be a #rrggbb hex color" });
 
 export const settingsRouter = router({
   team: router({
@@ -271,7 +282,12 @@ export const settingsRouter = router({
         .select({
           brandName: schema.teams.unsubscribeBrandName,
           message: schema.teams.unsubscribeMessage,
+          successMessage: schema.teams.unsubscribeSuccessMessage,
           redirectUrl: schema.teams.unsubscribeRedirectUrl,
+          backgroundColor: schema.teams.unsubscribeBackgroundColor,
+          textColor: schema.teams.unsubscribeTextColor,
+          accentColor: schema.teams.unsubscribeAccentColor,
+          hideBranding: schema.teams.unsubscribeHideBranding,
         })
         .from(schema.teams)
         .where(eq(schema.teams.id, ctx.teamId));
@@ -284,7 +300,12 @@ export const settingsRouter = router({
         z.object({
           brandName: nullableText(80),
           message: nullableText(500),
+          successMessage: nullableText(500),
           redirectUrl: nullableHttpUrl,
+          backgroundColor: nullableHexColor,
+          textColor: nullableHexColor,
+          accentColor: nullableHexColor,
+          hideBranding: z.boolean(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -294,7 +315,12 @@ export const settingsRouter = router({
           .set({
             unsubscribeBrandName: input.brandName,
             unsubscribeMessage: input.message,
+            unsubscribeSuccessMessage: input.successMessage,
             unsubscribeRedirectUrl: input.redirectUrl,
+            unsubscribeBackgroundColor: input.backgroundColor,
+            unsubscribeTextColor: input.textColor,
+            unsubscribeAccentColor: input.accentColor,
+            unsubscribeHideBranding: input.hideBranding,
           })
           .where(eq(schema.teams.id, ctx.teamId));
         return input;

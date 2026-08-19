@@ -43,7 +43,9 @@ import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { secureHeaders } from "hono/secure-headers";
 import { registerApiKeyRoutes } from "./routes/api-keys.js";
+import { registerContactPropertyRoutes } from "./routes/contact-properties.js";
 import { type DomainsSesDeps, registerDomainRoutes } from "./routes/domains.js";
+import { registerWebhookRoutes } from "./routes/webhooks.js";
 import {
   addContactSegmentResponseSchema,
   batchEmailRequestSchema,
@@ -196,18 +198,70 @@ function toAcceptPayload(body: SendEmailRequest, domainId: string): AcceptEmailP
   };
 }
 
+/** Registered property types by lower(key) — the registry index is
+ * case-insensitive, and contact map keys are matched the same way. */
+type ContactPropertyTypes = Map<string, "string" | "number">;
+
+async function loadContactPropertyTypes(db: Db, teamId: string): Promise<ContactPropertyTypes> {
+  const p = schema.contactProperties;
+  const rows = await db.select({ key: p.key, type: p.type }).from(p).where(eq(p.teamId, teamId));
+  return new Map(rows.map((r) => [r.key.toLowerCase(), r.type]));
+}
+
 /**
- * Coerces an incoming contact `properties` record to a flat string→string map
- * (Resend property values are strings): scalars pass through `String()`, null
- * clears a key (omitted). A nested object or array is invalid — returns null so
- * the caller answers 422 rather than silently storing structured JSON.
+ * The numeric reading of a property value, or null when it has none:
+ * String(value) must be non-blank and parse to a finite number (values are
+ * stored as text, so this is the shared write-validate/read-back rule).
  */
-function coerceContactProperties(input: Record<string, unknown>): Record<string, string> | null {
+export function numericPropertyValue(value: unknown): number | null {
+  const str = String(value).trim();
+  if (str === "") return null;
+  const num = Number(str);
+  return Number.isFinite(num) ? num : null;
+}
+
+/**
+ * Coerces an incoming contact `properties` record to the stored flat
+ * string→string map: scalars pass through `String()`, null clears a key
+ * (omitted). Invalid — for a precise 422 rather than silently storing bad
+ * data — are nested objects/arrays, and values for a key registered as
+ * 'number' that don't parse to a finite number.
+ */
+function coerceContactProperties(
+  input: Record<string, unknown>,
+  types: ContactPropertyTypes,
+): { ok: true; properties: Record<string, string> } | { ok: false; message: string } {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(input)) {
     if (value === null || value === undefined) continue;
-    if (typeof value === "object") return null;
+    if (typeof value === "object") {
+      return { ok: false, message: "contact properties must be flat string or number values" };
+    }
+    if (types.get(key.toLowerCase()) === "number" && numericPropertyValue(value) === null) {
+      return { ok: false, message: `property "${key}" must be a number` };
+    }
     out[key] = String(value);
+  }
+  return { ok: true, properties: out };
+}
+
+type WireContactPropertyValue =
+  | { type: "string"; value: string }
+  | { type: "number"; value: number };
+
+/**
+ * GET /contacts/{id} wire: each stored value wrapped as {type, value}, typed
+ * per the team's registry. Unregistered keys — and number-typed values that
+ * no longer parse (typed after the value was stored) — read as strings.
+ */
+function wireContactProperties(
+  map: Record<string, string>,
+  types: ContactPropertyTypes,
+): Record<string, WireContactPropertyValue> {
+  const out: Record<string, WireContactPropertyValue> = {};
+  for (const [key, value] of Object.entries(map)) {
+    const num = types.get(key.toLowerCase()) === "number" ? numericPropertyValue(value) : null;
+    out[key] = num === null ? { type: "string", value } : { type: "number", value: num };
   }
   return out;
 }
@@ -221,9 +275,11 @@ async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
  * The emails table encrypts content at rest; request logs must not become a
  * plaintext copy. Content-bearing fields lose their value before storage.
  * `token` is the one-time API-key secret (POST /api-keys) — logging it would
- * persist a credential that is deliberately never stored.
+ * persist a credential that is deliberately never stored. `signing_secret`
+ * (POST/GET /webhooks) is envelope-encrypted at rest; the log must not become
+ * a plaintext copy of it.
  */
-const REDACTED_REQUEST_FIELDS = ["html", "text", "attachments", "token"] as const;
+const REDACTED_REQUEST_FIELDS = ["html", "text", "attachments", "token", "signing_secret"] as const;
 
 function redactRequestBody(body: unknown): unknown {
   if (Array.isArray(body)) return body.map(redactRequestBody);
@@ -365,10 +421,13 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
   const findContact = async (teamId: string, idOrEmail: string) =>
     (await db.select().from(t).where(teamContactWhere(teamId, idOrEmail)))[0];
 
-  const contactDetailWire = (contact: typeof schema.contacts.$inferSelect) => ({
+  const contactDetailWire = (
+    contact: typeof schema.contacts.$inferSelect,
+    types: ContactPropertyTypes,
+  ) => ({
     ...contactListItem(contact),
     object: "contact" as const,
-    properties: contact.properties,
+    properties: wireContactProperties(contact.properties, types),
   });
 
   /**
@@ -423,16 +482,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
   ): Promise<CreateContactResult> => {
     let properties: Record<string, string> = {};
     if (body.properties !== undefined) {
-      const coerced = coerceContactProperties(body.properties);
-      if (coerced === null) {
-        return {
-          ok: false,
-          status: 422,
-          name: "validation_error",
-          message: "contact properties must be flat string values",
-        };
+      const coerced = coerceContactProperties(
+        body.properties,
+        await loadContactPropertyTypes(db, teamId),
+      );
+      if (!coerced.ok) {
+        return { ok: false, status: 422, name: "validation_error", message: coerced.message };
       }
-      properties = coerced;
+      properties = coerced.properties;
     }
     const segmentIds = [...new Set((body.segments ?? []).map((s) => s.id))];
     // A topic repeated in the payload: the last entry wins, matching the
@@ -523,12 +580,15 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
     teamId: string,
     idOrEmail: string,
     body: z.infer<typeof updateContactRequestSchema>,
-  ): Promise<"invalid_properties" | { id: string } | undefined> => {
+  ): Promise<{ invalid: string } | { id: string } | undefined> => {
     let properties: Record<string, string> | undefined;
     if (body.properties !== undefined) {
-      const coerced = coerceContactProperties(body.properties);
-      if (coerced === null) return "invalid_properties";
-      properties = coerced;
+      const coerced = coerceContactProperties(
+        body.properties,
+        await loadContactPropertyTypes(db, teamId),
+      );
+      if (!coerced.ok) return { invalid: coerced.message };
+      properties = coerced.properties;
     }
     // Read the flag before writing so the timeline records only real flips —
     // a PATCH restating the current state stays silent.
@@ -658,7 +718,10 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const auth = c.get("auth");
       const contact = await findContact(auth.teamId, c.req.valid("param").id);
       if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
-      return c.json(contactDetailWire(contact), 200);
+      return c.json(
+        contactDetailWire(contact, await loadContactPropertyTypes(db, auth.teamId)),
+        200,
+      );
     },
   );
 
@@ -682,11 +745,8 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
     async (c) => {
       const auth = c.get("auth");
       const row = await updateContactOp(auth.teamId, c.req.valid("param").id, c.req.valid("json"));
-      if (row === "invalid_properties") {
-        return c.json(
-          errorBody(422, "validation_error", "contact properties must be flat string values"),
-          422,
-        );
+      if (row && "invalid" in row) {
+        return c.json(errorBody(422, "validation_error", row.invalid), 422);
       }
       if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       return c.json({ object: "contact" as const, id: row.id }, 200);
@@ -946,7 +1006,10 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       }
       const contact = await findContact(auth.teamId, id);
       if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
-      return c.json(contactDetailWire(contact), 200);
+      return c.json(
+        contactDetailWire(contact, await loadContactPropertyTypes(db, auth.teamId)),
+        200,
+      );
     },
   );
 
@@ -974,11 +1037,8 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
         return c.json(errorBody(404, "not_found", "Audience not found"), 404);
       }
       const row = await updateContactOp(auth.teamId, id, c.req.valid("json"));
-      if (row === "invalid_properties") {
-        return c.json(
-          errorBody(422, "validation_error", "contact properties must be flat string values"),
-          422,
-        );
+      if (row && "invalid" in row) {
+        return c.json(errorBody(422, "validation_error", row.invalid), 422);
       }
       if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       return c.json({ object: "contact" as const, id: row.id }, 200);
@@ -2086,6 +2146,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.use("/audiences/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerContactRootRoutes(app, deps.db);
 
+  app.use("/contact-properties", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/contact-properties/*", requireApiKey, enforceRateLimit, requireFullAccess);
+  registerContactPropertyRoutes(app, deps.db);
+
   app.use("/segments", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/segments/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerSegmentRoutes(app, deps.db);
@@ -2105,6 +2169,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.use("/api-keys", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/api-keys/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerApiKeyRoutes(app, deps.db);
+
+  app.use("/webhooks", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/webhooks/*", requireApiKey, enforceRateLimit, requireFullAccess);
+  registerWebhookRoutes(app, deps.db, deps.keyring);
 
   const sendRoute = createRoute({
     method: "post",

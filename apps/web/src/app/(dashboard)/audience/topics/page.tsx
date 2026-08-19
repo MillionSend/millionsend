@@ -18,7 +18,7 @@ import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
-import { SearchBox } from "../../emails/list-parts";
+import { ListFooter, PAGE_SIZES, SearchBox, StateCard } from "../../emails/list-parts";
 import { AudienceTabs } from "../audience-tabs";
 
 type DeleteTarget = { id: string; name: string };
@@ -92,6 +92,8 @@ export default function TopicsPage() {
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [search, setSearch] = useUrlState("q");
+  const [size, setSize] = useState<number>(PAGE_SIZES[1]);
+  const [pages, setPages] = useState(1);
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -166,6 +168,16 @@ export default function TopicsPage() {
     }
   };
 
+  const q = search.trim().toLowerCase();
+  const filteredRows = (query.data ?? []).filter((row) => row.name.toLowerCase().includes(q));
+  const shownRows = filteredRows.slice(0, pages * size);
+  const hasMore = filteredRows.length > shownRows.length;
+
+  const changeSize = (next: number) => {
+    setSize(next);
+    setPages(1);
+  };
+
   return (
     <>
       <PageHeader
@@ -230,13 +242,18 @@ export default function TopicsPage() {
             </button>
           }
         />
+      ) : filteredRows.length === 0 ? (
+        <StateCard
+          headline={t("noMatch")}
+          actionLabel={t("clearFilters")}
+          onAction={() => setSearch("")}
+        />
       ) : (
-        <Table>
-          <TopicsHead />
-          <tbody>
-            {query.data
-              .filter((row) => row.name.toLowerCase().includes(search.trim().toLowerCase()))
-              .map((row) => (
+        <>
+          <Table>
+            <TopicsHead />
+            <tbody>
+              {shownRows.map((row) => (
                 <tr key={row.id}>
                   <td>
                     <div style={{ fontSize: 14, color: "var(--ms-bone)" }}>
@@ -282,6 +299,7 @@ export default function TopicsPage() {
                             }),
                         },
                         { label: t("copyId"), onSelect: () => copyId(row.id) },
+                        null,
                         {
                           label: t("delete"),
                           danger: true,
@@ -292,8 +310,30 @@ export default function TopicsPage() {
                   </td>
                 </tr>
               ))}
-          </tbody>
-        </Table>
+            </tbody>
+          </Table>
+          {hasMore ? (
+            <div style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                onClick={() => setPages((prev) => prev + 1)}
+              >
+                {t("loadMore")}
+              </button>
+            </div>
+          ) : null}
+          <ListFooter
+            left={t("pageOf", {
+              pages: Math.max(1, Math.ceil(shownRows.length / size)),
+              total: filteredRows.length,
+            })}
+            size={size}
+            onSize={changeSize}
+            sizeLabel={(value) => t("pageSize", { count: value })}
+            singlePage={!hasMore && pages === 1}
+          />
+        </>
       )}
 
       <Modal

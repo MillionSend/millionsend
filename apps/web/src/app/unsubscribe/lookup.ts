@@ -8,12 +8,19 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, or } from "drizzle-orm";
 import { z } from "zod";
+import { uploadsEnabled } from "@/server/storage";
 
 /** Per-team customization the hosted confirm page applies; all fields optional. */
 export interface UnsubscribeCustomization {
   brandName: string | null;
   message: string | null;
+  successMessage: string | null;
   redirectUrl: string | null;
+  /** Set only when the team opted in AND a servable logo exists. */
+  logoUrl: string | null;
+  backgroundColor: string | null;
+  textColor: string | null;
+  accentColor: string | null;
 }
 
 export interface UnsubscribeTarget {
@@ -104,7 +111,13 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
       unsubscribed: c.unsubscribed,
       brandName: tm.unsubscribeBrandName,
       message: tm.unsubscribeMessage,
+      successMessage: tm.unsubscribeSuccessMessage,
       redirectUrl: tm.unsubscribeRedirectUrl,
+      backgroundColor: tm.unsubscribeBackgroundColor,
+      textColor: tm.unsubscribeTextColor,
+      accentColor: tm.unsubscribeAccentColor,
+      hideBranding: tm.unsubscribeHideBranding,
+      logoUrl: tm.logoUrl,
     })
     .from(c)
     .innerJoin(tm, eq(tm.id, c.teamId))
@@ -115,7 +128,13 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
   const customization: UnsubscribeCustomization = {
     brandName: contact.brandName,
     message: contact.message,
+    successMessage: contact.successMessage,
     redirectUrl: contact.redirectUrl,
+    // Storage off ⇒ stored URLs may be dead; fall back to name/wordmark.
+    logoUrl: contact.hideBranding && uploadsEnabled() ? contact.logoUrl : null,
+    backgroundColor: contact.backgroundColor,
+    textColor: contact.textColor,
+    accentColor: contact.accentColor,
   };
 
   if (topicId === null) {

@@ -12,6 +12,7 @@
     "menu": "Key actions"
   },
   "neverUsed": "Never",
+  "pageOf": "Page 1 – {pages} of {total} API keys",
   "revoke": "Revoke",
   "scope": {
     "full": "Full access",

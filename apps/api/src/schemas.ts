@@ -5,6 +5,7 @@ import {
   parseScheduledAt,
   parseSingleSender,
   SCHEDULED_AT_FORMS,
+  WEBHOOK_EVENT_TYPES,
 } from "@millionsend/core";
 import { SES_REGIONS } from "@millionsend/ses";
 
@@ -331,10 +332,19 @@ const contactSchema = z.object({
   unsubscribed: z.boolean(),
 });
 
+// The SDK's GetContactResponseSuccess types each property as a {type, value}
+// wrapper (ContactPropertyValue): number for keys registered as 'number' in
+// the team's property definitions, string otherwise.
+const contactPropertyValueSchema = z.union([
+  z.object({ type: z.literal("string"), value: z.string() }),
+  z.object({ type: z.literal("number"), value: z.number() }),
+]);
+
 export const getContactResponseSchema = contactSchema
-  // `properties` is required by the SDK's GetContactResponseSuccess. Stored as
-  // a flat string→string map (Resend property values are strings).
-  .extend({ object: z.literal("contact"), properties: z.record(z.string(), z.string()) })
+  .extend({
+    object: z.literal("contact"),
+    properties: z.record(z.string(), contactPropertyValueSchema),
+  })
   .openapi("GetContactResponse");
 
 export const listContactsResponseSchema = z
@@ -355,6 +365,65 @@ export const addContactSegmentResponseSchema = z
 export const removeContactSegmentResponseSchema = z
   .object({ id: z.uuid(), audienceId: z.uuid(), deleted: z.literal(true) })
   .openapi("RemoveContactSegmentResponse");
+
+/**
+ * Contact properties (/contact-properties): typed definitions layered over
+ * the free-form contacts.properties map. Wire entity is ApiContactProperty:
+ * snake_case, fallback_value typed per `type`.
+ */
+
+const contactPropertyTypeSchema = z.enum(["string", "number"]);
+
+// fallback_value is cross-validated against `type` in the handler (a number
+// property only accepts values that parse to a finite number).
+export const createContactPropertyRequestSchema = z
+  .object({
+    key: z.string().trim().min(1).max(200),
+    type: contactPropertyTypeSchema,
+    fallback_value: z
+      .union([z.string().max(1000), z.number()])
+      .nullable()
+      .optional(),
+  })
+  .openapi("CreateContactPropertyRequest");
+
+// Only fallback_value is updatable — the SDK never sends key/type on update.
+export const updateContactPropertyRequestSchema = z
+  .object({
+    fallback_value: z
+      .union([z.string().max(1000), z.number()])
+      .nullable()
+      .optional(),
+  })
+  .openapi("UpdateContactPropertyRequest");
+
+const contactPropertyWireSchema = z.object({
+  id: z.uuid(),
+  created_at: z.string(),
+  key: z.string(),
+  type: contactPropertyTypeSchema,
+  fallback_value: z.union([z.string(), z.number()]).nullable(),
+});
+
+export const contactPropertyIdResponseSchema = z
+  .object({ object: z.literal("contact_property"), id: z.uuid() })
+  .openapi("ContactPropertyIdResponse");
+
+export const getContactPropertyResponseSchema = contactPropertyWireSchema
+  .extend({ object: z.literal("contact_property") })
+  .openapi("GetContactPropertyResponse");
+
+export const listContactPropertiesResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    data: z.array(contactPropertyWireSchema),
+    has_more: z.boolean(),
+  })
+  .openapi("ListContactPropertiesResponse");
+
+export const removeContactPropertyResponseSchema = z
+  .object({ object: z.literal("contact_property"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveContactPropertyResponse");
 
 /**
  * Broadcasts. Targeting is an optional segment_id and/or topic_id; neither
@@ -658,6 +727,78 @@ export const domainIdResponseSchema = z
 export const removeDomainResponseSchema = z
   .object({ object: z.literal("domain"), id: z.uuid(), deleted: z.literal(true) })
   .openapi("RemoveDomainResponse");
+
+/**
+ * Webhooks — wire-compatible with the resend SDK's webhooks surface: the
+ * endpoint URL field is `endpoint` (stored as webhook_endpoints.url), the
+ * signing secret is `signing_secret` (returned on create and get, never in
+ * list rows), and status only speaks enabled/disabled.
+ */
+
+// The SDK's WebhookEvent union is wider (contact.*, domain.*, …); only events
+// this platform actually emits are accepted — anything else is a loud 422
+// instead of a subscription that never fires.
+const webhookEventSchema = z.enum(WEBHOOK_EVENT_TYPES);
+
+const webhookWireStatusSchema = z.enum(["enabled", "disabled"]);
+
+// https-only, mirroring the dashboard: a webhook target receives signed
+// customer event data and must not travel plaintext.
+const webhookEndpointUrl = z
+  .url()
+  .max(2048)
+  .refine((value) => new URL(value).protocol === "https:", {
+    message: "endpoint must be an https:// URL",
+  });
+
+export const createWebhookRequestSchema = z
+  .object({
+    endpoint: webhookEndpointUrl,
+    events: z.array(webhookEventSchema).min(1),
+  })
+  .openapi("CreateWebhookRequest");
+
+export const updateWebhookRequestSchema = z
+  .object({
+    endpoint: webhookEndpointUrl.optional(),
+    events: z.array(webhookEventSchema).min(1).optional(),
+    status: webhookWireStatusSchema.optional(),
+  })
+  .openapi("UpdateWebhookRequest");
+
+// events is nullable on the wire: null = subscribed to every event type
+// (dashboard-created endpoints; the public API always writes an explicit list).
+const webhookListItemSchema = z.object({
+  id: z.uuid(),
+  endpoint: z.string(),
+  created_at: z.string(),
+  status: webhookWireStatusSchema,
+  events: z.array(z.string()).nullable(),
+});
+
+export const createWebhookResponseSchema = z
+  .object({ object: z.literal("webhook"), id: z.uuid(), signing_secret: z.string() })
+  .openapi("CreateWebhookResponse");
+
+export const getWebhookResponseSchema = webhookListItemSchema
+  .extend({ object: z.literal("webhook"), signing_secret: z.string() })
+  .openapi("GetWebhookResponse");
+
+export const listWebhooksResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    data: z.array(webhookListItemSchema),
+    has_more: z.boolean(),
+  })
+  .openapi("ListWebhooksResponse");
+
+export const webhookIdResponseSchema = z
+  .object({ object: z.literal("webhook"), id: z.uuid() })
+  .openapi("WebhookIdResponse");
+
+export const removeWebhookResponseSchema = z
+  .object({ object: z.literal("webhook"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveWebhookResponse");
 
 /** API keys — wire-compatible with the resend SDK's apiKeys surface. */
 

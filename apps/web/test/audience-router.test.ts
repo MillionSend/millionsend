@@ -368,6 +368,108 @@ describe("audience.contacts.segments", () => {
   });
 });
 
+describe("audience.contacts.addSegment / removeSegment", () => {
+  async function activityRows(contactId: string) {
+    return db
+      .select()
+      .from(schema.contactActivities)
+      .where(eq(schema.contactActivities.contactId, contactId));
+  }
+
+  it("joins and leaves idempotently, recording only real transitions", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: contactId } = await caller.audience.contacts.add({ email: "ada@x.com" });
+    const { id: segmentId } = await caller.segments.create({
+      name: "VIP",
+      filter: { match: "all", conditions: [] },
+    });
+
+    expect(await caller.audience.contacts.addSegment({ contactId, segmentId })).toEqual({
+      added: true,
+    });
+    expect((await caller.audience.contacts.segments({ contactId })).map((s) => s.name)).toEqual([
+      "VIP",
+    ]);
+    // Re-add: no-op, no duplicate timeline row.
+    expect(await caller.audience.contacts.addSegment({ contactId, segmentId })).toEqual({
+      added: false,
+    });
+
+    expect(await caller.audience.contacts.removeSegment({ contactId, segmentId })).toEqual({
+      removed: true,
+    });
+    expect(await caller.audience.contacts.segments({ contactId })).toEqual([]);
+    // Re-remove: no-op, no phantom timeline row.
+    expect(await caller.audience.contacts.removeSegment({ contactId, segmentId })).toEqual({
+      removed: false,
+    });
+
+    const rows = await activityRows(contactId);
+    const segmentRows = rows.filter((r) => r.type.startsWith("segment_"));
+    expect(segmentRows.map((r) => r.type).sort()).toEqual(["segment_added", "segment_removed"]);
+    // Both rows carry the name snapshot for the timeline.
+    expect(segmentRows.every((r) => r.data && (r.data as { name: string }).name === "VIP")).toBe(
+      true,
+    );
+  });
+
+  it("rejects a foreign contact and a foreign segment", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const a = callerFor(teamA);
+    const b = callerFor(teamB);
+    const { id: contactId } = await a.audience.contacts.add({ email: "ada@x.com" });
+    const { id: bSegment } = await b.segments.create({
+      name: "B-only",
+      filter: { match: "all", conditions: [] },
+    });
+
+    // B cannot touch A's contact at all.
+    await expect(
+      b.audience.contacts.addSegment({ contactId, segmentId: bSegment }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // A cannot write a membership into B's segment.
+    await expect(
+      a.audience.contacts.addSegment({ contactId, segmentId: bSegment }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      a.audience.contacts.removeSegment({ contactId, segmentId: bSegment }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await a.audience.contacts.segments({ contactId })).toEqual([]);
+  });
+});
+
+describe("audience.contacts.list segment names", () => {
+  it("carries each row's manual memberships, name-sorted; filter matches don't count", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: ada } = await caller.audience.contacts.add({ email: "ada@x.com" });
+    await caller.audience.contacts.add({ email: "bob@x.com" });
+
+    const { id: zeta } = await caller.segments.create({
+      name: "Zeta",
+      filter: { match: "all", conditions: [] },
+    });
+    const { id: alpha } = await caller.segments.create({
+      name: "Alpha",
+      filter: { match: "all", conditions: [] },
+    });
+    // A filter segment everyone matches — never a manual membership.
+    await caller.segments.create({
+      name: "Everyone",
+      filter: { match: "all", conditions: [{ field: "email", op: "ends_with", value: "@x.com" }] },
+    });
+    await caller.audience.contacts.addSegment({ contactId: ada, segmentId: zeta });
+    await caller.audience.contacts.addSegment({ contactId: ada, segmentId: alpha });
+
+    const { items } = await caller.audience.contacts.list({});
+    const byEmail = new Map(items.map((c) => [c.email, c.segments]));
+    expect(byEmail.get("ada@x.com")).toEqual(["Alpha", "Zeta"]);
+    expect(byEmail.get("bob@x.com")).toEqual([]);
+  });
+});
+
 describe("audience.contacts.activities", () => {
   it("returns the timeline newest first with the snapshot payload", async () => {
     const teamId = await createTeam(db, "team-a");
@@ -560,6 +662,24 @@ describe("audience.properties definitions", () => {
     await expect(caller.audience.properties.define({ key: "plan" })).rejects.toMatchObject({
       code: "CONFLICT",
     });
+  });
+
+  it("defines a number property, requiring a numeric fallback", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+
+    await expect(
+      caller.audience.properties.define({ key: "seats", type: "number", fallbackValue: "many" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    const { id } = await caller.audience.properties.define({
+      key: "seats",
+      type: "number",
+      fallbackValue: "2",
+    });
+    expect(await caller.audience.properties.defineList()).toMatchObject([
+      { id, key: "seats", type: "number", fallbackValue: "2" },
+    ]);
   });
 
   it("stores a hostile key as data, never executing it", async () => {

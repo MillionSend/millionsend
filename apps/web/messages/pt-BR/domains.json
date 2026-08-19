@@ -19,7 +19,9 @@
     "allStatuses": "Todos os status",
     "allRegions": "Todas as regiões",
     "rowDetails": "Detalhes do domínio",
-    "count": "{count, plural, =1 {1 domínio} other {# domínios}}",
+    "pageOf": "Página 1 – {pages} de {total} domínios",
+    "noMatch": "Nenhum domínio corresponde aos filtros.",
+    "clearFilters": "Limpar filtros",
     "summary": {
       "verified": "{count} verificado(s)",
       "pending": "{count} pendente(s)",

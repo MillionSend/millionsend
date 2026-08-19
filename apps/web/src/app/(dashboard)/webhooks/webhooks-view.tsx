@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
+import { ResourceApiButton } from "@/components/api-sheet";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { GroupedMultiSelect } from "@/components/grouped-multi-select";
@@ -23,6 +24,7 @@ import {
   WEBHOOK_EVENT_TYPES,
   type WebhookEventType,
 } from "@/lib/webhook-events";
+import { ListFooter, PAGE_SIZES } from "../emails/list-parts";
 import { WebhookStatusBadge } from "./webhook-status-badge";
 
 /** Shared dot + human-label option list for the event picker, derived from meta. */
@@ -144,6 +146,10 @@ export function WebhooksView() {
   const [selectedEvents, setSelectedEvents] = useState<WebhookEventType[]>([]);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; url: string } | null>(null);
+  // Client-side paging: the list query returns every endpoint (webhook counts
+  // are small); the footer only bounds what is rendered.
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
+  const [pages, setPages] = useState(1);
 
   const invalidateList = () =>
     queryClient.invalidateQueries({ queryKey: trpc.webhooks.list.queryKey() });
@@ -207,14 +213,17 @@ export function WebhooksView() {
       <PageHeader
         title={nav("webhooks")}
         actions={
-          <button
-            type="button"
-            className="ms-btn ms-btn-primary"
-            onClick={() => setCreateOpen(true)}
-          >
-            <PlusGlyph size={14} />
-            {t("addWebhook")}
-          </button>
+          <>
+            <button
+              type="button"
+              className="ms-btn ms-btn-primary"
+              onClick={() => setCreateOpen(true)}
+            >
+              <PlusGlyph size={14} />
+              {t("addWebhook")}
+            </button>
+            <ResourceApiButton resource="webhooks" />
+          </>
         }
       />
 
@@ -239,73 +248,99 @@ export function WebhooksView() {
       ) : null}
 
       {webhooks && webhooks.length > 0 ? (
-        <Table>
-          <thead>
-            <tr>
-              <th>{t("table.url")}</th>
-              <th>{t("table.events")}</th>
-              <th>{t("table.status")}</th>
-              <th>{t("table.successRate")}</th>
-              <th>{t("table.created")}</th>
-              <th className="right" aria-label={t("table.menu")} />
-            </tr>
-          </thead>
-          <tbody>
-            {webhooks.map((webhook) => (
-              <tr key={webhook.id}>
-                <td>
-                  <Link
-                    href={`/webhooks/${webhook.id}`}
-                    className="ms-mono"
-                    style={{
-                      color: "var(--ms-bone)",
-                      textDecoration: "underline",
-                      textUnderlineOffset: 3,
-                    }}
-                  >
-                    {webhook.url}
-                  </Link>
-                </td>
-                <td>
-                  <span className="ms-chip">
-                    {webhook.eventTypes === null || webhook.eventTypes.length === 0
-                      ? t("allEvents")
-                      : t("eventsCount", { count: webhook.eventTypes.length })}
-                  </span>
-                </td>
-                <td>
-                  <WebhookStatusBadge status={webhook.status} />
-                </td>
-                <td>
-                  <span className="ms-mono">
-                    {webhook.successRate === null ? "—" : `${webhook.successRate}%`}
-                  </span>
-                </td>
-                <td>
-                  <RelativeTime date={webhook.createdAt} />
-                </td>
-                <td className="right">
-                  <PopoverMenu
-                    ariaLabel={t("table.menu")}
-                    items={[
-                      {
-                        label: webhook.enabled ? t("disable") : t("enable"),
-                        onSelect: () =>
-                          updateMutation.mutate({ id: webhook.id, enabled: !webhook.enabled }),
-                      },
-                      null,
-                      {
-                        label: t("delete"),
-                        danger: true,
-                        onSelect: () => setDeleteTarget({ id: webhook.id, url: webhook.url }),
-                      },
-                    ]}
-                  />
-                </td>
+        <>
+          <Table>
+            <thead>
+              <tr>
+                <th>{t("table.url")}</th>
+                <th>{t("table.events")}</th>
+                <th>{t("table.status")}</th>
+                <th>{t("table.successRate")}</th>
+                <th>{t("table.created")}</th>
+                <th className="right" aria-label={t("table.menu")} />
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {webhooks.slice(0, pages * pageSize).map((webhook) => (
+                <tr key={webhook.id}>
+                  <td>
+                    <Link
+                      href={`/webhooks/${webhook.id}`}
+                      className="ms-mono"
+                      style={{
+                        color: "var(--ms-bone)",
+                        textDecoration: "underline",
+                        textUnderlineOffset: 3,
+                      }}
+                    >
+                      {webhook.url}
+                    </Link>
+                  </td>
+                  <td>
+                    <span className="ms-chip">
+                      {webhook.eventTypes === null || webhook.eventTypes.length === 0
+                        ? t("allEvents")
+                        : t("eventsCount", { count: webhook.eventTypes.length })}
+                    </span>
+                  </td>
+                  <td>
+                    <WebhookStatusBadge status={webhook.status} />
+                  </td>
+                  <td>
+                    <span className="ms-mono">
+                      {webhook.successRate === null ? "—" : `${webhook.successRate}%`}
+                    </span>
+                  </td>
+                  <td>
+                    <RelativeTime date={webhook.createdAt} />
+                  </td>
+                  <td className="right">
+                    <PopoverMenu
+                      ariaLabel={t("table.menu")}
+                      items={[
+                        {
+                          label: webhook.enabled ? t("disable") : t("enable"),
+                          onSelect: () =>
+                            updateMutation.mutate({ id: webhook.id, enabled: !webhook.enabled }),
+                        },
+                        null,
+                        {
+                          label: t("delete"),
+                          danger: true,
+                          onSelect: () => setDeleteTarget({ id: webhook.id, url: webhook.url }),
+                        },
+                      ]}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {webhooks.length > pages * pageSize ? (
+            <div style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                onClick={() => setPages((p) => p + 1)}
+              >
+                {t("loadMore")}
+              </button>
+            </div>
+          ) : null}
+          <ListFooter
+            left={t("pageOf", {
+              pages: Math.min(pages, Math.ceil(webhooks.length / pageSize)),
+              total: webhooks.length,
+            })}
+            size={pageSize}
+            onSize={(next) => {
+              setPageSize(next);
+              setPages(1);
+            }}
+            sizeLabel={(size) => t("pageSize", { count: size })}
+            singlePage={pages === 1 && webhooks.length <= pageSize}
+          />
+        </>
       ) : null}
 
       <Modal
