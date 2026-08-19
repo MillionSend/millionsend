@@ -183,13 +183,13 @@
     "pt-BR": "Português (Brasil)"
   },
   "usage": {
-    "acceptedToday": "Emails accepted today",
+    "sentToday": "Emails sent today",
     "resetsMidnightUtc": "Resets at midnight UTC",
     "unlimited": "Unlimited",
     "history": "Daily history",
     "empty": "0 days recorded.",
     "day": "Day",
-    "accepted": "Accepted",
+    "sent": "Sent",
     "delivered": "Delivered",
     "bounced": "Bounced",
     "complained": "Complained"
