@@ -20,6 +20,10 @@ export async function GET(_request: Request, ctx: { params: Promise<{ token: str
   // guard keeps a malformed destination from reaching Response.redirect.
   if (!parsed || !/^https?:\/\//i.test(parsed.url)) return new Response(null, { status: 404 });
 
-  await recordEngagement(getDb(), parsed.emailId, "clicked", enqueueWebhookDelivery);
+  // data mirrors the SES click payload shape ({ click: { link } }) so one
+  // extractor serves both ingestion paths on the email detail page.
+  await recordEngagement(getDb(), parsed.emailId, "clicked", enqueueWebhookDelivery, {
+    click: { link: parsed.url },
+  });
   return Response.redirect(parsed.url, 302);
 }

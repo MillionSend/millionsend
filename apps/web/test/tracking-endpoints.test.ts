@@ -61,6 +61,14 @@ async function counts(emailId: string, teamId: string, type: "opened" | "clicked
   return { events: events.length, counter: counter?.[type] ?? 0 };
 }
 
+/** Push every existing event of this type past the 60s damping window. */
+async function backdateEvents(emailId: string, type: "opened" | "clicked", ageMs: number) {
+  await db
+    .update(schema.emailEvents)
+    .set({ occurredAt: new Date(Date.now() - ageMs) })
+    .where(and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, type)));
+}
+
 describe("click endpoint /t/c", () => {
   it("records a unique click and 302s to the signed url", async () => {
     const { emailId, teamId } = await seedEmail();
@@ -72,10 +80,28 @@ describe("click endpoint /t/c", () => {
     expect(res.headers.get("location")).toBe(url);
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
 
-    // A second click on the same email is the same unique engagement.
+    // The event carries the signed destination in the SES click shape.
+    const [event] = await db
+      .select({ data: schema.emailEvents.data })
+      .from(schema.emailEvents)
+      .where(and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "clicked")));
+    expect(event?.data).toEqual({ click: { link: url } });
+
+    // A second click within the damping window is dropped entirely.
     const res2 = await clickGet(...req(token));
     expect(res2.status).toBe(302);
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+  });
+
+  it("records a repeat click after the damping window without advancing the counter", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = makeClickToken({ emailId, url: "https://shop.example.com/", secretKey });
+
+    await clickGet(...req(token));
+    await backdateEvents(emailId, "clicked", 120_000);
+    await clickGet(...req(token));
+
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 2, counter: 1 });
   });
 
   it("promotes the email status to clicked", async () => {
@@ -132,8 +158,24 @@ describe("open endpoint /t/o", () => {
     expect(body.subarray(0, 3).toString("ascii")).toBe("GIF");
     expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
 
+    // A proxy refetch seconds later is damped: no second event, no counter move.
     await openGet(...req(token));
     expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+  });
+
+  it("records a repeat open after the damping window without advancing the counter", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = makeOpenToken({ emailId, secretKey });
+
+    await openGet(...req(token));
+    await backdateEvents(emailId, "opened", 120_000);
+    await openGet(...req(token));
+
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 2, counter: 1 });
+
+    // Immediately after the repeat, a third hit is inside the window again.
+    await openGet(...req(token));
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 2, counter: 1 });
   });
 
   it("returns the gif silently for an invalid token and records nothing", async () => {

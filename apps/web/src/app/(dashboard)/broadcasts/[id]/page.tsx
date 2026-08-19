@@ -11,9 +11,10 @@ import { ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { StatBlock } from "@/components/stat-block";
 import { formatUtcMinute } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
-import { type BroadcastStatus, ContentPreview, StatBlock, StatusPill } from "../parts";
+import { type BroadcastStatus, ContentPreview, StatusPill } from "../parts";
 
 function Microlabel({ children }: { children: React.ReactNode }) {
   return (
