@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useDeferredValue, useMemo, useRef, useState } from "react";
+import { ResourceApiButton } from "@/components/api-sheet";
+import { ContactAvatar } from "@/components/contact-avatar";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { GrowthSparkline } from "@/components/growth-sparkline";
@@ -19,6 +21,7 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { StatBlock } from "@/components/stat-block";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
@@ -33,9 +36,8 @@ function ContactsHead() {
   return (
     <thead>
       <tr>
-        <th style={{ width: "34%" }}>{t("contacts.email")}</th>
-        <th style={{ width: "24%" }}>{t("contacts.name")}</th>
-        <th style={{ width: "15%" }}>{t("contacts.status")}</th>
+        <th style={{ width: "56%" }}>{t("contacts.email")}</th>
+        <th style={{ width: "17%" }}>{t("contacts.status")}</th>
         <th className="right">{t("contacts.added")}</th>
         <th className="right" />
       </tr>
@@ -43,7 +45,7 @@ function ContactsHead() {
   );
 }
 
-/** Mirrors the loaded contacts table: mono email, name, badge, time, action trigger. */
+/** Mirrors the loaded contacts table: avatar + mono email, badge, time, action trigger. */
 function ContactsSkeleton() {
   const widths = ["58%", "42%", "66%", "50%", "38%"];
   return (
@@ -54,10 +56,10 @@ function ContactsSkeleton() {
           // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows, position is identity
           <tr key={row}>
             <td>
-              <Skeleton width={width} height={13} />
-            </td>
-            <td>
-              <Skeleton width={widths[widths.length - 1 - row] ?? "50%"} />
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Skeleton width={24} height={24} radius="50%" />
+                <Skeleton width={width} height={13} />
+              </span>
             </td>
             <td>
               <SkeletonBadge width={82} />
@@ -278,6 +280,7 @@ export function AudienceContactsView() {
           <>
             <ExportCsvLink href={`/export/contacts${exportQs ? `?${exportQs}` : ""}`} />
             <AddContactsSplit onManual={() => setAddOpen(true)} onCsv={() => setImportOpen(true)} />
+            <ResourceApiButton resource="contacts" />
           </>
         }
       />
@@ -390,22 +393,63 @@ export function AudienceContactsView() {
               {items.map((row) => {
                 const name = [row.firstName, row.lastName].filter(Boolean).join(" ");
                 const detailHref = `/audience/contacts/${row.id}`;
+                const statusBadge = (
+                  <span
+                    className={`ms-badge ${row.unsubscribed ? "ms-badge-neutral" : "ms-badge-success"}`}
+                  >
+                    {row.unsubscribed ? t("contacts.unsubscribedBadge") : t("contacts.subscribed")}
+                    {!row.unsubscribed && row.topics.length > 1 ? (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          padding: "0 5px",
+                          borderRadius: 999,
+                          background: "color-mix(in srgb, var(--ms-success) 18%, transparent)",
+                          fontSize: "var(--ms-fs-micro)",
+                        }}
+                      >
+                        {row.topics.length}
+                      </span>
+                    ) : null}
+                  </span>
+                );
                 return (
                   <tr key={row.id} className="hoverable" onClick={() => router.push(detailHref)}>
-                    <td className="ms-mono" style={{ fontSize: 13 }}>
-                      <Link href={detailHref} onClick={(event) => event.stopPropagation()}>
-                        {row.email}
-                      </Link>
-                    </td>
-                    <td>{name || <span style={{ color: "var(--ms-faint)" }}>—</span>}</td>
                     <td>
-                      <span
-                        className={`ms-badge ${row.unsubscribed ? "ms-badge-neutral" : "ms-badge-success"}`}
-                      >
-                        {row.unsubscribed
-                          ? t("contacts.unsubscribedBadge")
-                          : t("contacts.subscribed")}
+                      <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                        <ContactAvatar email={row.email} name={name} size={24} />
+                        <Link
+                          className="ms-mono"
+                          style={{ fontSize: 13, flexShrink: 0 }}
+                          href={detailHref}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {row.email}
+                        </Link>
+                        {name ? (
+                          <span
+                            style={{
+                              color: "var(--ms-muted)",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {name}
+                          </span>
+                        ) : null}
                       </span>
+                    </td>
+                    <td>
+                      {!row.unsubscribed && row.topics.length > 1 ? (
+                        // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only guard so pinning the topics tooltip does not also trigger the row navigation
+                        // biome-ignore lint/a11y/noStaticElementInteractions: click containment only, the tooltip trigger inside stays the interactive element
+                        <span onClick={(event) => event.stopPropagation()}>
+                          <Tooltip text={row.topics.join("\n")}>{statusBadge}</Tooltip>
+                        </span>
+                      ) : (
+                        statusBadge
+                      )}
                     </td>
                     <td className="right" style={{ color: "var(--ms-muted)" }}>
                       <RelativeTime date={row.createdAt} />

@@ -38,5 +38,11 @@
     "title": "Revogar chave de API",
     "body": "Requisições usando {name} falham imediatamente.",
     "confirm": "Revogar chave"
+  },
+  "apiSheet": {
+    "title": "API de Chaves de API",
+    "list": "Listar chaves de API",
+    "create": "Criar chave de API",
+    "revoke": "Revogar chave de API"
   }
 }

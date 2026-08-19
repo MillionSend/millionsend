@@ -76,6 +76,9 @@ describe("official resend SDK: topics", () => {
       name: "Product updates",
       description: "New features and changes",
       default_subscription: "opt_in",
+      // Superset field the SDK's Topic type doesn't declare — it must ride
+      // along without breaking the SDK's parsing, defaulting to private.
+      visibility: "private",
       created_at: expect.any(String),
     });
   });

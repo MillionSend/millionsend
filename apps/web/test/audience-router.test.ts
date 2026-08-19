@@ -297,6 +297,112 @@ describe("audience.contacts.list filters", () => {
   });
 });
 
+describe("audience.contacts.list topic names", () => {
+  it("carries each row's opted-in topic names, name-sorted, from effective membership", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: ada } = await caller.audience.contacts.add({ email: "ada@x.com" });
+    const { id: bob } = await caller.audience.contacts.add({ email: "bob@x.com" });
+
+    // Opt-in "News": everyone by default; bob opts out.
+    const { id: news } = await caller.topics.create({ name: "News", defaultSubscribed: true });
+    await caller.audience.contacts.setTopic({ contactId: bob, topicId: news, subscribed: false });
+    // Opt-out "Beta": nobody by default; ada opts in.
+    const { id: beta } = await caller.topics.create({ name: "Beta", defaultSubscribed: false });
+    await caller.audience.contacts.setTopic({ contactId: ada, topicId: beta, subscribed: true });
+
+    const { items } = await caller.audience.contacts.list({});
+    const byEmail = new Map(items.map((c) => [c.email, c.topics]));
+    expect(byEmail.get("ada@x.com")).toEqual(["Beta", "News"]);
+    expect(byEmail.get("bob@x.com")).toEqual([]);
+  });
+
+  it("never borrows another team's topics", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    await callerFor(teamB).topics.create({ name: "B-only", defaultSubscribed: true });
+    const a = callerFor(teamA);
+    await a.audience.contacts.add({ email: "ada@x.com" });
+
+    const { items } = await a.audience.contacts.list({});
+    expect(items[0]?.topics).toEqual([]);
+  });
+});
+
+describe("audience.contacts.segments", () => {
+  it("lists only manual memberships, name-sorted and team-scoped", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: contactId } = await caller.audience.contacts.add({ email: "ada@x.com" });
+
+    const [zeta, alpha, unjoined] = await db
+      .insert(schema.segments)
+      .values([
+        { teamId, name: "Zeta" },
+        { teamId, name: "Alpha" },
+        // A filter segment the contact matches but was never manually added to.
+        {
+          teamId,
+          name: "Filtered",
+          filter: {
+            match: "all" as const,
+            conditions: [{ field: "email", op: "ends_with", value: "@x.com" }],
+          },
+        },
+      ])
+      .returning({ id: schema.segments.id });
+    if (!zeta || !alpha || !unjoined) throw new Error("seed failed");
+    await db.insert(schema.segmentMembers).values([
+      { segmentId: zeta.id, contactId },
+      { segmentId: alpha.id, contactId },
+    ]);
+
+    const rows = await caller.audience.contacts.segments({ contactId });
+    expect(rows.map((s) => s.name)).toEqual(["Alpha", "Zeta"]);
+
+    // Another team cannot read this contact's memberships.
+    const teamB = await createTeam(db, "team-b");
+    await expect(callerFor(teamB).audience.contacts.segments({ contactId })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+});
+
+describe("audience.contacts.activities", () => {
+  it("returns the timeline newest first with the snapshot payload", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    // Direct insert: contacts.add would write its own contact_created row and
+    // muddy the hand-seeded timeline below.
+    const [contact] = await db
+      .insert(schema.contacts)
+      .values({ teamId, email: "ada@x.com" })
+      .returning({ id: schema.contacts.id });
+    const contactId = contact?.id ?? "";
+
+    await db.insert(schema.contactActivities).values([
+      { teamId, contactId, type: "contact_created", createdAt: new Date("2026-01-01T00:00:00Z") },
+      {
+        teamId,
+        contactId,
+        type: "topic_opt_in",
+        data: { topicId: "t1", name: "News" },
+        createdAt: new Date("2026-01-02T00:00:00Z"),
+      },
+    ]);
+
+    const rows = await caller.audience.contacts.activities({ contactId });
+    expect(rows.map((a) => a.type)).toEqual(["topic_opt_in", "contact_created"]);
+    expect(rows[0]?.data).toEqual({ topicId: "t1", name: "News" });
+
+    // Another team cannot read this contact's timeline.
+    const teamB = await createTeam(db, "team-b");
+    await expect(
+      callerFor(teamB).audience.contacts.activities({ contactId }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
 describe("audience.contacts.update", () => {
   it("flips subscription state and clears names with empty strings", async () => {
     const teamId = await createTeam(db, "team-a");
@@ -541,6 +647,22 @@ describe("unsubscribe route", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("");
     expect((await contactRow(id))?.unsubscribed).toBe(true);
+  });
+
+  it("records the unsubscribe on the timeline once, one-click re-hits included", async () => {
+    const { id } = await seedContact();
+    const token = makeUnsubscribeToken({ contactId: id, secretKey });
+
+    await post(token);
+    // Scanner re-hit: state unchanged, so no duplicate timeline row.
+    await post(token);
+
+    const rows = await db
+      .select()
+      .from(schema.contactActivities)
+      .where(eq(schema.contactActivities.contactId, id));
+    // contact_created comes from contacts.add in seedContact.
+    expect(rows.map((r) => r.type).sort()).toEqual(["contact_created", "unsubscribed"]);
   });
 
   it("404s tampered, malformed, and unknown-contact tokens without flipping anything", async () => {

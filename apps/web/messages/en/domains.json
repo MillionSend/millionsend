@@ -162,5 +162,11 @@
     "deleteError": "Couldn't delete the domain. Try again."
   },
   "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code> — see <code>SELF_HOSTING.md</code>.",
-  "awsCredentialsCta": "Open SES setup"
+  "awsCredentialsCta": "Open SES setup",
+  "apiSheet": {
+    "title": "Domains API",
+    "list": "List domains",
+    "create": "Create domain",
+    "verify": "Verify domain"
+  }
 }

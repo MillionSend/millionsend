@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ResourceApiButton } from "@/components/api-sheet";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
@@ -242,17 +243,20 @@ export default function SegmentsPage() {
       <PageHeader
         title={t("title")}
         actions={
-          <button
-            type="button"
-            className="ms-btn ms-btn-primary"
-            onClick={() => {
-              createMutation.reset();
-              setCreateOpen(true);
-            }}
-          >
-            <PlusGlyph size={14} />
-            {t("create")}
-          </button>
+          <>
+            <button
+              type="button"
+              className="ms-btn ms-btn-primary"
+              onClick={() => {
+                createMutation.reset();
+                setCreateOpen(true);
+              }}
+            >
+              <PlusGlyph size={14} />
+              {t("create")}
+            </button>
+            <ResourceApiButton resource="segments" />
+          </>
         }
       />
       <AudienceTabs />

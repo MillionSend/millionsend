@@ -540,7 +540,7 @@ export default function EmailDetailPage() {
         <div>
           <Microlabel>{t("detail.id")}</Microlabel>
           <div style={{ marginTop: 4 }}>
-            <CopyChip value={email.id} display={`${email.id.slice(0, 23)}…`} />
+            <CopyChip value={email.id} />
           </div>
         </div>
         {email.to.length > 1 ? (

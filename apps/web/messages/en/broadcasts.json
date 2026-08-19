@@ -100,5 +100,11 @@
     "cancelBody": "\"{name}\" will not be sent.",
     "cancelConfirm": "Cancel send",
     "keep": "Keep it"
+  },
+  "apiSheet": {
+    "title": "Broadcasts API",
+    "list": "List broadcasts",
+    "create": "Create broadcast",
+    "send": "Send broadcast"
   }
 }

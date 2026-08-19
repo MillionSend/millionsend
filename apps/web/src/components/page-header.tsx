@@ -3,6 +3,7 @@ import Link from "next/link";
 export function PageHeader({
   title,
   subtitle,
+  eyebrow,
   breadcrumb,
   actions,
   leading,
@@ -10,6 +11,8 @@ export function PageHeader({
   title: string;
   /** Mono proof strip under the H1 — the resource's own numbers. */
   subtitle?: string;
+  /** Microlabel directly above the H1 naming the resource kind ("Contact"). */
+  eyebrow?: string;
   /** Breadcrumb row above the H1 ("Emails / Email details"). */
   breadcrumb?: React.ReactNode;
   actions?: React.ReactNode;
@@ -46,6 +49,11 @@ export function PageHeader({
           </span>
         ) : null}
         <div style={leading ? { flex: 1, minWidth: 0 } : undefined}>
+          {eyebrow ? (
+            <p className="ms-microlabel" style={{ margin: "0 0 4px", fontSize: 10.5 }}>
+              {eyebrow}
+            </p>
+          ) : null}
           <h1
             className="ms-display"
             // Erode 500 reads thin at title sizes; section titles carry 600.

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
+import { ResourceApiButton } from "@/components/api-sheet";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
@@ -137,7 +138,15 @@ export default function BroadcastsPage() {
 
   return (
     <>
-      <PageHeader title={t("list.title")} actions={<NewBroadcastButton />} />
+      <PageHeader
+        title={t("list.title")}
+        actions={
+          <>
+            <NewBroadcastButton />
+            <ResourceApiButton resource="broadcasts" />
+          </>
+        }
+      />
 
       {query.isPending ? (
         <BroadcastsSkeleton />

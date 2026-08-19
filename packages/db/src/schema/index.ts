@@ -4,6 +4,7 @@ export * from "./api-requests.js";
 export * from "./audit.js";
 export * from "./auth.js";
 export * from "./broadcasts.js";
+export * from "./contact-activities.js";
 export * from "./contact-properties.js";
 export * from "./contacts.js";
 export * from "./domains.js";

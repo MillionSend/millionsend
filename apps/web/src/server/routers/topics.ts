@@ -22,14 +22,18 @@ export function topicMembershipSql(
 }
 
 /** Guards a topicId belongs to the caller's team: NOT_FOUND otherwise. */
-export async function assertTopic(ctx: { db: Db; teamId: string }, topicId: string): Promise<void> {
+export async function assertTopic(
+  ctx: { db: Db; teamId: string },
+  topicId: string,
+): Promise<{ id: string; name: string; defaultSubscribed: boolean }> {
   const t = schema.topics;
   const [row] = await ctx.db
-    .select({ id: t.id })
+    .select({ id: t.id, name: t.name, defaultSubscribed: t.defaultSubscribed })
     .from(t)
     .where(and(eq(t.id, topicId), eq(t.teamId, ctx.teamId)))
     .limit(1);
   if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+  return row;
 }
 
 export const topicsRouter = router({
@@ -41,6 +45,7 @@ export const topicsRouter = router({
         name: t.name,
         description: t.description,
         defaultSubscribed: t.defaultSubscribed,
+        visibility: t.visibility,
         createdAt: t.createdAt,
       })
       .from(t)
@@ -57,6 +62,7 @@ export const topicsRouter = router({
         // Immutable after creation: opt-in (true) subscribes contacts unless
         // they opt out; opt-out (false) is the inverse. No update path.
         defaultSubscribed: z.boolean(),
+        visibility: z.enum(["private", "public"]).default("private"),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -68,9 +74,36 @@ export const topicsRouter = router({
           name: input.name,
           description: input.description || null,
           defaultSubscribed: input.defaultSubscribed,
+          visibility: input.visibility,
         })
         .returning({ id: t.id });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      return { id: row.id };
+    }),
+
+  // defaultSubscribed is deliberately absent: immutable after creation.
+  update: teamProcedure
+    .input(
+      z.object({
+        id: z.uuid(),
+        name: z.string().trim().min(1).max(200),
+        // "" clears the field — stored as null, never as an empty string.
+        description: z.string().trim().max(1000).optional(),
+        visibility: z.enum(["private", "public"]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const t = schema.topics;
+      const [row] = await ctx.db
+        .update(t)
+        .set({
+          name: input.name,
+          description: input.description || null,
+          visibility: input.visibility,
+        })
+        .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
+        .returning({ id: t.id });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       return { id: row.id };
     }),
 

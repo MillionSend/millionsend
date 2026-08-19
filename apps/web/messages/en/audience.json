@@ -56,7 +56,6 @@
     "addManually": "Add manually",
     "importCsv": "Import CSV",
     "email": "Email",
-    "name": "Name",
     "status": "Status",
     "added": "Added",
     "subscribed": "Subscribed",
@@ -93,9 +92,16 @@
     "importDone": "Done",
     "deleteTitle": "Delete contact",
     "deleteBody": "{email} is removed from your contacts.",
-    "deleteConfirm": "Delete contact"
+    "deleteConfirm": "Delete contact",
+    "apiSheet": {
+      "title": "Contacts API",
+      "list": "List contacts",
+      "create": "Create contact",
+      "update": "Update contact"
+    }
   },
   "detail": {
+    "eyebrow": "Contact",
     "email": "Email",
     "created": "Created",
     "status": "Status",
@@ -105,25 +111,44 @@
     "saveConfirm": "Save",
     "notFound": "Contact not found.",
     "properties": "Properties",
-    "noProperties": "No properties.",
+    "firstName": "First name",
+    "lastName": "Last name",
     "propKeyPlaceholder": "Key",
     "propValuePlaceholder": "Value",
     "addProperty": "Add property",
     "removeProperty": "Remove property",
+    "segments": "Segments",
+    "noSegments": "No segments",
     "topics": "Topics",
-    "noTopics": "No topics yet.",
-    "topicToggle": "Subscribed to {name}"
+    "noTopics": "No topics",
+    "topicsPlaceholder": "Add topics…",
+    "removeTopic": "Remove {name}",
+    "unsubscribeBody": "{email} stops receiving every email, including topics they opted in to.",
+    "activity": {
+      "title": "Activity",
+      "empty": "No activity yet.",
+      "contact_created": "Contact created",
+      "topic_opt_in": "Opted in to {name}",
+      "topic_opt_out": "Opted out of {name}",
+      "unsubscribed": "Unsubscribed",
+      "resubscribed": "Resubscribed",
+      "segment_added": "Added to segment {name}",
+      "segment_removed": "Removed from segment {name}"
+    }
   },
   "topics": {
     "title": "Audience",
     "create": "Create topic",
     "name": "Name",
     "default": "Default",
+    "visibility": "Visibility",
     "optIn": "Opt-in",
     "optOut": "Opt-out",
     "created": "Created",
     "menu": "Topic actions",
-    "delete": "Delete",
+    "delete": "Delete topic",
+    "copyId": "Copy ID",
+    "searchPlaceholder": "Search by name…",
     "empty": "No topics yet.",
     "emptyHint": "Topics let contacts subscribe to some of your emails and not others.",
     "loadError": "Could not load topics.",
@@ -138,11 +163,24 @@
     "defaultOptOut": "Opt-out",
     "defaultHint": "Opt-in: contacts are subscribed unless they opt out. Opt-out: contacts are unsubscribed until they opt in.",
     "defaultImmutable": "This can't be changed after the topic is created.",
+    "visibilityLabel": "Visibility",
+    "visibilityPrivate": "Private",
+    "visibilityPublic": "Public",
+    "visibilityTooltip": "Public topics appear on the hosted unsubscribe page, where contacts manage their subscriptions. Private topics don't.",
     "createConfirm": "Create",
     "createError": "Could not create the topic. Try again.",
+    "editTitle": "Edit topic",
+    "editConfirm": "Save",
+    "editError": "Could not update the topic. Try again.",
     "deleteTitle": "Delete topic",
     "deleteBody": "{name} is deleted, along with every contact's subscription to it. This cannot be undone.",
-    "deleteConfirm": "Delete topic"
+    "deleteConfirm": "Delete topic",
+    "apiSheet": {
+      "title": "Topics API",
+      "list": "List topics",
+      "create": "Create topic",
+      "update": "Update topic"
+    }
   },
   "segments": {
     "title": "Audience",
@@ -203,6 +241,12 @@
       "countError": "Could not count matches.",
       "save": "Save segment",
       "saveError": "Could not save the segment. Try again."
+    },
+    "apiSheet": {
+      "title": "Segments API",
+      "list": "List segments",
+      "create": "Create segment",
+      "addContact": "Add contact to segment"
     }
   }
 }

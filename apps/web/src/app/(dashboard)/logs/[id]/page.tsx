@@ -3,12 +3,12 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { CopyChip } from "@/components/copy-chip";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
-import { formatUtcTimestampMs } from "@/lib/format";
+import { formatDayTime, formatUtcTimestampMs } from "@/lib/format";
 import { statusCodeColor } from "@/lib/status-code-color";
 import { useTRPC } from "@/lib/trpc";
 
@@ -172,6 +172,7 @@ function LogDetailSkeleton() {
 export default function LogDetailPage() {
   const { id } = useParams<{ id: string }>();
   const t = useTranslations("logs");
+  const locale = useLocale();
   const trpc = useTRPC();
 
   const query = useQuery(trpc.logs.get.queryOptions({ id }, { retry: false }));
@@ -229,8 +230,10 @@ export default function LogDetailPage() {
         </div>
         <div>
           <Microlabel>{t("detail.when")}</Microlabel>
-          <div className="ms-mono" style={{ fontSize: 13, marginTop: 5 }}>
-            {formatUtcTimestampMs(log.createdAt)}
+          <div style={{ fontSize: 13, marginTop: 5 }}>
+            <span title={formatUtcTimestampMs(log.createdAt)}>
+              {formatDayTime(log.createdAt, locale)}
+            </span>
             <span style={{ color: "var(--ms-muted)", marginLeft: 10 }}>
               <RelativeTime date={log.createdAt} />
             </span>
@@ -239,7 +242,7 @@ export default function LogDetailPage() {
         <div>
           <Microlabel>{t("detail.id")}</Microlabel>
           <div style={{ marginTop: 4 }}>
-            <CopyChip value={log.id} display={`${log.id.slice(0, 23)}…`} />
+            <CopyChip value={log.id} />
           </div>
         </div>
       </div>

@@ -5,14 +5,30 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
+import { ChipMultiSelect } from "@/components/chip-multi-select";
+import { confirmDialog } from "@/components/confirm-dialog";
+import { ContactAvatar } from "@/components/contact-avatar";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
+import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { formatUtcMinute } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
+
+/* Types the timeline knows how to phrase; unknown kinds (added later than this
+   build) are skipped rather than crashing on a missing message key. */
+const ACTIVITY_TYPES = [
+  "contact_created",
+  "topic_opt_in",
+  "topic_opt_out",
+  "unsubscribed",
+  "resubscribed",
+  "segment_added",
+  "segment_removed",
+] as const;
+type KnownActivityType = (typeof ACTIVITY_TYPES)[number];
 
 function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -25,50 +41,25 @@ function MetaItem({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
-/** Zero-CSS toggle: an ARIA switch styled from tokens, on = success steel. */
-function TopicSwitch({
-  on,
-  label,
-  disabled,
-  onToggle,
-}: {
-  on: boolean;
-  label: string;
-  disabled: boolean;
-  onToggle: () => void;
-}) {
+function EmptyValue() {
+  return <span style={{ color: "var(--ms-faint)" }}>—</span>;
+}
+
+/** Wrapping row of name pills (segments / topics on the detail page). */
+function ChipList({ names, emptyLabel }: { names: string[]; emptyLabel: string }) {
+  if (names.length === 0) {
+    return (
+      <p style={{ margin: "8px 0 0", fontSize: 14, color: "var(--ms-muted)" }}>{emptyLabel}</p>
+    );
+  }
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onToggle}
-      style={{
-        flexShrink: 0,
-        width: 34,
-        height: 20,
-        padding: 2,
-        border: 0,
-        borderRadius: 999,
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.6 : 1,
-        background: on ? "var(--ms-success)" : "var(--ms-line-strong)",
-        transition: "background var(--ms-motion-fast, 120ms) ease",
-        display: "flex",
-        justifyContent: on ? "flex-end" : "flex-start",
-      }}
-    >
-      <span
-        style={{
-          width: 16,
-          height: 16,
-          borderRadius: "50%",
-          background: "var(--ms-bone)",
-        }}
-      />
-    </button>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+      {names.map((name) => (
+        <span key={name} className="ms-chip">
+          {name}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -83,6 +74,7 @@ export default function ContactDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editFirst, setEditFirst] = useState("");
   const [editLast, setEditLast] = useState("");
+  const [editTopics, setEditTopics] = useState<string[]>([]);
   const [editProps, setEditProps] = useState<{ key: string; value: string }[]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -111,14 +103,13 @@ export default function ContactDetailPage() {
   const topicsQuery = useQuery(
     trpc.audience.contacts.topics.queryOptions({ contactId }, { retry: false }),
   );
-  const setTopicMutation = useMutation(
-    trpc.audience.contacts.setTopic.mutationOptions({
-      onSuccess: () => queryClient.invalidateQueries(trpc.audience.contacts.topics.pathFilter()),
-    }),
+  const segmentsQuery = useQuery(
+    trpc.audience.contacts.segments.queryOptions({ contactId }, { retry: false }),
   );
-  const pendingTopicId = setTopicMutation.isPending
-    ? setTopicMutation.variables?.topicId
-    : undefined;
+  const activitiesQuery = useQuery(
+    trpc.audience.contacts.activities.queryOptions({ contactId }, { retry: false }),
+  );
+  const setTopicMutation = useMutation(trpc.audience.contacts.setTopic.mutationOptions());
 
   // Stable identities: Modal's focus effect depends on onClose.
   const closeEdit = useCallback(() => setEditOpen(false), []);
@@ -139,15 +130,43 @@ export default function ContactDetailPage() {
 
   const row = query.isSuccess ? query.data : null;
   const name = row ? [row.firstName, row.lastName].filter(Boolean).join(" ") : "";
+  const subscribedTopics = (topicsQuery.data ?? []).filter((topic) => topic.subscribed);
+  const saving = updateMutation.isPending || setTopicMutation.isPending;
 
-  const submitEdit = () => {
-    if (!row || updateMutation.isPending) return;
+  const openEdit = () => {
+    if (!row) return;
+    setEditFirst(row.firstName ?? "");
+    setEditLast(row.lastName ?? "");
+    setEditTopics(subscribedTopics.map((topic) => topic.id));
+    setEditProps(Object.entries(row.properties).map(([key, value]) => ({ key, value })));
+    setEditOpen(true);
+  };
+
+  const submitEdit = async () => {
+    if (!row || saving) return;
     // Rows with a blank key are dropped; a repeated key keeps its
     // last value. Sent as the full replacement map (update semantics).
     const properties: Record<string, string> = {};
     for (const { key, value } of editProps) {
       const k = key.trim();
       if (k) properties[k] = value;
+    }
+    // Topic diffs go through the existing per-topic upsert; only effective
+    // state that actually changed writes an override row.
+    const selected = new Set(editTopics);
+    const diffs = (topicsQuery.data ?? []).filter(
+      (topic) => topic.subscribed !== selected.has(topic.id),
+    );
+    try {
+      for (const topic of diffs) {
+        await setTopicMutation.mutateAsync({
+          contactId,
+          topicId: topic.id,
+          subscribed: selected.has(topic.id),
+        });
+      }
+    } catch {
+      return; // keep the dialog open; the mutation error stays visible
     }
     updateMutation.mutate({
       id: row.id,
@@ -157,9 +176,26 @@ export default function ContactDetailPage() {
     });
   };
 
+  const toggleSubscription = async () => {
+    if (!row || updateMutation.isPending) return;
+    if (!row.unsubscribed) {
+      const ok = await confirmDialog({
+        message: t("detail.unsubscribeBody", { email: row.email }),
+        confirmLabel: t("contacts.unsubscribe"),
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    updateMutation.mutate({ id: row.id, unsubscribed: !row.unsubscribed });
+  };
+
   const submitDelete = () => {
     if (row && !deleteMutation.isPending) deleteMutation.mutate({ id: row.id });
   };
+
+  const activities = (activitiesQuery.data ?? []).filter((a) =>
+    (ACTIVITY_TYPES as readonly string[]).includes(a.type),
+  );
 
   return (
     <>
@@ -171,21 +207,18 @@ export default function ContactDetailPage() {
               <CrumbEnd label={row.email} />
             </>
           }
+          eyebrow={t("detail.eyebrow")}
           title={row.email}
-          {...(name ? { subtitle: name } : {})}
+          leading={<ContactAvatar email={row.email} name={name} size={44} />}
           actions={
             <>
+              {/* Enabled only once topics resolve: the dialog seeds its chip list
+                  from them, and an empty seed would read as "opt out of all". */}
               <button
                 type="button"
                 className="ms-btn ms-btn-secondary"
-                onClick={() => {
-                  setEditFirst(row.firstName ?? "");
-                  setEditLast(row.lastName ?? "");
-                  setEditProps(
-                    Object.entries(row.properties).map(([key, value]) => ({ key, value })),
-                  );
-                  setEditOpen(true);
-                }}
+                disabled={!topicsQuery.isSuccess}
+                onClick={openEdit}
               >
                 {t("detail.edit")}
               </button>
@@ -193,9 +226,7 @@ export default function ContactDetailPage() {
                 type="button"
                 className="ms-btn ms-btn-secondary"
                 disabled={updateMutation.isPending}
-                onClick={() =>
-                  updateMutation.mutate({ id: row.id, unsubscribed: !row.unsubscribed })
-                }
+                onClick={() => void toggleSubscription()}
               >
                 <BtnSpinner on={updateMutation.isPending} />
                 {row.unsubscribed ? t("contacts.resubscribe") : t("contacts.unsubscribe")}
@@ -211,7 +242,7 @@ export default function ContactDetailPage() {
           }
         />
       ) : (
-        // Mirrors the loaded PageHeader's boxes (breadcrumb + H1 + actions).
+        // Mirrors the loaded PageHeader's boxes (breadcrumb + avatar + H1 + actions).
         <div
           style={{
             display: "flex",
@@ -225,12 +256,15 @@ export default function ContactDetailPage() {
             <div style={{ display: "flex", fontSize: 13, lineHeight: 1, marginBottom: 10 }}>
               <Skeleton width={200} height="1lh" />
             </div>
-            <h1
-              className="ms-display"
-              style={{ fontSize: "var(--ms-fs-h1)", fontWeight: 600, margin: 0, display: "flex" }}
-            >
-              <Skeleton width={300} height="1lh" />
-            </h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <Skeleton width={44} height={44} radius="50%" />
+              <h1
+                className="ms-display"
+                style={{ fontSize: "var(--ms-fs-h1)", fontWeight: 600, margin: 0, display: "flex" }}
+              >
+                <Skeleton width={300} height="1lh" />
+              </h1>
+            </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <Skeleton width={64} height={30} radius="var(--ms-r-input)" />
@@ -244,7 +278,7 @@ export default function ContactDetailPage() {
         className="ms-meta-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
           gap: 22,
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
@@ -255,7 +289,7 @@ export default function ContactDetailPage() {
           {row ? <CopyChip value={row.email} /> : <SkeletonChip width={180} />}
         </MetaItem>
         <MetaItem label={t("detail.created")}>
-          {row ? formatUtcMinute(row.createdAt) : <Skeleton width={130} height={14} />}
+          {row ? <RelativeTime date={row.createdAt} /> : <Skeleton width={130} height={14} />}
         </MetaItem>
         <MetaItem label={t("detail.status")}>
           {row ? (
@@ -269,12 +303,52 @@ export default function ContactDetailPage() {
           )}
         </MetaItem>
         <MetaItem label={t("detail.id")}>
-          {row ? (
-            <CopyChip value={row.id} display={`${row.id.slice(0, 8)}…`} title={row.id} />
-          ) : (
-            <SkeletonChip width={110} />
-          )}
+          {/* The chip's own overflow CSS end-ellipsizes only under real space pressure. */}
+          {row ? <CopyChip value={row.id} /> : <SkeletonChip width={110} />}
         </MetaItem>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 22,
+          padding: "20px 0",
+          borderBottom: "1px solid var(--ms-line)",
+        }}
+      >
+        <div>
+          <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
+            {t("detail.segments")}
+          </p>
+          {segmentsQuery.isSuccess ? (
+            <ChipList
+              names={segmentsQuery.data.map((s) => s.name)}
+              emptyLabel={t("detail.noSegments")}
+            />
+          ) : (
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <SkeletonChip width={90} />
+              <SkeletonChip width={70} />
+            </div>
+          )}
+        </div>
+        <div>
+          <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
+            {t("detail.topics")}
+          </p>
+          {topicsQuery.isSuccess ? (
+            <ChipList
+              names={subscribedTopics.map((topic) => topic.name)}
+              emptyLabel={t("detail.noTopics")}
+            />
+          ) : (
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <SkeletonChip width={90} />
+              <SkeletonChip width={70} />
+            </div>
+          )}
+        </div>
       </div>
 
       <div style={{ padding: "20px 0", borderBottom: "1px solid var(--ms-line)" }}>
@@ -282,34 +356,29 @@ export default function ContactDetailPage() {
           {t("detail.properties")}
         </p>
         {row ? (
-          Object.keys(row.properties).length === 0 ? (
-            <p style={{ margin: "8px 0 0", fontSize: 14, color: "var(--ms-muted)" }}>
-              {t("detail.noProperties")}
-            </p>
-          ) : (
-            <dl
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(120px, max-content) 1fr",
-                gap: "6px 22px",
-                margin: "10px 0 0",
-              }}
-            >
-              {Object.entries(row.properties).map(([key, value]) => (
-                <div key={key} style={{ display: "contents" }}>
-                  <dt style={{ fontSize: 14, color: "var(--ms-muted)" }}>{key}</dt>
-                  <dd style={{ margin: 0, fontSize: 14, color: "var(--ms-bone)" }}>{value}</dd>
-                </div>
-              ))}
-            </dl>
-          )
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+              gap: "16px 22px",
+              marginTop: 12,
+            }}
+          >
+            <MetaItem label={t("detail.firstName")}>{row.firstName || <EmptyValue />}</MetaItem>
+            <MetaItem label={t("detail.lastName")}>{row.lastName || <EmptyValue />}</MetaItem>
+            {Object.entries(row.properties).map(([key, value]) => (
+              <MetaItem key={key} label={key}>
+                {value || <EmptyValue />}
+              </MetaItem>
+            ))}
+          </div>
         ) : (
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(120px, max-content) 1fr",
-              gap: "6px 22px",
-              marginTop: 10,
+              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+              gap: "16px 22px",
+              marginTop: 12,
             }}
           >
             <Skeleton width={90} height={14} />
@@ -320,53 +389,90 @@ export default function ContactDetailPage() {
         )}
       </div>
 
-      <div style={{ padding: "20px 0", borderBottom: "1px solid var(--ms-line)" }}>
+      <div style={{ padding: "20px 0" }}>
         <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
-          {t("detail.topics")}
+          {t("detail.activity.title")}
         </p>
-        {row && topicsQuery.isSuccess ? (
-          topicsQuery.data.length === 0 ? (
+        {activitiesQuery.isSuccess ? (
+          activities.length === 0 ? (
             <p style={{ margin: "8px 0 0", fontSize: 14, color: "var(--ms-muted)" }}>
-              {t("detail.noTopics")}
+              {t("detail.activity.empty")}
             </p>
           ) : (
-            <div style={{ display: "grid", gap: 14, margin: "12px 0 0" }}>
-              {topicsQuery.data.map((topic) => (
-                <div key={topic.id} style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, color: "var(--ms-bone)" }}>{topic.name}</div>
-                    {topic.description ? (
-                      <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>
-                        {topic.description}
-                      </div>
-                    ) : null}
+            <div className="ms-card" style={{ marginTop: 12, padding: "8px 18px" }}>
+              {activities.map((activity, index) => {
+                const activityName =
+                  typeof activity.data?.name === "string" ? activity.data.name : "";
+                return (
+                  <div key={activity.id} style={{ display: "flex", gap: 12 }}>
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        width: 12,
+                        flex: "none",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 1,
+                          height: 14,
+                          flex: "none",
+                          background: index === 0 ? "transparent" : "var(--ms-line)",
+                        }}
+                      />
+                      <span
+                        style={{
+                          width: 7,
+                          height: 7,
+                          borderRadius: "50%",
+                          flex: "none",
+                          boxSizing: "border-box",
+                          ...(activity.type === "contact_created"
+                            ? { border: "1.5px solid var(--ms-line-strong)" }
+                            : { background: "var(--ms-line-strong)" }),
+                        }}
+                      />
+                      <span
+                        style={{
+                          width: 1,
+                          flex: 1,
+                          background:
+                            index === activities.length - 1 ? "transparent" : "var(--ms-line)",
+                        }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "baseline",
+                        gap: 12,
+                        padding: "8px 0 14px",
+                      }}
+                    >
+                      <span style={{ fontSize: 14, color: "var(--ms-bone)" }}>
+                        {t(`detail.activity.${activity.type as KnownActivityType}`, {
+                          name: activityName,
+                        })}
+                      </span>
+                      <span style={{ fontSize: 12.5, color: "var(--ms-muted)", flex: "none" }}>
+                        <RelativeTime date={activity.createdAt} />
+                      </span>
+                    </div>
                   </div>
-                  <TopicSwitch
-                    on={topic.subscribed}
-                    label={t("detail.topicToggle", { name: topic.name })}
-                    disabled={pendingTopicId === topic.id}
-                    onToggle={() =>
-                      setTopicMutation.mutate({
-                        contactId,
-                        topicId: topic.id,
-                        subscribed: !topic.subscribed,
-                      })
-                    }
-                  />
-                </div>
-              ))}
+                );
+              })}
             </div>
           )
         ) : (
-          <div style={{ display: "grid", gap: 14, margin: "12px 0 0" }}>
-            {[64, 48].map((w) => (
-              <div key={w} style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                <div style={{ flex: 1 }}>
-                  <Skeleton width={`${w + 40}px`} height={14} />
-                </div>
-                <Skeleton width={34} height={20} radius={999} />
-              </div>
-            ))}
+          <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+            <Skeleton width="55%" height={14} />
+            <Skeleton width="40%" height={14} />
           </div>
         )}
       </div>
@@ -374,13 +480,13 @@ export default function ContactDetailPage() {
       <Modal
         open={editOpen}
         onClose={closeEdit}
-        onConfirm={submitEdit}
+        onConfirm={() => void submitEdit()}
         title={t("detail.editTitle")}
       >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            submitEdit();
+            void submitEdit();
           }}
         >
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -390,7 +496,7 @@ export default function ContactDetailPage() {
                 id="edit-first"
                 className="ms-input"
                 style={{ width: "100%" }}
-                disabled={updateMutation.isPending}
+                disabled={saving}
                 value={editFirst}
                 onChange={(event) => setEditFirst(event.target.value)}
               />
@@ -401,11 +507,27 @@ export default function ContactDetailPage() {
                 id="edit-last"
                 className="ms-input"
                 style={{ width: "100%" }}
-                disabled={updateMutation.isPending}
+                disabled={saving}
                 value={editLast}
                 onChange={(event) => setEditLast(event.target.value)}
               />
             </div>
+          </div>
+          <div className="ms-field" style={{ marginTop: 14 }}>
+            <label htmlFor="edit-topics">{t("detail.topics")}</label>
+            <ChipMultiSelect
+              id="edit-topics"
+              value={editTopics}
+              onChange={setEditTopics}
+              options={(topicsQuery.data ?? []).map((topic) => ({
+                value: topic.id,
+                label: topic.name,
+              }))}
+              placeholder={t("detail.topicsPlaceholder")}
+              ariaLabel={t("detail.topics")}
+              removeLabel={(label) => t("detail.removeTopic", { name: label })}
+              disabled={saving}
+            />
           </div>
           <div style={{ marginTop: 18 }}>
             <p className="ms-microlabel" style={{ margin: "0 0 8px", fontSize: 10.5 }}>
@@ -421,7 +543,7 @@ export default function ContactDetailPage() {
                     className="ms-input"
                     style={{ flex: 1, minWidth: 0 }}
                     placeholder={t("detail.propKeyPlaceholder")}
-                    disabled={updateMutation.isPending}
+                    disabled={saving}
                     value={prop.key}
                     onChange={(event) =>
                       setEditProps((rows) =>
@@ -433,7 +555,7 @@ export default function ContactDetailPage() {
                     className="ms-input"
                     style={{ flex: 1, minWidth: 0 }}
                     placeholder={t("detail.propValuePlaceholder")}
-                    disabled={updateMutation.isPending}
+                    disabled={saving}
                     value={prop.value}
                     onChange={(event) =>
                       setEditProps((rows) =>
@@ -445,7 +567,7 @@ export default function ContactDetailPage() {
                     type="button"
                     className="ms-btn ms-btn-ghost"
                     aria-label={t("detail.removeProperty")}
-                    disabled={updateMutation.isPending}
+                    disabled={saving}
                     onClick={() => setEditProps((rows) => rows.filter((_, j) => j !== i))}
                   >
                     ✕
@@ -456,8 +578,9 @@ export default function ContactDetailPage() {
             <button
               type="button"
               className="ms-btn ms-btn-ghost"
-              style={{ marginTop: 8 }}
-              disabled={updateMutation.isPending}
+              // Zero side padding: the ghost label sits flush with the field column above.
+              style={{ marginTop: 8, paddingLeft: 0, paddingRight: 0 }}
+              disabled={saving}
               onClick={() => setEditProps((rows) => [...rows, { key: "", value: "" }])}
             >
               {t("detail.addProperty")}
@@ -467,12 +590,8 @@ export default function ContactDetailPage() {
             <button type="button" className="ms-btn ms-btn-secondary" onClick={closeEdit}>
               {common("cancel")} <span className="ms-keycap">Esc</span>
             </button>
-            <button
-              type="submit"
-              className="ms-btn ms-btn-primary"
-              disabled={updateMutation.isPending}
-            >
-              <BtnSpinner on={updateMutation.isPending} />
+            <button type="submit" className="ms-btn ms-btn-primary" disabled={saving}>
+              <BtnSpinner on={saving} />
               {t("detail.saveConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
