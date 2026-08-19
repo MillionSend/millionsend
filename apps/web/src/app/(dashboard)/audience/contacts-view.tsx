@@ -36,8 +36,9 @@ function ContactsHead() {
   return (
     <thead>
       <tr>
-        <th style={{ width: "56%" }}>{t("contacts.email")}</th>
-        <th style={{ width: "17%" }}>{t("contacts.status")}</th>
+        <th style={{ width: "40%" }}>{t("contacts.email")}</th>
+        <th style={{ width: "15%" }}>{t("contacts.status")}</th>
+        <th style={{ width: "22%" }}>{t("contacts.segments")}</th>
         <th className="right">{t("contacts.added")}</th>
         <th className="right" />
       </tr>
@@ -63,6 +64,9 @@ function ContactsSkeleton() {
             </td>
             <td>
               <SkeletonBadge width={82} />
+            </td>
+            <td>
+              <Skeleton width={70} />
             </td>
             <td className="right">
               <Skeleton width={48} />
@@ -449,6 +453,23 @@ export function AudienceContactsView() {
                         </span>
                       ) : (
                         statusBadge
+                      )}
+                    </td>
+                    <td>
+                      {row.segments.length > 0 ? (
+                        <span
+                          style={{
+                            display: "block",
+                            color: "var(--ms-muted)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {row.segments.join(", ")}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--ms-faint)" }}>—</span>
                       )}
                     </td>
                     <td className="right" style={{ color: "var(--ms-muted)" }}>

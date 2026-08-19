@@ -1,6 +1,10 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
+
+// Mirrors the Resend contact-property wire contract: type is exactly
+// 'string' | 'number'.
+export const contactPropertyTypeEnum = pgEnum("contact_property_type", ["string", "number"]);
 
 // Typed definitions layered over the free-form contacts.properties map: they
 // declare which keys exist, their type, and an optional fallback, independent
@@ -13,9 +17,8 @@ export const contactProperties = pgTable(
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
     key: text("key").notNull(),
-    // MVP defines only 'string'; the column stays so richer types can land
-    // later without a migration.
-    type: text("type").notNull().default("string"),
+    type: contactPropertyTypeEnum("type").notNull().default("string"),
+    // Stored as text even for 'number' properties; callers coerce per `type`.
     fallbackValue: text("fallback_value"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

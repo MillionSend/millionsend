@@ -20,6 +20,7 @@ import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { maskApiKey } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
+import { ListFooter } from "../emails/list-parts";
 
 /** Mirrors the loaded table: name, masked mono token, two relative times, menu column. */
 function KeysSkeleton() {
@@ -172,57 +173,64 @@ export function ApiKeysView() {
       ) : null}
 
       {keys && keys.length > 0 ? (
-        <Table>
-          <thead>
-            <tr>
-              <th>{t("table.name")}</th>
-              <th>{t("table.token")}</th>
-              <th>{t("table.lastUsed")}</th>
-              <th>{t("table.created")}</th>
-              <th className="right" aria-label={t("table.menu")} />
-            </tr>
-          </thead>
-          <tbody>
-            {keys.map((key) => (
-              <tr key={key.id}>
-                <td>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    {key.name}
-                    <span
-                      className={`ms-badge ms-badge-${
-                        key.permission === "sending_access" ? "info" : "neutral"
-                      }`}
-                    >
-                      {t(key.permission === "sending_access" ? "scope.sending" : "scope.full")}
-                    </span>
-                    {key.domainName ? (
-                      <span className="ms-badge ms-badge-neutral">{key.domainName}</span>
-                    ) : null}
-                  </span>
-                </td>
-                <td>
-                  <span className="ms-mono">{maskApiKey(key.tokenPrefix, key.last4)}</span>
-                </td>
-                <td>{key.lastUsedAt ? <RelativeTime date={key.lastUsedAt} /> : t("neverUsed")}</td>
-                <td>
-                  <RelativeTime date={key.createdAt} />
-                </td>
-                <td className="right">
-                  <PopoverMenu
-                    ariaLabel={t("table.menu")}
-                    items={[
-                      {
-                        label: t("revoke"),
-                        danger: true,
-                        onSelect: () => setRevokeTarget({ id: key.id, name: key.name }),
-                      },
-                    ]}
-                  />
-                </td>
+        <>
+          <Table>
+            <thead>
+              <tr>
+                <th>{t("table.name")}</th>
+                <th>{t("table.token")}</th>
+                <th>{t("table.lastUsed")}</th>
+                <th>{t("table.created")}</th>
+                <th className="right" aria-label={t("table.menu")} />
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {keys.map((key) => (
+                <tr key={key.id}>
+                  <td>
+                    <span
+                      style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+                    >
+                      {key.name}
+                      <span
+                        className={`ms-badge ms-badge-${
+                          key.permission === "sending_access" ? "info" : "neutral"
+                        }`}
+                      >
+                        {t(key.permission === "sending_access" ? "scope.sending" : "scope.full")}
+                      </span>
+                      {key.domainName ? (
+                        <span className="ms-badge ms-badge-neutral">{key.domainName}</span>
+                      ) : null}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="ms-mono">{maskApiKey(key.tokenPrefix, key.last4)}</span>
+                  </td>
+                  <td>
+                    {key.lastUsedAt ? <RelativeTime date={key.lastUsedAt} /> : t("neverUsed")}
+                  </td>
+                  <td>
+                    <RelativeTime date={key.createdAt} />
+                  </td>
+                  <td className="right">
+                    <PopoverMenu
+                      ariaLabel={t("table.menu")}
+                      items={[
+                        {
+                          label: t("revoke"),
+                          danger: true,
+                          onSelect: () => setRevokeTarget({ id: key.id, name: key.name }),
+                        },
+                      ]}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          <ListFooter left={t("pageOf", { pages: 1, total: keys.length })} singlePage />
+        </>
       ) : null}
 
       <Modal

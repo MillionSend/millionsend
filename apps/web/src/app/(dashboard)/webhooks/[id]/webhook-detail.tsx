@@ -15,9 +15,8 @@ import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { maskWebhookSecret, WEBHOOK_EVENT_META, type WebhookEventType } from "@/lib/webhook-events";
+import { ListFooter, PAGE_SIZES } from "../../emails/list-parts";
 import { DeliveryStatusBadge, WebhookStatusBadge } from "../webhook-status-badge";
-
-const DELIVERIES_PAGE_SIZE = 25;
 
 function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -201,12 +200,13 @@ export function WebhookDetail({ id }: { id: string }) {
   const queryClient = useQueryClient();
 
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [testSent, setTestSent] = useState(false);
 
   const webhook = useQuery(trpc.webhooks.get.queryOptions({ id }));
-  const deliveriesInput = { endpointId: id, offset: page * DELIVERIES_PAGE_SIZE };
+  const deliveriesInput = { endpointId: id, offset: page * pageSize, limit: pageSize };
   const deliveries = useQuery(
     trpc.webhooks.deliveries.list.queryOptions(deliveriesInput, { enabled: webhook.isSuccess }),
   );
@@ -320,7 +320,7 @@ export function WebhookDetail({ id }: { id: string }) {
   const data = webhook.data;
   const total = deliveries.data?.total ?? 0;
   const pageItems = deliveries.data?.items ?? [];
-  const lastPage = (page + 1) * DELIVERIES_PAGE_SIZE >= total;
+  const lastPage = (page + 1) * pageSize >= total;
 
   return (
     <>
@@ -505,7 +505,7 @@ export function WebhookDetail({ id }: { id: string }) {
                   ))}
                 </tbody>
               </Table>
-              {total > DELIVERIES_PAGE_SIZE ? (
+              {total > pageSize ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
                   <button
                     type="button"
@@ -529,15 +529,23 @@ export function WebhookDetail({ id }: { id: string }) {
                   >
                     {t("detail.next")}
                   </button>
-                  <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-muted)" }}>
-                    {t("detail.pageOf", {
-                      from: page * DELIVERIES_PAGE_SIZE + 1,
-                      to: Math.min((page + 1) * DELIVERIES_PAGE_SIZE, total),
-                      total,
-                    })}
-                  </span>
                 </div>
               ) : null}
+              <ListFooter
+                left={t("detail.pageOf", {
+                  from: page * pageSize + 1,
+                  to: Math.min((page + 1) * pageSize, total),
+                  total,
+                })}
+                size={pageSize}
+                onSize={(next) => {
+                  setExpandedId(null);
+                  setPage(0);
+                  setPageSize(next);
+                }}
+                sizeLabel={(size) => t("pageSize", { count: size })}
+                singlePage={page === 0 && total <= pageSize}
+              />
             </>
           )}
         </div>

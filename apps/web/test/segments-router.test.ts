@@ -4,7 +4,7 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildSegmentFilter } from "@/lib/segment-builder";
+import { buildSegmentFilter, filterToRows, sameFilter } from "@/lib/segment-builder";
 import { createCaller } from "@/server/routers";
 
 const TEST_KEK = Buffer.alloc(32, 7).toString("base64");
@@ -238,6 +238,72 @@ describe("builder produces a valid filter shape", () => {
       { field: "property:plan", op: "equals", value: "pro" },
       { field: "unsubscribed", op: "is_false", value: null },
     ]);
+  });
+
+  it("filterToRows/sameFilter round-trip a saved filter for the detail editor", () => {
+    const saved = filterOf("any", [
+      { field: "email", op: "ends_with", value: "@x.com" },
+      { field: "unsubscribed", op: "is_false", value: null },
+    ]);
+    const rows = filterToRows(saved);
+    expect(rows).toEqual([
+      { field: "email", op: "ends_with", value: "@x.com" },
+      { field: "unsubscribed", op: "is_false", value: "" },
+    ]);
+    const rebuilt = buildSegmentFilter("any", rows);
+    expect(rebuilt).toEqual(saved);
+    expect(sameFilter(rebuilt, saved)).toBe(true);
+    expect(sameFilter({ ...rebuilt, match: "all" }, saved)).toBe(false);
+    expect(sameFilter(buildSegmentFilter("any", rows.slice(0, 1)), saved)).toBe(false);
+    expect(filterToRows(null)).toEqual([]);
+  });
+});
+
+describe("segment counts include unsubscribed contacts", () => {
+  it("list batches contact + unsubscribed counts per segment; get matches", async () => {
+    const teamId = await createTeam(db, "team-unsub");
+    const caller = callerFor(teamId);
+    await insertContact(teamId, { email: "ada@x.com" });
+    await insertContact(teamId, { email: "bob@x.com", unsubscribed: true });
+    await insertContact(teamId, { email: "cyd@y.com", unsubscribed: true });
+
+    const { id: xId } = await caller.segments.create({
+      name: "x-domain",
+      filter: filterOf("all", [{ field: "email", op: "ends_with", value: "@x.com" }]),
+    });
+    const { id: allId } = await caller.segments.create({
+      name: "everyone",
+      filter: filterOf("all", []),
+    });
+    // Manual segment holding only the unsubscribed y-domain contact.
+    const [manual] = await db
+      .insert(schema.segments)
+      .values({ teamId, name: "hand-picked", filter: null })
+      .returning({ id: schema.segments.id });
+    if (!manual) throw new Error("segment insert failed");
+    const [cyd] = await db
+      .select({ id: schema.contacts.id })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.email, "cyd@y.com"));
+    if (!cyd) throw new Error("contact missing");
+    await db.insert(schema.segmentMembers).values({ segmentId: manual.id, contactId: cyd.id });
+
+    const byId = new Map((await caller.segments.list()).map((row) => [row.id, row]));
+    expect(byId.get(xId)).toMatchObject({ count: 2, unsubscribedCount: 1 });
+    expect(byId.get(allId)).toMatchObject({ count: 3, unsubscribedCount: 2 });
+    expect(byId.get(manual.id)).toMatchObject({ count: 1, unsubscribedCount: 1 });
+
+    const got = await caller.segments.get({ id: xId });
+    expect(got).toMatchObject({ count: 2, unsubscribedCount: 1 });
+  });
+
+  it("counts other teams' contacts in neither total", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    await insertContact(teamB, { email: "elsewhere@x.com", unsubscribed: true });
+    const a = callerFor(teamA);
+    const { id } = await a.segments.create({ name: "empty", filter: filterOf("all", []) });
+    expect(await a.segments.get({ id })).toMatchObject({ count: 0, unsubscribedCount: 0 });
   });
 });
 

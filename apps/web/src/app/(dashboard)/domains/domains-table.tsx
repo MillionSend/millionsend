@@ -21,6 +21,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
+import { ListFooter, StateCard } from "../emails/list-parts";
 import { AwsCredentialsBanner } from "./aws-credentials-banner";
 import { type DomainStatus, DomainStatusBadge } from "./domain-status";
 import { RegionLabel } from "./region-label";
@@ -221,78 +222,87 @@ export function DomainsView() {
             />
           </div>
 
-          <Table>
-            <thead>
-              <tr>
-                <th style={{ width: "36%" }}>{t("list.columns.domain")}</th>
-                <th style={{ width: "15%" }}>{t("list.columns.status")}</th>
-                <th>{t("list.columns.region")}</th>
-                <th className="right" style={{ width: "13%" }}>
-                  {t("list.columns.created")}
-                </th>
-              </tr>
-            </thead>
-            {domains.isPending ? (
-              <SkeletonRows />
-            ) : (
-              <tbody>
-                {filtered.map((domain) => (
-                  <tr key={domain.id}>
-                    <td className="ms-mono" style={{ fontSize: 13 }}>
-                      <Link href={`/domains/${domain.id}`}>{domain.name}</Link>
-                    </td>
-                    <td>
-                      <DomainStatusBadge status={domain.status as DomainStatus} />
-                    </td>
-                    <td style={{ color: "var(--ms-muted)" }}>
-                      <RegionLabel region={domain.region} />
-                    </td>
-                    <td className="right">
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 10,
-                          justifyContent: "flex-end",
-                        }}
-                      >
-                        <RelativeTime date={domain.createdAt} />
-                        <PopoverMenu
-                          ariaLabel={t("detail.moreActions")}
-                          items={[
-                            {
-                              label: t("list.rowDetails"),
-                              onSelect: () => router.push(`/domains/${domain.id}`),
-                            },
-                            null,
-                            {
-                              label: t("detail.deleteDomain"),
-                              danger: true,
-                              onSelect: () => {
-                                setConfirmText("");
-                                setDeleteTarget({ id: domain.id, name: domain.name });
-                              },
-                            },
-                          ]}
-                        />
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            )}
-          </Table>
-          {domains.isSuccess ? (
-            <div
-              style={{
-                marginTop: 14,
-                fontSize: 13,
-                color: "var(--ms-muted)",
+          {domains.isSuccess && filtered.length === 0 ? (
+            <StateCard
+              headline={t("list.noMatch")}
+              actionLabel={t("list.clearFilters")}
+              onAction={() => {
+                setSearch("");
+                setStatus("all");
+                setRegion("all");
               }}
-            >
-              {t("list.count", { count: filtered.length })}
-            </div>
-          ) : null}
+            />
+          ) : (
+            <>
+              <Table>
+                <thead>
+                  <tr>
+                    <th style={{ width: "36%" }}>{t("list.columns.domain")}</th>
+                    <th style={{ width: "15%" }}>{t("list.columns.status")}</th>
+                    <th>{t("list.columns.region")}</th>
+                    <th className="right" style={{ width: "13%" }}>
+                      {t("list.columns.created")}
+                    </th>
+                  </tr>
+                </thead>
+                {domains.isPending ? (
+                  <SkeletonRows />
+                ) : (
+                  <tbody>
+                    {filtered.map((domain) => (
+                      <tr key={domain.id}>
+                        <td className="ms-mono" style={{ fontSize: 13 }}>
+                          <Link href={`/domains/${domain.id}`}>{domain.name}</Link>
+                        </td>
+                        <td>
+                          <DomainStatusBadge status={domain.status as DomainStatus} />
+                        </td>
+                        <td style={{ color: "var(--ms-muted)" }}>
+                          <RegionLabel region={domain.region} />
+                        </td>
+                        <td className="right">
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 10,
+                              justifyContent: "flex-end",
+                            }}
+                          >
+                            <RelativeTime date={domain.createdAt} />
+                            <PopoverMenu
+                              ariaLabel={t("detail.moreActions")}
+                              items={[
+                                {
+                                  label: t("list.rowDetails"),
+                                  onSelect: () => router.push(`/domains/${domain.id}`),
+                                },
+                                null,
+                                {
+                                  label: t("detail.deleteDomain"),
+                                  danger: true,
+                                  onSelect: () => {
+                                    setConfirmText("");
+                                    setDeleteTarget({ id: domain.id, name: domain.name });
+                                  },
+                                },
+                              ]}
+                            />
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                )}
+              </Table>
+              {domains.isSuccess ? (
+                <ListFooter
+                  left={t("list.pageOf", { pages: 1, total: filtered.length })}
+                  singlePage
+                />
+              ) : null}
+            </>
+          )}
         </>
       )}
 

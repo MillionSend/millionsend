@@ -3,6 +3,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, sql } from "drizzle-orm";
+import { unionAll } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { isForeignKeyViolation } from "../db-errors";
 import { router, teamProcedure } from "../trpc";
@@ -81,18 +82,38 @@ export async function countMatching(
   return row?.count ?? 0;
 }
 
-/** Live count of the team's contacts a saved segment resolves to. */
-export async function countSegment(
+type SegmentCounts = { count: number; unsubscribedCount: number };
+
+/**
+ * Live contact + unsubscribed counts for saved segments in ONE round trip.
+ * Each segment's predicate differs, so a per-segment aggregate is UNION ALLed
+ * rather than issued as N separate count queries.
+ */
+async function countSegments(
   ctx: { db: Db; teamId: string },
-  segment: { id: string; filter: SegmentFilter },
-): Promise<number> {
+  segments: { id: string; filter: SegmentFilter }[],
+): Promise<Map<string, SegmentCounts>> {
   const c = schema.contacts;
-  const [row] = await ctx.db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(c)
-    .where(and(eq(c.teamId, ctx.teamId), savedSegmentPredicate(segment)));
-  return row?.count ?? 0;
+  const selects = segments.map((segment) =>
+    ctx.db
+      .select({
+        // Cast the bound id: Postgres cannot infer a type for a bare
+        // parameter that only appears in a select list.
+        id: sql<string>`${segment.id}::text`.as("segment_id"),
+        count: sql<number>`count(*)::int`.as("contact_count"),
+        unsubscribedCount: sql<number>`count(*) filter (where ${c.unsubscribed})::int`.as(
+          "unsubscribed_count",
+        ),
+      })
+      .from(c)
+      .where(and(eq(c.teamId, ctx.teamId), savedSegmentPredicate(segment))),
+  );
+  const [first, second, ...rest] = selects;
+  const rows = !first ? [] : !second ? await first : await unionAll(first, second, ...rest);
+  return new Map(rows.map(({ id, ...counts }) => [id, counts]));
 }
+
+const zeroCounts: SegmentCounts = { count: 0, unsubscribedCount: 0 };
 
 export const segmentsRouter = router({
   list: teamProcedure.query(async ({ ctx }) => {
@@ -107,19 +128,14 @@ export const segmentsRouter = router({
       .from(s)
       .where(eq(s.teamId, ctx.teamId))
       .orderBy(desc(s.createdAt), desc(s.id));
-    // Live count reuses the shared resolver per row. Segments are few per
-    // team, so a per-row aggregate beats materializing membership.
-    return Promise.all(
-      rows.map(async (row) => ({
-        ...row,
-        count: await countSegment(ctx, row),
-      })),
-    );
+    const counts = await countSegments(ctx, rows);
+    return rows.map((row) => ({ ...row, ...(counts.get(row.id) ?? zeroCounts) }));
   }),
 
   get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
     const row = await assertSegment(ctx, input.id);
-    return { ...row, count: await countSegment(ctx, row) };
+    const counts = await countSegments(ctx, [row]);
+    return { ...row, ...(counts.get(row.id) ?? zeroCounts) };
   }),
 
   create: teamProcedure

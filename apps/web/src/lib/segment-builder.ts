@@ -94,3 +94,27 @@ export function buildSegmentFilter(match: MatchMode, rows: BuilderRow[]): Segmen
     })),
   };
 }
+
+/** A saved filter's wire conditions back to editable builder rows (null value → empty input). */
+export function filterToRows(filter: SegmentFilterDraft | null): BuilderRow[] {
+  return (filter?.conditions ?? []).map((c) => ({
+    field: c.field,
+    op: c.op,
+    value: c.value ?? "",
+  }));
+}
+
+/**
+ * Structural equality of two filter drafts. jsonb round-trips reorder object
+ * keys, so comparing JSON.stringify output against a saved filter is unreliable.
+ */
+export function sameFilter(a: SegmentFilterDraft, b: SegmentFilterDraft): boolean {
+  return (
+    a.match === b.match &&
+    a.conditions.length === b.conditions.length &&
+    a.conditions.every((c, i) => {
+      const d = b.conditions[i];
+      return d !== undefined && d.field === c.field && d.op === c.op && d.value === c.value;
+    })
+  );
+}

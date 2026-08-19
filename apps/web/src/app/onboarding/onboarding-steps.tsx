@@ -2,12 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { BtnSpinner } from "@/components/spinner";
 import { StatusBadge } from "@/components/status-badge";
 import { jsSingleQuote, shellSingleQuote } from "@/lib/escape";
-import { formatUtcMinute, maskApiKey } from "@/lib/format";
+import { formatDayTime, formatUtcTimestamp, maskApiKey } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
@@ -255,6 +255,7 @@ export function OnboardingSteps({
 }) {
   const t = useTranslations("onboarding");
   const common = useTranslations("common");
+  const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
@@ -442,8 +443,11 @@ export function OnboardingSteps({
                 {t("success.keyAdded")}
               </span>
               {bankedKey ? (
-                <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-faint)" }}>
-                  {formatUtcMinute(bankedKey.createdAt)}
+                <span
+                  style={{ fontSize: 11, color: "var(--ms-faint)" }}
+                  title={formatUtcTimestamp(bankedKey.createdAt)}
+                >
+                  {formatDayTime(bankedKey.createdAt, locale)}
                 </span>
               ) : null}
             </div>
@@ -477,8 +481,11 @@ export function OnboardingSteps({
                 </span>
               )}
               {firstEmail ? (
-                <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-faint)" }}>
-                  {formatUtcMinute(firstEmail.createdAt)}
+                <span
+                  style={{ fontSize: 11, color: "var(--ms-faint)" }}
+                  title={formatUtcTimestamp(firstEmail.createdAt)}
+                >
+                  {formatDayTime(firstEmail.createdAt, locale)}
                 </span>
               ) : null}
             </div>
@@ -586,8 +593,11 @@ export function OnboardingSteps({
                 <span style={{ fontSize: 14, color: "var(--ms-muted)" }}>
                   {t("accountCreated")}
                 </span>
-                <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-faint)" }}>
-                  {formatUtcMinute(accountCreatedAt)}
+                <span
+                  style={{ fontSize: 11, color: "var(--ms-faint)" }}
+                  title={formatUtcTimestamp(accountCreatedAt)}
+                >
+                  {formatDayTime(accountCreatedAt, locale)}
                 </span>
               </div>
             </div>
@@ -630,8 +640,11 @@ export function OnboardingSteps({
                     <span style={{ fontSize: 15, fontWeight: 600, color: "var(--ms-success)" }}>
                       {t("step1.done")}
                     </span>
-                    <span className="ms-mono" style={{ fontSize: 11, color: "var(--ms-muted)" }}>
-                      {formatUtcMinute(bankedKey.createdAt)}
+                    <span
+                      style={{ fontSize: 11, color: "var(--ms-muted)" }}
+                      title={formatUtcTimestamp(bankedKey.createdAt)}
+                    >
+                      {formatDayTime(bankedKey.createdAt, locale)}
                     </span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>

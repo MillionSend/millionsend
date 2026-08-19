@@ -45,20 +45,33 @@ function EmptyValue() {
   return <span style={{ color: "var(--ms-faint)" }}>—</span>;
 }
 
-/** Wrapping row of name pills (segments / topics on the detail page). */
-function ChipList({ names, emptyLabel }: { names: string[]; emptyLabel: string }) {
-  if (names.length === 0) {
+/** Wrapping row of name pills (segments / topics on the detail page);
+ * items with an href render as links. */
+function ChipList({
+  items,
+  emptyLabel,
+}: {
+  items: { name: string; href?: string }[];
+  emptyLabel: string;
+}) {
+  if (items.length === 0) {
     return (
       <p style={{ margin: "8px 0 0", fontSize: 14, color: "var(--ms-muted)" }}>{emptyLabel}</p>
     );
   }
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
-      {names.map((name) => (
-        <span key={name} className="ms-chip">
-          {name}
-        </span>
-      ))}
+      {items.map((item) =>
+        item.href ? (
+          <Link key={item.name} className="ms-chip" href={item.href}>
+            {item.name}
+          </Link>
+        ) : (
+          <span key={item.name} className="ms-chip">
+            {item.name}
+          </span>
+        ),
+      )}
     </div>
   );
 }
@@ -75,6 +88,7 @@ export default function ContactDetailPage() {
   const [editFirst, setEditFirst] = useState("");
   const [editLast, setEditLast] = useState("");
   const [editTopics, setEditTopics] = useState<string[]>([]);
+  const [editSegments, setEditSegments] = useState<string[]>([]);
   const [editProps, setEditProps] = useState<{ key: string; value: string }[]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -110,6 +124,9 @@ export default function ContactDetailPage() {
     trpc.audience.contacts.activities.queryOptions({ contactId }, { retry: false }),
   );
   const setTopicMutation = useMutation(trpc.audience.contacts.setTopic.mutationOptions());
+  const allSegmentsQuery = useQuery(trpc.segments.list.queryOptions());
+  const addSegmentMutation = useMutation(trpc.audience.contacts.addSegment.mutationOptions());
+  const removeSegmentMutation = useMutation(trpc.audience.contacts.removeSegment.mutationOptions());
 
   // Stable identities: Modal's focus effect depends on onClose.
   const closeEdit = useCallback(() => setEditOpen(false), []);
@@ -131,13 +148,18 @@ export default function ContactDetailPage() {
   const row = query.isSuccess ? query.data : null;
   const name = row ? [row.firstName, row.lastName].filter(Boolean).join(" ") : "";
   const subscribedTopics = (topicsQuery.data ?? []).filter((topic) => topic.subscribed);
-  const saving = updateMutation.isPending || setTopicMutation.isPending;
+  const saving =
+    updateMutation.isPending ||
+    setTopicMutation.isPending ||
+    addSegmentMutation.isPending ||
+    removeSegmentMutation.isPending;
 
   const openEdit = () => {
     if (!row) return;
     setEditFirst(row.firstName ?? "");
     setEditLast(row.lastName ?? "");
     setEditTopics(subscribedTopics.map((topic) => topic.id));
+    setEditSegments((segmentsQuery.data ?? []).map((segment) => segment.id));
     setEditProps(Object.entries(row.properties).map(([key, value]) => ({ key, value })));
     setEditOpen(true);
   };
@@ -157,6 +179,10 @@ export default function ContactDetailPage() {
     const diffs = (topicsQuery.data ?? []).filter(
       (topic) => topic.subscribed !== selected.has(topic.id),
     );
+    // Segment diffs against the seeded memberships: only real joins/leaves
+    // hit the idempotent membership mutations.
+    const memberIds = new Set((segmentsQuery.data ?? []).map((segment) => segment.id));
+    const selectedSegments = new Set(editSegments);
     try {
       for (const topic of diffs) {
         await setTopicMutation.mutateAsync({
@@ -164,6 +190,16 @@ export default function ContactDetailPage() {
           topicId: topic.id,
           subscribed: selected.has(topic.id),
         });
+      }
+      for (const segmentId of editSegments) {
+        if (!memberIds.has(segmentId)) {
+          await addSegmentMutation.mutateAsync({ contactId, segmentId });
+        }
+      }
+      for (const segmentId of memberIds) {
+        if (!selectedSegments.has(segmentId)) {
+          await removeSegmentMutation.mutateAsync({ contactId, segmentId });
+        }
       }
     } catch {
       return; // keep the dialog open; the mutation error stays visible
@@ -212,12 +248,13 @@ export default function ContactDetailPage() {
           leading={<ContactAvatar email={row.email} name={name} size={44} />}
           actions={
             <>
-              {/* Enabled only once topics resolve: the dialog seeds its chip list
-                  from them, and an empty seed would read as "opt out of all". */}
+              {/* Enabled only once topics and segments resolve: the dialog seeds
+                  its chip lists from them, and an empty seed would read as
+                  "opt out of all" / "leave every segment". */}
               <button
                 type="button"
                 className="ms-btn ms-btn-secondary"
-                disabled={!topicsQuery.isSuccess}
+                disabled={!topicsQuery.isSuccess || !segmentsQuery.isSuccess}
                 onClick={openEdit}
               >
                 {t("detail.edit")}
@@ -323,7 +360,11 @@ export default function ContactDetailPage() {
           </p>
           {segmentsQuery.isSuccess ? (
             <ChipList
-              names={segmentsQuery.data.map((s) => s.name)}
+              items={segmentsQuery.data.map((s) => ({
+                name: s.name,
+                // The contacts tab reads ?segment= from the URL as its filter.
+                href: `/audience?segment=${s.id}`,
+              }))}
               emptyLabel={t("detail.noSegments")}
             />
           ) : (
@@ -339,7 +380,7 @@ export default function ContactDetailPage() {
           </p>
           {topicsQuery.isSuccess ? (
             <ChipList
-              names={subscribedTopics.map((topic) => topic.name)}
+              items={subscribedTopics.map((topic) => ({ name: topic.name }))}
               emptyLabel={t("detail.noTopics")}
             />
           ) : (
@@ -526,6 +567,22 @@ export default function ContactDetailPage() {
               placeholder={t("detail.topicsPlaceholder")}
               ariaLabel={t("detail.topics")}
               removeLabel={(label) => t("detail.removeTopic", { name: label })}
+              disabled={saving}
+            />
+          </div>
+          <div className="ms-field" style={{ marginTop: 14 }}>
+            <label htmlFor="edit-segments">{t("detail.segments")}</label>
+            <ChipMultiSelect
+              id="edit-segments"
+              value={editSegments}
+              onChange={setEditSegments}
+              options={(allSegmentsQuery.data ?? []).map((segment) => ({
+                value: segment.id,
+                label: segment.name,
+              }))}
+              placeholder={t("detail.segmentsPlaceholder")}
+              ariaLabel={t("detail.segments")}
+              removeLabel={(label) => t("detail.removeSegment", { name: label })}
               disabled={saving}
             />
           </div>

@@ -116,34 +116,53 @@ describe("settings.smtp", () => {
 });
 
 describe("settings.unsubscribe", () => {
-  it("get returns the team's customization, null by default", async () => {
+  // Full update payload / default get result — tests override what they exercise.
+  const emptyCfg = {
+    brandName: null,
+    message: null,
+    successMessage: null,
+    redirectUrl: null,
+    backgroundColor: null,
+    textColor: null,
+    accentColor: null,
+    hideBranding: false,
+  };
+
+  it("get returns the team's customization, defaults by default", async () => {
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "owner");
     const cfg = await callerFor("u1", teamId, "owner").settings.unsubscribe.get();
-    expect(cfg).toEqual({ brandName: null, message: null, redirectUrl: null });
+    expect(cfg).toEqual(emptyCfg);
   });
 
-  it("update stores brand/message/redirect for owners and admins, clearing on empty", async () => {
+  it("update stores the full customization for owners and admins, clearing on empty", async () => {
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "admin");
     const caller = callerFor("u1", teamId, "admin");
-    await caller.settings.unsubscribe.update({
+    const full = {
       brandName: "Acme",
       message: "Sorry to see you go.",
+      successMessage: "All set.",
       redirectUrl: "https://acme.com/bye",
-    });
-    expect(await caller.settings.unsubscribe.get()).toEqual({
-      brandName: "Acme",
-      message: "Sorry to see you go.",
-      redirectUrl: "https://acme.com/bye",
-    });
+      backgroundColor: "#000000",
+      textColor: "#FFFFFF",
+      accentColor: "#46a3f9",
+      hideBranding: true,
+    };
+    await caller.settings.unsubscribe.update(full);
+    expect(await caller.settings.unsubscribe.get()).toEqual(full);
     // Empty strings clear back to null.
-    await caller.settings.unsubscribe.update({ brandName: "", message: "", redirectUrl: "" });
-    expect(await caller.settings.unsubscribe.get()).toEqual({
-      brandName: null,
-      message: null,
-      redirectUrl: null,
+    await caller.settings.unsubscribe.update({
+      brandName: "",
+      message: "",
+      successMessage: "",
+      redirectUrl: "",
+      backgroundColor: "",
+      textColor: "",
+      accentColor: "",
+      hideBranding: false,
     });
+    expect(await caller.settings.unsubscribe.get()).toEqual(emptyCfg);
   });
 
   it("update is forbidden for role member", async () => {
@@ -151,9 +170,8 @@ describe("settings.unsubscribe", () => {
     await addMember(teamId, "u1", "member");
     await expect(
       callerFor("u1", teamId, "member").settings.unsubscribe.update({
+        ...emptyCfg,
         brandName: "Hijack",
-        message: null,
-        redirectUrl: null,
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
@@ -164,11 +182,31 @@ describe("settings.unsubscribe", () => {
     const caller = callerFor("u1", teamId, "owner");
     for (const redirectUrl of ["javascript:alert(1)", "ftp://x.com", "not a url"]) {
       await expect(
-        caller.settings.unsubscribe.update({ brandName: null, message: null, redirectUrl }),
+        caller.settings.unsubscribe.update({ ...emptyCfg, redirectUrl }),
       ).rejects.toThrow();
     }
     // The rejected writes never landed.
     expect((await caller.settings.unsubscribe.get()).redirectUrl).toBeNull();
+  });
+
+  it("update rejects anything that is not a strict 6-digit hex color", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    const caller = callerFor("u1", teamId, "owner");
+    // Colors land in inline styles on the public page — nothing loose may pass.
+    const bad = ["red", "#fff", "#12345g", "46a3f9", "#1234567", "rgb(0,0,0)", "url(x)"];
+    for (const color of bad) {
+      await expect(
+        caller.settings.unsubscribe.update({ ...emptyCfg, backgroundColor: color }),
+      ).rejects.toThrow();
+      await expect(
+        caller.settings.unsubscribe.update({ ...emptyCfg, textColor: color }),
+      ).rejects.toThrow();
+      await expect(
+        caller.settings.unsubscribe.update({ ...emptyCfg, accentColor: color }),
+      ).rejects.toThrow();
+    }
+    expect(await caller.settings.unsubscribe.get()).toEqual(emptyCfg);
   });
 
   it("update is scoped to the caller's team", async () => {
@@ -177,15 +215,10 @@ describe("settings.unsubscribe", () => {
     await addMember(teamA, "alice", "owner");
     await addMember(teamB, "carol", "owner");
     await callerFor("alice", teamA, "owner").settings.unsubscribe.update({
+      ...emptyCfg,
       brandName: "A",
-      message: null,
-      redirectUrl: null,
     });
-    expect(await callerFor("carol", teamB, "owner").settings.unsubscribe.get()).toEqual({
-      brandName: null,
-      message: null,
-      redirectUrl: null,
-    });
+    expect(await callerFor("carol", teamB, "owner").settings.unsubscribe.get()).toEqual(emptyCfg);
   });
 });
 

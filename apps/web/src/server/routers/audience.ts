@@ -158,8 +158,38 @@ export const audienceRouter = router({
             else topicsByContact.set(m.contactId, [m.name]);
           }
         }
+        // Manual segment names for the page's rows in ONE grouped query
+        // (segment_members only — filter matches are not memberships).
+        const segmentsByContact = new Map<string, string[]>();
+        if (page.items.length > 0) {
+          const m = schema.segmentMembers;
+          const s = schema.segments;
+          const memberships = await ctx.db
+            .select({ contactId: m.contactId, name: s.name })
+            .from(m)
+            .innerJoin(s, eq(s.id, m.segmentId))
+            .where(
+              and(
+                inArray(
+                  m.contactId,
+                  page.items.map((r) => r.id),
+                ),
+                eq(s.teamId, ctx.teamId),
+              ),
+            )
+            .orderBy(asc(s.name));
+          for (const row of memberships) {
+            const names = segmentsByContact.get(row.contactId);
+            if (names) names.push(row.name);
+            else segmentsByContact.set(row.contactId, [row.name]);
+          }
+        }
         return {
-          items: page.items.map((r) => ({ ...r, topics: topicsByContact.get(r.id) ?? [] })),
+          items: page.items.map((r) => ({
+            ...r,
+            topics: topicsByContact.get(r.id) ?? [],
+            segments: segmentsByContact.get(r.id) ?? [],
+          })),
           nextCursor: page.nextCursor,
           total: totalRow?.total ?? 0,
         };
@@ -377,6 +407,52 @@ export const audienceRouter = router({
           .orderBy(asc(s.name));
       }),
 
+    /** Idempotent manual join: re-adding an existing member is a no-op and
+     * the timeline records only first joins. */
+    addSegment: teamProcedure
+      .input(z.object({ contactId: z.uuid(), segmentId: z.uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        await assertContact(ctx, input.contactId);
+        const segment = await assertSegment(ctx, input.segmentId);
+        const m = schema.segmentMembers;
+        const [added] = await ctx.db
+          .insert(m)
+          .values({ segmentId: input.segmentId, contactId: input.contactId })
+          .onConflictDoNothing()
+          .returning({ contactId: m.contactId });
+        if (added) {
+          await recordContactActivity(ctx.db, {
+            teamId: ctx.teamId,
+            contactId: input.contactId,
+            type: "segment_added",
+            data: { segmentId: segment.id, name: segment.name },
+          });
+        }
+        return { added: added !== undefined };
+      }),
+
+    /** Idempotent leave: removing a non-member is a no-op (no timeline row). */
+    removeSegment: teamProcedure
+      .input(z.object({ contactId: z.uuid(), segmentId: z.uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        await assertContact(ctx, input.contactId);
+        const segment = await assertSegment(ctx, input.segmentId);
+        const m = schema.segmentMembers;
+        const [removed] = await ctx.db
+          .delete(m)
+          .where(and(eq(m.segmentId, input.segmentId), eq(m.contactId, input.contactId)))
+          .returning({ segmentId: m.segmentId });
+        if (removed) {
+          await recordContactActivity(ctx.db, {
+            teamId: ctx.teamId,
+            contactId: input.contactId,
+            type: "segment_removed",
+            data: { segmentId: segment.id, name: segment.name },
+          });
+        }
+        return { removed: removed !== undefined };
+      }),
+
     /** The contact's activity timeline, newest first. */
     activities: teamProcedure
       .input(z.object({ contactId: z.uuid() }))
@@ -483,15 +559,26 @@ export const audienceRouter = router({
     /**
      * Declares a typed property. The key is stored verbatim (parameterized, so
      * a hostile string stays data); CONFLICT is the case-insensitive
-     * (teamId, lower(key)) unique index. Only 'string' is defined today.
+     * (teamId, lower(key)) unique index. The type is immutable after create
+     * (the public API's PATCH only updates fallback_value).
      */
     define: teamProcedure
       .input(
-        z.object({
-          key: z.string().trim().min(1).max(200),
-          type: z.enum(["string"]).default("string"),
-          fallbackValue: z.string().max(1000).optional(),
-        }),
+        z
+          .object({
+            key: z.string().trim().min(1).max(200),
+            type: z.enum(["string", "number"]).default("string"),
+            fallbackValue: z.string().max(1000).optional(),
+          })
+          // A number property's fallback must read back as a finite number —
+          // it is stored as text and coerced per type at the wire.
+          .refine(
+            (v) =>
+              v.type !== "number" ||
+              v.fallbackValue === undefined ||
+              (v.fallbackValue.trim() !== "" && Number.isFinite(Number(v.fallbackValue))),
+            { message: "fallbackValue must be a number" },
+          ),
       )
       .mutation(async ({ ctx, input }) => {
         const p = schema.contactProperties;

@@ -14,6 +14,9 @@
   },
   "allEvents": "Todos",
   "eventsCount": "{count, plural, one {# evento} other {# eventos}}",
+  "loadMore": "Carregar mais",
+  "pageOf": "Página 1 – {pages} de {total} webhooks",
+  "pageSize": "{count} itens",
   "eventGroup": {
     "delivery": "Entrega",
     "engagement": "Engajamento",
@@ -97,5 +100,11 @@
     "success": "Sucesso",
     "failed": "Falhou",
     "exhausted": "Esgotado"
+  },
+  "apiSheet": {
+    "title": "API de Webhooks",
+    "list": "Listar webhooks",
+    "create": "Criar webhook",
+    "update": "Atualizar webhook"
   }
 }

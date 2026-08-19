@@ -19,7 +19,9 @@
     "allStatuses": "All statuses",
     "allRegions": "All regions",
     "rowDetails": "Domain details",
-    "count": "{count, plural, =1 {1 domain} other {# domains}}",
+    "pageOf": "Page 1 – {pages} of {total} domains",
+    "noMatch": "No domains match the filters.",
+    "clearFilters": "Clear filters",
     "summary": {
       "verified": "{count} verified",
       "pending": "{count} pending",

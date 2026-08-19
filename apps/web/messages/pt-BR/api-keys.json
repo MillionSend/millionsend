@@ -12,6 +12,7 @@
     "menu": "Ações da chave"
   },
   "neverUsed": "Nunca",
+  "pageOf": "Página 1 – {pages} de {total} chaves de API",
   "revoke": "Revogar",
   "scope": {
     "full": "Acesso total",

@@ -313,8 +313,9 @@ MillionSend.Emails.send(client, %{
 };
 
 /* curl sheets for the non-email resources. The paths mirror apps/api exactly
-   (/contacts, /segments, /topics, /broadcasts, /domains, /api-keys); `ns` is
-   the message-namespace prefix carrying apiSheet.{title,<section>} keys. */
+   (/contacts, /contact-properties, /segments, /topics, /broadcasts, /domains,
+   /api-keys, /webhooks); `ns` is the message-namespace prefix carrying
+   apiSheet.{title,<section>} keys. */
 const API_BASE = "https://api.millionsend.com";
 const AUTH = `-H "Authorization: Bearer ms_xxxxxxxxx"`;
 const JSON_CT = `-H "Content-Type: application/json"`;
@@ -343,6 +344,26 @@ export const RESOURCE_SHEETS = {
   ${AUTH} \\
   ${JSON_CT} \\
   -d '{ "unsubscribed": true }'`,
+      ],
+    ],
+  },
+  contactProperties: {
+    ns: "audience.properties",
+    sections: [
+      ["list", `curl "${API_BASE}/contact-properties" \\\n  ${AUTH}`],
+      [
+        "create",
+        `curl -X POST "${API_BASE}/contact-properties" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{ "key": "plan", "type": "string", "fallback_value": "free" }'`,
+      ],
+      [
+        "update",
+        `curl -X PATCH "${API_BASE}/contact-properties/${SAMPLE_ID}" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{ "fallback_value": "pro" }'`,
       ],
     ],
   },
@@ -450,6 +471,29 @@ export const RESOURCE_SHEETS = {
   -d '{ "name": "Production", "permission": "sending_access" }'`,
       ],
       ["revoke", `curl -X DELETE "${API_BASE}/api-keys/${SAMPLE_ID}" \\\n  ${AUTH}`],
+    ],
+  },
+  webhooks: {
+    ns: "webhooks",
+    sections: [
+      ["list", `curl "${API_BASE}/webhooks?limit=20" \\\n  ${AUTH}`],
+      [
+        "create",
+        `curl -X POST "${API_BASE}/webhooks" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{
+    "endpoint": "https://example.com/webhooks/millionsend",
+    "events": ["email.delivered", "email.bounced"]
+  }'`,
+      ],
+      [
+        "update",
+        `curl -X PATCH "${API_BASE}/webhooks/${SAMPLE_ID}" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{ "status": "disabled" }'`,
+      ],
     ],
   },
 } satisfies Record<string, { ns: string; sections: readonly (readonly [string, string])[] }>;
