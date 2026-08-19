@@ -21,6 +21,7 @@ import { StatBlock } from "@/components/stat-block";
 import { Table } from "@/components/table";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
 import { useTRPC } from "@/lib/trpc";
+import { useUrlState } from "@/lib/url-state";
 import { ListFooter, SearchBox, StateCard } from "../emails/list-parts";
 import { AudienceTabs } from "./audience-tabs";
 
@@ -145,10 +146,12 @@ export function AudienceContactsView() {
   const queryClient = useQueryClient();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 
-  const [search, setSearch] = useState("");
+  // Unknown segment/topic ids from the URL degrade gracefully: the list query
+  // returns no rows and the Select renders an empty trigger label.
+  const [search, setSearch] = useUrlState("q");
   const [limit, setLimit] = useState(40);
-  const [segmentId, setSegmentId] = useState("");
-  const [topicId, setTopicId] = useState("");
+  const [segmentId, setSegmentId] = useUrlState("segment");
+  const [topicId, setTopicId] = useUrlState("topic");
   const deferredSearch = useDeferredValue(search.trim());
 
   const [addOpen, setAddOpen] = useState(false);

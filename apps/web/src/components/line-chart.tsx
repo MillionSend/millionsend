@@ -12,8 +12,9 @@ export interface LineChartSeries {
   area?: boolean;
 }
 
-/* Plot frame: y labels ride the right edge, x labels the bottom band. */
-const PAD = { top: 12, right: 46, bottom: 24, left: 24 };
+/* Plot frame: full-bleed horizontally so the plot aligns with the card's
+   own padding; y labels sit inside above the gridlines, x labels below. */
+const PAD = { top: 12, right: 0, bottom: 24, left: 0 };
 /* Width one short-day x label needs — drives label thinning. */
 const X_LABEL_W = 46;
 
@@ -78,7 +79,7 @@ export function ChartTip({
 /**
  * Multi-series daily line chart, pure SVG: straight segments, dashed
  * horizontal gridlines with right-side round-tick labels, thinned localized
- * x-axis day labels, and a pointer-tracked hover (vertical guide snapped to
+ * x-axis day labels, and a pointer-tracked hover (column band snapped to
  * the nearest day, a dot per series, floating clamped tooltip). Width follows
  * the container via ResizeObserver. No transitions, so reduced-motion needs
  * no special casing.
@@ -148,6 +149,23 @@ export function LineChart({
     >
       {width > 0 && n > 0 ? (
         <svg width={width} height={height} aria-hidden="true" style={{ display: "block" }}>
+          {hover
+            ? // Hovered-day column band, drawn first so gridlines and series
+              // stay legible over it. One day-pitch wide, clamped to the plot.
+              (() => {
+                const pitch = n <= 1 ? plotW : plotW / (n - 1);
+                const left = Math.max(0, x(hover.index) - pitch / 2);
+                return (
+                  <rect
+                    x={left}
+                    y={0}
+                    width={Math.min(width - left, pitch)}
+                    height={baseline}
+                    fill="var(--ms-panel-raised)"
+                  />
+                );
+              })()
+            : null}
           {ticks.map((tick) => (
             <g key={tick}>
               <line
@@ -159,11 +177,12 @@ export function LineChart({
                 strokeDasharray="3 4"
               />
               <text
-                x={width - PAD.right + 6}
-                y={y(tick) + 3}
+                x={width - 2}
+                y={y(tick) - 4}
                 fontSize={10}
                 fontFamily="var(--ms-font-mono)"
                 fill="var(--ms-faint)"
+                textAnchor="end"
               >
                 {formatValue(tick)}
               </text>
@@ -185,21 +204,14 @@ export function LineChart({
                 fontSize={10}
                 fontFamily="var(--ms-font-mono)"
                 fill="var(--ms-faint)"
-                textAnchor="middle"
+                // Edge labels anchor inward so the full-bleed plot never
+                // clips them at the card padding.
+                textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"}
               >
                 {formatDay(day)}
               </text>
             ) : null,
           )}
-          {hover ? (
-            <line
-              x1={x(hover.index)}
-              x2={x(hover.index)}
-              y1={PAD.top}
-              y2={baseline}
-              stroke="var(--ms-line-strong)"
-            />
-          ) : null}
           {series.map((s) =>
             s.area ? (
               <path
