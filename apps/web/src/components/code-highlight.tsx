@@ -1,5 +1,6 @@
 "use client";
 
+import bash from "highlight.js/lib/languages/bash";
 import csharp from "highlight.js/lib/languages/csharp";
 import elixir from "highlight.js/lib/languages/elixir";
 import go from "highlight.js/lib/languages/go";
@@ -15,6 +16,7 @@ import type { ReactNode } from "react";
 /** Only the grammars the SDK snippets need — registering all of hljs would
  *  drag every language into the client bundle. */
 const lowlight = createLowlight({
+  bash,
   javascript,
   python,
   php,
@@ -27,6 +29,7 @@ const lowlight = createLowlight({
 });
 
 export type HighlightLanguage =
+  | "bash"
   | "javascript"
   | "python"
   | "php"

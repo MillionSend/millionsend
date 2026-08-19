@@ -312,6 +312,188 @@ MillionSend.Emails.send(client, %{
   },
 };
 
+/* curl sheets for the non-email resources. The paths mirror apps/api exactly
+   (/contacts, /segments, /topics, /broadcasts, /domains, /api-keys); `ns` is
+   the message-namespace prefix carrying apiSheet.{title,<section>} keys. */
+const API_BASE = "https://api.millionsend.com";
+const AUTH = `-H "Authorization: Bearer ms_xxxxxxxxx"`;
+const JSON_CT = `-H "Content-Type: application/json"`;
+const SAMPLE_ID = "4ef9a417-02e9-4d39-ad75-9611e0fcc33c";
+
+export const RESOURCE_SHEETS = {
+  contacts: {
+    ns: "audience.contacts",
+    sections: [
+      ["list", `curl "${API_BASE}/contacts?limit=20" \\\n  ${AUTH}`],
+      [
+        "create",
+        `curl -X POST "${API_BASE}/contacts" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{
+    "email": "steve.wozniak@gmail.com",
+    "first_name": "Steve",
+    "last_name": "Wozniak",
+    "unsubscribed": false
+  }'`,
+      ],
+      [
+        "update",
+        `curl -X PATCH "${API_BASE}/contacts/${SAMPLE_ID}" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{ "unsubscribed": true }'`,
+      ],
+    ],
+  },
+  segments: {
+    ns: "audience.segments",
+    sections: [
+      ["list", `curl "${API_BASE}/segments" \\\n  ${AUTH}`],
+      [
+        "create",
+        `curl -X POST "${API_BASE}/segments" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{
+    "name": "Gmail users",
+    "filter": {
+      "match": "all",
+      "conditions": [
+        { "field": "email", "op": "ends_with", "value": "@gmail.com" }
+      ]
+    }
+  }'`,
+      ],
+      [
+        "addContact",
+        `curl -X POST \\
+  "${API_BASE}/contacts/${SAMPLE_ID}/segments/b0f2a3c4-5d6e-4f70-8a91-b2c3d4e5f607" \\
+  ${AUTH}`,
+      ],
+    ],
+  },
+  topics: {
+    ns: "audience.topics",
+    sections: [
+      ["list", `curl "${API_BASE}/topics" \\\n  ${AUTH}`],
+      [
+        "create",
+        `curl -X POST "${API_BASE}/topics" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{
+    "name": "Product updates",
+    "description": "New features and improvements",
+    "default_subscription": "opt_in",
+    "visibility": "public"
+  }'`,
+      ],
+      [
+        "update",
+        `curl -X PATCH "${API_BASE}/topics/${SAMPLE_ID}" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{ "description": "Monthly product news", "visibility": "private" }'`,
+      ],
+    ],
+  },
+  broadcasts: {
+    ns: "broadcasts",
+    sections: [
+      ["list", `curl "${API_BASE}/broadcasts?limit=20" \\\n  ${AUTH}`],
+      [
+        "create",
+        `curl -X POST "${API_BASE}/broadcasts" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{
+    "name": "Launch announcement",
+    "segment_id": "${SAMPLE_ID}",
+    "from": "Acme <news@yourdomain.com>",
+    "subject": "We just launched",
+    "html": "<p>Big news!</p>"
+  }'`,
+      ],
+      [
+        "send",
+        `curl -X POST "${API_BASE}/broadcasts/${SAMPLE_ID}/send" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{ "scheduled_at": "in 1 hour" }'`,
+      ],
+    ],
+  },
+  domains: {
+    ns: "domains",
+    sections: [
+      ["list", `curl "${API_BASE}/domains" \\\n  ${AUTH}`],
+      [
+        "create",
+        `curl -X POST "${API_BASE}/domains" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{ "name": "yourdomain.com", "region": "us-east-1" }'`,
+      ],
+      ["verify", `curl -X POST "${API_BASE}/domains/${SAMPLE_ID}/verify" \\\n  ${AUTH}`],
+    ],
+  },
+  apiKeys: {
+    ns: "api-keys",
+    sections: [
+      ["list", `curl "${API_BASE}/api-keys" \\\n  ${AUTH}`],
+      [
+        "create",
+        `curl -X POST "${API_BASE}/api-keys" \\
+  ${AUTH} \\
+  ${JSON_CT} \\
+  -d '{ "name": "Production", "permission": "sending_access" }'`,
+      ],
+      ["revoke", `curl -X DELETE "${API_BASE}/api-keys/${SAMPLE_ID}" \\\n  ${AUTH}`],
+    ],
+  },
+} satisfies Record<string, { ns: string; sections: readonly (readonly [string, string])[] }>;
+
+type Resource = keyof typeof RESOURCE_SHEETS;
+
+/**
+ * "</>" affordance for the non-email list surfaces: same drawer as
+ * ApiDocsButton, copy-ready curl calls against the public API. The key hint
+ * is shared with the emails sheet (emails.apiSheet.keyHint).
+ */
+export function ResourceApiButton({ resource }: { resource: Resource }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  const { ns, sections } = RESOURCE_SHEETS[resource];
+  const title = t(`${ns}.apiSheet.title`);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="ms-btn ms-btn-icon"
+        aria-label={title}
+        onClick={() => setOpen(true)}
+      >
+        <CodeGlyph size={14} />
+      </button>
+      <Drawer open={open} onClose={() => setOpen(false)} title={title}>
+        {sections.map(([section, code]) => (
+          <section key={section} style={{ marginTop: 22 }}>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--ms-bone)" }}>
+              {t(`${ns}.apiSheet.${section}`)}
+            </h3>
+            <CodeBlock code={code} language="bash" />
+          </section>
+        ))}
+        <p style={{ margin: "20px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
+          {t("emails.apiSheet.keyHint")}
+        </p>
+      </Drawer>
+    </>
+  );
+}
+
 function CodeBlock({ code, language }: { code: string; language: HighlightLanguage }) {
   return (
     <pre

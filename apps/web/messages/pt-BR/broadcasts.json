@@ -100,5 +100,11 @@
     "cancelBody": "\"{name}\" não será enviada.",
     "cancelConfirm": "Cancelar envio",
     "keep": "Manter"
+  },
+  "apiSheet": {
+    "title": "API de Transmissões",
+    "list": "Listar transmissões",
+    "create": "Criar transmissão",
+    "send": "Enviar transmissão"
   }
 }

@@ -38,5 +38,11 @@
     "title": "Revoke API key",
     "body": "Requests using {name} fail immediately.",
     "confirm": "Revoke key"
+  },
+  "apiSheet": {
+    "title": "API Keys API",
+    "list": "List API keys",
+    "create": "Create API key",
+    "revoke": "Revoke API key"
   }
 }

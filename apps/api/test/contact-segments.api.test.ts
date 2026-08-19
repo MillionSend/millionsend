@@ -155,6 +155,43 @@ describe("POST /contacts with segments and topics", () => {
     expect(subs[0]).toMatchObject({ topicId, subscribed: false });
   });
 
+  it("writes the creation timeline: contact_created + per-topic + per-segment rows", async () => {
+    const segmentId = (await createSegment(tokenA, { name: "timeline-seg" })).id as string;
+    const topicRes = await call(tokenA, "POST", "/topics", {
+      name: "timeline-topic",
+      default_subscription: "opt_in",
+    });
+    const topicId = (await json(topicRes)).id as string;
+
+    const res = await createContact(tokenA, {
+      email: "timeline@example.com",
+      segments: [{ id: segmentId }],
+      topics: [{ id: topicId, subscription: "opt_out" }],
+    });
+    expect(res.status).toBe(200);
+    const contactId = (await json(res)).id as string;
+
+    const rows = await db
+      .select()
+      .from(schema.contactActivities)
+      .where(eq(schema.contactActivities.contactId, contactId));
+    expect(rows.map((r) => r.type).sort()).toEqual([
+      "contact_created",
+      "segment_added",
+      "topic_opt_out",
+    ]);
+    // Payloads snapshot the names at write time.
+    expect(rows.find((r) => r.type === "topic_opt_out")?.data).toEqual({
+      topicId,
+      name: "timeline-topic",
+    });
+    expect(rows.find((r) => r.type === "segment_added")?.data).toEqual({
+      segmentId,
+      name: "timeline-seg",
+    });
+    expect(rows.every((r) => r.teamId === teamAId)).toBe(true);
+  });
+
   it("404s an unknown or foreign segment/topic and creates NOTHING (one transaction)", async () => {
     const foreignSegment = (await createSegment(tokenB, { name: "b-owned" })).id as string;
     for (const body of [

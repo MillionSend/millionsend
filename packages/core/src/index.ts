@@ -1,4 +1,4 @@
-export type { SegmentCondition, SegmentFilter } from "@millionsend/db/schema";
+export type { ContactActivityType, SegmentCondition, SegmentFilter } from "@millionsend/db/schema";
 export {
   type AcceptEmailAuth,
   type AcceptEmailDeps,
@@ -27,6 +27,7 @@ export {
   resolveComplaintGuidance,
 } from "./bounce-guidance.js";
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
+export { type ContactActivityRow, recordContactActivity } from "./contact-activities.js";
 export {
   decryptEmailBody,
   decryptPayload,

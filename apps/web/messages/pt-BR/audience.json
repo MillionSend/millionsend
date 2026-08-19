@@ -56,7 +56,6 @@
     "addManually": "Adicionar manualmente",
     "importCsv": "Importar CSV",
     "email": "E-mail",
-    "name": "Nome",
     "status": "Status",
     "added": "Adicionado",
     "subscribed": "Inscrito",
@@ -93,9 +92,16 @@
     "importDone": "Concluir",
     "deleteTitle": "Excluir contato",
     "deleteBody": "{email} será removido dos seus contatos.",
-    "deleteConfirm": "Excluir contato"
+    "deleteConfirm": "Excluir contato",
+    "apiSheet": {
+      "title": "API de Contatos",
+      "list": "Listar contatos",
+      "create": "Criar contato",
+      "update": "Atualizar contato"
+    }
   },
   "detail": {
+    "eyebrow": "Contato",
     "email": "E-mail",
     "created": "Criado",
     "status": "Status",
@@ -105,25 +111,44 @@
     "saveConfirm": "Salvar",
     "notFound": "Contato não encontrado.",
     "properties": "Propriedades",
-    "noProperties": "Nenhuma propriedade.",
+    "firstName": "Nome",
+    "lastName": "Sobrenome",
     "propKeyPlaceholder": "Chave",
     "propValuePlaceholder": "Valor",
     "addProperty": "Adicionar propriedade",
     "removeProperty": "Remover propriedade",
+    "segments": "Segmentos",
+    "noSegments": "Sem segmentos",
     "topics": "Tópicos",
-    "noTopics": "Nenhum tópico ainda.",
-    "topicToggle": "Inscrito em {name}"
+    "noTopics": "Nenhum tópico",
+    "topicsPlaceholder": "Adicionar tópicos…",
+    "removeTopic": "Remover {name}",
+    "unsubscribeBody": "{email} deixa de receber todos os e-mails, inclusive os tópicos em que optou por entrar.",
+    "activity": {
+      "title": "Atividade",
+      "empty": "Nenhuma atividade ainda.",
+      "contact_created": "Contato criado",
+      "topic_opt_in": "Optou por entrar em {name}",
+      "topic_opt_out": "Optou por sair de {name}",
+      "unsubscribed": "Descadastrado",
+      "resubscribed": "Reinscrito",
+      "segment_added": "Adicionado ao segmento {name}",
+      "segment_removed": "Removido do segmento {name}"
+    }
   },
   "topics": {
     "title": "Audiência",
     "create": "Criar tópico",
     "name": "Nome",
     "default": "Padrão",
+    "visibility": "Visibilidade",
     "optIn": "Opt-in",
     "optOut": "Opt-out",
     "created": "Criado",
     "menu": "Ações do tópico",
-    "delete": "Excluir",
+    "delete": "Excluir tópico",
+    "copyId": "Copiar ID",
+    "searchPlaceholder": "Buscar por nome…",
     "empty": "Nenhum tópico ainda.",
     "emptyHint": "Tópicos permitem que contatos se inscrevam em alguns e-mails e não em outros.",
     "loadError": "Não foi possível carregar os tópicos.",
@@ -138,11 +163,24 @@
     "defaultOptOut": "Opt-out",
     "defaultHint": "Opt-in: contatos ficam inscritos até cancelarem. Opt-out: contatos ficam fora até se inscreverem.",
     "defaultImmutable": "Isto não pode ser alterado após a criação do tópico.",
+    "visibilityLabel": "Visibilidade",
+    "visibilityPrivate": "Privado",
+    "visibilityPublic": "Público",
+    "visibilityTooltip": "Tópicos públicos aparecem na página hospedada de cancelamento de inscrição, onde contatos gerenciam suas inscrições. Tópicos privados não aparecem.",
     "createConfirm": "Criar",
     "createError": "Não foi possível criar o tópico. Tente de novo.",
+    "editTitle": "Editar tópico",
+    "editConfirm": "Salvar",
+    "editError": "Não foi possível atualizar o tópico. Tente de novo.",
     "deleteTitle": "Excluir tópico",
     "deleteBody": "{name} é excluído, junto com a inscrição de cada contato nele. Isto não pode ser desfeito.",
-    "deleteConfirm": "Excluir tópico"
+    "deleteConfirm": "Excluir tópico",
+    "apiSheet": {
+      "title": "API de Tópicos",
+      "list": "Listar tópicos",
+      "create": "Criar tópico",
+      "update": "Atualizar tópico"
+    }
   },
   "segments": {
     "title": "Audiência",
@@ -203,6 +241,12 @@
       "countError": "Não foi possível contar as correspondências.",
       "save": "Salvar segmento",
       "saveError": "Não foi possível salvar o segmento. Tente de novo."
+    },
+    "apiSheet": {
+      "title": "API de Segmentos",
+      "list": "Listar segmentos",
+      "create": "Criar segmento",
+      "addContact": "Adicionar contato ao segmento"
     }
   }
 }

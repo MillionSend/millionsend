@@ -521,13 +521,19 @@ export const removeSegmentResponseSchema = z
  * Topics. Wire-compatible with the resend SDK's `topics` and
  * `contacts.topics` surfaces: default_subscription is 'opt_in'/'opt_out'
  * (opt_in = subscribed unless the contact opts out) and is fixed at creation.
+ * `visibility` is a superset field absent from the SDK's types: private
+ * topics show on the unsubscribe page only via their own topic link, public
+ * topics always show there.
  */
+
+const topicVisibilityEnum = z.enum(["private", "public"]);
 
 export const createTopicRequestSchema = z
   .object({
     name: z.string().min(1),
     description: z.string().optional(),
     default_subscription: subscriptionEnum,
+    visibility: topicVisibilityEnum.optional(),
   })
   .openapi("CreateTopicRequest");
 
@@ -541,6 +547,7 @@ export const updateTopicRequestSchema = z
   .object({
     name: z.string().min(1).optional(),
     description: z.string().optional(),
+    visibility: topicVisibilityEnum.optional(),
   })
   .openapi("UpdateTopicRequest");
 
@@ -549,6 +556,7 @@ const topicSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   default_subscription: subscriptionEnum,
+  visibility: topicVisibilityEnum,
   created_at: z.string(),
 });
 

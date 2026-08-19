@@ -4,13 +4,13 @@ import { resolveBounceGuidance, resolveComplaintGuidance } from "@millionsend/co
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { CopyGlyph } from "@/components/copy-chip";
 import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { formatUtcMinute } from "@/lib/format";
+import { formatDayTime, formatUtcTimestamp } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
 type BounceData = {
@@ -97,6 +97,7 @@ function SuppressionDetailSkeleton() {
 export default function SuppressionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const t = useTranslations("emails");
+  const locale = useLocale();
   const trpc = useTRPC();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -205,7 +206,9 @@ export default function SuppressionDetailPage() {
           <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
             {t("suppressions.detail.added")}
           </div>
-          <div style={{ fontSize: 14, marginTop: 4 }}>{formatUtcMinute(row.createdAt)}</div>
+          <div style={{ fontSize: 14, marginTop: 4 }} title={formatUtcTimestamp(row.createdAt)}>
+            {formatDayTime(row.createdAt, locale)}
+          </div>
         </div>
       </div>
 

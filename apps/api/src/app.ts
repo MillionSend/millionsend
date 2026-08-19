@@ -5,6 +5,7 @@ import {
   acceptEmail,
   authenticateApiKey,
   beginIdempotent,
+  type ContactActivityRow,
   canonicalBodyHash,
   completeIdempotent,
   decryptEmailBody,
@@ -16,6 +17,7 @@ import {
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   parseScheduledAt,
+  recordContactActivity,
   releaseIdempotent,
   SCHEDULED_AT_FORMS,
   segmentContactsWhere,
@@ -369,23 +371,39 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
     properties: contact.properties,
   });
 
-  /** True when every id is a segment the team owns (unknown/foreign → false). */
-  const ownsSegments = async (teamId: string, ids: string[]): Promise<boolean> => {
-    if (ids.length === 0) return true;
+  /**
+   * The team's segments for these ids as id→name, or null when any id is
+   * unknown/foreign. Truthy on full ownership, so boolean call sites read the
+   * same; the names feed activity-timeline snapshots.
+   */
+  const ownsSegments = async (
+    teamId: string,
+    ids: string[],
+  ): Promise<Map<string, string> | null> => {
+    if (ids.length === 0) return new Map();
     const owned = await db
-      .select({ id: schema.segments.id })
+      .select({ id: schema.segments.id, name: schema.segments.name })
       .from(schema.segments)
       .where(and(eq(schema.segments.teamId, teamId), inArray(schema.segments.id, ids)));
-    return owned.length === ids.length;
+    return owned.length === ids.length ? new Map(owned.map((s) => [s.id, s.name])) : null;
   };
 
-  const ownsTopics = async (teamId: string, ids: string[]): Promise<boolean> => {
-    if (ids.length === 0) return true;
+  const ownsTopics = async (
+    teamId: string,
+    ids: string[],
+  ): Promise<Map<string, { name: string; defaultSubscribed: boolean }> | null> => {
+    if (ids.length === 0) return new Map();
     const owned = await db
-      .select({ id: schema.topics.id })
+      .select({
+        id: schema.topics.id,
+        name: schema.topics.name,
+        defaultSubscribed: schema.topics.defaultSubscribed,
+      })
       .from(schema.topics)
       .where(and(eq(schema.topics.teamId, teamId), inArray(schema.topics.id, ids)));
-    return owned.length === ids.length;
+    return owned.length === ids.length
+      ? new Map(owned.map((r) => [r.id, { name: r.name, defaultSubscribed: r.defaultSubscribed }]))
+      : null;
   };
 
   type CreateContactResult =
@@ -420,10 +438,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
     // A topic repeated in the payload: the last entry wins, matching the
     // upsert semantics of PATCH /contacts/{id}/topics.
     const topicSubs = new Map((body.topics ?? []).map((e) => [e.id, e.subscription === "opt_in"]));
-    if (!(await ownsSegments(teamId, segmentIds))) {
+    const segmentNames = await ownsSegments(teamId, segmentIds);
+    if (!segmentNames) {
       return { ok: false, status: 404, name: "not_found", message: "Segment not found" };
     }
-    if (!(await ownsTopics(teamId, [...topicSubs.keys()]))) {
+    const topicInfo = await ownsTopics(teamId, [...topicSubs.keys()]);
+    if (!topicInfo) {
       return { ok: false, status: 404, name: "not_found", message: "Topic not found" };
     }
     try {
@@ -457,6 +477,26 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
         }
         return row.id;
       });
+      const activityRows: ContactActivityRow[] = [
+        { teamId, contactId: id, type: "contact_created" },
+        ...[...topicSubs].map(
+          ([topicId, subscribed]): ContactActivityRow => ({
+            teamId,
+            contactId: id,
+            type: subscribed ? "topic_opt_in" : "topic_opt_out",
+            data: { topicId, name: topicInfo.get(topicId)?.name ?? null },
+          }),
+        ),
+        ...segmentIds.map(
+          (segmentId): ContactActivityRow => ({
+            teamId,
+            contactId: id,
+            type: "segment_added",
+            data: { segmentId, name: segmentNames.get(segmentId) ?? null },
+          }),
+        ),
+      ];
+      await recordContactActivity(db, activityRows);
       return { ok: true, id };
     } catch (err) {
       if (isUniqueViolation(err)) {
@@ -490,6 +530,15 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       if (coerced === null) return "invalid_properties";
       properties = coerced;
     }
+    // Read the flag before writing so the timeline records only real flips —
+    // a PATCH restating the current state stays silent.
+    const [before] =
+      body.unsubscribed === undefined
+        ? []
+        : await db
+            .select({ unsubscribed: t.unsubscribed })
+            .from(t)
+            .where(teamContactWhere(teamId, idOrEmail));
     const [row] = await db
       .update(t)
       .set({
@@ -506,6 +555,13 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       })
       .where(teamContactWhere(teamId, idOrEmail))
       .returning({ id: t.id });
+    if (row && before && before.unsubscribed !== body.unsubscribed) {
+      await recordContactActivity(db, {
+        teamId,
+        contactId: row.id,
+        type: body.unsubscribed ? "unsubscribed" : "resubscribed",
+      });
+    }
     return row;
   };
 
@@ -688,9 +744,22 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       // Topics are teamId-scoped: a subscription may only target one this
       // team owns, or a caller could write rows against another team's topic.
       const topicIds = [...new Set(entries.map((e) => e.id))];
-      if (!(await ownsTopics(auth.teamId, topicIds))) {
+      const topicInfo = await ownsTopics(auth.teamId, topicIds);
+      if (!topicInfo) {
         return c.json(errorBody(404, "not_found", "Topic not found"), 404);
       }
+
+      // Effective state before the write (explicit row, else the topic's
+      // default) — the timeline records only real transitions.
+      const s = schema.contactTopicSubscriptions;
+      const prior = new Map(
+        (
+          await db
+            .select({ topicId: s.topicId, subscribed: s.subscribed })
+            .from(s)
+            .where(and(eq(s.contactId, contact.id), inArray(s.topicId, topicIds)))
+        ).map((r) => [r.topicId, r.subscribed]),
+      );
 
       await db
         .insert(schema.contactTopicSubscriptions)
@@ -711,6 +780,23 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
             updatedAt: new Date(),
           },
         });
+
+      const changed: ContactActivityRow[] = [];
+      for (const e of entries) {
+        const topic = topicInfo.get(e.id);
+        if (!topic) continue;
+        const next = e.subscription === "opt_in";
+        if ((prior.get(e.id) ?? topic.defaultSubscribed) !== next) {
+          changed.push({
+            teamId: auth.teamId,
+            contactId: contact.id,
+            type: next ? "topic_opt_in" : "topic_opt_out",
+            data: { topicId: e.id, name: topic.name },
+          });
+        }
+        prior.set(e.id, next);
+      }
+      await recordContactActivity(db, changed);
       return c.json({ id: contact.id }, 200);
     },
   );
@@ -735,14 +821,25 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       // SECURITY: the segment must be the team's own, or this would write a
       // membership into another team's segment.
-      if (!(await ownsSegments(auth.teamId, [segmentId]))) {
+      const segmentNames = await ownsSegments(auth.teamId, [segmentId]);
+      if (!segmentNames) {
         return c.json(errorBody(404, "not_found", "Segment not found"), 404);
       }
-      // Idempotent: re-adding an existing member succeeds without a new row.
-      await db
+      // Idempotent: re-adding an existing member succeeds without a new row;
+      // `returning` is empty then, so the timeline records only first joins.
+      const [added] = await db
         .insert(schema.segmentMembers)
         .values({ segmentId, contactId: contact.id })
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        .returning({ contactId: schema.segmentMembers.contactId });
+      if (added) {
+        await recordContactActivity(db, {
+          teamId: auth.teamId,
+          contactId: contact.id,
+          type: "segment_added",
+          data: { segmentId, name: segmentNames.get(segmentId) ?? null },
+        });
+      }
       return c.json({ id: contact.id }, 200);
     },
   );
@@ -775,6 +872,18 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       if (!removed) {
         return c.json(errorBody(404, "not_found", "Contact is not a member of this segment"), 404);
       }
+      // A membership row existed, so the segment is the team's own (rows only
+      // ever link same-team pairs); fetch its name for the timeline snapshot.
+      const [segment] = await db
+        .select({ name: schema.segments.name })
+        .from(schema.segments)
+        .where(eq(schema.segments.id, segmentId));
+      await recordContactActivity(db, {
+        teamId: auth.teamId,
+        contactId: contact.id,
+        type: "segment_removed",
+        data: { segmentId, name: segment?.name ?? null },
+      });
       return c.json({ id: contact.id, audienceId: segmentId, deleted: true as const }, 200);
     },
   );
@@ -915,6 +1024,7 @@ function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
     name: row.name,
     ...(row.description !== null ? { description: row.description } : {}),
     default_subscription: wireSubscription(row.defaultSubscribed),
+    visibility: row.visibility,
     created_at: row.createdAt.toISOString(),
   });
 
@@ -945,6 +1055,8 @@ function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
           // Immutable after creation (topics.ts): opt_in = subscribed unless
           // the contact opts out.
           defaultSubscribed: body.default_subscription === "opt_in",
+          // Omitted → the column default ('private').
+          ...(body.visibility !== undefined ? { visibility: body.visibility } : {}),
         })
         .returning({ id: b.id });
       if (!row) throw new Error("topic insert returned no row");
@@ -1023,6 +1135,7 @@ function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const changes = {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.description !== undefined ? { description: body.description } : {}),
+        ...(body.visibility !== undefined ? { visibility: body.visibility } : {}),
       };
       // The SDK always posts a body (its `id` is dropped by the schema); a
       // PATCH with nothing editable is a no-op ack, not an error.

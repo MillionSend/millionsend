@@ -1,6 +1,19 @@
-import { boolean, index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { contacts } from "./contacts.js";
 import { teams } from "./teams.js";
+
+// private: shown on the unsubscribe page only when the contact opted in;
+// public: always shown there.
+export const topicVisibilityEnum = pgEnum("topic_visibility", ["private", "public"]);
 
 export const topics = pgTable(
   "topics",
@@ -15,6 +28,7 @@ export const topics = pgTable(
     // Immutable after creation — flipping it would silently reinterpret every
     // absent subscription row, so the default is fixed at creation time.
     defaultSubscribed: boolean("default_subscribed").notNull(),
+    visibility: topicVisibilityEnum("visibility").notNull().default("private"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("topics_team_idx").on(t.teamId)],

@@ -260,19 +260,20 @@ table.ms-table {
   text-align: right;
 }
 .ms-table td {
-  padding: 13px 14px;
+  padding: 7px 14px;
+  line-height: 1.4;
   border-bottom: 1px solid var(--ms-line);
   color: var(--ms-bone);
 }
 .ms-table td:last-child {
   color: var(--ms-muted);
 }
-/* Dense variant — DNS record tables at Resend density: slim header, ~8px rows. */
+/* Dense variant — DNS record tables at Resend density: slim header, ~5px rows. */
 .ms-table.dense thead th {
   padding: 6px 12px;
 }
 .ms-table.dense td {
-  padding: 8px 12px;
+  padding: 5px 12px;
 }
 /* Row hover: no background wash — the row's link underlines instead (quieter,
    and the affordance sits on the thing you'd click). */

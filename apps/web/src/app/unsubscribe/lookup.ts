@@ -6,7 +6,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 
 /** Per-team customization the hosted confirm page applies; all fields optional. */
@@ -18,6 +18,7 @@ export interface UnsubscribeCustomization {
 
 export interface UnsubscribeTarget {
   contactId: string;
+  teamId: string;
   email: string;
   /** null = global unsubscribe; set = topic-scoped. */
   topic: { id: string; name: string } | null;
@@ -25,6 +26,41 @@ export interface UnsubscribeTarget {
   alreadyDone: boolean;
   /** The contact's team's customization for the confirm page. */
   customization: UnsubscribeCustomization;
+}
+
+export interface PreferenceTopic {
+  id: string;
+  name: string;
+  /** Effective state: the explicit override, else the topic's default. */
+  subscribed: boolean;
+}
+
+/**
+ * Topics the confirm page's preferences list shows and the POST handler may
+ * write: the team's public topics, plus the token's own topic when private —
+ * a private topic's own unsubscribe link must still render it. This set is
+ * the write allowlist too: ids posted outside it are ignored.
+ */
+export async function preferenceTopics(
+  db: Db,
+  target: UnsubscribeTarget,
+): Promise<PreferenceTopic[]> {
+  const t = schema.topics;
+  const s = schema.contactTopicSubscriptions;
+  const visible = target.topic
+    ? or(eq(t.visibility, "public"), eq(t.id, target.topic.id))
+    : eq(t.visibility, "public");
+  const rows = await db
+    .select({ id: t.id, name: t.name, defaultSubscribed: t.defaultSubscribed, sub: s.subscribed })
+    .from(t)
+    .leftJoin(s, and(eq(s.topicId, t.id), eq(s.contactId, target.contactId)))
+    .where(and(eq(t.teamId, target.teamId), visible))
+    .orderBy(asc(t.createdAt), asc(t.id));
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    subscribed: isSubscribedToTopic(row.sub, row.defaultSubscribed),
+  }));
 }
 
 /**
@@ -85,6 +121,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
   if (topicId === null) {
     return {
       contactId: contact.id,
+      teamId: contact.teamId,
       email: contact.email,
       topic: null,
       alreadyDone: contact.unsubscribed,
@@ -112,6 +149,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
   const effective = isSubscribedToTopic(sub?.subscribed, topic.defaultSubscribed);
   return {
     contactId: contact.id,
+    teamId: contact.teamId,
     email: contact.email,
     topic: { id: topic.id, name: topic.name },
     alreadyDone: !effective,

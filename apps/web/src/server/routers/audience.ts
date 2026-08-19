@@ -1,8 +1,8 @@
-import { resultRows } from "@millionsend/core";
+import { recordContactActivity, resultRows } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, ilike, isNotNull, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
@@ -130,7 +130,39 @@ export const audienceRouter = router({
           .where(and(...filters))
           .orderBy(desc(t.createdAt), desc(t.id))
           .limit(input.limit + 1);
-        return { ...paginate(rows, input.limit), total: totalRow?.total ?? 0 };
+        const page = paginate(rows, input.limit);
+        // Opted-in topic names for the page's rows in ONE grouped query (the
+        // status badge's count + tooltip), reusing the shared membership rule.
+        const topicsByContact = new Map<string, string[]>();
+        if (page.items.length > 0) {
+          const tp = schema.topics;
+          const s = schema.contactTopicSubscriptions;
+          const memberships = await ctx.db
+            .select({ contactId: t.id, name: tp.name })
+            .from(t)
+            .innerJoin(tp, eq(tp.teamId, ctx.teamId))
+            .leftJoin(s, and(eq(s.topicId, tp.id), eq(s.contactId, t.id)))
+            .where(
+              and(
+                inArray(
+                  t.id,
+                  page.items.map((r) => r.id),
+                ),
+                topicMembershipSql(s, tp),
+              ),
+            )
+            .orderBy(asc(tp.name));
+          for (const m of memberships) {
+            const names = topicsByContact.get(m.contactId);
+            if (names) names.push(m.name);
+            else topicsByContact.set(m.contactId, [m.name]);
+          }
+        }
+        return {
+          items: page.items.map((r) => ({ ...r, topics: topicsByContact.get(r.id) ?? [] })),
+          nextCursor: page.nextCursor,
+          total: totalRow?.total ?? 0,
+        };
       }),
 
     get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
@@ -176,6 +208,11 @@ export const audienceRouter = router({
           .returning({ id: t.id });
         // Conflict = the team already has this address (case-insensitive).
         if (!row) throw new TRPCError({ code: "CONFLICT" });
+        await recordContactActivity(ctx.db, {
+          teamId: ctx.teamId,
+          contactId: row.id,
+          type: "contact_created",
+        });
         return { id: row.id };
       }),
 
@@ -229,6 +266,14 @@ export const audienceRouter = router({
           .values(valid.map((v) => ({ ...v, teamId: ctx.teamId })))
           .onConflictDoNothing()
           .returning({ id: t.id });
+        await recordContactActivity(
+          ctx.db,
+          inserted.map((r) => ({
+            teamId: ctx.teamId,
+            contactId: r.id,
+            type: "contact_created" as const,
+          })),
+        );
         return { created: inserted.length, skipped: skipped + valid.length - inserted.length };
       }),
 
@@ -244,6 +289,15 @@ export const audienceRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const t = schema.contacts;
+        // Read the flag before writing so the timeline records only real
+        // flips — an update restating the current state stays silent.
+        const [before] =
+          input.unsubscribed === undefined
+            ? []
+            : await ctx.db
+                .select({ unsubscribed: t.unsubscribed })
+                .from(t)
+                .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)));
         // properties REPLACES the whole map when provided (not a merge);
         // omitting it leaves the stored map unchanged.
         const [row] = await ctx.db
@@ -263,6 +317,13 @@ export const audienceRouter = router({
           .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
           .returning({ id: t.id, unsubscribed: t.unsubscribed });
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        if (before && before.unsubscribed !== row.unsubscribed) {
+          await recordContactActivity(ctx.db, {
+            teamId: ctx.teamId,
+            contactId: row.id,
+            type: row.unsubscribed ? "unsubscribed" : "resubscribed",
+          });
+        }
         return row;
       }),
 
@@ -301,13 +362,52 @@ export const audienceRouter = router({
         .orderBy(desc(t.createdAt), desc(t.id));
     }),
 
+    /** The contact's manual segment memberships (segment_members rows only). */
+    segments: teamProcedure
+      .input(z.object({ contactId: z.uuid() }))
+      .query(async ({ ctx, input }) => {
+        await assertContact(ctx, input.contactId);
+        const m = schema.segmentMembers;
+        const s = schema.segments;
+        return ctx.db
+          .select({ id: s.id, name: s.name })
+          .from(m)
+          .innerJoin(s, eq(s.id, m.segmentId))
+          .where(and(eq(m.contactId, input.contactId), eq(s.teamId, ctx.teamId)))
+          .orderBy(asc(s.name));
+      }),
+
+    /** The contact's activity timeline, newest first. */
+    activities: teamProcedure
+      .input(z.object({ contactId: z.uuid() }))
+      .query(async ({ ctx, input }) => {
+        await assertContact(ctx, input.contactId);
+        const a = schema.contactActivities;
+        return (
+          ctx.db
+            .select({ id: a.id, type: a.type, data: a.data, createdAt: a.createdAt })
+            .from(a)
+            .where(and(eq(a.contactId, input.contactId), eq(a.teamId, ctx.teamId)))
+            .orderBy(desc(a.createdAt), desc(a.id))
+            // ponytail: hard cap, no paging — add a keyset cursor if timelines outgrow it
+            .limit(100)
+        );
+      }),
+
     /** Upserts the explicit per-topic override for this contact. */
     setTopic: teamProcedure
       .input(z.object({ contactId: z.uuid(), topicId: z.uuid(), subscribed: z.boolean() }))
       .mutation(async ({ ctx, input }) => {
         await assertContact(ctx, input.contactId);
-        await assertTopic(ctx, input.topicId);
+        const topic = await assertTopic(ctx, input.topicId);
         const s = schema.contactTopicSubscriptions;
+        // Effective state before the write (explicit row, else the topic's
+        // default) — the timeline records only real transitions.
+        const [prior] = await ctx.db
+          .select({ subscribed: s.subscribed })
+          .from(s)
+          .where(and(eq(s.contactId, input.contactId), eq(s.topicId, input.topicId)))
+          .limit(1);
         await ctx.db
           .insert(s)
           .values({
@@ -319,6 +419,14 @@ export const audienceRouter = router({
             target: [s.contactId, s.topicId],
             set: { subscribed: input.subscribed, updatedAt: new Date() },
           });
+        if ((prior?.subscribed ?? topic.defaultSubscribed) !== input.subscribed) {
+          await recordContactActivity(ctx.db, {
+            teamId: ctx.teamId,
+            contactId: input.contactId,
+            type: input.subscribed ? "topic_opt_in" : "topic_opt_out",
+            data: { topicId: topic.id, name: topic.name },
+          });
+        }
         return { subscribed: input.subscribed };
       }),
   }),

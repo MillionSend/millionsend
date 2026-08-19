@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import en from "../../../../../messages/en/unsubscribe.json";
 import ptBR from "../../../../../messages/pt-BR/unsubscribe.json";
-import { targetForToken } from "../../lookup";
+import { preferenceTopics, targetForToken } from "../../lookup";
 
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 
@@ -80,14 +80,17 @@ export default async function UnsubscribeConfirmPage({
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ done?: string }>;
+  searchParams: Promise<{ done?: string; saved?: string }>;
 }) {
   const [{ token }, query, headerList] = await Promise.all([params, searchParams, headers()]);
   const m = pickMessages(headerList.get("accept-language"));
-  const target = await targetForToken(getDb(), token);
+  const db = getDb();
+  const target = await targetForToken(db, token);
+  const saved = target !== null && query.saved === "1";
   // Already-unsubscribed reads as done: the action is idempotent and the page
   // never asks for something that would change nothing.
-  const done = target !== null && (query.done === "1" || target.alreadyDone);
+  const done = !saved && target !== null && (query.done === "1" || target.alreadyDone);
+  const topics = target !== null && !saved && !done ? await preferenceTopics(db, target) : [];
   const topicName = target?.topic?.name;
   const brandName = target?.customization.brandName ?? null;
   const customMessage = target?.customization.message ?? null;
@@ -129,6 +132,10 @@ export default async function UnsubscribeConfirmPage({
         ) : null}
         {target === null ? (
           <p style={{ margin: 0, fontSize: 15, color: "var(--ms-bone)" }}>{m.invalid}</p>
+        ) : saved ? (
+          <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
+            {m.saved}
+          </p>
         ) : done ? (
           <>
             <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
@@ -143,9 +150,57 @@ export default async function UnsubscribeConfirmPage({
             <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
               {confirmText}
             </p>
+            {topics.length > 0 ? (
+              // Separate form: saving preferences must not trigger the
+              // unsubscribe below. The hidden `prefs` marker routes the POST.
+              <form
+                method="post"
+                action={`/unsubscribe/${encodeURIComponent(token)}`}
+                style={{ marginTop: 20, textAlign: "left" }}
+              >
+                <input type="hidden" name="prefs" value="1" />
+                <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--ms-muted)" }}>
+                  {m.preferences}
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {topics.map((topic) => (
+                    <label
+                      key={topic.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontSize: 14,
+                        color: "var(--ms-bone)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        name="topic"
+                        value={topic.id}
+                        defaultChecked={topic.subscribed}
+                      />
+                      {topic.name}
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="submit"
+                  className="ms-btn ms-btn-secondary"
+                  style={{ marginTop: 14, width: "100%" }}
+                >
+                  {m.save}
+                </button>
+              </form>
+            ) : null}
             {/* Plain form POST to the canonical route — the page ships no JS. */}
             <form method="post" action={`/unsubscribe/${encodeURIComponent(token)}`}>
-              <button type="submit" className="ms-btn ms-btn-primary" style={{ marginTop: 20 }}>
+              <button
+                type="submit"
+                className="ms-btn ms-btn-primary"
+                style={{ marginTop: topics.length > 0 ? 12 : 20 }}
+              >
                 {m.button}
               </button>
             </form>

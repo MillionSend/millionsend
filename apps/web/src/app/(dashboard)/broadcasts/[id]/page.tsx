@@ -12,7 +12,7 @@ import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { StatBlock } from "@/components/stat-block";
-import { formatUtcMinute } from "@/lib/format";
+import { formatDayTime, formatUtcTimestamp } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { type BroadcastStatus, ContentPreview, StatusPill } from "../parts";
 
@@ -153,12 +153,12 @@ export default function BroadcastDetailPage() {
         </div>
         <div>
           <Microlabel>{broadcast?.sentAt ? t("detail.sent") : t("detail.scheduled")}</Microlabel>
-          <div className="ms-mono" style={{ fontSize: 13, marginTop: 7 }}>
+          <div style={{ fontSize: 13, marginTop: 7 }}>
             {broadcast ? (
               (() => {
                 const at = broadcast.sentAt ?? broadcast.scheduledAt;
                 return at ? (
-                  formatUtcMinute(at)
+                  <span title={formatUtcTimestamp(at)}>{formatDayTime(at, locale)}</span>
                 ) : (
                   <span style={{ color: "var(--ms-faint)" }}>—</span>
                 );

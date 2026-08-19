@@ -90,6 +90,31 @@ describe("topics teamId isolation", () => {
     expect((await call(tokenA, "POST", "/topics", { name: "x" })).status).toBe(422);
   });
 
+  it("defaults visibility to private and round-trips an explicit public", async () => {
+    const got = await json(await call(tokenA, "GET", `/topics/${topicA}`));
+    expect(got).toMatchObject({ visibility: "private" });
+
+    const res = await call(tokenA, "POST", "/topics", {
+      name: "Public news",
+      default_subscription: "opt_in",
+      visibility: "public",
+    });
+    expect(res.status).toBe(200);
+    const id = (await json(res)).id ?? "";
+    const fetched = await json(await call(tokenA, "GET", `/topics/${id}`));
+    expect(fetched).toMatchObject({ visibility: "public" });
+    expect((await call(tokenA, "DELETE", `/topics/${id}`)).status).toBe(200);
+  });
+
+  it("rejects an invalid visibility value", async () => {
+    const res = await call(tokenA, "POST", "/topics", {
+      name: "x",
+      default_subscription: "opt_in",
+      visibility: "hidden",
+    });
+    expect(res.status).toBe(422);
+  });
+
   it("team B cannot see team A's topic in its list", async () => {
     const res = await call(tokenB, "GET", "/topics");
     expect((await json(res)).data).toEqual([]);
@@ -212,6 +237,13 @@ describe("PATCH /topics/{id}", () => {
     const res = await call(tokenA, "PATCH", `/topics/${topicId}`, { id: topicId });
     expect(res.status).toBe(200);
     expect(await json(res)).toEqual({ id: topicId });
+  });
+
+  it("updates visibility", async () => {
+    const res = await call(tokenA, "PATCH", `/topics/${topicId}`, { visibility: "public" });
+    expect(res.status).toBe(200);
+    const got = await json(await call(tokenA, "GET", `/topics/${topicId}`));
+    expect(got).toMatchObject({ visibility: "public" });
   });
 
   it("leaves default_subscription immutable even when provided", async () => {

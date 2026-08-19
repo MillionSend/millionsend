@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ResourceApiButton } from "@/components/api-sheet";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
@@ -144,6 +145,7 @@ export function DomainsView() {
               <PlusGlyph size={14} />
               {t("list.addDomain")}
             </Link>
+            <ResourceApiButton resource="domains" />
           </>
         }
       />
