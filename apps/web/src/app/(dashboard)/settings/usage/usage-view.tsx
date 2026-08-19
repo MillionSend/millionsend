@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { Odometer } from "@/components/odometer";
 import { Skeleton } from "@/components/skeleton";
+import { StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
@@ -92,16 +93,22 @@ function QuotaRow({
   );
 }
 
+const HISTORY_COLS = ["sent", "delivered", "bounced", "complained"] as const;
+
 function HistoryHead() {
   const t = useTranslations("settings.usage");
   return (
     <thead>
       <tr>
         <th>{t("day")}</th>
-        <th className="right">{t("sent")}</th>
-        <th className="right">{t("delivered")}</th>
-        <th className="right">{t("bounced")}</th>
-        <th className="right">{t("complained")}</th>
+        {HISTORY_COLS.map((col) => (
+          <th key={col} className="right">
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <StatusDot status={col} />
+              {t(col)}
+            </span>
+          </th>
+        ))}
       </tr>
     </thead>
   );
