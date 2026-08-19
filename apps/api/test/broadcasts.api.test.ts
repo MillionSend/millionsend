@@ -39,7 +39,7 @@ const draftBody = () => ({
 // happy-path tests.
 async function makeSendableTeam(slug: string) {
   const teamId = await createTeam(db, slug);
-  const key = generateApiKey("live");
+  const key = generateApiKey();
   await db.insert(schema.apiKeys).values({
     teamId,
     name: slug,
@@ -70,7 +70,7 @@ beforeAll(async () => {
   ] as const) {
     const teamId = await createTeam(db, slug);
     if (slug === "bc-team-a") teamA = teamId;
-    const key = generateApiKey("live");
+    const key = generateApiKey();
     setToken(key.token);
     await db.insert(schema.apiKeys).values({
       teamId,
@@ -385,7 +385,7 @@ describe("domain-scoped keys cannot cross domains on broadcasts", () => {
       status: "verified",
       verifiedAt: new Date(),
     });
-    const key = generateApiKey("live");
+    const key = generateApiKey();
     scopedToken = key.token;
     await db.insert(schema.apiKeys).values({
       teamId: scopeTeam,

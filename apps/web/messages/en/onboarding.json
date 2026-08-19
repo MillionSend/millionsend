@@ -2,6 +2,9 @@
   "team": {
     "title": "Name your team",
     "teamName": "Team name",
+    "logoLabel": "Team logo (optional)",
+    "logoAdd": "Add a logo",
+    "logoChange": "Change logo",
     "submit": "Create team",
     "error": "Team creation failed. Try again."
   },
@@ -59,5 +62,10 @@
       "link": "Team →"
     },
     "instance": "Send rate and email retention are instance settings — set them in <link>Settings</link>."
+  },
+  "stepSes": {
+    "title": "Connect your AWS SES",
+    "body": "MillionSend sends through your own AWS SES account. Connect it once in settings — the wizard creates everything and tests the connection.",
+    "cta": "Open SES setup"
   }
 }

@@ -11,7 +11,6 @@ export {
 } from "./accept-email.js";
 export { type ApiKeyAuth, authenticateApiKey } from "./api-key-auth.js";
 export {
-  type ApiKeyMode,
   extractTokenPrefix,
   type GeneratedApiKey,
   generateApiKey,

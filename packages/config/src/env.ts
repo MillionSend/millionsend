@@ -137,6 +137,16 @@ export const env = createEnv({
     // Cloud-only (billing).
     STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
+
+    // S3-compatible object storage for team logo uploads (Cloudflare R2
+    // first-class). All five must be set to enable uploads; otherwise the
+    // upload UI is hidden everywhere. Objects are served publicly as
+    // STORAGE_S3_PUBLIC_URL/<key>.
+    STORAGE_S3_ENDPOINT: z.url().optional(),
+    STORAGE_S3_BUCKET: z.string().optional(),
+    STORAGE_S3_ACCESS_KEY_ID: z.string().optional(),
+    STORAGE_S3_SECRET_ACCESS_KEY: z.string().optional(),
+    STORAGE_S3_PUBLIC_URL: z.url().optional(),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
@@ -145,10 +155,25 @@ export const env = createEnv({
 
 export type Env = typeof env;
 
+const STORAGE_S3_KEYS = [
+  "STORAGE_S3_ENDPOINT",
+  "STORAGE_S3_BUCKET",
+  "STORAGE_S3_ACCESS_KEY_ID",
+  "STORAGE_S3_SECRET_ACCESS_KEY",
+  "STORAGE_S3_PUBLIC_URL",
+] as const;
+
 /** Cross-field rules that per-field schemas cannot express. */
 export function assertEnvConsistency(e: Env): void {
   if (Boolean(e.SMTP_TLS_CERT_PATH) !== Boolean(e.SMTP_TLS_KEY_PATH)) {
     throw new Error("SMTP_TLS_CERT_PATH and SMTP_TLS_KEY_PATH must be set together");
+  }
+  // Partial storage config is a misconfiguration, not "disabled": silently
+  // hiding the upload UI would make the missing variable invisible.
+  const storageSet = STORAGE_S3_KEYS.filter((key) => e[key]);
+  if (storageSet.length > 0 && storageSet.length < STORAGE_S3_KEYS.length) {
+    const missing = STORAGE_S3_KEYS.filter((key) => !e[key]).join(", ");
+    throw new Error(`STORAGE_S3_* must be set together; missing: ${missing}`);
   }
   if (e.IS_CLOUD) {
     for (const key of [

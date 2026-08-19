@@ -18,10 +18,12 @@ import { Sidebar } from "@/components/sidebar";
  */
 export function AppShell({
   teamName,
+  teamLogoUrl,
   userEmail,
   children,
 }: {
   teamName: string;
+  teamLogoUrl?: string | null | undefined;
   userEmail: string;
   children: React.ReactNode;
 }) {
@@ -79,6 +81,7 @@ export function AppShell({
       ) : null}
       <Sidebar
         teamName={teamName}
+        teamLogoUrl={teamLogoUrl}
         userEmail={userEmail}
         className={drawerOpen ? "ms-sidebar open" : "ms-sidebar"}
         onNavigate={() => setDrawerOpen(false)}

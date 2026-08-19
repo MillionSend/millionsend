@@ -49,7 +49,14 @@ describe("settings.team", () => {
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "owner");
     const team = await callerFor("u1", teamId, "owner").settings.team.get();
-    expect(team).toEqual({ name: "acme", slug: "acme", plan: "free", planDailyLimit: 100 });
+    expect(team).toEqual({
+      name: "acme",
+      slug: "acme",
+      plan: "free",
+      planDailyLimit: 100,
+      logoUrl: null,
+      logoUploadsEnabled: false,
+    });
   });
 
   it("get reports no daily limit on self-host, where the cap is not enforced", async () => {

@@ -30,7 +30,7 @@ beforeAll(async () => {
     status: "verified",
     verifiedAt: new Date(),
   });
-  const key = generateApiKey("test");
+  const key = generateApiKey();
   await db.insert(schema.apiKeys).values({
     teamId,
     name: "contract",

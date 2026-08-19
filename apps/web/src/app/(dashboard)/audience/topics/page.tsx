@@ -235,10 +235,8 @@ export default function TopicsPage() {
             />
           </div>
           <div className="ms-field" style={{ marginTop: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-              <label htmlFor="topic-default" style={{ marginBottom: 0 }}>
-                {t("defaultLabel")}
-              </label>
+            <div className="ms-label-row">
+              <label htmlFor="topic-default">{t("defaultLabel")}</label>
               <Tooltip text={t("defaultHint")} />
             </div>
             <Select

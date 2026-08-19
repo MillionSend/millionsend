@@ -14,7 +14,7 @@ let token: string;
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
   const teamId = await createTeam(db, "rate-limit");
-  const key = generateApiKey("live");
+  const key = generateApiKey();
   token = key.token;
   await db.insert(schema.apiKeys).values({
     teamId,

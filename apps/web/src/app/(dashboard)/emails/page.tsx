@@ -85,16 +85,6 @@ export default function EmailsPage() {
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
 
-  const subtitle = stats.data
-    ? [
-        t("list.sentToday", { count: nf.format(stats.data.sentToday) }),
-        t("list.deliveredAllTime", { count: nf.format(stats.data.deliveredAllTime) }),
-        ...(stats.data.p50DeliveryMs != null
-          ? [t("list.p50Delivery", { ms: nf.format(stats.data.p50DeliveryMs) })]
-          : []),
-      ].join(" · ")
-    : undefined;
-
   const capReached =
     usage.data?.today.limit != null && usage.data.today.accepted >= usage.data.today.limit;
 
@@ -132,7 +122,6 @@ export default function EmailsPage() {
     <>
       <PageHeader
         title={t("list.title")}
-        {...(subtitle ? { subtitle } : {})}
         actions={
           <>
             <ExportCsvLink

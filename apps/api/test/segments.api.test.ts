@@ -28,7 +28,7 @@ async function call(token: string, method: string, path: string, body?: unknown)
 
 async function seedTeam(slug: string): Promise<string> {
   const teamId = await createTeam(db, slug);
-  const key = generateApiKey("live");
+  const key = generateApiKey();
   await db.insert(schema.apiKeys).values({
     teamId,
     name: slug,

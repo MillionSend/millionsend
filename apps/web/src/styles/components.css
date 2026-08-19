@@ -1281,3 +1281,30 @@ svg:focus {
 .ms-hl .hljs-variable {
   color: color-mix(in srgb, var(--ms-info) 45%, var(--ms-bone));
 }
+
+/* One-shot attention pulse for a section the user was just navigated to. */
+.ms-attention {
+  animation: ms-attention 0.9s var(--ms-ease) 2;
+}
+@keyframes ms-attention {
+  50% {
+    transform: scale(1.015);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-attention {
+    animation: none;
+  }
+}
+
+/* Label + info tooltip on one line: the label's own bottom gap moves to the
+   row so the glyph centers on the text instead of floating below it. */
+.ms-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.ms-label-row label {
+  margin-bottom: 0;
+}

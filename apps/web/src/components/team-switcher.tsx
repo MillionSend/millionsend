@@ -7,32 +7,8 @@ import { ChevronGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { useDismiss } from "@/components/popover-menu";
 import { BtnSpinner } from "@/components/spinner";
+import { TeamLogo } from "@/components/team-logo";
 import { useTRPC } from "@/lib/trpc";
-
-/** Rounded-square avatar: the team's initial on a raised tile. */
-function TeamTile({ name, size }: { name: string; size: number }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        width: size,
-        height: size,
-        borderRadius: Math.round(size * 0.3),
-        background: "var(--ms-panel-raised)",
-        border: "1px solid var(--ms-line)",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: Math.round(size * 0.46),
-        fontWeight: 600,
-        flex: "none",
-        boxSizing: "border-box",
-      }}
-    >
-      {name.charAt(0).toUpperCase()}
-    </span>
-  );
-}
 
 function PlanBadge({ plan }: { plan: string }) {
   const t = useTranslations("common");
@@ -80,7 +56,14 @@ function ChevronStack() {
  * Switching/creating sets the server-side selection cookie, so the follow-up
  * is a full navigation: every query cache belongs to the previous team.
  */
-export function TeamSwitcher({ teamName }: { teamName: string }) {
+export function TeamSwitcher({
+  teamName,
+  teamLogoUrl,
+}: {
+  teamName: string;
+  /** Server-resolved logo for the active team — the trigger before team.list lands. */
+  teamLogoUrl?: string | null | undefined;
+}) {
   const t = useTranslations("common.teamSwitcher");
   const tCommon = useTranslations("common");
   const trpc = useTRPC();
@@ -139,7 +122,11 @@ export function TeamSwitcher({ teamName }: { teamName: string }) {
           color: "inherit",
         }}
       >
-        <TeamTile name={active?.teamName ?? teamName} size={26} />
+        <TeamLogo
+          name={active?.teamName ?? teamName}
+          logoUrl={active ? active.logoUrl : teamLogoUrl}
+          size={26}
+        />
         <span
           style={{
             fontSize: 14,
@@ -187,7 +174,7 @@ export function TeamSwitcher({ teamName }: { teamName: string }) {
                   minWidth: 0,
                 }}
               >
-                <TeamTile name={team.teamName} size={22} />
+                <TeamLogo name={team.teamName} logoUrl={team.logoUrl} size={22} />
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
                   {team.teamName}
                 </span>

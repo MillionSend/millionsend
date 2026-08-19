@@ -258,10 +258,8 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
           </div>
 
           <div className="ms-field" style={{ marginTop: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-              <label htmlFor="domain-region" style={{ marginBottom: 0 }}>
-                {t("new.region")}
-              </label>
+            <div className="ms-label-row">
+              <label htmlFor="domain-region">{t("new.region")}</label>
               <Tooltip text={t("new.regionHint")} />
             </div>
             <Select

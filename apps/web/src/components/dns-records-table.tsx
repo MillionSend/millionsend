@@ -96,51 +96,84 @@ export function DnsRecordsTable({
   records,
   domain,
   showStatus = false,
+  highlightGroup = null,
+  forceGroups = [],
+  groupExtras = {},
+  emptyNotes = {},
 }: {
   records: DnsRecord[];
   /** The domain the records belong to; omitted, names render absolute. */
   domain?: string | undefined;
   showStatus?: boolean;
+  /** One-shot attention pulse + scroll anchor for a group the user was sent to. */
+  highlightGroup?: (typeof GROUPS)[number] | null;
+  /** Groups rendered even with no records (their emptyNotes line shows instead). */
+  forceGroups?: (typeof GROUPS)[number][];
+  /** Right-aligned header content per group (e.g. a toggle). */
+  groupExtras?: Partial<Record<(typeof GROUPS)[number], React.ReactNode>>;
+  emptyNotes?: Partial<Record<(typeof GROUPS)[number], string>>;
 }) {
   const t = useTranslations("domains");
   return (
     <div style={{ display: "grid", gap: 20 }}>
       {GROUPS.map((group) => {
         const rows = records.filter((r) => r.group === group);
-        if (rows.length === 0) return null;
+        if (rows.length === 0 && !forceGroups.includes(group)) return null;
         return (
-          <div key={group} style={{ maxWidth: 1000 }}>
-            <p className="ms-microlabel" style={{ margin: "0 0 8px" }}>
-              {t(`detail.groups.${group}`)}
-            </p>
-            <RecordsTable showStatus={showStatus}>
-              {rows.map((record) => {
-                const name = domain ? zoneRelativeName(record.name, domain) : record.name;
-                return (
-                  <tr key={`${record.type}-${record.name}-${record.value}`}>
-                    <td>{record.type}</td>
-                    <td>
-                      <CopyChip value={name} title={record.name} />
-                    </td>
-                    <td style={{ paddingRight: 24 }}>
-                      <CopyChip value={record.value} />
-                    </td>
-                    <td>{t("detail.ttlAuto")}</td>
-                    <td>{record.priority ?? "—"}</td>
-                    {showStatus ? (
-                      <td style={{ whiteSpace: "nowrap" }}>
-                        <RecordStatusBadge
-                          status={combineRecordStatus({
-                            live: record.live,
-                            sesGate: sesGateFromRecordStatus(record.status),
-                          })}
-                        />
+          <div
+            key={group}
+            id={`dns-group-${group}`}
+            className={highlightGroup === group ? "ms-attention" : undefined}
+            style={{ maxWidth: 1000 }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                margin: "0 0 8px",
+              }}
+            >
+              <p className="ms-microlabel" style={{ margin: 0 }}>
+                {t(`detail.groups.${group}`)}
+              </p>
+              {groupExtras[group] ?? null}
+            </div>
+            {rows.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.55 }}>
+                {emptyNotes[group]}
+              </p>
+            ) : (
+              <RecordsTable showStatus={showStatus}>
+                {rows.map((record) => {
+                  const name = domain ? zoneRelativeName(record.name, domain) : record.name;
+                  return (
+                    <tr key={`${record.type}-${record.name}-${record.value}`}>
+                      <td>{record.type}</td>
+                      <td>
+                        <CopyChip value={name} title={record.name} />
                       </td>
-                    ) : null}
-                  </tr>
-                );
-              })}
-            </RecordsTable>
+                      <td style={{ paddingRight: 24 }}>
+                        <CopyChip value={record.value} />
+                      </td>
+                      <td>{t("detail.ttlAuto")}</td>
+                      <td>{record.priority ?? "—"}</td>
+                      {showStatus ? (
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <RecordStatusBadge
+                            status={combineRecordStatus({
+                              live: record.live,
+                              sesGate: sesGateFromRecordStatus(record.status),
+                            })}
+                          />
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+              </RecordsTable>
+            )}
           </div>
         );
       })}

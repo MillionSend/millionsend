@@ -43,7 +43,7 @@ beforeAll(async () => {
     status: "verified",
     verifiedAt: new Date(),
   });
-  const key = generateApiKey("live");
+  const key = generateApiKey();
   token = key.token;
   await db.insert(schema.apiKeys).values({
     teamId,
@@ -165,7 +165,7 @@ describe("send edge cases", () => {
     const res = await post(validBody);
     const { id } = (await res.json()) as { id: string };
     const otherTeam = await createTeam(db, "intruder");
-    const otherKey = generateApiKey("live");
+    const otherKey = generateApiKey();
     await db.insert(schema.apiKeys).values({
       teamId: otherTeam,
       name: "o",
@@ -279,7 +279,7 @@ describe("batch send is atomic (no double-send on retry)", () => {
       status: "verified",
       verifiedAt: new Date(),
     });
-    const key = generateApiKey("live");
+    const key = generateApiKey();
     await db.insert(schema.apiKeys).values({
       teamId: atomicTeam,
       name: "atomic",

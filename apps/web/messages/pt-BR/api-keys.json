@@ -21,16 +21,13 @@
     "title": "Criar chave de API",
     "name": "Nome",
     "namePlaceholder": "Produção",
-    "mode": "Modo",
-    "modeLive": "Produção",
-    "modeTest": "Teste",
     "permission": "Permissão",
     "permFull": "Acesso total",
     "permSending": "Apenas envio",
-    "permHint": "Apenas envio: esta chave pode enviar e-mails. Ela não pode ler, configurar ou gerenciar chaves.",
     "domain": "Domínio",
     "domainAny": "Qualquer domínio",
-    "submit": "Criar chave"
+    "submit": "Criar chave",
+    "permissionTooltip": "Acesso total gerencia tudo pela API — domínios, contatos, transmissões, chaves. Acesso de envio só pode enviar e-mails."
   },
   "reveal": {
     "title": "Chave de API criada",

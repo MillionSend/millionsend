@@ -107,7 +107,15 @@
     "saved": "Salvo",
     "slug": "Slug",
     "plan": "Plano",
-    "error": "Não foi possível salvar."
+    "error": "Não foi possível salvar.",
+    "logo": {
+      "label": "Logo",
+      "upload": "Enviar logo",
+      "replace": "Trocar logo",
+      "remove": "Remover",
+      "hint": "PNG, JPEG ou WebP, de até 2 MB. Aparece onde sua equipe é exibida.",
+      "error": "Não foi possível atualizar a logo."
+    }
   },
   "plans": {
     "free": "Free",

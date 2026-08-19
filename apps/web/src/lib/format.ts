@@ -81,12 +81,10 @@ export function formatDurationShort(ms: number): string {
 }
 
 /**
- * "ms_live_••••••••abcd" — drops the 6 indexed secret chars the stored
+ * "ms_••••••••abcd" — drops the 6 indexed secret chars the stored
  * tokenPrefix carries; the mask shows only the scheme and the last 4.
- * The scheme is matched structurally, not by splitting on the last "_":
- * the secret chars are base64url, which itself contains "_".
  */
 export function maskApiKey(tokenPrefix: string, last4: string): string {
-  const scheme = /^ms_(?:live|test)_/.exec(tokenPrefix)?.[0] ?? tokenPrefix;
+  const scheme = tokenPrefix.startsWith("ms_") ? "ms_" : tokenPrefix;
   return `${scheme}••••••••${last4}`;
 }

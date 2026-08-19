@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { asc, eq } from "drizzle-orm";
+import { uploadsEnabled } from "./storage";
 
 export type TeamRole = (typeof schema.teamMemberRoleEnum.enumValues)[number];
 export type TeamPlan = (typeof schema.planEnum.enumValues)[number];
@@ -17,21 +18,26 @@ export interface ActiveMembership {
   role: TeamRole;
   teamName: string;
   plan: TeamPlan;
+  logoUrl: string | null;
 }
 
 /** All memberships for a user, oldest first (the first one is the default team). */
-export function listMemberships(db: Db, userId: string): Promise<ActiveMembership[]> {
-  return db
+export async function listMemberships(db: Db, userId: string): Promise<ActiveMembership[]> {
+  const rows = await db
     .select({
       teamId: schema.teamMembers.teamId,
       role: schema.teamMembers.role,
       teamName: schema.teams.name,
       plan: schema.teams.plan,
+      logoUrl: schema.teams.logoUrl,
     })
     .from(schema.teamMembers)
     .innerJoin(schema.teams, eq(schema.teams.id, schema.teamMembers.teamId))
     .where(eq(schema.teamMembers.userId, userId))
     .orderBy(asc(schema.teamMembers.createdAt));
+  // Storage off ⇒ logo URLs may be dead (bucket gone/private); every surface
+  // falls back to the initial tile rather than render a broken image.
+  return uploadsEnabled() ? rows : rows.map((row) => ({ ...row, logoUrl: null }));
 }
 
 /**

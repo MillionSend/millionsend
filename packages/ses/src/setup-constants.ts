@@ -183,6 +183,22 @@ BACKUP_S3_PREFIX=backups
 BACKUP_CRON=0 3 * * *
 BACKUP_RETENTION_DAYS=14
 
+# --- Uploads (optional) ---
+
+# Team logo uploads to any S3-compatible bucket (Cloudflare R2 works out of
+# the box). Disabled until all five STORAGE_S3_* values are set — until then
+# no upload UI appears anywhere. The bucket must already exist and serve
+# objects publicly. R2 endpoint: https://<accountid>.r2.cloudflarestorage.com
+STORAGE_S3_ENDPOINT=
+STORAGE_S3_BUCKET=
+STORAGE_S3_ACCESS_KEY_ID=
+STORAGE_S3_SECRET_ACCESS_KEY=
+
+# Public base URL the bucket serves from (the R2 public bucket URL, or a
+# CDN/custom domain in front of it). Uploaded objects are addressed as
+# \${STORAGE_S3_PUBLIC_URL}/<key>.
+STORAGE_S3_PUBLIC_URL=
+
 # --- Social login (optional) ---
 
 # OAuth credentials for the dashboard's social sign-in. Each provider's

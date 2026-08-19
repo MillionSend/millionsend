@@ -21,16 +21,13 @@
     "title": "Create API key",
     "name": "Name",
     "namePlaceholder": "Production",
-    "mode": "Mode",
-    "modeLive": "Live",
-    "modeTest": "Test",
     "permission": "Permission",
     "permFull": "Full access",
     "permSending": "Sending only",
-    "permHint": "Sending only: this key can send email. It cannot read, configure, or manage keys.",
     "domain": "Domain",
     "domainAny": "Any domain",
-    "submit": "Create key"
+    "submit": "Create key",
+    "permissionTooltip": "Full access can manage everything over the API — domains, contacts, broadcasts, keys. Sending access can only send emails."
   },
   "reveal": {
     "title": "API key created",

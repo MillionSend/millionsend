@@ -36,7 +36,7 @@ const json = async (res: Response) =>
 
 async function seedTeam(slug: string): Promise<{ token: string; teamId: string }> {
   const teamId = await createTeam(db, slug);
-  const key = generateApiKey("live");
+  const key = generateApiKey();
   await db.insert(schema.apiKeys).values({
     teamId,
     name: slug,

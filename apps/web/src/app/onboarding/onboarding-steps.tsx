@@ -262,6 +262,19 @@ export function OnboardingSteps({
   const [token, setToken] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
 
+  // Self-host: sending needs SES connected, so the stepper leads with that
+  // when credentials are absent. Polls until connected (the SES settings
+  // page is a different tab away); cloud always passes.
+  const awsQuery = useQuery({
+    ...trpc.system.awsReadiness.queryOptions(),
+    enabled: showInstanceHint,
+    refetchOnWindowFocus: true,
+    refetchInterval: (query) => (query.state.data?.credentialsConfigured ? false : 8000),
+  });
+  const sesReady = !showInstanceHint || awsQuery.data?.credentialsConfigured === true;
+  // Extra leading step shifts the numbering below it.
+  const marker = (step: number) => String(step + (sesReady ? 0 : 1)).padStart(2, "0");
+
   const keysQuery = useQuery(trpc.apiKeys.list.queryOptions());
   const keys = keysQuery.data ?? [];
   // Oldest key = the one this flow banked (list is newest-first).
@@ -319,7 +332,7 @@ export function OnboardingSteps({
     ? maskApiKey(token, token.slice(-4))
     : bankedKey
       ? maskApiKey(bankedKey.tokenPrefix, bankedKey.last4)
-      : "ms_live_…";
+      : "ms_…";
 
   const snippetBase = {
     apiUrl,
@@ -341,7 +354,7 @@ export function OnboardingSteps({
   const displaySegs = tab === "node" ? nodeSegs(displayParams) : curlSegs(displayParams);
   const copyText = segsText(tab === "node" ? nodeSegs(copyParams) : curlSegs(copyParams));
 
-  if (keysQuery.isPending) return null;
+  if (keysQuery.isPending || (showInstanceHint && awsQuery.isPending)) return null;
 
   const success = firstEmail !== undefined;
   const toDisplay = firstEmail?.to.join(", ") ?? userEmail;
@@ -579,10 +592,30 @@ export function OnboardingSteps({
               </div>
             </div>
 
-            {/* Step 01 — add an API key */}
+            {!sesReady ? (
+              /* Leading step — connect AWS SES before anything can send */
+              <div className="ms-step" style={{ display: "flex", gap: 18 }}>
+                <StepRail marker="01" color="var(--ms-bone)" />
+                <div style={stepCard}>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>{t("stepSes.title")}</div>
+                  <div style={{ fontSize: 13.5, color: "var(--ms-muted)", marginTop: 4 }}>
+                    {t("stepSes.body")}
+                  </div>
+                  <Link
+                    href="/settings/ses"
+                    className="ms-btn ms-btn-primary"
+                    style={{ marginTop: 16 }}
+                  >
+                    {t("stepSes.cta")}
+                  </Link>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Add an API key */}
             <div className="ms-step" style={{ display: "flex", gap: 18 }}>
               <StepRail
-                marker={hasKey ? "✓" : "01"}
+                marker={hasKey ? "✓" : marker(1)}
                 color={hasKey ? "var(--ms-success)" : "var(--ms-bone)"}
               />
               {hasKey && bankedKey ? (
@@ -647,7 +680,7 @@ export function OnboardingSteps({
                     className="ms-btn ms-btn-primary"
                     style={{ marginTop: 16 }}
                     disabled={createKey.isPending}
-                    onClick={() => createKey.mutate({ name: t("step1.keyName"), mode: "live" })}
+                    onClick={() => createKey.mutate({ name: t("step1.keyName") })}
                   >
                     <BtnSpinner on={createKey.isPending} />
                     {t("step1.cta")}
@@ -656,9 +689,9 @@ export function OnboardingSteps({
               )}
             </div>
 
-            {/* Step 02 — send an email */}
+            {/* Send an email */}
             <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-              <StepRail marker="02" color={hasKey ? "var(--ms-bone)" : "var(--ms-faint)"} />
+              <StepRail marker={marker(2)} color={hasKey ? "var(--ms-bone)" : "var(--ms-faint)"} />
               <div
                 style={{
                   ...stepCard,
@@ -673,9 +706,9 @@ export function OnboardingSteps({
               </div>
             </div>
 
-            {/* Step 03 — watch it arrive */}
+            {/* Watch it arrive */}
             <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-              <StepRail marker="03" color="var(--ms-faint)" line={false} />
+              <StepRail marker={marker(3)} color="var(--ms-faint)" line={false} />
               <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
                 <span
                   style={{ fontSize: 14, color: hasKey ? "var(--ms-muted)" : "var(--ms-faint)" }}
