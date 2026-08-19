@@ -8,7 +8,7 @@ import { useCallback, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -100,6 +100,13 @@ export default function TemplatesPage() {
   // Stable identity: Modal's focus effect depends on onClose.
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
 
+  // Guard mirrors the delete button's disabled state — the same check gates
+  // both the form submit and Modal's Cmd+Enter path.
+  const submitDelete = () => {
+    if (!deleteTarget || deleteMutation.isPending) return;
+    deleteMutation.mutate({ id: deleteTarget.id });
+  };
+
   return (
     <>
       <PageHeader title={t("list.title")} actions={<NewTemplateButton />} />
@@ -183,13 +190,16 @@ export default function TemplatesPage() {
         </>
       )}
 
-      <Modal open={deleteTarget !== null} onClose={closeDelete} title={t("list.deleteTitle")}>
+      <Modal
+        open={deleteTarget !== null}
+        onClose={closeDelete}
+        onConfirm={submitDelete}
+        title={t("list.deleteTitle")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (deleteTarget && !deleteMutation.isPending) {
-              deleteMutation.mutate({ id: deleteTarget.id });
-            }
+            submitDelete();
           }}
         >
           <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -205,7 +215,7 @@ export default function TemplatesPage() {
               disabled={deleteMutation.isPending}
             >
               <BtnSpinner on={deleteMutation.isPending} />
-              {t("list.deleteConfirm")} <span className="ms-keycap">↵</span>
+              {t("list.deleteConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

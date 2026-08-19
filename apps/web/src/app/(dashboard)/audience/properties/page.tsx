@@ -6,7 +6,7 @@ import { useCallback, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -120,6 +120,21 @@ export default function PropertiesPage() {
   // Stable identities: Modal's focus effect depends on onClose.
   const closeAdd = useCallback(() => setAddOpen(false), []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
+
+  const submitAdd = () => {
+    if (defineMutation.isPending || key.trim().length === 0) return;
+    defineMutation.mutate({
+      key: key.trim(),
+      type: "string",
+      ...(fallback.trim() ? { fallbackValue: fallback.trim() } : {}),
+    });
+  };
+
+  const submitDelete = () => {
+    if (deleteTarget && !removeMutation.isPending) {
+      removeMutation.mutate({ id: deleteTarget.id });
+    }
+  };
 
   const openAdd = (prefill = "") => {
     setKey(prefill);
@@ -291,16 +306,11 @@ export default function PropertiesPage() {
         </Table>
       )}
 
-      <Modal open={addOpen} onClose={closeAdd} title={t("addTitle")}>
+      <Modal open={addOpen} onClose={closeAdd} onConfirm={submitAdd} title={t("addTitle")}>
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (defineMutation.isPending || key.trim().length === 0) return;
-            defineMutation.mutate({
-              key: key.trim(),
-              type: "string",
-              ...(fallback.trim() ? { fallbackValue: fallback.trim() } : {}),
-            });
+            submitAdd();
           }}
         >
           <div className="ms-field">
@@ -361,19 +371,22 @@ export default function PropertiesPage() {
               disabled={defineMutation.isPending || key.trim().length === 0}
             >
               <BtnSpinner on={defineMutation.isPending} />
-              {t("addConfirm")} <span className="ms-keycap">↵</span>
+              {t("addConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>
       </Modal>
 
-      <Modal open={deleteTarget !== null} onClose={closeDelete} title={t("deleteTitle")}>
+      <Modal
+        open={deleteTarget !== null}
+        onClose={closeDelete}
+        onConfirm={submitDelete}
+        title={t("deleteTitle")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (deleteTarget && !removeMutation.isPending) {
-              removeMutation.mutate({ id: deleteTarget.id });
-            }
+            submitDelete();
           }}
         >
           <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -389,7 +402,7 @@ export default function PropertiesPage() {
               disabled={removeMutation.isPending}
             >
               <BtnSpinner on={removeMutation.isPending} />
-              {t("deleteConfirm")} <span className="ms-keycap">↵</span>
+              {t("deleteConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

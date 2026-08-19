@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
 import { ChevronGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
+import { ConfirmKeycap } from "@/components/modal-footer";
 import { useDismiss } from "@/components/popover-menu";
 import { BtnSpinner } from "@/components/spinner";
 import { TeamLogo } from "@/components/team-logo";
@@ -90,6 +91,13 @@ export function TeamSwitcher({
       onSuccess: () => window.location.assign("/emails"),
     }),
   );
+
+  // Shared by the form submit and the modal's ⌘↵ shortcut, which bypasses
+  // the input's native `required` check — hence the explicit empty guard.
+  function submitCreate() {
+    if (createTeam.isPending || newName.trim().length === 0) return;
+    createTeam.mutate({ name: newName });
+  }
 
   function onKeyDown(event: React.KeyboardEvent) {
     if (event.key === "Escape" && open) {
@@ -210,12 +218,11 @@ export function TeamSwitcher({
           </button>
         </div>
       ) : null}
-      <Modal open={createOpen} onClose={closeCreate} title={t("create")}>
+      <Modal open={createOpen} onClose={closeCreate} onConfirm={submitCreate} title={t("create")}>
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (createTeam.isPending) return;
-            createTeam.mutate({ name: newName });
+            submitCreate();
           }}
           style={{ display: "grid", gap: 16, marginTop: 12 }}
         >
@@ -244,7 +251,7 @@ export function TeamSwitcher({
             </button>
             <button type="submit" className="ms-btn ms-btn-primary" disabled={createTeam.isPending}>
               <BtnSpinner on={createTeam.isPending} />
-              {t("submit")} <span className="ms-keycap">↵</span>
+              {t("submit")} <ConfirmKeycap />
             </button>
           </div>
         </form>

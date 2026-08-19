@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -139,6 +139,27 @@ export default function ContactDetailPage() {
 
   const row = query.isSuccess ? query.data : null;
   const name = row ? [row.firstName, row.lastName].filter(Boolean).join(" ") : "";
+
+  const submitEdit = () => {
+    if (!row || updateMutation.isPending) return;
+    // Rows with a blank key are dropped; a repeated key keeps its
+    // last value. Sent as the full replacement map (update semantics).
+    const properties: Record<string, string> = {};
+    for (const { key, value } of editProps) {
+      const k = key.trim();
+      if (k) properties[k] = value;
+    }
+    updateMutation.mutate({
+      id: row.id,
+      firstName: editFirst.trim(),
+      lastName: editLast.trim(),
+      properties,
+    });
+  };
+
+  const submitDelete = () => {
+    if (row && !deleteMutation.isPending) deleteMutation.mutate({ id: row.id });
+  };
 
   return (
     <>
@@ -350,24 +371,16 @@ export default function ContactDetailPage() {
         )}
       </div>
 
-      <Modal open={editOpen} onClose={closeEdit} title={t("detail.editTitle")}>
+      <Modal
+        open={editOpen}
+        onClose={closeEdit}
+        onConfirm={submitEdit}
+        title={t("detail.editTitle")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (!row || updateMutation.isPending) return;
-            // Rows with a blank key are dropped; a repeated key keeps its
-            // last value. Sent as the full replacement map (update semantics).
-            const properties: Record<string, string> = {};
-            for (const { key, value } of editProps) {
-              const k = key.trim();
-              if (k) properties[k] = value;
-            }
-            updateMutation.mutate({
-              id: row.id,
-              firstName: editFirst.trim(),
-              lastName: editLast.trim(),
-              properties,
-            });
+            submitEdit();
           }}
         >
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -460,17 +473,22 @@ export default function ContactDetailPage() {
               disabled={updateMutation.isPending}
             >
               <BtnSpinner on={updateMutation.isPending} />
-              {t("detail.saveConfirm")} <span className="ms-keycap">↵</span>
+              {t("detail.saveConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>
       </Modal>
 
-      <Modal open={confirmingDelete} onClose={closeDelete} title={t("contacts.deleteTitle")}>
+      <Modal
+        open={confirmingDelete}
+        onClose={closeDelete}
+        onConfirm={submitDelete}
+        title={t("contacts.deleteTitle")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (row && !deleteMutation.isPending) deleteMutation.mutate({ id: row.id });
+            submitDelete();
           }}
         >
           <p style={{ margin: "0 0 22px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -486,7 +504,7 @@ export default function ContactDetailPage() {
               disabled={deleteMutation.isPending}
             >
               <BtnSpinner on={deleteMutation.isPending} />
-              {t("contacts.deleteConfirm")} <span className="ms-keycap">↵</span>
+              {t("contacts.deleteConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 
 export interface ConfirmDialogOptions {
   message: string;
@@ -62,6 +62,7 @@ export function ConfirmDialogHost() {
     <Modal
       open={request !== null}
       onClose={() => close(false)}
+      onConfirm={() => close(true)}
       title={request?.title ?? common("confirmTitle")}
     >
       <form
@@ -81,7 +82,7 @@ export function ConfirmDialogHost() {
             type="submit"
             className={request?.danger ? "ms-btn ms-btn-destructive" : "ms-btn ms-btn-primary"}
           >
-            {request?.confirmLabel ?? common("confirm")} <span className="ms-keycap">↵</span>
+            {request?.confirmLabel ?? common("confirm")} <ConfirmKeycap />
           </button>
         </ModalFooter>
       </form>

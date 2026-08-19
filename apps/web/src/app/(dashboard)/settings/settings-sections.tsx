@@ -6,7 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -272,10 +272,22 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
     reset();
   }, [onClose, reset]);
 
+  // Shared by the form submit and the modal's ⌘↵ shortcut; in the created
+  // state the primary action is just dismissing.
+  const confirm = () => {
+    if (create.data) {
+      close();
+      return;
+    }
+    if (email.trim().length === 0 || create.isPending) return;
+    create.mutate({ email, role });
+  };
+
   return (
     <Modal
       open={open}
       onClose={close}
+      onConfirm={confirm}
       title={create.data ? t("invitations.created.title") : t("invitations.invite.title")}
     >
       {create.data ? (
@@ -292,7 +304,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           <CopyChip value={create.data.acceptUrl} />
           <ModalFooter>
             <button type="submit" className="ms-btn ms-btn-primary">
-              {t("invitations.created.done")} <span className="ms-keycap">↵</span>
+              {t("invitations.created.done")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>
@@ -301,8 +313,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           style={{ display: "grid", gap: 14, marginTop: 12 }}
           onSubmit={(event) => {
             event.preventDefault();
-            if (email.trim().length === 0 || create.isPending) return;
-            create.mutate({ email, role });
+            confirm();
           }}
         >
           <div className="ms-field">
@@ -349,7 +360,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
               disabled={email.trim().length === 0 || create.isPending}
             >
               <BtnSpinner on={create.isPending} />
-              {t("invitations.invite.submit")} <span className="ms-keycap">↵</span>
+              {t("invitations.invite.submit")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

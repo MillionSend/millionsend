@@ -7,7 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -47,6 +47,9 @@ export default function BroadcastDetailPage() {
     }),
   );
   const closeCancel = useCallback(() => setCancelOpen(false), []);
+  const confirmCancel = () => {
+    if (!cancelMutation.isPending) cancelMutation.mutate({ id });
+  };
 
   if (query.isError) {
     return (
@@ -250,11 +253,16 @@ export default function BroadcastDetailPage() {
         )}
       </div>
 
-      <Modal open={cancelOpen} onClose={closeCancel} title={t("detail.cancelTitle")}>
+      <Modal
+        open={cancelOpen}
+        onClose={closeCancel}
+        onConfirm={confirmCancel}
+        title={t("detail.cancelTitle")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (!cancelMutation.isPending) cancelMutation.mutate({ id });
+            confirmCancel();
           }}
         >
           <p style={{ margin: "0 0 22px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -270,7 +278,7 @@ export default function BroadcastDetailPage() {
               disabled={cancelMutation.isPending}
             >
               <BtnSpinner on={cancelMutation.isPending} />
-              {t("detail.cancelConfirm")} <span className="ms-keycap">↵</span>
+              {t("detail.cancelConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

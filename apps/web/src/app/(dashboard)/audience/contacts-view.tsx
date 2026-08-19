@@ -10,7 +10,7 @@ import { ExportCsvLink } from "@/components/export-csv-link";
 import { GrowthSparkline } from "@/components/growth-sparkline";
 import { ChevronGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu, useDismiss } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -233,6 +233,20 @@ export function AudienceContactsView() {
     setImportError(false);
   }, []);
 
+  function submitAdd() {
+    if (addMutation.isPending || newEmail.trim().length === 0) return;
+    addMutation.mutate({
+      email: newEmail.trim(),
+      ...(newFirst.trim() ? { firstName: newFirst.trim() } : {}),
+      ...(newLast.trim() ? { lastName: newLast.trim() } : {}),
+    });
+  }
+
+  function submitDelete() {
+    if (!deleteTarget || deleteMutation.isPending) return;
+    deleteMutation.mutate({ id: deleteTarget.id });
+  }
+
   async function runImport() {
     if (!importRows || importRows.length === 0 || importing) return;
     setImporting(true);
@@ -454,16 +468,11 @@ export function AudienceContactsView() {
         </>
       )}
 
-      <Modal open={addOpen} onClose={closeAdd} title={t("contacts.addTitle")}>
+      <Modal open={addOpen} onClose={closeAdd} onConfirm={submitAdd} title={t("contacts.addTitle")}>
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (addMutation.isPending || newEmail.trim().length === 0) return;
-            addMutation.mutate({
-              email: newEmail.trim(),
-              ...(newFirst.trim() ? { firstName: newFirst.trim() } : {}),
-              ...(newLast.trim() ? { lastName: newLast.trim() } : {}),
-            });
+            submitAdd();
           }}
         >
           <div className="ms-field">
@@ -525,13 +534,21 @@ export function AudienceContactsView() {
               disabled={addMutation.isPending || newEmail.trim().length === 0}
             >
               <BtnSpinner on={addMutation.isPending} />
-              {t("contacts.addConfirm")} <span className="ms-keycap">↵</span>
+              {t("contacts.addConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>
       </Modal>
 
-      <Modal open={importOpen} onClose={closeImport} title={t("contacts.importTitle")}>
+      <Modal
+        open={importOpen}
+        onClose={closeImport}
+        onConfirm={() => {
+          if (importResult) closeImport();
+          else void runImport();
+        }}
+        title={t("contacts.importTitle")}
+      >
         <p style={{ margin: "0 0 18px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
           {t("contacts.importBody")}
         </p>
@@ -612,13 +629,16 @@ export function AudienceContactsView() {
         )}
       </Modal>
 
-      <Modal open={deleteTarget !== null} onClose={closeDelete} title={t("contacts.deleteTitle")}>
+      <Modal
+        open={deleteTarget !== null}
+        onClose={closeDelete}
+        onConfirm={submitDelete}
+        title={t("contacts.deleteTitle")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (deleteTarget && !deleteMutation.isPending) {
-              deleteMutation.mutate({ id: deleteTarget.id });
-            }
+            submitDelete();
           }}
         >
           <p style={{ margin: "0 0 22px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -634,7 +654,7 @@ export function AudienceContactsView() {
               disabled={deleteMutation.isPending}
             >
               <BtnSpinner on={deleteMutation.isPending} />
-              {t("contacts.deleteConfirm")} <span className="ms-keycap">↵</span>
+              {t("contacts.deleteConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

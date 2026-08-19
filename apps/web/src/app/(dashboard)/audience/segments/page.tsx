@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -226,6 +226,17 @@ export default function SegmentsPage() {
 
   const canSave = name.trim() !== "" && !createMutation.isPending;
 
+  const submitCreate = () => {
+    if (!canSave) return;
+    createMutation.mutate({ name: name.trim(), filter });
+  };
+
+  const submitDelete = () => {
+    if (deleteTarget && !deleteMutation.isPending) {
+      deleteMutation.mutate({ id: deleteTarget.id });
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -316,12 +327,16 @@ export default function SegmentsPage() {
         </Table>
       )}
 
-      <Modal open={createOpen} onClose={closeCreate} title={t("createTitle")}>
+      <Modal
+        open={createOpen}
+        onClose={closeCreate}
+        onConfirm={submitCreate}
+        title={t("createTitle")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (!canSave) return;
-            createMutation.mutate({ name: name.trim(), filter });
+            submitCreate();
           }}
         >
           <div className="ms-field">
@@ -420,19 +435,22 @@ export default function SegmentsPage() {
             </button>
             <button type="submit" className="ms-btn ms-btn-primary" disabled={!canSave}>
               <BtnSpinner on={createMutation.isPending} />
-              {t("builder.save")} <span className="ms-keycap">↵</span>
+              {t("builder.save")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>
       </Modal>
 
-      <Modal open={deleteTarget !== null} onClose={closeDelete} title={t("deleteTitle")}>
+      <Modal
+        open={deleteTarget !== null}
+        onClose={closeDelete}
+        onConfirm={submitDelete}
+        title={t("deleteTitle")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (deleteTarget && !deleteMutation.isPending) {
-              deleteMutation.mutate({ id: deleteTarget.id });
-            }
+            submitDelete();
           }}
         >
           <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -448,7 +466,7 @@ export default function SegmentsPage() {
               disabled={deleteMutation.isPending}
             >
               <BtnSpinner on={deleteMutation.isPending} />
-              {t("deleteConfirm")} <span className="ms-keycap">↵</span>
+              {t("deleteConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

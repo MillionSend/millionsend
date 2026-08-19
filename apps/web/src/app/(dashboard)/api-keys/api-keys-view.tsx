@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -116,6 +116,20 @@ export function ApiKeysView() {
   }, [resetCreate]);
   const closeRevoke = useCallback(() => setRevokeTarget(null), []);
 
+  // Shared by the form submit and Modal's ⌘↵ onConfirm — one guard for both.
+  const confirmCreate = () => {
+    if (revealedToken) {
+      closeCreate();
+      return;
+    }
+    if (name.trim().length === 0 || createMutation.isPending) return;
+    createMutation.mutate({ name, permission, domainId: domainId || null });
+  };
+  const confirmRevoke = () => {
+    if (!revokeTarget || revokeMutation.isPending) return;
+    revokeMutation.mutate({ id: revokeTarget.id });
+  };
+
   return (
     <>
       <PageHeader
@@ -212,6 +226,7 @@ export function ApiKeysView() {
       <Modal
         open={createOpen}
         onClose={closeCreate}
+        onConfirm={confirmCreate}
         title={revealedToken ? t("reveal.title") : t("create.title")}
       >
         {revealedToken ? (
@@ -219,7 +234,7 @@ export function ApiKeysView() {
             style={{ display: "grid", gap: 12, marginTop: 12 }}
             onSubmit={(event) => {
               event.preventDefault();
-              closeCreate();
+              confirmCreate();
             }}
           >
             {/* Grid children stretch; the chip should hug the token. */}
@@ -231,7 +246,7 @@ export function ApiKeysView() {
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button type="submit" className="ms-btn ms-btn-primary">
-                {t("reveal.done")} <span className="ms-keycap">↵</span>
+                {t("reveal.done")} <ConfirmKeycap />
               </button>
             </div>
           </form>
@@ -240,8 +255,7 @@ export function ApiKeysView() {
             style={{ display: "grid", gap: 14, marginTop: 12 }}
             onSubmit={(event) => {
               event.preventDefault();
-              if (name.trim().length === 0 || createMutation.isPending) return;
-              createMutation.mutate({ name, permission, domainId: domainId || null });
+              confirmCreate();
             }}
           >
             <div className="ms-field">
@@ -301,21 +315,25 @@ export function ApiKeysView() {
                 disabled={name.trim().length === 0 || createMutation.isPending}
               >
                 <BtnSpinner on={createMutation.isPending} />
-                {t("create.submit")} <span className="ms-keycap">↵</span>
+                {t("create.submit")} <ConfirmKeycap />
               </button>
             </ModalFooter>
           </form>
         )}
       </Modal>
 
-      <Modal open={revokeTarget !== null} onClose={closeRevoke} title={t("revokeConfirm.title")}>
+      <Modal
+        open={revokeTarget !== null}
+        onClose={closeRevoke}
+        onConfirm={confirmRevoke}
+        title={t("revokeConfirm.title")}
+      >
         {revokeTarget ? (
           <form
             style={{ display: "grid", gap: 14, marginTop: 12 }}
             onSubmit={(event) => {
               event.preventDefault();
-              if (revokeMutation.isPending) return;
-              revokeMutation.mutate({ id: revokeTarget.id });
+              confirmRevoke();
             }}
           >
             <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -331,7 +349,7 @@ export function ApiKeysView() {
                 disabled={revokeMutation.isPending}
               >
                 <BtnSpinner on={revokeMutation.isPending} />
-                {t("revokeConfirm.confirm")} <span className="ms-keycap">↵</span>
+                {t("revokeConfirm.confirm")} <ConfirmKeycap />
               </button>
             </ModalFooter>
           </form>

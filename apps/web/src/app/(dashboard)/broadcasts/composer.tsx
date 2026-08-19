@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DraftBanner } from "@/components/draft-banner";
 import { FromField } from "@/components/from-field";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
@@ -289,7 +289,9 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   }
 
   async function confirmSend() {
-    if (!complete || sending) return;
+    // Mirrors the confirm button's disabled state (zero recipients included):
+    // Modal's onConfirm shortcut routes here too and must obey the same guard.
+    if (!complete || sending || recipientCount.data?.count === 0) return;
     try {
       const id = await persist();
       await sendMutation.mutateAsync({
@@ -691,17 +693,16 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
         </div>
       )}
 
-      <Modal open={guardOpen} onClose={closeGuard} title={t("guard.title")}>
+      <Modal
+        open={guardOpen}
+        onClose={closeGuard}
+        onConfirm={() => void confirmSend()}
+        title={t("guard.title")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
             void confirmSend();
-          }}
-          onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-              event.preventDefault();
-              void confirmSend();
-            }
           }}
         >
           <p style={{ margin: "0 0 18px", fontSize: "var(--ms-fs-ui)" }}>
@@ -750,8 +751,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               disabled={sending || recipientCount.data?.count === 0}
             >
               <BtnSpinner on={sending} />
-              {schedule ? t("guard.schedule") : t("guard.sendNow")}{" "}
-              <span className="ms-keycap">⌘↵</span>
+              {schedule ? t("guard.schedule") : t("guard.sendNow")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>
