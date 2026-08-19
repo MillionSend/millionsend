@@ -1,5 +1,12 @@
 import { z } from "@hono/zod-openapi";
-import { DAY_MS, extractAddrSpec, parseSingleSender } from "@millionsend/core";
+import {
+  DAY_MS,
+  extractAddrSpec,
+  parseScheduledAt,
+  parseSingleSender,
+  SCHEDULED_AT_FORMS,
+} from "@millionsend/core";
+import { SES_REGIONS } from "@millionsend/ses";
 
 /**
  * Wire-compatible with Resend's documented /emails surface
@@ -25,6 +32,143 @@ const recipientList = z
   .union([emailAddress, z.array(emailAddress).min(1).max(50)])
   .transform((v) => (Array.isArray(v) ? v : [v]));
 
+// Strict base64: canonical alphabet, correct padding, no whitespace.
+const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+/**
+ * Wire shape from resend's parseEmailToApiOptions. Only inline base64
+ * `content` is supported: a `path` URL would have the server fetch an
+ * attacker-chosen location (SSRF), so it is rejected and never fetched.
+ */
+const attachmentSchema = z
+  .object({
+    filename: z.string().min(1),
+    content: z.string().optional(),
+    content_type: z.string().optional(),
+    content_id: z.string().optional(),
+    path: z.string().optional(),
+  })
+  .superRefine((a, ctx) => {
+    if (a.path !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["path"],
+        message: "path attachments are not supported — inline the file as base64 content",
+      });
+      return;
+    }
+    if (a.content_id !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["content_id"],
+        message: "content_id (inline attachments) is not supported",
+      });
+      return;
+    }
+    if (!a.content) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["content"],
+        message: "content is required (base64-encoded file bytes)",
+      });
+      return;
+    }
+    if (!BASE64_RE.test(a.content)) {
+      ctx.addIssue({ code: "custom", path: ["content"], message: "content must be valid base64" });
+    }
+  });
+
+/**
+ * Headers the transport owns: overriding them could forge identity or routing
+ * (From, Return-Path, Bcc), break MIME assembly (Content-Type), or strip
+ * compliance headers (List-Unsubscribe). Rejected case-insensitively; the
+ * worker additionally reassigns its own headers last (defense in depth).
+ */
+const RESERVED_HEADERS = new Set([
+  "from",
+  "sender",
+  "to",
+  "cc",
+  "bcc",
+  "reply-to",
+  "subject",
+  "date",
+  "message-id",
+  "mime-version",
+  "content-type",
+  "content-transfer-encoding",
+  "content-disposition",
+  "return-path",
+  "received",
+  "dkim-signature",
+  "list-unsubscribe",
+  "list-unsubscribe-post",
+  "list-id",
+  "precedence",
+  "auto-submitted",
+  "x-millionsend-email-id",
+]);
+
+// RFC 5322 field name: printable US-ASCII except colon.
+const HEADER_NAME_RE = /^[!-9;-~]+$/;
+
+/** True when the value carries a control char that could smuggle a header. */
+function hasHeaderControlChar(value: string): boolean {
+  for (const ch of value) {
+    const code = ch.charCodeAt(0);
+    if ((code < 0x20 && code !== 0x09) || code === 0x7f) return true;
+  }
+  return false;
+}
+
+const customHeadersSchema = z.record(z.string(), z.string()).superRefine((headers, ctx) => {
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (RESERVED_HEADERS.has(lower) || lower.startsWith("x-ses-")) {
+      ctx.addIssue({
+        code: "custom",
+        path: [name],
+        message: `"${name}" is a reserved header set by the transport`,
+      });
+    } else if (!HEADER_NAME_RE.test(name)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [name],
+        message: `"${name}" is not a valid header name`,
+      });
+    }
+    if (hasHeaderControlChar(value)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [name],
+        message: `"${name}" value must not contain control characters`,
+      });
+    }
+  }
+});
+
+/**
+ * ISO 8601 with offset, or Resend's relative forms ("in 5 mins"). Validated
+ * here but kept as the raw string: idempotency hashes the body, and a
+ * relative form must hash identically across retries — handlers re-resolve
+ * it via parseScheduledAt.
+ */
+const scheduledAtSchema = z.string().superRefine((v, ctx) => {
+  const at = parseScheduledAt(v);
+  if (!at) {
+    ctx.addIssue({ code: "custom", message: `scheduled_at must be ${SCHEDULED_AT_FORMS}` });
+    return;
+  }
+  // Capped at 30 days ahead (Resend's own limit). Also keeps a scheduled
+  // send from outliving the default body-retention window.
+  if (at.getTime() > Date.now() + 30 * DAY_MS) {
+    ctx.addIssue({
+      code: "custom",
+      message: "scheduled_at cannot be more than 30 days in the future",
+    });
+  }
+});
+
 export const sendEmailRequestSchema = z
   .object({
     from: fromAddress.openapi({ example: "Acme <onboarding@acme.dev>" }),
@@ -35,20 +179,14 @@ export const sendEmailRequestSchema = z
     cc: recipientList.optional(),
     bcc: recipientList.optional(),
     reply_to: recipientList.optional(),
-    // Capped at 30 days ahead (Resend's own limit). Also keeps a scheduled
-    // send from outliving the default body-retention window.
-    scheduled_at: z.iso
-      .datetime({ offset: true })
-      .refine((v) => new Date(v).getTime() <= Date.now() + 30 * DAY_MS, {
-        message: "scheduled_at cannot be more than 30 days in the future",
-      })
-      .optional(),
+    scheduled_at: scheduledAtSchema.optional(),
     tags: z.array(z.object({ name: z.string().min(1), value: z.string() })).optional(),
-    // Accepted into the schema so we can reject loudly instead of silently
-    // stripping — "never an incompatible subset" (docs/resend-compatibility.md).
-    attachments: z.array(z.unknown()).optional(),
-    headers: z.record(z.string(), z.string()).optional(),
-    topic_id: z.string().nullable().optional(),
+    // Topic-scoped send: recipients opted out of the topic (explicit
+    // subscription row, else the topic's default) are dropped at accept
+    // exactly like suppression-list hits.
+    topic_id: z.uuid().nullable().optional(),
+    attachments: z.array(attachmentSchema).optional(),
+    headers: customHeadersSchema.optional(),
   })
   .refine((v) => v.html !== undefined || v.text !== undefined, {
     message: "Either html or text must be provided",
@@ -61,24 +199,41 @@ export const sendEmailResponseSchema = z.object({ id: z.uuid() }).openapi("SendE
 
 /**
  * Batch send (resend.batch.send → POST /emails/batch). The SDK posts a bare
- * array of email options (attachments unsupported in batch); we reuse the
- * single-send schema per item and cap at Resend's 100-email limit — an
- * over-cap array is a 422. Strict validation only: any invalid item fails the
- * whole batch up front (x-batch-validation defaults to 'strict').
+ * array of email options, capped at Resend's 100-email limit — an over-cap
+ * array is a 422. Items are deliberately untyped here: the handler validates
+ * each against sendEmailRequestSchema itself (so batch items carry
+ * attachments/headers too — Resend omits attachments only at the type
+ * level), because the x-batch-validation header decides whether one invalid
+ * item fails the whole batch (strict, the default) or becomes a per-index
+ * error while the valid subset is accepted (permissive).
  */
 export const batchEmailRequestSchema = z
-  .array(sendEmailRequestSchema)
+  .array(z.unknown())
   .min(1)
   .max(100)
   .openapi("BatchEmailRequest");
 
 export const batchEmailResponseSchema = z
-  .object({ data: z.array(z.object({ id: z.uuid() })) })
+  .object({
+    data: z.array(z.object({ id: z.uuid() })),
+    // Present only in permissive mode: per-item failures by input index.
+    errors: z.array(z.object({ index: z.number().int(), message: z.string() })).optional(),
+  })
   .openapi("BatchEmailResponse");
 
 export const cancelEmailResponseSchema = z
   .object({ object: z.literal("email"), id: z.uuid() })
   .openapi("CancelEmailResponse");
+
+// PATCH /emails/{id} (resend.emails.update): reschedule a not-yet-sent
+// scheduled email.
+export const updateEmailRequestSchema = z
+  .object({ scheduled_at: scheduledAtSchema })
+  .openapi("UpdateEmailRequest");
+
+export const updateEmailResponseSchema = z
+  .object({ object: z.literal("email"), id: z.uuid() })
+  .openapi("UpdateEmailResponse");
 
 export const getEmailResponseSchema = z
   .object({
@@ -131,6 +286,8 @@ export const errorSchema = z
  * (v6+) reaches this surface through the top-level /contacts paths.
  */
 
+const subscriptionEnum = z.enum(["opt_in", "opt_out"]);
+
 export const createContactRequestSchema = z
   .object({
     // Bare addr-spec only — a contact record is an address, not a mailbox
@@ -142,8 +299,13 @@ export const createContactRequestSchema = z
     // Kept as unknown values so the handler can coerce scalars to strings and
     // reject nested objects/arrays with a precise 422 message.
     properties: z.record(z.string(), z.unknown()).optional(),
+    // Initial associations, written in the same transaction as the contact.
+    segments: z.array(z.object({ id: z.uuid() })).optional(),
+    topics: z.array(z.object({ id: z.uuid(), subscription: subscriptionEnum })).optional(),
   })
   .openapi("CreateContactRequest");
+
+export type CreateContactRequest = z.infer<typeof createContactRequestSchema>;
 
 export const updateContactRequestSchema = z
   .object({
@@ -183,11 +345,20 @@ export const removeContactResponseSchema = z
   .object({ object: z.literal("contact"), contact: z.uuid(), deleted: z.literal(true) })
   .openapi("RemoveContactResponse");
 
+// contacts.segments.add/remove (SDK AddContactSegmentResponseSuccess /
+// RemoveContactSegmentResponseSuccess): id is the contact, audienceId the
+// segment (audiences are a pure alias of segments in resend v6).
+export const addContactSegmentResponseSchema = z
+  .object({ id: z.uuid() })
+  .openapi("AddContactSegmentResponse");
+
+export const removeContactSegmentResponseSchema = z
+  .object({ id: z.uuid(), audienceId: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveContactSegmentResponse");
+
 /**
  * Broadcasts. Targeting is an optional segment_id and/or topic_id; neither
- * set means every contact of the team. Unsupported knobs (preview_text,
- * send-on-create) are accepted into the schema and rejected loudly — "never
- * an incompatible subset" (docs/resend-compatibility.md).
+ * set means every contact of the team.
  */
 
 const replyToList = z
@@ -206,10 +377,15 @@ export const createBroadcastRequestSchema = z
     preview_text: z.string().optional(),
     topic_id: z.uuid().nullable().optional(),
     send: z.boolean().optional(),
-    scheduled_at: z.string().optional(),
+    scheduled_at: scheduledAtSchema.optional(),
   })
   .refine((v) => v.html !== undefined || v.text !== undefined, {
     message: "Either html or text must be provided",
+  })
+  // Mirrors the SDK's type-level constraint: a schedule only makes sense on a
+  // create that also sends.
+  .refine((v) => v.scheduled_at === undefined || v.send === true, {
+    message: "scheduled_at requires send: true",
   })
   .openapi("CreateBroadcastRequest");
 
@@ -229,13 +405,7 @@ export const updateBroadcastRequestSchema = z
 
 export const sendBroadcastRequestSchema = z
   .object({
-    // ISO only — natural-language schedules ("in 2 days") are not supported.
-    scheduled_at: z.iso
-      .datetime({ offset: true })
-      .refine((v) => new Date(v).getTime() <= Date.now() + 30 * DAY_MS, {
-        message: "scheduled_at cannot be more than 30 days in the future",
-      })
-      .optional(),
+    scheduled_at: scheduledAtSchema.optional(),
   })
   .openapi("SendBroadcastRequest");
 
@@ -304,14 +474,17 @@ const segmentFilterInputSchema = z
 export const createSegmentRequestSchema = z
   .object({
     name: z.string().min(1),
-    filter: segmentFilterInputSchema,
+    // Omitted = manual segment: membership comes only from segment_members
+    // rows (contacts.segments.add / contacts.create segments).
+    filter: segmentFilterInputSchema.optional(),
   })
   .openapi("CreateSegmentRequest");
 
 export const updateSegmentRequestSchema = z
   .object({
     name: z.string().min(1).optional(),
-    filter: segmentFilterInputSchema.optional(),
+    // null clears the filter, turning the segment manual-membership-only.
+    filter: segmentFilterInputSchema.nullable().optional(),
   })
   .openapi("UpdateSegmentRequest");
 
@@ -319,7 +492,8 @@ const segmentBaseSchema = z.object({
   object: z.literal("segment"),
   id: z.uuid(),
   name: z.string(),
-  filter: segmentFilterInputSchema,
+  // Null = manual-membership-only segment (no saved filter).
+  filter: segmentFilterInputSchema.nullable(),
   created_at: z.string(),
 });
 
@@ -349,8 +523,6 @@ export const removeSegmentResponseSchema = z
  * (opt_in = subscribed unless the contact opts out) and is fixed at creation.
  */
 
-const subscriptionEnum = z.enum(["opt_in", "opt_out"]);
-
 export const createTopicRequestSchema = z
   .object({
     name: z.string().min(1),
@@ -360,6 +532,17 @@ export const createTopicRequestSchema = z
   .openapi("CreateTopicRequest");
 
 export const topicIdResponseSchema = z.object({ id: z.uuid() }).openapi("TopicIdResponse");
+
+// PATCH /topics/{id}: the SDK posts its whole payload, leaking `id` into the
+// body — non-strict parsing drops it. default_subscription is immutable and
+// absent from the SDK's update surface, so it is not accepted here either
+// (an unknown key, silently dropped).
+export const updateTopicRequestSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+  })
+  .openapi("UpdateTopicRequest");
 
 const topicSchema = z.object({
   id: z.uuid(),
@@ -379,6 +562,128 @@ export const listTopicsResponseSchema = z
 export const removeTopicResponseSchema = z
   .object({ id: z.uuid(), object: z.literal("topic"), deleted: z.literal(true) })
   .openapi("RemoveTopicResponse");
+
+/**
+ * Domains — wire-compatible with the resend SDK's domains surface.
+ * `custom_return_path` is the MAIL FROM subdomain (Resend's name for it).
+ */
+
+// Lowercase registrable hostname / single DNS label. Mirrors
+// apps/web/src/server/routers/domains.ts — restated because that module is
+// app-private; SES identities are registered exactly as typed, so uppercase
+// is rejected instead of normalized.
+const HOSTNAME_RE = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+const SUBDOMAIN_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+export const createDomainRequestSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .refine((v) => HOSTNAME_RE.test(v), "must be a lowercase hostname"),
+    region: z.enum(SES_REGIONS).optional(),
+    custom_return_path: z
+      .string()
+      .trim()
+      .refine((v) => SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
+      .default("send"),
+  })
+  .openapi("CreateDomainRequest");
+
+export const updateDomainRequestSchema = z
+  .object({
+    click_tracking: z.boolean().optional(),
+    open_tracking: z.boolean().optional(),
+    // Empty string or null clears the branded tracking subdomain.
+    tracking_subdomain: z
+      .string()
+      .trim()
+      .refine((v) => v === "" || SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
+      .nullable()
+      .optional(),
+    // Accepted by the SDK but unsupported here; the handler answers 422
+    // instead of silently ignoring a security-relevant setting.
+    tls: z.unknown().optional(),
+    capabilities: z.unknown().optional(),
+  })
+  .openapi("UpdateDomainRequest");
+
+const domainRecordSchema = z.object({
+  record: z.string(),
+  name: z.string(),
+  type: z.string(),
+  ttl: z.string(),
+  status: z.string(),
+  value: z.string(),
+  priority: z.number().optional(),
+});
+
+const domainSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  status: z.string(),
+  created_at: z.string(),
+  region: z.string(),
+  open_tracking: z.boolean(),
+  click_tracking: z.boolean(),
+  tracking_subdomain: z.string().nullable(),
+  // Sending-only platform; present for SDK-shape parity.
+  capabilities: z.object({ sending: z.string(), receiving: z.string() }),
+});
+
+export const createDomainResponseSchema = domainSchema
+  .extend({ records: z.array(domainRecordSchema) })
+  .openapi("CreateDomainResponse");
+
+export const getDomainResponseSchema = domainSchema
+  .extend({ object: z.literal("domain"), records: z.array(domainRecordSchema) })
+  .openapi("GetDomainResponse");
+
+export const listDomainsResponseSchema = z
+  .object({ object: z.literal("list"), data: z.array(domainSchema), has_more: z.boolean() })
+  .openapi("ListDomainsResponse");
+
+export const domainIdResponseSchema = z
+  .object({ object: z.literal("domain"), id: z.uuid() })
+  .openapi("DomainIdResponse");
+
+export const removeDomainResponseSchema = z
+  .object({ object: z.literal("domain"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveDomainResponse");
+
+/** API keys — wire-compatible with the resend SDK's apiKeys surface. */
+
+export const createApiKeyRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    permission: z.enum(["full_access", "sending_access"]).default("full_access"),
+    // Omitted = any verified domain; a uuid scopes the key to one domain.
+    domain_id: z.uuid().nullish(),
+  })
+  .openapi("CreateApiKeyRequest");
+
+export const createApiKeyResponseSchema = z
+  .object({ id: z.uuid(), token: z.string() })
+  .openapi("CreateApiKeyResponse");
+
+export const listApiKeysResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    data: z.array(
+      z.object({
+        id: z.uuid(),
+        name: z.string(),
+        created_at: z.string(),
+        last_used_at: z.string().nullable(),
+      }),
+    ),
+    has_more: z.boolean(),
+  })
+  .openapi("ListApiKeysResponse");
+
+export const removeApiKeyResponseSchema = z
+  .object({ object: z.literal("api_key"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveApiKeyResponse");
 
 // PATCH /contacts/{id}/topics: the SDK sends the topics array as the bare
 // request body (contact-topics.ts posts `payload.topics`).

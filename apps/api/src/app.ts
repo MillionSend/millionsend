@@ -11,12 +11,15 @@ import {
   extractTokenPrefix,
   fetchDeliverabilityHealth,
   findSuppressed,
+  findTopicOptOuts,
   type Keyring,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
+  parseScheduledAt,
   releaseIdempotent,
+  SCHEDULED_AT_FORMS,
+  segmentContactsWhere,
   segmentFilterSchema,
-  segmentWhere,
   verifySenderDomain,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -36,10 +39,14 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
 import { secureHeaders } from "hono/secure-headers";
+import { registerApiKeyRoutes } from "./routes/api-keys.js";
+import { type DomainsSesDeps, registerDomainRoutes } from "./routes/domains.js";
 import {
+  addContactSegmentResponseSchema,
   batchEmailRequestSchema,
   batchEmailResponseSchema,
   broadcastIdResponseSchema,
+  type CreateContactRequest,
   cancelBroadcastResponseSchema,
   cancelEmailResponseSchema,
   contactIdResponseSchema,
@@ -60,6 +67,7 @@ import {
   listTopicsResponseSchema,
   removeBroadcastResponseSchema,
   removeContactResponseSchema,
+  removeContactSegmentResponseSchema,
   removeSegmentResponseSchema,
   removeTopicResponseSchema,
   type SendEmailRequest,
@@ -73,7 +81,10 @@ import {
   updateContactRequestSchema,
   updateContactTopicsRequestSchema,
   updateContactTopicsResponseSchema,
+  updateEmailRequestSchema,
+  updateEmailResponseSchema,
   updateSegmentRequestSchema,
+  updateTopicRequestSchema,
 } from "./schemas.js";
 
 export interface SnsIngestDeps {
@@ -105,6 +116,8 @@ export interface ApiDeps {
     | undefined;
   /** SES event ingestion; omitted → the endpoint does not exist (404). */
   sns?: SnsIngestDeps | undefined;
+  /** SES identity management; omitted → the /domains routes do not exist (404). */
+  ses?: DomainsSesDeps | undefined;
   /**
    * Broadcast emails embed unsubscribe links built from APP_BASE_URL; without
    * it POST /broadcasts/{id}/send is rejected (same precondition the web
@@ -115,7 +128,7 @@ export interface ApiDeps {
   rateLimitPerMinute?: number | undefined;
 }
 
-type Env = { Variables: { auth: ApiKeyAuth; rateLimited: boolean } };
+export type Env = { Variables: { auth: ApiKeyAuth; rateLimited: boolean } };
 
 class IdempotencyTakeoverError extends Error {
   constructor() {
@@ -123,7 +136,7 @@ class IdempotencyTakeoverError extends Error {
   }
 }
 
-function errorBody(status: number, name: string, message: string) {
+export function errorBody(status: number, name: string, message: string) {
   return { statusCode: status, name, message };
 }
 
@@ -138,20 +151,28 @@ function keyForbidsSendingDomain(auth: ApiKeyAuth, domainId: string): boolean {
 
 const RESTRICTED_DOMAIN_MESSAGE = "This API key can only send from its assigned domain";
 
-/**
- * Fields accepted into the send schema only to reject them loudly rather than
- * silently strip (docs/resend-compatibility.md). Returns the 422 message, or
- * null when the payload uses no unsupported field.
- */
-function unsupportedSendField(body: SendEmailRequest): string | null {
-  if (body.attachments && body.attachments.length > 0) return "Attachments are not yet supported";
-  if (body.headers !== undefined) return "headers are not yet supported";
-  if (body.topic_id != null) return "topic_id is not yet supported";
-  return null;
+/** Topic lookup scoped to the caller's team — a foreign topic id is a 404. */
+async function findTeamTopic(
+  db: Db,
+  teamId: string,
+  id: string,
+): Promise<{ id: string } | undefined> {
+  const [row] = await db
+    .select({ id: schema.topics.id })
+    .from(schema.topics)
+    .where(and(eq(schema.topics.id, id), eq(schema.topics.teamId, teamId)));
+  return row;
 }
 
 /** Maps a validated Resend-shaped send body to the shared accept payload. */
 function toAcceptPayload(body: SendEmailRequest, domainId: string): AcceptEmailPayload {
+  // `content` is guaranteed by the schema's superRefine; the `?? ""` only
+  // satisfies the optional wire type.
+  const attachments = body.attachments?.map((a) => ({
+    filename: a.filename,
+    content: a.content ?? "",
+    ...(a.content_type ? { contentType: a.content_type } : {}),
+  }));
   return {
     from: body.from,
     to: body.to,
@@ -162,8 +183,13 @@ function toAcceptPayload(body: SendEmailRequest, domainId: string): AcceptEmailP
     html: body.html,
     text: body.text,
     tags: body.tags ? Object.fromEntries(body.tags.map((t) => [t.name, t.value])) : null,
-    scheduledAt: body.scheduled_at ? new Date(body.scheduled_at) : undefined,
+    headers: body.headers && Object.keys(body.headers).length > 0 ? body.headers : undefined,
+    attachments: attachments && attachments.length > 0 ? attachments : undefined,
+    // Schema-validated, so this always resolves; re-resolved here because
+    // the wire value may be relative ("in 2 hours").
+    scheduledAt: body.scheduled_at ? (parseScheduledAt(body.scheduled_at) ?? undefined) : undefined,
     domainId,
+    topicId: body.topic_id ?? undefined,
   };
 }
 
@@ -191,8 +217,10 @@ async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
 /**
  * The emails table encrypts content at rest; request logs must not become a
  * plaintext copy. Content-bearing fields lose their value before storage.
+ * `token` is the one-time API-key secret (POST /api-keys) — logging it would
+ * persist a credential that is deliberately never stored.
  */
-const REDACTED_REQUEST_FIELDS = ["html", "text", "attachments"] as const;
+const REDACTED_REQUEST_FIELDS = ["html", "text", "attachments", "token"] as const;
 
 function redactRequestBody(body: unknown): unknown {
   if (Array.isArray(body)) return body.map(redactRequestBody);
@@ -227,7 +255,7 @@ function capLoggedJson(value: unknown): unknown {
  * Keyset pagination for the Resend list endpoints: limit 1-100 (default 20),
  * `after`/`before` cursors are item ids, rows ordered by (created_at, id).
  */
-async function keysetPage<R>(opts: {
+export async function keysetPage<R>(opts: {
   query: ListQuery;
   createdAt: AnyPgColumn;
   id: AnyPgColumn;
@@ -269,7 +297,7 @@ function wireSubscription(subscribed: boolean): "opt_in" | "opt_out" {
   return subscribed ? "opt_in" : "opt_out";
 }
 
-function isUniqueViolation(err: unknown): boolean {
+export function isUniqueViolation(err: unknown): boolean {
   let e: unknown = err;
   while (e instanceof Error) {
     if ((e as { code?: string }).code === "23505" || e.message.includes("duplicate key")) {
@@ -289,10 +317,24 @@ function isForeignKeyViolation(err: unknown): boolean {
   return false;
 }
 
+/** ListContacts wire item, shared by GET /contacts and GET /segments/{id}/contacts. */
+function contactListItem(r: typeof schema.contacts.$inferSelect) {
+  return {
+    id: r.id,
+    email: r.email,
+    first_name: r.firstName,
+    last_name: r.lastName,
+    created_at: r.createdAt.toISOString(),
+    unsubscribed: r.unsubscribed,
+  };
+}
+
 /**
  * Team-global contact CRUD: one row per (team, lower(email)), enforced by the
  * contacts_team_email_idx unique index. The resend SDK (v6) reaches these
- * paths whenever audienceId is omitted.
+ * paths whenever audienceId is omitted; passing audienceId routes it to the
+ * legacy /audiences/{id}/contacts aliases registered below, which run the
+ * same operations (audiences are a pure alias of segments in resend v6).
  */
 function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
   const jsonErr = (description: string) => ({
@@ -313,6 +355,161 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
     );
 
   const idParam = z.object({ id: z.string().min(1) });
+  const membershipParams = z.object({ id: z.string().min(1), segmentId: z.uuid() });
+  const audienceParams = z.object({ audienceId: z.uuid() });
+  const audienceContactParams = z.object({ audienceId: z.uuid(), id: z.string().min(1) });
+
+  const findContact = async (teamId: string, idOrEmail: string) =>
+    (await db.select().from(t).where(teamContactWhere(teamId, idOrEmail)))[0];
+
+  const contactDetailWire = (contact: typeof schema.contacts.$inferSelect) => ({
+    ...contactListItem(contact),
+    object: "contact" as const,
+    properties: contact.properties,
+  });
+
+  /** True when every id is a segment the team owns (unknown/foreign → false). */
+  const ownsSegments = async (teamId: string, ids: string[]): Promise<boolean> => {
+    if (ids.length === 0) return true;
+    const owned = await db
+      .select({ id: schema.segments.id })
+      .from(schema.segments)
+      .where(and(eq(schema.segments.teamId, teamId), inArray(schema.segments.id, ids)));
+    return owned.length === ids.length;
+  };
+
+  const ownsTopics = async (teamId: string, ids: string[]): Promise<boolean> => {
+    if (ids.length === 0) return true;
+    const owned = await db
+      .select({ id: schema.topics.id })
+      .from(schema.topics)
+      .where(and(eq(schema.topics.teamId, teamId), inArray(schema.topics.id, ids)));
+    return owned.length === ids.length;
+  };
+
+  type CreateContactResult =
+    | { ok: true; id: string }
+    | { ok: false; status: 404 | 409 | 422; name: string; message: string };
+
+  /**
+   * Creation shared by POST /contacts and its legacy audiences alias.
+   * SECURITY: segment/topic associations are validated against the caller's
+   * team before anything is written — a foreign id must not link a contact
+   * into another team's segment or topic. Contact + associations commit in one
+   * transaction, so a rejected association never leaves a bare contact behind.
+   */
+  const createContactOp = async (
+    teamId: string,
+    body: CreateContactRequest,
+  ): Promise<CreateContactResult> => {
+    let properties: Record<string, string> = {};
+    if (body.properties !== undefined) {
+      const coerced = coerceContactProperties(body.properties);
+      if (coerced === null) {
+        return {
+          ok: false,
+          status: 422,
+          name: "validation_error",
+          message: "contact properties must be flat string values",
+        };
+      }
+      properties = coerced;
+    }
+    const segmentIds = [...new Set((body.segments ?? []).map((s) => s.id))];
+    // A topic repeated in the payload: the last entry wins, matching the
+    // upsert semantics of PATCH /contacts/{id}/topics.
+    const topicSubs = new Map((body.topics ?? []).map((e) => [e.id, e.subscription === "opt_in"]));
+    if (!(await ownsSegments(teamId, segmentIds))) {
+      return { ok: false, status: 404, name: "not_found", message: "Segment not found" };
+    }
+    if (!(await ownsTopics(teamId, [...topicSubs.keys()]))) {
+      return { ok: false, status: 404, name: "not_found", message: "Topic not found" };
+    }
+    try {
+      const id = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(t)
+          .values({
+            teamId,
+            email: body.email,
+            firstName: body.first_name ?? null,
+            lastName: body.last_name ?? null,
+            unsubscribed: body.unsubscribed ?? false,
+            ...(body.unsubscribed ? { unsubscribedAt: new Date() } : {}),
+            properties,
+          })
+          .returning({ id: t.id });
+        if (!row) throw new Error("contact insert returned no row");
+        if (segmentIds.length > 0) {
+          await tx
+            .insert(schema.segmentMembers)
+            .values(segmentIds.map((segmentId) => ({ segmentId, contactId: row.id })));
+        }
+        if (topicSubs.size > 0) {
+          await tx.insert(schema.contactTopicSubscriptions).values(
+            [...topicSubs].map(([topicId, subscribed]) => ({
+              contactId: row.id,
+              topicId,
+              subscribed,
+            })),
+          );
+        }
+        return row.id;
+      });
+      return { ok: true, id };
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        // "validation_error" (not "conflict"): the name must be a
+        // RESEND_ERROR_CODE_KEY member for SDK clients.
+        return {
+          ok: false,
+          status: 409,
+          name: "validation_error",
+          message: "Contact already exists",
+        };
+      }
+      // Ownership was checked before the transaction; a segment/topic deleted
+      // in between surfaces as an FK violation — still "not found".
+      if (isForeignKeyViolation(err)) {
+        return { ok: false, status: 404, name: "not_found", message: "Segment or topic not found" };
+      }
+      throw err;
+    }
+  };
+
+  /** Update shared by PATCH /contacts/{id} and its legacy audiences alias. */
+  const updateContactOp = async (
+    teamId: string,
+    idOrEmail: string,
+    body: z.infer<typeof updateContactRequestSchema>,
+  ): Promise<"invalid_properties" | { id: string } | undefined> => {
+    let properties: Record<string, string> | undefined;
+    if (body.properties !== undefined) {
+      const coerced = coerceContactProperties(body.properties);
+      if (coerced === null) return "invalid_properties";
+      properties = coerced;
+    }
+    const [row] = await db
+      .update(t)
+      .set({
+        updatedAt: new Date(),
+        ...(body.first_name !== undefined ? { firstName: body.first_name } : {}),
+        ...(body.last_name !== undefined ? { lastName: body.last_name } : {}),
+        ...(body.unsubscribed !== undefined
+          ? {
+              unsubscribed: body.unsubscribed,
+              unsubscribedAt: body.unsubscribed ? new Date() : null,
+            }
+          : {}),
+        ...(properties !== undefined ? { properties } : {}),
+      })
+      .where(teamContactWhere(teamId, idOrEmail))
+      .returning({ id: t.id });
+    return row;
+  };
+
+  const deleteContactOp = async (teamId: string, idOrEmail: string) =>
+    (await db.delete(t).where(teamContactWhere(teamId, idOrEmail)).returning({ id: t.id }))[0];
 
   app.openapi(
     createRoute({
@@ -326,47 +523,18 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
           content: { "application/json": { schema: contactIdResponseSchema } },
           description: "Contact created",
         },
+        404: jsonErr("Unknown segment or topic"),
         409: jsonErr("Contact already exists"),
         422: jsonErr("Validation error"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
-      const body = c.req.valid("json");
-      let properties: Record<string, string> = {};
-      if (body.properties !== undefined) {
-        const coerced = coerceContactProperties(body.properties);
-        if (coerced === null) {
-          return c.json(
-            errorBody(422, "validation_error", "contact properties must be flat string values"),
-            422,
-          );
-        }
-        properties = coerced;
+      const result = await createContactOp(auth.teamId, c.req.valid("json"));
+      if (!result.ok) {
+        return c.json(errorBody(result.status, result.name, result.message), result.status);
       }
-      try {
-        const [row] = await db
-          .insert(t)
-          .values({
-            teamId: auth.teamId,
-            email: body.email,
-            firstName: body.first_name ?? null,
-            lastName: body.last_name ?? null,
-            unsubscribed: body.unsubscribed ?? false,
-            ...(body.unsubscribed ? { unsubscribedAt: new Date() } : {}),
-            properties,
-          })
-          .returning({ id: t.id });
-        if (!row) throw new Error("contact insert returned no row");
-        return c.json({ object: "contact" as const, id: row.id }, 200);
-      } catch (err) {
-        if (isUniqueViolation(err)) {
-          // "validation_error" (not "conflict"): the name must be a
-          // RESEND_ERROR_CODE_KEY member for SDK clients.
-          return c.json(errorBody(409, "validation_error", "Contact already exists"), 409);
-        }
-        throw err;
-      }
+      return c.json({ object: "contact" as const, id: result.id }, 200);
     },
   );
 
@@ -410,18 +578,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
         return c.json(errorBody(422, "validation_error", "invalid pagination cursor"), 422);
       }
       return c.json(
-        {
-          object: "list" as const,
-          data: page.rows.map((r) => ({
-            id: r.id,
-            email: r.email,
-            first_name: r.firstName,
-            last_name: r.lastName,
-            created_at: r.createdAt.toISOString(),
-            unsubscribed: r.unsubscribed,
-          })),
-          has_more: page.hasMore,
-        },
+        { object: "list" as const, data: page.rows.map(contactListItem), has_more: page.hasMore },
         200,
       );
     },
@@ -442,22 +599,9 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
     }),
     async (c) => {
       const auth = c.get("auth");
-      const { id } = c.req.valid("param");
-      const [contact] = await db.select().from(t).where(teamContactWhere(auth.teamId, id));
+      const contact = await findContact(auth.teamId, c.req.valid("param").id);
       if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
-      return c.json(
-        {
-          object: "contact" as const,
-          id: contact.id,
-          email: contact.email,
-          first_name: contact.firstName,
-          last_name: contact.lastName,
-          created_at: contact.createdAt.toISOString(),
-          unsubscribed: contact.unsubscribed,
-          properties: contact.properties,
-        },
-        200,
-      );
+      return c.json(contactDetailWire(contact), 200);
     },
   );
 
@@ -480,35 +624,13 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
     }),
     async (c) => {
       const auth = c.get("auth");
-      const { id } = c.req.valid("param");
-      const body = c.req.valid("json");
-      let properties: Record<string, string> | undefined;
-      if (body.properties !== undefined) {
-        const coerced = coerceContactProperties(body.properties);
-        if (coerced === null) {
-          return c.json(
-            errorBody(422, "validation_error", "contact properties must be flat string values"),
-            422,
-          );
-        }
-        properties = coerced;
+      const row = await updateContactOp(auth.teamId, c.req.valid("param").id, c.req.valid("json"));
+      if (row === "invalid_properties") {
+        return c.json(
+          errorBody(422, "validation_error", "contact properties must be flat string values"),
+          422,
+        );
       }
-      const [row] = await db
-        .update(t)
-        .set({
-          updatedAt: new Date(),
-          ...(body.first_name !== undefined ? { firstName: body.first_name } : {}),
-          ...(body.last_name !== undefined ? { lastName: body.last_name } : {}),
-          ...(body.unsubscribed !== undefined
-            ? {
-                unsubscribed: body.unsubscribed,
-                unsubscribedAt: body.unsubscribed ? new Date() : null,
-              }
-            : {}),
-          ...(properties !== undefined ? { properties } : {}),
-        })
-        .where(teamContactWhere(auth.teamId, id))
-        .returning({ id: t.id });
       if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       return c.json({ object: "contact" as const, id: row.id }, 200);
     },
@@ -529,10 +651,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
     }),
     async (c) => {
       const auth = c.get("auth");
-      const { id } = c.req.valid("param");
-      const [row] = await db.delete(t).where(teamContactWhere(auth.teamId, id)).returning({
-        id: t.id,
-      });
+      const row = await deleteContactOp(auth.teamId, c.req.valid("param").id);
       if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       return c.json({ object: "contact" as const, contact: row.id, deleted: true as const }, 200);
     },
@@ -561,21 +680,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
       const entries = c.req.valid("json");
-      const [contact] = await db
-        .select({ id: t.id })
-        .from(t)
-        .where(teamContactWhere(auth.teamId, id));
+      const contact = await findContact(auth.teamId, id);
       if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       if (entries.length === 0) return c.json({ id: contact.id }, 200);
 
       // Topics are teamId-scoped: a subscription may only target one this
       // team owns, or a caller could write rows against another team's topic.
       const topicIds = [...new Set(entries.map((e) => e.id))];
-      const owned = await db
-        .select({ id: schema.topics.id })
-        .from(schema.topics)
-        .where(and(eq(schema.topics.teamId, auth.teamId), inArray(schema.topics.id, topicIds)));
-      if (owned.length !== topicIds.length) {
+      if (!(await ownsTopics(auth.teamId, topicIds))) {
         return c.json(errorBody(404, "not_found", "Topic not found"), 404);
       }
 
@@ -599,6 +711,192 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
           },
         });
       return c.json({ id: contact.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/contacts/{id}/segments/{segmentId}",
+      request: { params: membershipParams },
+      responses: {
+        200: {
+          content: { "application/json": { schema: addContactSegmentResponseSchema } },
+          description: "Contact added to the segment",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id, segmentId } = c.req.valid("param");
+      const contact = await findContact(auth.teamId, id);
+      if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      // SECURITY: the segment must be the team's own, or this would write a
+      // membership into another team's segment.
+      if (!(await ownsSegments(auth.teamId, [segmentId]))) {
+        return c.json(errorBody(404, "not_found", "Segment not found"), 404);
+      }
+      // Idempotent: re-adding an existing member succeeds without a new row.
+      await db
+        .insert(schema.segmentMembers)
+        .values({ segmentId, contactId: contact.id })
+        .onConflictDoNothing();
+      return c.json({ id: contact.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: "/contacts/{id}/segments/{segmentId}",
+      request: { params: membershipParams },
+      responses: {
+        200: {
+          content: { "application/json": { schema: removeContactSegmentResponseSchema } },
+          description: "Contact removed from the segment",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id, segmentId } = c.req.valid("param");
+      const contact = await findContact(auth.teamId, id);
+      if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      // No team check on the segment: membership rows only ever link same-team
+      // pairs, so a foreign segmentId matches no row and 404s below.
+      const m = schema.segmentMembers;
+      const [removed] = await db
+        .delete(m)
+        .where(and(eq(m.segmentId, segmentId), eq(m.contactId, contact.id)))
+        .returning({ segmentId: m.segmentId });
+      if (!removed) {
+        return c.json(errorBody(404, "not_found", "Contact is not a member of this segment"), 404);
+      }
+      return c.json({ id: contact.id, audienceId: segmentId, deleted: true as const }, 200);
+    },
+  );
+
+  // Legacy audiences aliases (resend v6: contacts.create/get/update/remove
+  // with audienceId). An audience IS a segment; the create alias additionally
+  // joins the new contact to it, and the read/write aliases only require the
+  // audience to exist for the team before running the same operations.
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/audiences/{audienceId}/contacts",
+      request: {
+        params: audienceParams,
+        body: { content: { "application/json": { schema: createContactRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: contactIdResponseSchema } },
+          description: "Contact created in the audience",
+        },
+        404: jsonErr("Not found"),
+        409: jsonErr("Contact already exists"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { audienceId } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const result = await createContactOp(auth.teamId, {
+        ...body,
+        segments: [...(body.segments ?? []), { id: audienceId }],
+      });
+      if (!result.ok) {
+        return c.json(errorBody(result.status, result.name, result.message), result.status);
+      }
+      return c.json({ object: "contact" as const, id: result.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/audiences/{audienceId}/contacts/{id}",
+      request: { params: audienceContactParams },
+      responses: {
+        200: {
+          content: { "application/json": { schema: getContactResponseSchema } },
+          description: "Contact",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { audienceId, id } = c.req.valid("param");
+      if (!(await ownsSegments(auth.teamId, [audienceId]))) {
+        return c.json(errorBody(404, "not_found", "Audience not found"), 404);
+      }
+      const contact = await findContact(auth.teamId, id);
+      if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      return c.json(contactDetailWire(contact), 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "patch",
+      path: "/audiences/{audienceId}/contacts/{id}",
+      request: {
+        params: audienceContactParams,
+        body: { content: { "application/json": { schema: updateContactRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: contactIdResponseSchema } },
+          description: "Contact updated",
+        },
+        404: jsonErr("Not found"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { audienceId, id } = c.req.valid("param");
+      if (!(await ownsSegments(auth.teamId, [audienceId]))) {
+        return c.json(errorBody(404, "not_found", "Audience not found"), 404);
+      }
+      const row = await updateContactOp(auth.teamId, id, c.req.valid("json"));
+      if (row === "invalid_properties") {
+        return c.json(
+          errorBody(422, "validation_error", "contact properties must be flat string values"),
+          422,
+        );
+      }
+      if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      return c.json({ object: "contact" as const, id: row.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: "/audiences/{audienceId}/contacts/{id}",
+      request: { params: audienceContactParams },
+      responses: {
+        200: {
+          content: { "application/json": { schema: removeContactResponseSchema } },
+          description: "Contact deleted",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { audienceId, id } = c.req.valid("param");
+      if (!(await ownsSegments(auth.teamId, [audienceId]))) {
+        return c.json(errorBody(404, "not_found", "Audience not found"), 404);
+      }
+      const row = await deleteContactOp(auth.teamId, id);
+      if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      return c.json({ object: "contact" as const, contact: row.id, deleted: true as const }, 200);
     },
   );
 }
@@ -702,6 +1000,48 @@ function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
 
   app.openapi(
     createRoute({
+      method: "patch",
+      path: "/topics/{id}",
+      request: {
+        params: idParam,
+        body: { content: { "application/json": { schema: updateTopicRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: topicIdResponseSchema } },
+          description: "Topic updated",
+        },
+        404: jsonErr("Not found"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const changes = {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.description !== undefined ? { description: body.description } : {}),
+      };
+      // The SDK always posts a body (its `id` is dropped by the schema); a
+      // PATCH with nothing editable is a no-op ack, not an error.
+      if (Object.keys(changes).length === 0) {
+        const existing = await findTeamTopic(db, auth.teamId, id);
+        if (!existing) return c.json(errorBody(404, "not_found", "Topic not found"), 404);
+        return c.json({ id: existing.id }, 200);
+      }
+      const [row] = await db
+        .update(b)
+        .set(changes)
+        .where(and(eq(b.id, id), eq(b.teamId, auth.teamId)))
+        .returning({ id: b.id });
+      if (!row) return c.json(errorBody(404, "not_found", "Topic not found"), 404);
+      return c.json({ id: row.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
       method: "delete",
       path: "/topics/{id}",
       request: { params: idParam },
@@ -755,13 +1095,19 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
     created_at: row.createdAt.toISOString(),
   });
 
-  // Live count of contacts the segment currently matches. Reuses the one
-  // translator, so the count can never drift from what the fan-out targets.
-  const contactCount = async (teamId: string, filter: SegmentFilter): Promise<number> => {
+  // Live count of contacts the segment currently resolves to (filter matches
+  // plus manual members). Reuses the one resolver, so the count can never
+  // drift from what the fan-out targets.
+  const contactCount = async (
+    teamId: string,
+    segment: { id: string; filter: SegmentFilter | null },
+  ): Promise<number> => {
     const [row] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(schema.contacts)
-      .where(and(eq(schema.contacts.teamId, teamId), segmentWhere(schema.contacts, filter)));
+      .where(
+        and(eq(schema.contacts.teamId, teamId), segmentContactsWhere(schema.contacts, segment)),
+      );
     return row?.count ?? 0;
   };
 
@@ -786,14 +1132,19 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const auth = c.get("auth");
       const body = c.req.valid("json");
       // Authoritative field/operator validation (the request schema only pins
-      // the wire structure): a bad filter is a 422, never stored.
-      const parsed = segmentFilterSchema.safeParse(body.filter);
-      if (!parsed.success) {
-        return c.json(filterError(parsed.error.issues.map((i) => i.message)), 422);
+      // the wire structure): a bad filter is a 422, never stored. No filter =
+      // manual segment (membership rows only).
+      let filter: SegmentFilter | null = null;
+      if (body.filter !== undefined) {
+        const parsed = segmentFilterSchema.safeParse(body.filter);
+        if (!parsed.success) {
+          return c.json(filterError(parsed.error.issues.map((i) => i.message)), 422);
+        }
+        filter = parsed.data;
       }
       const [row] = await db
         .insert(s)
-        .values({ teamId: auth.teamId, name: body.name, filter: parsed.data })
+        .values({ teamId: auth.teamId, name: body.name, filter })
         .returning();
       if (!row) throw new Error("segment insert returned no row");
       return c.json(toWire(row), 200);
@@ -866,8 +1217,59 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
         .from(s)
         .where(and(eq(s.id, c.req.valid("param").id), eq(s.teamId, auth.teamId)));
       if (!row) return c.json(errorBody(404, "not_found", "Segment not found"), 404);
+      return c.json({ ...toWire(row), contact_count: await contactCount(auth.teamId, row) }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/segments/{id}/contacts",
+      request: { params: idParam, query: listQuerySchema },
+      responses: {
+        200: {
+          content: { "application/json": { schema: listContactsResponseSchema } },
+          description: "Contacts the segment resolves to",
+        },
+        404: jsonErr("Not found"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const [segment] = await db
+        .select()
+        .from(s)
+        .where(and(eq(s.id, c.req.valid("param").id), eq(s.teamId, auth.teamId)));
+      if (!segment) return c.json(errorBody(404, "not_found", "Segment not found"), 404);
+      const ct = schema.contacts;
+      const inSegment = segmentContactsWhere(ct, segment);
+      const page = await keysetPage({
+        query: c.req.valid("query"),
+        createdAt: ct.createdAt,
+        id: ct.id,
+        loadCursor: async (id) =>
+          (
+            await db
+              .select({ createdAt: ct.createdAt, id: ct.id })
+              .from(ct)
+              .where(and(eq(ct.id, id), eq(ct.teamId, auth.teamId)))
+          )[0],
+        loadRows: (cond, descending, take) =>
+          db
+            .select()
+            .from(ct)
+            .where(and(eq(ct.teamId, auth.teamId), inSegment, cond))
+            .orderBy(
+              ...(descending ? [desc(ct.createdAt), desc(ct.id)] : [asc(ct.createdAt), asc(ct.id)]),
+            )
+            .limit(take),
+      });
+      if (page === "bad_cursor") {
+        return c.json(errorBody(422, "validation_error", "invalid pagination cursor"), 422);
+      }
       return c.json(
-        { ...toWire(row), contact_count: await contactCount(auth.teamId, row.filter) },
+        { object: "list" as const, data: page.rows.map(contactListItem), has_more: page.hasMore },
         200,
       );
     },
@@ -894,8 +1296,11 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
       const body = c.req.valid("json");
-      let filter: SegmentFilter | undefined;
-      if (body.filter !== undefined) {
+      // undefined = keep; null = clear (the segment becomes manual-only).
+      let filter: SegmentFilter | null | undefined;
+      if (body.filter === null) {
+        filter = null;
+      } else if (body.filter !== undefined) {
         const parsed = segmentFilterSchema.safeParse(body.filter);
         if (!parsed.success) {
           return c.json(filterError(parsed.error.issues.map((i) => i.message)), 422);
@@ -969,13 +1374,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         .where(and(eq(schema.broadcasts.id, id), eq(schema.broadcasts.teamId, teamId)))
     )[0];
 
-  const findTopic = async (teamId: string, id: string) =>
-    (
-      await db
-        .select({ id: schema.topics.id })
-        .from(schema.topics)
-        .where(and(eq(schema.topics.id, id), eq(schema.topics.teamId, teamId)))
-    )[0];
+  const findTopic = (teamId: string, id: string) => findTeamTopic(db, teamId, id);
 
   const findSegment = async (teamId: string, id: string) =>
     (
@@ -985,19 +1384,85 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         .where(and(eq(schema.segments.id, id), eq(schema.segments.teamId, teamId)))
     )[0];
 
-  // Accepted into the request schema so unsupported Resend knobs fail loudly
-  // instead of being silently stripped (docs/resend-compatibility.md).
-  const unsupported = (body: {
-    preview_text?: string | undefined;
-    send?: boolean | undefined;
-    scheduled_at?: string | undefined;
-  }): string | null => {
-    if (body.preview_text !== undefined) return "preview_text is not yet supported";
-    if (body.send) return "send-on-create is not supported; use POST /broadcasts/{id}/send";
-    if (body.scheduled_at !== undefined) {
-      return "scheduled_at on create is not supported; use POST /broadcasts/{id}/send";
+  // Every guard plus the draft→scheduled CAS behind POST /broadcasts/{id}/send,
+  // shared with send-on-create (POST /broadcasts with send: true) so the two
+  // entry points can never drift.
+  const initiateSend = async (
+    auth: ApiKeyAuth,
+    broadcast: { id: string; from: string },
+    scheduledAtInput: string | undefined,
+  ): Promise<
+    | { ok: true; id: string }
+    | { ok: false; status: 400 | 403 | 422; body: ReturnType<typeof errorBody> }
+  > => {
+    const fail = (status: 400 | 403 | 422, name: string, message: string) => ({
+      ok: false as const,
+      status,
+      body: errorBody(status, name, message),
+    });
+    // Same precondition the web router enforces: unsubscribe links are
+    // built from APP_BASE_URL, and a broadcast without them must not go out.
+    if (!deps.appBaseUrl) {
+      return fail(
+        422,
+        "validation_error",
+        "APP_BASE_URL is not set. Unsubscribe links are built from it. Set it, restart, send again.",
+      );
     }
-    return null;
+    // Server-authoritative deliverability guardrail: a raw API client must not
+    // bypass what the dashboard enforces. If the team's trailing-window bounce
+    // or complaint rate has crossed SES's own pause line, block new broadcast
+    // sends here — before scheduling — so we stop sending before SES pauses the
+    // whole account. `sending_paused` is a MillionSend-specific error outside
+    // Resend's SDK union (see docs/resend-compatibility.md, known deltas).
+    const health = await fetchDeliverabilityHealth(db, auth.teamId);
+    const paused = health.reasons.find((r) => r.tier === "paused");
+    if (paused) {
+      const limit = paused.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
+      const pct = (r: number) => `${(r * 100).toFixed(2)}%`;
+      return fail(
+        403,
+        "sending_paused",
+        `Sending is paused: your ${paused.metric} rate of ${pct(paused.rate)} over the last ${health.windowDays} days is at or above the ${pct(limit)} limit. Lower it before sending new broadcasts.`,
+      );
+    }
+    // Same boundary as /emails: only a verified team domain may appear as
+    // the sender.
+    const domain = await verifySenderDomain(db, auth.teamId, broadcast.from);
+    if (!domain.ok) {
+      return fail(
+        422,
+        "validation_error",
+        domain.reason === "invalid_sender"
+          ? "from must be a single address"
+          : `The ${domain.fromDomain} domain is not verified for this team`,
+      );
+    }
+    // Same per-key domain confinement as /emails and SMTP: a domain-scoped
+    // key must not send from a different team domain.
+    if (keyForbidsSendingDomain(auth, domain.domainId)) {
+      return fail(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE);
+    }
+    // Schema-validated, so parseScheduledAt always resolves (the ?? only
+    // satisfies the type); relative forms ("in 2 days") resolve against now.
+    const scheduledAt =
+      (scheduledAtInput ? parseScheduledAt(scheduledAtInput) : null) ?? new Date();
+    const [row] = await db
+      .update(schema.broadcasts)
+      .set({ status: "scheduled", scheduledAt, updatedAt: new Date() })
+      .where(and(eq(schema.broadcasts.id, broadcast.id), eq(schema.broadcasts.status, "draft")))
+      .returning({ id: schema.broadcasts.id });
+    if (!row) {
+      return fail(400, "invalid_parameter", "Only draft broadcasts can be sent");
+    }
+    // Enqueue failure must not undo the commit — the reconcile sweep
+    // re-enqueues scheduled broadcasts whose job was lost.
+    try {
+      await deps.enqueueBroadcastSend?.(row.id, { startAfter: scheduledAt });
+    } catch (err) {
+      console.error("broadcast.send enqueue failed; reconcile sweep will recover", err);
+    }
+    return { ok: true, id: row.id };
   };
 
   const parseReplyTo = (stored: string | null): string[] | null =>
@@ -1013,9 +1478,10 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       responses: {
         200: {
           content: { "application/json": { schema: broadcastIdResponseSchema } },
-          description: "Broadcast created as draft",
+          description: "Broadcast created (and scheduled when send: true)",
         },
-        403: jsonErr("Restricted API key"),
+        400: jsonErr("Broadcast state conflict"),
+        403: jsonErr("Restricted API key or sending paused"),
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
       },
@@ -1023,8 +1489,6 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const rejected = unsupported(body);
-      if (rejected) return c.json(errorBody(422, "validation_error", rejected), 422);
       // Targeting is optional: no segment and no topic means every contact.
       if (body.segment_id !== undefined && !(await findSegment(auth.teamId, body.segment_id))) {
         return c.json(errorBody(422, "validation_error", "Segment not found"), 422);
@@ -1050,11 +1514,19 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           from: body.from,
           subject: body.subject,
           replyTo: body.reply_to ? JSON.stringify(body.reply_to) : null,
+          previewText: body.preview_text ?? null,
           html: body.html ?? null,
           text: body.text ?? null,
         })
         .returning({ id: schema.broadcasts.id });
       if (!row) throw new Error("broadcast insert returned no row");
+      // send: true — the identical guards and scheduling as POST
+      // /broadcasts/{id}/send. A failed guard returns its error but the
+      // just-created draft remains, fixable and sendable later.
+      if (body.send) {
+        const out = await initiateSend(auth, { id: row.id, from: body.from }, body.scheduled_at);
+        if (!out.ok) return c.json(out.body, out.status);
+      }
       return c.json({ id: row.id }, 200);
     },
   );
@@ -1144,7 +1616,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           from: broadcast.from,
           subject: broadcast.subject,
           reply_to: parseReplyTo(broadcast.replyTo),
-          preview_text: null,
+          preview_text: broadcast.previewText,
           topic_id: broadcast.topicId,
           html: broadcast.html,
           text: broadcast.text,
@@ -1180,8 +1652,6 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       const auth = c.get("auth");
       const { id } = c.req.valid("param");
       const body = c.req.valid("json");
-      const rejected = unsupported(body);
-      if (rejected) return c.json(errorBody(422, "validation_error", rejected), 422);
       const broadcast = await findBroadcast(auth.teamId, id);
       if (!broadcast) return c.json(errorBody(404, "not_found", "Broadcast not found"), 404);
       if (broadcast.status !== "draft") {
@@ -1208,6 +1678,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           ...(body.html !== undefined ? { html: body.html } : {}),
           ...(body.text !== undefined ? { text: body.text } : {}),
           ...(body.reply_to !== undefined ? { replyTo: JSON.stringify(body.reply_to) } : {}),
+          ...(body.preview_text !== undefined ? { previewText: body.preview_text } : {}),
         })
         // Status re-checked in the WHERE: a send racing this update must not
         // let a draft-only edit land on a scheduled/sending broadcast.
@@ -1293,78 +1764,9 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           400,
         );
       }
-      // Same precondition the web router enforces: unsubscribe links are
-      // built from APP_BASE_URL, and a broadcast without them must not go out.
-      if (!deps.appBaseUrl) {
-        return c.json(
-          errorBody(
-            422,
-            "validation_error",
-            "APP_BASE_URL is not set. Unsubscribe links are built from it. Set it, restart, send again.",
-          ),
-          422,
-        );
-      }
-      // Server-authoritative deliverability guardrail: a raw API client must not
-      // bypass what the dashboard enforces. If the team's trailing-window bounce
-      // or complaint rate has crossed SES's own pause line, block new broadcast
-      // sends here — before scheduling — so we stop sending before SES pauses the
-      // whole account. `sending_paused` is a MillionSend-specific error outside
-      // Resend's SDK union (see docs/resend-compatibility.md, known deltas).
-      const health = await fetchDeliverabilityHealth(db, auth.teamId);
-      const paused = health.reasons.find((r) => r.tier === "paused");
-      if (paused) {
-        const limit = paused.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
-        const pct = (r: number) => `${(r * 100).toFixed(2)}%`;
-        return c.json(
-          errorBody(
-            403,
-            "sending_paused",
-            `Sending is paused: your ${paused.metric} rate of ${pct(paused.rate)} over the last ${health.windowDays} days is at or above the ${pct(limit)} limit. Lower it before sending new broadcasts.`,
-          ),
-          403,
-        );
-      }
-      // Same boundary as /emails: only a verified team domain may appear as
-      // the sender.
-      const domain = await verifySenderDomain(db, auth.teamId, broadcast.from);
-      if (!domain.ok) {
-        return c.json(
-          errorBody(
-            422,
-            "validation_error",
-            domain.reason === "invalid_sender"
-              ? "from must be a single address"
-              : `The ${domain.fromDomain} domain is not verified for this team`,
-          ),
-          422,
-        );
-      }
-      // Same per-key domain confinement as /emails and SMTP: a domain-scoped
-      // key must not send from a different team domain.
-      if (keyForbidsSendingDomain(auth, domain.domainId)) {
-        return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
-      }
-      const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at) : new Date();
-      const [row] = await db
-        .update(schema.broadcasts)
-        .set({ status: "scheduled", scheduledAt, updatedAt: new Date() })
-        .where(and(eq(schema.broadcasts.id, id), eq(schema.broadcasts.status, "draft")))
-        .returning({ id: schema.broadcasts.id });
-      if (!row) {
-        return c.json(
-          errorBody(400, "invalid_parameter", "Only draft broadcasts can be sent"),
-          400,
-        );
-      }
-      // Enqueue failure must not undo the commit — the reconcile sweep
-      // re-enqueues scheduled broadcasts whose job was lost.
-      try {
-        await deps.enqueueBroadcastSend?.(row.id, { startAfter: scheduledAt });
-      } catch (err) {
-        console.error("broadcast.send enqueue failed; reconcile sweep will recover", err);
-      }
-      return c.json({ id: row.id }, 200);
+      const out = await initiateSend(auth, broadcast, body.scheduled_at);
+      if (!out.ok) return c.json(out.body, out.status);
+      return c.json({ id: out.id }, 200);
     },
   );
 
@@ -1542,6 +1944,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
 
   app.use("/contacts", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/contacts/*", requireApiKey, enforceRateLimit, requireFullAccess);
+  // Legacy audiences aliases (contacts nested under /audiences/{id}) are
+  // registered by registerContactRootRoutes and share the contacts policy.
+  app.use("/audiences/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerContactRootRoutes(app, deps.db);
 
   app.use("/segments", requireApiKey, enforceRateLimit, requireFullAccess);
@@ -1555,6 +1960,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.use("/topics", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/topics/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerTopicRoutes(app, deps.db);
+
+  app.use("/domains", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/domains/*", requireApiKey, enforceRateLimit, requireFullAccess);
+  if (deps.ses) registerDomainRoutes(app, deps, deps.ses);
+
+  app.use("/api-keys", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/api-keys/*", requireApiKey, enforceRateLimit, requireFullAccess);
+  registerApiKeyRoutes(app, deps.db);
 
   const sendRoute = createRoute({
     method: "post",
@@ -1571,6 +1984,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         content: { "application/json": { schema: errorSchema } },
         description: "Restricted API key",
       },
+      404: {
+        content: { "application/json": { schema: errorSchema } },
+        description: "Not found",
+      },
       409: {
         content: { "application/json": { schema: errorSchema } },
         description: "Idempotency conflict",
@@ -1586,8 +2003,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const auth = c.get("auth");
     const body = c.req.valid("json");
 
-    const unsupported = unsupportedSendField(body);
-    if (unsupported) return c.json(errorBody(422, "validation_error", unsupported), 422);
+    // Same boundary as broadcasts: a topic reference outside the caller's
+    // team must not leak into the send.
+    if (body.topic_id != null && !(await findTeamTopic(deps.db, auth.teamId, body.topic_id))) {
+      return c.json(errorBody(404, "not_found", "Topic not found"), 404);
+    }
 
     const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
     if (!domain.ok) {
@@ -1705,50 +2125,84 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         description: "Batch accepted",
       },
       403: jsonErr("Restricted API key"),
+      404: jsonErr("Not found"),
       409: jsonErr("Idempotency conflict"),
       422: jsonErr("Validation error"),
     },
   });
 
+  // One batch item's full validation (wire shape + business rules), no
+  // writes. A failure carries the strict-mode status so strict can answer
+  // with it verbatim while permissive downgrades it to a per-index error.
+  type BatchItemVerdict =
+    | { payload: AcceptEmailPayload }
+    | { status: 403 | 404 | 422; name: string; message: string };
+
+  const validateBatchItem = async (auth: ApiKeyAuth, raw: unknown): Promise<BatchItemVerdict> => {
+    const parsed = sendEmailRequestSchema.safeParse(raw);
+    if (!parsed.success) {
+      return {
+        status: 422,
+        name: "validation_error",
+        message: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
+      };
+    }
+    const body = parsed.data;
+    if (body.topic_id != null && !(await findTeamTopic(deps.db, auth.teamId, body.topic_id))) {
+      return { status: 404, name: "not_found", message: "Topic not found" };
+    }
+    const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
+    if (!domain.ok) {
+      return {
+        status: 422,
+        name: "validation_error",
+        message:
+          domain.reason === "invalid_sender"
+            ? "from must be a single address"
+            : `The ${domain.fromDomain} domain is not verified for this team`,
+      };
+    }
+    if (keyForbidsSendingDomain(auth, domain.domainId)) {
+      return { status: 403, name: "restricted_api_key", message: RESTRICTED_DOMAIN_MESSAGE };
+    }
+    // Suppression (and topic opt-outs, which drop identically) is resolved
+    // up front too, so an all-suppressed item fails at validation instead of
+    // leaving earlier items accepted.
+    const recipients = [...new Set([...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])])];
+    const suppressed = await findSuppressed(deps.db, auth.teamId, recipients);
+    if (body.topic_id != null) {
+      const optedOut = await findTopicOptOuts(deps.db, auth.teamId, body.topic_id, recipients);
+      for (const r of optedOut) suppressed.add(r);
+    }
+    if (body.to.every((r) => suppressed.has(r))) {
+      return { status: 422, name: "validation_error", message: "All recipients are suppressed" };
+    }
+    return { payload: toAcceptPayload(body, domain.domainId) };
+  };
+
   app.openapi(batchRoute, async (c) => {
     const auth = c.get("auth");
     const items = c.req.valid("json");
+    // Resend's x-batch-validation switch: strict (default) fails the whole
+    // batch on the first invalid item; permissive accepts the valid subset
+    // and reports the rest as per-index errors.
+    const permissive = c.req.header("x-batch-validation")?.toLowerCase() === "permissive";
 
-    // Pass 1 — validate every item with no writes, so any bad item fails the
-    // whole batch (Resend 'strict' batch validation) before a single accept.
+    // Pass 1 — validate every item with no writes.
     const payloads: AcceptEmailPayload[] = [];
-    for (const [i, body] of items.entries()) {
-      const unsupported = unsupportedSendField(body);
-      if (unsupported) {
-        return c.json(errorBody(422, "validation_error", `emails.${i}: ${unsupported}`), 422);
-      }
-      const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
-      if (!domain.ok) {
+    const itemErrors: { index: number; message: string }[] = [];
+    for (const [i, raw] of items.entries()) {
+      const verdict = await validateBatchItem(auth, raw);
+      if ("payload" in verdict) {
+        payloads.push(verdict.payload);
+      } else if (permissive) {
+        itemErrors.push({ index: i, message: verdict.message });
+      } else {
         return c.json(
-          errorBody(
-            422,
-            "validation_error",
-            domain.reason === "invalid_sender"
-              ? `emails.${i}: from must be a single address`
-              : `emails.${i}: The ${domain.fromDomain} domain is not verified for this team`,
-          ),
-          422,
+          errorBody(verdict.status, verdict.name, `emails.${i}: ${verdict.message}`),
+          verdict.status,
         );
       }
-      if (keyForbidsSendingDomain(auth, domain.domainId)) {
-        return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
-      }
-      // Suppression is resolved up front too, so an all-suppressed item fails
-      // the batch atomically instead of leaving earlier items accepted.
-      const recipients = [...new Set([...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])])];
-      const suppressed = await findSuppressed(deps.db, auth.teamId, recipients);
-      if (body.to.every((r) => suppressed.has(r))) {
-        return c.json(
-          errorBody(422, "validation_error", `emails.${i}: All recipients are suppressed`),
-          422,
-        );
-      }
-      payloads.push(toAcceptPayload(body, domain.domainId));
     }
 
     const idemKey = c.req.header("idempotency-key") ?? null;
@@ -1823,7 +2277,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           console.error("batch email.send enqueue failed; reconcile sweep will recover", err);
         }
       }
-      return c.json({ data: accepted.map((o) => ({ id: o.id })) }, 200);
+      return c.json(
+        {
+          data: accepted.map((o) => ({ id: o.id })),
+          // The SDK's permissive response type requires `errors`, empty or not.
+          ...(permissive ? { errors: itemErrors } : {}),
+        },
+        200,
+      );
     } catch (err) {
       if (err instanceof IdempotencyTakeoverError && idemKey) {
         const replay = await beginIdempotent(deps.db, {
@@ -1899,6 +2360,83 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         ),
         422,
       );
+    }
+    return c.json({ object: "email" as const, id: row.id }, 200);
+  });
+
+  const updateEmailRoute = createRoute({
+    method: "patch",
+    path: "/emails/{id}",
+    request: {
+      params: z.object({ id: z.uuid() }),
+      body: { content: { "application/json": { schema: updateEmailRequestSchema } } },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: updateEmailResponseSchema } },
+        description: "Email rescheduled",
+      },
+      404: jsonErr("Not found"),
+      422: jsonErr("Not reschedulable"),
+    },
+  });
+
+  app.openapi(updateEmailRoute, async (c) => {
+    const auth = c.get("auth");
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const [email] = await deps.db
+      .select({ id: schema.emails.id })
+      .from(schema.emails)
+      .where(and(eq(schema.emails.id, id), eq(schema.emails.teamId, auth.teamId)));
+    // Cross-team / unknown id is a 404 (never reveals another team's email).
+    if (!email) return c.json(errorBody(404, "not_found", "Email not found"), 404);
+    // Schema-validated, so this always resolves (the guard only satisfies the
+    // type); re-resolved here because the wire value may be relative.
+    const scheduledAt = parseScheduledAt(body.scheduled_at);
+    if (!scheduledAt) {
+      return c.json(
+        errorBody(422, "validation_error", `scheduled_at must be ${SCHEDULED_AT_FORMS}`),
+        422,
+      );
+    }
+    // Same state gate as cancel: only a scheduled email nothing has claimed
+    // can move — a reschedule racing the send loses cleanly (the WHERE no
+    // longer matches once the sender claims sentAt).
+    const [row] = await deps.db
+      .update(schema.emails)
+      .set({ scheduledAt })
+      .where(
+        and(
+          eq(schema.emails.id, id),
+          eq(schema.emails.teamId, auth.teamId),
+          inArray(schema.emails.latestStatus, ["queued", "queued_quota"]),
+          isNull(schema.emails.sentAt),
+          isNotNull(schema.emails.scheduledAt),
+        ),
+      )
+      .returning({ id: schema.emails.id, latestStatus: schema.emails.latestStatus });
+    if (!row) {
+      return c.json(
+        errorBody(
+          422,
+          "validation_error",
+          "Only scheduled emails that have not been sent can be rescheduled",
+        ),
+        422,
+      );
+    }
+    // Best-effort nudge at the new due time; quota-parked rows wait for the
+    // midnight drain instead, like at accept. While the original job is still
+    // queued the dedupe key collapses this send, so a move to an EARLIER time
+    // takes effect only when that job fires (the row is then already due); a
+    // LATER time is exact — the send handler defers to scheduled_at.
+    if (row.latestStatus === "queued") {
+      try {
+        await deps.enqueueEmailSend(row.id, { startAfter: scheduledAt });
+      } catch (err) {
+        console.error("email reschedule enqueue failed; reconcile sweep will recover", err);
+      }
     }
     return c.json({ object: "email" as const, id: row.id }, 200);
   });

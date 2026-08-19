@@ -130,8 +130,8 @@ describe("official resend SDK: broadcasts", () => {
     expect(fetched.data?.subject).toBe("We really launched");
   });
 
-  it("rejects a natural-language scheduled_at", async () => {
-    const sent = await resend.broadcasts.send(broadcastId, { scheduledAt: "in 2 days" });
+  it("rejects an unparseable scheduled_at (only ISO or Resend's relative forms)", async () => {
+    const sent = await resend.broadcasts.send(broadcastId, { scheduledAt: "day after tomorrow" });
     expect(sent.data).toBeNull();
     expect(sent.error?.name).toBe("validation_error");
   });
@@ -185,5 +185,50 @@ describe("official resend SDK: broadcasts", () => {
     const gone = await resend.broadcasts.get(id);
     expect(gone.data).toBeNull();
     expect(gone.error?.name).toBe("not_found");
+  });
+
+  it("carries preview_text and topic_id through create, update, and get", async () => {
+    const topic = await resend.topics.create({ name: "bc-news", defaultSubscription: "opt_in" });
+    expect(topic.error).toBeNull();
+    const created = await resend.broadcasts.create({
+      segmentId,
+      from: "Acme <hello@acme.dev>",
+      subject: "peek",
+      html: "<p>hi</p>",
+      previewText: "A peek inside",
+      topicId: topic.data?.id ?? null,
+    });
+    expect(created.error).toBeNull();
+    const id = created.data?.id ?? "";
+
+    const fetched = await resend.broadcasts.get(id);
+    expect(fetched.data).toMatchObject({
+      preview_text: "A peek inside",
+      topic_id: topic.data?.id,
+    });
+
+    const updated = await resend.broadcasts.update(id, {
+      name: "named later",
+      previewText: "New peek",
+    });
+    expect(updated.error).toBeNull();
+    const again = await resend.broadcasts.get(id);
+    expect(again.data).toMatchObject({ name: "named later", preview_text: "New peek" });
+  });
+
+  it("send: true creates and queues the broadcast in one call", async () => {
+    const before = enqueued.length;
+    const created = await resend.broadcasts.create({
+      segmentId,
+      from: "Acme <hello@acme.dev>",
+      subject: "instant",
+      text: "now",
+      send: true,
+    });
+    expect(created.error).toBeNull();
+    const id = created.data?.id ?? "";
+    expect(enqueued.slice(before).map((e) => e.broadcastId)).toEqual([id]);
+    const fetched = await resend.broadcasts.get(id);
+    expect(fetched.data?.status).toBe("queued");
   });
 });

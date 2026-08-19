@@ -183,3 +183,51 @@ describe("topics teamId isolation", () => {
     expect((await call(tokenA, "GET", `/topics/${topicA}`)).status).toBe(200);
   });
 });
+
+describe("PATCH /topics/{id}", () => {
+  let topicId: string;
+
+  beforeAll(async () => {
+    const res = await call(tokenA, "POST", "/topics", {
+      name: "Digest",
+      description: "Weekly digest",
+      default_subscription: "opt_in",
+    });
+    topicId = (await json(res)).id ?? "";
+  });
+
+  it("updates name and description", async () => {
+    const res = await call(tokenA, "PATCH", `/topics/${topicId}`, {
+      name: "Monthly digest",
+      description: "Once a month",
+    });
+    expect(res.status).toBe(200);
+    expect(await json(res)).toEqual({ id: topicId });
+    const got = await json(await call(tokenA, "GET", `/topics/${topicId}`));
+    expect(got).toMatchObject({ name: "Monthly digest", description: "Once a month" });
+  });
+
+  it("tolerates the SDK's leaked body id and a no-op body", async () => {
+    // resend.topics.update posts its whole payload, id included.
+    const res = await call(tokenA, "PATCH", `/topics/${topicId}`, { id: topicId });
+    expect(res.status).toBe(200);
+    expect(await json(res)).toEqual({ id: topicId });
+  });
+
+  it("leaves default_subscription immutable even when provided", async () => {
+    const res = await call(tokenA, "PATCH", `/topics/${topicId}`, {
+      name: "Digest again",
+      default_subscription: "opt_out",
+    });
+    expect(res.status).toBe(200);
+    const got = await json(await call(tokenA, "GET", `/topics/${topicId}`));
+    expect(got).toMatchObject({ name: "Digest again", default_subscription: "opt_in" });
+  });
+
+  it("404s another team's topic without touching it", async () => {
+    const res = await call(tokenB, "PATCH", `/topics/${topicId}`, { name: "hijacked" });
+    expect(res.status).toBe(404);
+    const got = await json(await call(tokenA, "GET", `/topics/${topicId}`));
+    expect(got).toMatchObject({ name: "Digest again" });
+  });
+});

@@ -2,6 +2,7 @@ import { segmentFilterSchema } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildSegmentFilter } from "@/lib/segment-builder";
 import { createCaller } from "@/server/routers";
@@ -279,5 +280,55 @@ describe("broadcast create carries a segmentId", () => {
         subject: "Hi",
       }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("manual (null-filter) segments", () => {
+  it("list/get count manual members and never crash on a null filter", async () => {
+    const teamId = await createTeam(db, "team-manual");
+    const caller = callerFor(teamId);
+    await insertContact(teamId, { email: "picked@x.com" });
+    await insertContact(teamId, { email: "unpicked@x.com" });
+    const [segment] = await db
+      .insert(schema.segments)
+      .values({ teamId, name: "hand-picked", filter: null })
+      .returning({ id: schema.segments.id });
+    if (!segment) throw new Error("segment insert failed");
+    const [contact] = await db
+      .select({ id: schema.contacts.id })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.email, "picked@x.com"));
+    if (!contact) throw new Error("contact missing");
+    await db.insert(schema.segmentMembers).values({ segmentId: segment.id, contactId: contact.id });
+
+    const listed = await caller.segments.list();
+    expect(listed[0]).toMatchObject({ id: segment.id, filter: null, count: 1 });
+    expect((await caller.segments.get({ id: segment.id })).count).toBe(1);
+  });
+
+  it("broadcasts.recipientCount resolves manual members plus filter matches", async () => {
+    const teamId = await createTeam(db, "team-manual-rc");
+    const caller = callerFor(teamId);
+    await insertContact(teamId, { email: "match@x.com", properties: { tier: "vip" } });
+    await insertContact(teamId, { email: "picked@y.com" });
+    await insertContact(teamId, { email: "outsider@z.com" });
+    const [segment] = await db
+      .insert(schema.segments)
+      .values({
+        teamId,
+        name: "vips-plus",
+        filter: filterOf("all", [{ field: "property:tier", op: "equals", value: "vip" }]),
+      })
+      .returning({ id: schema.segments.id });
+    if (!segment) throw new Error("segment insert failed");
+    const [picked] = await db
+      .select({ id: schema.contacts.id })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.email, "picked@y.com"));
+    if (!picked) throw new Error("contact missing");
+    await db.insert(schema.segmentMembers).values({ segmentId: segment.id, contactId: picked.id });
+
+    const { count } = await caller.broadcasts.recipientCount({ segmentId: segment.id });
+    expect(count).toBe(2);
   });
 });

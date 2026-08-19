@@ -17,6 +17,7 @@ import { reconcileStalledBroadcasts } from "../src/handlers/cron.js";
 import {
   applyMergeFields,
   type BroadcastDeps,
+  injectPreheader,
   sendBroadcast,
 } from "../src/handlers/send-broadcast.js";
 import { type SesSender, sendEmail } from "../src/handlers/send-email.js";
@@ -151,6 +152,38 @@ it("a broadcast with no segment or topic fans out to ALL subscribed team contact
   expect(match).toBeTruthy();
   expect(verifyUnsubscribeToken(match?.[1] ?? "", secretKey)).toEqual({
     contactId: first.contactId,
+    topicId: null,
+  });
+});
+
+it("substitutes the {{{RESEND_UNSUBSCRIBE_URL}}} alias in html and text", async () => {
+  const { teamId: tid, ids } = await seedTeam("alias", [{ email: "al@example.com" }]);
+  const broadcastId = await insertBroadcast({
+    teamId: tid,
+    from: "Alias <hi@alias.dev>",
+    html: '<a href="{{{RESEND_UNSUBSCRIBE_URL}}}">bye</a>',
+    text: "Bye: {{{RESEND_UNSUBSCRIBE_URL}}}",
+  });
+  const { deps } = makeDeps();
+
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+  const [row] = await emailsOf(broadcastId);
+  if (!row?.bodyCiphertext || !row.bodyIv || !row.bodyWrappedDek) throw new Error("no body");
+  const body = await decryptEmailBody(
+    {
+      ciphertext: row.bodyCiphertext,
+      iv: row.bodyIv,
+      wrappedDek: row.bodyWrappedDek,
+      keyVersion: row.bodyKeyVersion ?? 0,
+    },
+    keyring,
+  );
+  expect(body.html).not.toContain("{{{");
+  expect(body.text).not.toContain("{{{");
+  expect(body.text).toContain(`${BASE_URL}/unsubscribe/`);
+  const match = body.html?.match(new RegExp(`${BASE_URL}/unsubscribe/([^"]+)`));
+  expect(verifyUnsubscribeToken(match?.[1] ?? "", secretKey)).toEqual({
+    contactId: ids["al@example.com"],
     topicId: null,
   });
 });
@@ -436,6 +469,52 @@ it("missing APP_BASE_URL fails the fan-out loudly, sending nothing", async () =>
   expect(broadcast?.status).toBe("scheduled");
 });
 
+it("injectPreheader hides escaped preview text at the top of the body", () => {
+  const doc = injectPreheader('<html><body class="x"><p>Hi</p></body></html>', "New <deals> &co");
+  // Inserted right after the body tag, escaped, padded with zero-width chars.
+  expect(doc.startsWith('<html><body class="x"><div style="display:none')).toBe(true);
+  expect(doc).toContain("New &lt;deals&gt; &amp;co");
+  expect(doc).toContain("&nbsp;&zwnj;");
+  expect(doc.indexOf("New &lt;deals&gt;")).toBeLessThan(doc.indexOf("<p>Hi</p>"));
+  // Fragment without a <body> tag: prepended.
+  expect(injectPreheader("<p>Hi</p>", "peek").startsWith('<div style="display:none')).toBe(true);
+});
+
+it("fan-out injects the preheader into html only when preview_text is set", async () => {
+  const { teamId: tId } = await seedTeam("preheader", [{ email: "ph@example.com" }]);
+  const withPreview = await insertBroadcast({
+    teamId: tId,
+    from: "Acme <hi@preheader.dev>",
+    previewText: "Sneak peek",
+  });
+  const without = await insertBroadcast({ teamId: tId, from: "Acme <hi@preheader.dev>" });
+
+  const decrypt = async (broadcastId: string) => {
+    expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
+    const [row] = await emailsOf(broadcastId);
+    if (!row?.bodyCiphertext || !row.bodyIv || !row.bodyWrappedDek) throw new Error("no body");
+    return decryptEmailBody(
+      {
+        ciphertext: row.bodyCiphertext,
+        iv: row.bodyIv,
+        wrappedDek: row.bodyWrappedDek,
+        keyVersion: row.bodyKeyVersion ?? 0,
+      },
+      keyring,
+    );
+  };
+
+  const body = await decrypt(withPreview);
+  expect(body.html?.startsWith('<div style="display:none')).toBe(true);
+  expect(body.html).toContain("Sneak peek");
+  // The hidden div precedes the original content; text bodies stay untouched.
+  expect(body.html?.indexOf("Sneak peek")).toBeLessThan(body.html?.indexOf("<p>Hi</p>") ?? -1);
+  expect(body.text).not.toContain("Sneak peek");
+
+  const plain = await decrypt(without);
+  expect(plain.html).not.toContain("display:none");
+});
+
 it("applyMergeFields substitutes contact fields, with fallbacks for null and empty", () => {
   const contact = { email: "ada@example.com", firstName: "Ada", lastName: null, properties: {} };
   expect(
@@ -684,4 +763,62 @@ it("a foreign-team segment on a broadcast refuses the fan-out, sending nothing",
   await expect(sendBroadcast(db, deps, { broadcastId })).rejects.toThrow(/not found for its team/);
   expect(await emailsOf(broadcastId)).toHaveLength(0);
   expect(enqueued).toHaveLength(0);
+});
+
+it("a segment fan-out includes manual members alongside filter matches", async () => {
+  const { teamId: tId, ids } = await seedTeam("segmem", [
+    { email: "match@example.com", properties: { tier: "vip" } },
+    { email: "hand-picked@example.com" },
+    { email: "outsider@example.com" },
+  ]);
+  const [segment] = await db
+    .insert(schema.segments)
+    .values({
+      teamId: tId,
+      name: "vips-and-picks",
+      filter: {
+        match: "all",
+        conditions: [{ field: "property:tier", op: "equals", value: "vip" }],
+      },
+    })
+    .returning({ id: schema.segments.id });
+  if (!segment) throw new Error("segment insert failed");
+  await db.insert(schema.segmentMembers).values({
+    segmentId: segment.id,
+    contactId: ids["hand-picked@example.com"] as string,
+  });
+
+  const broadcastId = await insertBroadcast({
+    teamId: tId,
+    from: "Acme <hi@segmem.dev>",
+    segmentId: segment.id,
+  });
+  expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
+
+  const rows = await emailsOf(broadcastId);
+  expect(rows.map((r) => r.to[0]).sort()).toEqual(["hand-picked@example.com", "match@example.com"]);
+});
+
+it("a null-filter (manual) segment fans out to its members only", async () => {
+  const { teamId: tId, ids } = await seedTeam("segmanual", [
+    { email: "picked@example.com" },
+    { email: "unpicked@example.com" },
+  ]);
+  const [segment] = await db
+    .insert(schema.segments)
+    .values({ teamId: tId, name: "manual", filter: null })
+    .returning({ id: schema.segments.id });
+  if (!segment) throw new Error("segment insert failed");
+  await db.insert(schema.segmentMembers).values({
+    segmentId: segment.id,
+    contactId: ids["picked@example.com"] as string,
+  });
+
+  const broadcastId = await insertBroadcast({
+    teamId: tId,
+    from: "Acme <hi@segmanual.dev>",
+    segmentId: segment.id,
+  });
+  expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
+  expect((await emailsOf(broadcastId)).map((r) => r.to[0])).toEqual(["picked@example.com"]);
 });

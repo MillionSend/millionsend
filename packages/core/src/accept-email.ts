@@ -1,12 +1,13 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq } from "drizzle-orm";
-import { encryptEmailBody } from "./crypto/envelope.js";
+import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
 import { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 import { reserveDailyQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
 import { findSuppressed } from "./suppressions.js";
+import { findTopicOptOuts } from "./topics.js";
 
 /**
  * Domain part of an RFC 5322 sender, lowercased. SECURITY: strict
@@ -73,9 +74,14 @@ export interface AcceptEmailPayload {
   html?: string | undefined;
   text?: string | undefined;
   tags?: Record<string, string> | null | undefined;
+  /** Custom SMTP headers; transport-owned names are rejected at the wire. */
+  headers?: Record<string, string> | undefined;
+  attachments?: EmailAttachment[] | undefined;
   scheduledAt?: Date | undefined;
   /** From verifySenderDomain — callers verify the sender before accepting. */
   domainId: string;
+  /** Topic-scoped send; callers validate team ownership before accepting. */
+  topicId?: string | undefined;
 }
 
 export type AcceptEmailResult =
@@ -115,6 +121,17 @@ export async function acceptEmail(
   // Read through the caller's transaction when one is supplied: a batch holds
   // the connection open, so a read on deps.db would deadlock a single-conn pool.
   const suppressed = await findSuppressed(opts.tx ?? deps.db, auth.teamId, allRecipients);
+  // Topic opt-outs drop exactly like suppression hits: strip the recipient,
+  // keep sending to the rest, refuse only when no `to` remains.
+  if (payload.topicId) {
+    const optedOut = await findTopicOptOuts(
+      opts.tx ?? deps.db,
+      auth.teamId,
+      payload.topicId,
+      allRecipients,
+    );
+    for (const r of optedOut) suppressed.add(r);
+  }
   const keep = (list: string[] | undefined) => list?.filter((r) => !suppressed.has(r));
   const to = keep(payload.to) ?? [];
   if (to.length === 0) return { ok: false, reason: "all_suppressed" };
@@ -125,6 +142,11 @@ export async function acceptEmail(
     { html: payload.html ?? null, text: payload.text ?? null },
     deps.keyring,
   );
+  // Attachments are content like html/text: sealed at rest, purged with the body.
+  const sealedAttachments =
+    payload.attachments && payload.attachments.length > 0
+      ? await sealAttachments(payload.attachments, deps.keyring)
+      : null;
 
   const limit = deps.isCloud ? PLAN_DAILY_LIMIT[auth.plan] : null;
   // Quota reservation, email insert, and the caller's in-transaction hook
@@ -145,6 +167,9 @@ export async function acceptEmail(
         replyTo: payload.replyTo ?? null,
         subject: payload.subject,
         tags: payload.tags ?? null,
+        headers: payload.headers ?? null,
+        attachments: sealedAttachments,
+        topicId: payload.topicId ?? null,
         latestStatus: quota.reserved ? "queued" : "queued_quota",
         scheduledAt: payload.scheduledAt ?? null,
         bodyCiphertext: encrypted.ciphertext,

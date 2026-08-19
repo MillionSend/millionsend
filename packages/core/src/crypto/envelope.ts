@@ -57,6 +57,53 @@ export async function encryptEmailBody(body: EmailBody, keyring: Keyring): Promi
   return encryptPayload(Buffer.from(JSON.stringify(body), "utf8"), keyring);
 }
 
+export interface EmailAttachment {
+  filename: string;
+  /** File bytes, base64-encoded (validated at the accept surface). */
+  content: string;
+  contentType?: string | undefined;
+}
+
+/**
+ * Attachments seal through the same envelope primitive as email bodies, but
+ * the emails table gives them a single text column instead of four dedicated
+ * ones — so the envelope parts travel inside the blob as base64 JSON.
+ */
+export async function sealAttachments(
+  attachments: EmailAttachment[],
+  keyring: Keyring,
+): Promise<string> {
+  const encrypted = await encryptPayload(Buffer.from(JSON.stringify(attachments), "utf8"), keyring);
+  return JSON.stringify({
+    keyVersion: encrypted.keyVersion,
+    iv: encrypted.iv.toString("base64"),
+    wrappedDek: encrypted.wrappedDek.toString("base64"),
+    ciphertext: encrypted.ciphertext.toString("base64"),
+  });
+}
+
+export async function openAttachments(
+  sealed: string,
+  keyring: Keyring,
+): Promise<EmailAttachment[]> {
+  const parts = JSON.parse(sealed) as {
+    keyVersion: number;
+    iv: string;
+    wrappedDek: string;
+    ciphertext: string;
+  };
+  const plaintext = await decryptPayload(
+    {
+      ciphertext: Buffer.from(parts.ciphertext, "base64"),
+      iv: Buffer.from(parts.iv, "base64"),
+      wrappedDek: Buffer.from(parts.wrappedDek, "base64"),
+      keyVersion: parts.keyVersion,
+    },
+    keyring,
+  );
+  return JSON.parse(plaintext.toString("utf8")) as EmailAttachment[];
+}
+
 export async function decryptEmailBody(
   encrypted: EncryptedBody,
   keyring: Keyring,

@@ -65,6 +65,25 @@ export function buildUnsubscribeUrl(baseUrl: string, token: string): string {
   ).toString();
 }
 
+/**
+ * Literal body tokens replaced per recipient with their hosted unsubscribe
+ * URL. {{{RESEND_UNSUBSCRIBE_URL}}} is the Resend-compatible alias.
+ */
+export const UNSUBSCRIBE_URL_TOKENS = [
+  "{{{UNSUBSCRIBE_URL}}}",
+  "{{{RESEND_UNSUBSCRIBE_URL}}}",
+] as const;
+
+/**
+ * Replaces every unsubscribe token with `url`. Pass "" when no URL can be
+ * built — a literal placeholder token must never reach an inbox.
+ */
+export function substituteUnsubscribeUrl(content: string, url: string): string {
+  let out = content;
+  for (const token of UNSUBSCRIBE_URL_TOKENS) out = out.replaceAll(token, url);
+  return out;
+}
+
 /** RFC 8058 one-click unsubscribe headers for outgoing mail. */
 export function buildUnsubscribeHeaders(
   baseUrl: string,

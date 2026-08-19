@@ -30,10 +30,13 @@ export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
 export {
   decryptEmailBody,
   decryptPayload,
+  type EmailAttachment,
   type EmailBody,
   type EncryptedBody,
   encryptEmailBody,
   encryptPayload,
+  openAttachments,
+  sealAttachments,
 } from "./crypto/envelope.js";
 export { EnvKeyring, type Keyring } from "./crypto/keyring.js";
 export {
@@ -74,8 +77,10 @@ export { getInstanceSettings, type InstanceSettings } from "./instance-settings.
 export { type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
 export { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
+export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
 export {
   SegmentFilterError,
+  segmentContactsWhere,
   segmentFilterSchema,
   segmentWhere,
 } from "./segment-filter.js";
@@ -84,7 +89,7 @@ export { isBlockedIp, type PostJsonOptions, type PostJsonResult, postJson } from
 export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";
 export { extractAddrSpec, findSuppressed, hashRecipient } from "./suppressions.js";
 export { INVITE_TTL_MS, signInviteToken, verifyInviteToken } from "./team-invitations.js";
-export { isSubscribedToTopic } from "./topics.js";
+export { findTopicOptOuts, isSubscribedToTopic } from "./topics.js";
 export {
   deriveTrackingKey,
   makeClickToken,
@@ -97,8 +102,11 @@ export {
   buildUnsubscribeUrl,
   deriveUnsubscribeKey,
   makeUnsubscribeToken,
+  substituteUnsubscribeUrl,
+  UNSUBSCRIBE_URL_TOKENS,
   verifyUnsubscribeToken,
 } from "./unsubscribe.js";
+export { isLoopbackUrl } from "./url.js";
 export { DAY_MS, utcDay } from "./utc-day.js";
 export {
   buildWebhookPayload,

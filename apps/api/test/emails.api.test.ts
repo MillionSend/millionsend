@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey, hashRecipient } from "@millionsend/core";
+import { EnvKeyring, generateApiKey, hashRecipient, openAttachments } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -12,6 +12,7 @@ let close: () => Promise<void>;
 let app: ReturnType<typeof createApi>;
 let teamId: string;
 let token: string;
+const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
 const enqueuedSends: { emailId: string; startAfter?: Date }[] = [];
 
 async function post(body: unknown, headers: Record<string, string> = {}) {
@@ -54,7 +55,7 @@ beforeAll(async () => {
   });
   app = createApi({
     db,
-    keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+    keyring,
     isCloud: true,
     enqueueEmailSend: async (emailId, opts) => {
       enqueuedSends.push({ emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) });
@@ -429,6 +430,320 @@ describe("cancel scheduled email", () => {
     const res = await post({ ...validBody, to: ["immediate@example.com"] });
     const { id } = (await res.json()) as { id: string };
     expect((await cancel(id)).status).toBe(422);
+  });
+});
+
+describe("reschedule scheduled email (PATCH /emails/{id})", () => {
+  const patch = (id: string, body: unknown) =>
+    app.request(`/emails/${id}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const scheduledAtOf = async (id: string) =>
+    (
+      await db
+        .select({ scheduledAt: schema.emails.scheduledAt })
+        .from(schema.emails)
+        .where(eq(schema.emails.id, id))
+    )[0]?.scheduledAt;
+
+  async function scheduleEmail(to: string): Promise<string> {
+    const res = await post({
+      ...validBody,
+      to: [to],
+      scheduled_at: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  it("reschedules a future email and re-enqueues at the new time", async () => {
+    const id = await scheduleEmail("resched1@example.com");
+    const at = new Date(Date.now() + 7_200_000);
+    const res = await patch(id, { scheduled_at: at.toISOString() });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ object: "email", id });
+    expect((await scheduledAtOf(id))?.getTime()).toBe(at.getTime());
+    const nudge = enqueuedSends.filter((e) => e.emailId === id);
+    expect(nudge.at(-1)?.startAfter?.getTime()).toBe(at.getTime());
+  });
+
+  it("accepts a relative scheduled_at resolved against now", async () => {
+    const id = await scheduleEmail("resched2@example.com");
+    const before = Date.now();
+    const res = await patch(id, { scheduled_at: "in 2 hours" });
+    expect(res.status).toBe(200);
+    const stored = (await scheduledAtOf(id))?.getTime() ?? 0;
+    expect(stored).toBeGreaterThanOrEqual(before + 2 * 3_600_000);
+    expect(stored).toBeLessThanOrEqual(Date.now() + 2 * 3_600_000);
+  });
+
+  it("422s when the email was already sent", async () => {
+    const id = await scheduleEmail("resched3@example.com");
+    await db
+      .update(schema.emails)
+      .set({ latestStatus: "sent", sentAt: new Date() })
+      .where(eq(schema.emails.id, id));
+    const res = await patch(id, { scheduled_at: new Date(Date.now() + 60_000).toISOString() });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ name: "validation_error" });
+  });
+
+  it("422s a canceled email", async () => {
+    const id = await scheduleEmail("resched4@example.com");
+    await app.request(`/emails/${id}/cancel`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const res = await patch(id, { scheduled_at: new Date(Date.now() + 60_000).toISOString() });
+    expect(res.status).toBe(422);
+  });
+
+  it("422s a non-scheduled (immediate) email", async () => {
+    const res = await post({ ...validBody, to: ["resched5@example.com"] });
+    const { id } = (await res.json()) as { id: string };
+    expect((await patch(id, { scheduled_at: "in 1 hour" })).status).toBe(422);
+  });
+
+  it("404s a cross-team email without touching it", async () => {
+    const otherTeam = await createTeam(db, "resched-other");
+    const [foreign] = await db
+      .insert(schema.emails)
+      .values({
+        teamId: otherTeam,
+        from: "A <a@other.dev>",
+        to: ["x@example.com"],
+        subject: "s",
+        latestStatus: "queued",
+        scheduledAt: new Date(Date.now() + 3_600_000),
+      })
+      .returning({ id: schema.emails.id, scheduledAt: schema.emails.scheduledAt });
+    if (!foreign) throw new Error("insert failed");
+    const res = await patch(foreign.id, { scheduled_at: "in 1 day" });
+    expect(res.status).toBe(404);
+    expect((await scheduledAtOf(foreign.id))?.getTime()).toBe(foreign.scheduledAt?.getTime());
+  });
+
+  it("re-validates the 30-day cap and the accepted forms", async () => {
+    const id = await scheduleEmail("resched6@example.com");
+    const tooFar = await patch(id, {
+      scheduled_at: new Date(Date.now() + 31 * 86_400_000).toISOString(),
+    });
+    expect(tooFar.status).toBe(422);
+    expect(await tooFar.json()).toMatchObject({
+      message: expect.stringMatching(/30 days/),
+    });
+    const garbage = await patch(id, { scheduled_at: "tomorrow" });
+    expect(garbage.status).toBe(422);
+    // The 422 names both accepted forms.
+    expect(await garbage.json()).toMatchObject({
+      message: expect.stringMatching(/ISO 8601.*in 5 mins/),
+    });
+  });
+});
+
+describe("natural-language scheduled_at on send", () => {
+  it("accepts 'in N mins' and enqueues with the resolved startAfter", async () => {
+    const before = Date.now();
+    const res = await post({
+      ...validBody,
+      to: ["nl-sched@example.com"],
+      scheduled_at: "in 5 mins",
+    });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    const enqueued = enqueuedSends.find((e) => e.emailId === id);
+    expect(enqueued?.startAfter?.getTime()).toBeGreaterThanOrEqual(before + 5 * 60_000);
+    expect(enqueued?.startAfter?.getTime()).toBeLessThanOrEqual(Date.now() + 5 * 60_000);
+  });
+
+  it("still rejects unparseable values naming both forms", async () => {
+    const res = await post({ ...validBody, scheduled_at: "next tuesday" });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/ISO 8601.*in 5 mins/),
+    });
+  });
+});
+
+describe("batch permissive validation", () => {
+  const batch = (items: unknown[], headers: Record<string, string> = {}) =>
+    app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...headers },
+      body: JSON.stringify(items),
+    });
+  const permissive = { "x-batch-validation": "permissive" };
+
+  it("accepts the valid subset and reports the rest per index", async () => {
+    const before = enqueuedSends.length;
+    const res = await batch(
+      [
+        { ...validBody, to: ["perm-ok@example.com"] },
+        { ...validBody, text: undefined }, // schema-invalid: no html, no text
+        { ...validBody, from: "Nope <a@unverified.dev>" }, // unverified domain
+        { ...validBody, to: ["dead@example.com"] }, // suppressed earlier in this suite
+      ],
+      permissive,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { id: string }[];
+      errors: { index: number; message: string }[];
+    };
+    expect(body.data).toHaveLength(1);
+    expect(body.errors).toEqual([
+      { index: 1, message: expect.stringMatching(/html or text/) },
+      { index: 2, message: expect.stringMatching(/not verified/) },
+      { index: 3, message: expect.stringMatching(/suppressed/) },
+    ]);
+    // Only the valid item was accepted and enqueued.
+    expect(enqueuedSends.slice(before).map((e) => e.emailId)).toEqual([body.data[0]?.id]);
+  });
+
+  it("includes an empty errors array when every item is valid", async () => {
+    const res = await batch([{ ...validBody, to: ["perm-all-ok@example.com"] }], permissive);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { id: string }[]; errors: unknown[] };
+    expect(body.data).toHaveLength(1);
+    expect(body.errors).toEqual([]);
+  });
+
+  it("accepts nothing when every item fails, still a 200 with errors", async () => {
+    const before = enqueuedSends.length;
+    const res = await batch([{ ...validBody, text: undefined }], permissive);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: unknown[]; errors: { index: number }[] };
+    expect(body.data).toEqual([]);
+    expect(body.errors).toHaveLength(1);
+    expect(enqueuedSends.length).toBe(before);
+  });
+
+  it("strict mode (default) still fails the whole batch and omits errors", async () => {
+    const before = enqueuedSends.length;
+    const res = await batch([
+      { ...validBody, to: ["strict-ok@example.com"] },
+      { ...validBody, text: undefined },
+    ]);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/^emails\.1: /),
+    });
+    expect(enqueuedSends.length).toBe(before);
+  });
+});
+
+describe("attachments and custom headers", () => {
+  const pdfBase64 = Buffer.from("%PDF-1.4 fake pdf bytes").toString("base64");
+
+  it("accepts them, stores headers as metadata and attachments sealed", async () => {
+    const res = await post({
+      ...validBody,
+      to: ["attach@example.com"],
+      attachments: [{ filename: "x.pdf", content: pdfBase64, content_type: "application/pdf" }],
+      headers: { "X-Entity-Ref-ID": "ref-1" },
+    });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db
+      .select({ headers: schema.emails.headers, attachments: schema.emails.attachments })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, id));
+    expect(row?.headers).toEqual({ "X-Entity-Ref-ID": "ref-1" });
+    // Sealed at rest: neither the payload nor the filename is stored in the clear.
+    expect(row?.attachments).toBeTruthy();
+    expect(row?.attachments).not.toContain(pdfBase64);
+    expect(row?.attachments).not.toContain("x.pdf");
+    expect(await openAttachments(row?.attachments ?? "", keyring)).toEqual([
+      { filename: "x.pdf", content: pdfBase64, contentType: "application/pdf" },
+    ]);
+  });
+
+  it("rejects path attachments with a clear message, never fetching the URL", async () => {
+    const res = await post({
+      ...validBody,
+      attachments: [{ filename: "x.pdf", path: "https://evil.test/x.pdf" }],
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/path attachments are not supported/),
+    });
+  });
+
+  it("rejects non-base64 attachment content", async () => {
+    const res = await post({
+      ...validBody,
+      attachments: [{ filename: "x.txt", content: "not base64!!" }],
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      message: expect.stringMatching(/base64/),
+    });
+  });
+
+  it("rejects attachments missing content", async () => {
+    const res = await post({ ...validBody, attachments: [{ filename: "x.txt" }] });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      message: expect.stringMatching(/content is required/),
+    });
+  });
+
+  it("rejects reserved transport headers case-insensitively", async () => {
+    for (const name of ["From", "bCC", "list-UNSUBSCRIBE", "Content-Type", "X-SES-SOURCE-ARN"]) {
+      const res = await post({ ...validBody, headers: { [name]: "x" } });
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({
+        message: expect.stringMatching(/reserved header/),
+      });
+    }
+  });
+
+  it("rejects header values that could smuggle extra headers", async () => {
+    const res = await post({
+      ...validBody,
+      headers: { "X-Entity-Ref-ID": "a\r\nBcc: evil@example.com" },
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      message: expect.stringMatching(/control characters/),
+    });
+  });
+
+  it("validates batch items the same way and accepts valid ones", async () => {
+    const bad = await app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify([
+        { ...validBody, attachments: [{ filename: "x.pdf", path: "https://evil.test/x" }] },
+      ]),
+    });
+    expect(bad.status).toBe(422);
+
+    const ok = await app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify([
+        {
+          ...validBody,
+          to: ["batch-attach@example.com"],
+          attachments: [{ filename: "a.txt", content: Buffer.from("hi").toString("base64") }],
+          headers: { "X-Entity-Ref-ID": "batch-1" },
+        },
+      ]),
+    });
+    expect(ok.status).toBe(200);
+    const { data } = (await ok.json()) as { data: { id: string }[] };
+    const [row] = await db
+      .select({ headers: schema.emails.headers, attachments: schema.emails.attachments })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, data[0]?.id ?? ""));
+    expect(row?.headers).toEqual({ "X-Entity-Ref-ID": "batch-1" });
+    expect(row?.attachments).toBeTruthy();
   });
 });
 

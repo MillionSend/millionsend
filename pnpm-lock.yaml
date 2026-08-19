@@ -65,8 +65,8 @@ importers:
         specifier: ^22.20.1
         version: 22.20.1
       resend:
-        specifier: ^6.19.0
-        version: 6.19.0(@react-email/render@1.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))
+        specifier: ^6.20.0
+        version: 6.20.0(@react-email/render@1.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -4622,6 +4622,15 @@ packages:
 
   resend@6.19.0:
     resolution: {integrity: sha512-JnEdYnd9WyBDIzunsEZtUF8n3cBKM9SlmySaos/7wwi4sEXKG1Zz4M64VFAyk+278erX01Fq2wHQ3p7OIdPriA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@react-email/render': '*'
+    peerDependenciesMeta:
+      '@react-email/render':
+        optional: true
+
+  resend@6.20.0:
+    resolution: {integrity: sha512-fXDFt7jVMuka6ruS79DzaQFKPyxOAUtoYUGSl3dTUyOnFK9klmUULxADQRzFFtHfHRipYyy62jYcm4cMKqvtjw==}
     engines: {node: '>=20'}
     peerDependencies:
       '@react-email/render': '*'
@@ -9363,6 +9372,13 @@ snapshots:
   reselect@5.2.0: {}
 
   resend@6.19.0(@react-email/render@1.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)):
+    dependencies:
+      postal-mime: 2.7.5
+      standardwebhooks: 1.0.0
+    optionalDependencies:
+      '@react-email/render': 1.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+
+  resend@6.20.0(@react-email/render@1.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)):
     dependencies:
       postal-mime: 2.7.5
       standardwebhooks: 1.0.0

@@ -14,6 +14,7 @@ import { broadcasts } from "./broadcasts.js";
 import { bytea } from "./custom-types.js";
 import { domains } from "./domains.js";
 import { teams } from "./teams.js";
+import { topics } from "./topics.js";
 
 /**
  * Status values are ordered: updates apply only when the incoming status ranks
@@ -82,6 +83,9 @@ export const emails = pgTable(
     // No FK: the contact may be deleted later and per-broadcast stats must
     // survive it.
     contactId: uuid("contact_id"),
+    // SET NULL (unlike broadcasts' RESTRICT): a historical email must never
+    // block topic deletion.
+    topicId: uuid("topic_id").references(() => topics.id, { onDelete: "set null" }),
     sesMessageId: text("ses_message_id"),
     from: text("from").notNull(),
     to: jsonb("to").$type<string[]>().notNull(),
@@ -90,6 +94,10 @@ export const emails = pgTable(
     replyTo: jsonb("reply_to").$type<string[]>(),
     subject: text("subject").notNull(),
     tags: jsonb("tags").$type<Record<string, string>>(),
+    headers: jsonb("headers").$type<Record<string, string>>(),
+    // Content, not metadata: holds ciphertext (same envelope scheme as the
+    // body columns), so it belongs on the content retention clock.
+    attachments: text("attachments"),
     latestStatus: emailStatusEnum("latest_status").notNull().default("queued"),
     bodyCiphertext: bytea("body_ciphertext"),
     bodyIv: bytea("body_iv"),

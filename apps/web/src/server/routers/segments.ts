@@ -1,4 +1,4 @@
-import { segmentWhere } from "@millionsend/core";
+import { segmentContactsWhere, segmentWhere } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -41,15 +41,11 @@ export async function assertSegment(
   return row;
 }
 
-/**
- * The shared translator's SQL predicate for `filter`. The core validator throws
- * on an unknown field/op — surfaced here as 422. Caught by error name (not the
- * class) so it holds even if two copies of core ever load. Returns undefined for
- * an empty condition set (matches everyone) — safe to `and(...)` in.
- */
-export function segmentPredicate(filter: SegmentFilter) {
+/** Maps the core validator's throw to a 422; caught by error name (not the
+ * class) so it holds even if two copies of core ever load. */
+function surfacing422<T>(build: () => T): T {
   try {
-    return segmentWhere(schema.contacts, filter);
+    return build();
   } catch (err) {
     if (err instanceof Error && err.name === "SegmentFilterError") {
       throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: err.message });
@@ -58,7 +54,21 @@ export function segmentPredicate(filter: SegmentFilter) {
   }
 }
 
-/** Live count of the team's contacts matching a filter. */
+/** The shared translator's SQL predicate for a bare (unsaved) `filter`. */
+export function segmentPredicate(filter: SegmentFilter) {
+  return surfacing422(() => segmentWhere(schema.contacts, filter));
+}
+
+/**
+ * The shared resolver's predicate for a SAVED segment: filter matches (when a
+ * filter is set) plus manual segment_members rows. Null-filter segments
+ * resolve to their members only.
+ */
+export function savedSegmentPredicate(segment: { id: string; filter: SegmentFilter }) {
+  return surfacing422(() => segmentContactsWhere(schema.contacts, segment));
+}
+
+/** Live count of the team's contacts matching a filter (builder preview). */
 export async function countMatching(
   ctx: { db: Db; teamId: string },
   filter: SegmentFilter,
@@ -68,6 +78,19 @@ export async function countMatching(
     .select({ count: sql<number>`count(*)::int` })
     .from(c)
     .where(and(eq(c.teamId, ctx.teamId), segmentPredicate(filter)));
+  return row?.count ?? 0;
+}
+
+/** Live count of the team's contacts a saved segment resolves to. */
+export async function countSegment(
+  ctx: { db: Db; teamId: string },
+  segment: { id: string; filter: SegmentFilter },
+): Promise<number> {
+  const c = schema.contacts;
+  const [row] = await ctx.db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(c)
+    .where(and(eq(c.teamId, ctx.teamId), savedSegmentPredicate(segment)));
   return row?.count ?? 0;
 }
 
@@ -84,19 +107,19 @@ export const segmentsRouter = router({
       .from(s)
       .where(eq(s.teamId, ctx.teamId))
       .orderBy(desc(s.createdAt), desc(s.id));
-    // Live count reuses the shared translator per row. Segments are few per
+    // Live count reuses the shared resolver per row. Segments are few per
     // team, so a per-row aggregate beats materializing membership.
     return Promise.all(
       rows.map(async (row) => ({
         ...row,
-        count: await countMatching(ctx, row.filter),
+        count: await countSegment(ctx, row),
       })),
     );
   }),
 
   get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
     const row = await assertSegment(ctx, input.id);
-    return { ...row, count: await countMatching(ctx, row.filter) };
+    return { ...row, count: await countSegment(ctx, row) };
   }),
 
   create: teamProcedure

@@ -151,6 +151,7 @@
     "count": "Contatos",
     "created": "Criado",
     "menu": "Ações do segmento",
+    "manual": "Manual",
     "delete": "Excluir",
     "empty": "Nenhum segmento ainda.",
     "emptyHint": "Um segmento é um filtro salvo sobre seus contatos — mire uma transmissão apenas nos contatos que correspondem.",

@@ -301,7 +301,22 @@ export default function SegmentsPage() {
             {query.data.map((row) => (
               <tr key={row.id}>
                 <td>
-                  <div style={{ fontSize: 14, color: "var(--ms-bone)" }}>{row.name}</div>
+                  <div style={{ fontSize: 14, color: "var(--ms-bone)" }}>
+                    {row.name}
+                    {/* Null filter = manual segment (membership added via the
+                        API); the builder only edits filter segments. */}
+                    {row.filter === null ? (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          color: "var(--ms-faint)",
+                          fontSize: "var(--ms-fs-label)",
+                        }}
+                      >
+                        {t("manual")}
+                      </span>
+                    ) : null}
+                  </div>
                 </td>
                 <td className="right ms-mono" style={{ fontSize: 13 }}>
                   {nf.format(row.count)}

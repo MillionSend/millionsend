@@ -92,6 +92,22 @@ describe("official resend SDK: topics", () => {
     ]);
   });
 
+  it("updates a topic's name and description (default_subscription stays)", async () => {
+    const updated = await resend.topics.update({
+      id: topicId,
+      name: "Product news",
+      description: "Announcements only",
+    });
+    expect(updated.error).toBeNull();
+    expect(updated.data?.id).toBe(topicId);
+    const fetched = await resend.topics.get(topicId);
+    expect(fetched.data).toMatchObject({
+      name: "Product news",
+      description: "Announcements only",
+      default_subscription: "opt_in",
+    });
+  });
+
   it("updates a contact's subscription state to opt_out", async () => {
     const updated = await resend.contacts.topics.update({
       id: contactId,

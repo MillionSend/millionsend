@@ -10,7 +10,8 @@ import {
   PLAN_DAILY_LIMIT,
   parseSingleSender,
   reserveDailyQuota,
-  segmentWhere,
+  segmentContactsWhere,
+  substituteUnsubscribeUrl,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -39,9 +40,6 @@ export interface BroadcastDeps {
 }
 
 export type BroadcastOutcome = "sent" | "skipped" | "deferred";
-
-/** Literal token replaced per recipient with their hosted unsubscribe URL. */
-const UNSUBSCRIBE_URL_TOKEN = "{{{UNSUBSCRIBE_URL}}}";
 
 // Resend's broadcast merge syntax: {{{NAME}}} or {{{NAME|fallback}}}. NAME is a
 // builtin (FIRST_NAME/LAST_NAME/EMAIL) or a custom-property key; a name with no
@@ -89,6 +87,20 @@ export function applyMergeFields(
     if (!value) return fallback ?? "";
     return opts.html ? escapeHtml(value) : value;
   });
+}
+
+/**
+ * Hidden-preheader injection (the standard inbox-preview pattern): the preview
+ * text goes first in the body inside a display:none container, padded with
+ * zero-width characters so clients that ignore the hiding styles still don't
+ * pull visible body content into the snippet. Inserted right after `<body>`
+ * when present (full documents), else prepended (fragments).
+ */
+export function injectPreheader(html: string, previewText: string): string {
+  const preheader = `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all">${escapeHtml(previewText)}${"&nbsp;&zwnj;".repeat(40)}</div>`;
+  const bodyTag = /<body[^>]*>/i.exec(html);
+  const at = bodyTag ? bodyTag.index + bodyTag[0].length : 0;
+  return html.slice(0, at) + preheader + html.slice(at);
 }
 
 export async function sendBroadcast(
@@ -189,13 +201,14 @@ export async function sendBroadcast(
   const startMs = Date.now();
   let emitted = 0;
 
-  // Optional segment: AND its parameterized filter into the contact scan. The
-  // segment must belong to this broadcast's team — a mismatch is a
-  // tampered/foreign reference, so refuse rather than mail the wrong people.
+  // Optional segment: AND the shared resolver (filter matches plus manual
+  // members) into the contact scan. The segment must belong to this
+  // broadcast's team — a mismatch is a tampered/foreign reference, so refuse
+  // rather than mail the wrong people.
   let segmentPredicate: SQL | undefined;
   if (broadcast.segmentId) {
     const [segment] = await db
-      .select({ filter: schema.segments.filter })
+      .select({ id: schema.segments.id, filter: schema.segments.filter })
       .from(schema.segments)
       .where(
         and(
@@ -208,10 +221,16 @@ export async function sendBroadcast(
         `broadcast ${broadcast.id}: segment ${broadcast.segmentId} not found for its team`,
       );
     }
-    segmentPredicate = segmentWhere(schema.contacts, segment.filter);
+    segmentPredicate = segmentContactsWhere(schema.contacts, segment);
   }
 
   const replyTo = broadcast.replyTo ? (JSON.parse(broadcast.replyTo) as string[]) : null;
+  // The preheader is per-broadcast, so it is injected once here; merge tokens
+  // inside it still personalize per contact below.
+  const baseHtml =
+    broadcast.html !== null && broadcast.previewText
+      ? injectPreheader(broadcast.html, broadcast.previewText)
+      : broadcast.html;
   const batchSize = deps.batchSize ?? 100;
   let cursor = "";
   for (;;) {
@@ -286,10 +305,10 @@ export async function sendBroadcast(
       const personalize = (s: string | null, opts: { html: boolean }) =>
         s === null
           ? null
-          : applyMergeFields(s.replaceAll(UNSUBSCRIBE_URL_TOKEN, unsubscribeUrl), contact, opts);
+          : applyMergeFields(substituteUnsubscribeUrl(s, unsubscribeUrl), contact, opts);
       const encrypted = await encryptEmailBody(
         {
-          html: personalize(broadcast.html, { html: true }),
+          html: personalize(baseHtml, { html: true }),
           text: personalize(broadcast.text, { html: false }),
         },
         deps.keyring,

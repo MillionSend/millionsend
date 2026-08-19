@@ -44,13 +44,21 @@ ela pode enviar.
 
 Os formatos de requisição e resposta correspondem aos da API do Resend, então
 os SDKs oficiais do Resend funcionam contra o MillionSend apontando a URL
-base para ele. As diferenças notáveis são deliberadas e explícitas:
+base para ele. O CI executa o pacote oficial `resend` do npm contra todos os
+endpoints como um teste de conformidade. As poucas diferenças restantes são
+deliberadas e explícitas:
 
-- Campos do Resend não suportados (ex.: `attachments`, `headers`
-  customizados) são rejeitados com `422` em vez de descartados em silêncio.
-- Contatos são globais ao time — endpoints de contato não recebem id de
+- Anexos aceitam apenas `content` em base64 inline — uma URL em `path` é
+  rejeitada com `422` (nunca é buscada), assim como `content_id` (imagens
+  inline).
+- Contatos são globais ao time — os endpoints de audience são servidos como
+  aliases de segments, e os endpoints de contato funcionam com ou sem id de
   audience (veja [Contatos](/pt-BR/concepts/contacts)).
-- Broadcasts suportam `canceled`, um status fora da união do Resend.
+- Broadcasts suportam `canceled`, um status fora da união do Resend, e o
+  envio de broadcast pode retornar `403 sending_paused` quando sua taxa de
+  bounce ou reclamação cruza os limites de enforcement do SES.
+- Qualquer coisa não suportada é rejeitada com `422` em vez de descartada em
+  silêncio (ex.: `tls` na atualização de domínio).
 
 ## Erros
 
