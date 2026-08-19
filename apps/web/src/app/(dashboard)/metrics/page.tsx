@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/skeleton";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
+import { useUrlState } from "@/lib/url-state";
 
 const RANGES = [7, 15, 30] as const;
 type Range = (typeof RANGES)[number];
@@ -23,7 +24,6 @@ type Range = (typeof RANGES)[number];
  * line (bounce line at top 6px → 114px = 4%; complaint at 14px → 106px = 0.01%).
  */
 const BAR_AREA = 120;
-const BAR_W = 4;
 const BAR_GAP = 4;
 const BOUNCE = { threshold: WARN_BOUNCE_RATE, lineTop: 6 };
 const COMPLAINT = { threshold: WARN_COMPLAINT_RATE, lineTop: 14 };
@@ -121,12 +121,14 @@ function RateCard(props: {
   const hoveredBar = hover ? props.bars[hover.index] : undefined;
 
   // Same mechanics as the line chart: track the pointer over the whole bar
-  // area (a 4px bar is no hit target) and snap to the nearest bar's pitch.
+  // area (a thin bar is no hit target) and snap to the nearest bar's pitch —
+  // bars flex to fill the card, so the pitch comes from the measured width.
   function track(event: React.PointerEvent<HTMLDivElement>) {
     if (props.bars.length === 0) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
-    const index = Math.min(props.bars.length - 1, Math.max(0, Math.floor(x / (BAR_W + BAR_GAP))));
+    const pitch = rect.width / props.bars.length;
+    const index = Math.min(props.bars.length - 1, Math.max(0, Math.floor(x / pitch)));
     setHover({ index, x, y: event.clientY - rect.top });
   }
 
@@ -159,7 +161,9 @@ function RateCard(props: {
             <span
               key={bar.day}
               style={{
-                width: BAR_W,
+                // Bars share the row evenly so the window always spans the
+                // card end-to-end, whatever the day count.
+                flex: "1 1 0",
                 // 2px floor keeps zero days visible as a baseline stub.
                 height: Math.max(2, bar.height),
                 background: props.color,
@@ -317,7 +321,9 @@ export default function MetricsPage() {
   const common = useTranslations("common");
   const locale = useLocale();
   const trpc = useTRPC();
-  const [days, setDays] = useState<Range>(15);
+  const [rangeParam, setRangeParam] = useUrlState("range", "15");
+  // URL input — anything but a known range key falls back to the default.
+  const days: Range = RANGES.find((r) => String(r) === rangeParam) ?? 15;
   const query = useQuery(trpc.metrics.window.queryOptions({ days }));
 
   const fmt = new Intl.NumberFormat(locale);
@@ -346,7 +352,7 @@ export default function MetricsPage() {
         actions={
           <Select
             value={String(days)}
-            onChange={(value) => setDays(Number(value) as Range)}
+            onChange={setRangeParam}
             ariaLabel={t(`range.${days}`)}
             options={RANGES.map((r) => ({ value: String(r), label: t(`range.${r}`) }))}
           />

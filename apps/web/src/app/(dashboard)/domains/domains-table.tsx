@@ -19,6 +19,7 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
+import { useUrlState } from "@/lib/url-state";
 import { AwsCredentialsBanner } from "./aws-credentials-banner";
 import { type DomainStatus, DomainStatusBadge } from "./domain-status";
 import { RegionLabel } from "./region-label";
@@ -72,9 +73,9 @@ export function DomainsView() {
     setConfirmText("");
   }, []);
 
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("all");
-  const [region, setRegion] = useState("all");
+  const [search, setSearch] = useUrlState("q");
+  const [statusParam, setStatus] = useUrlState("status", "all");
+  const [regionParam, setRegion] = useUrlState("region", "all");
   const searchRef = useRef<HTMLInputElement>(null);
 
   // "/" focuses search from anywhere on the page.
@@ -91,6 +92,12 @@ export function DomainsView() {
 
   const rows = domains.data ?? [];
   const regions = useMemo(() => [...new Set(rows.map((d) => d.region))], [rows]);
+
+  // URL params are untrusted: unknown values fall back to "all".
+  const status = ["all", "verified", "pending", "failed"].includes(statusParam)
+    ? statusParam
+    : "all";
+  const region = regionParam === "all" || regions.includes(regionParam) ? regionParam : "all";
 
   const filtered = rows.filter(
     (d) =>

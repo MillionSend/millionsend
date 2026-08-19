@@ -4,7 +4,6 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
@@ -13,6 +12,7 @@ import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { statusCodeColor } from "@/lib/status-code-color";
 import { useTRPC } from "@/lib/trpc";
+import { useUrlState } from "@/lib/url-state";
 import { StateCard } from "../emails/list-parts";
 
 const STATUS_CLASSES = ["2xx", "4xx", "5xx"] as const;
@@ -65,7 +65,13 @@ export default function LogsPage() {
   const t = useTranslations("logs");
   const trpc = useTRPC();
   const router = useRouter();
-  const [statusClass, setStatusClass] = useState<StatusClass | "all">("all");
+  const [statusParam, setStatusClass] = useUrlState("status", "all");
+  // URL param is untrusted; unknown values fall back to "all".
+  const statusClass: StatusClass | "all" = (STATUS_CLASSES as readonly string[]).includes(
+    statusParam,
+  )
+    ? (statusParam as StatusClass)
+    : "all";
 
   const query = useInfiniteQuery(
     trpc.logs.list.infiniteQueryOptions(

@@ -18,6 +18,7 @@ import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatHoursMinutes } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { useUrlState } from "@/lib/url-state";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "./list-parts";
 
 // Keep in enum order (packages/db schema.emailStatusEnum) — the router input
@@ -55,11 +56,18 @@ export default function EmailsPage() {
   const router = useRouter();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<EmailStatus | "all">("all");
-  const [range, setRange] = useState<RangeKey>("d15");
-  const [apiKeyId, setApiKeyId] = useState("all");
+  const [search, setSearch] = useUrlState("q");
+  const [statusParam, setStatus] = useUrlState("status", "all");
+  const [rangeParam, setRange] = useUrlState("range", "d15");
+  const [apiKeyId, setApiKeyId] = useUrlState("key", "all");
   const [limit, setLimit] = useState(40);
+  // URL params are untrusted; unknown values fall back to the defaults.
+  const status: EmailStatus | "all" = (STATUSES as readonly string[]).includes(statusParam)
+    ? (statusParam as EmailStatus)
+    : "all";
+  const range: RangeKey = (RANGE_KEYS as readonly string[]).includes(rangeParam)
+    ? (rangeParam as RangeKey)
+    : "d15";
   const deferredSearch = useDeferredValue(search.trim());
   const since = useMemo(
     () => (range === "all" ? undefined : new Date(Date.now() - RANGE_HOURS[range] * 3_600_000)),
@@ -183,14 +191,14 @@ export default function EmailsPage() {
         <SearchBox value={search} onChange={setSearch} placeholder={t("list.searchPlaceholder")} />
         <Select
           value={range}
-          onChange={(value) => setRange(value as RangeKey)}
+          onChange={setRange}
           width={130}
           ariaLabel={t(`list.range.${range}`)}
           options={RANGE_KEYS.map((key) => ({ value: key, label: t(`list.range.${key}`) }))}
         />
         <Select
           value={status}
-          onChange={(value) => setStatus(value as EmailStatus | "all")}
+          onChange={setStatus}
           width={126}
           ariaLabel={t("list.status")}
           options={[

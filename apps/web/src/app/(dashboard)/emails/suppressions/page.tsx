@@ -18,6 +18,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { type BadgeStatus, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
+import { useUrlState } from "@/lib/url-state";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "../list-parts";
 
 const REASONS = ["hard_bounce", "complaint", "manual", "one_click_unsubscribe"] as const;
@@ -50,9 +51,15 @@ export default function SuppressionsPage() {
   const queryClient = useQueryClient();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 
-  const [search, setSearch] = useState("");
-  const [reason, setReason] = useState<Reason | "all">("all");
-  const [range, setRange] = useState<RangeKey>("all");
+  const [search, setSearch] = useUrlState("q");
+  const [reasonParam, setReason] = useUrlState("reason", "all");
+  const [rangeParam, setRange] = useUrlState("range", "all");
+  const reason: Reason | "all" = (REASONS as readonly string[]).includes(reasonParam)
+    ? (reasonParam as Reason)
+    : "all";
+  const range: RangeKey = (RANGE_KEYS as readonly string[]).includes(rangeParam)
+    ? (rangeParam as RangeKey)
+    : "all";
   const [limit, setLimit] = useState(40);
   const deferredSearch = useDeferredValue(search.trim());
   const since = useMemo(
@@ -161,7 +168,7 @@ export default function SuppressionsPage() {
         />
         <Select
           value={reason}
-          onChange={(value) => setReason(value as Reason | "all")}
+          onChange={setReason}
           width={120}
           ariaLabel={t("suppressions.origin")}
           options={[
@@ -175,7 +182,7 @@ export default function SuppressionsPage() {
         />
         <Select
           value={range}
-          onChange={(value) => setRange(value as RangeKey)}
+          onChange={setRange}
           width={110}
           ariaLabel={t(`list.range.${range === "all" ? "all" : range}`)}
           options={RANGE_KEYS.map((key) => ({ value: key, label: t(`list.range.${key}`) }))}
