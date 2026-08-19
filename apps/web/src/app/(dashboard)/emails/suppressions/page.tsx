@@ -9,7 +9,7 @@ import { EmailStatusIcon } from "@/components/email-status-icon";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -124,6 +124,17 @@ export default function SuppressionsPage() {
   // the email input.
   const closeAdd = useCallback(() => setAddOpen(false), []);
   const closeRemove = useCallback(() => setRemoveTarget(null), []);
+
+  // Guards mirror the primary buttons' disabled state — the same checks gate
+  // both the form submit and Modal's Cmd+Enter path.
+  const submitAdd = () => {
+    if (addMutation.isPending || newEmail.trim().length === 0) return;
+    addMutation.mutate({ email: newEmail.trim(), reason: "manual" });
+  };
+  const submitRemove = () => {
+    if (!removeTarget || removeMutation.isPending) return;
+    removeMutation.mutate({ id: removeTarget.id });
+  };
 
   function clearFilters() {
     setSearch("");
@@ -288,15 +299,19 @@ export default function SuppressionsPage() {
         </>
       )}
 
-      <Modal open={addOpen} onClose={closeAdd} title={t("suppressions.addTitle")}>
+      <Modal
+        open={addOpen}
+        onClose={closeAdd}
+        onConfirm={submitAdd}
+        title={t("suppressions.addTitle")}
+      >
         <p style={{ margin: "0 0 18px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
           {t("suppressions.addBody")}
         </p>
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (addMutation.isPending) return;
-            addMutation.mutate({ email: newEmail.trim(), reason: "manual" });
+            submitAdd();
           }}
         >
           <div className="ms-field">
@@ -332,7 +347,7 @@ export default function SuppressionsPage() {
               disabled={addMutation.isPending || newEmail.trim().length === 0}
             >
               <BtnSpinner on={addMutation.isPending} />
-              {t("suppressions.addConfirm")} <span className="ms-keycap">↵</span>
+              {t("suppressions.addConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>
@@ -341,14 +356,13 @@ export default function SuppressionsPage() {
       <Modal
         open={removeTarget !== null}
         onClose={closeRemove}
+        onConfirm={submitRemove}
         title={t("suppressions.removeTitle")}
       >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (removeTarget && !removeMutation.isPending) {
-              removeMutation.mutate({ id: removeTarget.id });
-            }
+            submitRemove();
           }}
         >
           <p style={{ margin: "0 0 22px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -364,7 +378,7 @@ export default function SuppressionsPage() {
               disabled={removeMutation.isPending}
             >
               <BtnSpinner on={removeMutation.isPending} />
-              {t("suppressions.removeConfirm")} <span className="ms-keycap">↵</span>
+              {t("suppressions.removeConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

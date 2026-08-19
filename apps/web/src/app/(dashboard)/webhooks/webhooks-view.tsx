@@ -9,7 +9,7 @@ import { EmptyState } from "@/components/empty-state";
 import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -186,6 +186,22 @@ export function WebhooksView() {
   const urlValid = url.trim().startsWith("https://");
   const submittable = urlValid && (allEvents || selectedEvents.length > 0);
 
+  // Shared by the form's onSubmit and the modal's ⌘↵ onConfirm, with the same
+  // guards as the primary button's disabled state.
+  const submitCreate = () => {
+    if (!submittable || createMutation.isPending) return;
+    const trimmedDescription = description.trim();
+    createMutation.mutate({
+      url: url.trim(),
+      eventTypes: allEvents ? [] : selectedEvents,
+      ...(trimmedDescription ? { description: trimmedDescription } : {}),
+    });
+  };
+  const submitDelete = () => {
+    if (!deleteTarget || deleteMutation.isPending) return;
+    deleteMutation.mutate({ id: deleteTarget.id });
+  };
+
   return (
     <>
       <PageHeader
@@ -295,6 +311,7 @@ export function WebhooksView() {
       <Modal
         open={createOpen}
         onClose={closeCreate}
+        onConfirm={revealedSecret ? closeCreate : submitCreate}
         title={revealedSecret ? t("reveal.title") : t("create.title")}
       >
         {revealedSecret ? (
@@ -314,7 +331,7 @@ export function WebhooksView() {
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button type="submit" className="ms-btn ms-btn-primary">
-                {t("reveal.done")} <span className="ms-keycap">↵</span>
+                {t("reveal.done")} <ConfirmKeycap />
               </button>
             </div>
           </form>
@@ -323,13 +340,7 @@ export function WebhooksView() {
             style={{ display: "grid", gap: 14, marginTop: 12 }}
             onSubmit={(event) => {
               event.preventDefault();
-              if (!submittable || createMutation.isPending) return;
-              const trimmedDescription = description.trim();
-              createMutation.mutate({
-                url: url.trim(),
-                eventTypes: allEvents ? [] : selectedEvents,
-                ...(trimmedDescription ? { description: trimmedDescription } : {}),
-              });
+              submitCreate();
             }}
           >
             <div className="ms-field">
@@ -380,21 +391,25 @@ export function WebhooksView() {
                 disabled={!submittable || createMutation.isPending}
               >
                 <BtnSpinner on={createMutation.isPending} />
-                {t("create.submit")} <span className="ms-keycap">↵</span>
+                {t("create.submit")} <ConfirmKeycap />
               </button>
             </ModalFooter>
           </form>
         )}
       </Modal>
 
-      <Modal open={deleteTarget !== null} onClose={closeDelete} title={t("deleteConfirm.title")}>
+      <Modal
+        open={deleteTarget !== null}
+        onClose={closeDelete}
+        onConfirm={submitDelete}
+        title={t("deleteConfirm.title")}
+      >
         {deleteTarget ? (
           <form
             style={{ display: "grid", gap: 14, marginTop: 12 }}
             onSubmit={(event) => {
               event.preventDefault();
-              if (deleteMutation.isPending) return;
-              deleteMutation.mutate({ id: deleteTarget.id });
+              submitDelete();
             }}
           >
             <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -410,7 +425,7 @@ export function WebhooksView() {
                 disabled={deleteMutation.isPending}
               >
                 <BtnSpinner on={deleteMutation.isPending} />
-                {t("deleteConfirm.confirm")} <span className="ms-keycap">↵</span>
+                {t("deleteConfirm.confirm")} <ConfirmKeycap />
               </button>
             </ModalFooter>
           </form>

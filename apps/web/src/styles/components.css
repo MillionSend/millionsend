@@ -857,6 +857,9 @@ svg:focus {
   font-size: 12px;
   line-height: 1.45;
   color: var(--ms-bone);
+  /* Messages may carry \n paragraph breaks (e.g. the API-key permission
+     explainer); render them instead of collapsing. */
+  white-space: pre-line;
   pointer-events: none;
   animation: ms-fade var(--ms-dur-fast) var(--ms-ease);
 }

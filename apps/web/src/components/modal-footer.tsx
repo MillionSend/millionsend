@@ -11,3 +11,14 @@ export function ModalFooter({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
+/**
+ * The confirm-shortcut badge for a dialog's primary button — every dialog
+ * shows the same one, matching Modal's onConfirm binding (⌘↵ on Apple
+ * platforms, Ctrl↵ elsewhere). Only rendered inside open modals, which never
+ * exist at hydration time, so the navigator sniff can't mismatch SSR output.
+ */
+export function ConfirmKeycap() {
+  const mac = typeof navigator !== "undefined" && /Mac|iP(hone|ad|od)/.test(navigator.platform);
+  return <span className="ms-keycap">{mac ? "⌘↵" : "Ctrl↵"}</span>;
+}

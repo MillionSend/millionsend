@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { Fragment, useCallback, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -239,6 +239,13 @@ export function WebhookDetail({ id }: { id: string }) {
 
   // Stable identity: Modal-style focus/keyboard effects depend on onClose.
   const closeDelete = useCallback(() => setConfirmingDelete(false), []);
+
+  // Shared by the form's onSubmit and the modal's ⌘↵ onConfirm, with the same
+  // guard as the primary button's disabled state.
+  const submitDelete = () => {
+    if (deleteMutation.isPending) return;
+    deleteMutation.mutate({ id });
+  };
 
   if (webhook.isError) {
     return (
@@ -536,13 +543,17 @@ export function WebhookDetail({ id }: { id: string }) {
         </div>
       </section>
 
-      <Modal open={confirmingDelete} onClose={closeDelete} title={t("deleteConfirm.title")}>
+      <Modal
+        open={confirmingDelete}
+        onClose={closeDelete}
+        onConfirm={submitDelete}
+        title={t("deleteConfirm.title")}
+      >
         <form
           style={{ display: "grid", gap: 14, marginTop: 12 }}
           onSubmit={(event) => {
             event.preventDefault();
-            if (deleteMutation.isPending) return;
-            deleteMutation.mutate({ id });
+            submitDelete();
           }}
         >
           <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -558,7 +569,7 @@ export function WebhookDetail({ id }: { id: string }) {
               disabled={deleteMutation.isPending}
             >
               <BtnSpinner on={deleteMutation.isPending} />
-              {t("deleteConfirm.confirm")} <span className="ms-keycap">↵</span>
+              {t("deleteConfirm.confirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

@@ -32,11 +32,19 @@ const FOCUSABLE =
 export function Modal({
   open,
   onClose,
+  onConfirm,
   title,
   children,
 }: {
   open: boolean;
   onClose: () => void;
+  /**
+   * The dialog's primary action, fired on ⌘↵ / Ctrl↵ — the one confirm
+   * shortcut every dialog shares (plain Enter only works while focus is in
+   * a form field, and the modal itself holds focus on open). Callers must
+   * guard it exactly like the primary button (pending/invalid → no-op).
+   */
+  onConfirm?: () => void;
   title?: string;
   children: React.ReactNode;
 }) {
@@ -56,6 +64,13 @@ export function Modal({
         onClose();
         return;
       }
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        if (onConfirm) {
+          event.preventDefault();
+          onConfirm();
+        }
+        return;
+      }
       if (event.key !== "Tab" || !ref.current) return;
       const focusable = ref.current.querySelectorAll<HTMLElement>(FOCUSABLE);
       const first = focusable[0];
@@ -71,7 +86,7 @@ export function Modal({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, onConfirm]);
 
   if (!open) return null;
 

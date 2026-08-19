@@ -27,7 +27,7 @@
     "domain": "Domain",
     "domainAny": "Any domain",
     "submit": "Create key",
-    "permissionTooltip": "Full access can manage everything over the API — domains, contacts, broadcasts, keys. Sending access can only send emails."
+    "permissionTooltip": "Full access can manage everything over the API — domains, contacts, broadcasts, keys.\n\nSending access can only send emails."
   },
   "reveal": {
     "title": "API key created",

@@ -10,7 +10,7 @@ import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -72,6 +72,13 @@ export function DomainsView() {
     setDeleteTarget(null);
     setConfirmText("");
   }, []);
+  // Shared by form submit and the modal's ⌘↵ shortcut; guards mirror the
+  // delete button's disabled state.
+  function confirmDelete() {
+    if (deleteTarget && confirmText === deleteTarget.name && !deleteMutation.isPending) {
+      deleteMutation.mutate({ id: deleteTarget.id });
+    }
+  }
 
   const [search, setSearch] = useUrlState("q");
   const [statusParam, setStatus] = useUrlState("status", "all");
@@ -287,13 +294,16 @@ export function DomainsView() {
         </>
       )}
 
-      <Modal open={deleteTarget !== null} onClose={closeDelete} title={t("detail.deleteDomain")}>
+      <Modal
+        open={deleteTarget !== null}
+        onClose={closeDelete}
+        onConfirm={confirmDelete}
+        title={t("detail.deleteDomain")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (deleteTarget && confirmText === deleteTarget.name && !deleteMutation.isPending) {
-              deleteMutation.mutate({ id: deleteTarget.id });
-            }
+            confirmDelete();
           }}
         >
           <p
@@ -343,7 +353,7 @@ export function DomainsView() {
               disabled={confirmText !== deleteTarget?.name || deleteMutation.isPending}
             >
               <BtnSpinner on={deleteMutation.isPending} />
-              {t("detail.deleteDomain")} <span className="ms-keycap">↵</span>
+              {t("detail.deleteDomain")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

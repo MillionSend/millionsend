@@ -11,7 +11,7 @@ import {
   DnsRecordsTableSkeleton,
 } from "@/components/dns-records-table";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { Select } from "@/components/select";
@@ -480,18 +480,12 @@ export function DomainDetail({ id }: { id: string }) {
     verifyMutate({ id });
   }, [id, verifyMutate]);
 
-  // ⌘↵ confirms the type-to-confirm delete, as printed on the button.
+  // Shared by the delete button and the modal's ⌘↵ shortcut; guards mirror
+  // the button's disabled state.
   const confirmMatches = confirmText === domain.data?.name;
-  useEffect(() => {
-    if (!confirmingDelete) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && confirmMatches) {
-        deleteDomain.mutate({ id });
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  });
+  function confirmDelete() {
+    if (confirmMatches && !deleteDomain.isPending) deleteDomain.mutate({ id });
+  }
 
   if (domain.isError) {
     return (
@@ -873,7 +867,12 @@ export function DomainDetail({ id }: { id: string }) {
         </section>
       )}
 
-      <Modal open={confirmingDelete} onClose={closeDelete} title={t("detail.deleteDomain")}>
+      <Modal
+        open={confirmingDelete}
+        onClose={closeDelete}
+        onConfirm={confirmDelete}
+        title={t("detail.deleteDomain")}
+      >
         <p
           style={{
             margin: "10px 0 14px",
@@ -915,11 +914,10 @@ export function DomainDetail({ id }: { id: string }) {
             type="button"
             className="ms-btn ms-btn-destructive"
             disabled={!confirmMatches || deleteDomain.isPending}
-            onClick={() => deleteDomain.mutate({ id })}
+            onClick={confirmDelete}
           >
             <BtnSpinner on={deleteDomain.isPending} />
-            {t("detail.deleteDomain")} <span className="ms-keycap">⌘</span>
-            <span className="ms-keycap">↵</span>
+            {t("detail.deleteDomain")} <ConfirmKeycap />
           </button>
         </ModalFooter>
       </Modal>

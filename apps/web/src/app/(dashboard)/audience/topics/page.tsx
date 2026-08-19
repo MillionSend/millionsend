@@ -6,7 +6,7 @@ import { useCallback, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
-import { ModalFooter } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -101,6 +101,21 @@ export default function TopicsPage() {
   // Stable identities: Modal's focus effect depends on onClose.
   const closeCreate = useCallback(() => setCreateOpen(false), []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
+
+  const submitCreate = () => {
+    if (createMutation.isPending || name.trim().length === 0) return;
+    createMutation.mutate({
+      name: name.trim(),
+      ...(description.trim() ? { description: description.trim() } : {}),
+      defaultSubscribed: defaultSub === "opt_in",
+    });
+  };
+
+  const submitDelete = () => {
+    if (deleteTarget && !deleteMutation.isPending) {
+      deleteMutation.mutate({ id: deleteTarget.id });
+    }
+  };
 
   return (
     <>
@@ -198,16 +213,16 @@ export default function TopicsPage() {
         </Table>
       )}
 
-      <Modal open={createOpen} onClose={closeCreate} title={t("createTitle")}>
+      <Modal
+        open={createOpen}
+        onClose={closeCreate}
+        onConfirm={submitCreate}
+        title={t("createTitle")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (createMutation.isPending || name.trim().length === 0) return;
-            createMutation.mutate({
-              name: name.trim(),
-              ...(description.trim() ? { description: description.trim() } : {}),
-              defaultSubscribed: defaultSub === "opt_in",
-            });
+            submitCreate();
           }}
         >
           <div className="ms-field">
@@ -282,19 +297,22 @@ export default function TopicsPage() {
               disabled={createMutation.isPending || name.trim().length === 0}
             >
               <BtnSpinner on={createMutation.isPending} />
-              {t("createConfirm")} <span className="ms-keycap">↵</span>
+              {t("createConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>
       </Modal>
 
-      <Modal open={deleteTarget !== null} onClose={closeDelete} title={t("deleteTitle")}>
+      <Modal
+        open={deleteTarget !== null}
+        onClose={closeDelete}
+        onConfirm={submitDelete}
+        title={t("deleteTitle")}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (deleteTarget && !deleteMutation.isPending) {
-              deleteMutation.mutate({ id: deleteTarget.id });
-            }
+            submitDelete();
           }}
         >
           <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -310,7 +328,7 @@ export default function TopicsPage() {
               disabled={deleteMutation.isPending}
             >
               <BtnSpinner on={deleteMutation.isPending} />
-              {t("deleteConfirm")} <span className="ms-keycap">↵</span>
+              {t("deleteConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>
