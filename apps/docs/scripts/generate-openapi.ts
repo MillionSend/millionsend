@@ -21,6 +21,9 @@ const inertDeps: ApiDeps = {
   keyring: null as unknown as ApiDeps["keyring"],
   isCloud: false,
   enqueueEmailSend: async () => {},
+  // Must be truthy: /domains routes register only when the SES seam is
+  // present. An empty object is safe — registration never dereferences it.
+  ses: {} as ApiDeps["ses"],
 };
 
 const app = createApi(inertDeps);
