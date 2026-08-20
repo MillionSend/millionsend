@@ -22,11 +22,11 @@
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
     "@types/mailparser": "^3.4.6",
-    "@types/node": "^22.20.1",
+    "@types/node": "^26.2.0",
     "@types/nodemailer": "^8.0.1",
     "@types/smtp-server": "^3.5.13",
     "nodemailer": "^9.0.5",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }
