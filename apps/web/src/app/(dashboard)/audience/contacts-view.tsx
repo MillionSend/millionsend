@@ -4,8 +4,10 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useDeferredValue, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
+import { ChipMultiSelect } from "@/components/chip-multi-select";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
@@ -32,11 +34,15 @@ import { AudienceTabs } from "./audience-tabs";
 /** addMany's input ceiling — larger CSVs go up in sequential batches. */
 const IMPORT_BATCH = 1000;
 
-function ContactsHead() {
+/** The bulk mutations' contactIds ceiling — larger selections go up in sequential batches. */
+const BULK_BATCH = 100;
+
+function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
   const t = useTranslations("audience");
   return (
     <thead>
       <tr>
+        <th className="ms-check-cell">{selectAll}</th>
         <th style={{ width: "40%" }}>{t("contacts.email")}</th>
         <th style={{ width: "22%" }}>{t("contacts.segments")}</th>
         <th style={{ width: "15%" }}>{t("contacts.status")}</th>
@@ -57,6 +63,7 @@ function ContactsSkeleton() {
         {widths.map((width, row) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows, position is identity
           <tr key={row}>
+            <td className="ms-check-cell" />
             <td>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <Skeleton width={24} height={24} radius="50%" />
@@ -176,6 +183,19 @@ export function AudienceContactsView() {
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; email: string } | null>(null);
 
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
+  const [bulkModal, setBulkModal] = useState<
+    "addSegments" | "removeSegment" | "subscribeTopics" | null
+  >(null);
+  const [bulkSegmentIds, setBulkSegmentIds] = useState<string[]>([]);
+  const [bulkSegmentId, setBulkSegmentId] = useState("");
+  const [bulkTopicIds, setBulkTopicIds] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState(false);
+  const bulkMenuRef = useRef<HTMLDivElement>(null);
+  useDismiss(bulkMenuRef, bulkMenuOpen, () => setBulkMenuOpen(false));
+
   const segments = useQuery(trpc.segments.list.queryOptions());
   const stats = useQuery(trpc.audience.contacts.stats.queryOptions());
   const growth = useQuery(trpc.audience.contacts.growth.queryOptions());
@@ -192,9 +212,24 @@ export function AudienceContactsView() {
       { getNextPageParam: (page) => page.nextCursor },
     ),
   );
-  const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const items = useMemo(() => query.data?.pages.flatMap((page) => page.items) ?? [], [query.data]);
   const total = query.data?.pages[0]?.total ?? 0;
   const filtered = deferredSearch !== "" || segmentId !== "" || topicId !== "";
+
+  // Selection tracks the visible list: rows that fall out (filter/search
+  // change, deletion) are pruned; rows still visible after a page-size change
+  // or a "load more" stay selected. Pruning waits for data — a key change
+  // (filter, page size) empties `items` while pending, and clearing on that
+  // would drop rows the incoming page still shows.
+  useEffect(() => {
+    if (query.isPending) return;
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(items.map((row) => row.id));
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [items, query.isPending]);
 
   // Export mirrors the on-screen view: the search box plus the active segment
   // and topic filters, so a filtered download matches the table.
@@ -204,7 +239,10 @@ export function AudienceContactsView() {
   if (topicId) exportParams.set("topicId", topicId);
   const exportQs = exportParams.toString();
 
-  const invalidate = () => queryClient.invalidateQueries(trpc.audience.pathFilter());
+  const invalidate = useCallback(
+    () => queryClient.invalidateQueries(trpc.audience.pathFilter()),
+    [queryClient, trpc],
+  );
 
   const addMutation = useMutation(
     trpc.audience.contacts.add.mutationOptions({
@@ -229,6 +267,16 @@ export function AudienceContactsView() {
       },
     }),
   );
+  const bulkAddSegmentsMutation = useMutation(
+    trpc.audience.contacts.bulkAddSegments.mutationOptions(),
+  );
+  const bulkRemoveSegmentMutation = useMutation(
+    trpc.audience.contacts.bulkRemoveSegment.mutationOptions(),
+  );
+  const bulkSubscribeTopicsMutation = useMutation(
+    trpc.audience.contacts.bulkSubscribeTopics.mutationOptions(),
+  );
+  const bulkDeleteMutation = useMutation(trpc.audience.contacts.bulkDelete.mutationOptions());
 
   // Stable identities: Modal's focus effect depends on onClose.
   const closeAdd = useCallback(() => setAddOpen(false), []);
@@ -239,6 +287,105 @@ export function AudienceContactsView() {
     setImportResult(null);
     setImportError(false);
   }, []);
+  const closeBulkModal = useCallback(() => setBulkModal(null), []);
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }
+
+  function openBulkModal(modal: NonNullable<typeof bulkModal>) {
+    setBulkMenuOpen(false);
+    setBulkSegmentIds([]);
+    setBulkSegmentId("");
+    setBulkTopicIds([]);
+    setBulkError(false);
+    setBulkModal(modal);
+  }
+
+  /** Runs one bulk mutation over the selection in server-cap-sized batches. */
+  async function runBulk(run: (contactIds: string[]) => Promise<unknown>) {
+    if (bulkBusy || selected.size === 0) return;
+    setBulkBusy(true);
+    setBulkError(false);
+    try {
+      const ids = [...selected];
+      for (let i = 0; i < ids.length; i += BULK_BATCH) {
+        await run(ids.slice(i, i + BULK_BATCH));
+      }
+      setBulkModal(null);
+      clearSelection();
+      invalidate();
+    } catch {
+      setBulkError(true);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  const runBulkDelete = useCallback(async () => {
+    if (bulkBusy || selected.size === 0) return;
+    // Busy from confirm to commit: the ⌫ binding must not stack a second
+    // confirm (a new confirmDialog cancels the one already open).
+    setBulkBusy(true);
+    setBulkError(false);
+    try {
+      const ok = await confirmDialog({
+        title: t("contacts.bulk.deleteTitle"),
+        message: t("contacts.bulk.deleteBody", { count: selected.size }),
+        confirmLabel: t("contacts.bulk.deleteConfirm"),
+        danger: true,
+      });
+      if (!ok) return;
+      const ids = [...selected];
+      for (let i = 0; i < ids.length; i += BULK_BATCH) {
+        await bulkDeleteMutation.mutateAsync({ contactIds: ids.slice(i, i + BULK_BATCH) });
+      }
+      clearSelection();
+      invalidate();
+    } catch {
+      setBulkError(true);
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [bulkBusy, selected, t, bulkDeleteMutation.mutateAsync, clearSelection, invalidate]);
+
+  const anyModalOpen =
+    addOpen || importOpen || deleteTarget !== null || bulkModal !== null || bulkBusy;
+
+  // Bulk keyboard bindings, live while a selection exists and no dialog or
+  // text field owns the keys: E = edit menu, ⌫ = delete, Esc = clear.
+  useEffect(() => {
+    if (selected.size === 0) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      // A focused row checkbox is not "typing" — E/⌫/Esc must still work
+      // right after a click selects a row.
+      const typing =
+        (target instanceof HTMLInputElement && target.type !== "checkbox") ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target?.isContentEditable ?? false);
+      if (typing || anyModalOpen) return;
+      if (event.key === "Escape") {
+        if (bulkMenuOpen) setBulkMenuOpen(false);
+        else clearSelection();
+      } else if (event.key === "e" || event.key === "E") {
+        event.preventDefault();
+        setBulkMenuOpen((v) => !v);
+      } else if (event.key === "Backspace" || event.key === "Delete") {
+        event.preventDefault();
+        void runBulkDelete();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected.size, anyModalOpen, bulkMenuOpen, clearSelection, runBulkDelete]);
 
   function submitAdd() {
     if (addMutation.isPending || newEmail.trim().length === 0) return;
@@ -400,11 +547,32 @@ export function AudienceContactsView() {
       ) : (
         <>
           <Table>
-            <ContactsHead />
+            <ContactsHead
+              selectAll={
+                <input
+                  type="checkbox"
+                  className="ms-checkbox"
+                  aria-label={t("contacts.bulk.selectAll")}
+                  checked={items.length > 0 && items.every((row) => selected.has(row.id))}
+                  ref={(el) => {
+                    if (el) {
+                      el.indeterminate =
+                        selected.size > 0 && !items.every((row) => selected.has(row.id));
+                    }
+                  }}
+                  onChange={() =>
+                    // Any existing selection clears (indeterminate included);
+                    // from nothing, every loaded row selects.
+                    setSelected(selected.size > 0 ? new Set() : new Set(items.map((row) => row.id)))
+                  }
+                />
+              }
+            />
             <tbody>
               {items.map((row) => {
                 const name = [row.firstName, row.lastName].filter(Boolean).join(" ");
                 const detailHref = `/audience/contacts/${row.id}`;
+                const isSelected = selected.has(row.id);
                 const statusBadge = (
                   <span
                     className={`ms-badge ${row.unsubscribed ? "ms-badge-neutral" : "ms-badge-success"}`}
@@ -426,7 +594,21 @@ export function AudienceContactsView() {
                   </span>
                 );
                 return (
-                  <tr key={row.id} className="hoverable" onClick={() => router.push(detailHref)}>
+                  <tr
+                    key={row.id}
+                    className={isSelected ? "hoverable row-selected" : "hoverable"}
+                    onClick={() => router.push(detailHref)}
+                  >
+                    {/* biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only guard so toggling the checkbox does not also trigger the row navigation; keyboard users reach the checkbox directly */}
+                    <td className="ms-check-cell" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="ms-checkbox"
+                        aria-label={t("contacts.bulk.selectRow", { email: row.email })}
+                        checked={isSelected}
+                        onChange={() => toggleSelected(row.id)}
+                      />
+                    </td>
                     <td>
                       <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                         <ContactAvatar email={row.email} name={name} size={24} />
@@ -715,6 +897,223 @@ export function AudienceContactsView() {
             </button>
           </ModalFooter>
         </form>
+      </Modal>
+
+      {selected.size > 0 ? (
+        <div className="ms-bulk-bar" role="toolbar" aria-label={t("contacts.bulk.edit")}>
+          <span className="ms-bulk-count">
+            {t("contacts.bulk.selected", { count: selected.size })}
+          </span>
+          <button
+            type="button"
+            className="ms-menu-trigger-bare"
+            aria-label={t("contacts.bulk.clear")}
+            onClick={clearSelection}
+          >
+            ✕
+          </button>
+          <span className="ms-bulk-sep" aria-hidden="true" />
+          <div ref={bulkMenuRef} style={{ position: "relative", display: "inline-flex" }}>
+            <button
+              type="button"
+              className="ms-btn ms-btn-secondary"
+              aria-haspopup="menu"
+              aria-expanded={bulkMenuOpen}
+              onClick={() => setBulkMenuOpen((v) => !v)}
+            >
+              {t("contacts.bulk.edit")} <span className="ms-keycap">E</span>
+            </button>
+            {bulkMenuOpen ? (
+              <div
+                role="menu"
+                className="ms-menu"
+                style={{
+                  position: "absolute",
+                  bottom: "calc(100% + 8px)",
+                  left: 0,
+                  width: "max-content",
+                }}
+              >
+                {(
+                  [
+                    ["addSegments", t("contacts.bulk.addToSegments")],
+                    ["removeSegment", t("contacts.bulk.removeFromSegment")],
+                    ["subscribeTopics", t("contacts.bulk.subscribeToTopics")],
+                  ] as const
+                ).map(([modal, label]) => (
+                  <button
+                    key={modal}
+                    type="button"
+                    role="menuitem"
+                    className="ms-menu-item"
+                    onClick={() => openBulkModal(modal)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="ms-btn ms-btn-destructive"
+            disabled={bulkBusy}
+            onClick={() => void runBulkDelete()}
+          >
+            <BtnSpinner on={bulkBusy && bulkModal === null} />
+            {t("contacts.bulk.delete")} <span className="ms-keycap">⌫</span>
+          </button>
+          {bulkError && bulkModal === null ? (
+            <span className="ms-field-error" style={{ margin: 0 }}>
+              {t("contacts.bulk.error")}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      <Modal
+        open={bulkModal === "addSegments"}
+        onClose={closeBulkModal}
+        onConfirm={() => {
+          if (bulkSegmentIds.length > 0) {
+            void runBulk((contactIds) =>
+              bulkAddSegmentsMutation.mutateAsync({ contactIds, segmentIds: bulkSegmentIds }),
+            );
+          }
+        }}
+        title={t("contacts.bulk.addToSegments")}
+      >
+        <p style={{ margin: "0 0 18px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
+          {t("contacts.bulk.addSegmentsBody", { count: selected.size })}
+        </p>
+        <div className="ms-field">
+          <label htmlFor="bulk-segments">{t("contacts.bulk.segmentsLabel")}</label>
+          <ChipMultiSelect
+            id="bulk-segments"
+            value={bulkSegmentIds}
+            onChange={setBulkSegmentIds}
+            options={(segments.data ?? []).map((s) => ({ value: s.id, label: s.name }))}
+            placeholder={t("contacts.bulk.segmentsPlaceholder")}
+            ariaLabel={t("contacts.bulk.segmentsLabel")}
+            removeLabel={(label) => t("detail.removeSegment", { name: label })}
+            disabled={bulkBusy}
+          />
+        </div>
+        {bulkError ? <p className="ms-field-error">{t("contacts.bulk.error")}</p> : null}
+        <ModalFooter>
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={closeBulkModal}>
+            {common("cancel")} <span className="ms-keycap">Esc</span>
+          </button>
+          <button
+            type="button"
+            className="ms-btn ms-btn-primary"
+            disabled={bulkBusy || bulkSegmentIds.length === 0}
+            onClick={() =>
+              void runBulk((contactIds) =>
+                bulkAddSegmentsMutation.mutateAsync({ contactIds, segmentIds: bulkSegmentIds }),
+              )
+            }
+          >
+            <BtnSpinner on={bulkBusy} />
+            {t("contacts.bulk.addSegmentsConfirm")} <ConfirmKeycap />
+          </button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        open={bulkModal === "removeSegment"}
+        onClose={closeBulkModal}
+        onConfirm={() => {
+          if (bulkSegmentId !== "") {
+            void runBulk((contactIds) =>
+              bulkRemoveSegmentMutation.mutateAsync({ contactIds, segmentId: bulkSegmentId }),
+            );
+          }
+        }}
+        title={t("contacts.bulk.removeFromSegment")}
+      >
+        <p style={{ margin: "0 0 18px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
+          {t("contacts.bulk.removeSegmentBody", { count: selected.size })}
+        </p>
+        <div className="ms-field">
+          <label htmlFor="bulk-segment">{t("contacts.bulk.segmentLabel")}</label>
+          <Select
+            id="bulk-segment"
+            value={bulkSegmentId}
+            onChange={setBulkSegmentId}
+            ariaLabel={t("contacts.bulk.segmentLabel")}
+            width="100%"
+            options={(segments.data ?? []).map((s) => ({ value: s.id, label: s.name }))}
+          />
+        </div>
+        {bulkError ? <p className="ms-field-error">{t("contacts.bulk.error")}</p> : null}
+        <ModalFooter>
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={closeBulkModal}>
+            {common("cancel")} <span className="ms-keycap">Esc</span>
+          </button>
+          <button
+            type="button"
+            className="ms-btn ms-btn-destructive"
+            disabled={bulkBusy || bulkSegmentId === ""}
+            onClick={() =>
+              void runBulk((contactIds) =>
+                bulkRemoveSegmentMutation.mutateAsync({ contactIds, segmentId: bulkSegmentId }),
+              )
+            }
+          >
+            <BtnSpinner on={bulkBusy} />
+            {t("contacts.bulk.removeSegmentConfirm")} <ConfirmKeycap />
+          </button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal
+        open={bulkModal === "subscribeTopics"}
+        onClose={closeBulkModal}
+        onConfirm={() => {
+          if (bulkTopicIds.length > 0) {
+            void runBulk((contactIds) =>
+              bulkSubscribeTopicsMutation.mutateAsync({ contactIds, topicIds: bulkTopicIds }),
+            );
+          }
+        }}
+        title={t("contacts.bulk.subscribeToTopics")}
+      >
+        <p style={{ margin: "0 0 18px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
+          {t("contacts.bulk.subscribeTopicsBody", { count: selected.size })}
+        </p>
+        <div className="ms-field">
+          <label htmlFor="bulk-topics">{t("contacts.bulk.topicsLabel")}</label>
+          <ChipMultiSelect
+            id="bulk-topics"
+            value={bulkTopicIds}
+            onChange={setBulkTopicIds}
+            options={(topics.data ?? []).map((tp) => ({ value: tp.id, label: tp.name }))}
+            placeholder={t("contacts.bulk.topicsPlaceholder")}
+            ariaLabel={t("contacts.bulk.topicsLabel")}
+            removeLabel={(label) => t("detail.removeTopic", { name: label })}
+            disabled={bulkBusy}
+          />
+        </div>
+        {bulkError ? <p className="ms-field-error">{t("contacts.bulk.error")}</p> : null}
+        <ModalFooter>
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={closeBulkModal}>
+            {common("cancel")} <span className="ms-keycap">Esc</span>
+          </button>
+          <button
+            type="button"
+            className="ms-btn ms-btn-primary"
+            disabled={bulkBusy || bulkTopicIds.length === 0}
+            onClick={() =>
+              void runBulk((contactIds) =>
+                bulkSubscribeTopicsMutation.mutateAsync({ contactIds, topicIds: bulkTopicIds }),
+              )
+            }
+          >
+            <BtnSpinner on={bulkBusy} />
+            {t("contacts.bulk.subscribeTopicsConfirm")} <ConfirmKeycap />
+          </button>
+        </ModalFooter>
       </Modal>
     </>
   );

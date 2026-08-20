@@ -28,6 +28,29 @@ async function assertContact(ctx: { db: Db; teamId: string }, contactId: string)
   if (!row) throw new TRPCError({ code: "NOT_FOUND" });
 }
 
+// Bulk selection ceiling: the contacts table's client batches larger
+// selections into sequential calls of this size.
+const bulkContactIds = z.array(z.uuid()).min(1).max(100);
+
+/**
+ * Guards bulk procedures: EVERY id must be one of the team's contacts —
+ * NOT_FOUND before any write when even one is foreign. Returns the deduped
+ * ids the writes below fan out over.
+ */
+async function assertContacts(
+  ctx: { db: Db; teamId: string },
+  contactIds: string[],
+): Promise<string[]> {
+  const unique = [...new Set(contactIds)];
+  const c = schema.contacts;
+  const [row] = await ctx.db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(c)
+    .where(and(inArray(c.id, unique), eq(c.teamId, ctx.teamId)));
+  if ((row?.count ?? 0) !== unique.length) throw new TRPCError({ code: "NOT_FOUND" });
+  return unique;
+}
+
 export const audienceRouter = router({
   contacts: router({
     /** The stat strip's three counts over the team's contact base. */
@@ -366,6 +389,135 @@ export const audienceRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       return { id: row.id };
     }),
+
+    /** Bulk join: every selected contact into every chosen segment, in one
+     * insert. onConflictDoNothing + returning = only REAL joins come back, so
+     * the timeline never records a re-add. */
+    bulkAddSegments: teamProcedure
+      .input(z.object({ contactIds: bulkContactIds, segmentIds: z.array(z.uuid()).min(1).max(50) }))
+      .mutation(async ({ ctx, input }) => {
+        const contactIds = await assertContacts(ctx, input.contactIds);
+        const segments = await Promise.all(
+          [...new Set(input.segmentIds)].map((id) => assertSegment(ctx, id)),
+        );
+        const m = schema.segmentMembers;
+        const inserted = await ctx.db
+          .insert(m)
+          .values(
+            segments.flatMap((segment) =>
+              contactIds.map((contactId) => ({ segmentId: segment.id, contactId })),
+            ),
+          )
+          .onConflictDoNothing()
+          .returning({ segmentId: m.segmentId, contactId: m.contactId });
+        const names = new Map(segments.map((segment) => [segment.id, segment.name]));
+        await recordContactActivity(
+          ctx.db,
+          inserted.map((row) => ({
+            teamId: ctx.teamId,
+            contactId: row.contactId,
+            type: "segment_added" as const,
+            data: { segmentId: row.segmentId, name: names.get(row.segmentId) ?? null },
+          })),
+        );
+        return { added: inserted.length };
+      }),
+
+    /** Bulk leave: one delete; returning = only real leaves hit the timeline. */
+    bulkRemoveSegment: teamProcedure
+      .input(z.object({ contactIds: bulkContactIds, segmentId: z.uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        const contactIds = await assertContacts(ctx, input.contactIds);
+        const segment = await assertSegment(ctx, input.segmentId);
+        const m = schema.segmentMembers;
+        const removed = await ctx.db
+          .delete(m)
+          .where(and(eq(m.segmentId, segment.id), inArray(m.contactId, contactIds)))
+          .returning({ contactId: m.contactId });
+        await recordContactActivity(
+          ctx.db,
+          removed.map((row) => ({
+            teamId: ctx.teamId,
+            contactId: row.contactId,
+            type: "segment_removed" as const,
+            data: { segmentId: segment.id, name: segment.name },
+          })),
+        );
+        return { removed: removed.length };
+      }),
+
+    /**
+     * Bulk opt-in. Same effective-state rule as setTopic: prior state is the
+     * explicit row when one exists, else the topic's defaultSubscribed; every
+     * pair gets its explicit row upserted, but the timeline records only real
+     * transitions to subscribed.
+     */
+    bulkSubscribeTopics: teamProcedure
+      .input(z.object({ contactIds: bulkContactIds, topicIds: z.array(z.uuid()).min(1).max(50) }))
+      .mutation(async ({ ctx, input }) => {
+        const contactIds = await assertContacts(ctx, input.contactIds);
+        const topics = await Promise.all(
+          [...new Set(input.topicIds)].map((id) => assertTopic(ctx, id)),
+        );
+        const s = schema.contactTopicSubscriptions;
+        const prior = new Map(
+          (
+            await ctx.db
+              .select({ contactId: s.contactId, topicId: s.topicId, subscribed: s.subscribed })
+              .from(s)
+              .where(
+                and(
+                  inArray(s.contactId, contactIds),
+                  inArray(
+                    s.topicId,
+                    topics.map((topic) => topic.id),
+                  ),
+                ),
+              )
+          ).map((row) => [`${row.contactId}:${row.topicId}`, row.subscribed]),
+        );
+        await ctx.db
+          .insert(s)
+          .values(
+            topics.flatMap((topic) =>
+              contactIds.map((contactId) => ({ contactId, topicId: topic.id, subscribed: true })),
+            ),
+          )
+          .onConflictDoUpdate({
+            target: [s.contactId, s.topicId],
+            set: { subscribed: true, updatedAt: new Date() },
+          });
+        const changed = topics.flatMap((topic) =>
+          contactIds
+            .filter(
+              (contactId) =>
+                (prior.get(`${contactId}:${topic.id}`) ?? topic.defaultSubscribed) !== true,
+            )
+            .map((contactId) => ({
+              teamId: ctx.teamId,
+              contactId,
+              type: "topic_opt_in" as const,
+              data: { topicId: topic.id, name: topic.name },
+            })),
+        );
+        await recordContactActivity(ctx.db, changed);
+        return { optedIn: changed.length };
+      }),
+
+    /** Bulk delete. No timeline rows: the contacts' activities cascade away
+     * with them. Ownership is asserted up front so a foreign id rejects the
+     * whole batch before any row is gone. */
+    bulkDelete: teamProcedure
+      .input(z.object({ contactIds: bulkContactIds }))
+      .mutation(async ({ ctx, input }) => {
+        const contactIds = await assertContacts(ctx, input.contactIds);
+        const t = schema.contacts;
+        const deleted = await ctx.db
+          .delete(t)
+          .where(and(inArray(t.id, contactIds), eq(t.teamId, ctx.teamId)))
+          .returning({ id: t.id });
+        return { deleted: deleted.length };
+      }),
 
     /**
      * The team's topics, each with this contact's EFFECTIVE subscribe state:

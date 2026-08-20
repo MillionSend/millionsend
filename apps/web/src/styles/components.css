@@ -423,6 +423,101 @@ table.ms-table {
   }
 }
 
+/* Checkbox — bulk row selection. Checked/indeterminate fill with bone and draw
+   the glyph in ground (the primary-button pairing); the glyph is an inline SVG
+   so the light theme re-declares it with the flipped ground color. */
+.ms-checkbox {
+  appearance: none;
+  flex-shrink: 0;
+  display: block;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1px solid var(--ms-line-strong);
+  border-radius: 4px;
+  background: var(--ms-inset) center / 11px no-repeat;
+  cursor: pointer;
+  transition:
+    opacity var(--ms-dur-fast) var(--ms-ease),
+    background-color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-checkbox:checked,
+.ms-checkbox:indeterminate {
+  background-color: var(--ms-bone);
+  border-color: var(--ms-bone);
+}
+.ms-checkbox:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.5l2.5 2.5 4.5-5' fill='none' stroke='%23050505' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.ms-checkbox:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 6h6' fill='none' stroke='%23050505' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+:root[data-theme="light"] .ms-checkbox:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.5l2.5 2.5 4.5-5' fill='none' stroke='%23f4f1ea' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:root[data-theme="light"] .ms-checkbox:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 6h6' fill='none' stroke='%23f4f1ea' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+.ms-checkbox:focus-visible {
+  outline: none;
+  box-shadow: var(--ms-focus-ring);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-checkbox {
+    transition: none;
+  }
+}
+
+/* Selection column: invisible until the row is hovered, the box carries state,
+   or keyboard focus lands on it — so an unselected table stays quiet. */
+.ms-table .ms-check-cell {
+  width: 28px;
+  padding-right: 0;
+}
+.ms-table .ms-check-cell .ms-checkbox {
+  opacity: 0;
+}
+.ms-table tr:hover .ms-check-cell .ms-checkbox,
+.ms-table tr.row-selected .ms-check-cell .ms-checkbox,
+.ms-table .ms-check-cell .ms-checkbox:checked,
+.ms-table .ms-check-cell .ms-checkbox:indeterminate,
+.ms-table .ms-check-cell .ms-checkbox:focus-visible {
+  opacity: 1;
+}
+/* Selected rows carry a faint raised wash — state, not the hover treatment. */
+.ms-table tbody tr.row-selected td {
+  background: color-mix(in srgb, var(--ms-panel-raised) 60%, transparent);
+}
+
+/* Bulk-selection action bar — bottom-center floater while rows are selected.
+   Panel treatment; sits below modals so a confirm dialog covers it. */
+.ms-bulk-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--ms-z-popover);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--ms-panel);
+  border: 1px solid var(--ms-line-strong);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  animation: ms-fade var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-bulk-bar .ms-bulk-count {
+  font-size: var(--ms-fs-ui);
+  color: var(--ms-bone);
+  white-space: nowrap;
+}
+.ms-bulk-bar .ms-bulk-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--ms-line);
+}
+
 /* Tabs */
 .ms-tabs {
   display: flex;
