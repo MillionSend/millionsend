@@ -1,17 +1,15 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
+import { toPreviewTopics, UnsubscribePreview } from "@/components/unsubscribe-preview";
 import { isHexColor } from "@/lib/hex-color";
 import { isHttpUrl } from "@/lib/http-url";
 import { useTRPC } from "@/lib/trpc";
-import en from "../../../../../messages/en/unsubscribe.json";
-import ptBR from "../../../../../messages/pt-BR/unsubscribe.json";
-import { UnsubscribePageView } from "../../../unsubscribe/page-view";
 
 interface Draft {
   brandName: string;
@@ -108,18 +106,13 @@ function ColorField({
           onChange={(e) => onChange(e.target.value)}
         />
       </div>
-      {badHex(value) ? (
-        <span style={{ marginTop: 6, fontSize: 12, color: "var(--ms-danger)" }}>
-          {t("colorInvalid")}
-        </span>
-      ) : null}
+      {badHex(value) ? <span className="ms-field-error">{t("colorInvalid")}</span> : null}
     </div>
   );
 }
 
 export function UnsubscribeView() {
   const t = useTranslations("settings.unsubscribe");
-  const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { data } = useQuery(trpc.settings.unsubscribe.get.queryOptions());
@@ -159,14 +152,6 @@ export function UnsubscribeView() {
   const disabled = !canManage || save.isPending;
   // settings.team.get already nulls logoUrl when object storage is off.
   const logoAvailable = Boolean(team?.logoUrl);
-
-  // The recipient-facing preview uses the public page's own catalogs, picked
-  // by the dashboard locale (the public page itself uses Accept-Language).
-  const previewMessages = locale.startsWith("pt") ? ptBR : en;
-  const previewTopics = (topics ?? [])
-    .filter((topic) => topic.visibility === "public")
-    .map((topic) => ({ id: topic.id, name: topic.name, subscribed: topic.defaultSubscribed }))
-    .reverse();
 
   return (
     <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -300,13 +285,13 @@ export function UnsubscribeView() {
               value={form.redirectUrl}
               onChange={(e) => set({ redirectUrl: e.target.value })}
             />
-            <span style={{ marginTop: 6, fontSize: 12, color: "var(--ms-muted)" }}>
+            <span
+              style={{ display: "block", marginTop: 6, fontSize: 12, color: "var(--ms-muted)" }}
+            >
               {t("redirectUrlNote")}
             </span>
             {redirectInvalid ? (
-              <span style={{ marginTop: 6, fontSize: 12, color: "var(--ms-danger)" }}>
-                {t("redirectUrlInvalid")}
-              </span>
+              <span className="ms-field-error">{t("redirectUrlInvalid")}</span>
             ) : null}
           </div>
 
@@ -347,52 +332,32 @@ export function UnsubscribeView() {
           <p className="ms-microlabel" style={{ margin: 0 }}>
             {t("preview")}
           </p>
-          <div className="ms-theme-toggle">
+          <div className="ms-tabs">
             {(["confirm", "saved"] as const).map((state) => (
               <button
                 key={state}
                 type="button"
-                className={previewState === state ? "active" : undefined}
+                className={previewState === state ? "active" : ""}
                 onClick={() => setPreviewState(state)}
-                style={{ width: "auto", padding: "0 10px", fontSize: 12 }}
               >
                 {state === "confirm" ? t("previewPreferences") : t("previewSuccess")}
               </button>
             ))}
           </div>
         </div>
-        <div
-          style={{
-            border: "1px solid var(--ms-line)",
-            borderRadius: "var(--ms-r-card)",
-            overflow: "hidden",
-            height: 420,
-            background: "var(--ms-void)",
+        <UnsubscribePreview
+          state={previewState}
+          topics={toPreviewTopics(topics ?? [])}
+          customization={{
+            brandName: toNull(form.brandName),
+            message: toNull(form.message),
+            successMessage: toNull(form.successMessage),
+            logoUrl: form.hideBranding && logoAvailable ? (team?.logoUrl ?? null) : null,
+            backgroundColor: toNull(form.backgroundColor),
+            textColor: toNull(form.textColor),
+            accentColor: toNull(form.accentColor),
           }}
-        >
-          {/* inert: the preview renders the page's real forms; nothing may submit. */}
-          <div
-            inert
-            style={{ transform: "scale(0.75)", transformOrigin: "top left", width: "133.34%" }}
-          >
-            <UnsubscribePageView
-              m={previewMessages}
-              state={previewState}
-              email={t("previewEmail")}
-              topics={previewTopics}
-              minHeight={560}
-              customization={{
-                brandName: toNull(form.brandName),
-                message: toNull(form.message),
-                successMessage: toNull(form.successMessage),
-                logoUrl: form.hideBranding && logoAvailable ? (team?.logoUrl ?? null) : null,
-                backgroundColor: toNull(form.backgroundColor),
-                textColor: toNull(form.textColor),
-                accentColor: toNull(form.accentColor),
-              }}
-            />
-          </div>
-        </div>
+        />
       </div>
     </div>
   );

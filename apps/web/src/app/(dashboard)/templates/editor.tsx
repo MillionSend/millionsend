@@ -202,10 +202,19 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
     return id;
   }
 
+  // Transient "✓ Saved" beside the Save button; the timeout below retires it.
+  const [justSaved, setJustSaved] = useState(false);
+  useEffect(() => {
+    if (!justSaved) return;
+    const id = setTimeout(() => setJustSaved(false), 2100);
+    return () => clearTimeout(id);
+  }, [justSaved]);
+
   async function save(close: boolean) {
     if (!complete || saving) return;
     try {
       const id = await persist();
+      setJustSaved(true);
       queryClient.invalidateQueries(trpc.templates.pathFilter());
       if (close) router.push("/templates");
       else if (!initial) router.replace(`/templates/${id}/edit`);
@@ -242,6 +251,20 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
         title={initial ? t("editor.editTitle") : t("editor.newTitle")}
         actions={
           <>
+            {justSaved ? (
+              <span
+                role="status"
+                style={{
+                  color: "var(--ms-success)",
+                  fontSize: "var(--ms-fs-label)",
+                  // Fade-out is the shared fade-in played backwards, timed so
+                  // it finishes just before the unmount timeout fires.
+                  animation: "ms-fade 240ms var(--ms-ease) 1800ms reverse both",
+                }}
+              >
+                ✓ {t("editor.saved")}
+              </span>
+            ) : null}
             <button
               type="button"
               className="ms-btn ms-btn-secondary"
@@ -380,7 +403,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
         </div>
 
         {saveError ? (
-          <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
+          <p className="ms-field-error" style={{ margin: 0 }}>
             {t("editor.saveError")}
           </p>
         ) : null}

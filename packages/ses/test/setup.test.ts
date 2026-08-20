@@ -9,6 +9,7 @@ import {
   DetachUserPolicyCommand,
   ListAccessKeysCommand,
 } from "@aws-sdk/client-iam";
+import { CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
 import {
   CreateConfigurationSetCommand,
   CreateConfigurationSetEventDestinationCommand,
@@ -29,13 +30,16 @@ import {
 } from "@aws-sdk/client-sqs";
 import { describe, expect, it } from "vitest";
 import {
+  ensureBucket,
   httpsOrigin,
   runEventsSetup,
   runSetup,
   runTeardown,
   type SetupClients,
+  type StorageClient,
   setupEnvEntries,
   setupPlan,
+  storageEnvEntries,
   upsertEnv,
 } from "../src/setup.js";
 
@@ -305,5 +309,89 @@ describe("setupEnvEntries / upsertEnv", () => {
     const content = "AWS_REGION=old\n# note\nAWS_REGION=older\nOTHER=keep\nAWS_REGION=\n";
     const next = upsertEnv(content, { AWS_REGION: "us-east-1" });
     expect(next).toBe("AWS_REGION=us-east-1\n# note\nOTHER=keep\n");
+  });
+});
+
+function fakeStorageClient(options: { headError?: Error } = {}) {
+  const calls: object[] = [];
+  const client: StorageClient = {
+    send: async (command: object): Promise<unknown> => {
+      calls.push(command);
+      if (command instanceof HeadBucketCommand && options.headError) throw options.headError;
+      return {};
+    },
+  };
+  return { client, calls };
+}
+
+describe("ensureBucket", () => {
+  it("adopts an existing bucket without creating it", async () => {
+    const { client, calls } = fakeStorageClient();
+    expect(await ensureBucket(client, "millionsend-storage")).toBe("exists");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toBeInstanceOf(HeadBucketCommand);
+  });
+
+  it("creates the bucket when HeadBucket reports NotFound", async () => {
+    const { client, calls } = fakeStorageClient({ headError: namedError("NotFound") });
+    expect(await ensureBucket(client, "millionsend-backups")).toBe("created");
+    expect(calls[1]).toBeInstanceOf(CreateBucketCommand);
+    expect(calls[1]).toMatchObject({ input: { Bucket: "millionsend-backups" } });
+  });
+
+  it("creates on a bare 404 with no modeled error name", async () => {
+    const error = new Error("404") as Error & { $metadata?: { httpStatusCode?: number } };
+    error.$metadata = { httpStatusCode: 404 };
+    const { client, calls } = fakeStorageClient({ headError: error });
+    expect(await ensureBucket(client, "b")).toBe("created");
+    expect(calls[1]).toBeInstanceOf(CreateBucketCommand);
+  });
+
+  it("propagates auth/endpoint errors instead of creating", async () => {
+    const { client, calls } = fakeStorageClient({ headError: namedError("InvalidAccessKeyId") });
+    await expect(ensureBucket(client, "b")).rejects.toThrow("InvalidAccessKeyId");
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("storageEnvEntries", () => {
+  const credentials = {
+    endpoint: "https://acct.r2.cloudflarestorage.com",
+    accessKeyId: "key",
+    secretAccessKey: "secret",
+  };
+
+  it("writes the storage pair together when the public URL is known", () => {
+    expect(
+      storageEnvEntries({
+        credentials,
+        backupBucket: "millionsend-backups",
+        storageBucket: "millionsend-storage",
+        publicUrl: "https://pub.example.com",
+      }),
+    ).toEqual({
+      S3_ENDPOINT: "https://acct.r2.cloudflarestorage.com",
+      S3_ACCESS_KEY_ID: "key",
+      S3_SECRET_ACCESS_KEY: "secret",
+      S3_BACKUP_BUCKET: "millionsend-backups",
+      S3_STORAGE_BUCKET: "millionsend-storage",
+      S3_STORAGE_PUBLIC_URL: "https://pub.example.com",
+    });
+  });
+
+  it("omits the whole storage pair without a public URL — boot rejects a lone bucket", () => {
+    expect(
+      storageEnvEntries({
+        credentials,
+        backupBucket: "millionsend-backups",
+        storageBucket: "millionsend-storage",
+        publicUrl: "",
+      }),
+    ).toEqual({
+      S3_ENDPOINT: "https://acct.r2.cloudflarestorage.com",
+      S3_ACCESS_KEY_ID: "key",
+      S3_SECRET_ACCESS_KEY: "secret",
+      S3_BACKUP_BUCKET: "millionsend-backups",
+    });
   });
 });

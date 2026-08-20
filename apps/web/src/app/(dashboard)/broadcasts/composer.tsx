@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { DraftBanner } from "@/components/draft-banner";
 import { FromField } from "@/components/from-field";
 import { Modal } from "@/components/modal";
@@ -215,13 +216,36 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   /** Copies the template's content in as a starting snapshot — no link back;
    * later template edits change nothing here. */
   async function applyTemplate(id: string) {
-    setTemplateId(id);
-    if (!id) return;
+    if (!id) {
+      setTemplateId("");
+      return;
+    }
+    // Applying overwrites the body (and subject). Confirm when there is real
+    // content to lose: edits this session (dirty) or a stored non-empty body
+    // (text is the rendered plain text, so an empty document stays empty).
+    if (dirty || text.trim() !== "") {
+      const ok = await confirmDialog({
+        title: tTemplates("picker.replaceTitle"),
+        message: tTemplates("picker.replaceBody"),
+        confirmLabel: tTemplates("picker.replaceConfirm"),
+        danger: true,
+      });
+      if (!ok) return;
+    }
     const template = await queryClient.fetchQuery(trpc.templates.get.queryOptions({ id }));
+    // templateId must land in the same batch as the content: the editor is
+    // keyed on it and seeds once from its mount value, so a remount before
+    // setDocument would show the old body forever.
+    setTemplateId(id);
     if (template.subject) setSubject(template.subject);
     setHtml(template.html);
     setText(template.text ?? "");
     setDocument(template.document);
+    setEditorNonce((n) => n + 1);
+    // Applied-but-unsaved content: poison the baseline so the editor's next
+    // emit differs and the leave-guard arms immediately.
+    savedDoc.current = "__applied__";
+    setDirty(true);
   }
   const recipientCount = useQuery(
     trpc.broadcasts.recipientCount.queryOptions(
@@ -684,7 +708,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               </div>
 
               {saveError && !guardOpen ? (
-                <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
+                <p className="ms-field-error" style={{ margin: 0 }}>
                   {t("composer.saveError")}
                 </p>
               ) : null}
@@ -730,17 +754,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
               onChange={(event) => setSchedule(event.target.value)}
             />
           </div>
-          {sendErrorMessage ? (
-            <p
-              style={{
-                margin: "10px 0 0",
-                color: "var(--ms-danger)",
-                fontSize: "var(--ms-fs-label)",
-              }}
-            >
-              {sendErrorMessage}
-            </p>
-          ) : null}
+          {sendErrorMessage ? <p className="ms-field-error">{sendErrorMessage}</p> : null}
           <ModalFooter>
             <button type="button" className="ms-btn ms-btn-secondary" onClick={closeGuard}>
               {common("cancel")} <span className="ms-keycap">Esc</span>

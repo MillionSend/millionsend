@@ -23,13 +23,15 @@
     "problems": "Problemas"
   },
   "eventLabel": {
-    "email.sent": "Email enviado",
-    "email.delivered": "Email entregue",
-    "email.delivery_delayed": "Entrega atrasada",
-    "email.opened": "Email aberto",
-    "email.clicked": "Link clicado",
-    "email.bounced": "Email rejeitado",
-    "email.complained": "Marcado como spam"
+    "email": {
+      "sent": "Email enviado",
+      "delivered": "Email entregue",
+      "delivery_delayed": "Entrega atrasada",
+      "opened": "Email aberto",
+      "clicked": "Link clicado",
+      "bounced": "Email rejeitado",
+      "complained": "Marcado como spam"
+    }
   },
   "status": {
     "enabled": "Ativo",
@@ -60,8 +62,13 @@
   },
   "deleteConfirm": {
     "title": "Excluir webhook",
-    "body": "Entregas para {url} param imediatamente. O histórico de entregas é removido.",
+    "body": "Entregas para <code>{url}</code> param imediatamente. O histórico de entregas é removido.",
     "confirm": "Excluir webhook"
+  },
+  "disableConfirm": {
+    "title": "Desativar webhook",
+    "body": "Entregas para {url} param até que ele seja ativado novamente.",
+    "confirm": "Desativar webhook"
   },
   "detail": {
     "eyebrow": "Webhook",

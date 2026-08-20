@@ -23,13 +23,13 @@ afterEach(async () => {
   await close();
 });
 
-/** All five vars set ⇒ uploadsEnabled() is true, so stored logo URLs count as servable. */
+/** Credentials + both storage vars set ⇒ uploadsEnabled() is true, so stored logo URLs count as servable. */
 function stubStorage(): void {
-  vi.stubEnv("STORAGE_S3_ENDPOINT", "https://acc.r2.cloudflarestorage.com");
-  vi.stubEnv("STORAGE_S3_BUCKET", "ms-uploads");
-  vi.stubEnv("STORAGE_S3_ACCESS_KEY_ID", "key");
-  vi.stubEnv("STORAGE_S3_SECRET_ACCESS_KEY", "secret");
-  vi.stubEnv("STORAGE_S3_PUBLIC_URL", "https://cdn.example.com");
+  vi.stubEnv("S3_ENDPOINT", "https://acc.r2.cloudflarestorage.com");
+  vi.stubEnv("S3_ACCESS_KEY_ID", "key");
+  vi.stubEnv("S3_SECRET_ACCESS_KEY", "secret");
+  vi.stubEnv("S3_STORAGE_BUCKET", "ms-uploads");
+  vi.stubEnv("S3_STORAGE_PUBLIC_URL", "https://cdn.example.com");
 }
 
 async function seedContact(teamId: string): Promise<string> {

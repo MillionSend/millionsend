@@ -1,13 +1,13 @@
 #!/bin/sh
-# Gate + scheduler for the backup service. All four BACKUP_S3_* settings are
-# required to enable backups; anything missing exits 0 so an unconfigured
-# deployment stays clean (the compose service uses restart: "no", so the
-# stopped container is harmless).
+# Gate + scheduler for the backup service. S3_BACKUP_BUCKET enables backups;
+# unset exits 0 so an unconfigured deployment stays clean (the compose service
+# uses restart: "no", so the stopped container is harmless). The app container
+# validates at boot that the bucket comes with the shared S3_* credentials, so
+# a lone gate on the bucket suffices here.
 set -eu
 
-if [ -z "${BACKUP_S3_BUCKET:-}" ] || [ -z "${BACKUP_S3_ENDPOINT:-}" ] ||
-  [ -z "${BACKUP_S3_ACCESS_KEY_ID:-}" ] || [ -z "${BACKUP_S3_SECRET_ACCESS_KEY:-}" ]; then
-  echo "backups disabled — set BACKUP_S3_* to enable"
+if [ -z "${S3_BACKUP_BUCKET:-}" ]; then
+  echo "backups disabled — set S3_BACKUP_BUCKET to enable"
   exit 0
 fi
 

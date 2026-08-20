@@ -3,8 +3,9 @@ import { env } from "@millionsend/config";
 
 /**
  * Optional S3-compatible object storage (team logo uploads). Enabled only
- * when all five STORAGE_S3_* variables are set — boot validation rejects
- * partial configuration, so here any missing value simply means "off".
+ * when the shared S3 credentials and both S3_STORAGE_* variables are set —
+ * boot validation rejects partial configuration, so here any missing value
+ * simply means "off".
  */
 interface StorageConfig {
   endpoint: string;
@@ -16,11 +17,11 @@ interface StorageConfig {
 }
 
 function storageConfig(): StorageConfig | null {
-  const endpoint = env.STORAGE_S3_ENDPOINT;
-  const bucket = env.STORAGE_S3_BUCKET;
-  const accessKeyId = env.STORAGE_S3_ACCESS_KEY_ID;
-  const secretAccessKey = env.STORAGE_S3_SECRET_ACCESS_KEY;
-  const publicUrl = env.STORAGE_S3_PUBLIC_URL;
+  const endpoint = env.S3_ENDPOINT;
+  const bucket = env.S3_STORAGE_BUCKET;
+  const accessKeyId = env.S3_ACCESS_KEY_ID;
+  const secretAccessKey = env.S3_SECRET_ACCESS_KEY;
+  const publicUrl = env.S3_STORAGE_PUBLIC_URL;
   if (!endpoint || !bucket || !accessKeyId || !secretAccessKey || !publicUrl) return null;
   return {
     endpoint,
@@ -38,12 +39,12 @@ export function uploadsEnabled(): boolean {
 
 function client(cfg: StorageConfig): S3Client {
   // Per call, not a singleton: uploads are rare enough that client reuse buys
-  // nothing, and tests stub env per test. "auto" is R2's region; other
-  // S3-compatibles generally accept any region for SigV4 against a custom
-  // endpoint. forcePathStyle: R2 has no bucket-subdomain DNS.
+  // nothing, and tests stub env per test. The ?? covers SKIP_ENV_VALIDATION,
+  // where zod's "auto" default is not applied. forcePathStyle: R2 has no
+  // bucket-subdomain DNS.
   return new S3Client({
     endpoint: cfg.endpoint,
-    region: "auto",
+    region: env.S3_REGION ?? "auto",
     forcePathStyle: true,
     credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
   });
@@ -75,7 +76,7 @@ export async function deletePublicObject(key: string): Promise<void> {
 }
 
 /**
- * Object key encoded in a stored public URL (path under STORAGE_S3_PUBLIC_URL,
+ * Object key encoded in a stored public URL (path under S3_STORAGE_PUBLIC_URL,
  * cache-buster query stripped), or null for a URL outside the current bucket.
  */
 export function keyFromPublicUrl(url: string): string | null {

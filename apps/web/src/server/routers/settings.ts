@@ -273,6 +273,15 @@ export const settingsRouter = router({
       port: Number(env.SMTP_PORT) || 2587,
       user: "millionsend",
       passwordPlaceholder: SMTP_PASSWORD_PLACEHOLDER,
+      // Mirrors the relay's AUTH gate (apps/smtp/src/server.ts): AUTH needs
+      // STARTTLS (cert+key both set) unless the insecure escape hatch is on.
+      // Booleans only — the cert paths never reach the client. Raw process.env
+      // for the flag because under SKIP_ENV_VALIDATION the env proxy carries
+      // strings, not zod-parsed booleans.
+      tlsConfigured: Boolean(env.SMTP_TLS_CERT_PATH && env.SMTP_TLS_KEY_PATH),
+      allowInsecureAuth:
+        process.env.SMTP_ALLOW_INSECURE_AUTH === "true" ||
+        process.env.SMTP_ALLOW_INSECURE_AUTH === "1",
     })),
   }),
 

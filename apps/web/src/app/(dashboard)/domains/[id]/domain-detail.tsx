@@ -18,6 +18,7 @@ import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner, Spinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
+import { WarnCard } from "@/components/warn-card";
 import { formatRelative, formatUtcMinute } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
@@ -98,33 +99,6 @@ function MetaItem({ label, children }: { label: string; children: React.ReactNod
         {label}
       </p>
       <div style={{ marginTop: 4, fontSize: 14, color: "var(--ms-bone)" }}>{children}</div>
-    </div>
-  );
-}
-
-/** Inline warn card used inside configuration sections. */
-function WarnCard({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
-  return (
-    <div
-      role="status"
-      style={{
-        marginTop: 14,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 16,
-        flexWrap: "wrap",
-        padding: "11px 16px",
-        borderRadius: 12,
-        border: "1px solid var(--ms-warn-border)",
-        backgroundColor: "var(--ms-ground)",
-        backgroundImage: statusGlow("warn", 14),
-      }}
-    >
-      <span style={{ fontSize: 13, color: "var(--ms-warn)", lineHeight: 1.55, flex: "1 1 320px" }}>
-        {children}
-      </span>
-      {action ? <span style={{ flex: "none" }}>{action}</span> : null}
     </div>
   );
 }
@@ -745,10 +719,7 @@ export function DomainDetail({ id }: { id: string }) {
       ) : (
         <section style={{ marginTop: status === "verified" ? 24 : 26, maxWidth: 1000 }}>
           {status !== "verified" ? (
-            <h2
-              className="ms-display"
-              style={{ fontSize: 22, margin: 0, fontWeight: 500, color: "var(--ms-bone)" }}
-            >
+            <h2 className="ms-display" style={{ fontSize: 22, margin: 0, color: "var(--ms-bone)" }}>
               {provider
                 ? t("detail.recordsHeading", { provider: provider.name })
                 : t("detail.recordsHeadingGeneric")}

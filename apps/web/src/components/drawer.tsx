@@ -66,10 +66,7 @@ export function Drawer({
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <h3
-            className="ms-display"
-            style={{ fontSize: "var(--ms-fs-h2)", margin: 0, fontWeight: 500 }}
-          >
+          <h3 className="ms-display" style={{ fontSize: "var(--ms-fs-h2)", margin: 0 }}>
             {title}
           </h3>
           <button

@@ -120,7 +120,6 @@
     }
   },
   "detail": {
-    "eyebrow": "Contact",
     "email": "Email",
     "created": "Created",
     "status": "Status",
@@ -144,6 +143,7 @@
     "noTopics": "No topics",
     "topicsPlaceholder": "Add topics…",
     "removeTopic": "Remove {name}",
+    "toggleTopic": "Toggle subscription to {name}",
     "unsubscribeBody": "{email} stops receiving every email, including topics they opted in to.",
     "activity": {
       "title": "Activity",
@@ -187,7 +187,7 @@
     "defaultLabel": "Default subscription",
     "defaultOptIn": "Opt-in",
     "defaultOptOut": "Opt-out",
-    "defaultHint": "Opt-in: contacts are subscribed unless they opt out. Opt-out: contacts are unsubscribed until they opt in.",
+    "defaultHint": "Opt-in: contacts are subscribed unless they opt out.\n\nOpt-out: contacts are unsubscribed until they opt in.",
     "defaultImmutable": "This can't be changed after the topic is created.",
     "visibilityLabel": "Visibility",
     "visibilityPrivate": "Private",
@@ -201,11 +201,25 @@
     "deleteTitle": "Delete topic",
     "deleteBody": "{name} is deleted, along with every contact's subscription to it. This cannot be undone.",
     "deleteConfirm": "Delete topic",
+    "previewTitle": "Unsubscribe page",
+    "customize": "Customize page",
+    "detail": {
+      "eyebrow": "Topic",
+      "notFound": "Topic not found.",
+      "id": "ID",
+      "description": "Description",
+      "moreActions": "More actions",
+      "contacts": "Contacts",
+      "subscriptionFilter": "Subscription",
+      "empty": "No contacts in this topic yet.",
+      "noMatch": "No contacts match the filter.",
+      "clearFilter": "Clear filter"
+    },
     "apiSheet": {
       "title": "Topics API",
       "list": "List topics",
       "create": "Create topic",
-      "update": "Update topic"
+      "get": "Retrieve topic"
     }
   },
   "segments": {
@@ -273,7 +287,7 @@
         "all": "Match all",
         "any": "Match any"
       },
-      "matchCount": "{count} contacts match.",
+      "matchCount": "{count, plural, one {# contact matches} other {# contacts match}}.",
       "counting": "Counting…",
       "countError": "Could not count matches.",
       "save": "Save segment",
@@ -283,7 +297,7 @@
       "title": "Segments API",
       "list": "List segments",
       "create": "Create segment",
-      "addContact": "Add contact to segment"
+      "update": "Update segment"
     },
     "detail": {
       "eyebrow": "Segment",

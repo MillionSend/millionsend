@@ -120,7 +120,6 @@
     }
   },
   "detail": {
-    "eyebrow": "Contato",
     "email": "E-mail",
     "created": "Criado",
     "status": "Status",
@@ -144,6 +143,7 @@
     "noTopics": "Nenhum tópico",
     "topicsPlaceholder": "Adicionar tópicos…",
     "removeTopic": "Remover {name}",
+    "toggleTopic": "Alternar inscrição em {name}",
     "unsubscribeBody": "{email} deixa de receber todos os e-mails, inclusive os tópicos em que optou por entrar.",
     "activity": {
       "title": "Atividade",
@@ -187,7 +187,7 @@
     "defaultLabel": "Inscrição padrão",
     "defaultOptIn": "Opt-in",
     "defaultOptOut": "Opt-out",
-    "defaultHint": "Opt-in: contatos ficam inscritos até cancelarem. Opt-out: contatos ficam fora até se inscreverem.",
+    "defaultHint": "Opt-in: contatos ficam inscritos até cancelarem.\n\nOpt-out: contatos ficam fora até se inscreverem.",
     "defaultImmutable": "Isto não pode ser alterado após a criação do tópico.",
     "visibilityLabel": "Visibilidade",
     "visibilityPrivate": "Privado",
@@ -201,11 +201,25 @@
     "deleteTitle": "Excluir tópico",
     "deleteBody": "{name} é excluído, junto com a inscrição de cada contato nele. Isto não pode ser desfeito.",
     "deleteConfirm": "Excluir tópico",
+    "previewTitle": "Página de cancelamento",
+    "customize": "Personalizar página",
+    "detail": {
+      "eyebrow": "Tópico",
+      "notFound": "Tópico não encontrado.",
+      "id": "ID",
+      "description": "Descrição",
+      "moreActions": "Mais ações",
+      "contacts": "Contatos",
+      "subscriptionFilter": "Inscrição",
+      "empty": "Nenhum contato neste tópico ainda.",
+      "noMatch": "Nenhum contato corresponde ao filtro.",
+      "clearFilter": "Limpar filtro"
+    },
     "apiSheet": {
       "title": "API de Tópicos",
       "list": "Listar tópicos",
       "create": "Criar tópico",
-      "update": "Atualizar tópico"
+      "get": "Consultar tópico"
     }
   },
   "segments": {
@@ -273,7 +287,7 @@
         "all": "Corresponder a tudo",
         "any": "Corresponder a qualquer"
       },
-      "matchCount": "{count} contatos correspondem.",
+      "matchCount": "{count, plural, one {# contato corresponde} other {# contatos correspondem}}.",
       "counting": "Contando…",
       "countError": "Não foi possível contar as correspondências.",
       "save": "Salvar segmento",
@@ -283,7 +297,7 @@
       "title": "API de Segmentos",
       "list": "Listar segmentos",
       "create": "Criar segmento",
-      "addContact": "Adicionar contato ao segmento"
+      "update": "Atualizar segmento"
     },
     "detail": {
       "eyebrow": "Segmento",

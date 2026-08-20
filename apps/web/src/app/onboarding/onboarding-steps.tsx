@@ -410,10 +410,7 @@ export function OnboardingSteps({
 
   return (
     <div style={{ overflow: "hidden" }}>
-      <h1
-        className="ms-display"
-        style={{ fontSize: "var(--ms-fs-h1)", margin: 0, fontWeight: 500 }}
-      >
+      <h1 className="ms-display" style={{ fontSize: "var(--ms-fs-h1)", margin: 0 }}>
         {t("title")}
       </h1>
 

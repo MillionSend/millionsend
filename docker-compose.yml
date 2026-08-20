@@ -56,7 +56,7 @@ services:
   backup:
     # Optional scheduled pg_dump to S3-compatible storage. Stays disabled (the
     # container prints one line and exits 0, and restart "no" leaves it
-    # stopped) until the BACKUP_S3_* variables are set in .env.
+    # stopped) until S3_BACKUP_BUCKET and the S3_* credentials are set in .env.
     build: scripts/backup
     env_file: .env
     restart: "no"

@@ -6,6 +6,8 @@ import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 import { SES_REGIONS, type SesRegion } from "./domain-identity.js";
 import {
   createSetupClients,
+  createStorageClient,
+  ensureBucket,
   envTemplate,
   eventsPlan,
   httpsOrigin,
@@ -13,8 +15,10 @@ import {
   runSetup,
   runTeardown,
   SETUP_NAMES,
+  STORAGE_BUCKET_DEFAULTS,
   setupEnvEntries,
   setupPlan,
+  storageEnvEntries,
   teardownPlan,
   upsertEnv,
 } from "./setup.js";
@@ -171,8 +175,8 @@ function printHeader(): void {
 /**
  * End-to-end self-host wizard behind `npx @millionsend/setup`, `pnpm
  * setup:aws`, and the container's `setup` argv mode. Works from an empty
- * directory: env → secrets → AWS → launch, each step offered, state-aware,
- * and idempotent on re-runs.
+ * directory: env → secrets → AWS → object storage → social login → launch,
+ * each step offered, state-aware, and idempotent on re-runs.
  */
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const teardown = argv[0] === "teardown";
@@ -316,6 +320,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       }
     }
 
+    // --- object storage & backups step ---
+    await storageStep(rl, writeEnv);
+
     // --- social login step (before launch, so the stack starts with it) ---
     await socialLoginStep(rl, appBaseUrl, writeEnv);
 
@@ -390,6 +397,107 @@ async function socialLoginStep(
         .join("\n");
       console.log(`No .env here — paste into .env where MillionSend runs:\n\n${block}\n`);
     }
+  }
+}
+
+/** null when the value does not parse as a URL — .env values zod rejects at boot. */
+function validUrl(value: string): string | null {
+  try {
+    new URL(value);
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Optional object storage step: ONE S3-compatible credential set (Cloudflare
+ * R2 first-class) serves both team logo uploads and the scheduled database
+ * backups, each behind its own bucket. Creates/adopts both buckets over the
+ * S3 API; public access for the uploads bucket cannot be enabled that way,
+ * so the step prints the manual instruction and writes the S3_STORAGE_* pair
+ * only once the operator has a public URL (boot rejects one without the
+ * other). Every question defaults to skip; failures warn and return.
+ */
+async function storageStep(
+  rl: LineReader,
+  writeEnv: (entries: Record<string, string>) => boolean,
+): Promise<void> {
+  console.log("");
+  const wanted = await offer(
+    rl,
+    "Optional: object storage & backups. One S3-compatible credential set (Cloudflare R2 works out of the box) enables team logo uploads and scheduled database backups. Configure now?",
+    false,
+  );
+  if (!wanted) {
+    console.log(dim("Skipped — set the S3_* block in .env any time."));
+    return;
+  }
+  const endpoint = (
+    await rl.question(
+      "S3_ENDPOINT — R2: https://<accountid>.r2.cloudflarestorage.com (empty skips): ",
+    )
+  ).trim();
+  if (endpoint === "") return;
+  if (validUrl(endpoint) === null) {
+    console.error(`Not a URL: ${endpoint} — storage step skipped.`);
+    return;
+  }
+  const accessKeyId = (await rl.question("S3_ACCESS_KEY_ID (empty skips): ")).trim();
+  if (accessKeyId === "") return;
+  const secretAccessKey = (await rl.question("S3_SECRET_ACCESS_KEY: ")).trim();
+  if (secretAccessKey === "") {
+    console.log(dim("No secret — skipped."));
+    return;
+  }
+  const storageBucket =
+    (await rl.question(`Uploads bucket name [${STORAGE_BUCKET_DEFAULTS.storage}]: `)).trim() ||
+    STORAGE_BUCKET_DEFAULTS.storage;
+  const backupBucket =
+    (await rl.question(`Backups bucket name [${STORAGE_BUCKET_DEFAULTS.backup}]: `)).trim() ||
+    STORAGE_BUCKET_DEFAULTS.backup;
+
+  const credentials = { endpoint, accessKeyId, secretAccessKey };
+  const client = createStorageClient(credentials);
+  try {
+    for (const bucket of [storageBucket, backupBucket]) {
+      console.log(`==> bucket ${bucket}: ${await ensureBucket(client, bucket)}`);
+    }
+  } catch (error) {
+    // Connection failures surface as AggregateErrors with an empty message.
+    const reason = (error as Error).message || (error as Error).name || String(error);
+    console.error(
+      `Bucket setup failed: ${reason}\nCheck the endpoint and credentials, or create the buckets yourself and set the S3_* lines in .env by hand — storage step skipped.`,
+    );
+    return;
+  }
+
+  console.log(
+    `Uploads serve straight from the bucket, so ${storageBucket} must serve objects\npublicly — the S3 API cannot enable that. R2: bucket → Settings → enable\npublic access (or attach a custom domain), then use that URL below.\nKeep ${backupBucket} PRIVATE — dumps contain the whole database.`,
+  );
+  let publicUrl = (
+    await rl.question("S3_STORAGE_PUBLIC_URL (the bucket's public base URL; empty to add later): ")
+  ).trim();
+  if (publicUrl !== "" && validUrl(publicUrl) === null) {
+    console.error(`Not a URL: ${publicUrl} — add S3_STORAGE_PUBLIC_URL to .env later instead.`);
+    publicUrl = "";
+  }
+
+  const entries = storageEnvEntries({ credentials, backupBucket, storageBucket, publicUrl });
+  if (writeEnv(entries)) {
+    console.log(dim("S3 values written to .env."));
+  } else {
+    const block = Object.entries(entries)
+      .map(([key, value]) => `${key}=${value}`)
+      .join("\n");
+    console.log(`No .env here — paste into .env where MillionSend runs:\n\n${block}\n`);
+  }
+  if (publicUrl === "") {
+    console.log(
+      dim(
+        `Uploads stay off until public access is enabled and .env has S3_STORAGE_BUCKET=${storageBucket} and S3_STORAGE_PUBLIC_URL=<public URL> (set together).`,
+      ),
+    );
   }
 }
 

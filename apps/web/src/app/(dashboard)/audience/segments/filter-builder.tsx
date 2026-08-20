@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
+import { useEffect, useState } from "react";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Select } from "@/components/select";
 import {
@@ -179,7 +179,8 @@ export function FilterConditions({
 
 /**
  * Live "{n} contacts match" box. Debounces the filter snapshot internally so
- * each keystroke in a value input doesn't fire a count query.
+ * each keystroke in a value input doesn't fire a count query. Hidden while
+ * the filter has no complete conditions — there is nothing to preview.
  */
 export function FilterCountPreview({
   filter,
@@ -189,9 +190,7 @@ export function FilterCountPreview({
   enabled?: boolean;
 }) {
   const t = useTranslations("audience.segments");
-  const locale = useLocale();
   const trpc = useTRPC();
-  const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 
   const [debounced, setDebounced] = useState(filter);
   useEffect(() => {
@@ -199,7 +198,14 @@ export function FilterCountPreview({
     return () => clearTimeout(id);
   }, [filter]);
 
-  const countQuery = useQuery(trpc.segments.count.queryOptions({ filter: debounced }, { enabled }));
+  const countQuery = useQuery(
+    trpc.segments.count.queryOptions(
+      { filter: debounced },
+      { enabled: enabled && debounced.conditions.length > 0 },
+    ),
+  );
+
+  if (filter.conditions.length === 0) return null;
 
   return (
     <div
@@ -216,7 +222,7 @@ export function FilterCountPreview({
       ) : countQuery.isError ? (
         <span style={{ color: "var(--ms-danger)" }}>{t("builder.countError")}</span>
       ) : (
-        t("builder.matchCount", { count: nf.format(countQuery.data?.count ?? 0) })
+        t("builder.matchCount", { count: countQuery.data?.count ?? 0 })
       )}
     </div>
   );

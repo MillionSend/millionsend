@@ -58,7 +58,7 @@ function fillSlots(template: string, slots: Record<string, string>) {
 
 function BrandHeading({ name }: { name: string }) {
   return (
-    <span className="ms-display" style={{ fontSize: 20, fontWeight: 600, color: "var(--ms-bone)" }}>
+    <span className="ms-display" style={{ fontSize: 22, fontWeight: 600, color: "var(--ms-bone)" }}>
       {name}
     </span>
   );
@@ -152,28 +152,28 @@ export function UnsubscribePageView({
         style={{ padding: "28px 32px", width: "100%", maxWidth: 420, textAlign: "center" }}
       >
         {customization.message ? (
-          <p style={{ margin: "0 0 16px", fontSize: 13.5, color: "var(--ms-muted)" }}>
+          <p style={{ margin: "0 0 16px", fontSize: 14.5, color: "var(--ms-muted)" }}>
             {customization.message}
           </p>
         ) : null}
         {state === "invalid" ? (
-          <p style={{ margin: 0, fontSize: 15, color: "var(--ms-bone)" }}>{m.invalid}</p>
+          <p style={{ margin: 0, fontSize: 16, color: "var(--ms-bone)" }}>{m.invalid}</p>
         ) : state === "saved" ? (
-          <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
+          <p style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "var(--ms-bone)" }}>
             {successHeading ?? m.saved}
           </p>
         ) : state === "done" ? (
           <>
-            <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
+            <p style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "var(--ms-bone)" }}>
               {successHeading ?? m.done}
             </p>
-            <p style={{ margin: "10px 0 0", fontSize: 13.5, color: "var(--ms-muted)" }}>
+            <p style={{ margin: "10px 0 0", fontSize: 14.5, color: "var(--ms-muted)" }}>
               {doneText}
             </p>
           </>
         ) : (
           <>
-            <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--ms-bone)" }}>
+            <p style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "var(--ms-bone)" }}>
               {confirmText}
             </p>
             {topics.length > 0 ? (
@@ -181,7 +181,7 @@ export function UnsubscribePageView({
               // unsubscribe below. The hidden `prefs` marker routes the POST.
               <form method="post" action={formAction} style={{ marginTop: 20, textAlign: "left" }}>
                 <input type="hidden" name="prefs" value="1" />
-                <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--ms-muted)" }}>
+                <p style={{ margin: "0 0 8px", fontSize: 14, color: "var(--ms-muted)" }}>
                   {m.preferences}
                 </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -192,7 +192,7 @@ export function UnsubscribePageView({
                         display: "flex",
                         alignItems: "center",
                         gap: 8,
-                        fontSize: 14,
+                        fontSize: 15,
                         color: "var(--ms-bone)",
                         cursor: "pointer",
                       }}

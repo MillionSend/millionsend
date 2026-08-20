@@ -23,6 +23,7 @@ import { StatBlock } from "@/components/stat-block";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
+import { formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
 import { ListFooter, SearchBox, StateCard } from "../emails/list-parts";
@@ -37,8 +38,8 @@ function ContactsHead() {
     <thead>
       <tr>
         <th style={{ width: "40%" }}>{t("contacts.email")}</th>
-        <th style={{ width: "15%" }}>{t("contacts.status")}</th>
         <th style={{ width: "22%" }}>{t("contacts.segments")}</th>
+        <th style={{ width: "15%" }}>{t("contacts.status")}</th>
         <th className="right">{t("contacts.added")}</th>
         <th className="right" />
       </tr>
@@ -63,10 +64,10 @@ function ContactsSkeleton() {
               </span>
             </td>
             <td>
-              <SkeletonBadge width={82} />
+              <Skeleton width={70} />
             </td>
             <td>
-              <Skeleton width={70} />
+              <SkeletonBadge width={82} />
             </td>
             <td className="right">
               <Skeleton width={48} />
@@ -320,7 +321,14 @@ export function AudienceContactsView() {
           </div>
           <div style={{ marginTop: 6, display: "flex" }}>
             {growth.data ? (
-              <GrowthSparkline added={growth.data.added} unsubscribed={growth.data.unsubscribed} />
+              <GrowthSparkline
+                added={growth.data.added}
+                unsubscribed={growth.data.unsubscribed}
+                totalLabel={t("contacts.stats.subscribers")}
+                outLabel={t("contacts.stats.unsubscribed")}
+                formatDay={(day) => formatDayUtc(day, locale)}
+                formatValue={(value) => nf.format(value)}
+              />
             ) : (
               <Skeleton width={200} height={52} radius={6} />
             )}
@@ -445,17 +453,6 @@ export function AudienceContactsView() {
                       </span>
                     </td>
                     <td>
-                      {!row.unsubscribed && row.topics.length > 1 ? (
-                        // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only guard so pinning the topics tooltip does not also trigger the row navigation
-                        // biome-ignore lint/a11y/noStaticElementInteractions: click containment only, the tooltip trigger inside stays the interactive element
-                        <span onClick={(event) => event.stopPropagation()}>
-                          <Tooltip text={row.topics.join("\n")}>{statusBadge}</Tooltip>
-                        </span>
-                      ) : (
-                        statusBadge
-                      )}
-                    </td>
-                    <td>
                       {row.segments.length > 0 ? (
                         <span
                           style={{
@@ -470,6 +467,17 @@ export function AudienceContactsView() {
                         </span>
                       ) : (
                         <span style={{ color: "var(--ms-faint)" }}>—</span>
+                      )}
+                    </td>
+                    <td>
+                      {!row.unsubscribed && row.topics.length > 1 ? (
+                        // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only guard so pinning the topics tooltip does not also trigger the row navigation
+                        // biome-ignore lint/a11y/noStaticElementInteractions: click containment only, the tooltip trigger inside stays the interactive element
+                        <span onClick={(event) => event.stopPropagation()}>
+                          <Tooltip text={row.topics.join("\n")}>{statusBadge}</Tooltip>
+                        </span>
+                      ) : (
+                        statusBadge
                       )}
                     </td>
                     <td className="right" style={{ color: "var(--ms-muted)" }}>
@@ -577,13 +585,7 @@ export function AudienceContactsView() {
             </div>
           </div>
           {addMutation.isError ? (
-            <p
-              style={{
-                margin: "8px 0 0",
-                color: "var(--ms-danger)",
-                fontSize: "var(--ms-fs-label)",
-              }}
-            >
+            <p className="ms-field-error">
               {addMutation.error.data?.code === "CONFLICT"
                 ? t("contacts.addExists")
                 : t("contacts.addInvalid")}
@@ -665,17 +667,7 @@ export function AudienceContactsView() {
                   : t("contacts.importPreview", { count: importRows.length })}
               </p>
             ) : null}
-            {importError ? (
-              <p
-                style={{
-                  margin: "10px 0 0",
-                  color: "var(--ms-danger)",
-                  fontSize: "var(--ms-fs-label)",
-                }}
-              >
-                {t("contacts.importError")}
-              </p>
-            ) : null}
+            {importError ? <p className="ms-field-error">{t("contacts.importError")}</p> : null}
             <ModalFooter>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeImport}>
                 {common("cancel")} <span className="ms-keycap">Esc</span>

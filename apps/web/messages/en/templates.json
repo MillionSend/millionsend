@@ -35,11 +35,15 @@
     "textLabel": "Plain text",
     "save": "Save",
     "saveAndClose": "Save & close",
+    "saved": "Saved",
     "saveError": "Couldn't save the template."
   },
   "picker": {
     "label": "Start from a template",
     "none": "Blank",
-    "hint": "Copies its content here. Later template edits change nothing."
+    "hint": "Copies its content here. Later template edits change nothing.",
+    "replaceTitle": "Replace content?",
+    "replaceBody": "Applying this template overwrites the current body and subject.",
+    "replaceConfirm": "Replace content"
   }
 }

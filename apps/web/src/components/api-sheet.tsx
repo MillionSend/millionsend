@@ -13,14 +13,20 @@ import {
   siRuby,
   siRust,
 } from "simple-icons";
+import {
+  BROADCASTS_SNIPPETS,
+  CONTACTS_SNIPPETS,
+  LANGS,
+  type Lang,
+  SEGMENTS_SNIPPETS,
+  TOPICS_SNIPPETS,
+} from "@/components/api-sheet-snippets";
 import { CodeHighlight, type HighlightLanguage } from "@/components/code-highlight";
 import { Drawer } from "@/components/drawer";
 import { CodeGlyph } from "@/components/icons/nav-icons";
 
 /* Snippets per SDK — the real published packages, shown with a placeholder
    key. Kept to the three calls people reach for from the Emails surface. */
-const LANGS = ["node", "python", "php", "ruby", "go", "rust", "java", "dotnet", "elixir"] as const;
-type Lang = (typeof LANGS)[number];
 
 const LANG_META: Record<Lang, { label: string; hljs: HighlightLanguage; icon: { path: string } }> =
   {
@@ -312,204 +318,116 @@ MillionSend.Emails.send(client, %{
   },
 };
 
-/* curl sheets for the non-email resources. The paths mirror apps/api exactly
-   (/contacts, /contact-properties, /segments, /topics, /broadcasts, /domains,
-   /api-keys, /webhooks); `ns` is the message-namespace prefix carrying
-   apiSheet.{title,<section>} keys. */
+/* Sheets for the non-email resources; `ns` is the message-namespace prefix
+   carrying apiSheet.{title,<section>} keys. Resources every SDK implements
+   carry `sdk` snippets (api-sheet-snippets.ts) and get the emails sheet's
+   language tabs; the rest have no SDK surface to document, so they carry
+   copy-ready `curl` calls (paths mirror apps/api exactly: /contact-properties,
+   /domains, /api-keys, /webhooks). */
 const API_BASE = "https://api.millionsend.com";
 const AUTH = `-H "Authorization: Bearer ms_xxxxxxxxx"`;
 const JSON_CT = `-H "Content-Type: application/json"`;
 const SAMPLE_ID = "4ef9a417-02e9-4d39-ad75-9611e0fcc33c";
 
+export type ResourceSheet = { ns: string; sections: readonly string[] } & (
+  | { sdk: Record<Lang, Record<string, string>>; curl?: undefined }
+  | { curl: Record<string, string>; sdk?: undefined }
+);
+
 export const RESOURCE_SHEETS = {
   contacts: {
     ns: "audience.contacts",
-    sections: [
-      ["list", `curl "${API_BASE}/contacts?limit=20" \\\n  ${AUTH}`],
-      [
-        "create",
-        `curl -X POST "${API_BASE}/contacts" \\
-  ${AUTH} \\
-  ${JSON_CT} \\
-  -d '{
-    "email": "steve.wozniak@gmail.com",
-    "first_name": "Steve",
-    "last_name": "Wozniak",
-    "unsubscribed": false
-  }'`,
-      ],
-      [
-        "update",
-        `curl -X PATCH "${API_BASE}/contacts/${SAMPLE_ID}" \\
-  ${AUTH} \\
-  ${JSON_CT} \\
-  -d '{ "unsubscribed": true }'`,
-      ],
-    ],
+    sections: ["list", "create", "update"],
+    sdk: CONTACTS_SNIPPETS,
   },
   contactProperties: {
     ns: "audience.properties",
-    sections: [
-      ["list", `curl "${API_BASE}/contact-properties" \\\n  ${AUTH}`],
-      [
-        "create",
-        `curl -X POST "${API_BASE}/contact-properties" \\
+    sections: ["list", "create", "update"],
+    curl: {
+      list: `curl "${API_BASE}/contact-properties" \\\n  ${AUTH}`,
+      create: `curl -X POST "${API_BASE}/contact-properties" \\
   ${AUTH} \\
   ${JSON_CT} \\
   -d '{ "key": "plan", "type": "string", "fallback_value": "free" }'`,
-      ],
-      [
-        "update",
-        `curl -X PATCH "${API_BASE}/contact-properties/${SAMPLE_ID}" \\
+      update: `curl -X PATCH "${API_BASE}/contact-properties/${SAMPLE_ID}" \\
   ${AUTH} \\
   ${JSON_CT} \\
   -d '{ "fallback_value": "pro" }'`,
-      ],
-    ],
+    },
   },
   segments: {
     ns: "audience.segments",
-    sections: [
-      ["list", `curl "${API_BASE}/segments" \\\n  ${AUTH}`],
-      [
-        "create",
-        `curl -X POST "${API_BASE}/segments" \\
-  ${AUTH} \\
-  ${JSON_CT} \\
-  -d '{
-    "name": "Gmail users",
-    "filter": {
-      "match": "all",
-      "conditions": [
-        { "field": "email", "op": "ends_with", "value": "@gmail.com" }
-      ]
-    }
-  }'`,
-      ],
-      [
-        "addContact",
-        `curl -X POST \\
-  "${API_BASE}/contacts/${SAMPLE_ID}/segments/b0f2a3c4-5d6e-4f70-8a91-b2c3d4e5f607" \\
-  ${AUTH}`,
-      ],
-    ],
+    sections: ["list", "create", "update"],
+    sdk: SEGMENTS_SNIPPETS,
   },
   topics: {
     ns: "audience.topics",
-    sections: [
-      ["list", `curl "${API_BASE}/topics" \\\n  ${AUTH}`],
-      [
-        "create",
-        `curl -X POST "${API_BASE}/topics" \\
-  ${AUTH} \\
-  ${JSON_CT} \\
-  -d '{
-    "name": "Product updates",
-    "description": "New features and improvements",
-    "default_subscription": "opt_in",
-    "visibility": "public"
-  }'`,
-      ],
-      [
-        "update",
-        `curl -X PATCH "${API_BASE}/topics/${SAMPLE_ID}" \\
-  ${AUTH} \\
-  ${JSON_CT} \\
-  -d '{ "description": "Monthly product news", "visibility": "private" }'`,
-      ],
-    ],
+    sections: ["list", "create", "get"],
+    sdk: TOPICS_SNIPPETS,
   },
   broadcasts: {
     ns: "broadcasts",
-    sections: [
-      ["list", `curl "${API_BASE}/broadcasts?limit=20" \\\n  ${AUTH}`],
-      [
-        "create",
-        `curl -X POST "${API_BASE}/broadcasts" \\
-  ${AUTH} \\
-  ${JSON_CT} \\
-  -d '{
-    "name": "Launch announcement",
-    "segment_id": "${SAMPLE_ID}",
-    "from": "Acme <news@yourdomain.com>",
-    "subject": "We just launched",
-    "html": "<p>Big news!</p>"
-  }'`,
-      ],
-      [
-        "send",
-        `curl -X POST "${API_BASE}/broadcasts/${SAMPLE_ID}/send" \\
-  ${AUTH} \\
-  ${JSON_CT} \\
-  -d '{ "scheduled_at": "in 1 hour" }'`,
-      ],
-    ],
+    sections: ["list", "create", "send"],
+    sdk: BROADCASTS_SNIPPETS,
   },
   domains: {
     ns: "domains",
-    sections: [
-      ["list", `curl "${API_BASE}/domains" \\\n  ${AUTH}`],
-      [
-        "create",
-        `curl -X POST "${API_BASE}/domains" \\
+    sections: ["list", "create", "verify"],
+    curl: {
+      list: `curl "${API_BASE}/domains" \\\n  ${AUTH}`,
+      create: `curl -X POST "${API_BASE}/domains" \\
   ${AUTH} \\
   ${JSON_CT} \\
   -d '{ "name": "yourdomain.com", "region": "us-east-1" }'`,
-      ],
-      ["verify", `curl -X POST "${API_BASE}/domains/${SAMPLE_ID}/verify" \\\n  ${AUTH}`],
-    ],
+      verify: `curl -X POST "${API_BASE}/domains/${SAMPLE_ID}/verify" \\\n  ${AUTH}`,
+    },
   },
   apiKeys: {
     ns: "api-keys",
-    sections: [
-      ["list", `curl "${API_BASE}/api-keys" \\\n  ${AUTH}`],
-      [
-        "create",
-        `curl -X POST "${API_BASE}/api-keys" \\
+    sections: ["list", "create", "revoke"],
+    curl: {
+      list: `curl "${API_BASE}/api-keys" \\\n  ${AUTH}`,
+      create: `curl -X POST "${API_BASE}/api-keys" \\
   ${AUTH} \\
   ${JSON_CT} \\
   -d '{ "name": "Production", "permission": "sending_access" }'`,
-      ],
-      ["revoke", `curl -X DELETE "${API_BASE}/api-keys/${SAMPLE_ID}" \\\n  ${AUTH}`],
-    ],
+      revoke: `curl -X DELETE "${API_BASE}/api-keys/${SAMPLE_ID}" \\\n  ${AUTH}`,
+    },
   },
   webhooks: {
     ns: "webhooks",
-    sections: [
-      ["list", `curl "${API_BASE}/webhooks?limit=20" \\\n  ${AUTH}`],
-      [
-        "create",
-        `curl -X POST "${API_BASE}/webhooks" \\
+    sections: ["list", "create", "update"],
+    curl: {
+      list: `curl "${API_BASE}/webhooks?limit=20" \\\n  ${AUTH}`,
+      create: `curl -X POST "${API_BASE}/webhooks" \\
   ${AUTH} \\
   ${JSON_CT} \\
   -d '{
     "endpoint": "https://example.com/webhooks/millionsend",
     "events": ["email.delivered", "email.bounced"]
   }'`,
-      ],
-      [
-        "update",
-        `curl -X PATCH "${API_BASE}/webhooks/${SAMPLE_ID}" \\
+      update: `curl -X PATCH "${API_BASE}/webhooks/${SAMPLE_ID}" \\
   ${AUTH} \\
   ${JSON_CT} \\
   -d '{ "status": "disabled" }'`,
-      ],
-    ],
+    },
   },
-} satisfies Record<string, { ns: string; sections: readonly (readonly [string, string])[] }>;
+} satisfies Record<string, ResourceSheet>;
 
 type Resource = keyof typeof RESOURCE_SHEETS;
 
 /**
  * "</>" affordance for the non-email list surfaces: same drawer as
- * ApiDocsButton, copy-ready curl calls against the public API. The key hint
- * is shared with the emails sheet (emails.apiSheet.keyHint).
+ * ApiDocsButton. SDK-covered resources get the same language tabs and
+ * highlighted snippets as the emails sheet; the rest show copy-ready curl
+ * calls. The key hint is shared with the emails sheet (emails.apiSheet.keyHint).
  */
 export function ResourceApiButton({ resource }: { resource: Resource }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const { ns, sections } = RESOURCE_SHEETS[resource];
-  const title = t(`${ns}.apiSheet.title`);
+  const [lang, setLang] = useState<Lang>("node");
+  const sheet: ResourceSheet = RESOURCE_SHEETS[resource];
+  const title = t(`${sheet.ns}.apiSheet.title`);
 
   return (
     <>
@@ -522,19 +440,91 @@ export function ResourceApiButton({ resource }: { resource: Resource }) {
         <CodeGlyph size={14} />
       </button>
       <Drawer open={open} onClose={() => setOpen(false)} title={title}>
-        {sections.map(([section, code]) => (
-          <section key={section} style={{ marginTop: 22 }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--ms-bone)" }}>
-              {t(`${ns}.apiSheet.${section}`)}
-            </h3>
-            <CodeBlock code={code} language="bash" />
-          </section>
+        {sheet.sdk ? <LangTabs label={title} value={lang} onChange={setLang} /> : null}
+        {sheet.sections.map((section) => (
+          <SheetSection
+            key={section}
+            title={t(`${sheet.ns}.apiSheet.${section}`)}
+            code={(sheet.sdk ? sheet.sdk[lang][section] : sheet.curl[section]) ?? ""}
+            language={sheet.sdk ? LANG_META[lang].hljs : "bash"}
+          />
         ))}
         <p style={{ margin: "20px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
           {t("emails.apiSheet.keyHint")}
         </p>
       </Drawer>
     </>
+  );
+}
+
+function LangTabs({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: Lang;
+  onChange: (lang: Lang) => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label={label}
+      className="ms-scroll-x"
+      style={{
+        display: "flex",
+        gap: 4,
+        flexWrap: "nowrap",
+        marginTop: 4,
+        overflowX: "auto",
+        paddingBottom: 4,
+      }}
+    >
+      {LANGS.map((key) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          aria-selected={key === value}
+          onClick={() => onChange(key)}
+          style={{
+            border: 0,
+            borderRadius: 8,
+            padding: "5px 10px",
+            fontSize: 12.5,
+            cursor: "pointer",
+            background: key === value ? "var(--ms-panel-raised)" : "none",
+            color: key === value ? "var(--ms-bone)" : "var(--ms-muted)",
+            font: "inherit",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            flex: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <LangIcon path={LANG_META[key].icon.path} />
+          {LANG_META[key].label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SheetSection({
+  title,
+  code,
+  language,
+}: {
+  title: string;
+  code: string;
+  language: HighlightLanguage;
+}) {
+  return (
+    <section style={{ marginTop: 22 }}>
+      <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--ms-bone)" }}>{title}</h3>
+      <CodeBlock code={code} language={language} />
+    </section>
   );
 }
 
@@ -581,47 +571,7 @@ export function ApiDocsButton() {
         <CodeGlyph size={14} />
       </button>
       <Drawer open={open} onClose={() => setOpen(false)} title={t("apiSheet.title")}>
-        <div
-          role="tablist"
-          aria-label={t("apiSheet.title")}
-          className="ms-scroll-x"
-          style={{
-            display: "flex",
-            gap: 4,
-            flexWrap: "nowrap",
-            marginTop: 4,
-            overflowX: "auto",
-            paddingBottom: 4,
-          }}
-        >
-          {LANGS.map((key) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={key === lang}
-              onClick={() => setLang(key)}
-              style={{
-                border: 0,
-                borderRadius: 8,
-                padding: "5px 10px",
-                fontSize: 12.5,
-                cursor: "pointer",
-                background: key === lang ? "var(--ms-panel-raised)" : "none",
-                color: key === lang ? "var(--ms-bone)" : "var(--ms-muted)",
-                font: "inherit",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                flex: "none",
-                whiteSpace: "nowrap",
-              }}
-            >
-              <LangIcon path={LANG_META[key].icon.path} />
-              {LANG_META[key].label}
-            </button>
-          ))}
-        </div>
+        <LangTabs label={t("apiSheet.title")} value={lang} onChange={setLang} />
 
         {(
           [
@@ -630,12 +580,12 @@ export function ApiDocsButton() {
             ["retrieve", snippets.retrieve],
           ] as const
         ).map(([section, code]) => (
-          <section key={section} style={{ marginTop: 22 }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--ms-bone)" }}>
-              {t(`apiSheet.${section}`)}
-            </h3>
-            <CodeBlock code={code} language={LANG_META[lang].hljs} />
-          </section>
+          <SheetSection
+            key={section}
+            title={t(`apiSheet.${section}`)}
+            code={code}
+            language={LANG_META[lang].hljs}
+          />
         ))}
 
         <p style={{ margin: "20px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>

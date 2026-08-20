@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Fragment, useCallback, useState } from "react";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -13,6 +14,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
+import { codeRichTags } from "@/lib/code-rich-tags";
 import { useTRPC } from "@/lib/trpc";
 import { maskWebhookSecret, WEBHOOK_EVENT_META, type WebhookEventType } from "@/lib/webhook-events";
 import { ListFooter, PAGE_SIZES } from "../../emails/list-parts";
@@ -246,6 +248,19 @@ export function WebhookDetail({ id }: { id: string }) {
     if (deleteMutation.isPending) return;
     deleteMutation.mutate({ id });
   };
+  // Disabling silently drops live traffic, so it confirms; enabling is direct.
+  const toggleEnabled = async (webhook: { url: string; enabled: boolean }) => {
+    if (webhook.enabled) {
+      const ok = await confirmDialog({
+        title: t("disableConfirm.title"),
+        message: t("disableConfirm.body", { url: webhook.url }),
+        confirmLabel: t("disableConfirm.confirm"),
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    updateMutation.mutate({ id, enabled: !webhook.enabled });
+  };
 
   if (webhook.isError) {
     return (
@@ -365,7 +380,7 @@ export function WebhookDetail({ id }: { id: string }) {
               items={[
                 {
                   label: data.enabled ? t("disable") : t("enable"),
-                  onSelect: () => updateMutation.mutate({ id, enabled: !data.enabled }),
+                  onSelect: () => void toggleEnabled(data),
                 },
                 null,
                 {
@@ -438,10 +453,7 @@ export function WebhookDetail({ id }: { id: string }) {
       </div>
 
       <section style={{ marginTop: 26, maxWidth: 1000 }}>
-        <h2
-          className="ms-display"
-          style={{ fontSize: 22, margin: 0, fontWeight: 500, color: "var(--ms-bone)" }}
-        >
+        <h2 className="ms-display" style={{ fontSize: 22, margin: 0, color: "var(--ms-bone)" }}>
           {t("detail.deliveries")}
         </h2>
         <div style={{ marginTop: 22 }}>
@@ -565,7 +577,7 @@ export function WebhookDetail({ id }: { id: string }) {
           }}
         >
           <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-            {t("deleteConfirm.body", { url: data.url })}
+            {t.rich("deleteConfirm.body", { ...codeRichTags, url: data.url })}
           </p>
           <ModalFooter>
             <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>

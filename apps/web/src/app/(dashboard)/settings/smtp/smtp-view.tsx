@@ -6,6 +6,8 @@ import { useTranslations } from "next-intl";
 import { CopyChip } from "@/components/copy-chip";
 import { Skeleton } from "@/components/skeleton";
 import { Tooltip } from "@/components/tooltip";
+import { WarnCard } from "@/components/warn-card";
+import { codeRichTags } from "@/lib/code-rich-tags";
 import { useTRPC } from "@/lib/trpc";
 
 const SMTP_DOCS_URL = "https://docs.millionsend.com/smtp";
@@ -47,6 +49,21 @@ export function SmtpView() {
 
   return (
     <div style={{ maxWidth: 720, display: "grid", gap: 20 }}>
+      {data && !data.tlsConfigured ? (
+        data.allowInsecureAuth ? (
+          <p
+            role="status"
+            style={{ margin: 0, fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.55 }}
+          >
+            {t.rich("insecureNote", codeRichTags)}
+          </p>
+        ) : (
+          <WarnCard>
+            <strong style={{ display: "block", marginBottom: 2 }}>{t("tlsWarnTitle")}</strong>
+            {t.rich("tlsWarnBody", codeRichTags)}
+          </WarnCard>
+        )
+      ) : null}
       <section className="ms-card" style={{ padding: 24 }}>
         <p style={{ margin: "0 0 4px", fontSize: 14, color: "var(--ms-bone)" }}>{t("intro")}</p>
         <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--ms-muted)" }}>

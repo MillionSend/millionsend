@@ -447,6 +447,9 @@ importers:
       '@aws-sdk/client-iam':
         specifier: ^3.750.0
         version: 3.1109.0
+      '@aws-sdk/client-s3':
+        specifier: ^3.750.0
+        version: 3.1111.0
       '@aws-sdk/client-sesv2':
         specifier: ^3.750.0
         version: 3.1109.0
@@ -481,6 +484,9 @@ importers:
       '@aws-sdk/client-iam':
         specifier: ^3.750.0
         version: 3.1109.0
+      '@aws-sdk/client-s3':
+        specifier: ^3.750.0
+        version: 3.1111.0
       '@aws-sdk/client-sesv2':
         specifier: ^3.750.0
         version: 3.1109.0

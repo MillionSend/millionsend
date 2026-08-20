@@ -160,44 +160,43 @@ PRIVACY_URL=
 # Leave false. true enables hosted-cloud behavior (KMS, Stripe billing).
 IS_CLOUD=false
 
-# --- Backups (optional) ---
+# --- Object storage (S3-compatible, optional) ---
 
-# Scheduled pg_dump of the database to any S3-compatible bucket, run by the
-# \`backup\` compose service. Disabled until all four BACKUP_S3_* values below
-# are set — until then the service prints a hint and exits. The bucket must
-# already exist. Cloudflare R2 endpoint: https://<accountid>.r2.cloudflarestorage.com
-BACKUP_S3_ENDPOINT=
-BACKUP_S3_BUCKET=
-BACKUP_S3_ACCESS_KEY_ID=
-BACKUP_S3_SECRET_ACCESS_KEY=
+# ONE credential set, shared by both S3-backed features below (team logo
+# uploads and database backups); each feature is then enabled by its own
+# bucket variable. Set all three together. Cloudflare R2 works out of the
+# box; its endpoint is https://<accountid>.r2.cloudflarestorage.com
+S3_ENDPOINT=
+S3_ACCESS_KEY_ID=
+S3_SECRET_ACCESS_KEY=
 
-# Defaults suit Cloudflare R2. Other S3-compatibles: set rclone's provider
-# name (AWS, Minio, ...) and a real region if the endpoint needs one.
-BACKUP_S3_PROVIDER=Cloudflare
-BACKUP_S3_REGION=auto
+# Defaults suit Cloudflare R2. Other S3-compatibles: set a real region if the
+# endpoint needs one, and rclone's provider name (AWS, Minio, ...) for the
+# backup job.
+S3_REGION=auto
+S3_PROVIDER=Cloudflare
 
-# Object key prefix inside the bucket, dump schedule (BusyBox cron syntax,
-# UTC; one dump also runs at every service start), and how many days of dumps
-# to keep before pruning.
-BACKUP_S3_PREFIX=backups
-BACKUP_CRON=0 3 * * *
-BACKUP_RETENTION_DAYS=14
+# Uploads (team logos): a bucket that already exists and serves objects
+# PUBLICLY, plus the public base URL it serves from (the R2 public bucket
+# URL, or a CDN/custom domain in front of it). Uploaded objects are addressed
+# as \${S3_STORAGE_PUBLIC_URL}/<key>. Unset: no upload UI appears anywhere.
+S3_STORAGE_BUCKET=
+S3_STORAGE_PUBLIC_URL=
 
-# --- Uploads (optional) ---
+# Backups: scheduled pg_dump of the database, run by the \`backup\` compose
+# service. Use a SEPARATE, PRIVATE bucket that already exists — dumps contain
+# the whole database, and R2 public access is bucket-wide, so a dump in the
+# public uploads bucket would be world-readable. Unset: the service prints a
+# hint and exits.
+S3_BACKUP_BUCKET=
 
-# Team logo uploads to any S3-compatible bucket (Cloudflare R2 works out of
-# the box). Disabled until all five STORAGE_S3_* values are set — until then
-# no upload UI appears anywhere. The bucket must already exist and serve
-# objects publicly. R2 endpoint: https://<accountid>.r2.cloudflarestorage.com
-STORAGE_S3_ENDPOINT=
-STORAGE_S3_BUCKET=
-STORAGE_S3_ACCESS_KEY_ID=
-STORAGE_S3_SECRET_ACCESS_KEY=
-
-# Public base URL the bucket serves from (the R2 public bucket URL, or a
-# CDN/custom domain in front of it). Uploaded objects are addressed as
-# \${STORAGE_S3_PUBLIC_URL}/<key>.
-STORAGE_S3_PUBLIC_URL=
+# Backup tuning, meaningful only with S3_BACKUP_BUCKET set: object key prefix
+# inside the bucket (default backups), dump schedule (BusyBox cron syntax,
+# UTC, default 0 3 * * *; one dump also runs at every service start), and how
+# many days of dumps to keep before pruning (default 14).
+S3_BACKUP_PREFIX=
+BACKUP_CRON=
+BACKUP_RETENTION_DAYS=
 
 # --- Social login (optional) ---
 

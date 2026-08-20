@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { GroupedMultiSelect } from "@/components/grouped-multi-select";
@@ -17,6 +18,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
+import { codeRichTags } from "@/lib/code-rich-tags";
 import { useTRPC } from "@/lib/trpc";
 import {
   WEBHOOK_EVENT_GROUPS,
@@ -207,6 +209,19 @@ export function WebhooksView() {
     if (!deleteTarget || deleteMutation.isPending) return;
     deleteMutation.mutate({ id: deleteTarget.id });
   };
+  // Disabling silently drops live traffic, so it confirms; enabling is direct.
+  const toggleEnabled = async (webhook: { id: string; url: string; enabled: boolean }) => {
+    if (webhook.enabled) {
+      const ok = await confirmDialog({
+        title: t("disableConfirm.title"),
+        message: t("disableConfirm.body", { url: webhook.url }),
+        confirmLabel: t("disableConfirm.confirm"),
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    updateMutation.mutate({ id: webhook.id, enabled: !webhook.enabled });
+  };
 
   return (
     <>
@@ -300,8 +315,7 @@ export function WebhooksView() {
                       items={[
                         {
                           label: webhook.enabled ? t("disable") : t("enable"),
-                          onSelect: () =>
-                            updateMutation.mutate({ id: webhook.id, enabled: !webhook.enabled }),
+                          onSelect: () => void toggleEnabled(webhook),
                         },
                         null,
                         {
@@ -448,7 +462,7 @@ export function WebhooksView() {
             }}
           >
             <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-              {t("deleteConfirm.body", { url: deleteTarget.url })}
+              {t.rich("deleteConfirm.body", { ...codeRichTags, url: deleteTarget.url })}
             </p>
             <ModalFooter>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeDelete}>

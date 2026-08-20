@@ -247,7 +247,7 @@ table.ms-table {
   font-weight: 500;
   font-size: var(--ms-fs-label);
   text-align: left;
-  padding: 8px 14px;
+  padding: 6px 14px;
 }
 .ms-table thead th:first-child {
   border-radius: var(--ms-r-input) 0 0 var(--ms-r-input);
@@ -260,7 +260,7 @@ table.ms-table {
   text-align: right;
 }
 .ms-table td {
-  padding: 7px 14px;
+  padding: 9px 14px;
   line-height: 1.4;
   border-bottom: 1px solid var(--ms-line);
   color: var(--ms-bone);
@@ -325,13 +325,15 @@ table.ms-table {
   font-size: var(--ms-fs-ui);
 }
 
-/* Mono chip — everything an engineer would paste gets a copy affordance */
+/* Mono chip — everything an engineer would paste gets a copy affordance.
+   Surface mixes toward bone so the chip separates from panel/inset grounds
+   in both themes (plain inset was near-invisible on cards). */
 .ms-chip {
   display: inline-flex;
   gap: 8px;
   align-items: center;
-  background: var(--ms-inset);
-  border: 1px solid var(--ms-line);
+  background: color-mix(in srgb, var(--ms-bone) 5%, var(--ms-inset));
+  border: 1px solid var(--ms-line-strong);
   border-radius: var(--ms-r-input);
   padding: 3px 8px;
   font-family: var(--ms-font-mono);
@@ -359,6 +361,66 @@ table.ms-table {
 /* Inside dense tables the pill matches the table's 13px mono. */
 .ms-table.dense .ms-chip {
   font-size: inherit;
+}
+
+/* Breadcrumb link — quiet until hover, when the shared dotted underline appears. */
+.ms-crumb {
+  color: var(--ms-muted);
+  text-decoration: none;
+}
+.ms-crumb:hover {
+  text-decoration: underline dotted var(--ms-faint);
+  text-underline-offset: 3px;
+}
+
+/* Field/form error line — always block-level with breathing room so it never
+   glues to the control or a footnote above it. */
+.ms-field-error {
+  display: block;
+  margin: 10px 0 0;
+  color: var(--ms-danger);
+  font-size: var(--ms-fs-label);
+}
+
+/* Switch — pill track + sliding thumb (components/switch.tsx). */
+.ms-switch {
+  flex-shrink: 0;
+  width: 40px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--ms-r-pill);
+  padding: 2px;
+  cursor: pointer;
+  background: var(--ms-faint);
+  transition: background var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-switch[aria-checked="true"] {
+  background: var(--ms-success);
+}
+.ms-switch:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.ms-switch:focus-visible {
+  outline: none;
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-switch span {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ms-bone);
+  transition: transform var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-switch[aria-checked="true"] span {
+  transform: translateX(18px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-switch,
+  .ms-switch span {
+    transition: none;
+  }
 }
 
 /* Tabs */
@@ -518,8 +580,8 @@ table.ms-table {
   animation: ms-fade var(--ms-dur-drawer) var(--ms-ease);
 }
 .ms-modal h2 {
-  font-family: var(--ms-font-display);
-  font-weight: 500;
+  font-family: var(--ms-font-sans);
+  font-weight: 600;
   font-size: var(--ms-fs-h2);
   color: var(--ms-bone);
   margin: 0 0 6px;
@@ -792,7 +854,7 @@ svg:focus {
 .ms-empty-headline {
   margin: 0;
   color: var(--ms-bone);
-  font: 500 var(--ms-fs-h2) var(--ms-font-display);
+  font: 600 var(--ms-fs-h2) var(--ms-font-sans);
 }
 .ms-empty-body {
   margin: 8px 0 0;
