@@ -12,6 +12,7 @@ import {
   ListAccessKeysCommand,
   type ListAccessKeysCommandOutput,
 } from "@aws-sdk/client-iam";
+import { CreateBucketCommand, HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import {
   CreateConfigurationSetCommand,
   CreateConfigurationSetEventDestinationCommand,
@@ -413,6 +414,90 @@ export async function runTeardown(
     clients.iam.send(new DeletePolicyCommand({ PolicyArn: setupPolicyArn(input.accountId) })),
     ["NoSuchEntityException"],
   );
+}
+
+/** Default bucket names the storage step offers; the prompts allow overrides. */
+export const STORAGE_BUCKET_DEFAULTS = {
+  storage: "millionsend-storage",
+  backup: "millionsend-backups",
+} as const;
+
+type StorageCommand = HeadBucketCommand | CreateBucketCommand;
+
+/** Structural subset of S3Client so tests inject fakes (mirrors SetupClients). */
+export interface StorageClient {
+  send(command: StorageCommand): Promise<unknown>;
+}
+
+export interface StorageCredentials {
+  endpoint: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+/**
+ * Real S3 client against the custom endpoint. region "auto" + forcePathStyle
+ * suit Cloudflare R2 (no bucket-subdomain DNS) — the storage step's primary
+ * target; endpoints that need a real region fail the bucket calls and land on
+ * the step's warn-and-skip path.
+ */
+export function createStorageClient(credentials: StorageCredentials): StorageClient {
+  return new S3Client({
+    endpoint: credentials.endpoint,
+    region: "auto",
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+    },
+  });
+}
+
+/**
+ * Adopts the bucket when it exists, creates it when HeadBucket says 404.
+ * Anything else (bad credentials, unreachable endpoint, 403 on someone
+ * else's bucket) propagates so the caller warns and skips rather than
+ * creating against the wrong target.
+ */
+export async function ensureBucket(
+  client: StorageClient,
+  bucket: string,
+): Promise<"exists" | "created"> {
+  try {
+    await client.send(new HeadBucketCommand({ Bucket: bucket }));
+    return "exists";
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    const missing = ["NotFound", "NoSuchBucket"].includes(errorName(error)) || status === 404;
+    if (!missing) throw error;
+    await client.send(new CreateBucketCommand({ Bucket: bucket }));
+    return "created";
+  }
+}
+
+/**
+ * The .env entries the storage step produces. The S3_STORAGE_* pair is
+ * written only when the public URL is known — boot validation rejects the
+ * bucket without its URL, and the URL exists only after the operator enables
+ * public access by hand (the S3 API cannot).
+ */
+export function storageEnvEntries(input: {
+  credentials: StorageCredentials;
+  backupBucket: string;
+  storageBucket: string;
+  publicUrl: string;
+}): Record<string, string> {
+  const entries: Record<string, string> = {
+    S3_ENDPOINT: input.credentials.endpoint,
+    S3_ACCESS_KEY_ID: input.credentials.accessKeyId,
+    S3_SECRET_ACCESS_KEY: input.credentials.secretAccessKey,
+    S3_BACKUP_BUCKET: input.backupBucket,
+  };
+  if (input.publicUrl) {
+    entries.S3_STORAGE_BUCKET = input.storageBucket;
+    entries.S3_STORAGE_PUBLIC_URL = input.publicUrl;
+  }
+  return entries;
 }
 
 /** The .env entries a setup run produces, in the order they should print. */

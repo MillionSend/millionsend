@@ -23,13 +23,15 @@
     "problems": "Problems"
   },
   "eventLabel": {
-    "email.sent": "Email sent",
-    "email.delivered": "Email delivered",
-    "email.delivery_delayed": "Delivery delayed",
-    "email.opened": "Email opened",
-    "email.clicked": "Link clicked",
-    "email.bounced": "Email bounced",
-    "email.complained": "Marked as spam"
+    "email": {
+      "sent": "Email sent",
+      "delivered": "Email delivered",
+      "delivery_delayed": "Delivery delayed",
+      "opened": "Email opened",
+      "clicked": "Link clicked",
+      "bounced": "Email bounced",
+      "complained": "Marked as spam"
+    }
   },
   "status": {
     "enabled": "Enabled",
@@ -60,8 +62,13 @@
   },
   "deleteConfirm": {
     "title": "Delete webhook",
-    "body": "Deliveries to {url} stop immediately. Delivery history is removed.",
+    "body": "Deliveries to <code>{url}</code> stop immediately. Delivery history is removed.",
     "confirm": "Delete webhook"
+  },
+  "disableConfirm": {
+    "title": "Disable webhook",
+    "body": "Deliveries to {url} stop until it is enabled again.",
+    "confirm": "Disable webhook"
   },
   "detail": {
     "eyebrow": "Webhook",

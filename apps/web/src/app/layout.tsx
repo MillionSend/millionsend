@@ -28,13 +28,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="ms">
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static theme bootstrap, no user input */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-        {/* Erode loads from the Fontshare CDN — the Fontshare EULA forbids
-            vendoring the font files into this repository. */}
-        <link
-          rel="stylesheet"
-          href="https://api.fontshare.com/v2/css?f[]=erode@500,600&display=swap"
-          precedence="default"
-        />
         <NextIntlClientProvider>
           <Providers>{children}</Providers>
         </NextIntlClientProvider>

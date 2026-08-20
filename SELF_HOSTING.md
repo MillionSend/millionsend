@@ -25,9 +25,9 @@ npx @millionsend/setup
 
 The wizard detects what is already there and offers each step — create `.env`
 from a built-in template with generated secrets, provision the AWS resources
-(below), download the standalone compose file, and `docker compose up -d`.
-Every step is skippable and safe to re-run; `--dry-run` prints the full plan
-and touches nothing.
+and the S3 buckets for uploads and backups (both below), download the
+standalone compose file, and `docker compose up -d`. Every step is skippable
+and safe to re-run; `--dry-run` prints the full plan and touches nothing.
 
 Prefer doing it by hand? The manual equivalent runs the same multi-arch
 prebuilt image. The standalone compose intentionally requires you to select a
@@ -342,23 +342,54 @@ sudo ufw enable
 </details>
 
 <details>
+<summary><b>Object storage (team logos)</b></summary>
+
+Optional. With an S3-compatible bucket configured, team admins can upload a
+team logo in the dashboard; it also brands hosted unsubscribe pages when
+MillionSend branding is hidden. ONE `S3_*` credential set is shared with the
+backup job below — each feature is then enabled by its own bucket variable.
+
+The storage step of `npx @millionsend/setup` prompts for the endpoint and
+keys, creates (or adopts) both buckets — `millionsend-storage` and
+`millionsend-backups` by default — and writes the `S3_*` lines to `.env`.
+The one thing it cannot do over the S3 API is make the uploads bucket serve
+objects publicly: on R2, enable public access on the bucket (or attach a
+custom domain), then set that URL — uploads are addressed as
+`${S3_STORAGE_PUBLIC_URL}/<key>`:
+
+```sh
+S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+S3_STORAGE_BUCKET=millionsend-storage
+S3_STORAGE_PUBLIC_URL=https://<public-bucket-url-or-custom-domain>
+```
+
+Keep the two buckets separate: R2 public access is bucket-wide, so a database
+dump in the public uploads bucket would be world-readable.
+
+</details>
+
+<details>
 <summary><b>Backups</b></summary>
 
 The `backup` compose service takes a scheduled `pg_dump` of Postgres and
 uploads it to any S3-compatible bucket via rclone — Cloudflare R2 works out of
-the box. It is off by default: without the `BACKUP_S3_*` variables the
-container prints `backups disabled — set BACKUP_S3_* to enable` and exits 0,
-harmless.
+the box. It is off by default: without `S3_BACKUP_BUCKET` the container prints
+`backups disabled — set S3_BACKUP_BUCKET to enable` and exits 0, harmless.
 
-Enable it by setting all four in `.env` (the bucket must already exist; for R2
-the defaults `BACKUP_S3_PROVIDER=Cloudflare` and `BACKUP_S3_REGION=auto` are
-already right):
+Enable it by setting the shared S3 credentials and a backup bucket in `.env`
+(the setup wizard's storage step creates the bucket and writes these lines).
+The bucket must exist before the first dump and must stay private — dumps
+contain the whole database, and R2 public access is bucket-wide, so never
+reuse the public uploads bucket. For R2 the defaults `S3_PROVIDER=Cloudflare`
+and `S3_REGION=auto` are already right:
 
 ```sh
-BACKUP_S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
-BACKUP_S3_BUCKET=millionsend-backups
-BACKUP_S3_ACCESS_KEY_ID=...
-BACKUP_S3_SECRET_ACCESS_KEY=...
+S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+S3_BACKUP_BUCKET=millionsend-backups
 ```
 
 `docker compose up -d --build backup` then dumps once immediately, and after
@@ -366,7 +397,7 @@ that on `BACKUP_CRON` (default `0 3 * * *`, UTC). Each dump is `pg_dump -Fc`
 (compressed custom format, named `millionsend-YYYYMMDD-HHMMSS.dump`), its
 uploaded size is verified against the bucket before anything else happens, and
 dumps older than `BACKUP_RETENTION_DAYS` (default 14) are pruned.
-`BACKUP_S3_PREFIX` (default `backups`) sets the object key prefix.
+`S3_BACKUP_PREFIX` (default `backups`) sets the object key prefix.
 
 The dumps contain email bodies encrypted with `MASTER_ENCRYPTION_KEY` — back
 that key up separately, or restored bodies are unrecoverable.
@@ -382,10 +413,10 @@ Restore (stop the app first so nothing writes mid-restore):
 docker compose stop millionsend smtp
 # list the bucket, pick a dump
 docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup \
-  sh -c 'rclone lsl ":s3:$BACKUP_S3_BUCKET/${BACKUP_S3_PREFIX:-backups}"'
+  sh -c 'rclone lsl ":s3:$S3_BACKUP_BUCKET/${S3_BACKUP_PREFIX:-backups}"'
 # download it and restore over the current database
 docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup \
-  sh -c 'rclone copyto ":s3:$BACKUP_S3_BUCKET/${BACKUP_S3_PREFIX:-backups}/millionsend-YYYYMMDD-HHMMSS.dump" /tmp/restore.dump \
+  sh -c 'rclone copyto ":s3:$S3_BACKUP_BUCKET/${S3_BACKUP_PREFIX:-backups}/millionsend-YYYYMMDD-HHMMSS.dump" /tmp/restore.dump \
     && pg_restore --clean --if-exists -d "$DATABASE_URL" /tmp/restore.dump'
 docker compose start millionsend smtp
 ```

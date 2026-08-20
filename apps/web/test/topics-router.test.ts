@@ -110,6 +110,95 @@ describe("topics CRUD", () => {
   });
 });
 
+describe("topics.get", () => {
+  it("returns the topic's meta and 404s cross-team", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const a = callerFor(teamA);
+    const { id } = await a.topics.create({
+      name: "Product",
+      description: "News",
+      defaultSubscribed: true,
+      visibility: "public",
+    });
+
+    expect(await a.topics.get({ id })).toMatchObject({
+      id,
+      name: "Product",
+      description: "News",
+      defaultSubscribed: true,
+      visibility: "public",
+    });
+    await expect(callerFor(teamB).topics.get({ id })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+});
+
+describe("topics.contacts", () => {
+  it("resolves effective subscription (override else default) and filters by it", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: topicId } = await caller.topics.create({
+      name: "Product",
+      defaultSubscribed: true,
+    });
+    const ada = await seedContact(caller, "ada@example.com");
+    const bob = await seedContact(caller, "bob@example.com");
+    await caller.audience.contacts.setTopic({ contactId: bob, topicId, subscribed: false });
+
+    const all = await caller.topics.contacts({ topicId });
+    expect(all.total).toBe(2);
+    expect(new Map(all.items.map((r) => [r.email, r.subscribed]))).toEqual(
+      new Map([
+        ["ada@example.com", true],
+        ["bob@example.com", false],
+      ]),
+    );
+
+    const subscribed = await caller.topics.contacts({ topicId, subscribed: true });
+    expect(subscribed.items.map((r) => r.id)).toEqual([ada]);
+    expect(subscribed.total).toBe(1);
+
+    const unsubscribed = await caller.topics.contacts({ topicId, subscribed: false });
+    expect(unsubscribed.items.map((r) => r.id)).toEqual([bob]);
+    expect(unsubscribed.total).toBe(1);
+  });
+
+  it("pages with the keyset cursor and stays team-scoped", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const a = callerFor(teamA);
+    const b = callerFor(teamB);
+    const { id: topicId } = await a.topics.create({ name: "Digest", defaultSubscribed: false });
+    await seedContact(a, "a@example.com");
+    await seedContact(a, "b@example.com");
+    await seedContact(a, "c@example.com");
+    // Another team's contact must never enter the count or the page.
+    await seedContact(b, "d@example.com");
+
+    // Opt-out default with no overrides: every contact reads unsubscribed.
+    const page1 = await a.topics.contacts({ topicId, limit: 2 });
+    expect(page1.items).toHaveLength(2);
+    expect(page1.items.every((r) => r.subscribed === false)).toBe(true);
+    expect(page1.total).toBe(3);
+    expect(page1.nextCursor).not.toBeNull();
+
+    const page2 = await a.topics.contacts({
+      topicId,
+      limit: 2,
+      cursor: page1.nextCursor ?? undefined,
+    });
+    expect(page2.items).toHaveLength(1);
+    expect(page2.nextCursor).toBeNull();
+    // No row repeats or goes missing across the page boundary.
+    expect(new Set([...page1.items, ...page2.items].map((r) => r.id)).size).toBe(3);
+
+    // A foreign topic id is invisible, not empty.
+    await expect(b.topics.contacts({ topicId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
 describe("topics tenant isolation", () => {
   it("blocks cross-team list, delete, and contact-topic writes", async () => {
     const teamA = await createTeam(db, "team-a");

@@ -32,8 +32,12 @@ export function CopyChip({
   const { copied, copy, label } = useCopy(value);
   return (
     <span className="ms-chip" {...(title ? { title } : {})}>
-      {/* Width-constrained chips (table cells) end-ellipsize; the full value is copied. */}
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      {/* Width-constrained chips (table cells) end-ellipsize; the full value is copied.
+          minWidth 0 lets this flex item shrink below the nowrap value's min-content,
+          otherwise it overflows the chip's max-width instead of ellipsizing. */}
+      <span
+        style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+      >
         {display ?? value}
       </span>
       <button type="button" onClick={copy} aria-label={label}>

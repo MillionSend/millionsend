@@ -138,15 +138,28 @@ export const env = createEnv({
     STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
 
-    // S3-compatible object storage for team logo uploads (Cloudflare R2
-    // first-class). All five must be set to enable uploads; otherwise the
-    // upload UI is hidden everywhere. Objects are served publicly as
-    // STORAGE_S3_PUBLIC_URL/<key>.
-    STORAGE_S3_ENDPOINT: z.url().optional(),
-    STORAGE_S3_BUCKET: z.string().optional(),
-    STORAGE_S3_ACCESS_KEY_ID: z.string().optional(),
-    STORAGE_S3_SECRET_ACCESS_KEY: z.string().optional(),
-    STORAGE_S3_PUBLIC_URL: z.url().optional(),
+    // S3-compatible object storage (Cloudflare R2 first-class). ONE credential
+    // set shared by every S3-backed feature; each feature is enabled by its
+    // bucket variable below. "auto" is R2's region; other S3-compatibles set a
+    // real one when the endpoint needs it.
+    S3_ENDPOINT: z.url().optional(),
+    S3_ACCESS_KEY_ID: z.string().optional(),
+    S3_SECRET_ACCESS_KEY: z.string().optional(),
+    S3_REGION: z.string().default("auto"),
+
+    // Team logo uploads. The bucket must serve objects publicly; they are
+    // addressed as S3_STORAGE_PUBLIC_URL/<key>. Unset hides the upload UI
+    // everywhere.
+    S3_STORAGE_BUCKET: z.string().optional(),
+    S3_STORAGE_PUBLIC_URL: z.url().optional(),
+
+    // Backup sidecar gate + tuning (scripts/backup). Only the sidecar's shell
+    // scripts consume these; they are declared here so the cross-field boot
+    // checks below can reject partial configuration for the whole stack.
+    S3_BACKUP_BUCKET: z.string().optional(),
+    S3_BACKUP_PREFIX: z.string().optional(),
+    BACKUP_CRON: z.string().optional(),
+    BACKUP_RETENTION_DAYS: z.string().optional(),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
@@ -155,25 +168,36 @@ export const env = createEnv({
 
 export type Env = typeof env;
 
-const STORAGE_S3_KEYS = [
-  "STORAGE_S3_ENDPOINT",
-  "STORAGE_S3_BUCKET",
-  "STORAGE_S3_ACCESS_KEY_ID",
-  "STORAGE_S3_SECRET_ACCESS_KEY",
-  "STORAGE_S3_PUBLIC_URL",
-] as const;
+const S3_CREDENTIAL_KEYS = ["S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const;
+
+const S3_BUCKET_KEYS = ["S3_STORAGE_BUCKET", "S3_BACKUP_BUCKET"] as const;
+
+const BACKUP_TUNING_KEYS = ["S3_BACKUP_PREFIX", "BACKUP_CRON", "BACKUP_RETENTION_DAYS"] as const;
 
 /** Cross-field rules that per-field schemas cannot express. */
 export function assertEnvConsistency(e: Env): void {
   if (Boolean(e.SMTP_TLS_CERT_PATH) !== Boolean(e.SMTP_TLS_KEY_PATH)) {
     throw new Error("SMTP_TLS_CERT_PATH and SMTP_TLS_KEY_PATH must be set together");
   }
-  // Partial storage config is a misconfiguration, not "disabled": silently
-  // hiding the upload UI would make the missing variable invisible.
-  const storageSet = STORAGE_S3_KEYS.filter((key) => e[key]);
-  if (storageSet.length > 0 && storageSet.length < STORAGE_S3_KEYS.length) {
-    const missing = STORAGE_S3_KEYS.filter((key) => !e[key]).join(", ");
-    throw new Error(`STORAGE_S3_* must be set together; missing: ${missing}`);
+  // Partial S3 config is a misconfiguration, not "disabled": silently
+  // disabling a feature would make the missing variable invisible.
+  const credentialsSet = S3_CREDENTIAL_KEYS.filter((key) => e[key]);
+  if (credentialsSet.length > 0 && credentialsSet.length < S3_CREDENTIAL_KEYS.length) {
+    const missing = S3_CREDENTIAL_KEYS.filter((key) => !e[key]).join(", ");
+    throw new Error(`S3 credentials must be set together; missing: ${missing}`);
+  }
+  for (const bucket of S3_BUCKET_KEYS) {
+    if (e[bucket] && credentialsSet.length === 0) {
+      throw new Error(`${bucket} requires the S3 credentials (${S3_CREDENTIAL_KEYS.join(", ")})`);
+    }
+  }
+  if (Boolean(e.S3_STORAGE_BUCKET) !== Boolean(e.S3_STORAGE_PUBLIC_URL)) {
+    throw new Error("S3_STORAGE_BUCKET and S3_STORAGE_PUBLIC_URL must be set together");
+  }
+  for (const key of BACKUP_TUNING_KEYS) {
+    if (e[key] && !e.S3_BACKUP_BUCKET) {
+      throw new Error(`${key} requires S3_BACKUP_BUCKET`);
+    }
   }
   if (e.IS_CLOUD) {
     for (const key of [

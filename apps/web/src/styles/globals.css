@@ -1,7 +1,5 @@
-/* Design-system entry. Fonts load elsewhere by necessity:
-   - Erode via the Fontshare CDN <link> in the root layout — the Fontshare
-     EULA forbids redistributing the font files in this repo.
-   - JetBrains Mono via @fontsource imports in the root layout (OFL). */
+/* Design-system entry. JetBrains Mono loads via @fontsource imports in the
+   root layout (OFL); the UI sans is the system stack, nothing to load. */
 @import "./tokens/colors.css";
 @import "./tokens/typography.css";
 @import "./tokens/spacing.css";

@@ -121,10 +121,7 @@ function DnsRecordsStep({ id }: { id: string }) {
       <div className="ms-step" style={{ display: "flex", gap: 44 }}>
         <MarkerRail marker="02" color="var(--ms-bone)" line={false} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h2
-            className="ms-display"
-            style={{ fontSize: 22, margin: 0, fontWeight: 500, color: "var(--ms-bone)" }}
-          >
+          <h2 className="ms-display" style={{ fontSize: 22, margin: 0, color: "var(--ms-bone)" }}>
             {provider
               ? t("new.recordsTitleProvider", { provider: provider.name })
               : t("new.recordsTitle")}

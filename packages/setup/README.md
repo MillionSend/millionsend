@@ -26,7 +26,13 @@ and re-running is safe:
    sending); with an https `APP_BASE_URL`, also the SNS event topic and SES
    configuration set so bounces, complaints, and deliveries flow back into
    your instance. Keys are written into the same `.env`.
-3. **launch** — asks for a released image tag or immutable digest, downloads
+3. **object storage & backups** — one S3-compatible credential set (Cloudflare
+   R2 works out of the box) enables team logo uploads and scheduled database
+   backups. Creates (or adopts) both buckets — `millionsend-storage` and
+   `millionsend-backups` by default — and writes the `S3_*` lines. Public
+   access for the uploads bucket cannot be enabled over the S3 API, so it
+   prints the manual R2 instruction; keep the backups bucket private.
+4. **launch** — asks for a released image tag or immutable digest, downloads
    the standalone `docker-compose.yml` if the directory has none, then runs
    `docker compose up -d` (`--build` when your compose file builds from source).
 

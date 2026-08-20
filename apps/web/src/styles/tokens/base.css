@@ -12,13 +12,14 @@ body.ms {
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
-/* Display type: Erode 500, headings ≥20px only */
+/* Display type: the app sans at heading weight, headings ≥20px only */
 .ms-display {
-  font-family: var(--ms-font-display);
-  font-weight: 500;
+  font-family: var(--ms-font-sans);
+  font-weight: 600;
+  letter-spacing: -0.01em;
   line-height: 1.15;
 }
-/* Every number that counts: tabular grotesque, weight 800. Never Erode. */
+/* Every number that counts: tabular grotesque, weight 800. */
 .ms-digits {
   font-family: var(--ms-font-sans);
   font-weight: 800;

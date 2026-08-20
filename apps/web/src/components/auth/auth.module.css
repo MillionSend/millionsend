@@ -94,7 +94,7 @@
   }
 }
 
-/* Composed with the global .ms-display (Erode 500) — this only sizes/centers. */
+/* Composed with the global .ms-display — this only sizes/centers. */
 .headline {
   margin: 8px 0 0;
   font-size: var(--ms-fs-h2);

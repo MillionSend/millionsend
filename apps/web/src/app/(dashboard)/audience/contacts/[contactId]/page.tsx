@@ -15,6 +15,7 @@ import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { Switch } from "@/components/switch";
 import { useTRPC } from "@/lib/trpc";
 
 /* Types the timeline knows how to phrase; unknown kinds (added later than this
@@ -32,7 +33,7 @@ type KnownActivityType = (typeof ACTIVITY_TYPES)[number];
 
 function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
+    <div style={{ minWidth: 0 }}>
       <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
         {label}
       </p>
@@ -45,13 +46,12 @@ function EmptyValue() {
   return <span style={{ color: "var(--ms-faint)" }}>—</span>;
 }
 
-/** Wrapping row of name pills (segments / topics on the detail page);
- * items with an href render as links. */
+/** Wrapping row of linked name pills (segments on the detail page). */
 function ChipList({
   items,
   emptyLabel,
 }: {
-  items: { name: string; href?: string }[];
+  items: { name: string; href: string }[];
   emptyLabel: string;
 }) {
   if (items.length === 0) {
@@ -61,17 +61,11 @@ function ChipList({
   }
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
-      {items.map((item) =>
-        item.href ? (
-          <Link key={item.name} className="ms-chip" href={item.href}>
-            {item.name}
-          </Link>
-        ) : (
-          <span key={item.name} className="ms-chip">
-            {item.name}
-          </span>
-        ),
-      )}
+      {items.map((item) => (
+        <Link key={item.name} className="ms-chip" href={item.href}>
+          {item.name}
+        </Link>
+      ))}
     </div>
   );
 }
@@ -243,7 +237,6 @@ export default function ContactDetailPage() {
               <CrumbEnd label={row.email} />
             </>
           }
-          eyebrow={t("detail.eyebrow")}
           title={row.email}
           leading={<ContactAvatar email={row.email} name={name} size={44} />}
           actions={
@@ -379,10 +372,49 @@ export default function ContactDetailPage() {
             {t("detail.topics")}
           </p>
           {topicsQuery.isSuccess ? (
-            <ChipList
-              items={subscribedTopics.map((topic) => ({ name: topic.name }))}
-              emptyLabel={t("detail.noTopics")}
-            />
+            topicsQuery.data.length === 0 ? (
+              <p style={{ margin: "8px 0 0", fontSize: 14, color: "var(--ms-muted)" }}>
+                {t("detail.noTopics")}
+              </p>
+            ) : (
+              <div style={{ display: "grid", gap: 12, marginTop: 10 }}>
+                {topicsQuery.data.map((topic) => (
+                  <div
+                    key={topic.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ margin: 0, fontSize: 14, color: "var(--ms-bone)" }}>
+                        {topic.name}
+                      </p>
+                      {topic.description ? (
+                        <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
+                          {topic.description}
+                        </p>
+                      ) : null}
+                    </div>
+                    <Switch
+                      checked={topic.subscribed}
+                      // Also locked during the refetch after a toggle: the switch
+                      // still shows the pre-toggle state until fresh data lands.
+                      disabled={setTopicMutation.isPending || topicsQuery.isFetching}
+                      onChange={(subscribed) =>
+                        setTopicMutation.mutate(
+                          { contactId, topicId: topic.id, subscribed },
+                          { onSuccess: invalidate },
+                        )
+                      }
+                      ariaLabel={t("detail.toggleTopic", { name: topic.name })}
+                    />
+                  </div>
+                ))}
+              </div>
+            )
           ) : (
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
               <SkeletonChip width={90} />

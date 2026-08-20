@@ -35,11 +35,15 @@
     "textLabel": "Texto simples",
     "save": "Salvar",
     "saveAndClose": "Salvar e fechar",
+    "saved": "Salvo",
     "saveError": "Não foi possível salvar o modelo."
   },
   "picker": {
     "label": "Começar de um modelo",
     "none": "Em branco",
-    "hint": "Copia o conteúdo para cá. Edições futuras do modelo não mudam nada."
+    "hint": "Copia o conteúdo para cá. Edições futuras do modelo não mudam nada.",
+    "replaceTitle": "Substituir o conteúdo?",
+    "replaceBody": "Aplicar este modelo sobrescreve o corpo e o assunto atuais.",
+    "replaceConfirm": "Substituir conteúdo"
   }
 }

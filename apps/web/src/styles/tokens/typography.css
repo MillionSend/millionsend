@@ -1,6 +1,6 @@
-/* MillionSend type — Erode 500 display (≥20px only); quiet system grotesque for UI; mono for data. */
+/* MillionSend type — one quiet system grotesque for everything (headings carry
+   weight, not a second family; the wordmark is an outlined SVG); mono for data. */
 :root {
-  --ms-font-display: "Erode", "Erode Static", Georgia, serif;
   --ms-font-sans:
     -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Arial, sans-serif;
   --ms-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -11,7 +11,7 @@
   --ms-fs-body: 15px; /* body copy, input values */
   --ms-fs-section: 17px; /* card section headings */
   --ms-fs-h2: 22px; /* card titles, drawer titles */
-  --ms-fs-h1: 30px; /* page titles (Erode 500) */
+  --ms-fs-h1: 30px; /* page titles */
   --ms-fs-kpi: 40px; /* metric numbers (digits style) */
   --ms-fs-price: 44px; /* plan prices (digits style) */
 }

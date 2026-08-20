@@ -27,9 +27,10 @@ npx @millionsend/setup
 
 O assistente detecta o que já existe e oferece cada etapa — criar o `.env` a
 partir de um template embutido com segredos gerados, provisionar os recursos
-da AWS (abaixo), baixar o arquivo compose standalone e rodar
-`docker compose up -d`. Toda etapa pode ser pulada e é segura de repetir;
-`--dry-run` imprime o plano completo sem tocar em nada.
+da AWS e os buckets S3 para uploads e backups (ambos abaixo), baixar o
+arquivo compose standalone e rodar `docker compose up -d`. Toda etapa pode
+ser pulada e é segura de repetir; `--dry-run` imprime o plano completo sem
+tocar em nada.
 
 O equivalente manual usa a mesma imagem multi-arch pré-construída. O compose
 standalone exige de propósito uma tag de versão lançada ou um digest imutável,
@@ -111,6 +112,16 @@ padrões que funcionam localmente.
 | `IS_CLOUD` | Deixe `false`. `true` ativa comportamento de nuvem hospedada (KMS, cobrança via Stripe). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciais OAuth do "Continuar com Google". O botão só aparece com ambas definidas. URL de callback: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
+
+### Armazenamento de objetos (uploads e backups)
+
+| Variável | Propósito |
+| --- | --- |
+| `S3_ENDPOINT` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | UM conjunto de credenciais compatível com S3, compartilhado entre uploads de logo do time e backups do banco (o Cloudflare R2 funciona sem ajustes). Defina as três juntas. |
+| `S3_REGION` / `S3_PROVIDER` | Os padrões `auto` / `Cloudflare` servem para o R2. Outros serviços compatíveis com S3 definem uma região real se o endpoint exigir, e o nome do provider no rclone (`AWS`, `Minio`, …) para o job de backup. |
+| `S3_STORAGE_BUCKET` / `S3_STORAGE_PUBLIC_URL` | Bucket público de uploads (logos de time) e a URL base pública de onde ele serve. Defina juntas; sem elas a UI de upload não aparece em lugar nenhum. |
+| `S3_BACKUP_BUCKET` | Bucket PRIVADO para os dumps agendados do banco — nunca o bucket público de uploads. Sem ele o serviço `backup` fica desligado. |
+| `S3_BACKUP_PREFIX` / `BACKUP_CRON` / `BACKUP_RETENTION_DAYS` | Ajustes do backup: prefixo das chaves (padrão `backups`), agenda dos dumps (padrão `0 3 * * *`, UTC) e dias de dumps mantidos (padrão 14). |
 
 ## Configuração da AWS
 
@@ -372,23 +383,55 @@ sudo ufw allow 2587/tcp   # só se o relay SMTP estiver exposto
 sudo ufw enable
 ```
 
+## Armazenamento de objetos (logos de time)
+
+Opcional. Com um bucket compatível com S3 configurado, admins do time podem
+enviar um logo pelo dashboard; ele também marca as páginas hospedadas de
+descadastro quando a marca do MillionSend está oculta. UM conjunto de
+credenciais `S3_*` é compartilhado com o job de backup abaixo — cada recurso
+é então habilitado pela sua própria variável de bucket.
+
+A etapa de armazenamento do `npx @millionsend/setup` pergunta o endpoint e as
+chaves, cria (ou adota) os dois buckets — `millionsend-storage` e
+`millionsend-backups` por padrão — e escreve as linhas `S3_*` no `.env`. A
+única coisa que ela não consegue fazer pela API S3 é tornar público o bucket
+de uploads: no R2, habilite o acesso público no bucket (ou conecte um domínio
+customizado) e defina essa URL — os uploads são endereçados como
+`${S3_STORAGE_PUBLIC_URL}/<chave>`:
+
+```sh
+S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+S3_STORAGE_BUCKET=millionsend-storage
+S3_STORAGE_PUBLIC_URL=https://<url-publica-do-bucket-ou-dominio-customizado>
+```
+
+Mantenha os dois buckets separados: o acesso público do R2 vale para o bucket
+inteiro, então um dump do banco no bucket público de uploads ficaria legível
+para o mundo todo.
+
 ## Backups
 
 O serviço `backup` do compose faz um `pg_dump` agendado do Postgres e o envia
 para qualquer bucket compatível com S3 via rclone — o Cloudflare R2 funciona
-sem ajustes. Vem desligado por padrão: sem as variáveis `BACKUP_S3_*` o
-contêiner imprime `backups disabled — set BACKUP_S3_* to enable` e sai com
+sem ajustes. Vem desligado por padrão: sem `S3_BACKUP_BUCKET` o contêiner
+imprime `backups disabled — set S3_BACKUP_BUCKET to enable` e sai com
 código 0, inofensivo.
 
-Ative definindo as quatro no `.env` (o bucket precisa existir antes; para o R2
-os padrões `BACKUP_S3_PROVIDER=Cloudflare` e `BACKUP_S3_REGION=auto` já estão
-corretos):
+Ative definindo as credenciais S3 compartilhadas e um bucket de backup no
+`.env` (a etapa de armazenamento do assistente de setup cria o bucket e
+escreve essas linhas). O bucket precisa existir antes do primeiro dump e deve
+permanecer privado — os dumps contêm o banco de dados inteiro, e o acesso
+público do R2 vale para o bucket inteiro, então nunca reutilize o bucket
+público de uploads. Para o R2 os padrões `S3_PROVIDER=Cloudflare` e
+`S3_REGION=auto` já estão corretos:
 
 ```sh
-BACKUP_S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
-BACKUP_S3_BUCKET=millionsend-backups
-BACKUP_S3_ACCESS_KEY_ID=...
-BACKUP_S3_SECRET_ACCESS_KEY=...
+S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+S3_BACKUP_BUCKET=millionsend-backups
 ```
 
 `docker compose up -d --build backup` então faz um dump imediatamente e,
@@ -396,9 +439,9 @@ depois disso, segue o `BACKUP_CRON` (padrão `0 3 * * *`, UTC). Cada dump é um
 `pg_dump -Fc` (formato custom comprimido, nomeado
 `millionsend-YYYYMMDD-HHMMSS.dump`), o tamanho enviado é verificado contra o
 bucket antes de qualquer outra coisa, e dumps mais antigos que
-`BACKUP_RETENTION_DAYS` (padrão 14) são removidos. `BACKUP_S3_PREFIX` (padrão
+`BACKUP_RETENTION_DAYS` (padrão 14) são removidos. `S3_BACKUP_PREFIX` (padrão
 `backups`) define o prefixo das chaves. Outros serviços compatíveis com S3
-funcionam definindo `BACKUP_S3_PROVIDER` com o nome do provider no rclone
+funcionam definindo `S3_PROVIDER` com o nome do provider no rclone
 (`AWS`, `Minio`, …) e uma região real se o endpoint exigir.
 
 Os dumps contêm corpos de email criptografados com `MASTER_ENCRYPTION_KEY` —
@@ -418,10 +461,10 @@ Pare o app antes para que nada escreva no meio da restauração:
 docker compose stop millionsend smtp
 # liste o bucket, escolha um dump
 docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup \
-  sh -c 'rclone lsl ":s3:$BACKUP_S3_BUCKET/${BACKUP_S3_PREFIX:-backups}"'
+  sh -c 'rclone lsl ":s3:$S3_BACKUP_BUCKET/${S3_BACKUP_PREFIX:-backups}"'
 # baixe-o e restaure por cima do banco atual
 docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup \
-  sh -c 'rclone copyto ":s3:$BACKUP_S3_BUCKET/${BACKUP_S3_PREFIX:-backups}/millionsend-YYYYMMDD-HHMMSS.dump" /tmp/restore.dump \
+  sh -c 'rclone copyto ":s3:$S3_BACKUP_BUCKET/${S3_BACKUP_PREFIX:-backups}/millionsend-YYYYMMDD-HHMMSS.dump" /tmp/restore.dump \
     && pg_restore --clean --if-exists -d "$DATABASE_URL" /tmp/restore.dump'
 docker compose start millionsend smtp
 ```

@@ -237,10 +237,7 @@ export function SegmentDetail({ id }: { id: string }) {
       </div>
 
       <section style={{ marginTop: 26, maxWidth: 720 }}>
-        <h2
-          className="ms-display"
-          style={{ fontSize: 22, margin: 0, fontWeight: 500, color: "var(--ms-bone)" }}
-        >
+        <h2 className="ms-display" style={{ fontSize: 22, margin: 0, color: "var(--ms-bone)" }}>
           {data.filter === null ? t("detail.manualTitle") : t("detail.filterTitle")}
         </h2>
         {data.filter === null ? (
@@ -257,15 +254,7 @@ export function SegmentDetail({ id }: { id: string }) {
             />
             <FilterCountPreview filter={currentFilter} />
             {updateMutation.isError ? (
-              <p
-                style={{
-                  margin: "10px 0 0",
-                  color: "var(--ms-danger)",
-                  fontSize: "var(--ms-fs-label)",
-                }}
-              >
-                {t("builder.saveError")}
-              </p>
+              <p className="ms-field-error">{t("builder.saveError")}</p>
             ) : null}
             <div style={{ marginTop: 16 }}>
               <button
@@ -306,15 +295,7 @@ export function SegmentDetail({ id }: { id: string }) {
             />
           </div>
           {renameMutation.isError ? (
-            <p
-              style={{
-                margin: "10px 0 0",
-                color: "var(--ms-danger)",
-                fontSize: "var(--ms-fs-label)",
-              }}
-            >
-              {t("detail.renameError")}
-            </p>
+            <p className="ms-field-error">{t("detail.renameError")}</p>
           ) : null}
           <ModalFooter>
             <button type="button" className="ms-btn ms-btn-secondary" onClick={closeRename}>
@@ -348,13 +329,7 @@ export function SegmentDetail({ id }: { id: string }) {
             {t("deleteBody", { name: data.name })}
           </p>
           {deleteMutation.isError ? (
-            <p
-              style={{
-                margin: "10px 0 0",
-                color: "var(--ms-danger)",
-                fontSize: "var(--ms-fs-label)",
-              }}
-            >
+            <p className="ms-field-error">
               {deleteMutation.error.data?.code === "CONFLICT" ? t("deleteInUse") : t("deleteError")}
             </p>
           ) : null}

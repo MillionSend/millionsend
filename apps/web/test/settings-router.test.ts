@@ -113,6 +113,31 @@ describe("settings.smtp", () => {
     // No field may carry an ms_ API key.
     expect(JSON.stringify(smtp)).not.toMatch(/ms_/);
   });
+
+  it("derives TLS flags from env — both paths required, and never ships the paths", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    const caller = callerFor("u1", teamId, "owner");
+
+    vi.stubEnv("SMTP_TLS_CERT_PATH", "");
+    vi.stubEnv("SMTP_TLS_KEY_PATH", "");
+    vi.stubEnv("SMTP_ALLOW_INSECURE_AUTH", "");
+    const bare = await caller.settings.smtp.get();
+    expect(bare.tlsConfigured).toBe(false);
+    expect(bare.allowInsecureAuth).toBe(false);
+
+    // Cert without key is not TLS-configured.
+    vi.stubEnv("SMTP_TLS_CERT_PATH", "/etc/ssl/relay.crt");
+    expect((await caller.settings.smtp.get()).tlsConfigured).toBe(false);
+
+    vi.stubEnv("SMTP_TLS_KEY_PATH", "/etc/ssl/relay.key");
+    const withTls = await caller.settings.smtp.get();
+    expect(withTls.tlsConfigured).toBe(true);
+    expect(JSON.stringify(withTls)).not.toContain("/etc/ssl");
+
+    vi.stubEnv("SMTP_ALLOW_INSECURE_AUTH", "true");
+    expect((await caller.settings.smtp.get()).allowInsecureAuth).toBe(true);
+  });
 });
 
 describe("settings.unsubscribe", () => {
