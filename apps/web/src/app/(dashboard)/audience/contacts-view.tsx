@@ -57,7 +57,7 @@ function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
 function ContactsSkeleton() {
   const widths = ["58%", "42%", "66%", "50%", "38%"];
   return (
-    <Table gutter={36}>
+    <Table gutter={28}>
       <ContactsHead />
       <tbody>
         {widths.map((width, row) => (
@@ -546,7 +546,7 @@ export function AudienceContactsView() {
         )
       ) : (
         <>
-          <Table gutter={36}>
+          <Table gutter={28}>
             <ContactsHead
               selectAll={
                 <input
