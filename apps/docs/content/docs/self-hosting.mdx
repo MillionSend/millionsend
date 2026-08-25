@@ -105,7 +105,7 @@ working local defaults.
 | `WEB_PORT` | Host port the compose file publishes the dashboard on (the web process is always 3000 inside the container). Keep `APP_BASE_URL` in sync. |
 | `DOCS_PORT` | Host port the compose file publishes this documentation site on (the docs process is always 3002 inside the container). |
 | `SMTP_PORT` | SMTP relay listen port (default `2587`). |
-| `SMTP_TLS_CERT_PATH` / `SMTP_TLS_KEY_PATH` | STARTTLS keypair for the SMTP relay (PEM paths inside the container). Both set: STARTTLS is offered and required before AUTH. Without the pair, AUTH is disabled. |
+| `SMTP_TLS_CERT_PATH` / `SMTP_TLS_KEY_PATH` | STARTTLS keypair for the SMTP relay (PEM paths inside the container). Both set: STARTTLS is offered and required before AUTH. Without the pair the relay refuses to start (unless `SMTP_ALLOW_INSECURE_AUTH=true`). |
 | `SMTP_ALLOW_INSECURE_AUTH` | Explicit local/private-network escape hatch for plaintext SMTP AUTH. Keep `false`; never combine `true` with a public bind. |
 | `IS_CLOUD` | Leave `false`. `true` enables hosted-cloud behavior (KMS, Stripe billing). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials for "Continue with Google". The button appears only when both are set. Callback URL: `{APP_BASE_URL}/api/auth/callback/google`. |
@@ -187,7 +187,7 @@ Connection details:
 - **Password:** an `ms_` API key from the dashboard.
 - **Encryption:** STARTTLS is offered (and required before AUTH) when
   `SMTP_TLS_CERT_PATH` and `SMTP_TLS_KEY_PATH` point at a PEM keypair. Without
-  one, AUTH is disabled unless `SMTP_ALLOW_INSECURE_AUTH=true` is explicitly
+  one, the relay refuses to start unless `SMTP_ALLOW_INSECURE_AUTH=true` is explicitly
   enabled for a trusted private network.
 
 ### STARTTLS with your existing certificates

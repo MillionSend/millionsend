@@ -18,8 +18,8 @@
     "passwordNote": "Use qualquer chave de API como senha.",
     "passwordLink": "Chaves de API",
     "passwordTooltip": "O relay autentica com qualquer uma das suas chaves de API — cole uma no lugar de YOUR_API_KEY. As chaves nunca são exibidas aqui.",
-    "tlsWarnTitle": "SMTP AUTH está desativado",
-    "tlsWarnBody": "Esta implantação não tem certificado TLS para o relay, então os clientes não conseguem autenticar. Defina <code>SMTP_TLS_CERT_PATH</code> e <code>SMTP_TLS_KEY_PATH</code>, ou ative <code>SMTP_ALLOW_INSECURE_AUTH</code> apenas em uma rede privada e confiável.",
+    "tlsWarnTitle": "O relay SMTP não está rodando",
+    "tlsWarnBody": "Esta implantação não tem certificado TLS para o relay, então o serviço smtp se recusa a iniciar e fica reiniciando. Defina <code>SMTP_TLS_CERT_PATH</code> e <code>SMTP_TLS_KEY_PATH</code>, ou ative <code>SMTP_ALLOW_INSECURE_AUTH</code> apenas em uma rede privada e confiável.",
     "insecureNote": "TLS não está configurado e <code>SMTP_ALLOW_INSECURE_AUTH</code> está ativo: os clientes autenticam sem criptografia. Defina <code>SMTP_TLS_CERT_PATH</code> e <code>SMTP_TLS_KEY_PATH</code> para exigir STARTTLS.",
     "docs": "Documentação do SMTP"
   },
