@@ -479,7 +479,7 @@ table.ms-table {
 }
 .ms-table .ms-check-cell .ms-checkbox {
   position: absolute;
-  left: -30px;
+  left: -22px;
   top: 50%;
   transform: translateY(-50%);
   opacity: 0;
