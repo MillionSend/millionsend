@@ -470,12 +470,25 @@ table.ms-table {
 
 /* Selection column: invisible until the row is hovered, the box carries state,
    or keyboard focus lands on it — so an unselected table stays quiet. */
+/* The cell takes no width: the box hangs in the Table gutter outside the
+   first column, so selection never shifts row content. */
 .ms-table .ms-check-cell {
-  width: 28px;
-  padding-right: 0;
+  width: 0;
+  padding: 0;
+  position: relative;
 }
 .ms-table .ms-check-cell .ms-checkbox {
+  position: absolute;
+  left: -30px;
+  top: 50%;
+  transform: translateY(-50%);
   opacity: 0;
+}
+.ms-table thead th.ms-check-cell {
+  background: none;
+}
+.ms-table thead th.ms-check-cell + th {
+  border-radius: var(--ms-r-input) 0 0 var(--ms-r-input);
 }
 .ms-table tr:hover .ms-check-cell .ms-checkbox,
 .ms-table tr.row-selected .ms-check-cell .ms-checkbox,
