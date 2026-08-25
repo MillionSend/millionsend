@@ -110,6 +110,7 @@ working local defaults.
 | `IS_CLOUD` | Leave `false`. `true` enables hosted-cloud behavior (KMS, Stripe billing). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials for "Continue with Google". The button appears only when both are set. Callback URL: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Same, for GitHub. Callback URL: `{APP_BASE_URL}/api/auth/callback/github`. |
+| `AUTH_EMAIL_FROM` | Sender for account emails (password reset), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery only appears when this is set and SES credentials are configured — leave unset to hide it entirely. |
 
 ### Object storage (uploads & backups)
 

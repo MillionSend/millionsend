@@ -10,6 +10,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { isAwsCredentialError } from "@/lib/aws-errors";
 import { isInstanceOperator } from "../instance-operator";
+import { awsCredentialsConfigured, passwordRecoveryEnabled } from "../system-mail";
 import { router, teamProcedure } from "../trpc";
 
 /**
@@ -70,10 +71,7 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
      * so the dashboard warns instead of assuming it works.
      */
     awsReadiness: teamProcedure.query(() => ({
-      credentialsConfigured:
-        Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY) ||
-        process.env.AWS_DEFAULT_CHAIN === "true" ||
-        process.env.AWS_DEFAULT_CHAIN === "1",
+      credentialsConfigured: awsCredentialsConfigured(),
       region: env.AWS_REGION,
     })),
 
@@ -85,6 +83,9 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       // The setup page bakes the SNS subscription endpoint into its generated
       // setup script; null means the events section is omitted.
       appBaseUrl: env.APP_BASE_URL ?? null,
+      // Why the sign-in screen may hide "Forgot password?": recovery needs
+      // SES credentials plus AUTH_EMAIL_FROM.
+      passwordRecoveryEnabled: passwordRecoveryEnabled(),
     })),
 
     /**

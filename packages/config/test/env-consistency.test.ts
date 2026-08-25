@@ -69,3 +69,15 @@ it("rejects backup tuning without S3_BACKUP_BUCKET", () => {
     "BACKUP_RETENTION_DAYS requires S3_BACKUP_BUCKET",
   );
 });
+
+it("rejects an AUTH_EMAIL_FROM that does not parse, accepts both valid forms", () => {
+  expect(() => assertEnvConsistency(fakeEnv({ AUTH_EMAIL_FROM: "not-an-email" }))).toThrow(
+    "AUTH_EMAIL_FROM",
+  );
+  expect(() =>
+    assertEnvConsistency(fakeEnv({ AUTH_EMAIL_FROM: "no-reply@mail.example.com" })),
+  ).not.toThrow();
+  expect(() =>
+    assertEnvConsistency(fakeEnv({ AUTH_EMAIL_FROM: "MillionSend <no-reply@mail.example.com>" })),
+  ).not.toThrow();
+});

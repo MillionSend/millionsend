@@ -1,0 +1,9 @@
+{
+  "subject": "Redefina sua senha do MillionSend",
+  "greeting": "Olá, {name},",
+  "body": "Recebemos um pedido para redefinir a senha da sua conta. Clique no botão abaixo para escolher uma nova.",
+  "button": "Redefinir senha",
+  "linkFallback": "Ou copie este link no seu navegador:",
+  "expiry": "Este link expira em {minutes} minutos.",
+  "ignore": "Se você não fez este pedido, ignore este email — sua senha não será alterada."
+}

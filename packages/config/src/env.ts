@@ -27,6 +27,21 @@ export function parseSnsTopicArns(value: string | undefined): string[] | undefin
 export const SES_MAX_SEND_RATE_DEFAULT = 14;
 export const EMAIL_RETENTION_DAYS_DEFAULT = 30;
 
+const emailAddress = z.email();
+
+/**
+ * Parse a mail From value — `Name <user@domain>` or a bare address — into its
+ * display name and address. Null when the address part is not a valid email,
+ * so boot validation can reject a typo instead of failing on the first send.
+ */
+export function parseEmailFrom(value: string): { name: string | null; address: string } | null {
+  const match = /^([^<>]*)<([^<>\s]+)>$/.exec(value.trim());
+  const name = match?.[1]?.trim().replace(/^"(.*)"$/, "$1") || null;
+  const address = match ? (match[2] ?? "") : value.trim();
+  if (!emailAddress.safeParse(address).success) return null;
+  return { name, address };
+}
+
 // Canonical base64 only: Buffer.from silently skips foreign characters, so a
 // mangled key could pass a length check yet decode differently elsewhere —
 // which would make previously encrypted bodies unrecoverable.
@@ -118,6 +133,11 @@ export const env = createEnv({
     TERMS_URL: z.url().optional(),
     PRIVACY_URL: z.url().optional(),
 
+    // Sender for system emails (password reset), as `Name <user@domain>` or a
+    // bare address; its domain must be a verified identity in this instance's
+    // SES account. Unset disables password recovery entirely.
+    AUTH_EMAIL_FROM: z.string().optional(),
+
     // Dashboard session signing secret (`openssl rand -base64 32`).
     // Required only by the web process, which asserts it at boot.
     BETTER_AUTH_SECRET: z.string().min(32).optional(),
@@ -178,6 +198,9 @@ const BACKUP_TUNING_KEYS = ["S3_BACKUP_PREFIX", "BACKUP_CRON", "BACKUP_RETENTION
 export function assertEnvConsistency(e: Env): void {
   if (Boolean(e.SMTP_TLS_CERT_PATH) !== Boolean(e.SMTP_TLS_KEY_PATH)) {
     throw new Error("SMTP_TLS_CERT_PATH and SMTP_TLS_KEY_PATH must be set together");
+  }
+  if (e.AUTH_EMAIL_FROM && parseEmailFrom(e.AUTH_EMAIL_FROM) === null) {
+    throw new Error('AUTH_EMAIL_FROM must be "Name <user@domain>" or a bare email address');
   }
   // Partial S3 config is a misconfiguration, not "disabled": silently
   // disabling a feature would make the missing variable invisible.

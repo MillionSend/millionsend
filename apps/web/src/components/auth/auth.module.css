@@ -201,3 +201,24 @@
 .legal a {
   color: var(--ms-muted);
 }
+
+/* Password label row: field label left, "Forgot password?" link right. */
+.labelRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.forgot {
+  font-size: var(--ms-fs-label);
+}
+
+/* Neutral recovery outcome line ("check your email"): calm subline voice,
+   never a success/danger tint. */
+.notice {
+  margin: 0;
+  color: var(--ms-muted);
+  font-size: var(--ms-fs-label);
+  text-align: center;
+  line-height: 1.6;
+}
