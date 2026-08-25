@@ -41,6 +41,12 @@ export {
   type TrackedDnsRecord,
 } from "./domain-verification.js";
 export {
+  createSesSendClient,
+  type SesSendClient,
+  type SimpleEmail,
+  sendSimpleEmail,
+} from "./send.js";
+export {
   type ParsedSesEvent,
   parseSesEvent,
   type SesEventType,

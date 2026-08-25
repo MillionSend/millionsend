@@ -3,6 +3,12 @@ import { type Db, getDb, schema } from "@millionsend/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
+import {
+  passwordRecoveryEnabled,
+  RESET_TOKEN_TTL_MINUTES,
+  type SystemMailDeps,
+  sendPasswordResetEmail,
+} from "./system-mail";
 
 export type Auth = ReturnType<typeof createAuth>;
 
@@ -50,7 +56,8 @@ export function enabledSocialProviders(): { google: boolean; github: boolean } {
   };
 }
 
-function createAuth() {
+/** Exported for tests, which inject a PGlite db and a captured mail sender. */
+export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
   // env.ts leaves BETTER_AUTH_SECRET optional (api/worker don't need it);
   // the web process is the one that must refuse to run without it.
   if (!env.BETTER_AUTH_SECRET) {
@@ -58,7 +65,7 @@ function createAuth() {
   }
   const baseURL = resolveBaseUrl(env.APP_BASE_URL);
   return betterAuth({
-    database: drizzleAdapter(getDb(), {
+    database: drizzleAdapter(db, {
       provider: "pg",
       schema: {
         user: schema.user,
@@ -74,6 +81,39 @@ function createAuth() {
       minPasswordLength: 8,
       maxPasswordLength: 128,
       revokeSessionsOnPasswordReset: true,
+      resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_MINUTES * 60,
+      // Left unset when the instance cannot deliver the email, which keeps
+      // Better Auth's own RESET_PASSWORD_DISABLED 400 on the endpoint — the
+      // sign-in screen hides the link for the same reason.
+      ...(passwordRecoveryEnabled()
+        ? {
+            sendResetPassword: async (
+              data: {
+                user: { id: string; email: string; name: string };
+                url: string;
+                token: string;
+              },
+              request?: Request,
+            ) => {
+              await sendPasswordResetEmail(db, data, request, mail);
+            },
+          }
+        : {}),
+    },
+    /**
+     * Windows are seconds; storage is Better Auth's in-memory default
+     * (per-process — fine for the single web replica this deploy runs).
+     * The IP key comes from the default x-forwarded-for header, matching the
+     * nginx config in SELF_HOSTING.md; a client-appended (spoofed) multi-value
+     * chain is rejected by Better Auth and collapses into one shared bucket,
+     * so spoofing cannot widen a limit.
+     */
+    rateLimit: {
+      customRules: {
+        "/request-password-reset": { window: 15 * 60, max: 3 },
+        "/reset-password": { window: 15 * 60, max: 5 },
+        "/reset-password/*": { window: 15 * 60, max: 5 },
+      },
     },
     socialProviders: {
       ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
@@ -90,7 +130,7 @@ function createAuth() {
       user: {
         create: {
           before: async () => {
-            await assertSignupAllowed(getDb(), env.ALLOW_SIGNUP);
+            await assertSignupAllowed(db, env.ALLOW_SIGNUP);
           },
         },
       },

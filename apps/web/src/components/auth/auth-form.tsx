@@ -14,8 +14,8 @@ import { GitHubIcon, GoogleIcon } from "./social-icons";
 const STRENGTH_TONES = ["", "var(--ms-danger)", "var(--ms-warn)", "var(--ms-success)"] as const;
 const STRENGTH_KEYS = ["", "weak", "fair", "strong"] as const;
 
-/** Three bars + a word under the signup password field; hidden while empty. */
-function StrengthMeter({ password }: { password: string }) {
+/** Three bars + a word under a new-password field; hidden while empty. */
+export function StrengthMeter({ password }: { password: string }) {
   const t = useTranslations("auth.strength");
   const score = passwordStrength(password);
   if (score === 0) return null;
@@ -44,10 +44,13 @@ export function AuthForm({
   mode,
   providers,
   legal,
+  forgotPassword = false,
 }: {
   mode: "login" | "signup";
   providers: SocialProviderFlags;
   legal: LegalLinks;
+  /** Login only: render the "Forgot password?" link (instance can send the reset email). */
+  forgotPassword?: boolean;
 }) {
   const t = useTranslations(`auth.${mode}`);
   const tSocial = useTranslations("auth.social");
@@ -197,7 +200,14 @@ export function AuthForm({
           </div>
           {passwordShown ? (
             <div className={`ms-field ${styles.field}`}>
-              <label htmlFor="password">{t("password")}</label>
+              <div className={styles.labelRow}>
+                <label htmlFor="password">{t("password")}</label>
+                {mode === "login" && forgotPassword ? (
+                  <Link href="/forgot-password" className={styles.forgot}>
+                    {t("forgot")}
+                  </Link>
+                ) : null}
+              </div>
               <input
                 ref={passwordRef}
                 id="password"
