@@ -152,7 +152,7 @@ Connection details:
 - Password: an `ms_` API key from the dashboard.
 - Encryption: STARTTLS is offered (and required before AUTH) when
   `SMTP_TLS_CERT_PATH` and `SMTP_TLS_KEY_PATH` point at a PEM keypair. Without
-  one, AUTH is disabled unless `SMTP_ALLOW_INSECURE_AUTH=true` is explicitly set
+  one, the relay refuses to start unless `SMTP_ALLOW_INSECURE_AUTH=true` is explicitly set
   for a trusted private network.
 
 Before exposing the relay to the internet, give it a certificate — otherwise SMTP
