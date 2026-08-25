@@ -326,6 +326,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     // --- social login step (before launch, so the stack starts with it) ---
     await socialLoginStep(rl, appBaseUrl, writeEnv);
 
+    // --- account email (password recovery sender) ---
+    await accountEmailStep(rl, writeEnv);
+
     return await launchStep(
       rl,
       interactive,
@@ -397,6 +400,54 @@ async function socialLoginStep(
         .join("\n");
       console.log(`No .env here — paste into .env where MillionSend runs:\n\n${block}\n`);
     }
+  }
+}
+
+/** Accepted shapes mirror packages/config parseEmailFrom; boot re-validates. */
+const EMAIL_FROM_RE = /^(?:[^<>]+<)?[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+>?$/;
+
+/**
+ * Optional account-email step: the sender for password-reset mail. Env-only;
+ * recovery stays hidden until this AND SES credentials are set, so skipping
+ * is safe. The domain must be a verified identity — usually added later in
+ * the dashboard, which is why this only sanity-checks the address shape.
+ */
+async function accountEmailStep(
+  rl: LineReader,
+  writeEnv: (entries: Record<string, string>) => boolean,
+): Promise<void> {
+  console.log("");
+  const wanted = await offer(
+    rl,
+    'Optional: account emails. AUTH_EMAIL_FROM is the sender for password-reset mail; without it the "Forgot password?" link stays hidden. Set it now?',
+    false,
+  );
+  if (!wanted) {
+    console.log(
+      dim(
+        "Skipped — set AUTH_EMAIL_FROM in .env any time (its domain must be verified in the dashboard).",
+      ),
+    );
+    return;
+  }
+  const value = (
+    await rl.question('AUTH_EMAIL_FROM ("Name <user@domain>" or a bare address; empty skips): ')
+  ).trim();
+  if (value === "") return;
+  if (!EMAIL_FROM_RE.test(value)) {
+    console.log(dim("Doesn't look like an address — skipped. Set AUTH_EMAIL_FROM in .env later."));
+    return;
+  }
+  if (writeEnv({ AUTH_EMAIL_FROM: value })) {
+    console.log(
+      dim(
+        "AUTH_EMAIL_FROM written to .env. Its domain must be a verified sending domain in this instance.",
+      ),
+    );
+  } else {
+    console.log(
+      `No .env here — paste into .env where MillionSend runs:\n\nAUTH_EMAIL_FROM=${value}\n`,
+    );
   }
 }
 

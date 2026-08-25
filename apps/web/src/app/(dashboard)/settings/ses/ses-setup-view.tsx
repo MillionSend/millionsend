@@ -524,6 +524,15 @@ export function SesSetupView() {
               detail={credentialsOk ? t("credentials.keysConfigured") : t("credentials.keysChain")}
             />
             <CheckRow
+              ok={sesEnv.data.passwordRecoveryEnabled}
+              name="AUTH_EMAIL_FROM"
+              detail={
+                sesEnv.data.passwordRecoveryEnabled
+                  ? t("credentials.set")
+                  : t("credentials.authEmailNote")
+              }
+            />
+            <CheckRow
               ok
               name="AWS_REGION"
               detail={<span className="ms-mono">{readiness.data.region}</span>}
