@@ -66,9 +66,10 @@ export function buildResetEmail(input: {
   const greeting = m.greeting.replace("{name}", input.name);
   const expiry = m.expiry.replace("{minutes}", String(RESET_TOKEN_TTL_MINUTES));
   const url = escapeHtml(input.url);
+  // The wordmark is served by the same app that minted the reset link.
   const html = `<div style="background:#f4f4f5;padding:32px 16px;font-family:-apple-system,'Segoe UI',Roboto,sans-serif">
   <div style="max-width:440px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px">
-    <img src="${escapeHtml(env.APP_BASE_URL)}/email/wordmark.png" width="174" height="24" alt="MillionSend" style="display:block;height:24px;width:auto;margin:0 0 24px;border:0">
+    <img src="${escapeHtml(new URL(input.url).origin)}/email/wordmark.png" width="174" height="24" alt="MillionSend" style="display:block;height:24px;width:auto;margin:0 0 24px;border:0">
     <p style="font-size:14px;line-height:1.5;color:#18181b;margin:0 0 12px">${escapeHtml(greeting)}</p>
     <p style="font-size:14px;line-height:1.5;color:#18181b;margin:0 0 24px">${m.body}</p>
     <a href="${url}" style="display:inline-block;background:#18181b;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;padding:12px 20px">${m.button}</a>
