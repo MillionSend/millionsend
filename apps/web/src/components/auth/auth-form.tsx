@@ -203,7 +203,14 @@ export function AuthForm({
               <div className={styles.labelRow}>
                 <label htmlFor="password">{t("password")}</label>
                 {mode === "login" && forgotPassword ? (
-                  <Link href="/forgot-password" className={styles.forgot}>
+                  <Link
+                    href={
+                      email.trim()
+                        ? `/forgot-password?email=${encodeURIComponent(email.trim())}`
+                        : "/forgot-password"
+                    }
+                    className={styles.forgot}
+                  >
                     {t("forgot")}
                   </Link>
                 ) : null}

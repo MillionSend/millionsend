@@ -4,7 +4,15 @@ import { passwordRecoveryEnabled, RESET_TOKEN_TTL_MINUTES } from "@/server/syste
 
 // Gated like the login screen's link: an instance that cannot deliver the
 // reset email has no recovery flow to offer (the endpoint 400s there too).
-export default function ForgotPasswordPage() {
+export default async function ForgotPasswordPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ email?: string | string[] }>;
+}) {
   if (!passwordRecoveryEnabled()) redirect("/login");
-  return <ForgotPasswordForm minutes={RESET_TOKEN_TTL_MINUTES} />;
+  // The login link carries the address already typed; it only seeds the
+  // input, so a cap is the only validation needed here.
+  const raw = (await searchParams).email;
+  const initialEmail = typeof raw === "string" ? raw.trim().slice(0, 254) : "";
+  return <ForgotPasswordForm minutes={RESET_TOKEN_TTL_MINUTES} initialEmail={initialEmail} />;
 }
