@@ -16,11 +16,15 @@ function stubRecoveryEnv(enabled: boolean) {
 }
 
 describe("ForgotPasswordPage", () => {
-  it("redirects to /login when recovery is disabled", () => {
+  const params = (query: Record<string, string | string[]> = {}) => ({
+    searchParams: Promise.resolve(query),
+  });
+
+  it("redirects to /login when recovery is disabled", async () => {
     stubRecoveryEnv(false);
     let digest = "";
     try {
-      ForgotPasswordPage();
+      await ForgotPasswordPage(params());
     } catch (error) {
       digest = (error as { digest?: string }).digest ?? "";
     }
@@ -28,11 +32,22 @@ describe("ForgotPasswordPage", () => {
     expect(digest).toContain("/login");
   });
 
-  it("renders the form with the token TTL when recovery is enabled", () => {
+  it("renders the form with the token TTL when recovery is enabled", async () => {
     stubRecoveryEnv(true);
-    const page = ForgotPasswordPage();
+    const page = await ForgotPasswordPage(params());
     expect(page.type).toBe(ForgotPasswordForm);
     expect(page.props.minutes).toBe(RESET_TOKEN_TTL_MINUTES);
+    expect(page.props.initialEmail).toBe("");
+  });
+
+  it("seeds the email from the login link's query, trimmed and capped", async () => {
+    stubRecoveryEnv(true);
+    const seeded = await ForgotPasswordPage(params({ email: "  ada@example.com " }));
+    expect(seeded.props.initialEmail).toBe("ada@example.com");
+    const long = await ForgotPasswordPage(params({ email: "a".repeat(300) }));
+    expect(long.props.initialEmail).toHaveLength(254);
+    const arr = await ForgotPasswordPage(params({ email: ["x@y.z", "w@y.z"] }));
+    expect(arr.props.initialEmail).toBe("");
   });
 });
 

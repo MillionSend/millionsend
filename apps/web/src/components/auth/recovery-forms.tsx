@@ -40,9 +40,15 @@ function Screen({ title, children }: { title: string; children: React.ReactNode 
  * probe which emails have accounts; only a 429 adds a "try later" line, which
  * the server returns before touching the database.
  */
-export function ForgotPasswordForm({ minutes }: { minutes: number }) {
+export function ForgotPasswordForm({
+  minutes,
+  initialEmail = "",
+}: {
+  minutes: number;
+  initialEmail?: string;
+}) {
   const t = useTranslations("auth.forgot");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail);
   const [pending, setPending] = useState(false);
   const [sent, setSent] = useState(false);
   const [rateLimited, setRateLimited] = useState(false);
