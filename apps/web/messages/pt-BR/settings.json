@@ -82,7 +82,8 @@
       "keysConfigured": "configuradas",
       "keysChain": "não definidas — a cadeia padrão de provedores será tentada",
       "snsNote": "não definido — a ingestão de eventos está desativada",
-      "configSetNote": "não definido — o SES não publica eventos"
+      "configSetNote": "não definido — o SES não publica eventos",
+      "authEmailNote": "não definido — a recuperação de senha fica oculta"
     },
     "test": {
       "title": "Testar conexão",

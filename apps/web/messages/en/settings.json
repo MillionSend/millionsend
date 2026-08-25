@@ -82,7 +82,8 @@
       "keysConfigured": "configured",
       "keysChain": "not set — the default provider chain will be attempted",
       "snsNote": "not set — event ingestion is disabled",
-      "configSetNote": "not set — SES publishes no events"
+      "configSetNote": "not set — SES publishes no events",
+      "authEmailNote": "not set — password recovery is hidden"
     },
     "test": {
       "title": "Test connection",
