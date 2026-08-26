@@ -40,6 +40,7 @@ export {
   type DomainVerificationResult,
   type TrackedDnsRecord,
 } from "./domain-verification.js";
+export { createKeyringFromEnv, type KeyringEnv } from "./kms.js";
 export {
   createSesSendClient,
   type SesSendClient,

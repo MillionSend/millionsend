@@ -76,6 +76,13 @@ DATABASE_URL=postgres://millionsend:millionsend@postgres:5432/millionsend
 # Losing it makes stored bodies unrecoverable; changing it orphans old bodies.
 MASTER_ENCRYPTION_KEY=
 
+# Cloud only (IS_CLOUD=true): AWS KMS key (ARN or key id) that wraps per-email
+# data keys instead of MASTER_ENCRYPTION_KEY; self-host leaves it unset. When
+# migrating an existing instance to cloud, keep MASTER_ENCRYPTION_KEY set
+# alongside it - bodies sealed under the old key stay readable while new ones
+# are sealed under KMS.
+# KMS_KEY_ID=
+
 # Dashboard session signing secret. Generate: openssl rand -base64 32
 BETTER_AUTH_SECRET=
 

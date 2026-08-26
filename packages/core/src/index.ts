@@ -41,6 +41,12 @@ export {
 } from "./crypto/envelope.js";
 export { EnvKeyring, type Keyring } from "./crypto/keyring.js";
 export {
+  CompositeKeyring,
+  KMS_KEY_VERSION,
+  type KmsDekClient,
+  KmsKeyring,
+} from "./crypto/kms-keyring.js";
+export {
   broadcastSendSpacingMs,
   type DeliverabilityEvaluation,
   type DeliverabilityHealth,

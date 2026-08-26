@@ -89,6 +89,9 @@ export const env = createEnv({
     // Envelope-encryption KEK for email bodies at rest.
     // Self-host: required. Cloud: omitted in favor of KMS_KEY_ID.
     MASTER_ENCRYPTION_KEY: canonicalBase64Key.optional(),
+    // Cloud: KMS key (ARN or key id) that wraps per-email DEKs instead of
+    // the env KEK. Set alongside MASTER_ENCRYPTION_KEY, old env-sealed
+    // ciphertexts stay readable (self-host → cloud migration).
     KMS_KEY_ID: z.string().optional(),
 
     // BYO-SES for self-host; cloud uses the platform account.
@@ -203,6 +206,13 @@ export function assertEnvConsistency(e: Env): void {
   }
   if (e.AUTH_EMAIL_FROM && parseEmailFrom(e.AUTH_EMAIL_FROM) === null) {
     throw new Error('AUTH_EMAIL_FROM must be "Name <user@domain>" or a bare email address');
+  }
+  // Half a keypair would silently fall back to the default provider chain
+  // everywhere AWS clients are built (SES, KMS) — reject it instead. A fully
+  // absent pair stays valid: the chain (instance profile, SSO) is a real
+  // credential source that env vars cannot attest to.
+  if (Boolean(e.AWS_ACCESS_KEY_ID) !== Boolean(e.AWS_SECRET_ACCESS_KEY)) {
+    throw new Error("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set together");
   }
   // Partial S3 config is a misconfiguration, not "disabled": silently
   // disabling a feature would make the missing variable invisible.

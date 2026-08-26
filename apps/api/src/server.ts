@@ -1,20 +1,18 @@
 import { serve } from "@hono/node-server";
 import { env } from "@millionsend/config";
-import { EnvKeyring } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
 import { Queue } from "@millionsend/queue";
 import {
   createCachingCertFetcher,
+  createKeyringFromEnv,
   createSesv2Client,
   type SesIdentityClient,
 } from "@millionsend/ses";
 import { createApi } from "./app.js";
 
-if (!env.MASTER_ENCRYPTION_KEY) {
-  // Cloud KMS keyring arrives with the AWS package; until then both modes
-  // require the env KEK, which self-host mandates anyway.
-  throw new Error("MASTER_ENCRYPTION_KEY is required to start the API");
-}
+// Throws on missing encryption configuration, so boot fails before any
+// listener starts.
+const keyring = createKeyringFromEnv(env);
 
 // The API is the email.send producer, so the queue is unconditional.
 const queue = await Queue.start(env.DATABASE_URL);
@@ -44,7 +42,7 @@ function clientForRegion(region: string): SesIdentityClient {
 
 const app = createApi({
   db: getDb(),
-  keyring: EnvKeyring.fromBase64(env.MASTER_ENCRYPTION_KEY),
+  keyring,
   isCloud: env.IS_CLOUD,
   rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   appBaseUrl: env.APP_BASE_URL,

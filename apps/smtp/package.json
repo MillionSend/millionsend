@@ -13,6 +13,7 @@
     "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",
     "@millionsend/queue": "workspace:*",
+    "@millionsend/ses": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "mailparser": "^3.7.5",
     "smtp-server": "^3.14.0",
