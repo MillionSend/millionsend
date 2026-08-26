@@ -9,8 +9,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.750.0",
-    "@aws-sdk/client-sqs": "^3.1111.0",
+    "@aws-sdk/client-sesv2": "^3.1116.0",
+    "@aws-sdk/client-sqs": "^3.1116.0",
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",
@@ -21,7 +21,7 @@
     "tsx": "^4.23.12"
   },
   "devDependencies": {
-    "@hono/node-server": "^1.19.7",
+    "@hono/node-server": "^2.1.1",
     "@millionsend/api": "workspace:*",
     "@millionsend/test-utils": "workspace:*",
     "@types/node": "^22.20.1",
