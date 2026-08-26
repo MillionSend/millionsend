@@ -9,6 +9,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { StatBlock } from "@/components/stat-block";
 import { WarnCard } from "@/components/warn-card";
 import { formatDayTime } from "@/lib/format";
+import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { QuotaRow } from "../usage/usage-view";
 
@@ -88,21 +89,46 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const limitLabel = (limit: number | null) =>
     limit === null ? t("unlimited") : t("perDay", { limit: fmt.format(limit) });
 
-  const notice = checkout ? (
-    <div role="status" className="ms-toast ms-toast-neutral" style={{ marginBottom: 20 }}>
-      <span className="ms-toast-icon" aria-hidden="true">
-        i
-      </span>
-      {t(checkout === "success" ? "checkoutSuccess" : "checkoutCancel")}
-    </div>
-  ) : null;
+  const notice =
+    checkout === "success" ? (
+      <div
+        role="status"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "11px 16px",
+          borderRadius: 12,
+          border: "1px solid var(--ms-success-border)",
+          backgroundColor: "var(--ms-ground)",
+          backgroundImage: statusGlow("success", 15),
+          fontSize: "var(--ms-fs-ui)",
+        }}
+      >
+        <span
+          className="ms-mono"
+          aria-hidden="true"
+          style={{ fontSize: 11, color: "var(--ms-success)" }}
+        >
+          ✓
+        </span>
+        {t("checkoutSuccess")}
+      </div>
+    ) : checkout === "cancel" ? (
+      <div role="status" className="ms-toast ms-toast-neutral">
+        <span className="ms-toast-icon" aria-hidden="true">
+          i
+        </span>
+        {t("checkoutCancel")}
+      </div>
+    ) : null;
 
   if (!status.data) {
     return (
-      <>
+      <div style={{ display: "grid", gap: 20 }}>
         {notice}
         <BillingSkeleton title={t("plan")} />
-      </>
+      </div>
     );
   }
 
