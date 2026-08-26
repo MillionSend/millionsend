@@ -54,7 +54,7 @@ function ProgressRing({ used, limit }: { used: number; limit: number | null }) {
 }
 
 /** Quota row: ring, label + reset hint, right-aligned "used / limit". */
-function QuotaRow({
+export function QuotaRow({
   label,
   hint,
   used,

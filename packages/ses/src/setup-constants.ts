@@ -166,6 +166,13 @@ AUTH_EMAIL_FROM=
 # Leave false. true enables hosted-cloud behavior (KMS, Stripe billing).
 IS_CLOUD=false
 
+# Hosted cloud only (ignored when IS_CLOUD=false): Stripe API secret key, the
+# signing secret of the webhook endpoint pointed at /api/billing/webhook, and
+# an optional customer-portal configuration id (unset = the account default).
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PORTAL_CONFIG=
+
 # --- Object storage (S3-compatible, optional) ---
 
 # ONE credential set, shared by both S3-backed features below (team logo

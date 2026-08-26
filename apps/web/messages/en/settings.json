@@ -2,6 +2,7 @@
   "tabs": {
     "settings": "Settings",
     "usage": "Usage",
+    "billing": "Billing",
     "ses": "SES",
     "smtp": "SMTP",
     "unsubscribe": "Unsubscribe page"
@@ -214,5 +215,34 @@
     "delivered": "Delivered",
     "bounced": "Bounced",
     "complained": "Complained"
+  },
+  "billing": {
+    "plan": "Plan",
+    "status": {
+      "none": "No subscription",
+      "active": "Active",
+      "trialing": "Trial",
+      "past_due": "Past due",
+      "unpaid": "Unpaid",
+      "canceled": "Canceled",
+      "incomplete": "Incomplete"
+    },
+    "dailyLimit": "Daily limit",
+    "unlimited": "Unlimited",
+    "perDay": "{limit} emails / day",
+    "renewsOn": "Renews on",
+    "upgradePro": "Upgrade to Pro",
+    "upgradeScale": "Upgrade to Scale",
+    "manage": "Manage billing",
+    "manageHint": "Invoices, payment methods, and plan changes live in the billing portal.",
+    "readOnly": "Only owners and admins can change billing.",
+    "pastDue": "Payment failed — update your card to keep your plan.",
+    "updateCard": "Update payment method",
+    "usageTitle": "Usage today",
+    "plansTitle": "Plans",
+    "current": "Current",
+    "checkoutSuccess": "Thanks! Your plan updates as soon as Stripe confirms the payment — usually within a few seconds.",
+    "checkoutCancel": "Checkout canceled. Your plan is unchanged.",
+    "error": "Could not open Stripe. Try again."
   }
 }

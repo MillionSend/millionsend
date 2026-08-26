@@ -15,6 +15,7 @@
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@maily-to/core": "^0.3.7",
     "@maily-to/render": "^0.2.3",
+    "@millionsend/billing": "workspace:*",
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",
@@ -42,6 +43,7 @@
     "@types/node": "^22.20.1",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "stripe": "^22.5.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }

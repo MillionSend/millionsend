@@ -1,0 +1,143 @@
+---
+title: Billing (hosted deployments)
+description: How plans, Stripe Checkout, and the webhook fit together on a hosted MillionSend deployment, and how to provision a Stripe account for it.
+---
+
+Billing exists only when `IS_CLOUD=true`. A self-hosted instance has no
+plans, no daily caps, no Billing tab, and no webhook route — it never needs a
+Stripe key. This page is for operating a hosted deployment.
+
+## Plans
+
+Flat monthly tiers. The plan sets the team's daily send cap; emails over the
+cap are parked and drained after the UTC midnight reset.
+
+| Plan | Daily cap | Stripe lookup key |
+| --- | --- | --- |
+| `free` | 100 | — |
+| `pro` | 3,000 | `millionsend_pro_monthly` |
+| `scale` | unlimited | `millionsend_scale_monthly` |
+
+Prices are found by lookup key, never by price id, so the same build runs
+against any Stripe account (test or live) with no per-environment price
+configuration.
+
+## The flow
+
+1. An owner or admin opens **Settings → Billing** and picks a plan. The
+   server creates the Stripe Customer for the team (once, stored on the team
+   with `metadata.team_id`) and redirects to Stripe Checkout.
+2. Checkout collects payment, address, and tax id (automatic tax is on).
+   Stripe redirects back to `/settings/billing`. **The redirect changes
+   nothing** — the page just polls for a few seconds.
+3. Stripe delivers `checkout.session.completed` and
+   `customer.subscription.*` to `POST /api/billing/webhook`. The handler
+   verifies the signature on the raw body, records the event id (duplicates
+   are acknowledged and ignored), re-fetches the subscription from Stripe,
+   and only then writes `teams.plan`.
+4. **Manage subscription** opens the Stripe Customer Portal (invoices,
+   payment method, cancel at period end, switch between Pro and Scale).
+   Every change there arrives through the same webhook.
+
+The plan column is written by the webhook handler and nothing else — never
+by a redirect, a client call, or an event payload taken at face value.
+
+## Entitlement rules
+
+The plan is derived from the subscription **re-fetched** from Stripe at
+webhook time, so out-of-order deliveries converge on Stripe's current state.
+
+| Re-fetched subscription status | `plan` | `plan_status` |
+| --- | --- | --- |
+| `active`, `trialing` | From the price's lookup key (`pro` / `scale`). Unknown price: logged, nothing changes. | same |
+| `past_due` | Unchanged (payment grace; Stripe keeps retrying) | `past_due` |
+| `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, anything else | `free` | `unpaid` / `canceled` / `incomplete` / `canceled` |
+
+Additional rules:
+
+- A non-entitling status for a subscription other than the one stored on
+  the team is ignored, so a superseded subscription ending never revokes
+  the current one.
+- Events for a customer no team owns, or event types the handler does not
+  consume, are logged and answered `200` so Stripe stops retrying them.
+- Stripe being unreachable or a database failure throws; the event row rolls
+  back and Stripe's retry is processed normally.
+- `stripe_customer_id`, `stripe_subscription_id`, and `current_period_end`
+  are stored alongside the plan.
+
+## Environment
+
+`IS_CLOUD=true` requires all of these at boot (the process refuses to start
+otherwise):
+
+| Variable | Purpose |
+| --- | --- |
+| `STRIPE_SECRET_KEY` | Stripe API secret key (`sk_test_…` / `sk_live_…`). |
+| `STRIPE_WEBHOOK_SECRET` | Signing secret of the endpoint pointed at `/api/billing/webhook` (`whsec_…`). |
+| `STRIPE_PORTAL_CONFIG` | Optional. Customer Portal configuration id (`bpc_…`); unset uses the account default. |
+| `APP_BASE_URL` | Public dashboard URL; Checkout and Portal return to `{APP_BASE_URL}/settings/billing`. |
+| `KMS_KEY_ID` | AWS KMS key for tenant secrets (hosted mode encrypts with KMS instead of `MASTER_ENCRYPTION_KEY`). |
+
+## Provisioning a Stripe account
+
+One idempotent script creates everything the API can create:
+
+```sh
+STRIPE_SECRET_KEY=sk_test_… pnpm --filter @millionsend/billing provision \
+  --pro-usd 20 --scale-usd 100 \
+  --webhook-url https://app.example.com/api/billing/webhook \
+  --portal
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--pro-usd`, `--scale-usd` | Monthly amounts in USD (required). |
+| `--webhook-url` | Find-or-create the webhook endpoint for this URL with exactly the events the handler consumes. Omit for local development. |
+| `--portal` | Find-or-create the Customer Portal configuration and print its id for `STRIPE_PORTAL_CONFIG`. |
+| `--dry-run` | Read the account and print what would be written, without writing. |
+
+What it does, and why re-running is safe:
+
+- **Products** are found by `metadata.millionsend_plan` (`pro` / `scale`),
+  created with the Stripe Tax code for SaaS business use.
+- **Prices** are found by lookup key. A changed amount creates a new price,
+  moves the lookup key onto it, and archives the old one; existing
+  subscriptions keep their old price, new checkouts get the new one. Prices
+  are `tax_behavior: exclusive`.
+- **Webhook endpoint** is found by URL; drifted event lists are re-synced.
+  The signing secret is printed **once, at creation** — Stripe never returns
+  it again. To rotate it, delete the endpoint in the dashboard and run again.
+- **Portal configuration** is found by metadata and always re-pointed at the
+  current price ids, so run with `--portal` again after a price change.
+
+Test and live are separate Stripe accounts: run once with each key.
+
+### Dashboard-only checklist
+
+The script ends by printing these; the API cannot do them:
+
+- **Stripe Tax**: enable it and add tax registrations for the jurisdictions
+  you sell in (Settings → Tax). Checkout enables automatic tax, which
+  fails without this.
+- **Business profile**: legal name, support email/URL, and the statement
+  descriptor customers see on card statements (Settings → Public details).
+- **Branding**: logo, icon, and colors for Checkout, the portal, invoices,
+  and emails (Settings → Branding).
+- **Customer emails**: successful-payment receipts and failed-payment
+  notices (Settings → Emails).
+
+## Local testing
+
+Run the dashboard with `IS_CLOUD=true` and the test-mode secret key, then
+forward Stripe's events to it with the Stripe CLI:
+
+```sh
+stripe listen --forward-to localhost:3009/api/billing/webhook
+```
+
+`stripe listen` prints a `whsec_…` secret of its own — put that in
+`STRIPE_WEBHOOK_SECRET` for the local process (no `--webhook-url` needed
+when provisioning). Use the card `4242 4242 4242 4242` in Checkout, and
+`stripe trigger customer.subscription.deleted` to exercise a downgrade. The
+webhook route answers `404` when `IS_CLOUD` is not `true`, `400` on a bad
+signature, and `200` for anything it has verified.

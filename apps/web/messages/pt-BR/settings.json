@@ -2,6 +2,7 @@
   "tabs": {
     "settings": "Configurações",
     "usage": "Uso",
+    "billing": "Cobrança",
     "ses": "SES",
     "smtp": "SMTP",
     "unsubscribe": "Página de cancelamento"
@@ -214,5 +215,34 @@
     "delivered": "Entregues",
     "bounced": "Devolvidos",
     "complained": "Reclamações"
+  },
+  "billing": {
+    "plan": "Plano",
+    "status": {
+      "none": "Sem assinatura",
+      "active": "Ativo",
+      "trialing": "Teste",
+      "past_due": "Pagamento atrasado",
+      "unpaid": "Não pago",
+      "canceled": "Cancelado",
+      "incomplete": "Incompleto"
+    },
+    "dailyLimit": "Limite diário",
+    "unlimited": "Ilimitado",
+    "perDay": "{limit} e-mails / dia",
+    "renewsOn": "Renova em",
+    "upgradePro": "Fazer upgrade para o Pro",
+    "upgradeScale": "Fazer upgrade para o Scale",
+    "manage": "Gerenciar cobrança",
+    "manageHint": "Faturas, formas de pagamento e mudanças de plano ficam no portal de cobrança.",
+    "readOnly": "Apenas proprietários e administradores podem alterar a cobrança.",
+    "pastDue": "O pagamento falhou — atualize seu cartão para manter o plano.",
+    "updateCard": "Atualizar forma de pagamento",
+    "usageTitle": "Uso de hoje",
+    "plansTitle": "Planos",
+    "current": "Atual",
+    "checkoutSuccess": "Obrigado! Seu plano é atualizado assim que o Stripe confirmar o pagamento — normalmente em poucos segundos.",
+    "checkoutCancel": "Checkout cancelado. Seu plano não mudou.",
+    "error": "Não foi possível abrir o Stripe. Tente novamente."
   }
 }

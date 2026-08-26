@@ -12,6 +12,7 @@ export * from "./emails.js";
 export * from "./idempotency.js";
 export * from "./instance-settings.js";
 export * from "./segments.js";
+export * from "./stripe-events.js";
 export * from "./suppressions.js";
 export * from "./team-invitations.js";
 export * from "./teams.js";
