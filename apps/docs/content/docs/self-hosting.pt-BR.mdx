@@ -76,7 +76,9 @@ depois rode `pnpm --filter @millionsend/api dev`,
 ## Referência de ambiente
 
 Do `.env.example`. Só as três primeiras são obrigatórias; todo o resto tem
-padrões que funcionam localmente.
+padrões que funcionam localmente. Cobrança (planos, Stripe) só existe em
+implantações hospedadas — veja [Cobrança](/pt-BR/billing); uma instância
+auto-hospedada não tem limites de plano.
 
 ### Obrigatórias
 
@@ -110,6 +112,7 @@ padrões que funcionam localmente.
 | `SMTP_TLS_CERT_PATH` / `SMTP_TLS_KEY_PATH` | Par de chaves STARTTLS do relay SMTP (caminhos PEM dentro do contêiner). Com ambos definidos: STARTTLS é oferecido e exigido antes do AUTH. Sem o par, o relay se recusa a iniciar (a menos que `SMTP_ALLOW_INSECURE_AUTH=true`). |
 | `SMTP_ALLOW_INSECURE_AUTH` | Escape explícito para SMTP AUTH em texto puro apenas em rede local/privada. Mantenha `false`; nunca combine `true` com bind público. |
 | `IS_CLOUD` | Deixe `false`. `true` ativa comportamento de nuvem hospedada (KMS, cobrança via Stripe). |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PORTAL_CONFIG` | Somente na nuvem hospedada; ignorados quando `IS_CLOUD=false`. Chave de API do Stripe, o segredo de assinatura do endpoint de webhook em `/api/billing/webhook` e um id opcional de configuração do portal do cliente. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciais OAuth do "Continuar com Google". O botão só aparece com ambas definidas. URL de callback: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha só aparece com isto definido e credenciais SES configuradas — deixe vazio para ocultá-la por completo. |

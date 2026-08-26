@@ -198,6 +198,9 @@ importers:
       '@maily-to/render':
         specifier: ^0.2.3
         version: 0.2.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@millionsend/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@millionsend/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -274,6 +277,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.0
         version: 19.2.4(@types/react@19.2.18)
+      stripe:
+        specifier: ^22.5.0
+        version: 22.5.0(@types/node@22.20.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -332,6 +338,34 @@ importers:
       resend:
         specifier: ^6.19.0
         version: 6.19.0(@react-email/render@1.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8))
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.0)
+
+  packages/billing:
+    dependencies:
+      '@millionsend/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@electric-sql/pglite@0.3.16)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
+      stripe:
+        specifier: ^22.5.0
+        version: 22.5.0(@types/node@22.20.1)
+    devDependencies:
+      '@millionsend/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -4755,6 +4789,15 @@ packages:
 
   strip-literal@3.1.0:
     resolution: {integrity: sha512-8r3mkIM/2+PpjHoOtiAW8Rg3jJLHaV7xPwG+YRGrv6FP0wwk/toTpATxWYOW0BKdWwl82VT2tFYi5DlROa0Mxg==}
+
+  stripe@22.5.0:
+    resolution: {integrity: sha512-QVwMwriC0bbySx6R4dpsvJ0W//GojC1kwWVS6rPSoVqDUIZX4Hy3TaUrd2AZeXEAaKbfWIjQjvo3vKAReHZ0vQ==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@types/node': '>=18'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   style-to-js@1.1.21:
     resolution: {integrity: sha512-RjQetxJrrUJLQPHbLku6U/ocGtzyjbJMP9lCNK7Ag0CNh690nSH8woqWH9u16nMjYBAok+i7JO1NP2pOy8IsPQ==}
@@ -9560,6 +9603,10 @@ snapshots:
   strip-literal@3.1.0:
     dependencies:
       js-tokens: 9.0.1
+
+  stripe@22.5.0(@types/node@22.20.1):
+    optionalDependencies:
+      '@types/node': 22.20.1
 
   style-to-js@1.1.21:
     dependencies:

@@ -5,6 +5,18 @@ import { boolean, check, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-
 // self-host ignores plan entirely (quota code guards on IS_CLOUD first).
 export const planEnum = pgEnum("plan", ["free", "pro", "scale"]);
 
+// Mirrors Stripe subscription statuses; "none" = never subscribed. The
+// entitlement is `teams.plan`, written only by the verified Stripe webhook.
+export const planStatusEnum = pgEnum("plan_status", [
+  "none",
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+  "canceled",
+  "incomplete",
+]);
+
 export const teams = pgTable(
   "teams",
   {
@@ -12,6 +24,11 @@ export const teams = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull().unique(),
     plan: planEnum("plan").notNull().default("free"),
+    // Cloud-only Stripe linkage; all null/"none" on self-host.
+    stripeCustomerId: text("stripe_customer_id").unique(),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    planStatus: planStatusEnum("plan_status").notNull().default("none"),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     // SES tenant name for cloud reputation isolation; null on self-host.
     sesTenantName: text("ses_tenant_name"),
     // Per-team customization of the hosted unsubscribe pages. All null =

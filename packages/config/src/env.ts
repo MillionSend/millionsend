@@ -154,9 +154,11 @@ export const env = createEnv({
     GITHUB_CLIENT_ID: z.string().optional(),
     GITHUB_CLIENT_SECRET: z.string().optional(),
 
-    // Cloud-only (billing).
+    // Cloud-only (billing). STRIPE_PORTAL_CONFIG selects a customer-portal
+    // configuration; unset uses the Stripe account's default one.
     STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
+    STRIPE_PORTAL_CONFIG: z.string().optional(),
 
     // S3-compatible object storage (Cloudflare R2 first-class). ONE credential
     // set shared by every S3-backed feature; each feature is enabled by its

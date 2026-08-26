@@ -19,6 +19,10 @@
     "./domain-status": {
       "types": "./src/domain-status.ts",
       "default": "./src/domain-status.ts"
+    },
+    "./plans": {
+      "types": "./src/plans.ts",
+      "default": "./src/plans.ts"
     }
   },
   "scripts": {

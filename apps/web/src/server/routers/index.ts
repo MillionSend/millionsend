@@ -1,6 +1,7 @@
 import { createCallerFactory, router } from "../trpc";
 import { apiKeysRouter } from "./api-keys";
 import { audienceRouter } from "./audience";
+import { billingRouter } from "./billing";
 import { broadcastsRouter } from "./broadcasts";
 import { domainsRouter } from "./domains";
 import { emailRouter } from "./email";
@@ -17,6 +18,7 @@ import { webhooksRouter } from "./webhooks";
 
 export const appRouter = router({
   audience: audienceRouter,
+  billing: billingRouter,
   broadcasts: broadcastsRouter,
   email: emailRouter,
   emails: emailsRouter,

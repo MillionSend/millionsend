@@ -81,3 +81,17 @@ it("rejects an AUTH_EMAIL_FROM that does not parse, accepts both valid forms", (
     assertEnvConsistency(fakeEnv({ AUTH_EMAIL_FROM: "MillionSend <no-reply@mail.example.com>" })),
   ).not.toThrow();
 });
+
+it("cloud mode requires the KMS key, both Stripe secrets, and APP_BASE_URL", () => {
+  const cloud = {
+    IS_CLOUD: true,
+    KMS_KEY_ID: "kms",
+    STRIPE_SECRET_KEY: "sk",
+    STRIPE_WEBHOOK_SECRET: "whsec",
+    APP_BASE_URL: "https://app.example.com",
+  };
+  expect(() => assertEnvConsistency(fakeEnv(cloud))).not.toThrow();
+  expect(() => assertEnvConsistency(fakeEnv({ ...cloud, STRIPE_WEBHOOK_SECRET: "" }))).toThrow(
+    "IS_CLOUD=true requires STRIPE_WEBHOOK_SECRET",
+  );
+});

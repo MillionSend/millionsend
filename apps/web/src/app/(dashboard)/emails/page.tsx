@@ -169,8 +169,9 @@ export default function EmailsPage() {
               })}
             </span>
           ) : null}
+          {/* A daily limit exists only on the hosted cloud, so the billing page always exists here. */}
           <Link
-            href="/settings"
+            href="/settings/billing"
             style={{
               marginLeft: "auto",
               fontSize: 13.5,
