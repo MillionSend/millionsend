@@ -20,6 +20,8 @@ export interface SessionUser {
  */
 export interface AuthSession {
   user: SessionUser;
+  /** The session row; optional so tests can fake a context without one. */
+  session?: { id: string };
 }
 
 export interface Context {

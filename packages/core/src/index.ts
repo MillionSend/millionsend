@@ -76,6 +76,13 @@ export {
 } from "./idempotency.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export { type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
+export {
+  apiBaseUrl,
+  MCP_RESOURCE_PATH,
+  MCP_SCOPES,
+  type McpScope,
+  mcpResourceUrl,
+} from "./oauth-scopes.js";
 export { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";

@@ -5,7 +5,9 @@
     "billing": "Cobrança",
     "ses": "SES",
     "smtp": "SMTP",
-    "unsubscribe": "Página de cancelamento"
+    "mcp": "MCP",
+    "unsubscribe": "Página de cancelamento",
+    "connectedApps": "Aplicativos conectados"
   },
   "smtp": {
     "title": "SMTP",
@@ -244,5 +246,47 @@
     "checkoutSuccess": "Obrigado! Seu plano é atualizado assim que o Stripe confirmar o pagamento — normalmente em poucos segundos.",
     "checkoutCancel": "Checkout cancelado. Seu plano não mudou.",
     "error": "Não foi possível abrir o Stripe. Tente novamente."
+  },
+  "mcp": {
+    "title": "Servidor MCP",
+    "intro": "Deixe agentes de IA enviarem e-mails e gerenciarem sua audiência pelo Model Context Protocol.",
+    "subtitle": "Toda chamada de ferramenta passa pelas mesmas regras da API REST: domínios verificados, supressões, cotas e escopo de time.",
+    "serverUrl": "URL do servidor",
+    "serverUrlNote": "Endpoint HTTP (Streamable). Os clientes entram com sua conta MillionSend via OAuth — sem chaves de API e nada secreto para colar.",
+    "connectTitle": "Conectar um cliente",
+    "notes": {
+      "claudeCode": "Depois rode <code>/mcp</code> dentro do Claude Code e escolha millionsend para entrar.",
+      "claudeDesktop": "Adicione ao <code>claude_desktop_config.json</code> — ou pule o arquivo: Settings → Connectors → Add custom connector, e cole a URL do servidor.",
+      "cursor": "Salve como <code>.cursor/mcp.json</code> no projeto, ou <code>~/.cursor/mcp.json</code> para todos os projetos.",
+      "vscode": "Salve como <code>.vscode/mcp.json</code> no workspace e inicie o servidor pela visão de MCP do editor."
+    },
+    "authNote": "Na primeira conexão o navegador abre uma tela de consentimento onde você escolhe o time e as permissões do cliente. A permissão aparece em <link>Aplicativos conectados</link>, onde qualquer membro pode revogá-la.",
+    "toolsTitle": "Ferramentas",
+    "toolsIntro": "Um cliente só vê as ferramentas cobertas pelas permissões concedidas.",
+    "table": {
+      "tool": "Ferramenta",
+      "permission": "Permissão"
+    },
+    "readOnly": "somente leitura",
+    "docs": "Documentação do MCP"
+  },
+  "connectedApps": {
+    "title": "Aplicativos conectados",
+    "intro": "Aplicativos e clientes MCP autorizados via OAuth a agir neste time.",
+    "empty": "Nenhum aplicativo conectado ainda. Autorize um cliente MCP e a permissão aparece aqui.",
+    "table": {
+      "app": "Aplicativo",
+      "user": "Autorizado por",
+      "scopes": "Permissões",
+      "granted": "Concedido",
+      "menu": "Ações da permissão"
+    },
+    "you": "você",
+    "revoke": "Revogar acesso",
+    "revokeConfirm": {
+      "title": "Revogar acesso",
+      "body": "{name} perde o acesso a este time na próxima renovação de token, em até 15 minutos.",
+      "confirm": "Revogar acesso"
+    }
   }
 }

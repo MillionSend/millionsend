@@ -9,6 +9,8 @@ const TABS = [
   { key: "billing", href: "/settings/billing" },
   { key: "ses", href: "/settings/ses" },
   { key: "smtp", href: "/settings/smtp" },
+  { key: "mcp", href: "/settings/mcp" },
+  { key: "connectedApps", href: "/settings/connected-apps" },
   { key: "unsubscribe", href: "/settings/unsubscribe" },
 ] as const;
 

@@ -1,0 +1,135 @@
+---
+title: MCP server
+description: Connect AI agents to MillionSend through the Model Context Protocol.
+---
+
+Every MillionSend deployment ships an MCP (Model Context Protocol) server, so
+AI agents like Claude Code, Claude Desktop, Cursor and VS Code can send emails
+and manage your audience. Tool calls run through the exact same pipeline as
+the REST API — verified domains, suppressions, topic opt-outs, quotas and
+team scoping all apply unchanged.
+
+## Server URL
+
+The MCP endpoint (Streamable HTTP) lives at `/mcp` on the API origin:
+
+<DeploymentTabs>
+<DeploymentTab deployment="cloud">
+
+`https://api.millionsend.com/mcp`
+
+</DeploymentTab>
+<DeploymentTab deployment="self-hosted">
+
+Your instance's API origin plus `/mcp` — e.g. `https://api.acme.dev/mcp`, or
+`http://localhost:3001/mcp` on a local compose setup. The dashboard shows the
+exact URL under **Settings → MCP**.
+
+</DeploymentTab>
+</DeploymentTabs>
+
+## Connect a client
+
+<Tabs items={["Claude Code", "Claude Desktop", "Cursor", "VS Code"]}>
+<Tab value="Claude Code">
+
+```sh
+claude mcp add --transport http millionsend https://api.millionsend.com/mcp
+```
+
+Then run `/mcp` inside Claude Code and pick `millionsend` to sign in.
+
+</Tab>
+<Tab value="Claude Desktop">
+
+Add a custom connector under **Settings → Connectors → Add custom connector**
+and paste the server URL. Or use the config file — Claude Desktop's
+`claude_desktop_config.json` only launches stdio servers, so `mcp-remote`
+bridges it to the HTTP endpoint:
+
+```json title="claude_desktop_config.json"
+{
+  "mcpServers": {
+    "millionsend": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://api.millionsend.com/mcp"]
+    }
+  }
+}
+```
+
+</Tab>
+<Tab value="Cursor">
+
+```json title=".cursor/mcp.json"
+{
+  "mcpServers": {
+    "millionsend": {
+      "url": "https://api.millionsend.com/mcp"
+    }
+  }
+}
+```
+
+Save in the project, or in `~/.cursor/mcp.json` for every project.
+
+</Tab>
+<Tab value="VS Code">
+
+```json title=".vscode/mcp.json"
+{
+  "servers": {
+    "millionsend": {
+      "type": "http",
+      "url": "https://api.millionsend.com/mcp"
+    }
+  }
+}
+```
+
+</Tab>
+</Tabs>
+
+Self-hosted: replace `https://api.millionsend.com/mcp` with your instance's
+server URL from above.
+
+## Authentication
+
+The MCP server uses OAuth, not API keys. On first connect the client opens
+your browser: sign in to MillionSend, pick the **team** the client may act
+on, and choose the **permissions** it gets. Nothing is copied or pasted — no
+secrets live in the client's config.
+
+- The access token is bound to the one team chosen at consent. To act on a
+  different team, sign in again from the client.
+- Grants are listed under **Settings → Connected apps** in the dashboard,
+  where any team member can revoke them. Revocation takes effect at the
+  client's next token refresh, within 15 minutes.
+- A member removed from the team loses MCP access immediately, even before
+  their token expires.
+- MCP calls share the API's per-minute rate limit.
+
+## Tools
+
+Each tool requires a permission (OAuth scope). Clients only see the tools
+their granted permissions cover.
+
+| Tool | Permission | Description |
+| --- | --- | --- |
+| `list_emails` | `emails:read` | List sent, queued and scheduled emails. |
+| `get_email` | `emails:read` | Get one email with its delivery status. |
+| `list_contacts` | `audience:read` | List contacts, optionally one segment's members. |
+| `get_contact` | `audience:read` | Get a contact by id or email address. |
+| `list_segments` | `audience:read` | List segments — the targets broadcasts are sent to. |
+| `list_topics` | `audience:read` | List subscription topics. |
+| `list_domains` | `domains:read` | List sending domains with verification status. |
+| `send_email` | `emails:send` | Send or schedule a transactional email. |
+| `create_contact` | `audience:write` | Create a contact, with segments and topic subscriptions. |
+| `update_contact` | `audience:write` | Update a contact's name, properties or unsubscribe flag. |
+| `add_contact_to_segment` | `audience:write` | Add a contact to a manual segment. |
+| `create_broadcast` | `broadcasts:write` | Create a broadcast draft (or send it immediately). |
+| `send_broadcast` | `broadcasts:write` | Send or schedule a draft broadcast. |
+
+Tool results are the REST API's JSON responses, and the same validation
+errors apply — an unverified sender domain fails a `send_email` call exactly
+as it fails `POST /emails`.

@@ -42,6 +42,7 @@ import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { secureHeaders } from "hono/secure-headers";
+import { INTERNAL_AUTH, registerMcp } from "./mcp.js";
 import { registerApiKeyRoutes } from "./routes/api-keys.js";
 import { registerContactPropertyRoutes } from "./routes/contact-properties.js";
 import { type DomainsSesDeps, registerDomainRoutes } from "./routes/domains.js";
@@ -67,6 +68,7 @@ import {
   type ListQuery,
   listBroadcastsResponseSchema,
   listContactsResponseSchema,
+  listEmailsResponseSchema,
   listQuerySchema,
   listSegmentsResponseSchema,
   listTopicsResponseSchema,
@@ -1997,6 +1999,15 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     },
   });
 
+  // First middleware: MCP tools authenticate their in-process REST calls by
+  // Request identity (see INTERNAL_AUTH). Must run before any middleware that
+  // could replace c.req.raw, and before the request logger reads `auth`.
+  app.use("*", async (c, next) => {
+    const internal = INTERNAL_AUTH.get(c.req.raw);
+    if (internal) c.set("auth", internal);
+    return next();
+  });
+
   // Uncaught throws must still speak Resend's error format — SDK clients
   // parse the body as JSON.
   app.onError((err, c) => {
@@ -2111,7 +2122,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     if (c.get("rateLimited")) return next();
     c.set("rateLimited", true);
     const auth = c.get("auth");
-    if (!auth) return next();
+    // OAuth (MCP) callers have no api_keys row to bucket on; the /mcp gate
+    // rate-limits them per user instead.
+    if (!auth || auth.apiKeyId === null) return next();
     const bucket = schema.apiRateLimits;
     const windowStart = sql<Date>`date_trunc('minute', now())`;
     const [row] = await deps.db
@@ -2721,6 +2734,75 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       200,
     );
   });
+
+  const listEmailsRoute = createRoute({
+    method: "get",
+    path: "/emails",
+    request: { query: listQuerySchema },
+    responses: {
+      200: {
+        content: { "application/json": { schema: listEmailsResponseSchema } },
+        description: "Emails",
+      },
+      422: {
+        content: { "application/json": { schema: errorSchema } },
+        description: "Validation error",
+      },
+    },
+  });
+
+  app.openapi(listEmailsRoute, async (c) => {
+    const auth = c.get("auth");
+    const t = schema.emails;
+    const page = await keysetPage({
+      query: c.req.valid("query"),
+      createdAt: t.createdAt,
+      id: t.id,
+      loadCursor: async (id) =>
+        (
+          await deps.db
+            .select({ createdAt: t.createdAt, id: t.id })
+            .from(t)
+            .where(and(eq(t.id, id), eq(t.teamId, auth.teamId)))
+        )[0],
+      loadRows: (cond, descending, take) =>
+        deps.db
+          .select()
+          .from(t)
+          .where(and(eq(t.teamId, auth.teamId), cond))
+          .orderBy(
+            ...(descending ? [desc(t.createdAt), desc(t.id)] : [asc(t.createdAt), asc(t.id)]),
+          )
+          .limit(take),
+    });
+    if (page === "bad_cursor") {
+      return c.json(errorBody(422, "validation_error", "invalid pagination cursor"), 422);
+    }
+    return c.json(
+      {
+        object: "list" as const,
+        data: page.rows.map((email) => ({
+          id: email.id,
+          from: email.from,
+          to: email.to,
+          cc: email.cc ?? null,
+          bcc: email.bcc ?? null,
+          reply_to: email.replyTo ?? null,
+          subject: email.subject,
+          created_at: email.createdAt.toISOString(),
+          scheduled_at: email.scheduledAt?.toISOString() ?? null,
+          // Internal quota-parking is invisible on the wire (same as GET /emails/{id}).
+          last_event: email.latestStatus === "queued_quota" ? "queued" : email.latestStatus,
+        })),
+        has_more: page.hasMore,
+      },
+      200,
+    );
+  });
+
+  // MCP needs APP_BASE_URL twice over: it is the OAuth issuer and the base
+  // the canonical resource URL derives from. Without it there is no /mcp.
+  if (deps.appBaseUrl) registerMcp(app, deps, deps.appBaseUrl);
 
   const sns = deps.sns;
   if (sns) {

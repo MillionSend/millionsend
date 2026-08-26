@@ -8,7 +8,8 @@ import type { Plan } from "./plans.js";
 export interface ApiKeyAuth {
   teamId: string;
   plan: Plan;
-  apiKeyId: string;
+  /** Null when the caller authenticated with an OAuth access token (MCP) instead of a key. */
+  apiKeyId: string | null;
   /**
    * SECURITY: the key's scope, enforced server-side. "sending_access" keys may
    * only reach the send surface; a non-null domainId restricts sends to that

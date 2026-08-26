@@ -172,22 +172,46 @@ const scheduledAtSchema = z.string().superRefine((v, ctx) => {
 
 export const sendEmailRequestSchema = z
   .object({
-    from: fromAddress.openapi({ example: "Acme <onboarding@acme.dev>" }),
-    to: recipientList.openapi({ example: ["delivered@resend.dev"] }),
-    subject: z.string().min(1),
-    html: z.string().optional(),
-    text: z.string().optional(),
-    cc: recipientList.optional(),
-    bcc: recipientList.optional(),
-    reply_to: recipientList.optional(),
-    scheduled_at: scheduledAtSchema.optional(),
-    tags: z.array(z.object({ name: z.string().min(1), value: z.string() })).optional(),
+    from: fromAddress
+      .describe(
+        'Sender, "Name <user@domain>" or bare address; the domain must be verified for the team',
+      )
+      .openapi({ example: "Acme <onboarding@acme.dev>" }),
+    to: recipientList
+      .describe("Recipient address or list of up to 50")
+      .openapi({ example: ["delivered@resend.dev"] }),
+    subject: z.string().min(1).describe("Subject line"),
+    html: z.string().optional().describe("HTML body; at least one of html/text is required"),
+    text: z.string().optional().describe("Plain-text body; at least one of html/text is required"),
+    cc: recipientList.optional().describe("Cc address or list"),
+    bcc: recipientList.optional().describe("Bcc address or list"),
+    reply_to: recipientList.optional().describe("Reply-To address or list"),
+    scheduled_at: scheduledAtSchema
+      .optional()
+      .describe(
+        `Deliver later: ISO 8601 with offset, or relative like "in 2 hours" (${SCHEDULED_AT_FORMS}); max 30 days ahead`,
+      ),
+    tags: z
+      .array(z.object({ name: z.string().min(1), value: z.string() }))
+      .optional()
+      .describe("Key/value labels attached to the email for filtering"),
     // Topic-scoped send: recipients opted out of the topic (explicit
     // subscription row, else the topic's default) are dropped at accept
     // exactly like suppression-list hits.
-    topic_id: z.uuid().nullable().optional(),
-    attachments: z.array(attachmentSchema).optional(),
-    headers: customHeadersSchema.optional(),
+    topic_id: z
+      .uuid()
+      .nullable()
+      .optional()
+      .describe(
+        "Topic id: recipients opted out of the topic are skipped and an unsubscribe link is added",
+      ),
+    attachments: z
+      .array(attachmentSchema)
+      .optional()
+      .describe("Attachments with base64 content (no remote paths)"),
+    headers: customHeadersSchema
+      .optional()
+      .describe("Extra message headers (transport headers are rejected)"),
   })
   .refine((v) => v.html !== undefined || v.text !== undefined, {
     message: "Either html or text must be provided",
@@ -236,24 +260,31 @@ export const updateEmailResponseSchema = z
   .object({ object: z.literal("email"), id: z.uuid() })
   .openapi("UpdateEmailResponse");
 
-export const getEmailResponseSchema = z
-  .object({
+const emailListItemSchema = z.object({
+  id: z.uuid(),
+  from: z.string(),
+  to: z.array(z.string()),
+  cc: z.array(z.string()).nullable(),
+  bcc: z.array(z.string()).nullable(),
+  reply_to: z.array(z.string()).nullable(),
+  subject: z.string(),
+  created_at: z.string(),
+  scheduled_at: z.string().nullable(),
+  last_event: z.string(),
+});
+
+export const listEmailsResponseSchema = z
+  .object({ object: z.literal("list"), data: z.array(emailListItemSchema), has_more: z.boolean() })
+  .openapi("ListEmailsResponse");
+
+export const getEmailResponseSchema = emailListItemSchema
+  .extend({
     object: z.literal("email"),
-    id: z.uuid(),
-    from: z.string(),
-    to: z.array(z.string()),
-    cc: z.array(z.string()).nullable(),
-    bcc: z.array(z.string()).nullable(),
-    reply_to: z.array(z.string()).nullable(),
-    subject: z.string(),
     html: z.string().nullable(),
     text: z.string().nullable(),
-    created_at: z.string(),
-    scheduled_at: z.string().nullable(),
     // RFC 5322 Message-ID ('<id@host>'); a placeholder until the send records
     // the provider message id.
     message_id: z.string(),
-    last_event: z.string(),
   })
   .openapi("GetEmailResponse");
 
@@ -264,9 +295,18 @@ export const getEmailResponseSchema = z
  */
 export const listQuerySchema = z
   .object({
-    limit: z.coerce.number().int().min(1).max(100).optional(),
-    after: z.uuid().optional(),
-    before: z.uuid().optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("Page size, 1-100 (default 20)"),
+    after: z.uuid().optional().describe("Cursor: id of the last item of the previous page"),
+    before: z
+      .uuid()
+      .optional()
+      .describe("Cursor: id of the first item of the next page (page backwards)"),
   })
   .refine((q) => !(q.after && q.before), {
     message: "after and before cannot be used together",
@@ -293,16 +333,25 @@ export const createContactRequestSchema = z
   .object({
     // Bare addr-spec only — a contact record is an address, not a mailbox
     // with display name.
-    email: z.email(),
-    first_name: z.string().optional(),
-    last_name: z.string().optional(),
-    unsubscribed: z.boolean().optional(),
+    email: z.email().describe("Bare email address (no display name); unique per team"),
+    first_name: z.string().optional().describe("First name"),
+    last_name: z.string().optional().describe("Last name"),
+    unsubscribed: z.boolean().optional().describe("Global opt-out from all marketing sends"),
     // Kept as unknown values so the handler can coerce scalars to strings and
     // reject nested objects/arrays with a precise 422 message.
-    properties: z.record(z.string(), z.unknown()).optional(),
+    properties: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe("Flat map of custom properties (string or number values)"),
     // Initial associations, written in the same transaction as the contact.
-    segments: z.array(z.object({ id: z.uuid() })).optional(),
-    topics: z.array(z.object({ id: z.uuid(), subscription: subscriptionEnum })).optional(),
+    segments: z
+      .array(z.object({ id: z.uuid() }))
+      .optional()
+      .describe("Segments to add the contact to on creation"),
+    topics: z
+      .array(z.object({ id: z.uuid(), subscription: subscriptionEnum }))
+      .optional()
+      .describe("Initial per-topic subscription choices"),
   })
   .openapi("CreateContactRequest");
 
@@ -310,12 +359,15 @@ export type CreateContactRequest = z.infer<typeof createContactRequestSchema>;
 
 export const updateContactRequestSchema = z
   .object({
-    first_name: z.string().nullable().optional(),
-    last_name: z.string().nullable().optional(),
-    unsubscribed: z.boolean().optional(),
+    first_name: z.string().nullable().optional().describe("First name; null clears it"),
+    last_name: z.string().nullable().optional().describe("Last name; null clears it"),
+    unsubscribed: z.boolean().optional().describe("Global opt-out from all marketing sends"),
     // Kept as unknown values so the handler can coerce scalars to strings and
     // reject nested objects/arrays with a precise 422 message.
-    properties: z.record(z.string(), z.unknown()).optional(),
+    properties: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe("Custom properties to set (merged); null removes a key"),
   })
   .openapi("UpdateContactRequest");
 
@@ -436,17 +488,39 @@ const replyToList = z
 
 export const createBroadcastRequestSchema = z
   .object({
-    name: z.string().optional(),
-    segment_id: z.uuid().optional(),
-    from: fromAddress,
-    subject: z.string().min(1),
-    html: z.string().optional(),
-    text: z.string().optional(),
-    reply_to: replyToList.optional(),
-    preview_text: z.string().optional(),
-    topic_id: z.uuid().nullable().optional(),
-    send: z.boolean().optional(),
-    scheduled_at: scheduledAtSchema.optional(),
+    name: z.string().optional().describe("Internal name shown in the dashboard"),
+    segment_id: z
+      .uuid()
+      .optional()
+      .describe("Segment to send to; omitted means every contact of the team"),
+    from: fromAddress.describe(
+      'Sender, "Name <user@domain>"; the domain must be verified for the team',
+    ),
+    subject: z
+      .string()
+      .min(1)
+      .describe("Subject line; supports {{{FIRST_NAME|there}}} merge fields"),
+    html: z
+      .string()
+      .optional()
+      .describe("HTML body; include {{{UNSUBSCRIBE_URL}}} for the opt-out link"),
+    text: z.string().optional().describe("Plain-text body; at least one of html/text is required"),
+    reply_to: replyToList.optional().describe("Reply-To address or list"),
+    preview_text: z.string().optional().describe("Inbox preview (preheader) text"),
+    topic_id: z
+      .uuid()
+      .nullable()
+      .optional()
+      .describe("Topic id; only contacts subscribed to it receive the broadcast"),
+    send: z
+      .boolean()
+      .optional()
+      .describe("true sends (or schedules) immediately instead of saving a draft"),
+    scheduled_at: scheduledAtSchema
+      .optional()
+      .describe(
+        'Deliver later (requires send: true): ISO 8601 with offset or relative like "in 1 hour"',
+      ),
   })
   .refine((v) => v.html !== undefined || v.text !== undefined, {
     message: "Either html or text must be provided",
@@ -474,7 +548,11 @@ export const updateBroadcastRequestSchema = z
 
 export const sendBroadcastRequestSchema = z
   .object({
-    scheduled_at: scheduledAtSchema.optional(),
+    scheduled_at: scheduledAtSchema
+      .optional()
+      .describe(
+        'Deliver later: ISO 8601 with offset or relative like "in 1 hour"; omitted sends now',
+      ),
   })
   .openapi("SendBroadcastRequest");
 

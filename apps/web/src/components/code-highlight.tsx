@@ -6,6 +6,7 @@ import elixir from "highlight.js/lib/languages/elixir";
 import go from "highlight.js/lib/languages/go";
 import java from "highlight.js/lib/languages/java";
 import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
 import php from "highlight.js/lib/languages/php";
 import python from "highlight.js/lib/languages/python";
 import ruby from "highlight.js/lib/languages/ruby";
@@ -18,6 +19,7 @@ import type { ReactNode } from "react";
 const lowlight = createLowlight({
   bash,
   javascript,
+  json,
   python,
   php,
   ruby,
@@ -31,6 +33,7 @@ const lowlight = createLowlight({
 export type HighlightLanguage =
   | "bash"
   | "javascript"
+  | "json"
   | "python"
   | "php"
   | "ruby"
