@@ -2,7 +2,6 @@ import { randomBytes } from "node:crypto";
 import { env } from "@millionsend/config";
 import {
   decryptWebhookSecret,
-  EnvKeyring,
   encryptWebhookSecret,
   generateWebhookSecret,
   postJson,
@@ -13,17 +12,8 @@ import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
+import { getKeyring } from "../keyring";
 import { adminProcedure, router, teamProcedure } from "../trpc";
-
-function getKeyring(): EnvKeyring {
-  if (!env.MASTER_ENCRYPTION_KEY) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "MASTER_ENCRYPTION_KEY is not configured",
-    });
-  }
-  return EnvKeyring.fromBase64(env.MASTER_ENCRYPTION_KEY);
-}
 
 const httpsUrl = z
   .url()

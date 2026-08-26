@@ -70,6 +70,20 @@ it("rejects backup tuning without S3_BACKUP_BUCKET", () => {
   );
 });
 
+it("rejects half an AWS keypair, accepts a full pair or none", () => {
+  expect(() => assertEnvConsistency(fakeEnv({ AWS_ACCESS_KEY_ID: "AKIA123" }))).toThrow(
+    "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set together",
+  );
+  expect(() => assertEnvConsistency(fakeEnv({ AWS_SECRET_ACCESS_KEY: "secret" }))).toThrow(
+    "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set together",
+  );
+  expect(() =>
+    assertEnvConsistency(
+      fakeEnv({ AWS_ACCESS_KEY_ID: "AKIA123", AWS_SECRET_ACCESS_KEY: "secret" }),
+    ),
+  ).not.toThrow();
+});
+
 it("rejects an AUTH_EMAIL_FROM that does not parse, accepts both valid forms", () => {
   expect(() => assertEnvConsistency(fakeEnv({ AUTH_EMAIL_FROM: "not-an-email" }))).toThrow(
     "AUTH_EMAIL_FROM",

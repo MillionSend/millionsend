@@ -2,14 +2,21 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { GCM_IV_LENGTH, GCM_TAG_LENGTH } from "./constants.js";
 
 /**
- * Wraps/unwraps per-email data-encryption keys. Implementations:
- * EnvKeyring (self-host, KEK from configuration) here; a KMS keyring ships
- * with the AWS package. keyVersion travels with every wrapped DEK so KEK
- * rotation re-wraps DEKs without re-encrypting bodies.
+ * Wraps/unwraps per-email data-encryption keys. Implementations: EnvKeyring
+ * (self-host, KEK from configuration) here; KmsKeyring and CompositeKeyring
+ * (cloud) in kms-keyring.ts. keyVersion travels with every wrapped DEK so
+ * KEK rotation re-wraps DEKs without re-encrypting bodies.
  */
 export interface Keyring {
   wrapDek(dek: Buffer): Promise<{ wrapped: Buffer; keyVersion: number }>;
   unwrapDek(wrapped: Buffer, keyVersion: number): Promise<Buffer>;
+  /**
+   * Present when the keyring supplies the DEK itself so it can serve a
+   * cached (DEK, wrapped) pair — wrapping through KMS costs a network
+   * round-trip per call. envelope.ts prefers this over wrapDek when present;
+   * the returned dek is the caller's copy to scrub.
+   */
+  generateWrappedDek?(): Promise<{ dek: Buffer; wrapped: Buffer; keyVersion: number }>;
 }
 
 export class EnvKeyring implements Keyring {

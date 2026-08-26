@@ -3,14 +3,18 @@ import { env } from "@millionsend/config";
 import {
   deriveTrackingKey,
   deriveUnsubscribeKey,
-  EnvKeyring,
   getInstanceSettings,
   postJson,
   purgeExpiredIdempotencyKeys,
 } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
 import { Queue } from "@millionsend/queue";
-import { createSesv2Client, nodeDnsResolver, type SesIdentityClient } from "@millionsend/ses";
+import {
+  createKeyringFromEnv,
+  createSesv2Client,
+  nodeDnsResolver,
+  type SesIdentityClient,
+} from "@millionsend/ses";
 import {
   drainQuotaParked,
   purgeExpiredApiRequests,
@@ -28,13 +32,14 @@ import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
 
 if (!env.MASTER_ENCRYPTION_KEY) {
-  // Cloud KMS keyring arrives with the AWS package; until then both modes
-  // require the env KEK, which self-host mandates anyway.
+  // Required even when cloud wraps DEKs with KMS: tracking/unsubscribe token
+  // keys derive from this key via HKDF, and KMS cannot serve as a local
+  // derivation root.
   throw new Error("MASTER_ENCRYPTION_KEY is required to start the worker");
 }
 
 const db = getDb();
-const keyring = EnvKeyring.fromBase64(env.MASTER_ENCRYPTION_KEY);
+const keyring = createKeyringFromEnv(env);
 const masterKeyBytes = Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64");
 const unsubscribeSecretKey = deriveUnsubscribeKey(masterKeyBytes);
 // App-layer tracking signs tokens with an HKDF-derived key; defaultBaseUrl is

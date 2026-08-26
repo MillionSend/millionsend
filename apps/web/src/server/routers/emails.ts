@@ -1,18 +1,11 @@
-import { env } from "@millionsend/config";
-import type { Keyring } from "@millionsend/core";
-import {
-  decryptEmailBody,
-  type EmailBody,
-  EnvKeyring,
-  hashRecipient,
-  utcDay,
-} from "@millionsend/core";
+import { decryptEmailBody, type EmailBody, hashRecipient, utcDay } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gt, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
+import { getKeyring } from "../keyring";
 import { router, teamProcedure } from "../trpc";
 
 const emailStatus = z.enum(schema.emailStatusEnum.enumValues);
@@ -69,22 +62,6 @@ function paginate<T extends { id: string; cursorCreatedAt: string }>(
     rows.length > limit && last ? { createdAt: last.cursorCreatedAt, id: last.id } : null;
   const items = page.map(({ cursorCreatedAt: _cursorCreatedAt, ...item }) => item);
   return { items, nextCursor };
-}
-
-// Built lazily so the process only demands MASTER_ENCRYPTION_KEY when a body
-// is actually read, and so tests can point the env at a test key first.
-let keyring: Keyring | undefined;
-function getKeyring(): Keyring {
-  if (!keyring) {
-    if (!env.MASTER_ENCRYPTION_KEY) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "MASTER_ENCRYPTION_KEY is not configured",
-      });
-    }
-    keyring = EnvKeyring.fromBase64(env.MASTER_ENCRYPTION_KEY);
-  }
-  return keyring;
 }
 
 export const emailsRouter = router({

@@ -15,13 +15,17 @@ export interface EncryptedBody {
 }
 
 /**
- * Envelope encryption: a fresh random DEK per payload (sidesteps GCM nonce
- * budgets), wrapped by the keyring's KEK. ciphertext layout: payload ||
- * authTag. The plaintext DEK is scrubbed on every path, including keyring
- * failure. Email bodies and webhook signing secrets both seal through here.
+ * Envelope encryption: one DEK per payload wrapped by the keyring, ciphertext
+ * layout payload || authTag. Keyrings with generateWrappedDek supply the DEK
+ * so they can reuse a bounded cached pair (KMS pays a network round-trip per
+ * wrap); otherwise a fresh random DEK per payload. Reuse is sound for GCM
+ * because the IV below is fresh and random per payload either way. The
+ * plaintext DEK is scrubbed on every path, including keyring failure. Email
+ * bodies and webhook signing secrets both seal through here.
  */
 export async function encryptPayload(plaintext: Buffer, keyring: Keyring): Promise<EncryptedBody> {
-  const dek = randomBytes(32);
+  const generated = keyring.generateWrappedDek ? await keyring.generateWrappedDek() : undefined;
+  const dek = generated?.dek ?? randomBytes(32);
   try {
     const iv = randomBytes(GCM_IV_LENGTH);
     const cipher = createCipheriv("aes-256-gcm", dek, iv);
@@ -30,7 +34,7 @@ export async function encryptPayload(plaintext: Buffer, keyring: Keyring): Promi
       cipher.final(),
       cipher.getAuthTag(),
     ]);
-    const { wrapped, keyVersion } = await keyring.wrapDek(dek);
+    const { wrapped, keyVersion } = generated ?? (await keyring.wrapDek(dek));
     return { ciphertext: encrypted, iv, wrappedDek: wrapped, keyVersion };
   } finally {
     dek.fill(0);
