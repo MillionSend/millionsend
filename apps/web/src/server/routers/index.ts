@@ -3,6 +3,7 @@ import { apiKeysRouter } from "./api-keys";
 import { audienceRouter } from "./audience";
 import { billingRouter } from "./billing";
 import { broadcastsRouter } from "./broadcasts";
+import { connectedAppsRouter } from "./connected-apps";
 import { domainsRouter } from "./domains";
 import { emailRouter } from "./email";
 import { emailsRouter } from "./emails";
@@ -20,6 +21,7 @@ export const appRouter = router({
   audience: audienceRouter,
   billing: billingRouter,
   broadcasts: broadcastsRouter,
+  connectedApps: connectedAppsRouter,
   email: emailRouter,
   emails: emailsRouter,
   domains: domainsRouter,

@@ -86,7 +86,7 @@ export function AuthForm({
     }
     setPending("email");
     setErrorMessage(null);
-    const { error } =
+    const { data, error } =
       mode === "login"
         ? await authClient.signIn.email({ email, password })
         : await authClient.signUp.email({ name, email, password });
@@ -97,6 +97,10 @@ export function AuthForm({
       setPending(null);
       return;
     }
+    // A sign-in that resumes a pending OAuth authorization answers with the
+    // consent URL; the auth client has already navigated there.
+    const resumed = data as { redirect?: boolean; url?: string } | null;
+    if (resumed?.redirect && resumed.url) return;
     // The dashboard layout guard bounces team-less users to /onboarding.
     router.push(next);
   }

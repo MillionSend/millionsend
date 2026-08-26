@@ -1,8 +1,13 @@
+import { oauthProvider } from "@better-auth/oauth-provider";
 import { env } from "@millionsend/config";
+import { isLoopbackUrl, MCP_SCOPES } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
-import { betterAuth } from "better-auth";
+import { type BetterAuthPlugin, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
+import { jwt } from "better-auth/plugins";
+import { mcpResourceUrl } from "@/lib/api-base-url";
+import { getActiveMembership, listMemberships } from "./membership";
 import {
   passwordRecoveryEnabled,
   RESET_TOKEN_TTL_MINUTES,
@@ -56,6 +61,46 @@ export function enabledSocialProviders(): { google: boolean; github: boolean } {
   };
 }
 
+/**
+ * Scopes an OAuth client may request. `offline_access` is what makes the
+ * provider issue a refresh token; the rest gate MCP tools on the API.
+ */
+export const OAUTH_SCOPES = ["offline_access", ...MCP_SCOPES];
+
+/**
+ * Team an OAuth grant is bound to. The consent page persists the picked team
+ * on the session row (team.switch), and this resolves it with the same rule
+ * as the dashboard cookie: a membership of the user's own, else their oldest
+ * team, else nothing (the consent page refuses to grant without a team).
+ */
+export async function grantTeamId(
+  db: Db,
+  userId: string,
+  activeTeamId: string | null | undefined,
+): Promise<string | undefined> {
+  return (await getActiveMembership(db, userId, activeTeamId ?? undefined))?.teamId;
+}
+
+/**
+ * Claims stamped into every access token. Runs on each issuance and refresh,
+ * so a member removed from the team stops getting tokens at the next refresh
+ * rather than at consent expiry. Strict membership check — no fallback to
+ * another team, or a revoked member's token would silently rebind.
+ */
+export async function grantClaims(
+  db: Db,
+  user: { id: string } | null | undefined,
+  referenceId: string | undefined,
+): Promise<{ team_id: string; team_role: string }> {
+  const membership = user
+    ? (await listMemberships(db, user.id)).find((m) => m.teamId === referenceId)
+    : undefined;
+  if (!membership) {
+    throw new APIError("FORBIDDEN", { message: "The grant is not bound to a team you belong to." });
+  }
+  return { team_id: membership.teamId, team_role: membership.role };
+}
+
 /** Exported for tests, which inject a PGlite db and a captured mail sender. */
 export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
   // env.ts leaves BETTER_AUTH_SECRET optional (api/worker don't need it);
@@ -72,8 +117,58 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
         session: schema.session,
         account: schema.account,
         verification: schema.verification,
+        jwks: schema.jwks,
+        oauthClient: schema.oauthClient,
+        oauthResource: schema.oauthResource,
+        oauthClientResource: schema.oauthClientResource,
+        oauthRefreshToken: schema.oauthRefreshToken,
+        oauthAccessToken: schema.oauthAccessToken,
+        oauthConsent: schema.oauthConsent,
+        oauthClientAssertion: schema.oauthClientAssertion,
       },
     }),
+    session: {
+      additionalFields: {
+        activeTeamId: { type: "string", required: false, input: false },
+      },
+    },
+    plugins: [
+      // Issuer is the bare APP_BASE_URL (not .../api/auth) so RFC 8414
+      // discovery resolves at /.well-known/oauth-authorization-server
+      // (app/.well-known/oauth-authorization-server/route.ts).
+      jwt({ jwt: { issuer: baseURL } }),
+      oauthProvider({
+        loginPage: "/login",
+        consentPage: "/oauth/consent",
+        scopes: OAUTH_SCOPES,
+        resources: [{ identifier: mcpResourceUrl(), allowedScopes: [...MCP_SCOPES] }],
+        clientRegistrationDefaultResources: [mcpResourceUrl()],
+        // MCP clients (Claude Code, Cursor) still self-register via RFC 7591.
+        allowDynamicClientRegistration: true,
+        allowUnauthenticatedClientRegistration: true,
+        // Access tokens are JWTs the API verifies offline, so revoking a grant
+        // only bites at the next refresh — keep that window short.
+        accessTokenExpiresIn: 15 * 60,
+        // A retried refresh within this window gets the same rotated response
+        // instead of tripping replay detection (MCP clients retry on network blips).
+        refreshTokenReuseInterval: 30,
+        postLogin: {
+          // Team selection happens on the consent page itself, so the
+          // separate post-login step never redirects.
+          page: "/oauth/consent",
+          shouldRedirect: () => false,
+          consentReferenceId: ({ user, session }) =>
+            grantTeamId(
+              db,
+              user.id,
+              typeof session.activeTeamId === "string" ? session.activeTeamId : undefined,
+            ),
+        },
+        customAccessTokenClaims: ({ user, referenceId }) => grantClaims(db, user, referenceId),
+        // The provider's OpenAPI parameter types (`items?: undefined`) do not
+        // satisfy better-call's under exactOptionalPropertyTypes; runtime shape is fine.
+      }) as unknown as BetterAuthPlugin,
+    ],
     emailAndPassword: {
       enabled: true,
       // NIST floor: 8 with no composition rules — the signup form's strength
@@ -134,6 +229,23 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
           },
         },
       },
+    },
+    hooks: {
+      // MCP clients register with http://localhost:<port> redirect URIs and
+      // usually omit application_type, which RFC 7591 defaults to "web" — a
+      // type the provider (rightly) refuses http redirects for. A loopback
+      // redirect is the RFC 8252 signature of a native app, so classify it as one.
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/oauth2/register") return;
+        const body = ctx.body as
+          | { application_type?: string; redirect_uris?: string[] }
+          | undefined;
+        const loopbackOnly = body?.redirect_uris?.every(
+          (uri) => uri.startsWith("http://") && isLoopbackUrl(uri),
+        );
+        if (!body || body.application_type || !loopbackOnly) return;
+        return { context: { body: { ...body, application_type: "native" } } };
+      }),
     },
   });
 }

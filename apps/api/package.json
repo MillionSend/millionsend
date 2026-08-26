@@ -22,12 +22,15 @@
     "@millionsend/db": "workspace:*",
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
+    "@modelcontextprotocol/server": "2.0.0",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.2",
+    "jose": "6.2.8",
     "tsx": "^4.23.12"
   },
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
+    "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "^22.20.1",
     "resend": "^6.20.0",
     "typescript": "^5.9.3",

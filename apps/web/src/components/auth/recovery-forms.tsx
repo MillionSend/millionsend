@@ -9,8 +9,8 @@ import styles from "./auth.module.css";
 import { StrengthMeter } from "./auth-form";
 import { SilkCanvas } from "./silk-canvas";
 
-/** Same screen chrome as AuthForm, for the recovery screens' three states. */
-function Screen({ title, children }: { title: string; children: React.ReactNode }) {
+/** Same screen chrome as AuthForm, for the recovery and OAuth consent screens. */
+export function AuthScreen({ title, children }: { title: string; children: React.ReactNode }) {
   const tCommon = useTranslations("common");
   return (
     <main className={styles.screen}>
@@ -66,7 +66,7 @@ export function ForgotPasswordForm({
   }
 
   return (
-    <Screen title={t("title")}>
+    <AuthScreen title={t("title")}>
       {sent ? (
         <>
           <p className={styles.notice} aria-live="polite">
@@ -106,7 +106,7 @@ export function ForgotPasswordForm({
           </form>
         </>
       )}
-    </Screen>
+    </AuthScreen>
   );
 }
 
@@ -149,7 +149,7 @@ export function ResetPasswordForm({ token }: { token: string | null }) {
   }
 
   return (
-    <Screen title={t("title")}>
+    <AuthScreen title={t("title")}>
       {state === "invalid" ? (
         <>
           <p className={styles.notice}>{t("invalid")}</p>
@@ -202,6 +202,6 @@ export function ResetPasswordForm({ token }: { token: string | null }) {
           </button>
         </form>
       )}
-    </Screen>
+    </AuthScreen>
   );
 }

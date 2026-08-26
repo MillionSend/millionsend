@@ -5,7 +5,9 @@
     "billing": "Billing",
     "ses": "SES",
     "smtp": "SMTP",
-    "unsubscribe": "Unsubscribe page"
+    "mcp": "MCP",
+    "unsubscribe": "Unsubscribe page",
+    "connectedApps": "Connected apps"
   },
   "smtp": {
     "title": "SMTP",
@@ -244,5 +246,47 @@
     "checkoutSuccess": "Thanks! Your plan updates as soon as Stripe confirms the payment — usually within a few seconds.",
     "checkoutCancel": "Checkout canceled. Your plan is unchanged.",
     "error": "Could not open Stripe. Try again."
+  },
+  "mcp": {
+    "title": "MCP server",
+    "intro": "Let AI agents send email and manage your audience over the Model Context Protocol.",
+    "subtitle": "Every tool call goes through the same rules as the REST API: verified domains, suppressions, quotas and team scoping.",
+    "serverUrl": "Server URL",
+    "serverUrlNote": "Streamable HTTP endpoint. Clients sign in with your MillionSend account through OAuth — no API keys and nothing secret to paste.",
+    "connectTitle": "Connect a client",
+    "notes": {
+      "claudeCode": "Then run <code>/mcp</code> inside Claude Code and pick millionsend to sign in.",
+      "claudeDesktop": "Add to <code>claude_desktop_config.json</code> — or skip the file: Settings → Connectors → Add custom connector, and paste the server URL.",
+      "cursor": "Save as <code>.cursor/mcp.json</code> in the project, or <code>~/.cursor/mcp.json</code> for every project.",
+      "vscode": "Save as <code>.vscode/mcp.json</code> in the workspace, then start the server from the editor's MCP view."
+    },
+    "authNote": "On first connect the browser opens a consent screen where you pick the team and permissions the client gets. The grant appears under <link>Connected apps</link>, where any member can revoke it.",
+    "toolsTitle": "Tools",
+    "toolsIntro": "A client only sees the tools its granted permissions cover.",
+    "table": {
+      "tool": "Tool",
+      "permission": "Permission"
+    },
+    "readOnly": "read-only",
+    "docs": "MCP documentation"
+  },
+  "connectedApps": {
+    "title": "Connected apps",
+    "intro": "Apps and MCP clients authorized through OAuth to act on this team.",
+    "empty": "No apps connected yet. Authorize an MCP client and its grant appears here.",
+    "table": {
+      "app": "App",
+      "user": "Authorized by",
+      "scopes": "Permissions",
+      "granted": "Granted",
+      "menu": "Grant actions"
+    },
+    "you": "you",
+    "revoke": "Revoke access",
+    "revokeConfirm": {
+      "title": "Revoke access",
+      "body": "{name} loses access to this team at its next token refresh, within 15 minutes.",
+      "confirm": "Revoke access"
+    }
   }
 }

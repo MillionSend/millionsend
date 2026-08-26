@@ -1,0 +1,137 @@
+---
+title: Servidor MCP
+description: Conecte agentes de IA ao MillionSend pelo Model Context Protocol.
+---
+
+Toda implantação do MillionSend inclui um servidor MCP (Model Context
+Protocol), para que agentes de IA como Claude Code, Claude Desktop, Cursor e
+VS Code possam enviar e-mails e gerenciar sua audiência. As chamadas de
+ferramenta passam exatamente pelo mesmo pipeline da API REST — domínios
+verificados, supressões, opt-outs de tópico, cotas e escopo de time se
+aplicam sem alteração.
+
+## URL do servidor
+
+O endpoint MCP (Streamable HTTP) fica em `/mcp` na origem da API:
+
+<DeploymentTabs>
+<DeploymentTab deployment="cloud">
+
+`https://api.millionsend.com/mcp`
+
+</DeploymentTab>
+<DeploymentTab deployment="self-hosted">
+
+A origem da API da sua instância mais `/mcp` — ex.: `https://api.acme.dev/mcp`,
+ou `http://localhost:3001/mcp` em um compose local. O dashboard mostra a URL
+exata em **Configurações → MCP**.
+
+</DeploymentTab>
+</DeploymentTabs>
+
+## Conectar um cliente
+
+<Tabs items={["Claude Code", "Claude Desktop", "Cursor", "VS Code"]}>
+<Tab value="Claude Code">
+
+```sh
+claude mcp add --transport http millionsend https://api.millionsend.com/mcp
+```
+
+Depois rode `/mcp` dentro do Claude Code e escolha `millionsend` para entrar.
+
+</Tab>
+<Tab value="Claude Desktop">
+
+Adicione um conector personalizado em **Settings → Connectors → Add custom
+connector** e cole a URL do servidor. Ou use o arquivo de configuração — o
+`claude_desktop_config.json` do Claude Desktop só inicia servidores stdio,
+então o `mcp-remote` faz a ponte para o endpoint HTTP:
+
+```json title="claude_desktop_config.json"
+{
+  "mcpServers": {
+    "millionsend": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://api.millionsend.com/mcp"]
+    }
+  }
+}
+```
+
+</Tab>
+<Tab value="Cursor">
+
+```json title=".cursor/mcp.json"
+{
+  "mcpServers": {
+    "millionsend": {
+      "url": "https://api.millionsend.com/mcp"
+    }
+  }
+}
+```
+
+Salve no projeto, ou em `~/.cursor/mcp.json` para todos os projetos.
+
+</Tab>
+<Tab value="VS Code">
+
+```json title=".vscode/mcp.json"
+{
+  "servers": {
+    "millionsend": {
+      "type": "http",
+      "url": "https://api.millionsend.com/mcp"
+    }
+  }
+}
+```
+
+</Tab>
+</Tabs>
+
+Auto-hospedado: troque `https://api.millionsend.com/mcp` pela URL do servidor
+da sua instância, mostrada acima.
+
+## Autenticação
+
+O servidor MCP usa OAuth, não chaves de API. Na primeira conexão o cliente
+abre seu navegador: entre no MillionSend, escolha o **time** em que o cliente
+pode agir e as **permissões** que ele recebe. Nada é copiado ou colado —
+nenhum segredo fica na configuração do cliente.
+
+- O token de acesso é vinculado ao único time escolhido no consentimento.
+  Para agir em outro time, entre de novo a partir do cliente.
+- As permissões concedidas ficam em **Configurações → Aplicativos
+  conectados** no dashboard, onde qualquer membro do time pode revogá-las. A
+  revogação vale a partir da próxima renovação de token do cliente, em até 15
+  minutos.
+- Um membro removido do time perde o acesso MCP imediatamente, mesmo antes de
+  o token expirar.
+- Chamadas MCP compartilham o limite por minuto da API.
+
+## Ferramentas
+
+Cada ferramenta exige uma permissão (escopo OAuth). Os clientes só veem as
+ferramentas cobertas pelas permissões concedidas.
+
+| Ferramenta | Permissão | Descrição |
+| --- | --- | --- |
+| `list_emails` | `emails:read` | Lista e-mails enviados, na fila e agendados. |
+| `get_email` | `emails:read` | Busca um e-mail com o status de entrega. |
+| `list_contacts` | `audience:read` | Lista contatos, opcionalmente os membros de um segmento. |
+| `get_contact` | `audience:read` | Busca um contato por id ou endereço de e-mail. |
+| `list_segments` | `audience:read` | Lista segmentos — os alvos dos broadcasts. |
+| `list_topics` | `audience:read` | Lista tópicos de inscrição. |
+| `list_domains` | `domains:read` | Lista domínios de envio com o status de verificação. |
+| `send_email` | `emails:send` | Envia ou agenda um e-mail transacional. |
+| `create_contact` | `audience:write` | Cria um contato, com segmentos e inscrições em tópicos. |
+| `update_contact` | `audience:write` | Atualiza nome, propriedades ou o cancelamento de um contato. |
+| `add_contact_to_segment` | `audience:write` | Adiciona um contato a um segmento manual. |
+| `create_broadcast` | `broadcasts:write` | Cria um rascunho de broadcast (ou envia na hora). |
+| `send_broadcast` | `broadcasts:write` | Envia ou agenda um rascunho de broadcast. |
+
+Os resultados das ferramentas são as respostas JSON da API REST, e os mesmos
+erros de validação se aplicam — um domínio remetente não verificado falha em
+`send_email` exatamente como falha em `POST /emails`.

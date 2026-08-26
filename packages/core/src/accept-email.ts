@@ -61,7 +61,8 @@ export interface AcceptEmailDeps {
 export interface AcceptEmailAuth {
   teamId: string;
   plan: Plan;
-  apiKeyId: string;
+  /** Null when the caller authenticated with something other than an API key (OAuth/MCP). */
+  apiKeyId: string | null;
 }
 
 export interface AcceptEmailPayload {

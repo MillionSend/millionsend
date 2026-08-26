@@ -1,0 +1,57 @@
+import { getDb, schema } from "@millionsend/db";
+import { eq } from "drizzle-orm";
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { getAuth, OAUTH_SCOPES } from "@/server/auth";
+import { ACTIVE_TEAM_COOKIE, getActiveMembership, listMemberships } from "@/server/membership";
+import { ConsentForm } from "./consent-form";
+
+/**
+ * OAuth consent screen. The provider redirects here with a signed copy of
+ * the authorization query (client_id, scope, sig, exp…); the form posts it
+ * back through the auth client, which is what completes the flow.
+ */
+export default async function ConsentPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === "string") query.set(key, value);
+  }
+  const session = await getAuth().api.getSession({ headers: await headers() });
+  // Expired session: the login resumes the pending authorization from the
+  // same signed query, exactly as the provider's own login redirect does.
+  if (!session) redirect(`/login?${query}`);
+
+  const db = getDb();
+  const clientId = query.get("client_id");
+  const [client] = clientId
+    ? await db
+        .select({ name: schema.oauthClient.name, uri: schema.oauthClient.uri })
+        .from(schema.oauthClient)
+        .where(eq(schema.oauthClient.clientId, clientId))
+    : [];
+  const teams = await listMemberships(db, session.user.id);
+  const active = await getActiveMembership(
+    db,
+    session.user.id,
+    (await cookies()).get(ACTIVE_TEAM_COOKIE)?.value,
+  );
+  // Only known scopes are described; the provider rejects unknown ones anyway.
+  const scopes = (query.get("scope") ?? "")
+    .split(" ")
+    .filter((scope) => (OAUTH_SCOPES as string[]).includes(scope));
+
+  return (
+    <ConsentForm
+      app={client ? { name: client.name, uri: client.uri } : null}
+      userEmail={session.user.email}
+      scopes={scopes}
+      teams={teams.map(({ teamId, teamName }) => ({ teamId, teamName }))}
+      defaultTeamId={active?.teamId ?? null}
+    />
+  );
+}

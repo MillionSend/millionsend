@@ -1,11 +1,33 @@
 import { randomBytes } from "node:crypto";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { slugify } from "@/lib/slug";
 import { listMemberships } from "../membership";
-import { protectedProcedure, router } from "../trpc";
+import { type AuthSession, type Context, protectedProcedure, router } from "../trpc";
+
+/**
+ * Records the active-team selection in both places that read it: the cookie
+ * (dashboard requests) and the session row (the OAuth consent flow, which
+ * binds a grant to session.activeTeamId). Callers validate membership first.
+ */
+async function selectTeam(
+  ctx: Pick<Context, "db"> & {
+    session: AuthSession;
+    setActiveTeamCookie: Context["setActiveTeamCookie"] | undefined;
+  },
+  teamId: string,
+): Promise<void> {
+  ctx.setActiveTeamCookie?.(teamId);
+  if (ctx.session.session) {
+    await ctx.db
+      .update(schema.session)
+      .set({ activeTeamId: teamId })
+      .where(eq(schema.session.id, ctx.session.session.id));
+  }
+}
 
 export const teamBootstrapRouter = router({
   /** All of the caller's memberships plus which one the session resolved as active. */
@@ -26,7 +48,7 @@ export const teamBootstrapRouter = router({
       if (!memberships.some((m) => m.teamId === input.teamId)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
-      ctx.setActiveTeamCookie?.(input.teamId);
+      await selectTeam(ctx, input.teamId);
       return { teamId: input.teamId };
     }),
 
@@ -51,7 +73,7 @@ export const teamBootstrapRouter = router({
             return { teamId: team.id };
           });
           // A freshly created team becomes the active one.
-          ctx.setActiveTeamCookie?.(created.teamId);
+          await selectTeam(ctx, created.teamId);
           return created;
         } catch (error) {
           if (!isUniqueViolation(error)) throw error;
