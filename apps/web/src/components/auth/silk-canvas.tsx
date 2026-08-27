@@ -143,6 +143,7 @@ export function SilkCanvas() {
       gl.uniform3fv(uBase, palette.base);
       gl.uniform3fv(uSheen, palette.sheen);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if (canvas.style.opacity !== "1") canvas.style.opacity = "1";
       frame = requestAnimationFrame(draw);
     };
     const onVisibility = () => {
