@@ -14,7 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "pg-boss": "^12.27.0"
+    "pg-boss": "^12.28.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
