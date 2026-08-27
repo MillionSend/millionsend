@@ -74,6 +74,8 @@ export function SilkCanvas() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // Re-mounts reuse the same canvas; undo a prior failure-path hide.
+    canvas.style.display = "";
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const gl = canvas.getContext("webgl", {
       antialias: false,
@@ -179,7 +181,6 @@ export function SilkCanvas() {
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("resize", resize);
       observer.disconnect();
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
     };
   }, []);
 
