@@ -876,11 +876,11 @@ svg:focus {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  /* Transparent border + padding-box clip slims the visible thumb to 4px. */
   background: var(--ms-line-strong);
-  background-clip: padding-box;
-  border: 2px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--ms-r-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ms-faint);
 }
 
 /* The product's only rotation: the DNS-check spinner ring (1s linear per the brief) */
