@@ -80,7 +80,11 @@ export function SilkCanvas() {
       depth: false,
       powerPreference: "low-power",
     });
-    if (!gl) return;
+    // Without WebGL the static silk beneath must show, not a blank canvas.
+    if (!gl) {
+      canvas.style.display = "none";
+      return;
+    }
 
     const compile = (type: number, src: string) => {
       const shader = gl.createShader(type) as WebGLShader;
@@ -92,7 +96,10 @@ export function SilkCanvas() {
     gl.attachShader(program, compile(gl.VERTEX_SHADER, VERT));
     gl.attachShader(program, compile(gl.FRAGMENT_SHADER, FRAG));
     gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return;
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      canvas.style.display = "none";
+      return;
+    }
     // biome-ignore lint/correctness/useHookAtTopLevel: WebGL's useProgram, not a React hook
     gl.useProgram(program);
 
@@ -144,9 +151,18 @@ export function SilkCanvas() {
     };
     document.addEventListener("visibilitychange", onVisibility);
     frame = requestAnimationFrame(draw);
+    // A lost GPU context leaves the browser painting its broken-canvas
+    // placeholder over the static silk; hide the canvas so the image shows.
+    const onLost = (event: Event) => {
+      event.preventDefault();
+      cancelAnimationFrame(frame);
+      canvas.style.display = "none";
+    };
+    canvas.addEventListener("webglcontextlost", onLost);
 
     return () => {
       cancelAnimationFrame(frame);
+      canvas.removeEventListener("webglcontextlost", onLost);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("resize", resize);
       observer.disconnect();
