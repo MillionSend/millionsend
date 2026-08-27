@@ -6,3 +6,11 @@
 @import "./tokens/motion.css";
 @import "./tokens/base.css";
 @import "./components.css";
+
+/* Text selection wears the primary-button inversion: bone highlight, ground
+   text. Slightly translucent so selections over images stay readable; the
+   tokens flip it for the light theme. */
+::selection {
+  background: color-mix(in srgb, var(--ms-bone) 90%, transparent);
+  color: var(--ms-ground);
+}
