@@ -17,10 +17,22 @@ export type McpScope = (typeof MCP_SCOPES)[number];
 /** Path of the MCP endpoint on the public API host (RFC 8707 resource = API base + this). */
 export const MCP_RESOURCE_PATH = "/mcp";
 
-// ponytail: assumes the API listens on port 3001 of the dashboard host (the
-// docker-compose default). Add a dedicated public-API-URL env when a reverse
-// proxy serves the API elsewhere.
-export function apiBaseUrl(appBaseUrl: string | undefined): string {
+/**
+ * Public origin of the API. Without an explicit value this assumes the API
+ * listens on port 3001 of the dashboard host, which is the docker-compose
+ * shape every self-host starts from. A deployment whose reverse proxy serves
+ * the API on its own hostname (PUBLIC_API_URL) gets that instead — the
+ * derived host:port is unroutable there, and it is what the dashboard prints
+ * as the API base and what MCP tokens are bound to.
+ *
+ * The trailing slash is stripped because callers concatenate a path onto the
+ * result, and a doubled slash is a different RFC 8707 resource identifier.
+ */
+export function apiBaseUrl(
+  appBaseUrl: string | undefined,
+  publicApiUrl?: string | undefined,
+): string {
+  if (publicApiUrl) return publicApiUrl.replace(/\/+$/, "");
   const url = new URL(appBaseUrl ?? "http://localhost:3000");
   return `${url.protocol}//${url.hostname}:3001`;
 }
@@ -28,8 +40,11 @@ export function apiBaseUrl(appBaseUrl: string | undefined): string {
 /**
  * Canonical RFC 8707 resource identifier OAuth access tokens are bound to.
  * The authorization server stamps it as `aud`; the API verifies it — both
- * derive it from APP_BASE_URL through this one function so they can't drift.
+ * derive it through this one function so they can't drift.
  */
-export function mcpResourceUrl(appBaseUrl: string | undefined): string {
-  return `${apiBaseUrl(appBaseUrl)}${MCP_RESOURCE_PATH}`;
+export function mcpResourceUrl(
+  appBaseUrl: string | undefined,
+  publicApiUrl?: string | undefined,
+): string {
+  return `${apiBaseUrl(appBaseUrl, publicApiUrl)}${MCP_RESOURCE_PATH}`;
 }

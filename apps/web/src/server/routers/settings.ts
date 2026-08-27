@@ -16,6 +16,7 @@ import { isUniqueViolation } from "@/lib/db-errors";
 import { isHexColor } from "@/lib/hex-color";
 import { isHttpUrl } from "@/lib/http-url";
 import { resolveBaseUrl } from "../auth";
+import { smtpRelayOffered } from "../smtp";
 import { uploadsEnabled } from "../storage";
 import { protectedProcedure, router, teamProcedure } from "../trpc";
 
@@ -266,23 +267,28 @@ export const settingsRouter = router({
     // Read-only connection facts. The password is deliberately the literal
     // placeholder, never a real key: the SMTP relay authenticates with any
     // ms_ API key, which the operator mints on the API keys screen.
-    get: teamProcedure.query(() => ({
-      host: smtpPublicHost(),
-      // Raw process.env carries no zod default under SKIP_ENV_VALIDATION, so
-      // fall back to the relay's default listen port.
-      port: Number(env.SMTP_PORT) || 2587,
-      user: "millionsend",
-      passwordPlaceholder: SMTP_PASSWORD_PLACEHOLDER,
-      // Mirrors the relay's AUTH gate (apps/smtp/src/server.ts): AUTH needs
-      // STARTTLS (cert+key both set) unless the insecure escape hatch is on.
-      // Booleans only — the cert paths never reach the client. Raw process.env
-      // for the flag because under SKIP_ENV_VALIDATION the env proxy carries
-      // strings, not zod-parsed booleans.
-      tlsConfigured: Boolean(env.SMTP_TLS_CERT_PATH && env.SMTP_TLS_KEY_PATH),
-      allowInsecureAuth:
-        process.env.SMTP_ALLOW_INSECURE_AUTH === "true" ||
-        process.env.SMTP_ALLOW_INSECURE_AUTH === "1",
-    })),
+    get: teamProcedure.query(() => {
+      // Same gate as the tab and the page: on cloud an unexposed relay has no
+      // connection details to hand out, only a hostname that cannot answer.
+      if (!smtpRelayOffered()) throw new TRPCError({ code: "NOT_FOUND" });
+      return {
+        host: smtpPublicHost(),
+        // Raw process.env carries no zod default under SKIP_ENV_VALIDATION, so
+        // fall back to the relay's default listen port.
+        port: Number(env.SMTP_PORT) || 2587,
+        user: "millionsend",
+        passwordPlaceholder: SMTP_PASSWORD_PLACEHOLDER,
+        // Mirrors the relay's AUTH gate (apps/smtp/src/server.ts): AUTH needs
+        // STARTTLS (cert+key both set) unless the insecure escape hatch is on.
+        // Booleans only — the cert paths never reach the client. Raw process.env
+        // for the flag because under SKIP_ENV_VALIDATION the env proxy carries
+        // strings, not zod-parsed booleans.
+        tlsConfigured: Boolean(env.SMTP_TLS_CERT_PATH && env.SMTP_TLS_KEY_PATH),
+        allowInsecureAuth:
+          process.env.SMTP_ALLOW_INSECURE_AUTH === "true" ||
+          process.env.SMTP_ALLOW_INSECURE_AUTH === "1",
+      };
+    }),
   }),
 
   unsubscribe: router({

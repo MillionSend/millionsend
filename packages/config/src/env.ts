@@ -130,6 +130,12 @@ export const env = createEnv({
     // unsubscribe pages are derived from it.
     APP_BASE_URL: z.url().optional(),
 
+    // Public origin of the API, when a reverse proxy serves it somewhere other
+    // than port 3001 of the dashboard host (the compose default the derivation
+    // in @millionsend/core assumes). Only what the app PRINTS and what MCP
+    // tokens are bound to; the listen port stays PORT.
+    PUBLIC_API_URL: z.url().optional(),
+
     // Legal pages linked from the auth screen's consent line. Both optional;
     // the line renders only the links that are set, and disappears entirely
     // when neither is.
