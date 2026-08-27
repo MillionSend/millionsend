@@ -610,6 +610,48 @@ it("openTracking on injects the pixel; a custom subdomain sets the tracking host
   expect(verifyOpenToken(pixel?.[1] ?? "", trackingSecret)).toEqual({ emailId });
 });
 
+// A deployment with no certificate for customer hostnames must not ship links
+// through one, even for a subdomain stored while the feature was available —
+// mail already sent cannot be recalled.
+it("allowSubdomains false falls back to the deployment host, stored subdomain and all", async () => {
+  const [branded] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "branded.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+      clickTracking: true,
+      openTracking: true,
+      trackingSubdomain: "track",
+    })
+    .returning({ id: schema.domains.id });
+  if (!branded) throw new Error("domain insert failed");
+  const { ses, sends } = fakeSes("mid-branded");
+  const emailId = await insertEmail(
+    { domainId: branded.id, from: "Branded <a@branded.dev>" },
+    `<a href="https://dest.test/a">go</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: {
+      secretKey: trackingSecret,
+      defaultBaseUrl: "https://fallback.test",
+      allowSubdomains: false,
+    },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).toContain("https://fallback.test/t/c/");
+  expect(mime).not.toContain("track.branded.dev");
+  // Tracking itself still works — only the host changed.
+  const pixel = mime.match(/\/t\/o\/([A-Za-z0-9_.-]+)/);
+  expect(verifyOpenToken(pixel?.[1] ?? "", trackingSecret)).toEqual({ emailId });
+});
+
 it("both toggles off ships the raw link and no pixel (clean links)", async () => {
   const [clean] = await db
     .insert(schema.domains)

@@ -18,6 +18,8 @@ beforeEach(async () => {
 afterEach(async () => {
   await close();
   vi.restoreAllMocks();
+  // Deployment-mode stubs would otherwise leak into the next test in the file.
+  vi.unstubAllEnvs();
 });
 
 interface FakeSesState {
@@ -679,5 +681,44 @@ describe("domains.updateConfiguration", () => {
       value: new URL(process.env.APP_BASE_URL ?? "http://localhost:3000").host,
       status: null,
     });
+  });
+
+  // "" rather than "false": under SKIP_ENV_VALIDATION the env proxy carries raw
+  // strings, where "false" would be truthy.
+  function cloudWithoutTrackingSubdomains() {
+    vi.stubEnv("IS_CLOUD", "true");
+    vi.stubEnv("ALLOW_TRACKING_SUBDOMAINS", "");
+  }
+
+  it("refuses to adopt a subdomain where the deployment cannot serve one", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const { id } = await caller.domains.create({ name: "gated.example.com", region: "eu-west-1" });
+
+    cloudWithoutTrackingSubdomains();
+    await expect(
+      caller.domains.updateConfiguration({ id, trackingSubdomain: "email" }),
+    ).rejects.toThrow(/not available/i);
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomain).toBeNull();
+  });
+
+  it("keeps clearing a stored subdomain possible after the deployment stops serving them", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const { id } = await caller.domains.create({
+      name: "stranded.example.com",
+      region: "eu-west-1",
+    });
+    await caller.domains.updateConfiguration({ id, trackingSubdomain: "email" });
+
+    cloudWithoutTrackingSubdomains();
+    // The CNAME stops being advertised, but the value stays clearable.
+    expect((await caller.domains.records({ id })).records.some((r) => r.group === "tracking")).toBe(
+      false,
+    );
+    await caller.domains.updateConfiguration({ id, trackingSubdomain: "" });
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomain).toBeNull();
   });
 });

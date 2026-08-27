@@ -133,6 +133,14 @@ SES_CONFIGURATION_SET=
 # this is true. Keep false when the dashboard is reachable from the internet.
 ALLOW_SIGNUP=false
 
+# Hosted cloud only (ignored when IS_CLOUD=false): whether a team may point a
+# branded tracking subdomain — track.theirdomain.com, CNAME'd at this app — at
+# its tracked links. Self-host always allows it, because the operator owns the
+# reverse proxy and its certificates. A multi-tenant cloud needs a certificate
+# issued per customer hostname first: without one the CNAME resolves, the TLS
+# handshake fails, and every tracked link already mailed is dead.
+ALLOW_TRACKING_SUBDOMAINS=false
+
 # API port. Under docker compose this moves both the container's listen port
 # and the published host port together.
 PORT=3001

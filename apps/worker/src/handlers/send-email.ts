@@ -60,7 +60,20 @@ export interface SendDeps {
    * whole dep is optional so tests that don't exercise tracking need not wire
    * it — the worker always provides it, since the master key is always present.
    */
-  tracking?: { secretKey: Buffer; defaultBaseUrl?: string | undefined } | undefined;
+  tracking?:
+    | {
+        secretKey: Buffer;
+        defaultBaseUrl?: string | undefined;
+        /**
+         * Whether a domain's branded tracking subdomain may serve as the
+         * tracking origin. Omitted means yes (self-host). False routes every
+         * tracked link through defaultBaseUrl instead, so a subdomain stored
+         * while the feature was available cannot keep shipping links to a
+         * host this deployment has no certificate for.
+         */
+        allowSubdomains?: boolean | undefined;
+      }
+    | undefined;
 }
 
 export type SendOutcome = "sent" | "skipped" | "deferred" | "suppressed" | "failed";
@@ -264,9 +277,11 @@ export async function sendEmail(
   // that don't exercise tracking need not wire it, and its absence simply
   // leaves the body untouched.
   if (html && (click || open) && deps.tracking) {
-    const trackingBaseUrl = domain?.trackingSubdomain
-      ? `https://${domain.trackingSubdomain}.${domain.name}`
-      : deps.tracking.defaultBaseUrl;
+    const brandedHost =
+      domain?.trackingSubdomain && deps.tracking.allowSubdomains !== false
+        ? `https://${domain.trackingSubdomain}.${domain.name}`
+        : null;
+    const trackingBaseUrl = brandedHost ?? deps.tracking.defaultBaseUrl;
     // A custom subdomain is self-sufficient; without one the redirect host is
     // APP_BASE_URL. Missing it would ship links pointing nowhere, so fail loud.
     if (!trackingBaseUrl) {

@@ -6,4 +6,5 @@ export {
   parseEmailFrom,
   parseSnsTopicArns,
   SES_MAX_SEND_RATE_DEFAULT,
+  trackingSubdomainsSupported,
 } from "./env.js";

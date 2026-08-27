@@ -141,6 +141,7 @@ function ConfigurationPanel({
   tlsMode,
   trackingCnameLive,
   trackingHostLocal,
+  subdomainsSupported,
   onShowTrackingRecords,
 }: {
   id: string;
@@ -152,6 +153,8 @@ function ConfigurationPanel({
   trackingCnameLive: string | undefined;
   /** APP_BASE_URL is loopback: recipients can never reach tracking URLs. */
   trackingHostLocal: boolean;
+  /** This deployment can serve a customer hostname CNAME'd at the app. */
+  subdomainsSupported: boolean;
   onShowTrackingRecords: () => void;
 }) {
   const t = useTranslations("domains");
@@ -183,94 +186,102 @@ function ConfigurationPanel({
         {t("detail.configuration.note")}
       </div>
 
-      <ConfigSection
-        title={t("detail.configuration.trackingMetrics")}
-        description={t("detail.tracking.subdomainHint")}
-      >
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", maxWidth: 460 }}>
-          <div className="ms-field" style={{ flex: 1 }}>
-            <input
-              id="tracking-subdomain"
-              type="text"
-              className="ms-input mono"
-              style={{ width: "100%" }}
-              aria-label={t("detail.tracking.subdomain")}
-              placeholder={t("detail.tracking.subdomainPlaceholder")}
-              autoComplete="off"
-              spellCheck={false}
-              disabled={update.isPending}
-              value={subdomain}
-              onChange={(e) => setSubdomain(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveSubdomain();
-              }}
-            />
-          </div>
-          <button
-            type="button"
-            className="ms-btn ms-btn-secondary"
-            disabled={update.isPending || invalid || !dirty}
-            onClick={saveSubdomain}
-          >
-            {t("detail.configuration.update")}
-          </button>
-        </div>
-        {(() => {
-          // The subdomain only works once its CNAME resolves; until then a
-          // warn card leads straight to the record.
-          const cnameMissing = trackingSubdomain !== null && trackingCnameLive !== "found";
-          if (invalid) {
-            return (
-              <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--ms-danger)" }}>
-                {t("detail.tracking.subdomainError")}
-              </p>
-            );
-          }
-          if (cnameMissing) {
-            return (
-              <WarnCard
-                action={
-                  <button
-                    type="button"
-                    className="ms-btn ms-btn-secondary"
-                    onClick={onShowTrackingRecords}
-                  >
-                    {t("detail.configuration.viewDnsRecord")}
-                  </button>
-                }
-              >
-                {t("detail.configuration.subdomainDnsMissing")}
-              </WarnCard>
-            );
-          }
-          return (
-            <p
-              style={{
-                margin: "8px 0 0",
-                fontSize: 12,
-                display: "flex",
-                gap: 6,
-                alignItems: "center",
-                color: "var(--ms-muted)",
-              }}
-            >
-              <span
-                aria-hidden
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  flexShrink: 0,
-                  background: trackingSubdomain ? "var(--ms-success)" : "var(--ms-faint)",
+      {/* A stored subdomain keeps the section even where the deployment cannot
+          serve it: this input is the only way to clear one, and both write
+          paths deliberately still accept a clear. */}
+      {subdomainsSupported || trackingSubdomain !== null ? (
+        <ConfigSection
+          title={t("detail.configuration.trackingMetrics")}
+          description={t("detail.tracking.subdomainHint")}
+        >
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start", maxWidth: 460 }}>
+            <div className="ms-field" style={{ flex: 1 }}>
+              <input
+                id="tracking-subdomain"
+                type="text"
+                className="ms-input mono"
+                style={{ width: "100%" }}
+                aria-label={t("detail.tracking.subdomain")}
+                placeholder={t("detail.tracking.subdomainPlaceholder")}
+                autoComplete="off"
+                spellCheck={false}
+                disabled={update.isPending}
+                value={subdomain}
+                onChange={(e) => setSubdomain(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveSubdomain();
                 }}
               />
-              {trackingSubdomain
-                ? t("detail.configuration.subdomainActive")
-                : t("detail.configuration.subdomainNeutral")}
-            </p>
-          );
-        })()}
-      </ConfigSection>
+            </div>
+            <button
+              type="button"
+              className="ms-btn ms-btn-secondary"
+              disabled={update.isPending || invalid || !dirty}
+              onClick={saveSubdomain}
+            >
+              {t("detail.configuration.update")}
+            </button>
+          </div>
+          {(() => {
+            // The subdomain only works once its CNAME resolves; until then a
+            // warn card leads straight to the record.
+            const cnameMissing = trackingSubdomain !== null && trackingCnameLive !== "found";
+            if (invalid) {
+              return (
+                <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--ms-danger)" }}>
+                  {t("detail.tracking.subdomainError")}
+                </p>
+              );
+            }
+            if (!subdomainsSupported) {
+              return <WarnCard>{t("detail.tracking.subdomainUnavailable")}</WarnCard>;
+            }
+            if (cnameMissing) {
+              return (
+                <WarnCard
+                  action={
+                    <button
+                      type="button"
+                      className="ms-btn ms-btn-secondary"
+                      onClick={onShowTrackingRecords}
+                    >
+                      {t("detail.configuration.viewDnsRecord")}
+                    </button>
+                  }
+                >
+                  {t("detail.configuration.subdomainDnsMissing")}
+                </WarnCard>
+              );
+            }
+            return (
+              <p
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: 12,
+                  display: "flex",
+                  gap: 6,
+                  alignItems: "center",
+                  color: "var(--ms-muted)",
+                }}
+              >
+                <span
+                  aria-hidden
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    background: trackingSubdomain ? "var(--ms-success)" : "var(--ms-faint)",
+                  }}
+                />
+                {trackingSubdomain
+                  ? t("detail.configuration.subdomainActive")
+                  : t("detail.configuration.subdomainNeutral")}
+              </p>
+            );
+          })()}
+        </ConfigSection>
+      ) : null}
 
       {trackingHostLocal ? <WarnCard>{t("detail.tracking.localWarning")}</WarnCard> : null}
 
@@ -342,6 +353,7 @@ export function DomainDetail({ id }: { id: string }) {
   // switches to Records, pulses that group once, then clears itself.
   const [highlightTracking, setHighlightTracking] = useState(false);
   const sesEnv = useQuery(trpc.system.sesEnv.queryOptions());
+  const trackingSubdomainsSupported = sesEnv.data?.trackingSubdomainsSupported ?? true;
   // The Records-tab header switch flips open+click together (one concept there;
   // Configuration keeps the granular toggles).
   const updateTracking = useMutation(
@@ -704,6 +716,7 @@ export function DomainDetail({ id }: { id: string }) {
             tlsMode={data.tlsMode}
             trackingCnameLive={rows.find((r) => r.group === "tracking")?.live}
             trackingHostLocal={isLoopbackUrl(sesEnv.data?.appBaseUrl)}
+            subdomainsSupported={trackingSubdomainsSupported}
             onShowTrackingRecords={() => {
               setTab("records");
               setHighlightTracking(true);
@@ -768,7 +781,13 @@ export function DomainDetail({ id }: { id: string }) {
                         }
                       : {}
                   }
-                  emptyNotes={{ tracking: t("detail.groups.trackingNote") }}
+                  emptyNotes={{
+                    tracking: t(
+                      trackingSubdomainsSupported
+                        ? "detail.groups.trackingNote"
+                        : "detail.groups.trackingNoteDefaultOnly",
+                    ),
+                  }}
                 />
               ) : (
                 <DnsRecordsTableSkeleton showStatus />

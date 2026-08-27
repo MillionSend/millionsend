@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { env } from "@millionsend/config";
+import { env, trackingSubdomainsSupported } from "@millionsend/config";
 import { getDb } from "@millionsend/db";
 import { Queue } from "@millionsend/queue";
 import {
@@ -47,6 +47,7 @@ const app = createApi({
   rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   appBaseUrl: env.APP_BASE_URL,
   publicApiUrl: env.PUBLIC_API_URL,
+  trackingSubdomains: trackingSubdomainsSupported(),
   ses: { clientForRegion, defaultRegion: env.AWS_REGION },
   enqueueEmailSend: async (emailId, opts) => {
     await queue.send(

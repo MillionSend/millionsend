@@ -1,5 +1,5 @@
 import { SQSClient } from "@aws-sdk/client-sqs";
-import { env } from "@millionsend/config";
+import { env, trackingSubdomainsSupported } from "@millionsend/config";
 import {
   deriveTrackingKey,
   deriveUnsubscribeKey,
@@ -47,6 +47,7 @@ const unsubscribeSecretKey = deriveUnsubscribeKey(masterKeyBytes);
 // APP_BASE_URL only fails a send whose domain has tracking on and no subdomain.
 const tracking = {
   secretKey: deriveTrackingKey(masterKeyBytes),
+  allowSubdomains: trackingSubdomainsSupported(),
   ...(env.APP_BASE_URL ? { defaultBaseUrl: env.APP_BASE_URL } : {}),
 };
 // Absent APP_BASE_URL doesn't stop the worker — transactional mail still

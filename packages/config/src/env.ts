@@ -156,6 +156,11 @@ export const env = createEnv({
     // internet-reachable dashboard from handing strangers the SES account.
     ALLOW_SIGNUP: boolFromString,
 
+    // Cloud-only switch for branded tracking subdomains (a customer CNAMEs
+    // track.theirdomain.com at this app). Read through
+    // trackingSubdomainsSupported(), which leaves self-host unconditionally on.
+    ALLOW_TRACKING_SUBDOMAINS: boolFromString,
+
     // Social login for the dashboard. A provider's sign-in button appears
     // only when BOTH its client id and secret are set.
     GOOGLE_CLIENT_ID: z.string().optional(),
@@ -198,6 +203,29 @@ export const env = createEnv({
 });
 
 export type Env = typeof env;
+
+/**
+ * Whether a domain's branded tracking subdomain — a customer CNAME pointing
+ * at this app — can actually be served here.
+ *
+ * Self-host: yes, unconditionally. The operator owns the reverse proxy and
+ * its certificates, so pointing another hostname at the app is theirs to
+ * arrange, and the domain screen already warns while the CNAME does not
+ * resolve.
+ *
+ * Cloud: only when the operator says so. A customer hostname arriving at a
+ * shared, CDN-fronted origin needs per-hostname certificate provisioning set
+ * up deliberately; without it the TLS handshake fails, and every tracked link
+ * that already shipped points somewhere recipients cannot reach.
+ */
+export function trackingSubdomainsSupported(e: Env = env): boolean {
+  if (!e.IS_CLOUD) return true;
+  // Compared against the parsed forms rather than tested for truthiness:
+  // under SKIP_ENV_VALIDATION the env proxy carries raw strings, where the
+  // string "false" would enable the feature.
+  const flag: unknown = e.ALLOW_TRACKING_SUBDOMAINS;
+  return flag === true || flag === "true" || flag === "1";
+}
 
 const S3_CREDENTIAL_KEYS = ["S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const;
 

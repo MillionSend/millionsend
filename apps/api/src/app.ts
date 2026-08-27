@@ -137,6 +137,13 @@ export interface ApiDeps {
    * MCP tokens are bound to it, so it must match what clients actually dial.
    */
   publicApiUrl?: string | undefined;
+  /**
+   * Whether a domain may adopt a branded tracking subdomain (a customer CNAME
+   * pointing at this app). Omitted means yes; false drops the CNAME from the
+   * DNS checklist and refuses to store one, for a deployment that holds no
+   * certificate for customer-owned hostnames.
+   */
+  trackingSubdomains?: boolean | undefined;
   /** Per-key fixed-window request cap. Defaults to 600 requests/minute. */
   rateLimitPerMinute?: number | undefined;
 }
