@@ -125,11 +125,14 @@ export function SilkCanvas() {
       attributeFilter: ["data-theme"],
     });
 
-    // DPR capped: fbm per pixel is the cost driver and folds are soft anyway.
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+    // fbm per pixel is the cost driver: render into a small backing store and
+    // let CSS stretch it — soft silk upscaled is indistinguishable, and this
+    // plus the 30fps cap is what keeps GPUs cool and contexts alive.
+    const RENDER_MAX_WIDTH = 640;
     const resize = () => {
-      canvas.width = Math.round(canvas.clientWidth * dpr);
-      canvas.height = Math.round(canvas.clientHeight * dpr);
+      const scale = Math.min(1, RENDER_MAX_WIDTH / Math.max(1, canvas.clientWidth));
+      canvas.width = Math.max(1, Math.round(canvas.clientWidth * scale));
+      canvas.height = Math.max(1, Math.round(canvas.clientHeight * scale));
       gl.viewport(0, 0, canvas.width, canvas.height);
     };
     resize();
@@ -137,7 +140,16 @@ export function SilkCanvas() {
 
     let frame = 0;
     const start = performance.now();
+    // 30fps: the motion is slow; half the frames, half the GPU.
+    const FRAME_MS = 1000 / 30;
+    let lastDraw = 0;
     const draw = () => {
+      const now = performance.now();
+      if (now - lastDraw < FRAME_MS) {
+        frame = requestAnimationFrame(draw);
+        return;
+      }
+      lastDraw = now;
       gl.uniform1f(uTime, (performance.now() - start) / 1000);
       gl.uniform2f(uRes, canvas.width, canvas.height);
       gl.uniform3fv(uBase, palette.base);

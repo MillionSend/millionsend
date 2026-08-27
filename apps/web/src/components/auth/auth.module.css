@@ -22,7 +22,6 @@
   height: 112%;
   object-fit: cover;
   z-index: -2;
-  filter: brightness(0.85);
   animation: drift 70s ease-in-out infinite alternate;
 }
 @keyframes drift {
@@ -42,10 +41,9 @@
 /* The live shader paints over the static webp when it runs; when it cannot
    (reduced motion, no WebGL), the imgs beneath remain the backdrop. */
 .canvas {
-  /* Hidden until the shader's first frame — the bright static webp otherwise
-     flashes before the darker render covers it. */
+  /* Hidden until the shader's first frame; the webp beneath is baked to the
+     shader's tone, so the switch is instant and imperceptible. */
   opacity: 0;
-  transition: opacity 0.8s ease;
   position: absolute;
   inset: 0;
   width: 100%;
