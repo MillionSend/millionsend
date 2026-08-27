@@ -7,10 +7,8 @@
 @import "./tokens/base.css";
 @import "./components.css";
 
-/* Text selection wears the primary-button inversion: bone highlight, ground
-   text. Slightly translucent so selections over images stay readable; the
-   tokens flip it for the light theme. */
+/* Text selection: a light bone wash only — text keeps its own color, so body
+   copy and highlighted code tokens stay legible in both themes. */
 ::selection {
-  background: color-mix(in srgb, var(--ms-bone) 90%, transparent);
-  color: var(--ms-ground);
+  background: color-mix(in srgb, var(--ms-bone) 30%, transparent);
 }
