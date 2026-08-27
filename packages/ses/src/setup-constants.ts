@@ -95,6 +95,14 @@ BETTER_AUTH_SECRET=
 # signup fail with an "invalid origin" error.
 APP_BASE_URL=http://localhost:3000
 
+# Public origin of the API, for deployments whose reverse proxy serves it on
+# its own hostname (e.g. https://api.example.com) rather than on port 3001 of
+# the dashboard host. Unset, that derived URL is what the dashboard prints as
+# the API base and what MCP tokens are bound to — correct for the compose
+# setup, unroutable once a proxy moves the API. Changes only the published
+# URL; the api still listens on PORT.
+# PUBLIC_API_URL=
+
 # --- AWS SES (bring your own account) ---
 
 # IAM credentials with ses:SendEmail / ses:SendRawEmail. Omit to use the

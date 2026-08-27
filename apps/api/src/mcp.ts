@@ -351,7 +351,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
  * are verified offline against its JWKS, so no cross-app import is needed.
  */
 export function registerMcp(app: OpenAPIHono<Env>, deps: ApiDeps, appBaseUrl: string): void {
-  const resource = mcpResourceUrl(appBaseUrl);
+  const resource = mcpResourceUrl(appBaseUrl, deps.publicApiUrl);
   const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(new URL(resource));
   const gate = requireBearerAuth({
     verifier: createTokenVerifier(

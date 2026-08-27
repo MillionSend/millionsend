@@ -46,6 +46,7 @@ const app = createApi({
   isCloud: env.IS_CLOUD,
   rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   appBaseUrl: env.APP_BASE_URL,
+  publicApiUrl: env.PUBLIC_API_URL,
   ses: { clientForRegion, defaultRegion: env.AWS_REGION },
   enqueueEmailSend: async (emailId, opts) => {
     await queue.send(

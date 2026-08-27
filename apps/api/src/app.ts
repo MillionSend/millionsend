@@ -131,6 +131,12 @@ export interface ApiDeps {
    * router enforces).
    */
   appBaseUrl?: string | undefined;
+  /**
+   * Public origin of this API, when a reverse proxy serves it somewhere other
+   * than port 3001 of the dashboard host. Omitted → derived from appBaseUrl.
+   * MCP tokens are bound to it, so it must match what clients actually dial.
+   */
+  publicApiUrl?: string | undefined;
   /** Per-key fixed-window request cap. Defaults to 600 requests/minute. */
   rateLimitPerMinute?: number | undefined;
 }
