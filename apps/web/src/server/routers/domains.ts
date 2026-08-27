@@ -1,5 +1,5 @@
 import { resolveNs as dnsResolveNs } from "node:dns/promises";
-import { env } from "@millionsend/config";
+import { env, trackingSubdomainsSupported } from "@millionsend/config";
 import { recordCheck } from "@millionsend/core/domain-status";
 import { type Db, schema } from "@millionsend/db";
 import {
@@ -166,8 +166,10 @@ function buildTrackedRecords(
   // Engagement tracking is app-layer: WE rewrite links and inject the open
   // pixel, so a branded tracking subdomain CNAMEs to THIS app (the /t/c and
   // /t/o handlers serve on any host). SES never checks it, so it carries no
-  // SES status — like DMARC — but the live DNS check does resolve it.
-  if (domain.trackingSubdomain) {
+  // SES status — like DMARC — but the live DNS check does resolve it. A
+  // deployment that cannot serve customer hostnames stops advertising the
+  // record, so a value stored earlier no longer asks for DNS that buys nothing.
+  if (domain.trackingSubdomain && trackingSubdomainsSupported()) {
     records.push({
       group: "tracking",
       type: "CNAME",
@@ -367,6 +369,14 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         if (input.openTracking !== undefined) set.openTracking = input.openTracking;
         if (input.clickTracking !== undefined) set.clickTracking = input.clickTracking;
         if (input.trackingSubdomain !== undefined) {
+          // Clearing is always allowed; only adopting one needs the deployment
+          // to be able to serve a customer hostname.
+          if (input.trackingSubdomain && !trackingSubdomainsSupported()) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Branded tracking subdomains are not available on this deployment",
+            });
+          }
           set.trackingSubdomain = input.trackingSubdomain || null;
         }
         if (input.tlsMode !== undefined) set.tlsMode = input.tlsMode;

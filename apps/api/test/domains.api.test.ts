@@ -62,6 +62,7 @@ function makeApp(opts: {
   client: SesIdentityClient;
   dns?: DnsResolver;
   appBaseUrl?: string | undefined;
+  trackingSubdomains?: boolean | undefined;
 }) {
   const deps: ApiDeps = {
     db,
@@ -69,6 +70,7 @@ function makeApp(opts: {
     isCloud: false,
     enqueueEmailSend: async () => {},
     appBaseUrl: opts.appBaseUrl,
+    trackingSubdomains: opts.trackingSubdomains,
     ses: {
       clientForRegion: () => opts.client,
       dns: opts.dns ?? fakeDns(),
@@ -344,6 +346,61 @@ describe("PATCH /domains/{id}", () => {
     await call(app, fullKey, "PATCH", `/domains/${id}`, { tracking_subdomain: "" });
     const [cleared] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(cleared?.trackingSubdomain).toBeNull();
+  });
+
+  it("422s adopting a tracking subdomain where the deployment cannot serve one", async () => {
+    const gated = makeApp({
+      ...fakeSes(),
+      appBaseUrl: "https://app.example.dev",
+      trackingSubdomains: false,
+    });
+    const { id } = await createDomain(gated, "gated.example.com");
+
+    const adopt = await call(gated, fullKey, "PATCH", `/domains/${id}`, {
+      tracking_subdomain: "email",
+    });
+    expect(adopt.status).toBe(422);
+    expect(await adopt.json()).toMatchObject({
+      statusCode: 422,
+      name: "validation_error",
+      message: expect.stringContaining("not available"),
+    });
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomain).toBeNull();
+  });
+
+  // Turning the flag off must not strand a subdomain adopted while it was on.
+  it("still clears a stored tracking subdomain once the deployment stops serving them", async () => {
+    const open = makeApp({ ...fakeSes(), appBaseUrl: "https://app.example.dev" });
+    const { id } = await createDomain(open, "stranded.example.com");
+    await call(open, fullKey, "PATCH", `/domains/${id}`, { tracking_subdomain: "email" });
+
+    const gated = makeApp({
+      ...fakeSes(),
+      appBaseUrl: "https://app.example.dev",
+      trackingSubdomains: false,
+    });
+    const cleared = await call(gated, fullKey, "PATCH", `/domains/${id}`, {
+      tracking_subdomain: "",
+    });
+    expect(cleared.status).toBe(200);
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomain).toBeNull();
+  });
+
+  it("omits the tracking CNAME from the checklist where subdomains are not served", async () => {
+    const open = makeApp({ ...fakeSes(), appBaseUrl: "https://app.example.dev" });
+    const { id } = await createDomain(open, "hidden.example.com");
+    await call(open, fullKey, "PATCH", `/domains/${id}`, { tracking_subdomain: "email" });
+
+    const gated = makeApp({
+      ...fakeSes(),
+      appBaseUrl: "https://app.example.dev",
+      trackingSubdomains: false,
+    });
+    const res = await call(gated, fullKey, "GET", `/domains/${id}`);
+    const body = (await res.json()) as { records: { record: string }[] };
+    expect(body.records.some((r) => r.record === "Tracking")).toBe(false);
   });
 
   it("422s enabling tracking when APP_BASE_URL is loopback or unset", async () => {

@@ -1,4 +1,9 @@
-import { EMAIL_RETENTION_DAYS_DEFAULT, env, SES_MAX_SEND_RATE_DEFAULT } from "@millionsend/config";
+import {
+  EMAIL_RETENTION_DAYS_DEFAULT,
+  env,
+  SES_MAX_SEND_RATE_DEFAULT,
+  trackingSubdomainsSupported,
+} from "@millionsend/config";
 import { getInstanceSettings } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import {
@@ -86,6 +91,8 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       // Why the sign-in screen may hide "Forgot password?": recovery needs
       // SES credentials plus AUTH_EMAIL_FROM.
       passwordRecoveryEnabled: passwordRecoveryEnabled(),
+      // Why the domain screen may omit the branded tracking subdomain field.
+      trackingSubdomainsSupported: trackingSubdomainsSupported(),
     })),
 
     /**

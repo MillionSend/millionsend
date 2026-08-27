@@ -84,7 +84,7 @@ const toWire = (row: DomainRow) => ({
 function wireRecords(
   domain: DomainRow,
   verification: DomainVerification | null,
-  appBaseUrl: string | undefined,
+  deps: Pick<ApiDeps, "appBaseUrl" | "trackingSubdomains">,
 ) {
   const status = (group: string): string => {
     if (!verification) return "not_started";
@@ -110,15 +110,16 @@ function wireRecords(
     ...(r.priority !== undefined ? { priority: r.priority } : {}),
   }));
   // Engagement tracking is app-layer: the branded CNAME points at THIS app
-  // host, not SES — so it only exists once APP_BASE_URL names a real host.
-  if (domain.trackingSubdomain && appBaseUrl) {
+  // host, not SES — so it only exists once APP_BASE_URL names a real host, and
+  // only where this deployment can actually serve a customer hostname.
+  if (domain.trackingSubdomain && deps.appBaseUrl && deps.trackingSubdomains !== false) {
     records.push({
       record: "Tracking",
       name: `${domain.trackingSubdomain}.${domain.name}`,
       type: "CNAME",
       ttl: "Auto",
       status: "not_started",
-      value: new URL(appBaseUrl).host,
+      value: new URL(deps.appBaseUrl).host,
     });
   }
   return records;
@@ -211,7 +212,7 @@ export function registerDomainRoutes(
         throw error;
       }
       if (!row) throw new Error("domain insert returned no row");
-      return c.json({ ...toWire(row), records: wireRecords(row, null, deps.appBaseUrl) }, 200);
+      return c.json({ ...toWire(row), records: wireRecords(row, null, deps) }, 200);
     },
   );
 
@@ -287,7 +288,7 @@ export function registerDomainRoutes(
         {
           object: "domain" as const,
           ...toWire(domain),
-          records: wireRecords(domain, verification, deps.appBaseUrl),
+          records: wireRecords(domain, verification, deps),
         },
         200,
       );
@@ -385,6 +386,18 @@ export function registerDomainRoutes(
             422,
             "validation_error",
             "APP_BASE_URL is a loopback address recipients cannot reach, so tracking cannot be enabled",
+          ),
+          422,
+        );
+      }
+      // Clearing is always allowed; adopting one needs a deployment that can
+      // terminate TLS for the customer's own hostname.
+      if (body.tracking_subdomain && deps.trackingSubdomains === false) {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            "Branded tracking subdomains are not available on this deployment",
           ),
           422,
         );
