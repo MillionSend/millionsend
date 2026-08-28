@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { sesEventsProxyHint, withComposeProfile } from "../src/setup-flow.js";
+import {
+  detectDirState,
+  flowPlan,
+  isCloudEnv,
+  sesEventsProxyHint,
+  withComposeProfile,
+} from "../src/setup-flow.js";
 
 describe("withComposeProfile", () => {
   it("adds the first profile, appends to existing ones, and never duplicates", () => {
@@ -26,5 +32,24 @@ describe("sesEventsProxyHint", () => {
     const hint = sesEventsProxyHint("https://mail.example.com", 4001);
     expect(hint).toContain("https://mail.example.com/ses/events");
     expect(hint).toContain("location = /ses/events { proxy_pass http://127.0.0.1:4001; }");
+  });
+});
+
+describe("cloud mode", () => {
+  it("recognises an .env that already runs as the hosted cloud", () => {
+    expect(isCloudEnv("IS_CLOUD=true\n")).toBe(true);
+    expect(isCloudEnv("IS_CLOUD=1\n")).toBe(true);
+    expect(isCloudEnv("IS_CLOUD=false\n")).toBe(false);
+    expect(isCloudEnv("IS_CLOUD=\n")).toBe(false);
+    expect(isCloudEnv(null)).toBe(false);
+  });
+
+  it("plans the cloud prompts only when asked", () => {
+    const opts = { appBaseUrl: "https://app.example.com", region: "sa-east-1" };
+    const state = detectDirState(() => null, null);
+    expect(flowPlan(state, { ...opts, cloud: true }).join("\n")).toContain(
+      "cloud: IS_CLOUD=true; prompt for KMS_KEY_ID, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET",
+    );
+    expect(flowPlan(state, opts).join("\n")).not.toContain("cloud:");
   });
 });
