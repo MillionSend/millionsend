@@ -6,6 +6,7 @@ import { type BetterAuthPlugin, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { jwt } from "better-auth/plugins";
+import { headers } from "next/headers";
 import { mcpResourceUrl } from "@/lib/api-base-url";
 import { getActiveMembership, listMemberships } from "./membership";
 import {
@@ -259,4 +260,18 @@ let instance: Auth | undefined;
 export function getAuth(): Auth {
   instance ??= createAuth();
   return instance;
+}
+
+/**
+ * Whether the request carries a signed-in session. False on any failure: the
+ * auth screens use this to bounce signed-in visitors, and a broken session
+ * lookup (no BETTER_AUTH_SECRET yet, or no request scope under tests) must
+ * render the form rather than crash the page.
+ */
+export async function hasSession(): Promise<boolean> {
+  try {
+    return (await getAuth().api.getSession({ headers: await headers() })) !== null;
+  } catch {
+    return false;
+  }
 }

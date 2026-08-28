@@ -72,6 +72,14 @@ export interface SendDeps {
          * host this deployment has no certificate for.
          */
         allowSubdomains?: boolean | undefined;
+        /**
+         * A tracking host shared by every tenant is what ad blockers and
+         * spam filters learn to block (SES's own awstrack.me sits on the
+         * popular blocklists), and its reputation bleeds across tenants.
+         * True: a domain without its own subdomain ships clean links instead
+         * of falling back to defaultBaseUrl.
+         */
+        requireBrandedHost?: boolean | undefined;
       }
     | undefined;
 }
@@ -281,30 +289,35 @@ export async function sendEmail(
       domain?.trackingSubdomain && deps.tracking.allowSubdomains !== false
         ? `https://${domain.trackingSubdomain}.${domain.name}`
         : null;
-    const trackingBaseUrl = brandedHost ?? deps.tracking.defaultBaseUrl;
+    const trackingBaseUrl =
+      brandedHost ?? (deps.tracking.requireBrandedHost ? null : deps.tracking.defaultBaseUrl);
     // A custom subdomain is self-sufficient; without one the redirect host is
-    // APP_BASE_URL. Missing it would ship links pointing nowhere, so fail loud.
-    if (!trackingBaseUrl) {
+    // APP_BASE_URL. Missing it would ship links pointing nowhere, so fail loud
+    // — except under requireBrandedHost, where untracked is the intended
+    // outcome, not an error.
+    if (!trackingBaseUrl && !deps.tracking.requireBrandedHost) {
       throw new Error(
         `tracking is enabled for email ${email.id} but APP_BASE_URL is unset and the domain has no tracking subdomain`,
       );
     }
-    // A broadcast's (or topic send's) in-body unsubscribe link is already
-    // expanded to its real URL by now, so click tracking must skip it —
-    // wrapping the visible Unsubscribe link through /t/c would log a bogus
-    // click.
-    const skipHrefPrefix =
-      (email.contactId || email.topicId) && deps.unsubscribe
-        ? buildUnsubscribeUrl(deps.unsubscribe.baseUrl, "")
-        : undefined;
-    html = rewriteForTracking(html, {
-      emailId: email.id,
-      trackingBaseUrl,
-      click,
-      open,
-      secretKey: deps.tracking.secretKey,
-      ...(skipHrefPrefix ? { skipHrefPrefix } : {}),
-    });
+    if (trackingBaseUrl) {
+      // A broadcast's (or topic send's) in-body unsubscribe link is already
+      // expanded to its real URL by now, so click tracking must skip it —
+      // wrapping the visible Unsubscribe link through /t/c would log a bogus
+      // click.
+      const skipHrefPrefix =
+        (email.contactId || email.topicId) && deps.unsubscribe
+          ? buildUnsubscribeUrl(deps.unsubscribe.baseUrl, "")
+          : undefined;
+      html = rewriteForTracking(html, {
+        emailId: email.id,
+        trackingBaseUrl,
+        click,
+        open,
+        secretKey: deps.tracking.secretKey,
+        ...(skipHrefPrefix ? { skipHrefPrefix } : {}),
+      });
+    }
   }
 
   // Caller-supplied headers first: every transport-owned header assigned

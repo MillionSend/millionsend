@@ -48,6 +48,7 @@ const unsubscribeSecretKey = deriveUnsubscribeKey(masterKeyBytes);
 const tracking = {
   secretKey: deriveTrackingKey(masterKeyBytes),
   allowSubdomains: trackingSubdomainsSupported(),
+  requireBrandedHost: env.IS_CLOUD,
   ...(env.APP_BASE_URL ? { defaultBaseUrl: env.APP_BASE_URL } : {}),
 };
 // Absent APP_BASE_URL doesn't stop the worker — transactional mail still

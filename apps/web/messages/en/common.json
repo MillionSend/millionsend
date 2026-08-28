@@ -68,5 +68,13 @@
   "draftDiscard": "Discard",
   "draftDiscardConfirm": "Discard the recovered draft? This can't be undone.",
   "confirmTitle": "Are you sure?",
-  "confirm": "Confirm"
+  "confirm": "Confirm",
+  "notFound": {
+    "body": "Wrong address, or the page moved.",
+    "cta": "Go to the dashboard"
+  },
+  "errorPage": {
+    "body": "The error is on our side. Reload, or try again in a moment.",
+    "retry": "Try again"
+  }
 }

@@ -99,7 +99,7 @@ depois rode `pnpm --filter @millionsend/api dev`,
 
 ## Referência de ambiente
 
-Do `.env.example`. Só as três primeiras são obrigatórias; todo o resto tem
+Do `.env.example`. Só os dois segredos são obrigatórios; todo o resto tem
 padrões que funcionam localmente. Cobrança (planos, Stripe) só existe em
 implantações hospedadas — veja [Cobrança](/pt-BR/billing); uma instância
 auto-hospedada não tem limites de plano.
@@ -109,7 +109,6 @@ auto-hospedada não tem limites de plano.
 | Variável | Propósito |
 | --- | --- |
 | `DATABASE_URL` | String de conexão do Postgres. O padrão corresponde ao serviço `postgres` do compose. |
-| `MILLIONSEND_IMAGE` | Só no deploy standalone: qual imagem rodar. O padrão `ghcr.io/millionsend/millionsend:latest` acompanha a `main`, então `docker compose pull` é a atualização. Defina uma tag de versão ou um digest imutável `ghcr.io/millionsend/millionsend@sha256:…` para segurar uma versão (`MILLIONSEND_BACKUP_IMAGE` fixa o sidecar de backup do mesmo jeito). |
 | `MASTER_ENCRYPTION_KEY` | Chave de criptografia dos corpos de email em repouso. Gere com `openssl rand -base64 32`. Perdê-la torna os corpos armazenados irrecuperáveis; trocá-la órfã os corpos antigos. Faça backup junto com o banco. |
 | `BETTER_AUTH_SECRET` | Segredo de assinatura das sessões do painel. Gere com `openssl rand -base64 32`. |
 | `APP_BASE_URL` | URL base pública da implantação — a origem que os navegadores usam para acessar o painel (ex.: `https://mail.example.com`). O login só é aceito a partir dessa origem; assinaturas SNS, links de descadastro e links de rastreamento derivam dela. Precisa corresponder exatamente ao esquema+host+porta em que você abre o painel — inclusive um `WEB_PORT` customizado — ou login e cadastro falham com erro de "invalid origin". Padrão `http://localhost:3000`. |
@@ -129,6 +128,7 @@ auto-hospedada não tem limites de plano.
 
 | Variável | Propósito |
 | --- | --- |
+| `MILLIONSEND_IMAGE` | Só no deploy standalone: qual imagem rodar. O padrão `ghcr.io/millionsend/millionsend:latest` acompanha a `main`, então `docker compose pull` é a atualização. Defina uma tag de versão ou um digest imutável `ghcr.io/millionsend/millionsend@sha256:…` para segurar uma versão (`MILLIONSEND_BACKUP_IMAGE` fixa o sidecar de backup do mesmo jeito). |
 | `ALLOW_SIGNUP` | O primeiro usuário sempre pode se registrar; depois disso o cadastro fica fechado a menos que isto seja `true`. Mantenha `false` quando o painel é acessível pela internet. |
 | `COMPOSE_PROFILES` | Serviços opcionais do compose, separados por vírgula: `smtp` (o relay; monte um par de chaves STARTTLS antes) e, no arquivo standalone, também `docs` (este site de documentação) e `backup` (dumps agendados). |
 | `PORT` | Porta da API (padrão `3001`). No compose, move junto a porta interna do contêiner e a porta publicada no host. |

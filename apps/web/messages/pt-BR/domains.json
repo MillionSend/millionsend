@@ -108,8 +108,9 @@
       "subdomainHint": "Opcional. Serve os links de rastreamento pelo seu próprio domínio em vez do host padrão — adicione o CNAME mostrado em Registros.",
       "subdomainPlaceholder": "links",
       "subdomainError": "Use um único rótulo DNS em minúsculas.",
-      "subdomainUnavailable": "Esta instalação não consegue servir links de rastreamento pelo seu próprio domínio, então o subdomínio abaixo não está em uso — os links saem pelo host padrão. Limpe-o para remover a configuração.",
+      "subdomainUnavailable": "Esta instalação não consegue servir links de rastreamento pelo seu próprio domínio no momento, então o subdomínio abaixo não está em uso — os emails saem com os links originais e sem pixel de abertura. Limpe-o para remover a configuração.",
       "localWarning": "O rastreamento precisa de uma URL acessível publicamente. A APP_BASE_URL desta instalação é local, então os destinatários nunca conseguem acessar os links rastreados nem o pixel de abertura — os controles ficam desativados até uma URL pública ser configurada.",
+      "cloudRequiresSubdomain": "Aqui os links rastreados são servidos apenas pelo seu próprio subdomínio de rastreamento — um host compartilhado é o que bloqueadores de anúncio e filtros de spam aprendem a bloquear. Sem um, os emails saem com os links originais e sem pixel de abertura.",
       "headerToggle": "Ativar ou desativar rastreamento de abertura e cliques"
     },
     "configuration": {

@@ -142,6 +142,7 @@ function ConfigurationPanel({
   trackingCnameLive,
   trackingHostLocal,
   subdomainsSupported,
+  trackingRequiresSubdomain,
   onShowTrackingRecords,
 }: {
   id: string;
@@ -155,6 +156,8 @@ function ConfigurationPanel({
   trackingHostLocal: boolean;
   /** This deployment can serve a customer hostname CNAME'd at the app. */
   subdomainsSupported: boolean;
+  /** Cloud: without a tracking subdomain, links ship untracked — never via the shared host. */
+  trackingRequiresSubdomain: boolean;
   onShowTrackingRecords: () => void;
 }) {
   const t = useTranslations("domains");
@@ -284,6 +287,10 @@ function ConfigurationPanel({
       ) : null}
 
       {trackingHostLocal ? <WarnCard>{t("detail.tracking.localWarning")}</WarnCard> : null}
+
+      {trackingRequiresSubdomain && !trackingSubdomain ? (
+        <WarnCard>{t("detail.tracking.cloudRequiresSubdomain")}</WarnCard>
+      ) : null}
 
       <ConfigSection
         title={t("detail.tracking.click")}
@@ -717,6 +724,7 @@ export function DomainDetail({ id }: { id: string }) {
             trackingCnameLive={rows.find((r) => r.group === "tracking")?.live}
             trackingHostLocal={isLoopbackUrl(sesEnv.data?.appBaseUrl)}
             subdomainsSupported={trackingSubdomainsSupported}
+            trackingRequiresSubdomain={sesEnv.data?.trackingRequiresSubdomain ?? false}
             onShowTrackingRecords={() => {
               setTab("records");
               setHighlightTracking(true);

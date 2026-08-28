@@ -1,0 +1,52 @@
+---
+title: Migrate from Resend
+description: Point the Resend SDK you already run at MillionSend — the wire format is identical.
+---
+
+MillionSend's REST API is wire-compatible with Resend's: same endpoints, same
+request and response shapes. Migrating is a configuration change, not a
+rewrite.
+
+## 1. Create your account and verify your domain
+
+Sign up ([MillionSend Cloud](https://millionsend.com), or your own
+[self-hosted](/self-hosting) instance), add your sending domain under
+**Domains**, and add the DKIM and MAIL FROM records it shows you. MillionSend
+uses its own DKIM keypair, so the records are new even for a domain that
+already sends through Resend — both can stay verified side by side while you
+migrate.
+
+Then create an `ms_` API key under **API keys**.
+
+## 2. Point your existing code at MillionSend
+
+The official Resend SDKs honor `RESEND_BASE_URL`, so the migration is two
+environment lines — no code changes:
+
+```sh
+RESEND_API_KEY=ms_...
+RESEND_BASE_URL=https://api.millionsend.com
+```
+
+Self-hosted, use your instance's API origin instead.
+
+Prefer first-party clients? The [MillionSend SDKs](/sdks) cover nine
+languages with the same surface:
+
+```ts
+import { MillionSend } from "millionsend";
+
+const ms = new MillionSend("ms_...", { baseUrl: "https://api.millionsend.com" });
+```
+
+## 3. Re-create what lives outside the request path
+
+- **Webhooks** — endpoints are per-platform state; re-create yours under
+  **Webhooks** in the dashboard.
+- **Contacts** — import via CSV under **Audience**, or `POST /contacts` with
+  the same payloads your Resend integration used.
+- **Suppressions** — bounce and complaint suppressions accumulate from your
+  own traffic; they do not transfer from Resend.
+
+Send one email through the new base URL and watch it move to **Delivered** on
+the Emails page — that is the whole migration.
