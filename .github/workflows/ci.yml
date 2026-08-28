@@ -9,9 +9,11 @@ on:
 permissions:
   contents: read
 
+# A newer push supersedes a PR's run, but never an in-flight publish on main:
+# cancelling one would leave the moving tags pointing at an older build.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
