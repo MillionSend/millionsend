@@ -23,6 +23,7 @@ import {
   upsertEnv,
 } from "./setup.js";
 import {
+  CLOUD_REQUIRED_KEYS,
   COMPOSE_DOWNLOAD_URL,
   composeUpArgs,
   confirmed,
@@ -31,6 +32,7 @@ import {
   envValue,
   flowPlan,
   generateSecret,
+  isCloudEnv,
   missingSecrets,
   secretLaterHint,
   sesEventsProxyHint,
@@ -191,7 +193,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
     // --dry-run spawns nothing, so the docker probe is skipped there too.
     const state = detectDirState(readCwdFile, dryRun ? null : probeDocker);
-    console.log(`${dim(stateSummary(state))}\n`);
+    // Hosted-cloud mode adds the prompts boot demands under IS_CLOUD=true. An
+    // .env that already says so keeps the mode on re-runs without the flag.
+    const cloud = argv.includes("--cloud") || isCloudEnv(state.envContent);
+    console.log(`${dim(stateSummary(state))}${cloud ? " · cloud" : ""}\n`);
 
     if (dryRun) {
       const appBaseUrl =
@@ -200,7 +205,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         "http://localhost:3000";
       console.log("Plan:");
       const region = process.env.AWS_REGION ?? "us-east-1";
-      for (const line of flowPlan(state, { appBaseUrl, region })) console.log(`  · ${line}`);
+      for (const line of flowPlan(state, { appBaseUrl, region, cloud })) {
+        console.log(`  · ${line}`);
+      }
       console.log("\n--dry-run: nothing was created, written, or started.");
       return 0;
     }
@@ -232,6 +239,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       writeFileSync(envPath, env);
       return true;
     };
+    if (cloud && !isCloudEnv(env)) writeEnv({ IS_CLOUD: "true" });
 
     // One APP_BASE_URL prompt feeds both the .env write and the SES events
     // route in the AWS step: https gets a push subscription, anything else
@@ -291,6 +299,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       }
     }
 
+    if (cloud) await cloudStep(rl, interactive, env, appBaseUrl, writeEnv, enableProfile);
+
     // --- aws step ---
     const hasKeys = (envValue(env, "AWS_ACCESS_KEY_ID") ?? "") !== "";
     const hasEvents = (envValue(env, "SNS_TOPIC_ARNS") ?? "") !== "";
@@ -346,6 +356,72 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     );
   } finally {
     rl.close();
+  }
+}
+
+/**
+ * Hosted-cloud additions: the values boot refuses to start without under
+ * IS_CLOUD=true — the KMS key that wraps email bodies and the Stripe secrets —
+ * plus the optional customer-portal id and the docs profile. Nothing here
+ * touches AWS or Stripe; the values are pasted from their consoles, and an
+ * empty answer keeps what .env already has.
+ */
+async function cloudStep(
+  rl: LineReader,
+  interactive: boolean,
+  env: string | null,
+  appBaseUrl: string,
+  writeEnv: (entries: Record<string, string>) => boolean,
+  enableProfile: (profile: string) => boolean,
+): Promise<void> {
+  console.log(
+    "\nHosted cloud (IS_CLOUD=true) — boot needs every value below except the portal id.",
+  );
+  const prompts = [
+    {
+      key: "KMS_KEY_ID",
+      label:
+        "KMS_KEY_ID — key ARN or id that wraps email bodies; the SES access key must be allowed to use it",
+    },
+    {
+      key: "STRIPE_SECRET_KEY",
+      label: "STRIPE_SECRET_KEY — live secret key (Stripe → Developers → API keys)",
+    },
+    {
+      key: "STRIPE_WEBHOOK_SECRET",
+      label: `STRIPE_WEBHOOK_SECRET — signing secret of the webhook endpoint at ${appBaseUrl}/api/billing/webhook (Stripe → Developers → Webhooks)`,
+    },
+    {
+      key: "STRIPE_PORTAL_CONFIG",
+      label:
+        "STRIPE_PORTAL_CONFIG — customer-portal configuration id, bpc_… (empty: the account default)",
+    },
+  ] as const;
+  const entries: Record<string, string> = {};
+  for (const { key, label } of prompts) {
+    const current = envValue(env, key) ?? "";
+    const value =
+      (await rl.question(`${label}${current ? ` [${current}]` : ""}: `)).trim() || current;
+    if (value !== "" && value !== current) entries[key] = value;
+  }
+  if (Object.keys(entries).length > 0) {
+    if (writeEnv(entries)) {
+      console.log(dim(`${Object.keys(entries).join(", ")} written to .env.`));
+    } else {
+      const block = Object.entries(entries)
+        .map(([key, value]) => `${key}=${value}`)
+        .join("\n");
+      console.log(`No .env here — paste into .env where MillionSend runs:\n\n${block}\n`);
+    }
+  }
+  const missing = CLOUD_REQUIRED_KEYS.filter((key) => !(entries[key] ?? envValue(env, key)));
+  if (missing.length > 0) {
+    console.log(
+      `note: ${missing.join(", ")} still empty — IS_CLOUD=true refuses to boot without them.`,
+    );
+  }
+  if (await offer(rl, "Serve the documentation site too (docs compose profile)?", interactive)) {
+    if (enableProfile("docs")) console.log(dim("docs added to COMPOSE_PROFILES."));
   }
 }
 

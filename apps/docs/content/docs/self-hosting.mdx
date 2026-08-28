@@ -168,10 +168,11 @@ including all access keys of the `millionsend` IAM user, so a running server
 stops sending. Re-running setup is safe, but each run mints a new access key —
 delete stale ones in the IAM console.
 
-No Node on the server? The same CLI ships inside the image:
+No Node on the server? The same CLI ships inside the image — run it from the
+deploy directory, which it reads and writes as `/work`:
 
 ```sh
-docker run --rm -it --user root -v ~/.aws:/root/.aws "$MILLIONSEND_IMAGE" setup
+docker run --rm -it --user root -v "$PWD":/work -w /work -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:latest setup
 ```
 
 Prefer not to run a CLI? The dashboard's **Settings → SES** page offers a

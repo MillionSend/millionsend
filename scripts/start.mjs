@@ -52,14 +52,16 @@ const PROCESSES = {
 
 const ALL_PROCESSES = ["api", "worker", "web"];
 
-// "setup" argv mode runs the interactive AWS setup CLI instead of the app:
-//   docker compose run --rm millionsend setup [teardown] [--dry-run]
-// (the Dockerfile ENTRYPOINT forwards compose run args here).
+// "setup" argv mode runs the interactive setup wizard instead of the app:
+//   docker run --rm -it -v "$PWD":/work -w /work <image> setup [--cloud] [teardown] [--dry-run]
+// (the Dockerfile ENTRYPOINT forwards the args here). The wizard reads and
+// writes .env in the working directory, so -w decides where that is; the
+// script path is absolute and resolves the same from any cwd.
 if (process.argv[2] === "setup") {
   const cli = spawnSync(
     join(root, "node_modules/.bin/tsx"),
     [join(root, "scripts/aws-setup/index.ts"), ...process.argv.slice(3)],
-    { cwd: root, stdio: "inherit" },
+    { cwd: process.cwd(), stdio: "inherit" },
   );
   process.exit(cli.status ?? 1);
 }

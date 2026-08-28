@@ -134,8 +134,9 @@ run mints a new access key — delete stale ones in the IAM console.
 (`@millionsend/setup` is the self-host setup tool; `@millionsend/cli` stays reserved
 for a future end-user CLI that talks to the MillionSend API.)
 
-No Node on the server? The same CLI ships inside the selected image:
-`docker run --rm -it --user root -v ~/.aws:/root/.aws "$MILLIONSEND_IMAGE" setup`.
+No Node on the server? The same CLI ships inside the image — run it from the
+deploy directory, which it reads and writes as `/work`:
+`docker run --rm -it --user root -v "$PWD":/work -w /work -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:latest setup`.
 
 Prefer not to run a CLI? The dashboard's Settings → SES page offers a CloudFormation
 quick-create link and a pre-filled shell script that create the same resources.

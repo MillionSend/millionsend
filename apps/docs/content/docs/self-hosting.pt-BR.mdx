@@ -174,10 +174,11 @@ todas as chaves de acesso do usuário IAM `millionsend`, então um servidor em
 execução para de enviar. Repetir o setup é seguro, mas cada execução gera uma
 nova chave de acesso — apague as antigas no console do IAM.
 
-Sem Node no servidor? O mesmo CLI vem dentro da imagem:
+Sem Node no servidor? O mesmo CLI vem dentro da imagem — rode-o a partir do
+diretório de deploy, que ele lê e escreve como `/work`:
 
 ```sh
-docker run --rm -it --user root -v ~/.aws:/root/.aws "$MILLIONSEND_IMAGE" setup
+docker run --rm -it --user root -v "$PWD":/work -w /work -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:latest setup
 ```
 
 Prefere não rodar um CLI? A página **Configurações → SES** do painel oferece

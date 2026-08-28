@@ -18,6 +18,22 @@ export const COMPOSE_DOWNLOAD_URL =
 /** .env keys the wizard offers to generate when missing or empty. */
 export const SECRET_KEYS = ["MASTER_ENCRYPTION_KEY", "BETTER_AUTH_SECRET"] as const;
 
+/**
+ * What boot demands on top of the self-host set once IS_CLOUD=true (mirrors
+ * assertEnvConsistency in packages/config; APP_BASE_URL is prompted anyway).
+ */
+export const CLOUD_REQUIRED_KEYS = [
+  "KMS_KEY_ID",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
+] as const;
+
+/** An .env that already runs as the hosted cloud: re-runs then need no --cloud flag. */
+export function isCloudEnv(content: string | null): boolean {
+  const value = envValue(content, "IS_CLOUD");
+  return value === "true" || value === "1";
+}
+
 export interface DirState {
   /** null = no .env in the directory. */
   envContent: string | null;
@@ -144,7 +160,10 @@ export function sesEventsProxyHint(origin: string, apiPort = 3001): string {
 }
 
 /** The full multi-step plan --dry-run prints; mirrors what the live run offers. */
-export function flowPlan(state: DirState, opts: { appBaseUrl: string; region: string }): string[] {
+export function flowPlan(
+  state: DirState,
+  opts: { appBaseUrl: string; region: string; cloud?: boolean },
+): string[] {
   const lines: string[] = [];
   lines.push(
     state.envContent === null
@@ -161,6 +180,11 @@ export function flowPlan(state: DirState, opts: { appBaseUrl: string; region: st
   lines.push(
     "env: PUBLIC_API_URL prompt (optional — the API's own hostname behind a reverse proxy)",
   );
+  if (opts.cloud) {
+    lines.push(
+      `cloud: IS_CLOUD=true; prompt for ${CLOUD_REQUIRED_KEYS.join(", ")} and STRIPE_PORTAL_CONFIG; offer the docs profile`,
+    );
+  }
   for (const line of setupPlan({ region: opts.region, appBaseUrl: opts.appBaseUrl })) {
     lines.push(`aws: ${line}`);
   }
