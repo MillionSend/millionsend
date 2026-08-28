@@ -13,7 +13,10 @@ const config: NextConfig = {
       "default-src 'self'",
       scriptPolicy,
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
+      // Team logos are served from S3_STORAGE_PUBLIC_URL, a runtime value this
+      // build-time policy cannot name; images carry no script, so any https
+      // origin is acceptable.
+      "img-src 'self' data: blob: https:",
       "font-src 'self'",
       "connect-src 'self'",
       "media-src 'self'",

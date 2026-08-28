@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  APP_IMAGE: ghcr.io/millionsend/millionsend
+  BACKUP_IMAGE: ghcr.io/millionsend/backup
+
 # A newer push supersedes a PR's run, but never an in-flight publish on main:
 # cancelling one would leave the moving tags pointing at an older build.
 concurrency:
@@ -37,61 +41,120 @@ jobs:
   # Images publish only from a green check on main or a version tag, so a
   # tag a deployment tracks can never point at a build the tests rejected.
   # main → :edge and :latest (moving head); version tags → :1.2.3 and :1.2.
-  # Once releases begin, drop the raw :latest line below so that tag follows
+  # Once releases begin, drop the raw :latest lines below so that tag follows
   # them instead (metadata-action adds :latest to semver tags by itself).
-  publish:
+  #
+  # Each platform builds on its own native runner — the Next.js build under
+  # QEMU emulation was the whole cost of a multi-arch build — and pushes by
+  # digest only; publish then stitches the digests into one tag per image.
+  build:
     needs: check
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            slug: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Labels only here (they link the package to this repository); tags are
+      # applied to the merged manifest in publish.
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        id: meta
+        with:
+          images: ${{ env.APP_IMAGE }}
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: app
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.APP_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=app-${{ matrix.slug }}
+          cache-to: type=gha,scope=app-${{ matrix.slug }},mode=max
+      # The backup sidecar (pg_dump + rclone) ships on the same tags so the
+      # standalone compose file needs no build context.
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: backup
+        with:
+          context: scripts/backup
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.BACKUP_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=backup-${{ matrix.slug }}
+          cache-to: type=gha,scope=backup-${{ matrix.slug }},mode=max
+      - name: Export digests
+        env:
+          APP_DIGEST: ${{ steps.app.outputs.digest }}
+          BACKUP_DIGEST: ${{ steps.backup.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests/app /tmp/digests/backup
+          touch "/tmp/digests/app/${APP_DIGEST#sha256:}" "/tmp/digests/backup/${BACKUP_DIGEST#sha256:}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-${{ matrix.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
 
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         id: app
         with:
-          images: ghcr.io/millionsend/millionsend
+          images: ${{ env.APP_IMAGE }}
           tags: |
             type=edge,branch=main
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.app.outputs.tags }}
-          labels: ${{ steps.app.outputs.labels }}
-          cache-from: type=gha,scope=app
-          cache-to: type=gha,scope=app,mode=max
-
-      # The backup sidecar (pg_dump + rclone) ships on the same tags so the
-      # standalone compose file needs no build context.
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         id: backup
         with:
-          images: ghcr.io/millionsend/backup
+          images: ${{ env.BACKUP_IMAGE }}
           tags: |
             type=edge,branch=main
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: scripts/backup
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.backup.outputs.tags }}
-          labels: ${{ steps.backup.outputs.labels }}
-          cache-from: type=gha,scope=backup
-          cache-to: type=gha,scope=backup,mode=max
+      - name: Create the multi-arch manifests
+        env:
+          APP_META: ${{ steps.app.outputs.json }}
+          BACKUP_META: ${{ steps.backup.outputs.json }}
+        run: |
+          cd /tmp/digests/app
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<<"$APP_META") $(printf "$APP_IMAGE@sha256:%s " *)
+          cd /tmp/digests/backup
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<<"$BACKUP_META") $(printf "$BACKUP_IMAGE@sha256:%s " *)
+          docker buildx imagetools inspect "$APP_IMAGE:${GITHUB_REF_NAME/main/edge}" --format '{{json .Manifest.Manifests | length}} platforms'
