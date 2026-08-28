@@ -114,6 +114,7 @@ describe("flowPlan", () => {
     expect(plan).toContain("create .env from the built-in template");
     expect(plan).toContain("generate MASTER_ENCRYPTION_KEY and BETTER_AUTH_SECRET");
     expect(plan).toContain("APP_BASE_URL prompt (default http://localhost:3000)");
+    expect(plan).toContain("PUBLIC_API_URL prompt");
     expect(plan).toContain("aws: IAM user millionsend");
     expect(plan).toContain("delivering to SQS queue millionsend-events");
     expect(plan).toContain("download deploy/docker-compose.yml, then docker compose up -d");

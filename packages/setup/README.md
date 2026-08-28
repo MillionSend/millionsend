@@ -32,9 +32,9 @@ and re-running is safe:
    `millionsend-backups` by default — and writes the `S3_*` lines. Public
    access for the uploads bucket cannot be enabled over the S3 API, so it
    prints the manual R2 instruction; keep the backups bucket private.
-4. **launch** — asks for a released image tag or immutable digest, downloads
-   the standalone `docker-compose.yml` if the directory has none, then runs
-   `docker compose up -d` (`--build` when your compose file builds from source).
+4. **launch** — downloads the standalone `docker-compose.yml` if the directory
+   has none, then runs `docker compose up -d` (`--build` when your compose file
+   builds from source).
 
 In a terminal every choice is interactive (arrow-key lists, Enter accepts the
 default). Piped input still works deterministically — answers one per line;

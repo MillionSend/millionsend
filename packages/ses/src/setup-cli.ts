@@ -33,7 +33,9 @@ import {
   generateSecret,
   missingSecrets,
   secretLaterHint,
+  sesEventsProxyHint,
   stateSummary,
+  withComposeProfile,
 } from "./setup-flow.js";
 import { banner, dim, pickBannerTier, selectPrompt, wrapText } from "./tty-ui.js";
 
@@ -224,6 +226,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       writeFileSync(envPath, env);
       return true;
     };
+    const enableProfile = (profile: string): boolean => {
+      if (env === null) return false;
+      env = withComposeProfile(env, profile);
+      writeFileSync(envPath, env);
+      return true;
+    };
 
     // One APP_BASE_URL prompt feeds both the .env write and the SES events
     // route in the AWS step: https gets a push subscription, anything else
@@ -240,24 +248,24 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       writeEnv({ APP_BASE_URL: appBaseUrl });
     }
 
-    const configuredImage =
-      envValue(env, "MILLIONSEND_IMAGE") || process.env.MILLIONSEND_IMAGE || "";
-    const needsPublishedImage =
-      state.composeContent === null || state.composeContent.includes("MILLIONSEND_IMAGE");
-    let imageMissing = needsPublishedImage && configuredImage === "";
-    if (imageMissing) {
-      const image = (
+    // The API's public origin is what the dashboard prints and what MCP
+    // tokens are bound to. Unset it is derived as <dashboard host>:3001,
+    // which only holds while the api answers on that port — a reverse proxy
+    // serving it on its own hostname needs the explicit value.
+    const currentApiUrl = envValue(env, "PUBLIC_API_URL") || process.env.PUBLIC_API_URL || "";
+    const publicApiUrl =
+      (
         await rl.question(
-          "MILLIONSEND_IMAGE — released image tag or immutable digest (required for the standalone compose; empty to configure later): ",
+          `PUBLIC_API_URL — the API's public origin when a reverse proxy serves it on its own hostname (empty: assumed at port 3001 of the dashboard host)${currentApiUrl ? ` [${currentApiUrl}]` : ""}: `,
         )
-      ).trim();
-      if (image !== "" && writeEnv({ MILLIONSEND_IMAGE: image })) {
-        imageMissing = false;
-        console.log(dim("MILLIONSEND_IMAGE written to .env."));
-      } else if (image !== "") {
-        console.log(`No .env here — add MILLIONSEND_IMAGE=${image} before starting.`);
-      }
+      ).trim() || currentApiUrl;
+    if (publicApiUrl !== "" && validUrl(publicApiUrl) === null) {
+      console.error(`Not a URL: ${publicApiUrl} — PUBLIC_API_URL left as it was.`);
+    } else if (env !== null && publicApiUrl !== (envValue(env, "PUBLIC_API_URL") ?? "")) {
+      writeEnv({ PUBLIC_API_URL: publicApiUrl });
     }
+    // The api's own listen port, for the reverse-proxy hint the AWS step prints.
+    const apiPort = Number(envValue(env, "PORT")) || 3001;
 
     // --- secrets ---
     if (env !== null) {
@@ -307,21 +315,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       if (choice === "skip") {
         console.log(dim("AWS step skipped."));
       } else {
-        await awsStep(rl, interactive, appBaseUrl, writeEnv, choice === "events");
+        await awsStep(rl, interactive, appBaseUrl, writeEnv, choice === "events", apiPort);
       }
     } else {
       const awsPrompt = hasKeys
         ? "Re-run the AWS setup (mints a NEW access key)?"
         : "\nCreate the AWS resources now (IAM user + key, SNS events, SES configuration set)?";
       if (await offer(rl, awsPrompt, interactive && !hasKeys)) {
-        await awsStep(rl, interactive, appBaseUrl, writeEnv);
+        await awsStep(rl, interactive, appBaseUrl, writeEnv, false, apiPort);
       } else {
         console.log(dim("AWS step skipped."));
       }
     }
 
     // --- object storage & backups step ---
-    await storageStep(rl, writeEnv);
+    await storageStep(rl, writeEnv, enableProfile);
 
     // --- social login step (before launch, so the stack starts with it) ---
     await socialLoginStep(rl, appBaseUrl, writeEnv);
@@ -335,7 +343,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       state,
       env === null ? [] : missingSecrets(env),
       appBaseUrl,
-      imageMissing,
     );
   } finally {
     rl.close();
@@ -473,6 +480,7 @@ function validUrl(value: string): string | null {
 async function storageStep(
   rl: LineReader,
   writeEnv: (entries: Record<string, string>) => boolean,
+  enableProfile: (profile: string) => boolean,
 ): Promise<void> {
   console.log("");
   const wanted = await offer(
@@ -537,6 +545,13 @@ async function storageStep(
   const entries = storageEnvEntries({ credentials, backupBucket, storageBucket, publicUrl });
   if (writeEnv(entries)) {
     console.log(dim("S3 values written to .env."));
+    // The standalone compose keeps the backup service behind a profile, so
+    // configuring backups also has to switch its container on.
+    if (enableProfile("backup")) {
+      console.log(
+        dim("backup added to COMPOSE_PROFILES — the scheduled dumps start with the stack."),
+      );
+    }
   } else {
     const block = Object.entries(entries)
       .map(([key, value]) => `${key}=${value}`)
@@ -636,6 +651,7 @@ async function awsStep(
   appBaseUrl: string,
   writeEnv: (entries: Record<string, string>) => boolean,
   eventsOnly = false,
+  apiPort = 3001,
 ): Promise<void> {
   const accountId = await resolveIdentity(rl);
   if (accountId === null) return;
@@ -680,11 +696,19 @@ async function awsStep(
       .join("\n");
     console.log(`\nDone. Paste into .env where MillionSend runs, then restart it:\n\n${block}\n`);
   }
-  if (httpsOrigin(appBaseUrl)) {
+  const origin = httpsOrigin(appBaseUrl);
+  if (origin) {
     console.log(
       "The SNS subscription confirms itself once the app runs with these values;\nif it stays pending, use 'Request confirmation' on it in the SNS console.",
     );
+    console.log(`\n${sesEventsProxyHint(origin, apiPort)}`);
   }
+}
+
+async function download(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.text();
 }
 
 const ENV_EXAMPLE_URL =
@@ -697,7 +721,6 @@ async function launchStep(
   state: DirState,
   secretsMissing: string[],
   appBaseUrl: string,
-  imageMissing: boolean,
 ): Promise<number> {
   console.log("");
   if (state.docker === null) {
@@ -725,9 +748,7 @@ async function launchStep(
       )
     ) {
       try {
-        const response = await fetch(COMPOSE_DOWNLOAD_URL);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        composeContent = await response.text();
+        composeContent = await download(COMPOSE_DOWNLOAD_URL);
         writeFileSync(join(process.cwd(), "docker-compose.yml"), composeContent);
         console.log(dim("Wrote docker-compose.yml."));
       } catch (error) {
@@ -740,29 +761,35 @@ async function launchStep(
   if (choice !== "start" || composeContent === null) {
     const curlLine =
       composeContent === null && state.composeFile === null
-        ? `\n  curl -O ${COMPOSE_DOWNLOAD_URL}`
+        ? `
+  curl -O ${COMPOSE_DOWNLOAD_URL}`
         : "";
-    console.log(`Start later with:${curlLine}\n  ${command}`);
+    console.log(`Start later with:${curlLine}
+  ${command}`);
     return 0;
-  }
-
-  if (composeContent.includes("MILLIONSEND_IMAGE:?") && imageMissing) {
-    console.error(
-      "MILLIONSEND_IMAGE is required — set it to a released version tag or immutable digest in .env, then re-run setup.",
-    );
-    return 1;
   }
 
   if (secretsMissing.length > 0) {
     console.log(`note: ${secretsMissing.join(", ")} still empty in .env — the app needs them.`);
   }
-  console.log(`\n$ ${command}`);
+  console.log(`
+$ ${command}`);
   if (!runInherit("docker", composeUpArgs(composeContent))) {
     console.error("docker compose failed — fix the error above and re-run the setup.");
     return 1;
   }
+  const origin = httpsOrigin(appBaseUrl);
   console.log(
-    `\nRunning. Next steps:\n  · ${appBaseUrl} — sign up (the first user becomes the owner)\n  · SES sandbox account? Set the send rate to 1 in Settings → Instance\n  · Verify a sending domain in the dashboard, then send`,
+    `
+Running. Next steps:
+  · ${appBaseUrl} — sign up (the first user becomes the owner)
+  · SES sandbox account? Set the send rate to 1 in Settings → Instance
+  · Verify a sending domain in the dashboard, then send${
+    origin
+      ? `
+  · Reverse proxy in front? Route ${origin}/ses/events to the api (SELF_HOSTING.md, SES events)`
+      : ""
+  }`,
   );
   return 0;
 }

@@ -3,6 +3,7 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -30,3 +31,65 @@ jobs:
         run: |
           pnpm db:generate
           git diff --exit-code -- packages/db/drizzle
+
+  # Images publish only from a green check on main or a version tag, so a
+  # tag a deployment tracks can never point at a build the tests rejected.
+  # main → :edge and :latest (moving head); version tags → :1.2.3 and :1.2.
+  # Once releases begin, drop the raw :latest line below so that tag follows
+  # them instead (metadata-action adds :latest to semver tags by itself).
+  publish:
+    needs: check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        id: app
+        with:
+          images: ghcr.io/millionsend/millionsend
+          tags: |
+            type=edge,branch=main
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.app.outputs.tags }}
+          labels: ${{ steps.app.outputs.labels }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,scope=app,mode=max
+
+      # The backup sidecar (pg_dump + rclone) ships on the same tags so the
+      # standalone compose file needs no build context.
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        id: backup
+        with:
+          images: ghcr.io/millionsend/backup
+          tags: |
+            type=edge,branch=main
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: scripts/backup
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.backup.outputs.tags }}
+          labels: ${{ steps.backup.outputs.labels }}
+          cache-from: type=gha,scope=backup
+          cache-to: type=gha,scope=backup,mode=max

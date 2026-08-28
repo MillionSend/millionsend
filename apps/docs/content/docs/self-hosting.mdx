@@ -30,9 +30,7 @@ and the S3 buckets for uploads and backups (both below), download the
 standalone compose file, and `docker compose up -d`. Every step is skippable
 and safe to re-run; `--dry-run` prints the full plan and touches nothing.
 
-The manual equivalent runs the same multi-arch prebuilt image. The standalone
-compose intentionally requires a released version tag or immutable digest
-instead of silently tracking the moving `:edge` tag:
+The manual equivalent runs the same multi-arch prebuilt image:
 
 ```sh
 mkdir millionsend && cd millionsend
@@ -49,6 +47,31 @@ docker compose up -d
 
 Migrations run automatically on boot. Dashboard: `http://localhost:3000`.
 API: `http://localhost:3001`.
+
+## Upgrades
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+Migrations run on boot, so that is the whole upgrade. The compose file runs
+`ghcr.io/millionsend/millionsend:latest`, which follows `main` — every build
+there passed the test suite first. To hold a version, set `MILLIONSEND_IMAGE`
+in `.env` to a version tag or an immutable digest
+(`ghcr.io/millionsend/millionsend@sha256:…`; `docker image ls --digests` shows
+what is running) and `docker compose up -d`. The previous pin put back is the
+rollback — with the caveat that schema migrations run forward only, so take a
+dump before a big jump ([Backups](#backups)); a rolled-back image may not
+start on a newer schema.
+
+Automatic upgrades, for a host that can only reach out (behind a CDN-only
+firewall, say): a cron line is enough, since `up -d` recreates a container
+only when its image changed.
+
+```sh
+( crontab -l 2>/dev/null; echo "*/5 * * * * cd /opt/millionsend && docker compose pull -q && docker compose up -d" ) | crontab -
+```
 
 ## From source
 
@@ -82,10 +105,11 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | Postgres connection string. The default matches the compose `postgres` service. |
-| `MILLIONSEND_IMAGE` | Required by the standalone deploy compose. Select a released version tag or, preferably, an immutable `ghcr.io/millionsend/millionsend@sha256:…` digest. |
+| `MILLIONSEND_IMAGE` | Standalone deploy only: which image to run. The default `ghcr.io/millionsend/millionsend:latest` follows `main`, so `docker compose pull` is the upgrade. Set a version tag or an immutable `ghcr.io/millionsend/millionsend@sha256:…` digest to hold a version (`MILLIONSEND_BACKUP_IMAGE` pins the backup sidecar the same way). |
 | `MASTER_ENCRYPTION_KEY` | Encryption key for email bodies at rest. Generate with `openssl rand -base64 32`. Losing it makes stored bodies unrecoverable; changing it orphans old bodies. Back it up with the database. |
 | `BETTER_AUTH_SECRET` | Dashboard session signing secret. Generate with `openssl rand -base64 32`. |
 | `APP_BASE_URL` | Public base URL of the deployment — the origin browsers use to reach the dashboard (e.g. `https://mail.example.com`). Sign-in is only accepted from this origin; SNS subscriptions, unsubscribe links, and tracking links derive from it. It must match the exact scheme+host+port you open the dashboard on — including a custom `WEB_PORT` — or login and signup fail with an "invalid origin" error. Default `http://localhost:3000`. |
+| `PUBLIC_API_URL` | Public origin of the API when a reverse proxy serves it on its own hostname (e.g. `https://api.example.com`). It is what the dashboard prints as the API base and what MCP tokens are bound to; unset, the API is assumed at port 3001 of the dashboard host. |
 
 ### AWS SES
 
@@ -102,6 +126,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | Variable | Purpose |
 | --- | --- |
 | `ALLOW_SIGNUP` | The first user can always register; after that signup stays closed unless this is `true`. Keep `false` when the dashboard is reachable from the internet. |
+| `COMPOSE_PROFILES` | Optional compose services, comma-separated: `smtp` (the relay; mount a STARTTLS keypair first), and in the standalone file also `docs` (this documentation site) and `backup` (scheduled dumps). |
 | `PORT` | API port (default `3001`). Under compose this moves both the container's listen port and the published host port together. |
 | `WEB_PORT` | Host port the compose file publishes the dashboard on (the web process is always 3000 inside the container). Keep `APP_BASE_URL` in sync. |
 | `DOCS_PORT` | Host port the compose file publishes this documentation site on (the docs process is always 3002 inside the container). |
@@ -173,6 +198,13 @@ The HTTPS SNS subscription confirms itself once the app runs with
 `SNS_TOPIC_ARNS` set; if it stays pending, use "Request confirmation" on it in
 the SNS console. Same-account SQS subscriptions need no confirmation.
 
+The subscription endpoint is `{APP_BASE_URL}/ses/events`, but the API process
+serves that path, not the dashboard: a reverse proxy in front of the dashboard
+hostname must route that one path to the API (the [nginx
+section](#production-nginx--tls) does), or the confirmation POST lands on the
+dashboard, 404s, and the subscription stays pending with every bounce and
+delivery lost.
+
 ## SMTP relay
 
 A drop-in SMTP relay for software that speaks SMTP instead of HTTP — legacy
@@ -216,9 +248,11 @@ SMTP_TLS_KEY_PATH=/certs/privkey.pem
 
 With both set, STARTTLS is required before AUTH — credentials never cross the
 wire unencrypted. Mount the `live/<domain>` directory (a symlink certbot keeps
-current), not a copy of the files: renewals are then picked up automatically,
-since the relay reads the keypair from disk per connection. A wildcard or any
-other CA-issued PEM works the same way.
+current), not a copy of the files, so a renewal lands at the same path — and
+restart the relay after each renewal, since it reads the keypair when it
+starts (certbot:
+`--deploy-hook 'docker compose -f /opt/millionsend/docker-compose.yml restart smtp'`).
+A wildcard or any other CA-issued PEM works the same way.
 
 Nodemailer example:
 
@@ -239,21 +273,27 @@ await transport.sendMail({
 });
 ```
 
-The `smtp` service is already defined in the compose files and starts with
-`docker compose up`. It is optional — remove the service if you only send
-through the HTTP API.
+The `smtp` service is defined in both compose files behind the `smtp`
+profile, so it stays off until asked for: once the keypair is mounted, add
+`smtp` to `COMPOSE_PROFILES` in `.env` (comma-separated with any others) and
+`docker compose up -d`.
 
 ## Documentation site
 
 The image can also serve this documentation site: a `docs` compose service
 runs with `PROCESS=docs` and publishes port `3002` (host side tunable via
-`DOCS_PORT`). It needs no database and is entirely optional.
+`DOCS_PORT`). It needs no database and is entirely optional; in the standalone
+file it sits behind the `docs` profile (`COMPOSE_PROFILES=docs`).
 
 ## Production: nginx + TLS
 
 The recommended production shape: nginx on the host terminates TLS and proxies
 one hostname per service, and the compose ports bind to loopback so nginx is
-the only way in.
+the only way in. The API needs its own hostname (or an exposed port): its
+routes (`/emails`, `/domains`, …) share paths with dashboard pages, so the two
+cannot split one hostname by path. Set `PUBLIC_API_URL` to that hostname — it
+is what the dashboard prints as the API base and what MCP tokens are bound to;
+unset, the API is assumed at port 3001 of the dashboard host.
 
 `/etc/nginx/conf.d/millionsend.conf`:
 
@@ -270,6 +310,14 @@ server {
 
     # The broadcast editor posts full HTML bodies through the dashboard.
     client_max_body_size 25m;
+
+    # SES events: SNS is subscribed at {APP_BASE_URL}/ses/events, and the API
+    # process serves that path, not the dashboard.
+    location = /ses/events {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -326,33 +374,21 @@ installs automatic renewal:
 sudo certbot --nginx --redirect -d mail.example.com -d api.example.com -d docs.example.com
 ```
 
-Then set `APP_BASE_URL=https://mail.example.com` in `.env` and restart. It
+Then set `APP_BASE_URL=https://mail.example.com` and
+`PUBLIC_API_URL=https://api.example.com` in `.env` and restart. `APP_BASE_URL`
 must be the **exact public https origin of the dashboard** — any other value
 makes login and signup fail with an "invalid origin" error.
 
-Bind the container ports to loopback so only nginx reaches them. Docker
-publishes ports by editing iptables directly, so a host firewall alone does
-not cover them. `WEB_PORT` and `DOCS_PORT` are the host side of their
-mappings, so `WEB_PORT=127.0.0.1:3000` / `DOCS_PORT=127.0.0.1:3002` in `.env`
-is enough for web and docs; `PORT` and `SMTP_PORT` appear on both sides of
-theirs, so cover the API (and optionally SMTP) with a
-`docker-compose.override.yml` instead — the default compose file stays as is:
-
-```yaml
-services:
-  millionsend:
-    ports: !override
-      - "127.0.0.1:3000:3000"
-      - "127.0.0.1:3001:3001"
-  # With the nginx stream module below, keep the relay loopback-only too:
-  # smtp:
-  #   ports: !override
-  #     - "127.0.0.1:2587:2587"
-```
+The compose files bind every application port to loopback by default
+(`WEB_BIND_ADDRESS`, `API_BIND_ADDRESS`, `DOCS_BIND_ADDRESS`,
+`SMTP_BIND_ADDRESS`, all `127.0.0.1`), so only a local reverse proxy reaches
+them. Docker publishes ports by editing iptables directly, so do not rely on a
+host firewall to compensate for a public bind: set a `*_BIND_ADDRESS` to
+`0.0.0.0` only for a service that must be reachable directly.
 
 The SMTP relay (`:2587`) is TCP, not HTTP — an `http` server block cannot
-proxy it. Either publish it directly (leave its port mapping public and open
-the firewall), or keep it on loopback and pass the TCP stream through nginx's
+proxy it. Either publish it directly (`SMTP_BIND_ADDRESS=0.0.0.0` and open the
+firewall), or keep it on loopback and pass the TCP stream through nginx's
 stream module — bytes pass through untouched, so STARTTLS still terminates in
 the relay via `SMTP_TLS_CERT_PATH`/`SMTP_TLS_KEY_PATH`:
 
@@ -423,8 +459,9 @@ S3_SECRET_ACCESS_KEY=...
 S3_BACKUP_BUCKET=millionsend-backups
 ```
 
-`docker compose up -d --build backup` then dumps once immediately, and after
-that on `BACKUP_CRON` (default `0 3 * * *`, UTC). Each dump is `pg_dump -Fc`
+Then add `backup` to `COMPOSE_PROFILES` in `.env` and `docker compose up -d`:
+the service dumps once immediately, and after that on `BACKUP_CRON` (default
+`0 3 * * *`, UTC). Each dump is `pg_dump -Fc`
 (compressed custom format, named `millionsend-YYYYMMDD-HHMMSS.dump`), its
 uploaded size is verified against the bucket before anything else happens, and
 dumps older than `BACKUP_RETENTION_DAYS` (default 14) are pruned.
@@ -435,10 +472,10 @@ name (`AWS`, `Minio`, …) and a real region if the endpoint needs one.
 The dumps contain email bodies encrypted with `MASTER_ENCRYPTION_KEY` — back
 that key up separately, or restored bodies are unrecoverable.
 
-The service builds from `scripts/backup` in the repository, so it is not part
-of the no-clone `deploy/docker-compose.yml`; run it from a clone, or copy
-`scripts/backup/` and the service definition from the root
-`docker-compose.yml` next to your standalone compose file.
+The standalone `deploy/docker-compose.yml` runs the published
+`ghcr.io/millionsend/backup` image (`MILLIONSEND_BACKUP_IMAGE` pins it, the way
+`MILLIONSEND_IMAGE` pins the app); a repository clone builds it from
+`scripts/backup`. Restores use the same container either way.
 
 ### Restore
 
