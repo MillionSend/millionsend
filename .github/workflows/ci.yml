@@ -157,4 +157,4 @@ jobs:
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<<"$APP_META") $(printf "$APP_IMAGE@sha256:%s " *)
           cd /tmp/digests/backup
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<<"$BACKUP_META") $(printf "$BACKUP_IMAGE@sha256:%s " *)
-          docker buildx imagetools inspect "$APP_IMAGE:${GITHUB_REF_NAME/main/edge}" --format '{{json .Manifest.Manifests | length}} platforms'
+          docker buildx imagetools inspect "$APP_IMAGE:${GITHUB_REF_NAME/main/edge}"
