@@ -2,7 +2,7 @@
 // detection, plan assembly, secret policy, and the compose-command choice.
 // I/O stays in setup-cli.ts; everything here takes injected readers/probes.
 import { randomBytes } from "node:crypto";
-import { setupPlan } from "./setup.js";
+import { setupPlan, upsertEnv } from "./setup.js";
 
 /** Compose file names `docker compose` picks up on its own, most common first. */
 export const COMPOSE_FILENAMES = [
@@ -112,6 +112,37 @@ export function composeUpArgs(composeContent: string | null): string[] {
   return build ? ["compose", "up", "--build", "-d"] : ["compose", "up", "-d"];
 }
 
+/**
+ * Turns an optional compose service on by editing COMPOSE_PROFILES, so the
+ * wizard step that configures a feature also starts its container; a
+ * profile already listed is left alone.
+ */
+export function withComposeProfile(content: string, profile: string): string {
+  const names = (envValue(content, "COMPOSE_PROFILES") ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  if (names.includes(profile)) return content;
+  return upsertEnv(content, { COMPOSE_PROFILES: [...names, profile].join(",") });
+}
+
+/**
+ * SES events are ingested by the api process, but the one public URL the
+ * setup knows is the dashboard origin, so SNS is subscribed there. A reverse
+ * proxy in front of the dashboard has to hand that single path to the api,
+ * or the confirmation POST 404s and no bounce or delivery ever arrives.
+ */
+export function sesEventsProxyHint(origin: string, apiPort = 3001): string {
+  return [
+    `SNS delivers SES events to ${origin}/ses/events, and the api process serves that path.`,
+    "A reverse proxy in front of the dashboard must route it to the api — nginx:",
+    "",
+    `    location = /ses/events { proxy_pass http://127.0.0.1:${apiPort}; }`,
+    "",
+    "Without that the subscription stays pending and no delivery or bounce event arrives.",
+  ].join("\n");
+}
+
 /** The full multi-step plan --dry-run prints; mirrors what the live run offers. */
 export function flowPlan(state: DirState, opts: { appBaseUrl: string; region: string }): string[] {
   const lines: string[] = [];
@@ -127,9 +158,9 @@ export function flowPlan(state: DirState, opts: { appBaseUrl: string; region: st
       : `secrets: offer to generate ${missing.join(" and ")}`,
   );
   lines.push(`env: APP_BASE_URL prompt (default ${opts.appBaseUrl})`);
-  if (state.composeContent === null || state.composeContent.includes("MILLIONSEND_IMAGE")) {
-    lines.push("env: require a released MILLIONSEND_IMAGE tag or immutable digest");
-  }
+  lines.push(
+    "env: PUBLIC_API_URL prompt (optional — the API's own hostname behind a reverse proxy)",
+  );
   for (const line of setupPlan({ region: opts.region, appBaseUrl: opts.appBaseUrl })) {
     lines.push(`aws: ${line}`);
   }

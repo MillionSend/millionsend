@@ -43,6 +43,10 @@ services:
       # SMTP_PORT is also the relay's listen port via env_file, so both sides
       # of the mapping move together.
       - "${SMTP_BIND_ADDRESS:-127.0.0.1}:${SMTP_PORT:-2587}:${SMTP_PORT:-2587}" # smtp relay
+    # Opt-in (COMPOSE_PROFILES=smtp): without a mounted STARTTLS keypair the
+    # relay refuses to start, and an always-on service would restart-loop
+    # from the first boot.
+    profiles: ["smtp"]
     depends_on:
       postgres:
         condition: service_healthy
