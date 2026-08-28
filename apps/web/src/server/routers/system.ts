@@ -93,6 +93,8 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       passwordRecoveryEnabled: passwordRecoveryEnabled(),
       // Why the domain screen may omit the branded tracking subdomain field.
       trackingSubdomainsSupported: trackingSubdomainsSupported(),
+      // Why cloud domains without a tracking subdomain ship untracked links.
+      trackingRequiresSubdomain: isCloudDeployment(),
     })),
 
     /**

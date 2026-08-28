@@ -48,5 +48,14 @@ export async function generateMetadata(props: PageParams): Promise<Metadata> {
   return {
     title: page.data.title,
     description: page.data.description,
+    // Page-level openGraph replaces the layout's wholesale, so the image
+    // rides along here or vanishes from article pages.
+    openGraph: {
+      siteName: "MillionSend Docs",
+      type: "website",
+      title: page.data.title,
+      description: page.data.description,
+      images: "/og.png",
+    },
   };
 }

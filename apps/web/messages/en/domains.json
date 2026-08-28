@@ -108,8 +108,9 @@
       "subdomainHint": "Optional. Serves tracking links from your own domain instead of the default host — add the CNAME shown in Records.",
       "subdomainPlaceholder": "links",
       "subdomainError": "Use a single lowercase DNS label.",
-      "subdomainUnavailable": "This deployment cannot serve tracking links from your own domain, so the subdomain below is not in use — links ship from the default host. Clear it to remove the setting.",
+      "subdomainUnavailable": "This deployment cannot serve tracking links from your own domain right now, so the subdomain below is not in use — emails ship with their original links and no open pixel. Clear it to remove the setting.",
       "localWarning": "Tracking needs a publicly reachable URL. This deployment's APP_BASE_URL is local, so recipients can never reach the tracked links or the open pixel — the toggles stay off until a public URL is configured.",
+      "cloudRequiresSubdomain": "Tracked links here are served only from your own tracking subdomain — a shared tracking host is what ad blockers and spam filters learn to block. Without one, emails ship with their original links and no open pixel.",
       "headerToggle": "Toggle open and click tracking"
     },
     "configuration": {

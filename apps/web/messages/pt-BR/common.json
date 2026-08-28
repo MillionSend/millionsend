@@ -68,5 +68,13 @@
   "draftDiscard": "Descartar",
   "draftDiscardConfirm": "Descartar o rascunho recuperado? Isso não pode ser desfeito.",
   "confirmTitle": "Tem certeza?",
-  "confirm": "Confirmar"
+  "confirm": "Confirmar",
+  "notFound": {
+    "body": "Endereço errado, ou a página mudou de lugar.",
+    "cta": "Ir para o painel"
+  },
+  "errorPage": {
+    "body": "O erro é do nosso lado. Recarregue, ou tente de novo em instantes.",
+    "retry": "Tentar de novo"
+  }
 }

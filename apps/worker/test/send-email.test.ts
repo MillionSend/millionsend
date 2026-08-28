@@ -775,3 +775,77 @@ it("token bucket setRate re-paces the existing bucket", async () => {
   for (let i = 0; i < 10; i++) await bucket.take();
   expect(Date.now() - start).toBeLessThan(2000);
 });
+
+// A tracking host shared by every tenant is what ad blockers learn to block,
+// so a deployment may require the domain's own subdomain — links then ship
+// clean rather than through the shared host.
+it("requireBrandedHost ships clean links when the domain has no subdomain", async () => {
+  const [untracked] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "untracked.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+      clickTracking: true,
+      openTracking: true,
+    })
+    .returning({ id: schema.domains.id });
+  if (!untracked) throw new Error("domain insert failed");
+  const { ses, sends } = fakeSes("mid-untracked");
+  const emailId = await insertEmail(
+    { domainId: untracked.id, from: "Untracked <a@untracked.dev>" },
+    `<a href="https://dest.test/a">go</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: {
+      secretKey: trackingSecret,
+      defaultBaseUrl: "https://fallback.test",
+      requireBrandedHost: true,
+    },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).toContain("https://dest.test/a");
+  expect(mime).not.toContain("/t/c/");
+  expect(mime).not.toContain("/t/o/");
+  expect(mime).not.toContain("fallback.test");
+});
+
+it("requireBrandedHost still tracks through the domain's own subdomain", async () => {
+  const [own] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "ownhost.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+      clickTracking: true,
+      openTracking: false,
+      trackingSubdomain: "track",
+    })
+    .returning({ id: schema.domains.id });
+  if (!own) throw new Error("domain insert failed");
+  const { ses, sends } = fakeSes("mid-own");
+  const emailId = await insertEmail(
+    { domainId: own.id, from: "Own <a@ownhost.dev>" },
+    `<a href="https://dest.test/a">go</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: {
+      secretKey: trackingSecret,
+      defaultBaseUrl: "https://fallback.test",
+      requireBrandedHost: true,
+    },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).toContain("https://track.ownhost.dev/t/c/");
+  expect(mime).not.toContain("fallback.test");
+});
