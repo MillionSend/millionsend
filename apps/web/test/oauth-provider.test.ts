@@ -92,7 +92,7 @@ async function registerClient(): Promise<string> {
 }
 
 /** Authorization-code + PKCE round trip as an MCP client would run it. */
-async function authorize(clientId: string, cookie: string) {
+async function authorize(clientId: string, cookie: string, consentScope?: string) {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
   const query = new URLSearchParams({
@@ -114,7 +114,12 @@ async function authorize(clientId: string, cookie: string) {
     method: "POST",
     cookie,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ accept: true, oauth_query: consentUrl.search.slice(1) }),
+    body: JSON.stringify({
+      accept: true,
+      oauth_query: consentUrl.search.slice(1),
+      // What the consent form sends when the user unticks permissions.
+      ...(consentScope !== undefined ? { scope: consentScope } : {}),
+    }),
   });
   const callback = new URL(await redirectTarget(consentRes), BASE);
   expect(callback.origin + callback.pathname).toBe(REDIRECT_URI);
@@ -316,5 +321,182 @@ describe("OAuth authorization server", () => {
     const membersGrant = grants.find((g) => g.userId === member.userId);
     await ownerCaller.connectedApps.revoke({ id: membersGrant?.id ?? "" });
     expect(await ownerCaller.connectedApps.list()).toHaveLength(1);
+  });
+
+  it("issues only the scopes accepted on the consent screen", async () => {
+    const teamId = await createTeam(db);
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+
+    const { status, body } = await authorize(clientId, cookie, "offline_access emails:send");
+    expect(status).toBe(200);
+    expect(body.scope).toBe("emails:send");
+    expect(decodeJwt(body.access_token as string).scope).toBe("emails:send");
+    // offline_access was kept, so the grant still refreshes — to the same subset.
+    const refreshed = await token({
+      grant_type: "refresh_token",
+      refresh_token: body.refresh_token as string,
+      client_id: clientId,
+    });
+    expect(refreshed.status).toBe(200);
+    expect(decodeJwt(refreshed.body.access_token as string).scope).toBe("emails:send");
+
+    const consents = await db.select().from(schema.oauthConsent);
+    expect(consents[0]?.scopes).toEqual(["offline_access", "emails:send"]);
+  });
+
+  it("rejects a consent scope that was not requested", async () => {
+    const teamId = await createTeam(db);
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+    await expect(authorize(clientId, cookie, "offline_access domains:write")).rejects.toThrow();
+  });
+
+  it("binds an all-teams grant and resolves membership per refresh", async () => {
+    const first = await createTeam(db, "first");
+    const second = await createTeam(db, "second");
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, first);
+    await addMember(userId, second, "member");
+    const [session] = await db
+      .select({ id: schema.session.id })
+      .from(schema.session)
+      .where(eq(schema.session.userId, userId));
+    if (!session) throw new Error("no session");
+    // What the consent form does when "All teams" is picked.
+    await createCaller({
+      db,
+      session: { user: { id: userId, email: "ada@example.com", name: "ada" }, session },
+      teamId: null,
+      role: null,
+    }).team.grantTeam({ teamId: "*" });
+
+    const clientId = await registerClient();
+    const { body } = await authorize(clientId, cookie);
+    const claims = decodeJwt(body.access_token as string);
+    expect(claims.team_id).toBe("*");
+    expect(claims.team_role).toBeUndefined();
+    const consents = await db.select().from(schema.oauthConsent);
+    expect(consents[0]?.referenceId).toBe("*");
+
+    // Leaving one team keeps the grant alive; leaving the last one kills it.
+    await db.delete(schema.teamMembers).where(eq(schema.teamMembers.teamId, first));
+    const refreshed = await token({
+      grant_type: "refresh_token",
+      refresh_token: body.refresh_token as string,
+      client_id: clientId,
+    });
+    expect(refreshed.status).toBe(200);
+    expect(decodeJwt(refreshed.body.access_token as string).team_id).toBe("*");
+    await db.delete(schema.teamMembers).where(eq(schema.teamMembers.teamId, second));
+    const denied = await token({
+      grant_type: "refresh_token",
+      refresh_token: refreshed.body.refresh_token as string,
+      client_id: clientId,
+    });
+    expect(denied.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it("refuses to bind a grant to a team the user is not in", async () => {
+    const mine = await createTeam(db, "mine");
+    const other = await createTeam(db, "other");
+    const { userId } = await signUp("ada@example.com");
+    await addMember(userId, mine);
+    const [session] = await db
+      .select({ id: schema.session.id })
+      .from(schema.session)
+      .where(eq(schema.session.userId, userId));
+    if (!session) throw new Error("no session");
+    const caller = createCaller({
+      db,
+      session: { user: { id: userId, email: "ada@example.com", name: "ada" }, session },
+      teamId: null,
+      role: null,
+    });
+    await expect(caller.team.grantTeam({ teamId: other })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+
+    const loner = await signUp("loner@example.com");
+    const [lonerSession] = await db
+      .select({ id: schema.session.id })
+      .from(schema.session)
+      .where(eq(schema.session.userId, loner.userId));
+    if (!lonerSession) throw new Error("no session");
+    await expect(
+      createCaller({
+        db,
+        session: {
+          user: { id: loner.userId, email: "loner@example.com", name: "l" },
+          session: lonerSession,
+        },
+        teamId: null,
+        role: null,
+      }).team.grantTeam({ teamId: "*" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("shows all-teams grants in the holder's teams only, and revokes them everywhere", async () => {
+    const first = await createTeam(db, "first");
+    const second = await createTeam(db, "second");
+    const elsewhere = await createTeam(db, "elsewhere");
+    const ada = await signUp("ada@example.com");
+    await addMember(ada.userId, first);
+    await addMember(ada.userId, second, "member");
+    const stranger = await signUp("stranger@example.com");
+    await addMember(stranger.userId, elsewhere);
+    const [session] = await db
+      .select({ id: schema.session.id })
+      .from(schema.session)
+      .where(eq(schema.session.userId, ada.userId));
+    if (!session) throw new Error("no session");
+    await createCaller({
+      db,
+      session: { user: { id: ada.userId, email: "ada@example.com", name: "ada" }, session },
+      teamId: null,
+      role: null,
+    }).team.grantTeam({ teamId: "*" });
+    const clientId = await registerClient();
+    const { body } = await authorize(clientId, ada.cookie);
+
+    const callerFor = (userId: string, email: string, teamId: string, role: "owner" | "member") =>
+      createCaller({ db, session: { user: { id: userId, email, name: email } }, teamId, role });
+    const inFirst = await callerFor(
+      ada.userId,
+      "ada@example.com",
+      first,
+      "owner",
+    ).connectedApps.list();
+    expect(inFirst).toHaveLength(1);
+    expect(inFirst[0]?.allTeams).toBe(true);
+    const inSecond = await callerFor(
+      ada.userId,
+      "ada@example.com",
+      second,
+      "member",
+    ).connectedApps.list();
+    expect(inSecond).toHaveLength(1);
+    // Not leaked into a team the grant holder doesn't belong to.
+    const inElsewhere = await callerFor(
+      stranger.userId,
+      "stranger@example.com",
+      elsewhere,
+      "owner",
+    ).connectedApps.list();
+    expect(inElsewhere).toHaveLength(0);
+
+    // Revoking from one team kills the grant for all of them.
+    await callerFor(ada.userId, "ada@example.com", second, "member").connectedApps.revoke({
+      id: inSecond[0]?.id ?? "",
+    });
+    expect(await db.select().from(schema.oauthRefreshToken)).toHaveLength(0);
+    const denied = await token({
+      grant_type: "refresh_token",
+      refresh_token: body.refresh_token as string,
+      client_id: clientId,
+    });
+    expect(denied.status).toBeGreaterThanOrEqual(400);
   });
 });

@@ -444,3 +444,74 @@ it("create_segment writes through the same REST pipeline and lists back", async 
   expect(JSON.stringify(resultJson(listed))).toContain(id);
   await client.close();
 });
+
+describe('all-teams tokens (team_id claim "*")', () => {
+  let secondTeamId: string;
+
+  beforeAll(async () => {
+    secondTeamId = await createTeam(db, "mcp-second");
+    await db.insert(schema.teamMembers).values({ teamId: secondTeamId, userId, role: "member" });
+  });
+
+  it("adds list_teams plus a team_id argument on every tool", async () => {
+    const client = await connect(await mintToken({ team_id: "*" }));
+    const tools = (await client.listTools()).tools;
+    expect(tools[0]?.name).toBe("list_teams");
+    for (const t of tools.filter((tool) => tool.name !== "list_teams")) {
+      const props = (t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
+      expect(Object.keys(props), t.name).toContain("team_id");
+    }
+    const listed = await client.callTool({ name: "list_teams", arguments: {} });
+    const teams = resultJson(listed) as unknown as Array<{
+      id: string;
+      name: string;
+      default: boolean;
+    }>;
+    expect(teams).toEqual([
+      { id: teamId, name: "mcp", default: true },
+      { id: secondTeamId, name: "mcp-second", default: false },
+    ]);
+    await client.close();
+  });
+
+  it("routes calls to the team_id argument, defaulting to the oldest team", async () => {
+    const client = await connect(await mintToken({ team_id: "*" }));
+    const created = await client.callTool({
+      name: "create_segment",
+      arguments: { name: "Second-team list", team_id: secondTeamId },
+    });
+    expect(created.isError).toBeFalsy();
+    const { id } = resultJson(created) as { id: string };
+    const inSecond = await client.callTool({
+      name: "list_segments",
+      arguments: { team_id: secondTeamId },
+    });
+    expect(JSON.stringify(resultJson(inSecond))).toContain(id);
+    // No team_id: the oldest membership (the fixture team) — which never saw this segment.
+    const inDefault = await client.callTool({ name: "list_segments", arguments: {} });
+    expect(JSON.stringify(resultJson(inDefault))).not.toContain(id);
+    await client.close();
+  });
+
+  it("refuses a team_id outside the holder's memberships", async () => {
+    const strangerTeam = await createTeam(db, "mcp-stranger");
+    const client = await connect(await mintToken({ team_id: "*" }));
+    const res = await client.callTool({
+      name: "list_segments",
+      arguments: { team_id: strangerTeam },
+    });
+    expect(res.isError).toBe(true);
+    expect(resultJson(res)).toMatchObject({ statusCode: 403, name: "forbidden" });
+    await client.close();
+  });
+
+  it("401s an all-teams token whose holder is in no team at all", async () => {
+    const token = await mintToken({ team_id: "*", sub: "nobody-anywhere" });
+    const res = await app.request("/mcp", {
+      method: "POST",
+      headers: { ...JSONRPC_HEADERS, authorization: `Bearer ${token}` },
+      body: ping,
+    });
+    expect(res.status).toBe(401);
+  });
+});

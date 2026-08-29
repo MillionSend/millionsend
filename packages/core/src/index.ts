@@ -83,6 +83,7 @@ export {
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export { type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
 export {
+  ALL_TEAMS_GRANT,
   apiBaseUrl,
   MCP_RESOURCE_PATH,
   MCP_SCOPES,

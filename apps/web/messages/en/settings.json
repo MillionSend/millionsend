@@ -282,6 +282,7 @@
       "menu": "Grant actions"
     },
     "you": "you",
+    "allTeams": "All teams",
     "revoke": "Revoke access",
     "revokeConfirm": {
       "title": "Revoke access",

@@ -100,11 +100,16 @@ server URL from above.
 
 The MCP server uses OAuth, not API keys. On first connect the client opens
 your browser: sign in to MillionSend, pick the **team** the client may act
-on, and choose the **permissions** it gets. Nothing is copied or pasted — no
-secrets live in the client's config.
+on — a single team or **All teams** — and untick any **permissions** you
+don't want to grant. Nothing is copied or pasted — no secrets live in the
+client's config.
 
-- The access token is bound to the one team chosen at consent. To act on a
-  different team, sign in again from the client.
+- A grant bound to one team only ever acts on that team. An **All teams**
+  grant covers every team you belong to, including teams you join later:
+  every tool gains an optional `team_id` argument (defaulting to your oldest
+  team) and a `list_teams` tool appears to look the ids up.
+- Permissions unticked at consent are simply never granted — the client
+  doesn't see the tools they cover.
 - Grants are listed under **Settings → Connected apps** in the dashboard,
   where any team member can revoke them. Revocation takes effect at the
   client's next token refresh, within 15 minutes.

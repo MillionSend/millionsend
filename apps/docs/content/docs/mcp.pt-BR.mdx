@@ -101,11 +101,17 @@ da sua instância, mostrada acima.
 
 O servidor MCP usa OAuth, não chaves de API. Na primeira conexão o cliente
 abre seu navegador: entre no MillionSend, escolha o **time** em que o cliente
-pode agir e as **permissões** que ele recebe. Nada é copiado ou colado —
-nenhum segredo fica na configuração do cliente.
+pode agir — um time específico ou **Todos os times** — e desmarque as
+**permissões** que não quiser conceder. Nada é copiado ou colado — nenhum
+segredo fica na configuração do cliente.
 
-- O token de acesso é vinculado ao único time escolhido no consentimento.
-  Para agir em outro time, entre de novo a partir do cliente.
+- Uma concessão vinculada a um time só age naquele time. Uma concessão
+  **Todos os times** cobre todos os times dos quais você participa,
+  incluindo times futuros: cada ferramenta ganha um argumento opcional
+  `team_id` (o padrão é seu time mais antigo) e a ferramenta `list_teams`
+  aparece para consultar os ids.
+- Permissões desmarcadas no consentimento simplesmente não são concedidas —
+  o cliente não vê as ferramentas que elas cobrem.
 - As permissões concedidas ficam em **Configurações → Aplicativos
   conectados** no dashboard, onde qualquer membro do time pode revogá-las. A
   revogação vale a partir da próxima renovação de token do cliente, em até 15

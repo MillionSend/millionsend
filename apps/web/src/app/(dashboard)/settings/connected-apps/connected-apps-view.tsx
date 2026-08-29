@@ -81,6 +81,9 @@ export function ConnectedAppsView() {
                   </td>
                   <td>
                     <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {grant.allTeams ? (
+                        <span className="ms-badge ms-badge-neutral">{t("allTeams")}</span>
+                      ) : null}
                       {grant.scopes.map((scope) => (
                         <span key={scope} className="ms-badge ms-badge-neutral ms-mono">
                           {scope}
