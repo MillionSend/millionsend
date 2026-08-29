@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
+import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -22,17 +23,6 @@ import {
 } from "@/lib/segment-builder";
 import { useTRPC } from "@/lib/trpc";
 import { FilterConditions, FilterCountPreview } from "../filter-builder";
-
-function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
-        {label}
-      </p>
-      <div style={{ marginTop: 4, fontSize: 14, color: "var(--ms-bone)" }}>{children}</div>
-    </div>
-  );
-}
 
 export function SegmentDetail({ id }: { id: string }) {
   const t = useTranslations("audience.segments");

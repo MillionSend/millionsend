@@ -238,11 +238,6 @@ export default function TopicsPage() {
                               </span>
                             ) : null}
                           </div>
-                          {row.description ? (
-                            <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>
-                              {row.description}
-                            </div>
-                          ) : null}
                         </td>
                         <td>
                           <span

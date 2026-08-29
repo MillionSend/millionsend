@@ -51,16 +51,14 @@ export function UnsubscribePreview({
       }}
     >
       {/* inert: the preview renders the page's real forms; nothing may submit. */}
-      <div
-        inert
-        style={{ transform: "scale(0.75)", transformOrigin: "top left", width: "133.34%" }}
-      >
+      {/* scale × minHeight = the frame's 420px, so the page centers exactly. */}
+      <div inert style={{ transform: "scale(0.8)", transformOrigin: "top left", width: "125%" }}>
         <UnsubscribePageView
           m={m}
           state={state}
           email={t("previewEmail")}
           topics={topics}
-          minHeight={560}
+          minHeight={525}
           customization={customization}
         />
       </div>

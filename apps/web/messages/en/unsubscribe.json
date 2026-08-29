@@ -1,6 +1,6 @@
 {
-  "confirm": "Unsubscribe {email}?",
-  "confirmTopic": "Unsubscribe {email} from {topic}?",
+  "confirm": "Unsubscribe",
+  "confirmTopic": "Unsubscribe from {topic}",
   "button": "Unsubscribe",
   "preferences": "Or update your email preferences:",
   "save": "Save preferences",

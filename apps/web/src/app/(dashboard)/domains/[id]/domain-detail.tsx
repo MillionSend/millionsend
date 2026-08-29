@@ -10,6 +10,7 @@ import {
   DnsRecordsTable,
   DnsRecordsTableSkeleton,
 } from "@/components/dns-records-table";
+import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -89,17 +90,6 @@ function TadaIcon() {
       <path d="m11 2 .33.82c.34.86-.2 1.82-1.11 1.98C9.52 4.9 9 5.52 9 6.23V7" />
       <path d="M11 13c1.93 1.93 2.83 4.17 2 5-.83.83-3.07-.07-5-2-1.93-1.93-2.83-4.17-2-5 .83-.83 3.07.07 5 2Z" />
     </svg>
-  );
-}
-
-function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
-        {label}
-      </p>
-      <div style={{ marginTop: 4, fontSize: 14, color: "var(--ms-bone)" }}>{children}</div>
-    </div>
   );
 }
 
