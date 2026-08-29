@@ -203,14 +203,42 @@ describe("tool listing", () => {
       "list_contacts",
       "get_contact",
       "list_segments",
+      "get_segment",
       "list_topics",
+      "get_topic",
+      "list_contact_properties",
+      "list_broadcasts",
+      "get_broadcast",
       "list_domains",
+      "get_domain",
       "send_email",
+      "send_email_batch",
+      "update_email",
+      "cancel_email",
       "create_contact",
       "update_contact",
+      "update_contact_topics",
+      "delete_contact",
       "add_contact_to_segment",
+      "remove_contact_from_segment",
+      "create_segment",
+      "update_segment",
+      "delete_segment",
+      "create_topic",
+      "update_topic",
+      "delete_topic",
+      "create_contact_property",
+      "update_contact_property",
+      "delete_contact_property",
       "create_broadcast",
+      "update_broadcast",
       "send_broadcast",
+      "cancel_broadcast",
+      "delete_broadcast",
+      "create_domain",
+      "update_domain",
+      "verify_domain",
+      "delete_domain",
     ]);
     await full.close();
 
@@ -219,9 +247,19 @@ describe("tool listing", () => {
       "list_contacts",
       "get_contact",
       "list_segments",
+      "get_segment",
       "list_topics",
+      "get_topic",
+      "list_contact_properties",
     ]);
     await readOnly.close();
+
+    const domainsRead = await connect(await mintToken({ scope: "domains:read" }));
+    expect((await domainsRead.listTools()).tools.map((t) => t.name)).toEqual([
+      "list_domains",
+      "get_domain",
+    ]);
+    await domainsRead.close();
   });
 });
 
@@ -391,4 +429,18 @@ describe("rate limiting", () => {
     }
     expect.fail(`rate limit never tripped (last status ${last})`);
   });
+});
+
+it("create_segment writes through the same REST pipeline and lists back", async () => {
+  const client = await connect(await mintToken());
+  const created = await client.callTool({
+    name: "create_segment",
+    arguments: { name: "MCP manual list" },
+  });
+  expect(created.isError).toBeFalsy();
+  const { id } = resultJson(created) as { id: string };
+  expect(id).toMatch(/^[0-9a-f-]{36}$/);
+  const listed = await client.callTool({ name: "list_segments", arguments: {} });
+  expect(JSON.stringify(resultJson(listed))).toContain(id);
+  await client.close();
 });

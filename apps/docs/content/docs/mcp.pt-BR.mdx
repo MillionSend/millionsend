@@ -35,8 +35,11 @@ exata em **Configurações → MCP**.
 <Tab value="Claude Code">
 
 ```sh
-claude mcp add --transport http millionsend https://api.millionsend.com/mcp
+claude mcp add --transport http --scope user millionsend https://api.millionsend.com/mcp
 ```
+
+`--scope user` registra o servidor para todos os projetos da sua máquina; sem
+ele, `claude mcp add` usa o escopo `local` — só o projeto atual.
 
 Depois rode `/mcp` dentro do Claude Code e escolha `millionsend` para entrar.
 
@@ -123,14 +126,42 @@ ferramentas cobertas pelas permissões concedidas.
 | `list_contacts` | `audience:read` | Lista contatos, opcionalmente os membros de um segmento. |
 | `get_contact` | `audience:read` | Busca um contato por id ou endereço de e-mail. |
 | `list_segments` | `audience:read` | Lista segmentos — os alvos dos broadcasts. |
+| `get_segment` | `audience:read` | Busca um segmento com o filtro ou a lista manual. |
 | `list_topics` | `audience:read` | Lista tópicos de inscrição. |
+| `get_topic` | `audience:read` | Busca um tópico de inscrição. |
+| `list_contact_properties` | `audience:read` | Lista as propriedades customizadas de contato. |
+| `list_broadcasts` | `broadcasts:write` | Lista broadcasts com o status. |
+| `get_broadcast` | `broadcasts:write` | Busca um broadcast. |
 | `list_domains` | `domains:read` | Lista domínios de envio com o status de verificação. |
+| `get_domain` | `domains:read` | Busca um domínio com os registros DNS. |
 | `send_email` | `emails:send` | Envia ou agenda um e-mail transacional. |
+| `send_email_batch` | `emails:send` | Envia até 100 e-mails em uma chamada. |
+| `update_email` | `emails:send` | Reagenda um e-mail agendado. |
+| `cancel_email` | `emails:send` | Cancela um e-mail agendado. |
 | `create_contact` | `audience:write` | Cria um contato, com segmentos e inscrições em tópicos. |
 | `update_contact` | `audience:write` | Atualiza nome, propriedades ou o cancelamento de um contato. |
+| `update_contact_topics` | `audience:write` | Define as inscrições por tópico de um contato. |
+| `delete_contact` | `audience:write` | Exclui um contato. |
 | `add_contact_to_segment` | `audience:write` | Adiciona um contato a um segmento manual. |
+| `remove_contact_from_segment` | `audience:write` | Remove um contato de um segmento manual. |
+| `create_segment` | `audience:write` | Cria um segmento — com filtro, ou manual sem um. |
+| `update_segment` | `audience:write` | Renomeia um segmento ou muda o filtro. |
+| `delete_segment` | `audience:write` | Exclui um segmento; os contatos permanecem. |
+| `create_topic` | `audience:write` | Cria um tópico de inscrição. |
+| `update_topic` | `audience:write` | Atualiza nome, descrição ou visibilidade de um tópico. |
+| `delete_topic` | `audience:write` | Exclui um tópico. |
+| `create_contact_property` | `audience:write` | Define uma propriedade customizada de contato. |
+| `update_contact_property` | `audience:write` | Atualiza a definição de uma propriedade. |
+| `delete_contact_property` | `audience:write` | Exclui a definição de uma propriedade. |
 | `create_broadcast` | `broadcasts:write` | Cria um rascunho de broadcast (ou envia na hora). |
+| `update_broadcast` | `broadcasts:write` | Atualiza um rascunho de broadcast. |
 | `send_broadcast` | `broadcasts:write` | Envia ou agenda um rascunho de broadcast. |
+| `cancel_broadcast` | `broadcasts:write` | Cancela um broadcast agendado. |
+| `delete_broadcast` | `broadcasts:write` | Exclui um rascunho de broadcast. |
+| `create_domain` | `domains:write` | Adiciona um domínio de envio e retorna os registros DNS. |
+| `update_domain` | `domains:write` | Muda as configurações de rastreamento de um domínio. |
+| `verify_domain` | `domains:write` | Reverifica o DNS e a verificação SES de um domínio. |
+| `delete_domain` | `domains:write` | Remove um domínio e a identidade SES dele. |
 
 Os resultados das ferramentas são as respostas JSON da API REST, e os mesmos
 erros de validação se aplicam — um domínio remetente não verificado falha em

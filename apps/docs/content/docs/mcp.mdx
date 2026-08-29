@@ -34,8 +34,11 @@ exact URL under **Settings → MCP**.
 <Tab value="Claude Code">
 
 ```sh
-claude mcp add --transport http millionsend https://api.millionsend.com/mcp
+claude mcp add --transport http --scope user millionsend https://api.millionsend.com/mcp
 ```
+
+`--scope user` registers the server for every project on your machine; without
+it, `claude mcp add` defaults to the `local` scope — this project only.
 
 Then run `/mcp` inside Claude Code and pick `millionsend` to sign in.
 
@@ -121,14 +124,42 @@ their granted permissions cover.
 | `list_contacts` | `audience:read` | List contacts, optionally one segment's members. |
 | `get_contact` | `audience:read` | Get a contact by id or email address. |
 | `list_segments` | `audience:read` | List segments — the targets broadcasts are sent to. |
+| `get_segment` | `audience:read` | Get one segment with its filter or manual membership. |
 | `list_topics` | `audience:read` | List subscription topics. |
+| `get_topic` | `audience:read` | Get one subscription topic. |
+| `list_contact_properties` | `audience:read` | List the custom contact property definitions. |
+| `list_broadcasts` | `broadcasts:write` | List broadcasts with their status. |
+| `get_broadcast` | `broadcasts:write` | Get one broadcast. |
 | `list_domains` | `domains:read` | List sending domains with verification status. |
+| `get_domain` | `domains:read` | Get one domain with its DNS records. |
 | `send_email` | `emails:send` | Send or schedule a transactional email. |
+| `send_email_batch` | `emails:send` | Send up to 100 emails in one call. |
+| `update_email` | `emails:send` | Reschedule a scheduled email. |
+| `cancel_email` | `emails:send` | Cancel a scheduled email. |
 | `create_contact` | `audience:write` | Create a contact, with segments and topic subscriptions. |
 | `update_contact` | `audience:write` | Update a contact's name, properties or unsubscribe flag. |
+| `update_contact_topics` | `audience:write` | Set a contact's per-topic subscriptions. |
+| `delete_contact` | `audience:write` | Delete a contact. |
 | `add_contact_to_segment` | `audience:write` | Add a contact to a manual segment. |
+| `remove_contact_from_segment` | `audience:write` | Remove a contact from a manual segment. |
+| `create_segment` | `audience:write` | Create a segment — filtered, or manual without a filter. |
+| `update_segment` | `audience:write` | Rename a segment or change its filter. |
+| `delete_segment` | `audience:write` | Delete a segment; its contacts remain. |
+| `create_topic` | `audience:write` | Create a subscription topic. |
+| `update_topic` | `audience:write` | Update a topic's name, description or visibility. |
+| `delete_topic` | `audience:write` | Delete a topic. |
+| `create_contact_property` | `audience:write` | Define a custom contact property. |
+| `update_contact_property` | `audience:write` | Update a custom property definition. |
+| `delete_contact_property` | `audience:write` | Delete a custom property definition. |
 | `create_broadcast` | `broadcasts:write` | Create a broadcast draft (or send it immediately). |
+| `update_broadcast` | `broadcasts:write` | Update a draft broadcast. |
 | `send_broadcast` | `broadcasts:write` | Send or schedule a draft broadcast. |
+| `cancel_broadcast` | `broadcasts:write` | Cancel a scheduled broadcast. |
+| `delete_broadcast` | `broadcasts:write` | Delete a draft broadcast. |
+| `create_domain` | `domains:write` | Add a sending domain and get its DNS records. |
+| `update_domain` | `domains:write` | Change a domain's tracking settings. |
+| `verify_domain` | `domains:write` | Re-check a domain's DNS and SES verification. |
+| `delete_domain` | `domains:write` | Remove a domain and its SES identity. |
 
 Tool results are the REST API's JSON responses, and the same validation
 errors apply — an unverified sender domain fails a `send_email` call exactly
