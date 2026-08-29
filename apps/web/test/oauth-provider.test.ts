@@ -74,7 +74,7 @@ async function signUp(email: string): Promise<{ userId: string; cookie: string }
   return { userId: response.user.id, cookie };
 }
 
-async function registerClient(): Promise<string> {
+async function registerClient(scope?: string): Promise<string> {
   const res = await call("/oauth2/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -84,6 +84,7 @@ async function registerClient(): Promise<string> {
       token_endpoint_auth_method: "none",
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
+      ...(scope !== undefined ? { scope } : {}),
     }),
   });
   const body = (await res.json()) as { client_id: string };
@@ -498,5 +499,24 @@ describe("OAuth authorization server", () => {
       client_id: clientId,
     });
     expect(denied.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it("does not pin a registration's scope list, so scopes added later stay requestable", async () => {
+    const teamId = await createTeam(db);
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, teamId);
+    // A registration that named only yesterday's scopes — the row must not
+    // freeze the list, or a server upgrade adding a scope strands the client.
+    const clientId = await registerClient("offline_access emails:send");
+    const [client] = await db
+      .select({ scopes: schema.oauthClient.scopes })
+      .from(schema.oauthClient)
+      .where(eq(schema.oauthClient.clientId, clientId));
+    expect(client?.scopes).toBeNull();
+
+    // Requests the full current list, audience:read included.
+    const { status, body } = await authorize(clientId, cookie);
+    expect(status).toBe(200);
+    expect(body.scope).toBe(RESOURCE_SCOPE);
   });
 });
