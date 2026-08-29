@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale } from "next-intl";
 import {
   UnsubscribePageView,
   type UnsubscribeViewCustomization,
@@ -37,7 +37,6 @@ export function UnsubscribePreview({
   topics: UnsubscribeViewTopic[];
   customization: UnsubscribeViewCustomization;
 }) {
-  const t = useTranslations("settings.unsubscribe");
   const locale = useLocale();
   const m = locale.startsWith("pt") ? ptBR : en;
   return (
@@ -56,7 +55,6 @@ export function UnsubscribePreview({
         <UnsubscribePageView
           m={m}
           state={state}
-          email={t("previewEmail")}
           topics={topics}
           minHeight={525}
           customization={customization}

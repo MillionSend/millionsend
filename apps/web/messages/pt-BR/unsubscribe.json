@@ -1,12 +1,13 @@
 {
   "confirm": "Cancelar inscrição",
+  "confirmPrefs": "Gerenciar preferências",
   "confirmTopic": "Cancelar inscrição em {topic}",
   "button": "Cancelar inscrição",
-  "preferences": "Ou atualize suas preferências de e-mail:",
+  "preferences": "Escolha quais e-mails você quer receber:",
   "save": "Salvar preferências",
   "saved": "Suas preferências de e-mail foram atualizadas.",
   "done": "Inscrição cancelada.",
-  "doneDetail": "{email} não receberá mais estes e-mails.",
-  "doneDetailTopic": "{email} não receberá mais os e-mails de {topic}.",
+  "doneDetail": "Você não receberá mais estes e-mails.",
+  "doneDetailTopic": "Você não receberá mais os e-mails de {topic}.",
   "invalid": "Este link não é válido."
 }
