@@ -125,6 +125,7 @@ export function ConsentForm({
               >
                 <input
                   type="checkbox"
+                  className="ms-checkbox"
                   checked={granted.has(scope)}
                   onChange={() => toggle(scope)}
                   disabled={pending !== null}
