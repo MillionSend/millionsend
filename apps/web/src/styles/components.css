@@ -337,9 +337,9 @@ table.ms-table {
   align-items: center;
   background: color-mix(in srgb, var(--ms-bone) 5%, var(--ms-inset));
   border: 1px solid var(--ms-line-strong);
-  border-radius: var(--ms-r-input);
-  /* Same box as .ms-badge (padding/border/line-height/font-size), so a chip
-     and a pill sitting on one row share one height. */
+  border-radius: var(--ms-r-chip);
+  /* Same box as .ms-badge (padding/border/line-height/font-size/radius), so a
+     chip and a pill sitting on one row read as one token family. */
   padding: 3px 8px;
   font-family: var(--ms-font-mono);
   font-size: var(--ms-fs-badge);
