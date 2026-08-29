@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
@@ -19,6 +19,7 @@ import { Table } from "@/components/table";
 import { type BuilderRow, buildSegmentFilter, type MatchMode } from "@/lib/segment-builder";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
+import { useCopied } from "@/lib/use-copied";
 import { ListFooter, PAGE_SIZES, SearchBox, StateCard } from "../../emails/list-parts";
 import { AudienceTabs } from "../audience-tabs";
 import { FilterConditions, FilterCountPreview } from "./filter-builder";
@@ -90,15 +91,7 @@ export default function SegmentsPage() {
   const [size, setSize] = useState<number>(PAGE_SIZES[1]);
   const [pages, setPages] = useState(1);
 
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(copyTimer.current), []);
-  const copyId = (id: string) => {
-    navigator.clipboard.writeText(id);
-    setCopiedId(id);
-    clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopiedId(null), 1600);
-  };
+  const { copied: copiedId, copy: copyId } = useCopied();
 
   const query = useQuery(trpc.segments.list.queryOptions());
 

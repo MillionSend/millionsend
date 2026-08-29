@@ -40,7 +40,8 @@ export const teams = pgTable(
     unsubscribeBackgroundColor: text("unsubscribe_background_color"),
     unsubscribeTextColor: text("unsubscribe_text_color"),
     unsubscribeAccentColor: text("unsubscribe_accent_color"),
-    unsubscribeHideBranding: boolean("unsubscribe_hide_branding").notNull().default(false),
+    // Default on: recipients should see the sender's brand, not MillionSend's.
+    unsubscribeHideBranding: boolean("unsubscribe_hide_branding").notNull().default(true),
     // Success-state copy shown after preferences are saved.
     unsubscribeSuccessMessage: text("unsubscribe_success_message"),
     // Public URL of the uploaded team logo (S3-compatible storage), including a

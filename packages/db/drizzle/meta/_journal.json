@@ -57,6 +57,13 @@
       "when": 1788032758821,
       "tag": "0007_unpin_oauth_client_scopes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788035706717,
+      "tag": "0008_melted_vampiro",
+      "breakpoints": true
     }
   ]
 }

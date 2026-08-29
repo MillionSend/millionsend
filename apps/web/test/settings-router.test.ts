@@ -141,8 +141,11 @@ describe("settings.smtp", () => {
 });
 
 describe("settings.unsubscribe", () => {
-  // Full update payload / default get result — tests override what they exercise.
+  // Default get result for a fresh team — tests override what they exercise.
+  // teamName rides along so the page can fall back to it as the brand name;
+  // hideBranding (the "show your logo" opt-in) defaults on.
   const emptyCfg = {
+    teamName: "acme",
     brandName: null,
     message: null,
     successMessage: null,
@@ -150,7 +153,7 @@ describe("settings.unsubscribe", () => {
     backgroundColor: null,
     textColor: null,
     accentColor: null,
-    hideBranding: false,
+    hideBranding: true,
   };
 
   it("get returns the team's customization, defaults by default", async () => {
@@ -175,7 +178,7 @@ describe("settings.unsubscribe", () => {
       hideBranding: true,
     };
     await caller.settings.unsubscribe.update(full);
-    expect(await caller.settings.unsubscribe.get()).toEqual(full);
+    expect(await caller.settings.unsubscribe.get()).toEqual({ teamName: "acme", ...full });
     // Empty strings clear back to null.
     await caller.settings.unsubscribe.update({
       brandName: "",
@@ -187,7 +190,8 @@ describe("settings.unsubscribe", () => {
       accentColor: "",
       hideBranding: false,
     });
-    expect(await caller.settings.unsubscribe.get()).toEqual(emptyCfg);
+    // hideBranding false was an explicit choice, not a cleared field.
+    expect(await caller.settings.unsubscribe.get()).toEqual({ ...emptyCfg, hideBranding: false });
   });
 
   it("update is forbidden for role member", async () => {
@@ -243,7 +247,10 @@ describe("settings.unsubscribe", () => {
       ...emptyCfg,
       brandName: "A",
     });
-    expect(await callerFor("carol", teamB, "owner").settings.unsubscribe.get()).toEqual(emptyCfg);
+    expect(await callerFor("carol", teamB, "owner").settings.unsubscribe.get()).toEqual({
+      ...emptyCfg,
+      teamName: "team-b",
+    });
   });
 });
 

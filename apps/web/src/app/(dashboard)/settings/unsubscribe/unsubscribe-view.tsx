@@ -239,7 +239,7 @@ export function UnsubscribeView() {
               style={{ width: "100%" }}
               maxLength={80}
               disabled={disabled}
-              placeholder={t("brandNamePlaceholder")}
+              placeholder={data?.teamName ?? t("brandNamePlaceholder")}
               value={form.brandName}
               onChange={(e) => set({ brandName: e.target.value })}
             />
@@ -349,7 +349,7 @@ export function UnsubscribeView() {
           state={previewState}
           topics={toPreviewTopics(topics ?? [])}
           customization={{
-            brandName: toNull(form.brandName),
+            brandName: toNull(form.brandName) ?? data?.teamName ?? null,
             message: toNull(form.message),
             successMessage: toNull(form.successMessage),
             logoUrl: form.hideBranding && logoAvailable ? (team?.logoUrl ?? null) : null,

@@ -295,6 +295,10 @@ export const settingsRouter = router({
     get: teamProcedure.query(async ({ ctx }) => {
       const [team] = await ctx.db
         .select({
+          // The page falls back to the team name when no brand name is set;
+          // the editor shows it as the placeholder rather than a stored value
+          // so a later team rename keeps flowing through.
+          teamName: schema.teams.name,
           brandName: schema.teams.unsubscribeBrandName,
           message: schema.teams.unsubscribeMessage,
           successMessage: schema.teams.unsubscribeSuccessMessage,

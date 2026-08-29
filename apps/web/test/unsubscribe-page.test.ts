@@ -85,17 +85,18 @@ describe("targetForToken customization", () => {
     });
   });
 
-  it("returns null customization fields for a team that never customized", async () => {
+  it("defaults a never-customized team to its own name as the brand", async () => {
     const teamId = await createTeam(db, "plain");
     const contactId = await seedContact(teamId);
     const token = makeUnsubscribeToken({ contactId, secretKey });
 
     const target = await targetForToken(db, token);
     expect(target?.customization).toEqual({
-      brandName: null,
+      brandName: "plain",
       message: null,
       successMessage: null,
       redirectUrl: null,
+      // hideBranding defaults on, but with no stored logo there is none to show.
       logoUrl: null,
       backgroundColor: null,
       textColor: null,

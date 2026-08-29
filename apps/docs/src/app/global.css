@@ -23,3 +23,22 @@
   --color-fd-accent-foreground: hsl(42, 29%, 94%);
   --color-fd-ring: hsl(212, 8%, 54%);
 }
+
+/* Code-block copy button: pop the check in, matching the dashboard/LP copy
+ * affordance (ms-copy-pop / lp-copy-pop — keep the three in step). Fumadocs
+ * stamps data-checked on the button while the copied state shows. */
+button[data-checked] svg {
+  color: hsl(140, 35%, 62%);
+  animation: docs-copy-pop 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes docs-copy-pop {
+  from {
+    transform: scale(0.55);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button[data-checked] svg {
+    animation: none;
+  }
+}
