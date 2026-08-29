@@ -258,6 +258,26 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
         if (!body || body.application_type || !loopbackOnly) return;
         return { context: { body: { ...body, application_type: "native" } } };
       }),
+      // Registration persists a scope list (the client's own, or the server's
+      // list as of that day) and authorization validates against it — which
+      // would strand every registered MCP client with invalid_scope each time
+      // a new scope ships. NULL defers to the live `scopes` config; per-user
+      // consent remains the gate. drizzle/0007 does the same for clients
+      // registered before this hook existed.
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/oauth2/register") return;
+        const returned = ctx.context.returned;
+        const clientId =
+          returned && typeof returned === "object" && !(returned instanceof Response)
+            ? (returned as { client_id?: unknown }).client_id
+            : undefined;
+        if (typeof clientId !== "string") return;
+        await ctx.context.adapter.update({
+          model: "oauthClient",
+          where: [{ field: "clientId", value: clientId }],
+          update: { scopes: null },
+        });
+      }),
     },
   });
 }
