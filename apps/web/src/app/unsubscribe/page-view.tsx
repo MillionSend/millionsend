@@ -152,39 +152,50 @@ export function UnsubscribePageView({
         style={{ padding: "28px 32px", width: "100%", maxWidth: 420, textAlign: "center" }}
       >
         {customization.message ? (
-          <p style={{ margin: "0 0 16px", fontSize: 14.5, color: "var(--ms-muted)" }}>
+          <p style={{ margin: "0 0 16px", fontSize: 15, color: "var(--ms-muted)" }}>
             {customization.message}
           </p>
         ) : null}
         {state === "invalid" ? (
-          <p style={{ margin: 0, fontSize: 16, color: "var(--ms-bone)" }}>{m.invalid}</p>
+          <p style={{ margin: 0, fontSize: 17, color: "var(--ms-bone)" }}>{m.invalid}</p>
         ) : state === "saved" ? (
-          <p style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "var(--ms-bone)" }}>
+          <p style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "var(--ms-bone)" }}>
             {successHeading ?? m.saved}
           </p>
         ) : state === "done" ? (
           <>
-            <p style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "var(--ms-bone)" }}>
+            <p style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "var(--ms-bone)" }}>
               {successHeading ?? m.done}
             </p>
-            <p style={{ margin: "10px 0 0", fontSize: 14.5, color: "var(--ms-muted)" }}>
-              {doneText}
-            </p>
+            <p style={{ margin: "10px 0 0", fontSize: 15, color: "var(--ms-muted)" }}>{doneText}</p>
           </>
         ) : (
           <>
-            <p style={{ margin: 0, fontSize: 17, fontWeight: 600, color: "var(--ms-bone)" }}>
+            <p style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "var(--ms-bone)" }}>
               {confirmText}
             </p>
+            {email ? (
+              <p
+                className="ms-mono"
+                style={{
+                  margin: "8px 0 0",
+                  fontSize: 13.5,
+                  color: "var(--ms-muted)",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {email}
+              </p>
+            ) : null}
             {topics.length > 0 ? (
               // Separate form: saving preferences must not trigger the
               // unsubscribe below. The hidden `prefs` marker routes the POST.
-              <form method="post" action={formAction} style={{ marginTop: 20, textAlign: "left" }}>
+              <form method="post" action={formAction} style={{ marginTop: 22, textAlign: "left" }}>
                 <input type="hidden" name="prefs" value="1" />
-                <p style={{ margin: "0 0 8px", fontSize: 14, color: "var(--ms-muted)" }}>
+                <p style={{ margin: "0 0 10px", fontSize: 15, color: "var(--ms-muted)" }}>
                   {m.preferences}
                 </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {topics.map((topic) => (
                     <label
                       key={topic.id}
@@ -192,13 +203,14 @@ export function UnsubscribePageView({
                         display: "flex",
                         alignItems: "center",
                         gap: 8,
-                        fontSize: 15,
+                        fontSize: 15.5,
                         color: "var(--ms-bone)",
                         cursor: "pointer",
                       }}
                     >
                       <input
                         type="checkbox"
+                        className="ms-checkbox"
                         name="topic"
                         value={topic.id}
                         defaultChecked={topic.subscribed}
@@ -210,7 +222,7 @@ export function UnsubscribePageView({
                 <button
                   type="submit"
                   className="ms-btn ms-btn-secondary"
-                  style={{ marginTop: 14, width: "100%" }}
+                  style={{ margin: "16px auto 0", display: "flex" }}
                 >
                   {m.save}
                 </button>

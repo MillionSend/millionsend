@@ -9,6 +9,7 @@ import { ChipMultiSelect } from "@/components/chip-multi-select";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CopyChip } from "@/components/copy-chip";
+import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -30,17 +31,6 @@ const ACTIVITY_TYPES = [
   "segment_removed",
 ] as const;
 type KnownActivityType = (typeof ACTIVITY_TYPES)[number];
-
-function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ minWidth: 0 }}>
-      <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
-        {label}
-      </p>
-      <div style={{ marginTop: 5, fontSize: 14, color: "var(--ms-bone)" }}>{children}</div>
-    </div>
-  );
-}
 
 function EmptyValue() {
   return <span style={{ color: "var(--ms-faint)" }}>—</span>;

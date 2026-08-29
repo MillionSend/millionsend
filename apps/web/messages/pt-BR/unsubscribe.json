@@ -1,6 +1,6 @@
 {
-  "confirm": "Cancelar a inscrição de {email}?",
-  "confirmTopic": "Cancelar a inscrição de {email} em {topic}?",
+  "confirm": "Cancelar inscrição",
+  "confirmTopic": "Cancelar inscrição em {topic}",
   "button": "Cancelar inscrição",
   "preferences": "Ou atualize suas preferências de e-mail:",
   "save": "Salvar preferências",

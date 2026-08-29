@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CopyChip } from "@/components/copy-chip";
+import { MetaItem } from "@/components/meta-item";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -17,17 +18,6 @@ import { useTRPC } from "@/lib/trpc";
 import { useCopied } from "@/lib/use-copied";
 import { ListFooter, StateCard } from "../../../emails/list-parts";
 import { TopicDeleteModal, TopicEditModal, type TopicEditTarget } from "../topic-modals";
-
-function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ minWidth: 0 }}>
-      <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
-        {label}
-      </p>
-      <div style={{ marginTop: 5, fontSize: 14, color: "var(--ms-bone)" }}>{children}</div>
-    </div>
-  );
-}
 
 function ContactsHead() {
   const t = useTranslations("audience.contacts");
@@ -134,7 +124,7 @@ export function TopicDetail({ id }: { id: string }) {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-            gap: 22,
+            gap: 28,
             padding: "20px 0",
             borderTop: "1px solid var(--ms-line)",
             borderBottom: "1px solid var(--ms-line)",
@@ -211,7 +201,7 @@ export function TopicDetail({ id }: { id: string }) {
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-          gap: 22,
+          gap: 28,
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
           borderBottom: "1px solid var(--ms-line)",

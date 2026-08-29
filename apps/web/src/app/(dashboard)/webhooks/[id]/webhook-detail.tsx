@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { Fragment, useCallback, useState } from "react";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
+import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -19,17 +20,6 @@ import { useTRPC } from "@/lib/trpc";
 import { maskWebhookSecret, WEBHOOK_EVENT_META, type WebhookEventType } from "@/lib/webhook-events";
 import { ListFooter, PAGE_SIZES } from "../../emails/list-parts";
 import { DeliveryStatusBadge, WebhookStatusBadge } from "../webhook-status-badge";
-
-function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="ms-microlabel" style={{ margin: 0, fontSize: 10.5 }}>
-        {label}
-      </p>
-      <div style={{ marginTop: 4, fontSize: 14, color: "var(--ms-bone)" }}>{children}</div>
-    </div>
-  );
-}
 
 /** "example.com/hooks" — the H1 form of an endpoint URL. */
 function hostAndPath(url: string): string {

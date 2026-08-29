@@ -154,9 +154,9 @@ export function StateCard({
 export const PAGE_SIZES = [25, 40, 50] as const;
 
 /** "Page 1 – N of M" footer with the page-size chooser at the right. The
- * chooser only renders when paging is real — on a single first page at the
- * smallest size it could never change what's shown. Omit the chooser props
- * entirely for a static count on an unpaginated list. */
+ * chooser only renders when paging is real — when everything already fits
+ * one page, a size choice could only add pagination, never remove it. Omit
+ * the chooser props entirely for a static count on an unpaginated list. */
 export function ListFooter({
   left,
   size,
@@ -171,8 +171,7 @@ export function ListFooter({
   /** True when everything already fits one page (no next page, page 1). */
   singlePage?: boolean;
 }) {
-  const showChooser =
-    size !== undefined && onSize && sizeLabel && (!singlePage || size !== PAGE_SIZES[0]);
+  const showChooser = size !== undefined && onSize && sizeLabel && !singlePage;
   return (
     <div
       style={{
