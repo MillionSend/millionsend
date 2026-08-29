@@ -4,6 +4,14 @@ import createNextIntlPlugin from "next-intl/plugin";
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 const config: NextConfig = {
+  experimental: {
+    // Keep visited page segments in the client router cache so sidebar
+    // back-and-forth doesn't refetch RSC payloads every click. Safe at 30s:
+    // dashboard pages are "use client" shells whose data flows through
+    // react-query (its own freshness rules) — the cached payload holds no
+    // user data that could go stale.
+    staleTimes: { dynamic: 30, static: 180 },
+  },
   async headers() {
     const scriptPolicy =
       process.env.NODE_ENV === "development"
