@@ -69,7 +69,7 @@ it("rejects property types outside the enum", async () => {
   ).rejects.toThrow(/invalid input value for enum contact_property_type/);
 });
 
-it("accepts valid hex colors and defaults branding visible", async () => {
+it("accepts valid hex colors; branding defaults to the team's own (0008 flip)", async () => {
   await client.query(
     "update teams set unsubscribe_background_color = '#000000', unsubscribe_text_color = '#FFFFFF', unsubscribe_accent_color = '#46a3f9' where id = $1",
     [teamId],
@@ -78,7 +78,7 @@ it("accepts valid hex colors and defaults branding visible", async () => {
     "select unsubscribe_hide_branding as hidden from teams where id = $1",
     [teamId],
   );
-  expect(row.hidden).toBe(false);
+  expect(row.hidden).toBe(true);
 });
 
 it("rejects malformed hex colors", async () => {

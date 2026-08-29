@@ -3,7 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { CopyGlyph } from "@/components/copy-chip";
 import { BtnSpinner } from "@/components/spinner";
 import { StatusBadge } from "@/components/status-badge";
 import { jsSingleQuote, shellSingleQuote } from "@/lib/escape";
@@ -108,35 +109,6 @@ function SnippetPre({ segs }: { segs: Seg[] }) {
         </span>
       ))}
     </pre>
-  );
-}
-
-/** ⧉→✓ copy button (header variant of the .ms-chip affordance). */
-function CopyGlyphButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={async () => {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        clearTimeout(timer.current);
-        timer.current = setTimeout(() => setCopied(false), 1600);
-      }}
-      style={{
-        background: "none",
-        border: 0,
-        cursor: "pointer",
-        fontSize: 12,
-        color: "var(--ms-muted)",
-        padding: "0 6px",
-      }}
-    >
-      {copied ? "✓" : "⧉"}
-    </button>
   );
 }
 
@@ -254,7 +226,6 @@ export function OnboardingSteps({
   showInstanceHint: boolean;
 }) {
   const t = useTranslations("onboarding");
-  const common = useTranslations("common");
   const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -401,7 +372,7 @@ export function OnboardingSteps({
           </button>
         ))}
         <span style={{ marginLeft: "auto" }}>
-          <CopyGlyphButton text={copyText} label={common("copy")} />
+          <CopyGlyph value={copyText} />
         </span>
       </div>
       <SnippetPre segs={displaySegs} />
@@ -659,13 +630,7 @@ export function OnboardingSteps({
                           >
                             {revealed ? t("step1.hide") : t("step1.show")}
                           </button>
-                          <button
-                            type="button"
-                            aria-label={common("copy")}
-                            onClick={() => navigator.clipboard.writeText(token)}
-                          >
-                            ⧉
-                          </button>
+                          <CopyGlyph value={token} />
                         </>
                       ) : null}
                     </span>

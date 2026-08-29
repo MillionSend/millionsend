@@ -344,6 +344,30 @@ table.ms-table {
   color: var(--ms-muted);
   max-width: 100%;
 }
+/* Shared copy→check swap (components/copy-chip.tsx CopyMark). Mirrors the
+   LP's .lp-copy pop; keep the two in step. */
+.ms-copy-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ms-copy-mark.done {
+  color: var(--ms-success);
+}
+.ms-copy-mark.done svg {
+  animation: ms-copy-pop 240ms var(--ms-ease);
+}
+@keyframes ms-copy-pop {
+  from {
+    transform: scale(0.55);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-copy-mark.done svg {
+    animation: none;
+  }
+}
 .ms-chip button {
   background: none;
   border: 0;

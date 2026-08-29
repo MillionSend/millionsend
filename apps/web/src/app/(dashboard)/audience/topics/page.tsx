@@ -335,7 +335,7 @@ export default function TopicsPage() {
             <UnsubscribePreview
               topics={toPreviewTopics(query.data ?? [])}
               customization={{
-                brandName: unsubSettings.data.brandName,
+                brandName: unsubSettings.data.brandName ?? unsubSettings.data.teamName,
                 message: unsubSettings.data.message,
                 successMessage: unsubSettings.data.successMessage,
                 // hideBranding is the "show my logo" opt-in; team.get already

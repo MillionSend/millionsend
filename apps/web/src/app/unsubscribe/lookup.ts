@@ -109,6 +109,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
       email: c.email,
       teamId: c.teamId,
       unsubscribed: c.unsubscribed,
+      teamName: tm.name,
       brandName: tm.unsubscribeBrandName,
       message: tm.unsubscribeMessage,
       successMessage: tm.unsubscribeSuccessMessage,
@@ -126,7 +127,9 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
   if (!contact) return null;
 
   const customization: UnsubscribeCustomization = {
-    brandName: contact.brandName,
+    // No explicit brand name → the team's name, so recipients always see who
+    // is emailing them rather than the MillionSend wordmark.
+    brandName: contact.brandName ?? contact.teamName,
     message: contact.message,
     successMessage: contact.successMessage,
     redirectUrl: contact.redirectUrl,
