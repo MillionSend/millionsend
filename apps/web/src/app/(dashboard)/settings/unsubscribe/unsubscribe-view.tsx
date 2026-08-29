@@ -296,15 +296,15 @@ export function UnsubscribeView() {
           </div>
 
           {canManage ? (
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 20 }}>
-              <button
-                type="submit"
-                className="ms-btn ms-btn-secondary"
-                disabled={disabled || redirectInvalid || colorInvalid}
-              >
-                <BtnSpinner on={save.isPending} />
-                {t("save")}
-              </button>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                justifyContent: "flex-end",
+                marginTop: 20,
+              }}
+            >
               {save.isSuccess && draft === null ? (
                 <span style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
                   ✓ {t("saved")}
@@ -315,6 +315,14 @@ export function UnsubscribeView() {
                   {t("error")}
                 </span>
               ) : null}
+              <button
+                type="submit"
+                className="ms-btn ms-btn-secondary"
+                disabled={disabled || redirectInvalid || colorInvalid}
+              >
+                <BtnSpinner on={save.isPending} />
+                {t("save")}
+              </button>
             </div>
           ) : null}
         </section>
