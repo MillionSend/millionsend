@@ -25,12 +25,24 @@ import { and, eq } from "drizzle-orm";
 import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from "jose";
 import { type ApiDeps, type Env, errorBody } from "./app.js";
 import {
+  batchEmailRequestSchema,
   createBroadcastRequestSchema,
+  createContactPropertyRequestSchema,
   createContactRequestSchema,
+  createDomainRequestSchema,
+  createSegmentRequestSchema,
+  createTopicRequestSchema,
   listQuerySchema,
   sendBroadcastRequestSchema,
   sendEmailRequestSchema,
+  updateBroadcastRequestSchema,
+  updateContactPropertyRequestSchema,
   updateContactRequestSchema,
+  updateContactTopicsRequestSchema,
+  updateDomainRequestSchema,
+  updateEmailRequestSchema,
+  updateSegmentRequestSchema,
+  updateTopicRequestSchema,
 } from "./schemas.js";
 
 /**
@@ -141,7 +153,7 @@ function withQuery(path: string, query: Record<string, unknown>): string {
 async function callApi(
   app: OpenAPIHono<Env>,
   auth: ApiKeyAuth,
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<CallToolResult> {
@@ -170,12 +182,12 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
   const server = new McpServer({ name: "millionsend", version: "1.0.0" });
   const { auth } = authInfo.extra as unknown as McpAuthExtra;
   const scopes = new Set(authInfo.scopes);
-  const api = (method: "GET" | "POST" | "PATCH", path: string, body?: unknown) =>
+  const api = (method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown) =>
     callApi(app, auth, method, path, body);
   const tool = <S extends z.ZodObject & StandardSchemaWithJSON>(
     name: string,
     scope: McpScope,
-    cfg: { description: string; inputSchema: S; readOnly?: boolean },
+    cfg: { description: string; inputSchema: S; readOnly?: boolean; destructive?: boolean },
     run: (args: z.output<S>) => Promise<CallToolResult>,
   ) => {
     if (!scopes.has(scope)) return;
@@ -184,7 +196,9 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       {
         description: cfg.description,
         inputSchema: cfg.inputSchema,
-        annotations: cfg.readOnly ? { readOnlyHint: true } : { destructiveHint: false },
+        annotations: cfg.readOnly
+          ? { readOnlyHint: true }
+          : { destructiveHint: cfg.destructive === true },
       },
       // The conditional ToolCallback type cannot resolve for an unbound
       // generic; the cast is sound because args were validated against
@@ -252,6 +266,17 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     (q) => api("GET", withQuery("/segments", q)),
   );
   tool(
+    "get_segment",
+    "audience:read",
+    {
+      description:
+        "Get one segment: its name and filter, or manual membership when it has no filter.",
+      inputSchema: z.object({ id: z.uuid().describe("Segment id from list_segments") }),
+      readOnly: true,
+    },
+    ({ id }) => api("GET", `/segments/${enc(id)}`),
+  );
+  tool(
     "list_topics",
     "audience:read",
     {
@@ -261,6 +286,47 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       readOnly: true,
     },
     (q) => api("GET", withQuery("/topics", q)),
+  );
+  tool(
+    "get_topic",
+    "audience:read",
+    {
+      description: "Get one subscription topic: name, description, default and visibility.",
+      inputSchema: z.object({ id: z.uuid().describe("Topic id from list_topics") }),
+      readOnly: true,
+    },
+    ({ id }) => api("GET", `/topics/${enc(id)}`),
+  );
+  tool(
+    "list_contact_properties",
+    "audience:read",
+    {
+      description:
+        "List the custom contact property definitions (key, type, fallback) usable on contacts and in templates.",
+      inputSchema: listQuerySchema,
+      readOnly: true,
+    },
+    (q) => api("GET", withQuery("/contact-properties", q)),
+  );
+  tool(
+    "list_broadcasts",
+    "broadcasts:write",
+    {
+      description: "List broadcasts with their status (draft, scheduled, sending, sent).",
+      inputSchema: listQuerySchema,
+      readOnly: true,
+    },
+    (q) => api("GET", withQuery("/broadcasts", q)),
+  );
+  tool(
+    "get_broadcast",
+    "broadcasts:write",
+    {
+      description: "Get one broadcast: audience, content, schedule and status.",
+      inputSchema: z.object({ id: z.uuid().describe("Broadcast id from list_broadcasts") }),
+      readOnly: true,
+    },
+    ({ id }) => api("GET", `/broadcasts/${enc(id)}`),
   );
   if (deps.ses) {
     tool(
@@ -274,6 +340,17 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       },
       () => api("GET", "/domains"),
     );
+    tool(
+      "get_domain",
+      "domains:read",
+      {
+        description:
+          "Get one sending domain with its DNS records (DKIM, MAIL FROM) and per-record status.",
+        inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
+        readOnly: true,
+      },
+      ({ id }) => api("GET", `/domains/${enc(id)}`),
+    );
   }
 
   tool(
@@ -285,6 +362,38 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       inputSchema: sendEmailRequestSchema,
     },
     (body) => api("POST", "/emails", body),
+  );
+  tool(
+    "send_email_batch",
+    "emails:send",
+    {
+      description:
+        "Send up to 100 emails in one call; each entry has the same shape as send_email. Returns one id per accepted email.",
+      inputSchema: z.object({
+        emails: batchEmailRequestSchema.describe("The emails to send, same shape as send_email"),
+      }),
+    },
+    ({ emails }) => api("POST", "/emails/batch", emails),
+  );
+  tool(
+    "update_email",
+    "emails:send",
+    {
+      description: "Reschedule a scheduled email that has not been sent yet.",
+      inputSchema: updateEmailRequestSchema.extend({
+        id: z.uuid().describe("Email id returned by send_email"),
+      }),
+    },
+    ({ id, ...body }) => api("PATCH", `/emails/${enc(id)}`, body),
+  );
+  tool(
+    "cancel_email",
+    "emails:send",
+    {
+      description: "Cancel a scheduled email before it is sent.",
+      inputSchema: z.object({ id: z.uuid().describe("Email id returned by send_email") }),
+    },
+    ({ id }) => api("POST", `/emails/${enc(id)}/cancel`),
   );
   tool(
     "create_contact",
@@ -307,6 +416,31 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     ({ id, ...body }) => api("PATCH", `/contacts/${enc(id)}`, body),
   );
   tool(
+    "update_contact_topics",
+    "audience:write",
+    {
+      description:
+        "Set a contact's per-topic subscription choices. Topics not listed are left unchanged.",
+      inputSchema: z.object({
+        id: idOrEmail,
+        topics: updateContactTopicsRequestSchema.describe(
+          "Topic subscriptions to set, each { id, subscription }",
+        ),
+      }),
+    },
+    ({ id, topics }) => api("PATCH", `/contacts/${enc(id)}/topics`, topics),
+  );
+  tool(
+    "delete_contact",
+    "audience:write",
+    {
+      description: "Delete a contact and its segment memberships. This cannot be undone.",
+      inputSchema: z.object({ id: idOrEmail }),
+      destructive: true,
+    },
+    ({ id }) => api("DELETE", `/contacts/${enc(id)}`),
+  );
+  tool(
     "add_contact_to_segment",
     "audience:write",
     {
@@ -320,6 +454,113 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       api("POST", `/contacts/${enc(contact_id)}/segments/${enc(segment_id)}`),
   );
   tool(
+    "remove_contact_from_segment",
+    "audience:write",
+    {
+      description: "Remove a contact from a manual segment. The contact itself is kept.",
+      inputSchema: z.object({
+        contact_id: idOrEmail,
+        segment_id: z.uuid().describe("Segment id from list_segments"),
+      }),
+    },
+    ({ contact_id, segment_id }) =>
+      api("DELETE", `/contacts/${enc(contact_id)}/segments/${enc(segment_id)}`),
+  );
+  tool(
+    "create_segment",
+    "audience:write",
+    {
+      description:
+        "Create a segment. With a filter it selects contacts dynamically; without one it is a manual membership list fed by add_contact_to_segment.",
+      inputSchema: createSegmentRequestSchema,
+    },
+    (body) => api("POST", "/segments", body),
+  );
+  tool(
+    "update_segment",
+    "audience:write",
+    {
+      description:
+        "Rename a segment or change its filter (null clears the filter, making it manual).",
+      inputSchema: updateSegmentRequestSchema.extend({
+        id: z.uuid().describe("Segment id from list_segments"),
+      }),
+    },
+    ({ id, ...body }) => api("PATCH", `/segments/${enc(id)}`, body),
+  );
+  tool(
+    "delete_segment",
+    "audience:write",
+    {
+      description: "Delete a segment. Its contacts remain in the audience.",
+      inputSchema: z.object({ id: z.uuid().describe("Segment id from list_segments") }),
+      destructive: true,
+    },
+    ({ id }) => api("DELETE", `/segments/${enc(id)}`),
+  );
+  tool(
+    "create_topic",
+    "audience:write",
+    {
+      description:
+        "Create a subscription topic (name, description, default_subscription, visibility). Topic ids scope sends and broadcasts.",
+      inputSchema: createTopicRequestSchema,
+    },
+    (body) => api("POST", "/topics", body),
+  );
+  tool(
+    "update_topic",
+    "audience:write",
+    {
+      description:
+        "Update a topic's name, description or visibility. The default subscription is immutable.",
+      inputSchema: updateTopicRequestSchema.extend({
+        id: z.uuid().describe("Topic id from list_topics"),
+      }),
+    },
+    ({ id, ...body }) => api("PATCH", `/topics/${enc(id)}`, body),
+  );
+  tool(
+    "delete_topic",
+    "audience:write",
+    {
+      description: "Delete a subscription topic and the per-contact choices recorded for it.",
+      inputSchema: z.object({ id: z.uuid().describe("Topic id from list_topics") }),
+      destructive: true,
+    },
+    ({ id }) => api("DELETE", `/topics/${enc(id)}`),
+  );
+  tool(
+    "create_contact_property",
+    "audience:write",
+    {
+      description: "Define a custom contact property (key, type, optional fallback value).",
+      inputSchema: createContactPropertyRequestSchema,
+    },
+    (body) => api("POST", "/contact-properties", body),
+  );
+  tool(
+    "update_contact_property",
+    "audience:write",
+    {
+      description: "Update a custom contact property definition.",
+      inputSchema: updateContactPropertyRequestSchema.extend({
+        id: z.uuid().describe("Property id from list_contact_properties"),
+      }),
+    },
+    ({ id, ...body }) => api("PATCH", `/contact-properties/${enc(id)}`, body),
+  );
+  tool(
+    "delete_contact_property",
+    "audience:write",
+    {
+      description: "Delete a custom contact property definition.",
+      inputSchema: z.object({ id: z.uuid().describe("Property id from list_contact_properties") }),
+      destructive: true,
+    },
+    ({ id }) => api("DELETE", `/contact-properties/${enc(id)}`),
+  );
+  tool(
     "create_broadcast",
     "broadcasts:write",
     {
@@ -328,6 +569,17 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       inputSchema: createBroadcastRequestSchema,
     },
     (body) => api("POST", "/broadcasts", body),
+  );
+  tool(
+    "update_broadcast",
+    "broadcasts:write",
+    {
+      description: "Update a draft broadcast's audience, content or subject.",
+      inputSchema: updateBroadcastRequestSchema.extend({
+        id: z.uuid().describe("Broadcast id from create_broadcast"),
+      }),
+    },
+    ({ id, ...body }) => api("PATCH", `/broadcasts/${enc(id)}`, body),
   );
   tool(
     "send_broadcast",
@@ -341,6 +593,69 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     },
     ({ id, ...body }) => api("POST", `/broadcasts/${enc(id)}/send`, body),
   );
+  tool(
+    "cancel_broadcast",
+    "broadcasts:write",
+    {
+      description: "Cancel a scheduled broadcast before it starts sending.",
+      inputSchema: z.object({ id: z.uuid().describe("Broadcast id from list_broadcasts") }),
+    },
+    ({ id }) => api("POST", `/broadcasts/${enc(id)}/cancel`),
+  );
+  tool(
+    "delete_broadcast",
+    "broadcasts:write",
+    {
+      description: "Delete a draft broadcast. Sent broadcasts cannot be deleted.",
+      inputSchema: z.object({ id: z.uuid().describe("Broadcast id from list_broadcasts") }),
+      destructive: true,
+    },
+    ({ id }) => api("DELETE", `/broadcasts/${enc(id)}`),
+  );
+  if (deps.ses) {
+    tool(
+      "create_domain",
+      "domains:write",
+      {
+        description:
+          "Add a sending domain (region optional). Returns the DNS records to create; the domain sends once they verify.",
+        inputSchema: createDomainRequestSchema,
+      },
+      (body) => api("POST", "/domains", body),
+    );
+    tool(
+      "update_domain",
+      "domains:write",
+      {
+        description: "Change a domain's open/click tracking settings.",
+        inputSchema: updateDomainRequestSchema.extend({
+          id: z.uuid().describe("Domain id from list_domains"),
+        }),
+      },
+      ({ id, ...body }) => api("PATCH", `/domains/${enc(id)}`, body),
+    );
+    tool(
+      "verify_domain",
+      "domains:write",
+      {
+        description:
+          "Re-check a domain's DNS records and SES verification, returning fresh status.",
+        inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
+      },
+      ({ id }) => api("POST", `/domains/${enc(id)}/verify`),
+    );
+    tool(
+      "delete_domain",
+      "domains:write",
+      {
+        description:
+          "Remove a sending domain and its SES identity. Sends from it stop immediately; this cannot be undone.",
+        inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
+        destructive: true,
+      },
+      ({ id }) => api("DELETE", `/domains/${enc(id)}`),
+    );
+  }
 
   return server;
 }

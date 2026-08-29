@@ -10,6 +10,7 @@ export const MCP_SCOPES = [
   "audience:write",
   "broadcasts:write",
   "domains:read",
+  "domains:write",
 ] as const;
 
 export type McpScope = (typeof MCP_SCOPES)[number];
