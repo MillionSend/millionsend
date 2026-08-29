@@ -1,6 +1,6 @@
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { env } from "@millionsend/config";
-import { isLoopbackUrl, MCP_SCOPES } from "@millionsend/core";
+import { ALL_TEAMS_GRANT, isLoopbackUrl, MCP_SCOPES } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { type BetterAuthPlugin, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -70,15 +70,19 @@ export const OAUTH_SCOPES = ["offline_access", ...MCP_SCOPES];
 
 /**
  * Team an OAuth grant is bound to. The consent page persists the picked team
- * on the session row (team.switch), and this resolves it with the same rule
- * as the dashboard cookie: a membership of the user's own, else their oldest
- * team, else nothing (the consent page refuses to grant without a team).
+ * (or ALL_TEAMS_GRANT) on the session row (team.grantTeam), and this
+ * resolves it with the same rule as the dashboard cookie: a membership of
+ * the user's own, else their oldest team, else nothing (the consent page
+ * refuses to grant without a team).
  */
 export async function grantTeamId(
   db: Db,
   userId: string,
   activeTeamId: string | null | undefined,
 ): Promise<string | undefined> {
+  if (activeTeamId === ALL_TEAMS_GRANT) {
+    return (await listMemberships(db, userId)).length ? ALL_TEAMS_GRANT : undefined;
+  }
   return (await getActiveMembership(db, userId, activeTeamId ?? undefined))?.teamId;
 }
 
@@ -92,10 +96,17 @@ export async function grantClaims(
   db: Db,
   user: { id: string } | null | undefined,
   referenceId: string | undefined,
-): Promise<{ team_id: string; team_role: string }> {
-  const membership = user
-    ? (await listMemberships(db, user.id)).find((m) => m.teamId === referenceId)
-    : undefined;
+): Promise<{ team_id: string; team_role?: string }> {
+  const memberships = user ? await listMemberships(db, user.id) : [];
+  // All-teams grant: no single role to stamp — the API resolves the team
+  // (and re-checks membership) per tool call instead.
+  if (referenceId === ALL_TEAMS_GRANT) {
+    if (!memberships.length) {
+      throw new APIError("FORBIDDEN", { message: "You are no longer a member of any team." });
+    }
+    return { team_id: ALL_TEAMS_GRANT };
+  }
+  const membership = memberships.find((m) => m.teamId === referenceId);
   if (!membership) {
     throw new APIError("FORBIDDEN", { message: "The grant is not bound to a team you belong to." });
   }

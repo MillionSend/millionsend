@@ -15,6 +15,12 @@ export const MCP_SCOPES = [
 
 export type McpScope = (typeof MCP_SCOPES)[number];
 
+/**
+ * Grant referenceId / token team_id meaning "every team the user belongs
+ * to", resolved per call. Not a uuid, so it can never collide with a team id.
+ */
+export const ALL_TEAMS_GRANT = "*";
+
 /** Path of the MCP endpoint on the public API host (RFC 8707 resource = API base + this). */
 export const MCP_RESOURCE_PATH = "/mcp";
 

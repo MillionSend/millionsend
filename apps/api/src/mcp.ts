@@ -1,5 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  ALL_TEAMS_GRANT,
   type ApiKeyAuth,
   MCP_RESOURCE_PATH,
   MCP_SCOPES,
@@ -21,7 +23,7 @@ import {
   type StandardSchemaWithJSON,
   type ToolCallback,
 } from "@modelcontextprotocol/server";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from "jose";
 import { type ApiDeps, type Env, errorBody } from "./app.js";
 import {
@@ -54,16 +56,35 @@ import {
  */
 export const INTERNAL_AUTH = new WeakMap<Request, ApiKeyAuth>();
 
+interface McpTeam {
+  teamId: string;
+  name: string;
+  plan: ApiKeyAuth["plan"];
+}
+
 interface McpAuthExtra {
+  /** For an all-teams token this is the default (oldest) team's auth. */
   auth: ApiKeyAuth;
   userId: string;
+  /** Present only on all-teams tokens: every team the holder belongs to, oldest first. */
+  teams?: McpTeam[];
+}
+
+function teamAuth(team: McpTeam): ApiKeyAuth {
+  return {
+    teamId: team.teamId,
+    plan: team.plan,
+    apiKeyId: null,
+    permission: "full_access",
+    domainId: null,
+  };
 }
 
 const accessTokenClaims = z.object({
   sub: z.string().min(1),
   client_id: z.string().min(1),
   scope: z.string(),
-  team_id: z.uuid(),
+  team_id: z.union([z.uuid(), z.literal(ALL_TEAMS_GRANT)]),
   exp: z.number(),
 });
 
@@ -97,22 +118,37 @@ function createTokenVerifier(
         );
       }
       const m = schema.teamMembers;
-      const [membership] = await db
-        .select({ plan: schema.teams.plan })
-        .from(m)
-        .innerJoin(schema.teams, eq(m.teamId, schema.teams.id))
-        .where(and(eq(m.userId, claims.data.sub), eq(m.teamId, claims.data.team_id)));
-      if (!membership) throw invalid("Token holder is no longer a member of the team");
-      const extra: McpAuthExtra = {
-        auth: {
-          teamId: claims.data.team_id,
-          plan: membership.plan,
-          apiKeyId: null,
-          permission: "full_access",
-          domainId: null,
-        },
-        userId: claims.data.sub,
-      };
+      let extra: McpAuthExtra;
+      if (claims.data.team_id === ALL_TEAMS_GRANT) {
+        // All-teams grant: resolve the memberships now (same freshness rule
+        // as the single-team check) and pick the team per tool call.
+        const teams: McpTeam[] = await db
+          .select({ teamId: m.teamId, name: schema.teams.name, plan: schema.teams.plan })
+          .from(m)
+          .innerJoin(schema.teams, eq(m.teamId, schema.teams.id))
+          .where(eq(m.userId, claims.data.sub))
+          .orderBy(asc(m.createdAt));
+        const first = teams[0];
+        if (!first) throw invalid("Token holder is no longer a member of any team");
+        extra = { auth: teamAuth(first), userId: claims.data.sub, teams };
+      } else {
+        const [membership] = await db
+          .select({ plan: schema.teams.plan })
+          .from(m)
+          .innerJoin(schema.teams, eq(m.teamId, schema.teams.id))
+          .where(and(eq(m.userId, claims.data.sub), eq(m.teamId, claims.data.team_id)));
+        if (!membership) throw invalid("Token holder is no longer a member of the team");
+        extra = {
+          auth: {
+            teamId: claims.data.team_id,
+            plan: membership.plan,
+            apiKeyId: null,
+            permission: "full_access",
+            domainId: null,
+          },
+          userId: claims.data.sub,
+        };
+      }
       return {
         token,
         clientId: claims.data.client_id,
@@ -180,10 +216,20 @@ const enc = encodeURIComponent;
 /** Tools are registered read-only first and only for scopes the token carries. */
 function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): McpServer {
   const server = new McpServer({ name: "millionsend", version: "1.0.0" });
-  const { auth } = authInfo.extra as unknown as McpAuthExtra;
+  const { auth, teams } = authInfo.extra as unknown as McpAuthExtra;
   const scopes = new Set(authInfo.scopes);
+  // All-teams tokens act on one team per tool call (`team_id` argument,
+  // default: oldest team). The selection rides async context so the same
+  // 41 `api(...)` call sites need no per-call auth threading.
+  const callTeam = teams ? new AsyncLocalStorage<ApiKeyAuth>() : null;
   const api = (method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown) =>
-    callApi(app, auth, method, path, body);
+    callApi(app, callTeam?.getStore() ?? auth, method, path, body);
+  const teamIdArg = z
+    .uuid()
+    .optional()
+    .describe(
+      "Team to act in (this connection spans all your teams). Defaults to your oldest team; call list_teams to see them.",
+    );
   const tool = <S extends z.ZodObject & StandardSchemaWithJSON>(
     name: string,
     scope: McpScope,
@@ -195,7 +241,9 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       name,
       {
         description: cfg.description,
-        inputSchema: cfg.inputSchema,
+        inputSchema: (teams
+          ? cfg.inputSchema.extend({ team_id: teamIdArg })
+          : cfg.inputSchema) as unknown as S,
         annotations: cfg.readOnly
           ? { readOnlyHint: true }
           : { destructiveHint: cfg.destructive === true },
@@ -203,9 +251,57 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       // The conditional ToolCallback type cannot resolve for an unbound
       // generic; the cast is sound because args were validated against
       // cfg.inputSchema by the SDK before the callback runs.
-      ((args: unknown) => run(args as z.output<S>)) as ToolCallback<S>,
+      ((args: unknown) => {
+        if (!teams || !callTeam) return run(args as z.output<S>);
+        const { team_id, ...rest } = args as { team_id?: string };
+        const team = team_id ? teams.find((t) => t.teamId === team_id) : teams[0];
+        if (!team) {
+          return Promise.resolve({
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(
+                  errorBody(
+                    403,
+                    "forbidden",
+                    "You are not a member of that team. Call list_teams for valid ids.",
+                  ),
+                  null,
+                  2,
+                ),
+              },
+            ],
+            isError: true,
+          });
+        }
+        return callTeam.run(teamAuth(team), () => run(rest as z.output<S>));
+      }) as ToolCallback<S>,
     );
   };
+
+  if (teams) {
+    server.registerTool(
+      "list_teams",
+      {
+        description:
+          "List the teams this all-teams connection can act in. Pass a team's id as team_id to any other tool; the first team listed is the default when team_id is omitted.",
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: true },
+      },
+      () => ({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              teams.map((t, i) => ({ id: t.teamId, name: t.name, default: i === 0 })),
+              null,
+              2,
+            ),
+          },
+        ],
+      }),
+    );
+  }
 
   tool(
     "list_emails",

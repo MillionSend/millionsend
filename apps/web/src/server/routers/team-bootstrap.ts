@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { ALL_TEAMS_GRANT } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
@@ -49,6 +50,30 @@ export const teamBootstrapRouter = router({
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       await selectTeam(ctx, input.teamId);
+      return { teamId: input.teamId };
+    }),
+
+  /**
+   * Binds the pending OAuth consent to a team — or to ALL_TEAMS_GRANT for an
+   * all-teams grant. Writes only the session row (what consentReferenceId
+   * reads), never the dashboard cookie: authorizing an app must not switch
+   * the team the user is working in.
+   */
+  grantTeam: protectedProcedure
+    .input(z.object({ teamId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const memberships = await listMemberships(ctx.db, ctx.session.user.id);
+      const allowed =
+        input.teamId === ALL_TEAMS_GRANT
+          ? memberships.length > 0
+          : memberships.some((m) => m.teamId === input.teamId);
+      if (!allowed) throw new TRPCError({ code: "FORBIDDEN" });
+      if (ctx.session.session) {
+        await ctx.db
+          .update(schema.session)
+          .set({ activeTeamId: input.teamId })
+          .where(eq(schema.session.id, ctx.session.session.id));
+      }
       return { teamId: input.teamId };
     }),
 
