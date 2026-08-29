@@ -52,7 +52,6 @@ export default async function UnsubscribeConfirmPage({
       <UnsubscribePageView
         m={m}
         state={state}
-        email={target?.email ?? ""}
         topicName={target?.topic?.name ?? null}
         topics={topics}
         formAction={`/unsubscribe/${encodeURIComponent(token)}`}

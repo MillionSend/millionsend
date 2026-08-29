@@ -338,9 +338,12 @@ table.ms-table {
   background: color-mix(in srgb, var(--ms-bone) 5%, var(--ms-inset));
   border: 1px solid var(--ms-line-strong);
   border-radius: var(--ms-r-input);
+  /* Same box as .ms-badge (padding/border/line-height/font-size), so a chip
+     and a pill sitting on one row share one height. */
   padding: 3px 8px;
   font-family: var(--ms-font-mono);
-  font-size: var(--ms-fs-label);
+  font-size: var(--ms-fs-badge);
+  line-height: 1.4;
   color: var(--ms-muted);
   max-width: 100%;
 }
@@ -363,8 +366,24 @@ table.ms-table {
     opacity: 0;
   }
 }
+/* Circled check over success states (unsubscribe page); ms-badge-success
+   palette, ms-copy-pop entrance. */
+.ms-success-check {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ms-success-bg);
+  border: 1px solid var(--ms-success-border);
+  color: var(--ms-success);
+  animation: ms-copy-pop 240ms var(--ms-ease);
+}
 @media (prefers-reduced-motion: reduce) {
-  .ms-copy-mark.done svg {
+  .ms-copy-mark.done svg,
+  .ms-success-check {
     animation: none;
   }
 }

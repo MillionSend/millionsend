@@ -33,20 +33,20 @@ export const EMPTY_UNSUBSCRIBE_CUSTOMIZATION: UnsubscribeViewCustomization = {
   accentColor: null,
 };
 
-/** "{email}"/"{topic}" slots → mono span, keeping the catalog's sentence order. */
+/** "{topic}" slot → mono span, keeping the catalog's sentence order. */
 function fillSlots(template: string, slots: Record<string, string>) {
   // One split per slot, in the order they appear — the catalog never repeats a
   // slot, so a single pass keeps the surrounding text intact.
   const parts: React.ReactNode[] = [];
   let rest = template;
   let key = 0;
-  const re = /\{(email|topic)\}/;
+  const re = /\{(topic)\}/;
   let match = re.exec(rest);
   while (match) {
     parts.push(rest.slice(0, match.index));
     parts.push(
       <span key={key++} className="ms-mono" style={{ overflowWrap: "anywhere" }}>
-        {slots[match[1] as "email" | "topic"]}
+        {slots[match[1] as "topic"]}
       </span>,
     );
     rest = rest.slice(match.index + match[0].length);
@@ -54,6 +54,27 @@ function fillSlots(template: string, slots: Record<string, string>) {
   }
   parts.push(rest);
   return <>{parts}</>;
+}
+
+/** Circled check above the success headings; palette and pop match ms-badge-success / ms-copy-mark. */
+function SuccessCheck() {
+  return (
+    <div className="ms-success-check">
+      <svg
+        width={22}
+        height={22}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="m4 12.5 5 5L20 6.5" />
+      </svg>
+    </div>
+  );
 }
 
 function BrandHeading({ name }: { name: string }) {
@@ -95,7 +116,6 @@ function Wordmark() {
 export function UnsubscribePageView({
   m,
   state,
-  email = "",
   topicName = null,
   topics = [],
   formAction,
@@ -104,7 +124,6 @@ export function UnsubscribePageView({
 }: {
   m: UnsubscribeMessages;
   state: UnsubscribeViewState;
-  email?: string;
   topicName?: string | null;
   topics?: UnsubscribeViewTopic[];
   formAction?: string;
@@ -114,11 +133,11 @@ export function UnsubscribePageView({
   const theme = unsubscribeThemeStyle(customization);
   const accent = unsubscribeAccentStyle(customization.accentColor);
   const confirmText = topicName
-    ? fillSlots(m.confirmTopic, { email, topic: topicName })
-    : fillSlots(m.confirm, { email });
-  const doneText = topicName
-    ? fillSlots(m.doneDetailTopic, { email, topic: topicName })
-    : fillSlots(m.doneDetail, { email });
+    ? fillSlots(m.confirmTopic, { topic: topicName })
+    : topics.length > 0
+      ? m.confirmPrefs
+      : m.confirm;
+  const doneText = topicName ? fillSlots(m.doneDetailTopic, { topic: topicName }) : m.doneDetail;
   const successHeading = customization.successMessage;
 
   return (
@@ -159,11 +178,15 @@ export function UnsubscribePageView({
         {state === "invalid" ? (
           <p style={{ margin: 0, fontSize: 17, color: "var(--ms-bone)" }}>{m.invalid}</p>
         ) : state === "saved" ? (
-          <p style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "var(--ms-bone)" }}>
-            {successHeading ?? m.saved}
-          </p>
+          <>
+            <SuccessCheck />
+            <p style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "var(--ms-bone)" }}>
+              {successHeading ?? m.saved}
+            </p>
+          </>
         ) : state === "done" ? (
           <>
+            <SuccessCheck />
             <p style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "var(--ms-bone)" }}>
               {successHeading ?? m.done}
             </p>
@@ -174,70 +197,74 @@ export function UnsubscribePageView({
             <p style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "var(--ms-bone)" }}>
               {confirmText}
             </p>
-            {email ? (
-              <p
-                className="ms-mono"
-                style={{
-                  margin: "8px 0 0",
-                  fontSize: 13.5,
-                  color: "var(--ms-muted)",
-                  overflowWrap: "anywhere",
-                }}
-              >
-                {email}
-              </p>
-            ) : null}
             {topics.length > 0 ? (
-              // Separate form: saving preferences must not trigger the
-              // unsubscribe below. The hidden `prefs` marker routes the POST.
-              <form method="post" action={formAction} style={{ marginTop: 22, textAlign: "left" }}>
-                <input type="hidden" name="prefs" value="1" />
-                <p style={{ margin: "0 0 10px", fontSize: 15, color: "var(--ms-muted)" }}>
-                  {m.preferences}
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {topics.map((topic) => (
-                    <label
-                      key={topic.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        fontSize: 15.5,
-                        color: "var(--ms-bone)",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        className="ms-checkbox"
-                        name="topic"
-                        value={topic.id}
-                        defaultChecked={topic.subscribed}
-                      />
-                      {topic.name}
-                    </label>
-                  ))}
+              <>
+                {/* Two forms, one button row: saving preferences must not
+                    trigger the unsubscribe, so each button submits its own
+                    form via the `form` attribute (plain HTML — the page
+                    ships no JS). The hidden `prefs` marker routes the POST. */}
+                <form
+                  method="post"
+                  action={formAction}
+                  id="ms-unsub-prefs"
+                  style={{ marginTop: 22, textAlign: "left" }}
+                >
+                  <input type="hidden" name="prefs" value="1" />
+                  <p style={{ margin: "0 0 10px", fontSize: 15, color: "var(--ms-muted)" }}>
+                    {m.preferences}
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {topics.map((topic) => (
+                      <label
+                        key={topic.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          fontSize: 15.5,
+                          color: "var(--ms-bone)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          className="ms-checkbox"
+                          name="topic"
+                          value={topic.id}
+                          defaultChecked={topic.subscribed}
+                        />
+                        {topic.name}
+                      </label>
+                    ))}
+                  </div>
+                </form>
+                <form method="post" action={formAction} id="ms-unsub-all" />
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
+                  <button type="submit" form="ms-unsub-all" className="ms-btn ms-btn-secondary">
+                    {m.button}
+                  </button>
+                  <button
+                    type="submit"
+                    form="ms-unsub-prefs"
+                    className="ms-btn ms-btn-primary"
+                    style={accent}
+                  >
+                    {m.save}
+                  </button>
                 </div>
+              </>
+            ) : (
+              // Plain form POST to the canonical route.
+              <form method="post" action={formAction}>
                 <button
                   type="submit"
-                  className="ms-btn ms-btn-secondary"
-                  style={{ margin: "16px auto 0", display: "flex" }}
+                  className="ms-btn ms-btn-primary"
+                  style={{ marginTop: 20, ...accent }}
                 >
-                  {m.save}
+                  {m.button}
                 </button>
               </form>
-            ) : null}
-            {/* Plain form POST to the canonical route — the page ships no JS. */}
-            <form method="post" action={formAction}>
-              <button
-                type="submit"
-                className="ms-btn ms-btn-primary"
-                style={{ marginTop: topics.length > 0 ? 12 : 20, ...accent }}
-              >
-                {m.button}
-              </button>
-            </form>
+            )}
           </>
         )}
       </div>
