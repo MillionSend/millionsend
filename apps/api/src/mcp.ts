@@ -34,6 +34,7 @@ import {
   createDomainRequestSchema,
   createSegmentRequestSchema,
   createTopicRequestSchema,
+  createWebhookRequestSchema,
   listQuerySchema,
   sendBroadcastRequestSchema,
   sendEmailRequestSchema,
@@ -45,6 +46,7 @@ import {
   updateEmailRequestSchema,
   updateSegmentRequestSchema,
   updateTopicRequestSchema,
+  updateWebhookRequestSchema,
 } from "./schemas.js";
 
 /**
@@ -424,6 +426,28 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     },
     ({ id }) => api("GET", `/broadcasts/${enc(id)}`),
   );
+  tool(
+    "list_webhooks",
+    "webhooks:write",
+    {
+      description:
+        "List webhook endpoints with their subscribed events and status (list rows never carry signing secrets).",
+      inputSchema: listQuerySchema,
+      readOnly: true,
+    },
+    (q) => api("GET", withQuery("/webhooks", q)),
+  );
+  tool(
+    "get_webhook",
+    "webhooks:write",
+    {
+      description:
+        "Get one webhook endpoint by id, including its Standard Webhooks signing secret (whsec_…).",
+      inputSchema: z.object({ id: z.uuid().describe("Webhook id from list_webhooks") }),
+      readOnly: true,
+    },
+    ({ id }) => api("GET", `/webhooks/${enc(id)}`),
+  );
   if (deps.ses) {
     tool(
       "list_domains",
@@ -707,6 +731,38 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       destructive: true,
     },
     ({ id }) => api("DELETE", `/broadcasts/${enc(id)}`),
+  );
+  tool(
+    "create_webhook",
+    "webhooks:write",
+    {
+      description:
+        "Create a webhook endpoint subscribed to email events. The response includes the Standard Webhooks signing secret (whsec_…) used to verify deliveries — store it; it is also retrievable via get_webhook.",
+      inputSchema: createWebhookRequestSchema,
+    },
+    (body) => api("POST", "/webhooks", body),
+  );
+  tool(
+    "update_webhook",
+    "webhooks:write",
+    {
+      description:
+        "Update a webhook's endpoint URL, subscribed events, or enabled/disabled status.",
+      inputSchema: updateWebhookRequestSchema.extend({
+        id: z.uuid().describe("Webhook id from list_webhooks"),
+      }),
+    },
+    ({ id, ...body }) => api("PATCH", `/webhooks/${enc(id)}`, body),
+  );
+  tool(
+    "delete_webhook",
+    "webhooks:write",
+    {
+      description: "Delete a webhook endpoint. Deliveries to it stop immediately.",
+      inputSchema: z.object({ id: z.uuid().describe("Webhook id from list_webhooks") }),
+      destructive: true,
+    },
+    ({ id }) => api("DELETE", `/webhooks/${enc(id)}`),
   );
   if (deps.ses) {
     tool(

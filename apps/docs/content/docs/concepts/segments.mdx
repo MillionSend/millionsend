@@ -8,6 +8,11 @@ expression, not a member list. Membership is evaluated live: a contact that
 starts matching the filter is in the segment immediately, and the contact
 count you see is computed at read time.
 
+A segment created **without a filter** is a **manual membership list**: you
+add and remove contacts explicitly (from the dashboard, or via
+`POST /contacts/{id}/segments/{segmentId}` and the MCP's `add_contact_to_segment`). Both
+kinds are equally valid broadcast targets.
+
 Filters match on contact fields (email, name, subscribe state, creation date)
 and on [custom properties](/concepts/contacts#what-a-contact-holds), with
 operators such as equals, contains, is-set / is-not-set, and date comparisons.

@@ -709,9 +709,11 @@ const topicSchema = z.object({
 
 export const topicResponseSchema = topicSchema.openapi("TopicResponse");
 
-// ListTopicsResponseSuccess is a bare { data: Topic[] } — no keyset pagination.
+// The SDK's ListTopicsResponseSuccess types a bare { data: Topic[] };
+// object/has_more ride along additively so every list shares one envelope
+// (topics are never paginated — has_more is always false).
 export const listTopicsResponseSchema = z
-  .object({ data: z.array(topicSchema) })
+  .object({ object: z.literal("list"), data: z.array(topicSchema), has_more: z.literal(false) })
   .openapi("ListTopicsResponse");
 
 export const removeTopicResponseSchema = z
