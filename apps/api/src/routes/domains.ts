@@ -1,7 +1,15 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
-import { isLoopbackUrl } from "@millionsend/core";
+import {
+  createFixedWindowLimiter,
+  DOMAIN_CREATE_LIMIT_PER_HOUR,
+  failQueuedEmailsForDomain,
+  isIdentitySharedByOtherDomains,
+  isLoopbackUrl,
+  isReservedSenderDomain,
+  PLAN_DOMAIN_LIMIT,
+} from "@millionsend/core";
 import { recordCheck } from "@millionsend/core/domain-status";
-import { schema } from "@millionsend/db";
+import { type Db, schema } from "@millionsend/db";
 import {
   computeDomainVerification,
   createDomainIdentity,
@@ -17,7 +25,7 @@ import {
   type SesIdentityClient,
   type SesRegion,
 } from "@millionsend/ses";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq } from "drizzle-orm";
 import { type ApiDeps, type Env, errorBody, isUniqueViolation, keysetPage } from "../app.js";
 import {
   createDomainRequestSchema,
@@ -41,6 +49,8 @@ export interface DomainsSesDeps {
   dns?: DnsResolver | undefined;
   /** Region used when a create omits `region`; must be one of SES_REGIONS. */
   defaultRegion?: string | undefined;
+  /** The AUTH_EMAIL_FROM sender; in cloud its domain is reserved for system mail. */
+  authEmailFrom?: string | undefined;
 }
 
 type DomainRow = typeof schema.domains.$inferSelect;
@@ -151,6 +161,11 @@ export function registerDomainRoutes(
         .where(and(eq(d.id, id), eq(d.teamId, teamId)))
     )[0];
 
+  // Identity creation is the one route that provisions a shared AWS resource;
+  // cloud caps it per team so one tenant cannot burn the account's
+  // CreateEmailIdentity throttle for everyone.
+  const createLimited = createFixedWindowLimiter(DOMAIN_CREATE_LIMIT_PER_HOUR, 3_600_000);
+
   app.openapi(
     createRoute({
       method: "post",
@@ -163,29 +178,73 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: createDomainResponseSchema } },
           description: "Domain created",
         },
+        403: jsonErr("Plan domain limit reached"),
         409: jsonErr("Domain already added"),
         422: jsonErr("Validation error"),
+        429: jsonErr("Too many domains created recently"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
       const region = body.region ?? defaultRegion;
+      if (
+        isReservedSenderDomain(body.name, {
+          isCloud: deps.isCloud,
+          authEmailFrom: ses.authEmailFrom,
+        })
+      ) {
+        return c.json(
+          errorBody(422, "validation_error", "This domain cannot be added as a sender"),
+          422,
+        );
+      }
       const [existing] = await db
         .select({ id: d.id })
         .from(d)
         .where(and(eq(d.teamId, auth.teamId), eq(d.name, body.name)));
       if (existing) return c.json(errorBody(409, "conflict", "domain already added"), 409);
+      if (deps.isCloud) {
+        // SES identities are account-wide per region and every cloud tenant
+        // shares the account, so a domain another team holds in this region
+        // is taken — adopting it would re-key their DKIM.
+        const [taken] = await db
+          .select({ id: d.id })
+          .from(d)
+          .where(and(eq(d.name, body.name), eq(d.region, region)));
+        if (taken) return c.json(errorBody(409, "conflict", "domain already registered"), 409);
+        const limit = PLAN_DOMAIN_LIMIT[auth.plan];
+        const [owned] = await db.select({ n: count() }).from(d).where(eq(d.teamId, auth.teamId));
+        if (limit !== null && (owned?.n ?? 0) >= limit) {
+          return c.json(
+            errorBody(403, "plan_limit_reached", `Your plan allows up to ${limit} domains`),
+            403,
+          );
+        }
+        if (createLimited(auth.teamId)) {
+          return c.json(errorBody(429, "rate_limit_exceeded", "Too many domains created"), 429);
+        }
+      }
 
       // BYODKIM: the private key lives only in this block — handed to SES,
       // then dereferenced. It must never be stored, returned, or logged.
       let dkim: ReturnType<typeof generateDkimKeyPair> | null = generateDkimKeyPair();
       const dkimPublicKey = dkim.publicKeyB64;
-      await createDomainIdentity(ses.clientForRegion(region), {
-        domain: body.name,
-        mailFromSubdomain: body.custom_return_path,
-        dkim: { selector: DKIM_SELECTOR, privateKeyB64: dkim.privateKeyB64 },
-      });
+      try {
+        await createDomainIdentity(ses.clientForRegion(region), {
+          domain: body.name,
+          mailFromSubdomain: body.custom_return_path,
+          dkim: { selector: DKIM_SELECTOR, privateKeyB64: dkim.privateKeyB64 },
+          // Self-host: the whole AWS account is the operator's, so an
+          // identity with no row (partial earlier create) is safe to adopt.
+          adoptExisting: !deps.isCloud,
+        });
+      } catch (error) {
+        if ((error as { name?: string }).name === "AlreadyExistsException") {
+          return c.json(errorBody(409, "conflict", "domain already registered"), 409);
+        }
+        throw error;
+      }
       dkim = null;
 
       let row: DomainRow | undefined;
@@ -474,21 +533,31 @@ export function registerDomainRoutes(
       const auth = c.get("auth");
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
-      try {
-        await deleteDomainIdentity(ses.clientForRegion(domain.region), { domain: domain.name });
-      } catch (error) {
-        // An identity already gone from SES must not block removing the row.
-        if ((error as { name?: string }).name !== "NotFoundException") throw error;
+      // The SES identity is shared by every row with the same (name, region):
+      // it goes only with the last of them.
+      if (!(await isIdentitySharedByOtherDomains(db, domain))) {
+        try {
+          await deleteDomainIdentity(ses.clientForRegion(domain.region), { domain: domain.name });
+        } catch (error) {
+          // An identity already gone from SES must not block removing the row.
+          if ((error as { name?: string }).name !== "NotFoundException") throw error;
+        }
       }
-      // api_keys.domainId is ON DELETE restrict (a scoped key must never
-      // silently widen to all domains): revoke every scoped key and drop its
-      // FK first — a revoked key never authenticates, and clearing domainId
-      // frees the delete. Same guards as the dashboard delete.
-      await db
-        .update(schema.apiKeys)
-        .set({ revokedAt: new Date(), domainId: null })
-        .where(and(eq(schema.apiKeys.teamId, auth.teamId), eq(schema.apiKeys.domainId, domain.id)));
-      await db.delete(d).where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
+      await db.transaction(async (tx) => {
+        const txDb = tx as unknown as Db;
+        await failQueuedEmailsForDomain(txDb, { teamId: auth.teamId, domainId: domain.id });
+        // api_keys.domainId is ON DELETE restrict (a scoped key must never
+        // silently widen to all domains): revoke every scoped key and drop its
+        // FK first — a revoked key never authenticates, and clearing domainId
+        // frees the delete. Same guards as the dashboard delete.
+        await txDb
+          .update(schema.apiKeys)
+          .set({ revokedAt: new Date(), domainId: null })
+          .where(
+            and(eq(schema.apiKeys.teamId, auth.teamId), eq(schema.apiKeys.domainId, domain.id)),
+          );
+        await txDb.delete(d).where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
+      });
       return c.json({ object: "domain" as const, id: domain.id, deleted: true as const }, 200);
     },
   );

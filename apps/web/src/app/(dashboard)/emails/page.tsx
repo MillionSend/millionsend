@@ -89,6 +89,9 @@ export default function EmailsPage() {
   const stats = useQuery(trpc.emails.stats.queryOptions());
   const usage = useQuery(trpc.settings.usage.recent.queryOptions({}));
   const apiKeys = useQuery(trpc.apiKeys.list.queryOptions());
+  const teamList = useQuery(trpc.team.list.queryOptions());
+  const role = teamList.data?.teams.find((m) => m.teamId === teamList.data?.activeTeamId)?.role;
+  const canExport = role === "owner" || role === "admin";
 
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
@@ -132,9 +135,11 @@ export default function EmailsPage() {
         title={t("list.title")}
         actions={
           <>
-            <ExportCsvLink
-              href={exportQuery ? `/export/emails?${exportQuery}` : "/export/emails"}
-            />
+            {canExport ? (
+              <ExportCsvLink
+                href={exportQuery ? `/export/emails?${exportQuery}` : "/export/emails"}
+              />
+            ) : null}
             <Link className="ms-btn ms-btn-secondary" href="/emails/suppressions">
               {t("list.suppressionList")}
             </Link>

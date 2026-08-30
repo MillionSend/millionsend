@@ -248,6 +248,24 @@ describe("webhooks.testDelivery", () => {
     expect(delivery.attempts).toBe(1);
     expect(delivery.payload).toMatchObject({ type: "email.sent", test: true });
     expect(delivery.messageId).toMatch(/^msg_/);
+    // Persisted outcome is a fixed code, never the socket's own message.
+    expect(delivery.lastResponseBody).toBe("url_rejected");
+  });
+
+  it("refuses non-standard ports without connecting, and caps test fires per team", async () => {
+    const teamId = await createTeam(db, "team-ports");
+    const caller = callerFor(teamId);
+    const { id } = await caller.webhooks.create({ url: "https://10.0.0.1:8080/hooks" });
+
+    const result = await caller.webhooks.testDelivery({ id });
+    expect(result.ok).toBe(false);
+    const delivery = await caller.webhooks.deliveries.get({ id: result.id });
+    expect(delivery.lastResponseBody).toBe("port_not_allowed");
+
+    for (let i = 1; i < 10; i += 1) await caller.webhooks.testDelivery({ id });
+    await expect(caller.webhooks.testDelivery({ id })).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+    });
   });
 });
 

@@ -1,12 +1,13 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { type PaidPlan, resolvePrices } from "./prices.js";
 import type { BillingStripe } from "./stripe.js";
 
 export interface BillingDeps {
   db: Db;
   stripe: BillingStripe;
+  log?: ((message: string) => void) | undefined;
 }
 
 export interface BillingTeam {
@@ -15,9 +16,29 @@ export interface BillingTeam {
   stripeCustomerId: string | null;
 }
 
+type PlanStatus = (typeof schema.planStatusEnum.enumValues)[number];
+
+/**
+ * Stripe still holds a subscription for the team under these statuses; a
+ * second Checkout would stack another one and bill twice. Changes go through
+ * the portal instead.
+ */
+const LIVE_SUBSCRIPTION_STATUSES: ReadonlySet<PlanStatus> = new Set<PlanStatus>([
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+]);
+
+export function hasLiveSubscription(status: PlanStatus): boolean {
+  return LIVE_SUBSCRIPTION_STATUSES.has(status);
+}
+
 /**
  * The customer is created before Checkout (not by it) so the webhook can
- * always locate the team by stripe_customer_id.
+ * always locate the team by stripe_customer_id. Concurrent first checkouts
+ * may each create a customer; COALESCE keeps whichever linked first and both
+ * requests continue with it (the loser is an empty, never-referenced customer).
  */
 async function ensureCustomer(
   deps: BillingDeps,
@@ -30,11 +51,12 @@ async function ensureCustomer(
     email,
     metadata: { team_id: team.id },
   });
-  await deps.db
+  const [linked] = await deps.db
     .update(schema.teams)
-    .set({ stripeCustomerId: customer.id })
-    .where(eq(schema.teams.id, team.id));
-  return customer.id;
+    .set({ stripeCustomerId: sql`coalesce(${schema.teams.stripeCustomerId}, ${customer.id})` })
+    .where(eq(schema.teams.id, team.id))
+    .returning({ stripeCustomerId: schema.teams.stripeCustomerId });
+  return linked?.stripeCustomerId ?? customer.id;
 }
 
 export async function createCheckoutSession(
@@ -51,21 +73,28 @@ export async function createCheckoutSession(
     resolvePrices(deps.stripe),
     ensureCustomer(deps, input.team, input.email),
   ]);
-  const session = await deps.stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer,
-    client_reference_id: input.team.id,
-    line_items: [{ price: prices[input.plan], quantity: 1 }],
-    success_url: input.successUrl,
-    cancel_url: input.cancelUrl,
-    automatic_tax: { enabled: true },
-    tax_id_collection: { enabled: true },
-    allow_promotion_codes: true,
-    billing_address_collection: "auto",
-    // Automatic tax on an existing customer requires Checkout to persist the
-    // collected address (and the business name for tax ids) onto it.
-    customer_update: { address: "auto", name: "auto" },
-  });
+  const session = await deps.stripe.checkout.sessions.create(
+    {
+      mode: "subscription",
+      customer,
+      client_reference_id: input.team.id,
+      line_items: [{ price: prices[input.plan], quantity: 1 }],
+      success_url: input.successUrl,
+      cancel_url: input.cancelUrl,
+      automatic_tax: { enabled: true },
+      tax_id_collection: { enabled: true },
+      allow_promotion_codes: true,
+      billing_address_collection: "auto",
+      // Automatic tax on an existing customer requires Checkout to persist the
+      // collected address (and the business name for tax ids) onto it.
+      customer_update: { address: "auto", name: "auto" },
+    },
+    // A double-click or two tabs within the same minute replay one session
+    // instead of minting several.
+    {
+      idempotencyKey: `checkout:${input.team.id}:${input.plan}:${Math.floor(Date.now() / 60_000)}`,
+    },
+  );
   if (!session.url) throw new Error("Stripe checkout session has no url");
   return session.url;
 }

@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
+import { createSettingsRouter, type TeamDeletionDeps } from "@/server/routers/settings";
+import { type Context, createCallerFactory, router } from "@/server/trpc";
 
 // SKIP_ENV_VALIDATION leaves env reads live, so stubbing IS_CLOUD here
 // switches the routers between cloud and self-host behavior per test.
@@ -95,9 +97,198 @@ describe("settings.members", () => {
 
     const members = await callerFor("alice", teamA, "owner").settings.members.list();
     expect(members).toEqual([
-      { name: "alice", email: "alice@example.com", role: "owner" },
-      { name: "bob", email: "bob@example.com", role: "member" },
+      { userId: "alice", name: "alice", email: "alice@example.com", role: "owner", self: true },
+      { userId: "bob", name: "bob", email: "bob@example.com", role: "member", self: false },
     ]);
+  });
+
+  async function memberRoles(teamId: string): Promise<Record<string, string>> {
+    const rows = await db
+      .select({ userId: schema.teamMembers.userId, role: schema.teamMembers.role })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.teamId, teamId));
+    return Object.fromEntries(rows.map((r) => [r.userId, r.role]));
+  }
+
+  it("remove drops the membership and the user's grants bound to this team only", async () => {
+    const teamId = await createTeam(db, "acme");
+    const other = await createTeam(db, "other");
+    await addMember(teamId, "alice", "owner");
+    await addMember(teamId, "bob", "member");
+    await db.insert(schema.teamMembers).values({ teamId: other, userId: "bob", role: "member" });
+    await db.insert(schema.oauthClient).values({ id: "c", clientId: "client", redirectUris: [] });
+    await db.insert(schema.oauthConsent).values([
+      { id: "here", clientId: "client", userId: "bob", referenceId: teamId, scopes: [] },
+      { id: "there", clientId: "client", userId: "bob", referenceId: other, scopes: [] },
+    ]);
+    await db.insert(schema.oauthRefreshToken).values({
+      id: "rt",
+      token: "rt",
+      clientId: "client",
+      userId: "bob",
+      referenceId: teamId,
+      scopes: [],
+    });
+
+    await callerFor("alice", teamId, "owner").settings.members.remove({ userId: "bob" });
+    expect(await memberRoles(teamId)).toEqual({ alice: "owner" });
+    expect(await memberRoles(other)).toEqual({ bob: "member" });
+    expect((await db.select().from(schema.oauthConsent)).map((c) => c.id)).toEqual(["there"]);
+    expect(await db.select().from(schema.oauthRefreshToken)).toEqual([]);
+  });
+
+  it("remove: members cannot, admins cannot remove owners, nobody removes the last owner", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    await addMember(teamId, "adam", "admin");
+    await addMember(teamId, "bob", "member");
+    await expect(
+      callerFor("bob", teamId, "member").settings.members.remove({ userId: "adam" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      callerFor("adam", teamId, "admin").settings.members.remove({ userId: "alice" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      callerFor("alice", teamId, "owner").settings.members.remove({ userId: "alice" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // A second owner may be removed by the first, but never the other way to zero.
+    await addMember(teamId, "olga", "owner");
+    await callerFor("alice", teamId, "owner").settings.members.remove({ userId: "olga" });
+    await callerFor("alice", teamId, "owner").settings.members.updateRole({
+      userId: "adam",
+      role: "owner",
+    });
+    await callerFor("adam", teamId, "owner").settings.members.remove({ userId: "alice" });
+    await expect(callerFor("adam", teamId, "owner").settings.members.leave()).rejects.toMatchObject(
+      { code: "PRECONDITION_FAILED" },
+    );
+    expect(await memberRoles(teamId)).toEqual({ adam: "owner", bob: "member" });
+  });
+
+  it("updateRole: admins manage non-owner roles; only owners grant or demote owner", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    await addMember(teamId, "adam", "admin");
+    await addMember(teamId, "bob", "member");
+    await callerFor("adam", teamId, "admin").settings.members.updateRole({
+      userId: "bob",
+      role: "admin",
+    });
+    await expect(
+      callerFor("adam", teamId, "admin").settings.members.updateRole({
+        userId: "bob",
+        role: "owner",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      callerFor("alice", teamId, "owner").settings.members.updateRole({
+        userId: "alice",
+        role: "member",
+      }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(
+      callerFor("alice", teamId, "owner").settings.members.updateRole({
+        userId: "ghost",
+        role: "member",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await memberRoles(teamId)).toEqual({ alice: "owner", adam: "admin", bob: "admin" });
+  });
+
+  it("leave removes the caller's own membership", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    await addMember(teamId, "bob", "member");
+    await callerFor("bob", teamId, "member").settings.members.leave();
+    expect(await memberRoles(teamId)).toEqual({ alice: "owner" });
+  });
+});
+
+describe("settings.team.delete", () => {
+  function deletionCaller(userId: string, teamId: string, role: TeamRole, deps: TeamDeletionDeps) {
+    const factory = createCallerFactory(router({ settings: createSettingsRouter(deps) }));
+    const ctx: Context = {
+      db,
+      session: { user: { id: userId, email: `${userId}@example.com`, name: userId } },
+      teamId,
+      role,
+    };
+    return factory(ctx);
+  }
+
+  it("owner deletes the team, its rows, grants, and external identities; others cannot", async () => {
+    stubCloud();
+    const teamId = await createTeam(db, "acme");
+    const other = await createTeam(db, "other");
+    await addMember(teamId, "alice", "owner");
+    await addMember(teamId, "adam", "admin");
+    await db
+      .update(schema.teams)
+      .set({ logoUrl: "https://cdn/logo.png" })
+      .where(eq(schema.teams.id, teamId));
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId, name: "acme.test", region: "us-east-1" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    // RESTRICT links that would block a bare cascade.
+    await db.insert(schema.apiKeys).values({
+      teamId,
+      name: "k",
+      tokenPrefix: "ms_",
+      last4: "abcd",
+      keyHash: "h",
+      permission: "full_access",
+      domainId: domain.id,
+    });
+    const [segment] = await db
+      .insert(schema.segments)
+      .values({ teamId, name: "s", filter: { match: "all", conditions: [] } })
+      .returning({ id: schema.segments.id });
+    await db.insert(schema.broadcasts).values({
+      teamId,
+      from: "a@acme.test",
+      subject: "s",
+      segmentId: segment?.id,
+    });
+    await db.insert(schema.oauthClient).values({ id: "c", clientId: "client", redirectUris: [] });
+    await db.insert(schema.oauthConsent).values([
+      { id: "here", clientId: "client", userId: "adam", referenceId: teamId, scopes: [] },
+      { id: "there", clientId: "client", userId: "adam", referenceId: other, scopes: [] },
+    ]);
+
+    const calls: string[] = [];
+    const deps: TeamDeletionDeps = {
+      cancelSubscription: async (_db, id) => {
+        calls.push(`stripe:${id}`);
+      },
+      deleteSesIdentity: async ({ name, region }) => {
+        calls.push(`ses:${region}:${name}`);
+        throw new Error("already gone");
+      },
+      deleteLogo: async (url) => {
+        calls.push(`logo:${url}`);
+      },
+    };
+
+    await expect(
+      deletionCaller("adam", teamId, "admin", deps).settings.team.delete(),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await deletionCaller("alice", teamId, "owner", deps).settings.team.delete();
+
+    expect(calls).toEqual([
+      `stripe:${teamId}`,
+      "ses:us-east-1:acme.test",
+      "logo:https://cdn/logo.png",
+    ]);
+    expect(await db.select().from(schema.teams)).toHaveLength(1);
+    expect(await db.select().from(schema.teamMembers)).toEqual([]);
+    expect(await db.select().from(schema.domains)).toEqual([]);
+    expect(await db.select().from(schema.apiKeys)).toEqual([]);
+    expect(await db.select().from(schema.broadcasts)).toEqual([]);
+    expect((await db.select().from(schema.oauthConsent)).map((c) => c.id)).toEqual(["there"]);
   });
 });
 

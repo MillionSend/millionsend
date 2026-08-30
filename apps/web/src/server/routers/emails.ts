@@ -6,7 +6,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { getKeyring } from "../keyring";
-import { router, teamProcedure } from "../trpc";
+import { adminProcedure, router, teamProcedure } from "../trpc";
 
 const emailStatus = z.enum(schema.emailStatusEnum.enumValues);
 
@@ -350,7 +350,8 @@ export const emailsRouter = router({
         return { id: existing.id };
       }),
 
-    remove: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+    // Admin-only: lifting a bounce/complaint block re-exposes sender reputation.
+    remove: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       const t = schema.suppressions;
       const [row] = await ctx.db
         .delete(t)

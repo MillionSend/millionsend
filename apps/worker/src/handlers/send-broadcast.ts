@@ -45,6 +45,11 @@ export type BroadcastOutcome = "sent" | "skipped" | "deferred";
 // builtin (FIRST_NAME/LAST_NAME/EMAIL) or a custom-property key; a name with no
 // matching value falls back (or resolves to "") so no raw token reaches an inbox.
 const MERGE_TOKEN = /\{\{\{([A-Za-z0-9_]+)(?:\|([^{}]*))?\}\}\}/g;
+// A token opening an href/src value: the contact value becomes the link's
+// scheme, so only web/mail URLs may land there (a javascript:/data: link
+// from an imported property is a phishing primitive, not personalization).
+const URL_ATTRIBUTE_OPEN = /(?:href|src)\s*=\s*["']?$/i;
+const LINK_SCHEME = /^(?:https?:\/\/|mailto:)/i;
 
 function escapeHtml(value: string): string {
   return value
@@ -75,18 +80,24 @@ export function applyMergeFields(
   contact: MergeContact,
   opts: { html: boolean },
 ): string {
-  return content.replace(MERGE_TOKEN, (_match, field: string, fallback: string | undefined) => {
-    const value =
-      field === "EMAIL"
-        ? contact.email
-        : field === "FIRST_NAME"
-          ? contact.firstName
-          : field === "LAST_NAME"
-            ? contact.lastName
-            : (contact.properties[field] ?? null);
-    if (!value) return fallback ?? "";
-    return opts.html ? escapeHtml(value) : value;
-  });
+  return content.replace(
+    MERGE_TOKEN,
+    (_match, field: string, fallback: string | undefined, offset: number) => {
+      const value =
+        field === "EMAIL"
+          ? contact.email
+          : field === "FIRST_NAME"
+            ? contact.firstName
+            : field === "LAST_NAME"
+              ? contact.lastName
+              : (contact.properties[field] ?? null);
+      if (!value) return fallback ?? "";
+      if (!opts.html) return value;
+      const opensUrl = URL_ATTRIBUTE_OPEN.test(content.slice(Math.max(0, offset - 12), offset));
+      if (opensUrl && !LINK_SCHEME.test(value)) return fallback ?? "";
+      return escapeHtml(value);
+    },
+  );
 }
 
 /**

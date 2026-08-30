@@ -1,6 +1,8 @@
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   type AcceptEmailPayload,
+  type AcceptEmailResult,
   type ApiKeyAuth,
   acceptEmail,
   authenticateApiKey,
@@ -8,6 +10,7 @@ import {
   type ContactActivityRow,
   canonicalBodyHash,
   completeIdempotent,
+  DAY_MS,
   decryptEmailBody,
   extractTokenPrefix,
   fetchDeliverabilityHealth,
@@ -38,6 +41,7 @@ import {
 } from "@millionsend/ses";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
@@ -75,6 +79,7 @@ import {
   removeBroadcastResponseSchema,
   removeContactResponseSchema,
   removeContactSegmentResponseSchema,
+  removeEmailResponseSchema,
   removeSegmentResponseSchema,
   removeTopicResponseSchema,
   type SendEmailRequest,
@@ -146,6 +151,11 @@ export interface ApiDeps {
   trackingSubdomains?: boolean | undefined;
   /** Per-key fixed-window request cap. Defaults to 600 requests/minute. */
   rateLimitPerMinute?: number | undefined;
+  /**
+   * Per-team fixed-window request cap across all of the team's keys, so
+   * minting keys cannot multiply the per-key cap. Defaults to 3000/minute.
+   */
+  teamRateLimitPerMinute?: number | undefined;
 }
 
 export type Env = { Variables: { auth: ApiKeyAuth; rateLimited: boolean } };
@@ -170,6 +180,89 @@ function keyForbidsSendingDomain(auth: ApiKeyAuth, domainId: string): boolean {
 }
 
 const RESTRICTED_DOMAIN_MESSAGE = "This API key can only send from its assigned domain";
+
+/**
+ * SECURITY: which of the team's emails a key may cancel, reschedule or
+ * delete. A sending_access key is confined to its own sends and a
+ * domain-scoped key to its domain; an unscoped full_access key manages the
+ * whole team's mail. Rows outside the scope read as not found.
+ */
+function emailScopeConditions(auth: ApiKeyAuth): SQL[] {
+  const conditions: SQL[] = [];
+  if (auth.permission === "sending_access") {
+    conditions.push(auth.apiKeyId ? eq(schema.emails.apiKeyId, auth.apiKeyId) : sql`false`);
+  }
+  if (auth.domainId !== null) conditions.push(eq(schema.emails.domainId, auth.domainId));
+  return conditions;
+}
+
+/** Wire status + body for an accept the pipeline refused. */
+function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
+  switch (result.reason) {
+    case "quota_backlog_full":
+      return {
+        status: 429 as const,
+        body: errorBody(
+          429,
+          "daily_quota_exceeded",
+          "Daily sending quota exceeded and the queued backlog is full; retry after the UTC day rolls over",
+        ),
+      };
+    case "attachments_too_large":
+      return {
+        status: 422 as const,
+        body: errorBody(
+          422,
+          "validation_error",
+          `Attachments exceed ${Math.floor(result.maxBytes / (1024 * 1024))} MiB in total`,
+        ),
+      };
+    case "all_suppressed":
+      return {
+        status: 422 as const,
+        body: errorBody(422, "validation_error", "All recipients are suppressed"),
+      };
+  }
+}
+
+/**
+ * Server-authoritative deliverability guardrail on every send surface: a raw
+ * API client must not bypass what the dashboard enforces. If the team's
+ * trailing-window bounce or complaint rate has crossed SES's own pause line,
+ * new sends are refused so we stop before SES pauses the whole account.
+ * `sending_paused` is a MillionSend-specific error outside Resend's SDK
+ * union (see docs/resend-compatibility.md, known deltas). Returns the error
+ * body, or null when sending may proceed.
+ */
+async function sendingPausedError(
+  deps: Pick<ApiDeps, "db" | "isCloud">,
+  auth: ApiKeyAuth,
+): Promise<ReturnType<typeof errorBody> | null> {
+  const health = await fetchDeliverabilityHealth(
+    deps.db,
+    auth.teamId,
+    deps.isCloud ? { plan: auth.plan } : {},
+  );
+  const paused = health.reasons.find((r) => r.tier === "paused");
+  if (!paused) return null;
+  const limit = paused.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
+  const pct = (r: number) => `${(r * 100).toFixed(2)}%`;
+  return errorBody(
+    403,
+    "sending_paused",
+    `Sending is paused: your ${paused.metric} rate of ${pct(paused.rate)} over the last ${health.windowDays} days is at or above the ${pct(limit)} limit. Lower it before sending again.`,
+  );
+}
+
+/** Refusal from acceptEmail inside a caller-owned batch transaction. */
+class AcceptRejectedError extends Error {
+  constructor(
+    readonly result: Exclude<AcceptEmailResult, { ok: true }>,
+    readonly index: number,
+  ) {
+    super(`batch item ${index} refused: ${result.reason}`);
+  }
+}
 
 /** Topic lookup scoped to the caller's team — a foreign topic id is a 404. */
 async function findTeamTopic(
@@ -287,27 +380,67 @@ async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
 }
 
 /**
- * The emails table encrypts content at rest; request logs must not become a
- * plaintext copy. Content-bearing fields lose their value before storage.
- * `token` is the one-time API-key secret (POST /api-keys) — logging it would
- * persist a credential that is deliberately never stored. `signing_secret`
- * (POST/GET /webhooks) is envelope-encrypted at rest; the log must not become
- * a plaintext copy of it.
+ * Request logs store metadata only: the emails table encrypts content at
+ * rest and contacts carry PII, so neither request nor success-response bodies
+ * are kept. Error responses are the one body stored — they are the API's own
+ * messages, never a copy of the payload — and email path segments
+ * (/contacts/{email}) are masked.
  */
-const REDACTED_REQUEST_FIELDS = ["html", "text", "attachments", "token", "signing_secret"] as const;
+function maskEmailPathSegments(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => {
+      let decoded = segment;
+      try {
+        decoded = decodeURIComponent(segment);
+      } catch {
+        // Not percent-encoded; the raw segment is what gets inspected.
+      }
+      return decoded.includes("@") ? "[email]" : segment;
+    })
+    .join("/");
+}
 
-function redactRequestBody(body: unknown): unknown {
-  if (Array.isArray(body)) return body.map(redactRequestBody);
-  if (body === null || typeof body !== "object") return body;
-  const copy: Record<string, unknown> = {};
-  for (const [field, value] of Object.entries(body as Record<string, unknown>)) {
-    copy[field] = REDACTED_REQUEST_FIELDS.includes(
-      field as (typeof REDACTED_REQUEST_FIELDS)[number],
-    )
-      ? "[redacted]"
-      : redactRequestBody(value);
+const RATE_WINDOW_MS = 60_000;
+const RATE_COUNTER_SWEEP_SIZE = 10_000;
+const AUTH_FAILURES_PER_MINUTE = 20;
+
+/**
+ * Fixed-window hit counter. Returns the count for `key` in the current
+ * window after this hit, plus the seconds until the window rolls over.
+ * ponytail: per-process; the DB bucket table is keyed by api_key uuid, so
+ * move these there (text key) if the API ever runs more than one replica.
+ */
+function fixedWindowCounter() {
+  const hits = new Map<string, { windowStart: number; count: number }>();
+  return (key: string, now = Date.now()): { count: number; retryAfterSec: number } => {
+    const windowStart = now - (now % RATE_WINDOW_MS);
+    if (hits.size > RATE_COUNTER_SWEEP_SIZE) {
+      for (const [k, v] of hits) if (v.windowStart !== windowStart) hits.delete(k);
+    }
+    const current = hits.get(key);
+    const count = current?.windowStart === windowStart ? current.count + 1 : 1;
+    hits.set(key, { windowStart, count });
+    return {
+      count,
+      retryAfterSec: Math.max(1, Math.ceil((windowStart + RATE_WINDOW_MS - now) / 1000)),
+    };
+  };
+}
+
+/**
+ * Cloud sits behind Cloudflare only (the origin firewall admits nothing
+ * else), so cf-connecting-ip is authoritative there; self-host reads the
+ * socket. Null when unknowable (in-process requests) — never bucket those
+ * together, or one shared bucket would throttle everyone.
+ */
+function clientIp(c: Context, isCloud: boolean): string | null {
+  if (isCloud) return c.req.header("cf-connecting-ip") ?? null;
+  try {
+    return getConnInfo(c).remote.address ?? null;
+  } catch {
+    return null;
   }
-  return copy;
 }
 
 const LOGGED_JSON_MAX_BYTES = 16 * 1024;
@@ -1605,23 +1738,8 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         "APP_BASE_URL is not set. Unsubscribe links are built from it. Set it, restart, send again.",
       );
     }
-    // Server-authoritative deliverability guardrail: a raw API client must not
-    // bypass what the dashboard enforces. If the team's trailing-window bounce
-    // or complaint rate has crossed SES's own pause line, block new broadcast
-    // sends here — before scheduling — so we stop sending before SES pauses the
-    // whole account. `sending_paused` is a MillionSend-specific error outside
-    // Resend's SDK union (see docs/resend-compatibility.md, known deltas).
-    const health = await fetchDeliverabilityHealth(db, auth.teamId);
-    const paused = health.reasons.find((r) => r.tier === "paused");
-    if (paused) {
-      const limit = paused.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
-      const pct = (r: number) => `${(r * 100).toFixed(2)}%`;
-      return fail(
-        403,
-        "sending_paused",
-        `Sending is paused: your ${paused.metric} rate of ${pct(paused.rate)} over the last ${health.windowDays} days is at or above the ${pct(limit)} limit. Lower it before sending new broadcasts.`,
-      );
-    }
+    const paused = await sendingPausedError(deps, auth);
+    if (paused) return { ok: false as const, status: 403 as const, body: paused };
     // Same boundary as /emails: only a verified team domain may appear as
     // the sender.
     const domain = await verifySenderDomain(db, auth.teamId, broadcast.from);
@@ -2079,35 +2197,48 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   // unauthenticated 401 has no team to attribute the row to. /ses/events is
   // excluded entirely (SNS traffic, not a customer API call). Fire-and-forget:
   // a logging failure must never fail or slow the response. Headers are never
-  // stored (Authorization included); request bodies are redacted and capped.
+  // stored (Authorization included); see maskEmailPathSegments for what is.
   app.use("*", async (c, next) => {
     await next();
     const auth = c.get("auth");
     if (!auth || c.req.path.startsWith("/ses/")) return;
-    const { method, path } = c.req;
+    const { method } = c.req;
+    const path = maskEmailPathSegments(c.req.path);
     const statusCode = c.res.status;
-    // Cloned before the response is returned; both body reads happen off the
+    // Cloned before the response is returned; the body read happens off the
     // request's critical path.
-    const resClone = c.res.clone();
+    const resClone = statusCode >= 400 ? c.res.clone() : null;
     void (async () => {
-      const requestBody =
-        method === "GET" || method === "HEAD"
-          ? null
-          : redactRequestBody(await c.req.json().catch(() => null));
-      // Responses carry decrypted content too (GET /emails/{id} returns
-      // html/text) — redacted the same way, or the log becomes a plaintext
-      // copy of the encrypted body.
-      const responseBody = redactRequestBody(await resClone.json().catch(() => null));
+      const errorResponse = resClone ? await resClone.json().catch(() => null) : null;
       await deps.db.insert(schema.apiRequests).values({
         teamId: auth.teamId,
         method,
         path,
         statusCode,
-        requestBody: capLoggedJson(requestBody),
-        responseBody: capLoggedJson(responseBody),
+        requestBody: null,
+        responseBody: capLoggedJson(errorResponse),
       });
     })().catch((err) => console.error("api request log failed", err));
   });
+
+  // Failed authentications are counted per client IP: every attempt costs a
+  // prefix-indexed key lookup, and nothing else throttles a caller that has
+  // no key to bucket on.
+  const countAuthFailure = fixedWindowCounter();
+  const authFailure = (c: Context, name: string, message: string) => {
+    const ip = clientIp(c, deps.isCloud);
+    if (ip) {
+      const failures = countAuthFailure(`ip:${ip}`);
+      if (failures.count > AUTH_FAILURES_PER_MINUTE) {
+        c.header("retry-after", String(failures.retryAfterSec));
+        return c.json(
+          errorBody(429, "rate_limit_exceeded", "Too many failed authentication attempts"),
+          429,
+        );
+      }
+    }
+    return c.json(errorBody(401, name, message), 401);
+  };
 
   const requireApiKey = createMiddleware<Env>(async (c, next) => {
     // Both /emails and /emails/* register this; skip the second pass.
@@ -2116,11 +2247,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const token = header.startsWith("Bearer ") ? header.slice(7) : null;
     const prefix = token ? extractTokenPrefix(token) : null;
     if (!token || !prefix) {
-      return c.json(errorBody(401, "missing_api_key", "Missing or malformed API key"), 401);
+      return authFailure(c, "missing_api_key", "Missing or malformed API key");
     }
     const auth = await authenticateApiKey(deps.db, token);
     if (!auth) {
-      return c.json(errorBody(401, "invalid_api_key", "API key is invalid"), 401);
+      return authFailure(c, "invalid_api_key", "API key is invalid");
     }
     c.set("auth", auth);
     await next();
@@ -2137,6 +2268,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     return next();
   });
 
+  const countTeamRequest = fixedWindowCounter();
   const enforceRateLimit = createMiddleware<Env>(async (c, next) => {
     // Exact + wildcard middleware registrations can both match one request.
     if (c.get("rateLimited")) return next();
@@ -2164,6 +2296,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const limit = deps.rateLimitPerMinute ?? 600;
     if ((row?.count ?? 0) > limit) {
       c.header("retry-after", String(row?.retryAfter ?? 60));
+      return c.json(errorBody(429, "rate_limit_exceeded", "Too many requests"), 429);
+    }
+    // The team bucket spans every key, so minting keys cannot multiply the cap.
+    const team = countTeamRequest(`team:${auth.teamId}`);
+    if (team.count > (deps.teamRateLimitPerMinute ?? 3000)) {
+      c.header("retry-after", String(team.retryAfterSec));
       return c.json(errorBody(429, "rate_limit_exceeded", "Too many requests"), 429);
     }
     return next();
@@ -2233,6 +2371,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       422: {
         content: { "application/json": { schema: errorSchema } },
         description: "Validation error",
+      },
+      429: {
+        content: { "application/json": { schema: errorSchema } },
+        description: "Daily quota exceeded",
       },
     },
   });
@@ -2304,6 +2446,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
 
     try {
+      const paused = await sendingPausedError(deps, auth);
+      if (paused) {
+        if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
+        return c.json(paused, 403);
+      }
       const result = await acceptEmail(deps, auth, toAcceptPayload(body, domain.domainId), {
         completeInTx: idemKey
           ? async (tx, emailId) => {
@@ -2320,7 +2467,8 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       });
       if (!result.ok) {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
-        return c.json(errorBody(422, "validation_error", "All recipients are suppressed"), 422);
+        const rejection = acceptRejection(result);
+        return c.json(rejection.body, rejection.status);
       }
       return c.json({ id: result.id }, 200);
     } catch (err) {
@@ -2366,6 +2514,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       404: jsonErr("Not found"),
       409: jsonErr("Idempotency conflict"),
       422: jsonErr("Validation error"),
+      429: jsonErr("Daily quota exceeded"),
     },
   });
 
@@ -2427,12 +2576,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const permissive = c.req.header("x-batch-validation")?.toLowerCase() === "permissive";
 
     // Pass 1 — validate every item with no writes.
-    const payloads: AcceptEmailPayload[] = [];
+    const payloads: { payload: AcceptEmailPayload; index: number }[] = [];
     const itemErrors: { index: number; message: string }[] = [];
     for (const [i, raw] of items.entries()) {
       const verdict = await validateBatchItem(auth, raw);
       if ("payload" in verdict) {
-        payloads.push(verdict.payload);
+        payloads.push({ payload: verdict.payload, index: i });
       } else if (permissive) {
         itemErrors.push({ index: i, message: verdict.message });
       } else {
@@ -2481,12 +2630,17 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // committed. Idempotency completion is recorded in the same transaction;
     // enqueue happens only after commit (reconcile re-enqueues any lost job).
     try {
+      const paused = await sendingPausedError(deps, auth);
+      if (paused) {
+        if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
+        return c.json(paused, 403);
+      }
       const accepted = await deps.db.transaction(async (dbTx) => {
         const txDb = dbTx as unknown as Db;
         const out: { id: string; parked: boolean; startAfter?: Date }[] = [];
-        for (const payload of payloads) {
+        for (const { payload, index } of payloads) {
           const result = await acceptEmail(deps, auth, payload, { tx: txDb });
-          if (!result.ok) throw new Error("batch item all-suppressed after pre-check");
+          if (!result.ok) throw new AcceptRejectedError(result, index);
           out.push({
             id: result.id,
             parked: result.parked,
@@ -2543,6 +2697,13 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       if (idemKey) {
         await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey }).catch(() => {});
       }
+      if (err instanceof AcceptRejectedError) {
+        const rejection = acceptRejection(err.result);
+        return c.json(
+          { ...rejection.body, message: `emails.${err.index}: ${rejection.body.message}` },
+          rejection.status,
+        );
+      }
       throw err;
     }
   });
@@ -2567,8 +2728,15 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const [email] = await deps.db
       .select({ id: schema.emails.id })
       .from(schema.emails)
-      .where(and(eq(schema.emails.id, id), eq(schema.emails.teamId, auth.teamId)));
-    // Cross-team / unknown id is a 404 (never reveals another team's email).
+      .where(
+        and(
+          eq(schema.emails.id, id),
+          eq(schema.emails.teamId, auth.teamId),
+          ...emailScopeConditions(auth),
+        ),
+      );
+    // Cross-team / out-of-scope / unknown id is a 404 (never reveals another
+    // team's email).
     if (!email) return c.json(errorBody(404, "not_found", "Email not found"), 404);
     // Atomic flip guarded like the send handler's claim (not-yet-sendable AND
     // sent_at IS NULL): a cancel racing the send loses cleanly — whichever
@@ -2624,10 +2792,17 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const { id } = c.req.valid("param");
     const body = c.req.valid("json");
     const [email] = await deps.db
-      .select({ id: schema.emails.id })
+      .select({ id: schema.emails.id, createdAt: schema.emails.createdAt })
       .from(schema.emails)
-      .where(and(eq(schema.emails.id, id), eq(schema.emails.teamId, auth.teamId)));
-    // Cross-team / unknown id is a 404 (never reveals another team's email).
+      .where(
+        and(
+          eq(schema.emails.id, id),
+          eq(schema.emails.teamId, auth.teamId),
+          ...emailScopeConditions(auth),
+        ),
+      );
+    // Cross-team / out-of-scope / unknown id is a 404 (never reveals another
+    // team's email).
     if (!email) return c.json(errorBody(404, "not_found", "Email not found"), 404);
     // Schema-validated, so this always resolves (the guard only satisfies the
     // type); re-resolved here because the wire value may be relative.
@@ -2635,6 +2810,18 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     if (!scheduledAt) {
       return c.json(
         errorBody(422, "validation_error", `scheduled_at must be ${SCHEDULED_AT_FORMS}`),
+        422,
+      );
+    }
+    // The 30-day cap is anchored at creation, not at each reschedule: chained
+    // reschedules must not keep a body out of the retention purge forever.
+    if (scheduledAt.getTime() > email.createdAt.getTime() + 30 * DAY_MS) {
+      return c.json(
+        errorBody(
+          422,
+          "validation_error",
+          "scheduled_at cannot be more than 30 days after the email was created",
+        ),
         422,
       );
     }
@@ -2679,15 +2866,20 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     return c.json({ object: "email" as const, id: row.id }, 200);
   });
 
+  // SECURITY: reads return decrypted bodies and the whole team archive, so
+  // they are management surface — a sending_access key gets a 403 here even
+  // though the rest of /emails is open to it.
   const getRoute = createRoute({
     method: "get",
     path: "/emails/{id}",
+    middleware: [requireFullAccess],
     request: { params: z.object({ id: z.uuid() }) },
     responses: {
       200: {
         content: { "application/json": { schema: getEmailResponseSchema } },
         description: "Email",
       },
+      403: jsonErr("Restricted API key"),
       404: {
         content: { "application/json": { schema: errorSchema } },
         description: "Not found",
@@ -2758,12 +2950,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   const listEmailsRoute = createRoute({
     method: "get",
     path: "/emails",
+    middleware: [requireFullAccess],
     request: { query: listQuerySchema },
     responses: {
       200: {
         content: { "application/json": { schema: listEmailsResponseSchema } },
         description: "Emails",
       },
+      403: jsonErr("Restricted API key"),
       422: {
         content: { "application/json": { schema: errorSchema } },
         description: "Validation error",
@@ -2818,6 +3012,41 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       },
       200,
     );
+  });
+
+  const deleteEmailRoute = createRoute({
+    method: "delete",
+    path: "/emails/{id}",
+    middleware: [requireFullAccess],
+    request: { params: z.object({ id: z.uuid() }) },
+    responses: {
+      200: {
+        content: { "application/json": { schema: removeEmailResponseSchema } },
+        description: "Email deleted, including its events",
+      },
+      403: jsonErr("Restricted API key"),
+      404: jsonErr("Not found"),
+    },
+  });
+
+  app.openapi(deleteEmailRoute, async (c) => {
+    const auth = c.get("auth");
+    const { id } = c.req.valid("param");
+    // Hard delete: events cascade with the row. A queued email whose row
+    // vanishes is skipped by the send handler, so deletion is safe in any
+    // state. Not part of Resend's surface.
+    const [row] = await deps.db
+      .delete(schema.emails)
+      .where(
+        and(
+          eq(schema.emails.id, id),
+          eq(schema.emails.teamId, auth.teamId),
+          ...emailScopeConditions(auth),
+        ),
+      )
+      .returning({ id: schema.emails.id });
+    if (!row) return c.json(errorBody(404, "not_found", "Email not found"), 404);
+    return c.json({ object: "email" as const, id: row.id, deleted: true as const }, 200);
   });
 
   // MCP needs APP_BASE_URL twice over: it is the OAuth issuer and the base

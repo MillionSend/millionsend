@@ -132,7 +132,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     );
   }
 
-  const { plan, planStatus, currentPeriodEnd, dailyLimit, hasCustomer } = status.data;
+  const { plan, planStatus, currentPeriodEnd, dailyLimit, hasCustomer, canCheckout } = status.data;
   const portalButton = (label: string, className: string) => (
     <button
       type="button"
@@ -164,7 +164,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
           </div>
           {canManage ? (
             <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {plan === "free" ? (
+              {canCheckout ? (
                 <>
                   <button
                     type="button"

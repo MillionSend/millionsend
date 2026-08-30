@@ -852,3 +852,80 @@ it("requireBrandedHost still tracks through the domain's own subdomain", async (
   expect(mime).toContain("https://track.ownhost.dev/t/c/");
   expect(mime).not.toContain("fallback.test");
 });
+
+it("a permanent SES refusal fails the email with an event instead of retrying", async () => {
+  const ses: SesSender = {
+    async sendRaw() {
+      throw Object.assign(new Error("Email address is not verified"), { name: "MessageRejected" });
+    },
+  };
+  const emailId = await insertEmail();
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("failed");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("failed");
+  expect(row?.sentAt).toBeNull();
+  const events = await db
+    .select()
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, emailId));
+  expect(events.map((e) => [e.type, e.data?.reason])).toEqual([["failed", "ses_MessageRejected"]]);
+});
+
+it("an unverified sending domain fails the email terminally, before any decrypt or SES call", async () => {
+  const { ses, sends } = fakeSes();
+  const [pending] = await db
+    .insert(schema.domains)
+    .values({ teamId, name: "pending.dev", region: "us-east-1", status: "pending" })
+    .returning({ id: schema.domains.id });
+  const emailId = await insertEmail({
+    domainId: pending?.id,
+    // Undecryptable body: a decrypt before the domain gate would throw here.
+    bodyCiphertext: Buffer.from("garbage"),
+  });
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("failed");
+  expect(sends).toHaveLength(0);
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("failed");
+});
+
+it("a transactional row re-checks suppression at send time: hits are stripped, an empty to refuses", async () => {
+  const { ses, sends } = fakeSes("mid-strip");
+  await db
+    .insert(schema.suppressions)
+    .values({
+      teamId,
+      email: "gone@example.com",
+      emailHash: hashRecipient("gone@example.com"),
+      reason: "hard_bounce",
+    })
+    .onConflictDoNothing();
+
+  const stripped = await insertEmail({
+    to: ["ok@example.com", "gone@example.com"],
+    cc: ["gone@example.com"],
+  });
+  expect(await sendEmail(db, { keyring, ses }, { emailId: stripped })).toBe("sent");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, stripped));
+  expect(row?.to).toEqual(["ok@example.com"]);
+  expect(row?.cc).toEqual([]);
+  expect(sends[0]?.raw.toString()).not.toContain("gone@example.com");
+
+  const refused = await insertEmail({ to: ["gone@example.com"] });
+  expect(await sendEmail(db, { keyring, ses }, { emailId: refused })).toBe("suppressed");
+  expect(sends).toHaveLength(1);
+});
+
+it("the send-rate token is taken only after every check that can still skip the row", async () => {
+  const { ses } = fakeSes();
+  let throttled = 0;
+  const throttle = async () => {
+    throttled += 1;
+  };
+  // Not in queued state: never reaches the bucket.
+  const parked = await insertEmail({ latestStatus: "queued_quota" });
+  expect(await sendEmail(db, { keyring, ses, throttle }, { emailId: parked })).toBe("skipped");
+  expect(throttled).toBe(0);
+  const emailId = await insertEmail();
+  expect(await sendEmail(db, { keyring, ses, throttle }, { emailId })).toBe("sent");
+  expect(throttled).toBe(1);
+});

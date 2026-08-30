@@ -13,12 +13,17 @@ const boolFromString = z
  * SubscriptionConfirmation needed to ever receive events.
  */
 export function parseSnsTopicArns(value: string | undefined): string[] | undefined {
+  return parseCommaList(value);
+}
+
+/** Comma-separated list → trimmed non-empty entries, or undefined when none. */
+export function parseCommaList(value: string | undefined): string[] | undefined {
   if (!value) return undefined;
-  const arns = value
+  const items = value
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  return arns.length > 0 ? arns : undefined;
+  return items.length > 0 ? items : undefined;
 }
 
 // Built-in defaults, exported for the settings screen's "effective value"
@@ -72,6 +77,18 @@ export const env = createEnv({
 
     IS_CLOUD: boolFromString,
 
+    // Reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are
+    // trusted for the client IP (comma-separated IPs). Anything else is a
+    // spoofable header, so the socket address wins.
+    TRUSTED_PROXIES: z
+      .string()
+      .default("127.0.0.1,::1")
+      .transform((v) => parseCommaList(v) ?? []),
+
+    // Webhook SSRF escape hatch: allow http:// and private/loopback targets
+    // for local development. Never enable on an internet-reachable instance.
+    WEBHOOK_ALLOW_LOCALHOST: boolFromString,
+
     // SMTP relay (PROCESS=smtp) listen port.
     SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(2587),
     // Public hostname self-hosters point their app's SMTP client at. Defaults
@@ -86,12 +103,13 @@ export const env = createEnv({
     // because AUTH PLAIN/LOGIN exposes the API key without TLS.
     SMTP_ALLOW_INSECURE_AUTH: boolFromString,
 
-    // Envelope-encryption KEK for email bodies at rest.
-    // Self-host: required. Cloud: omitted in favor of KMS_KEY_ID.
-    MASTER_ENCRYPTION_KEY: canonicalBase64Key.optional(),
-    // Cloud: KMS key (ARN or key id) that wraps per-email DEKs instead of
-    // the env KEK. Set alongside MASTER_ENCRYPTION_KEY, old env-sealed
-    // ciphertexts stay readable (self-host → cloud migration).
+    // Envelope-encryption KEK for email bodies at rest, and the HKDF root of
+    // the tracking/unsubscribe token keys. Always required: cloud wraps new
+    // DEKs with KMS but still derives tokens (and reads pre-KMS rows) from it.
+    MASTER_ENCRYPTION_KEY: canonicalBase64Key,
+    // Cloud only: KMS key (ARN or key id) that wraps per-email DEKs instead
+    // of the env KEK. Rows sealed under the env KEK stay readable through
+    // the composite keyring.
     KMS_KEY_ID: z.string().optional(),
 
     // BYO-SES for self-host; cloud uses the platform account.
@@ -204,6 +222,18 @@ export const env = createEnv({
 
 export type Env = typeof env;
 
+// Under SKIP_ENV_VALIDATION the env proxy carries raw process.env strings,
+// where the string "false" is truthy — so boolean flags are read through
+// this instead of tested for truthiness.
+function envFlag(value: unknown): boolean {
+  return value === true || value === "true" || value === "1";
+}
+
+/** The single seam between the hosted SaaS and self-host. */
+export function isCloudDeployment(e: Env = env): boolean {
+  return envFlag(e.IS_CLOUD);
+}
+
 /**
  * Whether a domain's branded tracking subdomain — a customer CNAME pointing
  * at this app — can actually be served here.
@@ -219,12 +249,8 @@ export type Env = typeof env;
  * that already shipped points somewhere recipients cannot reach.
  */
 export function trackingSubdomainsSupported(e: Env = env): boolean {
-  if (!e.IS_CLOUD) return true;
-  // Compared against the parsed forms rather than tested for truthiness:
-  // under SKIP_ENV_VALIDATION the env proxy carries raw strings, where the
-  // string "false" would enable the feature.
-  const flag: unknown = e.ALLOW_TRACKING_SUBDOMAINS;
-  return flag === true || flag === "true" || flag === "1";
+  if (!isCloudDeployment(e)) return true;
+  return envFlag(e.ALLOW_TRACKING_SUBDOMAINS);
 }
 
 const S3_CREDENTIAL_KEYS = ["S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const;
@@ -277,10 +303,10 @@ export function assertEnvConsistency(e: Env): void {
     ] as const) {
       if (!e[key]) throw new Error(`IS_CLOUD=true requires ${key}`);
     }
-  } else if (!e.MASTER_ENCRYPTION_KEY) {
-    throw new Error(
-      "Self-host requires MASTER_ENCRYPTION_KEY (32 bytes base64; generate with `openssl rand -base64 32`)",
-    );
+  } else if (e.KMS_KEY_ID) {
+    // A self-host boot would silently ignore the KMS key and seal everything
+    // under the env KEK — almost certainly an IS_CLOUD line lost in env drift.
+    throw new Error("KMS_KEY_ID is set but IS_CLOUD is false");
   }
 }
 

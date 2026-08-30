@@ -108,6 +108,36 @@ describe("settings.invitations.accept", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
+  it("on cloud, only the invited address can accept; self-host keeps the link as the credential", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "owner1", "owner");
+    await createUser("stranger");
+    await createUser("invited");
+    const { acceptUrl } = await callerFor("owner1", teamId, "owner").settings.invitations.create({
+      email: "Invited@example.com",
+    });
+    const token = tokenFromUrl(acceptUrl);
+
+    vi.stubEnv("IS_CLOUD", "true");
+    await expect(
+      callerFor("stranger", null, null).settings.invitations.accept({ token }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // The refused attempt must not have consumed the invite.
+    await expect(
+      callerFor("invited", null, null).settings.invitations.accept({ token }),
+    ).resolves.toEqual({ teamId });
+
+    vi.stubEnv("IS_CLOUD", "");
+    const second = await callerFor("owner1", teamId, "owner").settings.invitations.create({
+      email: "someone-else@example.com",
+    });
+    await expect(
+      callerFor("stranger", null, null).settings.invitations.accept({
+        token: tokenFromUrl(second.acceptUrl),
+      }),
+    ).resolves.toEqual({ teamId });
+  });
+
   it("rejects an invalid token", async () => {
     await createUser("someone");
     await expect(
@@ -143,9 +173,10 @@ describe("settings.invitations list/revoke isolation", () => {
     const caller = callerFor("owner1", teamId, "owner");
 
     const { id } = await caller.settings.invitations.create({ email: "p@example.com" });
-    expect((await caller.settings.invitations.list()).map((i) => i.email)).toEqual([
-      "p@example.com",
-    ]);
+    const listed = await caller.settings.invitations.list();
+    expect(listed.map((i) => i.email)).toEqual(["p@example.com"]);
+    // The bearer link is returned once, at create; a listing never rebuilds it.
+    expect(JSON.stringify(listed)).not.toContain("/invite/");
 
     await caller.settings.invitations.revoke({ id });
     expect(await caller.settings.invitations.list()).toEqual([]);

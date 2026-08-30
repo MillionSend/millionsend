@@ -34,18 +34,22 @@ Resources:
     Properties:
       ManagedPolicyName: millionsend-ses
       # Every SES action the instance issues — mirrors SES_IAM_POLICY in
-      # packages/ses/src/setup.ts.
+      # packages/ses/src/setup-constants.ts (a test pins the two equal).
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Action:
-              - ses:SendEmail
-              - ses:SendRawEmail
               - ses:CreateEmailIdentity
               - ses:GetEmailIdentity
               - ses:DeleteEmailIdentity
               - ses:PutEmailIdentityMailFromAttributes
+              - ses:PutEmailIdentityDkimSigningAttributes
+            Resource: "arn:aws:ses:*:*:identity/*"
+          - Effect: Allow
+            Action:
+              - ses:SendEmail
+              - ses:SendRawEmail
               - ses:GetAccount
             Resource: "*"
 
@@ -108,14 +112,15 @@ Resources:
       EventDestination:
         Name: millionsend-events
         Enabled: true
+        # Mirrors SES_EVENT_TYPES in packages/ses/src/setup-constants.ts: no
+        # open/click (subscribing them makes SES rewrite links and inject its
+        # pixel; engagement is tracked app-layer) and no send (the worker
+        # records "sent" itself).
         MatchingEventTypes:
-          - send
           - delivery
           - deliveryDelay
           - bounce
           - complaint
-          - open
-          - click
           - reject
           - renderingFailure
         SnsDestination:

@@ -25,12 +25,12 @@ afterEach(async () => {
   await close();
 });
 
-function caller(teamId: string) {
+function caller(teamId: string, role: Context["role"] = "owner") {
   const ctx: Context = {
     db,
     session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
     teamId,
-    role: "owner",
+    role,
   };
   return createCaller(ctx);
 }
@@ -334,6 +334,12 @@ describe("emails.suppressions", () => {
     await expect(caller(teamB).emails.suppressions.remove({ id: added.id })).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
+
+    // Lifting a block is admin-only; members still read the list.
+    await expect(
+      caller(teamA, "member").emails.suppressions.remove({ id: added.id }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect((await caller(teamA, "member").emails.suppressions.list({})).items).toHaveLength(1);
 
     await caller(teamA).emails.suppressions.remove({ id: added.id });
     const afterRemove = await caller(teamA).emails.suppressions.list({});

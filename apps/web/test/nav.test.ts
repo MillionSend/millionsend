@@ -17,6 +17,11 @@ describe("safeNextPath (open-redirect guard)", () => {
       "http://x",
       "\\\\host",
       "javascript:alert(1)",
+      // The URL parser strips ASCII tab/newline, so these resolve off-site.
+      "/\t//evil.com",
+      "/\n//evil.com",
+      "/\r\n\\evil.com",
+      "/emails\u0000",
       "",
       null,
       undefined,

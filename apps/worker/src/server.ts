@@ -24,10 +24,10 @@ import {
   reconcileWebhookDeliveries,
   reverifyDomains,
 } from "./handlers/cron.js";
-import { deliverWebhook } from "./handlers/deliver-webhook.js";
+import { abandonWebhookDelivery, deliverWebhook } from "./handlers/deliver-webhook.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
 import { sendBroadcast } from "./handlers/send-broadcast.js";
-import { createTokenBucket, sendEmail } from "./handlers/send-email.js";
+import { createTokenBucket, failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
 
@@ -109,13 +109,13 @@ const enqueueWebhook = async (deliveryId: string, startAfter?: Date): Promise<vo
 };
 
 await queue.work("email.send", async (payload) => {
-  await bucket.take();
   await sendEmail(
     db,
     {
       keyring,
       ses,
       defaultConfigurationSet: env.SES_CONFIGURATION_SET,
+      throttle: () => bucket.take(),
       reschedule: (emailId, at) => enqueueSend(emailId, at),
       enqueueWebhookDelivery: enqueueWebhook,
       tracking,
@@ -123,6 +123,13 @@ await queue.work("email.send", async (payload) => {
     },
     payload,
   );
+});
+
+// Retries exhausted: the row must not stay "queued" for the reconcile sweep
+// to resurrect forever.
+await queue.workDeadLetter("email.send", async ({ emailId }) => {
+  const failed = await failQueuedEmail(db, emailId, "retries_exhausted");
+  console.error(`email.send: dead-lettered ${emailId} (marked failed=${failed})`);
 });
 
 const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise<void> => {
@@ -186,17 +193,28 @@ if (env.SQS_QUEUE_URL) {
   }
 }
 
-await queue.work("webhook.deliver", async (payload) => {
-  await deliverWebhook(
-    db,
-    {
-      keyring,
-      post: (url, body, headers) =>
-        postJson(url, { body, headers, allowLocalhost: env.NODE_ENV === "development" }),
-      reenqueue: enqueueWebhook,
-    },
-    payload,
-  );
+await queue.work(
+  "webhook.deliver",
+  async (payload) => {
+    await deliverWebhook(
+      db,
+      {
+        keyring,
+        post: (url, body, headers) =>
+          postJson(url, { body, headers, allowLocalhost: env.WEBHOOK_ALLOW_LOCALHOST }),
+        reenqueue: enqueueWebhook,
+      },
+      payload,
+    );
+  },
+  // Receivers are tenant-controlled and can stall for the full timeout;
+  // several workers keep one slow endpoint from serializing every tenant.
+  { concurrency: 8 },
+);
+
+await queue.workDeadLetter("webhook.deliver", async ({ deliveryId }) => {
+  const abandoned = await abandonWebhookDelivery(db, deliveryId);
+  console.error(`webhook.deliver: dead-lettered ${deliveryId} (marked exhausted=${abandoned})`);
 });
 
 await queue.scheduleCrons({

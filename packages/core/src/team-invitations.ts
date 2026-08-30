@@ -1,17 +1,28 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, hkdfSync, timingSafeEqual } from "node:crypto";
 
 /** Pending invites expire after this window; accept must happen before it. */
-export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const INVITE_TTL_MS = 72 * 60 * 60 * 1000;
+
+const HKDF_INFO = "team-invitation";
+
+/**
+ * Signing key derived from the auth secret so invite MACs never share a key
+ * with anything else that secret protects (domain separation, like the
+ * tracking and unsubscribe keys).
+ */
+function deriveInviteKey(secret: string): Buffer {
+  return Buffer.from(hkdfSync("sha256", secret, Buffer.alloc(0), HKDF_INFO, 32));
+}
 
 /**
  * Invitation accept links carry an HMAC-signed, opaque token derived from the
- * invite's row id — nothing secret is stored at rest, so a pending-invites
- * list can reproduce the link, while forgery needs the server's auth secret.
+ * invite's row id — nothing secret is stored at rest, so the server can
+ * reproduce the link, while forgery needs the server's auth secret.
  * Single-use and expiry are enforced by the row (acceptedAt / expiresAt), not
  * the token, which is stateless.
  */
 export function signInviteToken(inviteId: string, secret: string): string {
-  const mac = createHmac("sha256", secret).update(inviteId).digest("base64url");
+  const mac = createHmac("sha256", deriveInviteKey(secret)).update(inviteId).digest("base64url");
   return `${Buffer.from(inviteId, "utf8").toString("base64url")}.${mac}`;
 }
 

@@ -1,12 +1,12 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
 import { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 import { reserveDailyQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
-import { findSuppressed } from "./suppressions.js";
+import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppressions.js";
 import { findTopicOptOuts } from "./topics.js";
 
 /**
@@ -85,9 +85,21 @@ export interface AcceptEmailPayload {
   topicId?: string | undefined;
 }
 
+/** Decoded attachment bytes allowed per email, summed across attachments. */
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Over-quota mail parks as queued_quota until the nightly drain; the backlog
+ * is bounded to this many days' worth of the plan's limit so a key past its
+ * cap cannot grow the table without bound.
+ */
+export const QUOTA_BACKLOG_DAYS = 3;
+
 export type AcceptEmailResult =
   | { ok: true; id: string; parked: boolean }
-  | { ok: false; reason: "all_suppressed" };
+  | { ok: false; reason: "all_suppressed" }
+  | { ok: false; reason: "attachments_too_large"; maxBytes: number }
+  | { ok: false; reason: "quota_backlog_full" };
 
 /**
  * The single accept pipeline behind every send surface: suppression strip,
@@ -114,6 +126,15 @@ export async function acceptEmail(
     tx?: Db | undefined;
   } = {},
 ): Promise<AcceptEmailResult> {
+  // Base64 decodes to 3 bytes per 4 chars; padding makes this a ≤2-byte overestimate.
+  const attachmentBytes = (payload.attachments ?? []).reduce(
+    (sum, a) => sum + Math.floor((a.content.length * 3) / 4),
+    0,
+  );
+  if (attachmentBytes > MAX_ATTACHMENT_BYTES) {
+    return { ok: false, reason: "attachments_too_large", maxBytes: MAX_ATTACHMENT_BYTES };
+  }
+
   // Suppression: dedupe, check every recipient field, and strip suppressed
   // addresses; refuse only when no `to` recipient remains.
   const allRecipients = [
@@ -138,6 +159,11 @@ export async function acceptEmail(
   if (to.length === 0) return { ok: false, reason: "all_suppressed" };
   const cc = keep(payload.cc);
   const bcc = keep(payload.bcc);
+  // Quota is charged per distinct mailbox, not per email: every recipient is
+  // one SES message and one unit of shared reputation.
+  const recipientCount = new Set(
+    [...to, ...(cc ?? []), ...(bcc ?? [])].map((r) => normalizeAddress(extractAddrSpec(r))),
+  ).size;
 
   const encrypted = await encryptEmailBody(
     { html: payload.html ?? null, text: payload.text ?? null },
@@ -154,7 +180,23 @@ export async function acceptEmail(
   // commit atomically (the quota contract). Over-quota mail is parked as
   // queued_quota — still accepted, drained after the midnight rollover.
   const runAccept = async (txDb: Db) => {
-    const quota = await reserveDailyQuota(txDb, { teamId: auth.teamId, count: 1, limit });
+    const quota = await reserveDailyQuota(txDb, {
+      teamId: auth.teamId,
+      count: recipientCount,
+      limit,
+    });
+    if (!quota.reserved && limit !== null) {
+      const [parked] = await txDb
+        .select({ n: count() })
+        .from(schema.emails)
+        .where(
+          and(
+            eq(schema.emails.teamId, auth.teamId),
+            eq(schema.emails.latestStatus, "queued_quota"),
+          ),
+        );
+      if ((parked?.n ?? 0) >= limit * QUOTA_BACKLOG_DAYS) return null;
+    }
     const [row] = await txDb
       .insert(schema.emails)
       .values({
@@ -186,6 +228,7 @@ export async function acceptEmail(
   const accepted = opts.tx
     ? await runAccept(opts.tx)
     : await deps.db.transaction((tx) => runAccept(tx as unknown as Db));
+  if (accepted === null) return { ok: false, reason: "quota_backlog_full" };
   // After commit: hand the send to the queue (quota-parked emails wait for
   // the midnight drain instead). An enqueue failure must NOT undo the accept
   // — the email is committed, so rethrowing would let a retry create a

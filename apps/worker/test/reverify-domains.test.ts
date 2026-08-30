@@ -188,3 +188,22 @@ it("caps the batch and defers the freshest-checked domains", async () => {
   expect((await domainRow(mid)).status).toBe("verified");
   expect((await domainRow(newest)).status).toBe("pending");
 });
+
+it("a domain whose SES identity no longer exists is marked failed, not left verified", async () => {
+  const gone = await insertDomain({ name: "gone.dev", status: "verified", lastCheckedAt: stale });
+  const missingIdentity = (): SesIdentityClient => ({
+    async send() {
+      throw Object.assign(new Error("identity not found"), { name: "NotFoundException" });
+    },
+  });
+
+  const result = await reverifyDomains(db, {
+    clientForRegion: missingIdentity,
+    resolver: fakeDns(),
+  });
+
+  expect(result.failed).toBe(0);
+  const row = await domainRow(gone);
+  expect(row.status).toBe("failed");
+  expect(row.lastCheckedAt?.getTime()).toBeGreaterThan(stale.getTime());
+});

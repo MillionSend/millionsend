@@ -231,6 +231,23 @@ describe("system.instanceSettings", () => {
       operator.system.instanceSettings.update({ sesMaxSendRate: 9, emailRetentionDays: 7 }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  it("hides instance-wide facts from cloud tenants who are not the operator", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const tenant = dbCaller("owner", "u2");
+    for (const read of [
+      () => tenant.system.instanceSettings.get(),
+      () => tenant.system.awsReadiness(),
+      () => tenant.system.sesEnv(),
+      () => tenant.system.sesAccount(),
+    ]) {
+      await expect(read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    }
+    // Tenant screens still learn what they need from the ungated facts.
+    expect(await tenant.system.features()).toMatchObject({ trackingRequiresSubdomain: true });
+    // The operator's own account keeps reading them.
+    expect(await dbCaller("owner").system.awsReadiness()).toHaveProperty("credentialsConfigured");
+  });
 });
 
 describe("system.sesEnv", () => {

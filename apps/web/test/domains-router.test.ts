@@ -1,4 +1,5 @@
 import { createPublicKey } from "node:crypto";
+import { PLAN_DOMAIN_LIMIT } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
@@ -211,6 +212,70 @@ describe("domains.create", () => {
       region: "us-east-1",
     });
     expect(other.id).toBeTruthy();
+  });
+
+  it("in cloud, 409s a domain another team holds in the region and never adopts SES identities", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const { deps, calls } = fakeSes();
+    await callerFor(teamA, deps).domains.create({
+      name: "victim.example.com",
+      region: "us-east-1",
+    });
+    await expect(
+      callerFor(teamB, deps).domains.create({ name: "victim.example.com", region: "us-east-1" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(calls.filter((c) => c.name === "CreateEmailIdentityCommand")).toHaveLength(1);
+
+    const existing: SesIdentityClient = {
+      async send(command) {
+        if (command.constructor.name === "CreateEmailIdentityCommand") {
+          throw Object.assign(new Error("identity exists"), { name: "AlreadyExistsException" });
+        }
+        throw new Error(`unexpected ${command.constructor.name}`);
+      },
+    };
+    await expect(
+      callerFor(teamB, {
+        clientForRegion: () => existing,
+        resolveNs: async () => [],
+      }).domains.create({ name: "taken.example.com", region: "us-east-1" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(
+      await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamB)),
+    ).toHaveLength(0);
+  });
+
+  it("refuses public mailbox providers, and in cloud the platform and system-mail domains", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@mail.ms-ops.dev>");
+    await expect(
+      caller.domains.create({ name: "gmail.com", region: "us-east-1" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // Self-host: the operator's auth domain is one of their own team domains.
+    await caller.domains.create({ name: "mail.ms-ops.dev", region: "us-east-1" });
+
+    vi.stubEnv("IS_CLOUD", "true");
+    for (const name of ["millionsend.com", "app.millionsend.com", "mail.ms-ops.dev"]) {
+      await expect(caller.domains.create({ name, region: "eu-west-1" })).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+    }
+  });
+
+  it("in cloud, caps domains per plan", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    const limit = PLAN_DOMAIN_LIMIT.free ?? 0;
+    for (let i = 0; i < limit; i++) {
+      await caller.domains.create({ name: `d${i}.example.com`, region: "us-east-1" });
+    }
+    await expect(
+      caller.domains.create({ name: "over.example.com", region: "us-east-1" }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
   it("adopts an SES identity orphaned by a partial earlier create", async () => {
@@ -549,6 +614,43 @@ describe("domains.delete", () => {
     });
     const rows = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(rows).toHaveLength(0);
+  });
+
+  it("fails the domain's queued emails in the delete and keeps an identity other rows share", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const otherTeam = await createTeam(db, "team-b");
+    const { deps, calls } = fakeSes();
+    const caller = callerFor(teamId, deps);
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+    const [queued] = await db
+      .insert(schema.emails)
+      .values({
+        teamId,
+        domainId: id,
+        from: "a@example.com",
+        to: ["r@x.com"],
+        subject: "s",
+        scheduledAt: new Date(Date.now() + 60_000),
+      })
+      .returning({ id: schema.emails.id });
+    // Self-host: another team registered the same identity in the same region.
+    await db
+      .insert(schema.domains)
+      .values({ teamId: otherTeam, name: "example.com", region: "us-east-1" });
+
+    await caller.domains.delete({ id });
+    expect(calls.some((c) => c.name === "DeleteEmailIdentityCommand")).toBe(false);
+    expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(0);
+    const [email] = await db
+      .select({ status: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, queued?.id ?? ""));
+    expect(email?.status).toBe("failed");
+    const events = await db
+      .select({ type: schema.emailEvents.type })
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.emailId, queued?.id ?? ""));
+    expect(events).toEqual([{ type: "failed" }]);
   });
 
   it("revokes and unscopes domain-scoped keys so the restrict FK cannot block the delete", async () => {

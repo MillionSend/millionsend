@@ -153,7 +153,15 @@
       "owner": "Owner",
       "admin": "Admin",
       "member": "Member"
-    }
+    },
+    "actions": "Actions",
+    "remove": "Remove",
+    "removeTitle": "Remove member",
+    "removeBody": "{email} loses access to this team immediately, including any connected apps authorized for it.",
+    "leave": "Leave team",
+    "leaveTitle": "Leave team",
+    "leaveBody": "You lose access to this team immediately. An owner can invite you back.",
+    "error": "Could not update members: {reason}"
   },
   "invitations": {
     "invite": {
@@ -168,7 +176,8 @@
     "created": {
       "title": "Invitation link",
       "body": "Share this link with {email}. It works once and expires in 7 days.",
-      "done": "Done"
+      "done": "Done",
+      "bodyTtl": "Share this link with {email}. It works once and expires in 3 days."
     },
     "pending": {
       "title": "Pending invitations",
@@ -187,7 +196,8 @@
       "signUp": "Create account",
       "body": "Accept this invitation as {email}?",
       "submit": "Accept invitation",
-      "invalid": "This invitation is no longer valid."
+      "invalid": "This invitation is no longer valid.",
+      "emailMismatch": "This invitation was sent to a different email address. Sign in with the invited account to accept it."
     }
   },
   "instance": {
@@ -283,10 +293,20 @@
     "you": "you",
     "allTeams": "All teams",
     "revoke": "Revoke access",
+    "revokeAllTeamsForbidden": "This grant also covers teams you do not administer. Only its holder can revoke it.",
     "revokeConfirm": {
       "title": "Revoke access",
       "body": "{name} loses access to this team at its next token refresh, within 15 minutes.",
       "confirm": "Revoke access"
     }
+  },
+  "danger": {
+    "title": "Danger zone",
+    "deleteTeam": "Delete team",
+    "deleteTeamBody": "Permanently delete {name} with all its contacts, emails, domains, API keys, templates, broadcasts and members. This cannot be undone.",
+    "deleteAccount": "Delete my account",
+    "deleteAccountBody": "Permanently delete your account and sign you out everywhere. Teams you are the only owner of must be deleted or handed over first. This cannot be undone.",
+    "deleteAccountError": "Could not delete the account. Delete or hand over the teams you own, sign in again, and retry.",
+    "hint": "Deletions are immediate and irreversible."
   }
 }

@@ -4,8 +4,9 @@
 #   (generate the two secrets in .env, then)
 #   docker compose up -d
 # Upgrade: docker compose pull && docker compose up -d — migrations run on boot.
-# The default image follows main; to hold a version, set MILLIONSEND_IMAGE in
-# .env to a version tag or an immutable @sha256 digest.
+# The default image is the latest tagged release (:edge follows main); to hold
+# a version, set MILLIONSEND_IMAGE in .env to a version tag or an immutable
+# @sha256 digest.
 #
 # Optional services sit behind compose profiles — COMPOSE_PROFILES in .env:
 #   docs    the documentation site on DOCS_PORT
@@ -16,7 +17,7 @@ services:
     image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     environment:
       POSTGRES_USER: millionsend
-      POSTGRES_PASSWORD: millionsend
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-millionsend}
       POSTGRES_DB: millionsend
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -38,11 +39,19 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    # Above the supervisor's 35 s child-exit budget (scripts/start.mjs).
+    stop_grace_period: 45s
     init: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/web/.next/cache
+      - /app/apps/docs/.next/cache
+      - /app/apps/docs/.source
 
   docs:
     image: "${MILLIONSEND_IMAGE:-ghcr.io/millionsend/millionsend:latest}"
@@ -59,6 +68,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/web/.next/cache
+      - /app/apps/docs/.next/cache
+      - /app/apps/docs/.source
 
   smtp:
     image: "${MILLIONSEND_IMAGE:-ghcr.io/millionsend/millionsend:latest}"
@@ -79,6 +94,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/web/.next/cache
+      - /app/apps/docs/.next/cache
+      - /app/apps/docs/.source
 
   backup:
     # Published from scripts/backup on the same tags as the app.
@@ -93,9 +114,15 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    volumes:
+      # pg_dump stages the dump on disk before upload; a volume rather than
+      # tmpfs so a large database does not land in RAM.
+      - backup-scratch:/tmp
     depends_on:
       postgres:
         condition: service_healthy
 
 volumes:
   pgdata:
+  backup-scratch:

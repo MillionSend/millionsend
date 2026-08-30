@@ -5,6 +5,8 @@ export {
   type AcceptEmailPayload,
   type AcceptEmailResult,
   acceptEmail,
+  MAX_ATTACHMENT_BYTES,
+  QUOTA_BACKLOG_DAYS,
   type SenderDomainVerdict,
   senderDomain,
   verifySenderDomain,
@@ -63,6 +65,14 @@ export {
   WARN_COMPLAINT_RATE,
 } from "./deliverability.js";
 export {
+  createFixedWindowLimiter,
+  DOMAIN_CREATE_LIMIT_PER_HOUR,
+  failQueuedEmailsForDomain,
+  isIdentitySharedByOtherDomains,
+  isReservedSenderDomain,
+  PLATFORM_DOMAIN,
+} from "./domain-lifecycle.js";
+export {
   combineRecordStatus,
   type DomainStatus,
   type LiveDnsStatus,
@@ -90,7 +100,7 @@ export {
   type McpScope,
   mcpResourceUrl,
 } from "./oauth-scopes.js";
-export { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
+export { PLAN_DAILY_LIMIT, PLAN_DOMAIN_LIMIT, type Plan } from "./plans.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
 export {
@@ -99,10 +109,22 @@ export {
   segmentFilterSchema,
   segmentWhere,
 } from "./segment-filter.js";
-export { parseSingleSender } from "./sender-address.js";
-export { isBlockedIp, type PostJsonOptions, type PostJsonResult, postJson } from "./ssrf.js";
+export { formatMailbox, type Mailbox, parseMailbox, parseSingleSender } from "./sender-address.js";
+export {
+  isBlockedIp,
+  type PostFailureCode,
+  type PostJsonOptions,
+  type PostJsonResult,
+  postFailureCode,
+  postJson,
+} from "./ssrf.js";
 export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";
-export { extractAddrSpec, findSuppressed, hashRecipient } from "./suppressions.js";
+export {
+  extractAddrSpec,
+  findSuppressed,
+  hashRecipient,
+  normalizeAddress,
+} from "./suppressions.js";
 export { INVITE_TTL_MS, signInviteToken, verifyInviteToken } from "./team-invitations.js";
 export { findTopicOptOuts, isSubscribedToTopic } from "./topics.js";
 export {

@@ -4,6 +4,7 @@ import {
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   parseSingleSender,
+  verifySenderDomain,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -329,6 +330,20 @@ export const broadcastsRouter = router({
           code: "PRECONDITION_FAILED",
           message:
             "APP_BASE_URL is not set. Unsubscribe links are built from it. Set it, restart, send again.",
+        });
+      }
+      // Same boundary as the API's /emails and /broadcasts/{id}/send: only a
+      // verified team domain may appear as the sender. The worker re-checks
+      // at fan-out, but failing there leaves the broadcast stuck in
+      // "scheduled" with no user-visible reason.
+      const sender = await verifySenderDomain(ctx.db, ctx.teamId, row.from);
+      if (!sender.ok) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            sender.reason === "invalid_sender"
+              ? "From must be a single address."
+              : `The ${sender.fromDomain} domain is not verified for this team.`,
         });
       }
       // Deliverability pause is enforced here, before anything is committed or

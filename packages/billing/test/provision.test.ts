@@ -1,9 +1,9 @@
 import type Stripe from "stripe";
 import { beforeEach, describe, expect, it } from "vitest";
+import { PRODUCT_METADATA_KEY } from "../src/prices.js";
 import {
   dryRunStripe,
   PORTAL_METADATA,
-  PRODUCT_METADATA_KEY,
   type ProvisionStripe,
   provision,
   SAAS_BUSINESS_TAX_CODE,

@@ -4,6 +4,7 @@ import createNextIntlPlugin from "next-intl/plugin";
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 const config: NextConfig = {
+  poweredByHeader: false,
   experimental: {
     // Keep visited page segments in the client router cache so sidebar
     // back-and-forth doesn't refetch RSC payloads every click. Safe at 30s:
@@ -47,6 +48,12 @@ const config: NextConfig = {
             value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
           },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // Browsers only honour HSTS over https, so plain-http self-hosts
+          // are unaffected; no preload until every subdomain is TLS-clean.
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=31536000; includeSubDomains",
+          },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-DNS-Prefetch-Control", value: "off" },
           { key: "X-Frame-Options", value: "DENY" },

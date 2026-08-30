@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { upsertEnv } from "../src/setup.js";
 import { envTemplate } from "../src/setup-constants.js";
 import {
   composeUpArgs,
@@ -8,6 +9,7 @@ import {
   detectDirState,
   envValue,
   flowPlan,
+  freshDatabaseEntries,
   generateSecret,
   missingSecrets,
   secretLaterHint,
@@ -49,6 +51,12 @@ describe("envValue / missingSecrets", () => {
     expect(envValue(null, "A")).toBeNull();
   });
 
+  it("reads back the quoted forms upsertEnv writes", () => {
+    const content = upsertEnv("", { A: "Ops <ops@example.com>", B: 'it\'s "$money"' });
+    expect(envValue(content, "A")).toBe("Ops <ops@example.com>");
+    expect(envValue(content, "B")).toBe('it\'s "$money"');
+  });
+
   it("treats empty and absent secret lines as missing", () => {
     expect(missingSecrets("MASTER_ENCRYPTION_KEY=\nOTHER=x\n")).toEqual([
       "MASTER_ENCRYPTION_KEY",
@@ -63,6 +71,17 @@ describe("generateSecret", () => {
     const secret = generateSecret();
     expect(Buffer.from(secret, "base64")).toHaveLength(32);
     expect(generateSecret()).not.toBe(secret);
+  });
+});
+
+describe("freshDatabaseEntries", () => {
+  it("puts one random URL-safe password in both POSTGRES_PASSWORD and DATABASE_URL", () => {
+    const entries = freshDatabaseEntries();
+    expect(entries.POSTGRES_PASSWORD).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(entries.DATABASE_URL).toBe(
+      `postgres://millionsend:${entries.POSTGRES_PASSWORD}@postgres:5432/millionsend`,
+    );
+    expect(freshDatabaseEntries().POSTGRES_PASSWORD).not.toBe(entries.POSTGRES_PASSWORD);
   });
 });
 

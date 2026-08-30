@@ -45,6 +45,20 @@ export type JobName = keyof JobPayloads;
  */
 const JOB_QUEUE_POLICY = "short" as const;
 
+/**
+ * Jobs that exhaust their retries are copied here instead of vanishing: the
+ * dead-letter handler turns "gave up" into a terminal row state (email
+ * failed, delivery exhausted) so the reconcile sweeps stop re-enqueueing
+ * them. pg-boss enforces a FK from job.dead_letter to the queue table, so
+ * the dead-letter queue must exist before the first send.
+ */
+export const DEAD_LETTER_QUEUES = {
+  "email.send": "email.send.dead",
+  "webhook.deliver": "webhook.deliver.dead",
+} as const;
+
+export type DeadLetteredJobName = keyof typeof DEAD_LETTER_QUEUES;
+
 export const CRON_JOBS = {
   // Midnight UTC: quota-parked emails drain back into the send queue.
   "quota.drain": "0 0 * * *",
@@ -63,6 +77,10 @@ export const CRON_JOBS = {
 } as const;
 
 export type CronJobName = keyof typeof CRON_JOBS;
+
+function deadLetterFor(name: JobName): string | undefined {
+  return name in DEAD_LETTER_QUEUES ? DEAD_LETTER_QUEUES[name as DeadLetteredJobName] : undefined;
+}
 
 export class Queue {
   #boss: PgBoss;
@@ -112,24 +130,50 @@ export class Queue {
     opts: { dedupeKey: string; startAfter?: Date },
   ): Promise<string | null> {
     await this.#ensureQueue(name, JOB_QUEUE_POLICY);
+    const deadLetter = deadLetterFor(name);
+    if (deadLetter) await this.#ensureQueue(deadLetter);
     return this.#boss.send(name, payload, {
       singletonKey: opts.dedupeKey,
       ...(opts.startAfter ? { startAfter: opts.startAfter } : {}),
+      ...(deadLetter ? { deadLetter } : {}),
       retryLimit: 10,
       retryBackoff: true,
       retryDelay: 5,
     });
   }
 
+  /**
+   * `concurrency` spawns that many independent pg-boss workers for the queue
+   * in this process, so one slow job (a stalling webhook receiver) cannot
+   * serialize everyone else's. It is not a rate limit.
+   */
   async work<N extends JobName>(
     name: N,
     handler: (payload: JobPayloads[N]) => Promise<void>,
-    opts: { batchSize?: number } = {},
+    opts: { batchSize?: number; concurrency?: number } = {},
   ): Promise<void> {
     await this.#ensureQueue(name, JOB_QUEUE_POLICY);
     await this.#boss.work<JobPayloads[N]>(
       name,
-      { batchSize: opts.batchSize ?? 1 },
+      { batchSize: opts.batchSize ?? 1, localConcurrency: opts.concurrency ?? 1 },
+      async (jobs: { data: JobPayloads[N] }[]) => {
+        for (const job of jobs) {
+          await handler(job.data);
+        }
+      },
+    );
+  }
+
+  /** Handles jobs that exhausted their retries on `name` (payload unchanged). */
+  async workDeadLetter<N extends DeadLetteredJobName>(
+    name: N,
+    handler: (payload: JobPayloads[N]) => Promise<void>,
+  ): Promise<void> {
+    const deadLetter = DEAD_LETTER_QUEUES[name];
+    await this.#ensureQueue(deadLetter);
+    await this.#boss.work<JobPayloads[N]>(
+      deadLetter,
+      { batchSize: 1 },
       async (jobs: { data: JobPayloads[N] }[]) => {
         for (const job of jobs) {
           await handler(job.data);

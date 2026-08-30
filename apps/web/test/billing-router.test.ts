@@ -14,8 +14,10 @@ let close: () => Promise<void>;
 let calls: {
   customers: Stripe.CustomerCreateParams[];
   checkouts: Stripe.Checkout.SessionCreateParams[];
+  checkoutOptions: (Stripe.RequestOptions | undefined)[];
   portals: Stripe.BillingPortal.SessionCreateParams[];
 };
+let onCustomerCreate: (() => Promise<void>) | undefined;
 
 const stripe = {
   prices: {
@@ -29,13 +31,18 @@ const stripe = {
   customers: {
     create: async (params: Stripe.CustomerCreateParams) => {
       calls.customers.push(params);
+      await onCustomerCreate?.();
       return { id: "cus_new" };
     },
   },
   checkout: {
     sessions: {
-      create: async (params: Stripe.Checkout.SessionCreateParams) => {
+      create: async (
+        params: Stripe.Checkout.SessionCreateParams,
+        options?: Stripe.RequestOptions,
+      ) => {
         calls.checkouts.push(params);
+        calls.checkoutOptions.push(options);
         return { url: "https://checkout.stripe.com/c/cs_1" };
       },
     },
@@ -65,7 +72,8 @@ function callerFor(teamId: string, role: TeamRole) {
 
 beforeEach(async () => {
   ({ db, close } = await createTestDb());
-  calls = { customers: [], checkouts: [], portals: [] };
+  calls = { customers: [], checkouts: [], checkoutOptions: [], portals: [] };
+  onCustomerCreate = undefined;
   vi.stubEnv("IS_CLOUD", "true");
   vi.stubEnv("APP_BASE_URL", "https://app.example.com");
 });
@@ -96,6 +104,7 @@ describe("billing router", () => {
       currentPeriodEnd: null,
       dailyLimit: 100,
       hasCustomer: false,
+      canCheckout: true,
     });
   });
 
@@ -129,14 +138,57 @@ describe("billing router", () => {
       allow_promotion_codes: true,
       billing_address_collection: "auto",
     });
+    expect(calls.checkoutOptions[0]?.idempotencyKey).toMatch(
+      new RegExp(`^checkout:${teamId}:scale:\\d+$`),
+    );
     const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
     expect(team).toMatchObject({ stripeCustomerId: "cus_new", plan: "free", planStatus: "none" });
 
+    // Abandoned checkouts (no subscription yet) may be retried freely.
     await admin.billing.checkout({ plan: "pro" });
     expect(calls.customers).toHaveLength(1);
     expect(calls.checkouts[1]).toMatchObject({
       customer: "cus_new",
       line_items: [{ price: "price_pro", quantity: 1 }],
+    });
+  });
+
+  it("checkout keeps the customer a concurrent request linked first", async () => {
+    const teamId = await createTeam(db);
+    onCustomerCreate = async () => {
+      await db
+        .update(schema.teams)
+        .set({ stripeCustomerId: "cus_first" })
+        .where(eq(schema.teams.id, teamId));
+    };
+    await callerFor(teamId, "owner").billing.checkout({ plan: "pro" });
+    expect(calls.checkouts[0]).toMatchObject({ customer: "cus_first" });
+    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+    expect(team?.stripeCustomerId).toBe("cus_first");
+  });
+
+  it("checkout is refused while a subscription is live; status says so", async () => {
+    const teamId = await createTeam(db);
+    const owner = callerFor(teamId, "owner");
+    for (const planStatus of ["active", "trialing", "past_due", "unpaid"] as const) {
+      await db
+        .update(schema.teams)
+        .set({ stripeCustomerId: "cus_1", stripeSubscriptionId: "sub_1", planStatus })
+        .where(eq(schema.teams.id, teamId));
+      expect((await owner.billing.status()).canCheckout).toBe(false);
+      await expect(owner.billing.checkout({ plan: "scale" })).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+      });
+    }
+    expect(calls.checkouts).toEqual([]);
+
+    await db
+      .update(schema.teams)
+      .set({ planStatus: "canceled" })
+      .where(eq(schema.teams.id, teamId));
+    expect((await owner.billing.status()).canCheckout).toBe(true);
+    expect(await owner.billing.checkout({ plan: "scale" })).toEqual({
+      url: "https://checkout.stripe.com/c/cs_1",
     });
   });
 

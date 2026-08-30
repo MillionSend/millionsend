@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -13,6 +14,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
 import type { AppLocale } from "@/i18n/request";
+import { authClient } from "@/lib/auth-client";
 import { TEAM_LOGO_ACCEPT, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
 import { removeTeamLogo, uploadTeamLogo } from "@/lib/team-logo-api";
 import { useTRPC } from "@/lib/trpc";
@@ -300,7 +302,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           }}
         >
           <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-            {t("invitations.created.body", { email: create.data.email })}
+            {t("invitations.created.bodyTtl", { email: create.data.email })}
           </p>
           <CopyChip value={create.data.acceptUrl} />
           <ModalFooter>
@@ -393,7 +395,6 @@ function PendingInvitations() {
           <tr>
             <th>{t("invitations.pending.email")}</th>
             <th>{t("members.role")}</th>
-            <th>{t("invitations.pending.link")}</th>
             <th className="right" aria-label={t("invitations.pending.actions")} />
           </tr>
         </thead>
@@ -402,9 +403,6 @@ function PendingInvitations() {
             <tr key={invite.id}>
               <td className="ms-mono">{invite.email}</td>
               <td>{t(`members.roles.${invite.role}`)}</td>
-              <td>
-                <CopyChip value={invite.acceptUrl} display={t("invitations.pending.copy")} />
-              </td>
               <td className="right">
                 <button
                   type="button"
@@ -427,14 +425,66 @@ function PendingInvitations() {
   );
 }
 
+type MemberRole = "owner" | "admin" | "member";
+
 function MembersSection() {
   const t = useTranslations("settings");
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { data: members } = useQuery(trpc.settings.members.list.queryOptions());
   const { data: teamList } = useQuery(trpc.team.list.queryOptions());
   const role = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
   const canManage = role === "owner" || role === "admin";
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = () => queryClient.invalidateQueries(trpc.settings.members.list.queryFilter());
+  const updateRole = useMutation(
+    trpc.settings.members.updateRole.mutationOptions({
+      onSuccess: refresh,
+      onError: (e) => setError(e.message),
+    }),
+  );
+  const remove = useMutation(
+    trpc.settings.members.remove.mutationOptions({
+      onSuccess: refresh,
+      onError: (e) => setError(e.message),
+    }),
+  );
+  const leave = useMutation(
+    trpc.settings.members.leave.mutationOptions({
+      // The selection cookie now points at a team the user left; a full
+      // navigation lets the layout resolve the next membership (or onboarding).
+      onSuccess: () => window.location.assign("/emails"),
+      onError: (e) => setError(e.message),
+    }),
+  );
+  const busy = updateRole.isPending || remove.isPending || leave.isPending;
+
+  // Admins never touch the owner role, in either direction.
+  const roleOptions = (["owner", "admin", "member"] as const)
+    .filter((r) => role === "owner" || r !== "owner")
+    .map((r) => ({ value: r, label: t(`members.roles.${r}`) }));
+
+  async function confirmRemove(member: { userId: string; email: string }) {
+    const ok = await confirmDialog({
+      title: t("members.removeTitle"),
+      message: t("members.removeBody", { email: member.email }),
+      confirmLabel: t("members.remove"),
+      danger: true,
+    });
+    if (ok) remove.mutate({ userId: member.userId });
+  }
+
+  async function confirmLeave() {
+    const ok = await confirmDialog({
+      title: t("members.leaveTitle"),
+      message: t("members.leaveBody"),
+      confirmLabel: t("members.leave"),
+      danger: true,
+    });
+    if (ok) leave.mutate();
+  }
 
   return (
     <SectionCard title={t("members.title")}>
@@ -455,6 +505,7 @@ function MembersSection() {
             <th>{t("members.name")}</th>
             <th>{t("members.email")}</th>
             <th>{t("members.role")}</th>
+            <th className="right" aria-label={t("members.actions")} />
           </tr>
         </thead>
         {!members ? (
@@ -469,20 +520,65 @@ function MembersSection() {
               <td>
                 <Skeleton width={52} />
               </td>
+              <td />
             </tr>
           </tbody>
         ) : (
           <tbody>
-            {members.map((m) => (
-              <tr key={m.email}>
-                <td>{m.name}</td>
-                <td className="ms-mono">{m.email}</td>
-                <td>{t(`members.roles.${m.role}`)}</td>
-              </tr>
-            ))}
+            {members.map((m) => {
+              const editable = canManage && !m.self && (role === "owner" || m.role !== "owner");
+              return (
+                <tr key={m.userId}>
+                  <td>{m.name}</td>
+                  <td className="ms-mono">{m.email}</td>
+                  <td>
+                    {editable ? (
+                      <Select
+                        width={140}
+                        value={m.role}
+                        disabled={busy}
+                        onChange={(value) =>
+                          updateRole.mutate({ userId: m.userId, role: value as MemberRole })
+                        }
+                        ariaLabel={t("members.role")}
+                        options={roleOptions}
+                      />
+                    ) : (
+                      t(`members.roles.${m.role}`)
+                    )}
+                  </td>
+                  <td className="right">
+                    {m.self ? (
+                      <button
+                        type="button"
+                        className="ms-btn ms-btn-secondary"
+                        disabled={busy}
+                        onClick={() => void confirmLeave()}
+                      >
+                        {t("members.leave")}
+                      </button>
+                    ) : editable ? (
+                      <button
+                        type="button"
+                        className="ms-btn ms-btn-secondary"
+                        disabled={busy}
+                        onClick={() => void confirmRemove(m)}
+                      >
+                        {t("members.remove")}
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         )}
       </Table>
+      {error ? (
+        <p style={{ margin: "8px 0 0", color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
+          {t("members.error", { reason: error })}
+        </p>
+      ) : null}
       {members ? (
         <ListFooter left={t("members.pageOf", { pages: 1, total: members.length })} singlePage />
       ) : null}
@@ -673,6 +769,89 @@ function InstanceSection() {
   );
 }
 
+function DangerSection() {
+  const t = useTranslations("settings.danger");
+  const trpc = useTRPC();
+  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
+  const active = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId);
+  const [error, setError] = useState<string | null>(null);
+  const [accountBusy, setAccountBusy] = useState(false);
+
+  const deleteTeam = useMutation(
+    trpc.settings.team.delete.mutationOptions({
+      onSuccess: () => window.location.assign("/emails"),
+      onError: (e) => setError(e.message),
+    }),
+  );
+
+  async function confirmDeleteTeam() {
+    if (!active) return;
+    const ok = await confirmDialog({
+      title: t("deleteTeam"),
+      message: t("deleteTeamBody", { name: active.teamName }),
+      confirmLabel: t("deleteTeam"),
+      danger: true,
+    });
+    if (ok) deleteTeam.mutate();
+  }
+
+  async function confirmDeleteAccount() {
+    const ok = await confirmDialog({
+      title: t("deleteAccount"),
+      message: t("deleteAccountBody"),
+      confirmLabel: t("deleteAccount"),
+      danger: true,
+    });
+    if (!ok) return;
+    setAccountBusy(true);
+    setError(null);
+    // Server-side: sessions are revoked and a sole owner is refused.
+    const result = await authClient.deleteUser();
+    if (result.error) {
+      setError(result.error.message ?? t("deleteAccountError"));
+      setAccountBusy(false);
+      return;
+    }
+    window.location.assign("/login");
+  }
+
+  const busy = deleteTeam.isPending || accountBusy;
+  return (
+    <SectionCard title={t("title")}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {active?.role === "owner" ? (
+          <button
+            type="button"
+            className="ms-btn ms-btn-destructive"
+            disabled={busy}
+            onClick={() => void confirmDeleteTeam()}
+          >
+            <BtnSpinner on={deleteTeam.isPending} />
+            {t("deleteTeam")}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="ms-btn ms-btn-destructive"
+          disabled={busy}
+          onClick={() => void confirmDeleteAccount()}
+        >
+          <BtnSpinner on={accountBusy} />
+          {t("deleteAccount")}
+        </button>
+      </div>
+      <p style={{ margin: "8px 0 0", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
+        {t("hint")}
+      </p>
+      {error ? (
+        <p style={{ margin: "8px 0 0", color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
+          {error}
+        </p>
+      ) : null}
+    </SectionCard>
+  );
+}
+
 export function SettingsSections({ showInstance }: { showInstance: boolean }) {
   return (
     <div style={{ display: "grid", gap: 20 }}>
@@ -680,6 +859,7 @@ export function SettingsSections({ showInstance }: { showInstance: boolean }) {
       <MembersSection />
       {showInstance ? <InstanceSection /> : null}
       <LanguageSection />
+      <DangerSection />
     </div>
   );
 }

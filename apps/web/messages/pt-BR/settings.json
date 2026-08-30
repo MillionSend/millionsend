@@ -153,7 +153,15 @@
       "owner": "Proprietário",
       "admin": "Administrador",
       "member": "Membro"
-    }
+    },
+    "actions": "Ações",
+    "remove": "Remover",
+    "removeTitle": "Remover membro",
+    "removeBody": "{email} perde o acesso a esta equipe imediatamente, incluindo os apps conectados autorizados para ela.",
+    "leave": "Sair da equipe",
+    "leaveTitle": "Sair da equipe",
+    "leaveBody": "Você perde o acesso a esta equipe imediatamente. Um proprietário pode convidar você de novo.",
+    "error": "Não foi possível atualizar os membros: {reason}"
   },
   "invitations": {
     "invite": {
@@ -168,7 +176,8 @@
     "created": {
       "title": "Link do convite",
       "body": "Compartilhe este link com {email}. Ele funciona uma vez e expira em 7 dias.",
-      "done": "Concluído"
+      "done": "Concluído",
+      "bodyTtl": "Compartilhe este link com {email}. Ele funciona uma vez e expira em 3 dias."
     },
     "pending": {
       "title": "Convites pendentes",
@@ -187,7 +196,8 @@
       "signUp": "Criar conta",
       "body": "Aceitar este convite como {email}?",
       "submit": "Aceitar convite",
-      "invalid": "Este convite não é mais válido."
+      "invalid": "Este convite não é mais válido.",
+      "emailMismatch": "Este convite foi enviado para outro endereço de e-mail. Entre com a conta convidada para aceitá-lo."
     }
   },
   "instance": {
@@ -283,10 +293,20 @@
     "you": "você",
     "allTeams": "Todos os times",
     "revoke": "Revogar acesso",
+    "revokeAllTeamsForbidden": "Esta autorização também cobre times que você não administra. Só quem a concedeu pode revogá-la.",
     "revokeConfirm": {
       "title": "Revogar acesso",
       "body": "{name} perde o acesso a este time na próxima renovação de token, em até 15 minutos.",
       "confirm": "Revogar acesso"
     }
+  },
+  "danger": {
+    "title": "Zona de perigo",
+    "deleteTeam": "Excluir equipe",
+    "deleteTeamBody": "Exclui permanentemente {name} com todos os contatos, e-mails, domínios, chaves de API, templates, campanhas e membros. Isso não pode ser desfeito.",
+    "deleteAccount": "Excluir minha conta",
+    "deleteAccountBody": "Exclui permanentemente sua conta e encerra todas as suas sessões. Equipes das quais você é o único proprietário precisam ser excluídas ou transferidas antes. Isso não pode ser desfeito.",
+    "deleteAccountError": "Não foi possível excluir a conta. Exclua ou transfira as equipes que você possui, entre de novo e tente outra vez.",
+    "hint": "Exclusões são imediatas e irreversíveis."
   }
 }

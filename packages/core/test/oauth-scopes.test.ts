@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { apiBaseUrl, mcpResourceUrl } from "../src/oauth-scopes.js";
+import { apiBaseUrl, MCP_SCOPES, mcpResourceUrl } from "../src/oauth-scopes.js";
 
 it("derives the API origin from the dashboard host when no public URL is set", () => {
   expect(apiBaseUrl("https://mail.example.com")).toBe("https://mail.example.com:3001");
@@ -23,4 +23,13 @@ it("strips a trailing slash so the resource identifier stays canonical", () => {
 
 it("binds the MCP resource to the same origin the dashboard advertises", () => {
   expect(mcpResourceUrl("https://mail.example.com")).toBe("https://mail.example.com:3001/mcp");
+});
+
+// Every scope must have a consent-page translation key (auth.consent.scopes.<scope with _>);
+// the advertised list is the contract both apps and the docs enumerate from.
+it("advertises a read scope for broadcasts alongside the write scope", () => {
+  expect(MCP_SCOPES).toContain("broadcasts:read");
+  expect(MCP_SCOPES.indexOf("broadcasts:read")).toBeLessThan(
+    MCP_SCOPES.indexOf("broadcasts:write"),
+  );
 });

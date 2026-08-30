@@ -108,8 +108,11 @@ function shutdown(signal, code) {
   exitCode = code;
   if (children.size === 0) process.exit(exitCode);
   for (const child of children.values()) child.kill(signal);
-  // Give children time to exit cleanly, then force the container down.
-  setTimeout(() => process.exit(exitCode), 10_000).unref();
+  // Give children time to exit cleanly, then force the container down. The
+  // worker drains in-flight jobs for up to 30 s (pg-boss graceful stop); a
+  // shorter budget here would kill a send between its claim and SES accept.
+  // Compose's stop_grace_period must stay above this.
+  setTimeout(() => process.exit(exitCode), 35_000).unref();
 }
 
 for (const name of names) {

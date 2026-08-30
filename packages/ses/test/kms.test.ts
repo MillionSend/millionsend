@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { CompositeKeyring, EnvKeyring, KmsKeyring } from "@millionsend/core";
+import { CompositeKeyring, EnvKeyring } from "@millionsend/core";
 import { expect, it } from "vitest";
 import { createKeyringFromEnv } from "../src/kms.js";
 
@@ -12,13 +12,13 @@ it("self-host uses the env KEK", () => {
   ).toBeInstanceOf(EnvKeyring);
 });
 
-it("cloud uses KMS", () => {
-  expect(createKeyringFromEnv({ ...BASE, IS_CLOUD: true, KMS_KEY_ID: "kms-key" })).toBeInstanceOf(
-    KmsKeyring,
+it("cloud still needs the env KEK: it is the token-derivation root", () => {
+  expect(() => createKeyringFromEnv({ ...BASE, IS_CLOUD: true, KMS_KEY_ID: "kms-key" })).toThrow(
+    /MASTER_ENCRYPTION_KEY is required/,
   );
 });
 
-it("cloud with the env KEK also set uses the composite (migration)", () => {
+it("cloud wraps with KMS behind the composite so env-sealed rows stay readable", () => {
   expect(
     createKeyringFromEnv({
       ...BASE,

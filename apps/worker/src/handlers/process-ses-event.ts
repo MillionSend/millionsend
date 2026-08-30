@@ -89,6 +89,8 @@ export async function processSesEvent(
       teamId: schema.emails.teamId,
       from: schema.emails.from,
       to: schema.emails.to,
+      cc: schema.emails.cc,
+      bcc: schema.emails.bcc,
       subject: schema.emails.subject,
       matchedByTag: sql<boolean>`false`,
     })
@@ -101,6 +103,8 @@ export async function processSesEvent(
         teamId: schema.emails.teamId,
         from: schema.emails.from,
         to: schema.emails.to,
+        cc: schema.emails.cc,
+        bcc: schema.emails.bcc,
         subject: schema.emails.subject,
         matchedByTag: sql<boolean>`true`,
       })
@@ -198,8 +202,12 @@ export async function processSesEvent(
     }
 
     // Auto-suppression: permanent bounces and complaints, scoped to the
-    // owning team only.
-    const toSuppress =
+    // owning team only and to addresses the email was actually sent to —
+    // the event payload never gets to name who is suppressed.
+    const ownRecipients = new Set(
+      [...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])].map(hashRecipient),
+    );
+    const toSuppress = (
       event.eventType === "Bounce" && event.bounce?.bounceType === "Permanent"
         ? event.bounce.recipients.map((r) => ({ email: r, reason: "hard_bounce" as const }))
         : event.eventType === "Complaint"
@@ -207,7 +215,8 @@ export async function processSesEvent(
               email: r,
               reason: "complaint" as const,
             }))
-          : [];
+          : []
+    ).filter((s) => ownRecipients.has(hashRecipient(s.email)));
     for (const s of toSuppress) {
       await txDb
         .insert(schema.suppressions)

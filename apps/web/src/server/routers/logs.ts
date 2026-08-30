@@ -53,6 +53,9 @@ export const logsRouter = router({
       .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
       .limit(1);
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    // Bodies carry recipient data and full API payloads: admin-only, while
+    // the metadata stays readable for every member.
+    if (ctx.role === "member") return { ...row, requestBody: null, responseBody: null };
     return row;
   }),
 });

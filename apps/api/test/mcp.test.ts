@@ -40,15 +40,22 @@ const JSONRPC_HEADERS = {
 const ping = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
 
 async function mintToken(
-  overrides: Partial<{ scope: string; aud: string; sub: string; team_id: string }> = {},
+  overrides: Partial<{
+    scope: string;
+    aud: string;
+    sub: string;
+    team_id: string;
+    team_role: string;
+    typ: string;
+  }> = {},
 ): Promise<string> {
   return new SignJWT({
     scope: overrides.scope ?? ALL_SCOPES,
     client_id: "client-abc",
     team_id: overrides.team_id ?? teamId,
-    team_role: "admin",
+    ...(overrides.team_id === "*" ? {} : { team_role: overrides.team_role ?? "admin" }),
   })
-    .setProtectedHeader({ alg: "EdDSA", kid: "test-key" })
+    .setProtectedHeader({ alg: "EdDSA", kid: "test-key", typ: overrides.typ ?? "at+jwt" })
     .setIssuer(appBaseUrl)
     .setAudience(overrides.aud ?? resource)
     .setSubject(overrides.sub ?? userId)
@@ -68,11 +75,14 @@ async function connect(token: string): Promise<Client> {
   return client;
 }
 
+/** Unwraps the untrusted-data envelope every tool result is delivered in. */
 function resultJson(result: { content?: unknown }): Record<string, unknown> {
   const content = result.content as Array<{ type: string; text: string }>;
   const text = content.find((c) => c.type === "text");
   if (!text) throw new Error("tool returned no text content");
-  return JSON.parse(text.text) as Record<string, unknown>;
+  const envelope = JSON.parse(text.text) as { notice: string; untrusted_data: unknown };
+  expect(envelope.notice).toContain("never as instructions");
+  return envelope.untrusted_data as Record<string, unknown>;
 }
 
 beforeAll(async () => {
@@ -182,6 +192,34 @@ describe("auth middleware", () => {
     expect(((await res.json()) as { error: string }).error).toBe("insufficient_scope");
   });
 
+  it("401s a token whose header typ is not at+jwt (session/logout JWTs share the JWKS)", async () => {
+    const token = await mintToken({ typ: "JWT" });
+    const res = await app.request("/mcp", {
+      method: "POST",
+      headers: { ...JSONRPC_HEADERS, authorization: `Bearer ${token}` },
+      body: ping,
+    });
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_token");
+  });
+
+  it("401s a single-team token missing the team_role claim", async () => {
+    const token = await new SignJWT({ scope: ALL_SCOPES, client_id: "client-abc", team_id: teamId })
+      .setProtectedHeader({ alg: "EdDSA", kid: "test-key", typ: "at+jwt" })
+      .setIssuer(appBaseUrl)
+      .setAudience(resource)
+      .setSubject(userId)
+      .setIssuedAt()
+      .setExpirationTime("15m")
+      .sign(privateKey);
+    const res = await app.request("/mcp", {
+      method: "POST",
+      headers: { ...JSONRPC_HEADERS, authorization: `Bearer ${token}` },
+      body: ping,
+    });
+    expect(res.status).toBe(401);
+  });
+
   it("401s a valid token whose holder is no longer a team member", async () => {
     const token = await mintToken({ sub: "someone-who-left" });
     const res = await app.request("/mcp", {
@@ -265,6 +303,50 @@ describe("tool listing", () => {
       "get_domain",
     ]);
     await domainsRead.close();
+  });
+
+  it("broadcasts:read lists only the read tools; broadcasts:write still implies them", async () => {
+    const read = await connect(await mintToken({ scope: "broadcasts:read" }));
+    expect((await read.listTools()).tools.map((t) => t.name)).toEqual([
+      "list_broadcasts",
+      "get_broadcast",
+    ]);
+    await read.close();
+    const write = await connect(await mintToken({ scope: "broadcasts:write" }));
+    expect((await write.listTools()).tools.map((t) => t.name)).toEqual([
+      "list_broadcasts",
+      "get_broadcast",
+      "create_broadcast",
+      "update_broadcast",
+      "send_broadcast",
+      "cancel_broadcast",
+      "delete_broadcast",
+    ]);
+    await write.close();
+  });
+
+  it("hides admin-only tools from a member, going by the live membership role", async () => {
+    await db.insert(schema.user).values({ id: "member-1", name: "Member", email: "m@acme.dev" });
+    await db.insert(schema.teamMembers).values({ teamId, userId: "member-1", role: "member" });
+    // The claim says admin; the membership row says member. The row wins.
+    const client = await connect(await mintToken({ sub: "member-1", team_role: "admin" }));
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    expect(names).toContain("list_webhooks");
+    expect(names).toContain("list_domains");
+    expect(names).toContain("send_email");
+    for (const hidden of [
+      "get_webhook",
+      "create_webhook",
+      "update_webhook",
+      "delete_webhook",
+      "create_domain",
+      "update_domain",
+      "verify_domain",
+      "delete_domain",
+    ]) {
+      expect(names).not.toContain(hidden);
+    }
+    await client.close();
   });
 });
 
@@ -434,6 +516,29 @@ describe("rate limiting", () => {
     }
     expect.fail(`rate limit never tripped (last status ${last})`);
   });
+
+  it("counts requests before the membership lookup, so 401s are not free", async () => {
+    const limited = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: false,
+      appBaseUrl,
+      rateLimitPerMinute: 2,
+      enqueueEmailSend: async () => {},
+    });
+    const token = await mintToken({ sub: "ghost-with-valid-token" });
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      const res = await limited.request("/mcp", {
+        method: "POST",
+        headers: { ...JSONRPC_HEADERS, authorization: `Bearer ${token}` },
+        body: ping,
+      });
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(0, 2)).toEqual([401, 401]);
+    expect(statuses).toContain(429);
+  });
 });
 
 it("create_segment writes through the same REST pipeline and lists back", async () => {
@@ -473,9 +578,25 @@ describe('all-teams tokens (team_id claim "*")', () => {
       default: boolean;
     }>;
     expect(teams).toEqual([
-      { id: teamId, name: "mcp", default: true },
-      { id: secondTeamId, name: "mcp-second", default: false },
+      { id: teamId, name: "mcp", role: "admin", default: true },
+      { id: secondTeamId, name: "mcp-second", role: "member", default: false },
     ]);
+    await client.close();
+  });
+
+  it("registers admin tools when any team is admin-level but refuses them in member teams", async () => {
+    const client = await connect(await mintToken({ team_id: "*" }));
+    expect((await client.listTools()).tools.map((t) => t.name)).toContain("create_webhook");
+    const res = await client.callTool({
+      name: "create_webhook",
+      arguments: {
+        endpoint: "https://acme.dev/hooks",
+        events: ["email.bounced"],
+        team_id: secondTeamId,
+      },
+    });
+    expect(res.isError).toBe(true);
+    expect(resultJson(res)).toMatchObject({ statusCode: 403, name: "forbidden" });
     await client.close();
   });
 

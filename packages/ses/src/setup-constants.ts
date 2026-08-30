@@ -29,21 +29,30 @@ export const SES_EVENT_TYPES = [
   "RENDERING_FAILURE",
 ] as const;
 
-/** Every SES action the instance issues — infra/millionsend-ses.cfn.yaml mirrors the same set. */
+/**
+ * Every SES action the instance issues — infra/millionsend-ses.cfn.yaml
+ * mirrors the same set. Identity actions support resource-level permissions
+ * and are confined to identities; sending stays account-wide because a send
+ * that names a configuration set is authorized against that resource too,
+ * and GetAccount accepts no resource at all.
+ */
 export const SES_IAM_POLICY = {
   Version: "2012-10-17",
   Statement: [
     {
       Effect: "Allow",
       Action: [
-        "ses:SendEmail",
-        "ses:SendRawEmail",
         "ses:CreateEmailIdentity",
         "ses:GetEmailIdentity",
         "ses:DeleteEmailIdentity",
         "ses:PutEmailIdentityMailFromAttributes",
-        "ses:GetAccount",
+        "ses:PutEmailIdentityDkimSigningAttributes",
       ],
+      Resource: "arn:aws:ses:*:*:identity/*",
+    },
+    {
+      Effect: "Allow",
+      Action: ["ses:SendEmail", "ses:SendRawEmail", "ses:GetAccount"],
       Resource: "*",
     },
   ],

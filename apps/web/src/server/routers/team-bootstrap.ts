@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { env } from "@millionsend/config";
 import { ALL_TEAMS_GRANT } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -8,6 +9,12 @@ import { isUniqueViolation } from "@/lib/db-errors";
 import { slugify } from "@/lib/slug";
 import { listMemberships } from "../membership";
 import { type AuthSession, type Context, protectedProcedure, router } from "../trpc";
+
+/**
+ * Cloud only: every team is a free sending quota, so one signup must not be
+ * able to multiply it. Invitations into other people's teams do not count.
+ */
+export const MAX_OWNED_TEAMS_CLOUD = 3;
 
 /**
  * Records the active-team selection in both places that read it: the cookie
@@ -80,6 +87,12 @@ export const teamBootstrapRouter = router({
   createTeam: protectedProcedure
     .input(z.object({ name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
+      if (env.IS_CLOUD) {
+        const memberships = await listMemberships(ctx.db, ctx.session.user.id);
+        if (memberships.filter((m) => m.role === "owner").length >= MAX_OWNED_TEAMS_CLOUD) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Team limit reached." });
+        }
+      }
       const base = slugify(input.name) || "team";
       for (let attempt = 0; attempt < 3; attempt++) {
         const slug = attempt === 0 ? base : `${base}-${randomBytes(3).toString("hex")}`;

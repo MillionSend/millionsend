@@ -84,6 +84,9 @@ export default function SuppressionsPage() {
     ),
   );
   const stats = useQuery(trpc.emails.suppressions.stats.queryOptions());
+  const teamList = useQuery(trpc.team.list.queryOptions());
+  const role = teamList.data?.teams.find((m) => m.teamId === teamList.data?.activeTeamId)?.role;
+  const canRemove = role === "owner" || role === "admin";
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
 
@@ -259,16 +262,18 @@ export default function SuppressionsPage() {
                     <RelativeTime date={row.createdAt} />
                   </td>
                   <td className="right" style={{ width: 40 }}>
-                    <PopoverMenu
-                      ariaLabel={t("suppressions.remove")}
-                      items={[
-                        {
-                          label: t("suppressions.remove"),
-                          danger: true,
-                          onSelect: () => setRemoveTarget({ id: row.id, email: row.email }),
-                        },
-                      ]}
-                    />
+                    {canRemove ? (
+                      <PopoverMenu
+                        ariaLabel={t("suppressions.remove")}
+                        items={[
+                          {
+                            label: t("suppressions.remove"),
+                            danger: true,
+                            onSelect: () => setRemoveTarget({ id: row.id, email: row.email }),
+                          },
+                        ]}
+                      />
+                    ) : null}
                   </td>
                 </tr>
               ))}

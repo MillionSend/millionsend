@@ -17,12 +17,12 @@ afterEach(async () => {
   await close();
 });
 
-function caller(teamId: string) {
+function caller(teamId: string, role: Context["role"] = "owner") {
   const ctx: Context = {
     db,
     session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
     teamId,
-    role: "owner",
+    role,
   };
   return createCaller(ctx);
 }
@@ -126,5 +126,21 @@ describe("logs.get", () => {
     expect(row.responseBody).toEqual({ statusCode: 422, name: "validation_error" });
 
     await expect(caller(teamB).logs.get({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("hides request/response bodies from role member, keeping the metadata", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const id = await insertRequest({
+      teamId: teamA,
+      requestBody: { to: "ada@example.com" },
+      responseBody: { id: "e1" },
+    });
+    const row = await caller(teamA, "member").logs.get({ id });
+    expect(row.path).toBe("/emails");
+    expect(row.requestBody).toBeNull();
+    expect(row.responseBody).toBeNull();
+    expect((await caller(teamA, "admin").logs.get({ id })).requestBody).toEqual({
+      to: "ada@example.com",
+    });
   });
 });

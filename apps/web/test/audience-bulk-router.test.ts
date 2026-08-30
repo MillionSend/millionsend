@@ -21,12 +21,12 @@ afterEach(async () => {
   await close();
 });
 
-function callerFor(teamId: string) {
+function callerFor(teamId: string, role: "owner" | "member" = "owner") {
   return createCaller({
     db,
     session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
     teamId,
-    role: "owner",
+    role,
   });
 }
 
@@ -112,6 +112,14 @@ describe("audience.contacts.bulkAddSegments", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(await db.select().from(schema.segmentMembers)).toEqual([]);
     expect(await activityTypes([ada, bContact])).toEqual([]);
+  });
+
+  it("is forbidden for role member", async () => {
+    const { teamId, caller, ada } = await seed();
+    await expect(
+      callerFor(teamId, "member").audience.contacts.bulkDelete({ contactIds: [ada] }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect((await caller.audience.contacts.stats()).contacts).toBe(2);
   });
 
   it("caps contactIds at 100", async () => {

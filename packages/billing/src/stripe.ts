@@ -7,10 +7,17 @@ import Stripe from "stripe";
 export interface BillingStripe {
   prices: { list(params: Stripe.PriceListParams): Promise<Stripe.ApiList<Stripe.Price>> };
   customers: { create(params: Stripe.CustomerCreateParams): Promise<Stripe.Customer> };
-  subscriptions: { retrieve(id: string): Promise<Stripe.Subscription> };
+  subscriptions: {
+    retrieve(id: string, params?: Stripe.SubscriptionRetrieveParams): Promise<Stripe.Subscription>;
+    list(params: Stripe.SubscriptionListParams): Promise<Stripe.ApiList<Stripe.Subscription>>;
+    cancel(id: string, params?: Stripe.SubscriptionCancelParams): Promise<Stripe.Subscription>;
+  };
   checkout: {
     sessions: {
-      create(params: Stripe.Checkout.SessionCreateParams): Promise<Stripe.Checkout.Session>;
+      create(
+        params: Stripe.Checkout.SessionCreateParams,
+        options?: Stripe.RequestOptions,
+      ): Promise<Stripe.Checkout.Session>;
     };
   };
   billingPortal: {
@@ -25,4 +32,9 @@ export interface BillingStripe {
 
 export function createStripe(secretKey: string): BillingStripe {
   return new Stripe(secretKey);
+}
+
+/** Secret and restricted keys share the `_live_` / `_test_` mode marker. */
+export function isLiveKey(secretKey: string): boolean {
+  return /^[sr]k_live_/.test(secretKey);
 }

@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { GCM_IV_LENGTH, GCM_TAG_LENGTH } from "./constants.js";
-import type { Keyring } from "./keyring.js";
+import type { DekContext, Keyring } from "./keyring.js";
 
 export interface EmailBody {
   html: string | null;
@@ -14,6 +14,40 @@ export interface EncryptedBody {
   keyVersion: number;
 }
 
+export type EnvelopeKind = "email_body" | "email_attachments" | "webhook_secret";
+
+/** The row an envelope belongs to; the helpers below fix the kind. */
+export interface EnvelopeOwner {
+  teamId: string;
+  rowId: string;
+}
+
+/**
+ * Row identity authenticated into the ciphertext (AES-GCM AAD) and carried
+ * to the keyring as the DEK context. A bound envelope opens only on the row
+ * it was sealed for: copying its columns onto another row, another team, or
+ * a column of a different kind fails authentication.
+ */
+export interface EnvelopeBinding extends EnvelopeOwner {
+  kind: EnvelopeKind;
+}
+
+/**
+ * Bound envelopes store keyVersion + this offset. Rows sealed before binding
+ * existed carry the bare KEK version and still open without AAD; the offset
+ * keeps both formats apart in the existing integer column, the way
+ * KMS_KEY_VERSION splits KMS wraps from env KEK versions.
+ */
+export const BOUND_ENVELOPE_VERSION_OFFSET = 2_000_000;
+
+function aad(binding: EnvelopeBinding): Buffer {
+  return Buffer.from(`${binding.teamId}:${binding.kind}:${binding.rowId}`, "utf8");
+}
+
+function dekContext(binding: EnvelopeBinding): DekContext {
+  return { teamId: binding.teamId, purpose: binding.kind };
+}
+
 /**
  * Envelope encryption: one DEK per payload wrapped by the keyring, ciphertext
  * layout payload || authTag. Keyrings with generateWrappedDek supply the DEK
@@ -23,33 +57,62 @@ export interface EncryptedBody {
  * plaintext DEK is scrubbed on every path, including keyring failure. Email
  * bodies and webhook signing secrets both seal through here.
  */
-export async function encryptPayload(plaintext: Buffer, keyring: Keyring): Promise<EncryptedBody> {
-  const generated = keyring.generateWrappedDek ? await keyring.generateWrappedDek() : undefined;
+export async function encryptPayload(
+  plaintext: Buffer,
+  keyring: Keyring,
+  binding?: EnvelopeBinding,
+): Promise<EncryptedBody> {
+  const context = binding ? dekContext(binding) : undefined;
+  const generated = keyring.generateWrappedDek
+    ? await keyring.generateWrappedDek(context)
+    : undefined;
   const dek = generated?.dek ?? randomBytes(32);
   try {
     const iv = randomBytes(GCM_IV_LENGTH);
     const cipher = createCipheriv("aes-256-gcm", dek, iv);
+    if (binding) cipher.setAAD(aad(binding));
     const encrypted = Buffer.concat([
       cipher.update(plaintext),
       cipher.final(),
       cipher.getAuthTag(),
     ]);
-    const { wrapped, keyVersion } = generated ?? (await keyring.wrapDek(dek));
-    return { ciphertext: encrypted, iv, wrappedDek: wrapped, keyVersion };
+    const { wrapped, keyVersion } = generated ?? (await keyring.wrapDek(dek, context));
+    return {
+      ciphertext: encrypted,
+      iv,
+      wrappedDek: wrapped,
+      keyVersion: binding ? keyVersion + BOUND_ENVELOPE_VERSION_OFFSET : keyVersion,
+    };
   } finally {
     dek.fill(0);
   }
 }
 
-export async function decryptPayload(encrypted: EncryptedBody, keyring: Keyring): Promise<Buffer> {
+export async function decryptPayload(
+  encrypted: EncryptedBody,
+  keyring: Keyring,
+  binding?: EnvelopeBinding,
+): Promise<Buffer> {
   if (encrypted.ciphertext.length < GCM_TAG_LENGTH) {
     throw new Error(`ciphertext too short: ${encrypted.ciphertext.length} bytes`);
   }
-  const dek = await keyring.unwrapDek(encrypted.wrappedDek, encrypted.keyVersion);
+  const isBound = encrypted.keyVersion >= BOUND_ENVELOPE_VERSION_OFFSET;
+  if (isBound && !binding) throw new Error("bound envelope opened without its row binding");
+  // A legacy row ignores the binding: it was sealed without one.
+  const bound = isBound ? binding : undefined;
+  const keyVersion = isBound
+    ? encrypted.keyVersion - BOUND_ENVELOPE_VERSION_OFFSET
+    : encrypted.keyVersion;
+  const dek = await keyring.unwrapDek(
+    encrypted.wrappedDek,
+    keyVersion,
+    bound ? dekContext(bound) : undefined,
+  );
   try {
     const tag = encrypted.ciphertext.subarray(encrypted.ciphertext.length - GCM_TAG_LENGTH);
     const body = encrypted.ciphertext.subarray(0, encrypted.ciphertext.length - GCM_TAG_LENGTH);
     const decipher = createDecipheriv("aes-256-gcm", dek, encrypted.iv);
+    if (bound) decipher.setAAD(aad(bound));
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(body), decipher.final()]);
   } finally {
@@ -57,8 +120,16 @@ export async function decryptPayload(encrypted: EncryptedBody, keyring: Keyring)
   }
 }
 
-export async function encryptEmailBody(body: EmailBody, keyring: Keyring): Promise<EncryptedBody> {
-  return encryptPayload(Buffer.from(JSON.stringify(body), "utf8"), keyring);
+export async function encryptEmailBody(
+  body: EmailBody,
+  keyring: Keyring,
+  owner?: EnvelopeOwner,
+): Promise<EncryptedBody> {
+  return encryptPayload(
+    Buffer.from(JSON.stringify(body), "utf8"),
+    keyring,
+    owner && { ...owner, kind: "email_body" },
+  );
 }
 
 export interface EmailAttachment {
@@ -76,8 +147,13 @@ export interface EmailAttachment {
 export async function sealAttachments(
   attachments: EmailAttachment[],
   keyring: Keyring,
+  owner?: EnvelopeOwner,
 ): Promise<string> {
-  const encrypted = await encryptPayload(Buffer.from(JSON.stringify(attachments), "utf8"), keyring);
+  const encrypted = await encryptPayload(
+    Buffer.from(JSON.stringify(attachments), "utf8"),
+    keyring,
+    owner && { ...owner, kind: "email_attachments" },
+  );
   return JSON.stringify({
     keyVersion: encrypted.keyVersion,
     iv: encrypted.iv.toString("base64"),
@@ -89,6 +165,7 @@ export async function sealAttachments(
 export async function openAttachments(
   sealed: string,
   keyring: Keyring,
+  owner?: EnvelopeOwner,
 ): Promise<EmailAttachment[]> {
   const parts = JSON.parse(sealed) as {
     keyVersion: number;
@@ -104,6 +181,7 @@ export async function openAttachments(
       keyVersion: parts.keyVersion,
     },
     keyring,
+    owner && { ...owner, kind: "email_attachments" },
   );
   return JSON.parse(plaintext.toString("utf8")) as EmailAttachment[];
 }
@@ -111,7 +189,12 @@ export async function openAttachments(
 export async function decryptEmailBody(
   encrypted: EncryptedBody,
   keyring: Keyring,
+  owner?: EnvelopeOwner,
 ): Promise<EmailBody> {
-  const plaintext = await decryptPayload(encrypted, keyring);
+  const plaintext = await decryptPayload(
+    encrypted,
+    keyring,
+    owner && { ...owner, kind: "email_body" },
+  );
   return JSON.parse(plaintext.toString("utf8")) as EmailBody;
 }

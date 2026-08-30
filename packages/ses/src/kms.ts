@@ -13,12 +13,13 @@ export interface KeyringEnv {
 
 /**
  * The one keyring construction shared by api/worker/smtp/web. Cloud wraps
- * DEKs with KMS (credentials fall back to the default provider chain, like
- * the SES clients); cloud with the env KEK also set gets the composite so
- * ciphertexts sealed before a self-host → cloud migration stay readable;
- * everything else uses the env KEK.
+ * new DEKs with KMS (credentials fall back to the default provider chain,
+ * like the SES clients) behind the composite, so rows sealed under the env
+ * KEK stay readable; self-host uses the env KEK alone.
  */
 export function createKeyringFromEnv(e: KeyringEnv): Keyring {
+  if (!e.MASTER_ENCRYPTION_KEY) throw new Error("MASTER_ENCRYPTION_KEY is required");
+  const envKeyring = EnvKeyring.fromBase64(e.MASTER_ENCRYPTION_KEY);
   if (e.IS_CLOUD && e.KMS_KEY_ID) {
     const kms = new KmsKeyring(
       new KMS({
@@ -34,12 +35,7 @@ export function createKeyringFromEnv(e: KeyringEnv): Keyring {
       }),
       e.KMS_KEY_ID,
     );
-    return e.MASTER_ENCRYPTION_KEY
-      ? new CompositeKeyring(kms, EnvKeyring.fromBase64(e.MASTER_ENCRYPTION_KEY))
-      : kms;
+    return new CompositeKeyring(kms, envKeyring);
   }
-  if (!e.MASTER_ENCRYPTION_KEY) {
-    throw new Error("MASTER_ENCRYPTION_KEY is required (IS_CLOUD=true may use KMS_KEY_ID instead)");
-  }
-  return EnvKeyring.fromBase64(e.MASTER_ENCRYPTION_KEY);
+  return envKeyring;
 }

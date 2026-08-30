@@ -1,5 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey, hashRecipient, openAttachments } from "@millionsend/core";
+import {
+  EnvKeyring,
+  generateApiKey,
+  hashRecipient,
+  openAttachments,
+  utcDay,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -525,6 +531,34 @@ describe("reschedule scheduled email (PATCH /emails/{id})", () => {
     expect((await scheduledAtOf(foreign.id))?.getTime()).toBe(foreign.scheduledAt?.getTime());
   });
 
+  it("anchors the 30-day cap at creation, so chained reschedules cannot extend it", async () => {
+    const [old] = await db
+      .insert(schema.emails)
+      .values({
+        teamId,
+        from: "Acme <a@acme.dev>",
+        to: ["old@example.com"],
+        subject: "s",
+        latestStatus: "queued",
+        createdAt: new Date(Date.now() - 25 * 86_400_000),
+        scheduledAt: new Date(Date.now() + 3_600_000),
+      })
+      .returning({ id: schema.emails.id });
+    if (!old) throw new Error("insert failed");
+    // 10 days out is within 30 days of now but past creation + 30 days.
+    const res = await patch(old.id, {
+      scheduled_at: new Date(Date.now() + 10 * 86_400_000).toISOString(),
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      message: expect.stringMatching(/30 days after the email was created/),
+    });
+    const ok = await patch(old.id, {
+      scheduled_at: new Date(Date.now() + 4 * 86_400_000).toISOString(),
+    });
+    expect(ok.status).toBe(200);
+  });
+
   it("re-validates the 30-day cap and the accepted forms", async () => {
     const id = await scheduleEmail("resched6@example.com");
     const tooFar = await patch(id, {
@@ -693,14 +727,71 @@ describe("attachments and custom headers", () => {
     });
   });
 
-  it("rejects reserved transport headers case-insensitively", async () => {
-    for (const name of ["From", "bCC", "list-UNSUBSCRIBE", "Content-Type", "X-SES-SOURCE-ARN"]) {
+  it("rejects every header outside the allowlist, case-insensitively", async () => {
+    for (const name of [
+      "From",
+      "bCC",
+      "list-UNSUBSCRIBE",
+      "List-Id",
+      "Content-Type",
+      "X-SES-SOURCE-ARN",
+      "X-MillionSend-Email-Id",
+      "Resent-From",
+      "Authentication-Results",
+      "ARC-Seal",
+      "Received-SPF",
+      "Disposition-Notification-To",
+      "Return-Receipt-To",
+      "Errors-To",
+      "Return-Path",
+    ]) {
       const res = await post({ ...validBody, headers: { [name]: "x" } });
-      expect(res.status).toBe(422);
+      expect(res.status, name).toBe(422);
       expect(await res.json()).toMatchObject({
-        message: expect.stringMatching(/reserved header/),
+        message: expect.stringMatching(/not an allowed header/),
       });
     }
+    const ok = await post({
+      ...validBody,
+      to: ["allowed-headers@example.com"],
+      headers: { "In-Reply-To": "<abc@example.com>", "X-Priority": "1" },
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it("rejects control characters in subject, filename and content_type", async () => {
+    const cases: [unknown, RegExp][] = [
+      [{ subject: "a\r\nBcc: evil@example.com" }, /subject.*control characters/],
+      [
+        { attachments: [{ filename: "a\r\nb.txt", content: pdfBase64 }] },
+        /filename.*control characters/,
+      ],
+      [
+        {
+          attachments: [
+            { filename: "a.txt", content: pdfBase64, content_type: "text/plain\r\nX: y" },
+          ],
+        },
+        /content_type.*media type/,
+      ],
+      [
+        { attachments: [{ filename: "a.txt", content: pdfBase64, content_type: "plain" }] },
+        /media type/,
+      ],
+    ];
+    for (const [patch, message] of cases) {
+      const res = await post({ ...validBody, ...(patch as object) });
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({ message: expect.stringMatching(message) });
+    }
+    const ok = await post({
+      ...validBody,
+      to: ["params-ok@example.com"],
+      attachments: [
+        { filename: "a.txt", content: pdfBase64, content_type: "text/plain; charset=utf-8" },
+      ],
+    });
+    expect(ok.status).toBe(200);
   });
 
   it("rejects header values that could smuggle extra headers", async () => {
@@ -747,13 +838,224 @@ describe("attachments and custom headers", () => {
   });
 });
 
+describe("recipient validation", () => {
+  const readTo = async (id: string) =>
+    (
+      await db.select({ to: schema.emails.to }).from(schema.emails).where(eq(schema.emails.id, id))
+    )[0]?.to;
+
+  it("rejects entries a MIME builder would expand into extra mailboxes", async () => {
+    const smuggled = [
+      "suppressed@victim.com, other@victim.com <ok@example.com>",
+      "x <evil@victim.com> <ok@example.com>",
+      "ok@example.com, other@example.com",
+      "group: a@example.com, b@example.com;",
+      '"ceo@victim.com" <ok@example.com>',
+      "ok@example.com\r\nBcc: evil@example.com",
+    ];
+    for (const field of ["to", "cc", "bcc", "reply_to"]) {
+      for (const bad of smuggled) {
+        const res = await post({ ...validBody, [field]: [bad] });
+        expect(res.status, `${field}: ${bad}`).toBe(422);
+        expect(await res.json()).toMatchObject({
+          message: expect.stringMatching(/single valid email address/),
+        });
+      }
+    }
+  });
+
+  it("stores each recipient in its canonical single-mailbox form", async () => {
+    const res = await post({
+      ...validBody,
+      to: ['"Bob Example" <bob@example.com>', "  plain@example.com "],
+    });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    expect(await readTo(id)).toEqual(["Bob Example <bob@example.com>", "plain@example.com"]);
+  });
+
+  it("caps to + cc + bcc at 50 recipients in total", async () => {
+    const many = (prefix: string, n: number) =>
+      Array.from({ length: n }, (_, i) => `${prefix}${i}@example.com`);
+    const over = await post({ ...validBody, to: many("to", 30), cc: many("cc", 21) });
+    expect(over.status).toBe(422);
+    expect(await over.json()).toMatchObject({
+      message: expect.stringMatching(/cannot exceed 50 recipients/),
+    });
+    expect((await post({ ...validBody, to: many("to", 30), cc: many("cc", 20) })).status).toBe(200);
+  });
+});
+
+describe("quota backlog cap", () => {
+  it("429s daily_quota_exceeded once the parked backlog is full, on single and batch sends", async () => {
+    // Free plan: 100/day, backlog capped at 3 days' worth.
+    await db
+      .update(schema.usageCounters)
+      .set({ accepted: 100 })
+      .where(eq(schema.usageCounters.teamId, teamId));
+    const parked = await db
+      .select({ id: schema.emails.id })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, teamId))
+      .then((rows) => rows.length);
+    const filler = await db
+      .insert(schema.emails)
+      .values(
+        Array.from({ length: 300 }, () => ({
+          teamId,
+          from: "a@acme.dev",
+          to: ["parked@example.com"],
+          subject: "parked",
+          latestStatus: "queued_quota" as const,
+        })),
+      )
+      .returning({ id: schema.emails.id });
+    expect(parked).toBeLessThan(300);
+
+    const single = await post({ ...validBody, to: ["backlog@example.com"] });
+    expect(single.status).toBe(429);
+    expect(await single.json()).toMatchObject({ statusCode: 429, name: "daily_quota_exceeded" });
+
+    const batch = await app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify([{ ...validBody, to: ["backlog-batch@example.com"] }]),
+    });
+    expect(batch.status).toBe(429);
+    expect(await batch.json()).toMatchObject({
+      name: "daily_quota_exceeded",
+      message: expect.stringMatching(/^emails\.0: /),
+    });
+
+    for (const { id } of filler) await db.delete(schema.emails).where(eq(schema.emails.id, id));
+    await db
+      .update(schema.usageCounters)
+      .set({ accepted: 0 })
+      .where(eq(schema.usageCounters.teamId, teamId));
+  });
+});
+
+describe("deliverability guardrail on transactional sends", () => {
+  let pausedToken: string;
+  let pausedTeam: string;
+
+  beforeAll(async () => {
+    pausedTeam = await createTeam(db, "paused-team");
+    await db.insert(schema.domains).values({
+      teamId: pausedTeam,
+      name: "paused.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const key = generateApiKey();
+    pausedToken = key.token;
+    await db.insert(schema.apiKeys).values({
+      teamId: pausedTeam,
+      name: "p",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    // 10% bounce over 200 sends: past the free plan's 100-send floor, under
+    // the self-host default of 1000.
+    await db.insert(schema.usageCounters).values({
+      teamId: pausedTeam,
+      day: utcDay(),
+      accepted: 200,
+      sent: 200,
+      bounced: 20,
+      complained: 0,
+    });
+  });
+
+  const body = { from: "P <a@paused.dev>", to: ["x@example.com"], subject: "s", text: "t" };
+  const send = (target: ReturnType<typeof createApi>, path: string, payload: unknown) =>
+    target.request(path, {
+      method: "POST",
+      headers: { authorization: `Bearer ${pausedToken}`, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+  it("403s sending_paused on POST /emails and /emails/batch for a paused cloud team", async () => {
+    const single = await send(app, "/emails", body);
+    expect(single.status).toBe(403);
+    expect(await single.json()).toMatchObject({ statusCode: 403, name: "sending_paused" });
+    const batch = await send(app, "/emails/batch", [body]);
+    expect(batch.status).toBe(403);
+    const rows = await db
+      .select({ id: schema.emails.id })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, pausedTeam));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("uses the default floor on self-host, where plans do not apply", async () => {
+    const selfHost = createApi({ db, keyring, isCloud: false, enqueueEmailSend: async () => {} });
+    expect((await send(selfHost, "/emails", body)).status).toBe(200);
+  });
+});
+
+describe("DELETE /emails/{id}", () => {
+  const del = (id: string) =>
+    app.request(`/emails/${id}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+  it("deletes the row and its events, then reads as gone", async () => {
+    const res = await post({ ...validBody, to: ["delete-me@example.com"] });
+    const { id } = (await res.json()) as { id: string };
+    await db
+      .insert(schema.emailEvents)
+      .values({ emailId: id, type: "queued", occurredAt: new Date(), data: {} });
+
+    const deleted = await del(id);
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ object: "email", id, deleted: true });
+
+    const read = await app.request(`/emails/${id}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(read.status).toBe(404);
+    expect(
+      await db.select().from(schema.emailEvents).where(eq(schema.emailEvents.emailId, id)),
+    ).toHaveLength(0);
+    expect((await del(id)).status).toBe(404);
+  });
+
+  it("404s a cross-team email without touching it", async () => {
+    const otherTeam = await createTeam(db, "delete-other");
+    const [foreign] = await db
+      .insert(schema.emails)
+      .values({
+        teamId: otherTeam,
+        from: "A <a@other.dev>",
+        to: ["x@example.com"],
+        subject: "s",
+        latestStatus: "sent",
+      })
+      .returning({ id: schema.emails.id });
+    expect((await del(foreign?.id ?? "")).status).toBe(404);
+    expect(
+      await db
+        .select()
+        .from(schema.emails)
+        .where(eq(schema.emails.id, foreign?.id ?? "")),
+    ).toHaveLength(1);
+  });
+});
+
 describe("openapi", () => {
   it("serves the generated spec without auth", async () => {
     const res = await app.request("/openapi.json");
     expect(res.status).toBe(200);
-    const spec = (await res.json()) as { paths: Record<string, unknown> };
+    const spec = (await res.json()) as { paths: Record<string, Record<string, unknown>> };
     expect(Object.keys(spec.paths)).toEqual(
       expect.arrayContaining(["/emails", "/emails/{id}", "/emails/batch", "/emails/{id}/cancel"]),
+    );
+    expect(Object.keys(spec.paths["/emails/{id}"] ?? {})).toEqual(
+      expect.arrayContaining(["get", "patch", "delete"]),
     );
   });
 });

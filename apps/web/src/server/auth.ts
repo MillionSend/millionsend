@@ -1,13 +1,16 @@
 import { oauthProvider } from "@better-auth/oauth-provider";
-import { env } from "@millionsend/config";
+import { env, isCloudDeployment, parseCommaList } from "@millionsend/config";
 import { ALL_TEAMS_GRANT, isLoopbackUrl, MCP_SCOPES } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { type BetterAuthPlugin, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { jwt } from "better-auth/plugins";
+import { and, eq, ne, notExists } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { headers } from "next/headers";
-import { mcpResourceUrl } from "@/lib/api-base-url";
+import { mcpResourceUrl, resolveBaseUrl } from "@/lib/api-base-url";
+import { httpOrigin } from "@/lib/http-url";
 import { getActiveMembership, listMemberships } from "./membership";
 import {
   passwordRecoveryEnabled,
@@ -18,21 +21,67 @@ import {
 
 export type Auth = ReturnType<typeof createAuth>;
 
+export { resolveBaseUrl };
+
 /**
- * Better Auth rejects sign-ins from origins outside its trusted set. Production
- * must never silently trust localhost; development and tests retain the local
- * fallback for the no-config quickstart.
+ * How recently a session must have been established for step-up actions
+ * (minting API keys, deleting the account). Better Auth applies it to its own
+ * sensitive endpoints; freshProcedure applies it to tRPC.
  */
-export function resolveBaseUrl(
-  appBaseUrl: string | undefined,
-  nodeEnv = process.env.NODE_ENV,
-): string {
-  if (appBaseUrl) return appBaseUrl;
-  if (nodeEnv === "production") {
-    throw new Error("APP_BASE_URL is required in production");
+export const SESSION_FRESH_AGE_SECONDS = 15 * 60;
+
+/**
+ * Registration metadata rendered as links on the consent screen. RFC 7591
+ * lets the server ignore metadata it does not accept, so instead of failing
+ * the registration these are dropped unless https and on the origin of a
+ * redirect URI: a name plus a link to an arbitrary site on the trusted host
+ * is the consent-phishing recipe, while a link to the callback's own origin
+ * says nothing the redirect does not. Native (loopback) clients therefore
+ * never get a link, which is fine — they have no web origin to vouch for.
+ */
+const CLIENT_LINK_FIELDS = ["client_uri", "logo_uri", "tos_uri", "policy_uri"] as const;
+
+/**
+ * Refuses account deletion while the user is the only owner of any team:
+ * the team would be left with nobody able to administer or delete it.
+ */
+export async function assertNotSoleOwner(db: Db, userId: string): Promise<void> {
+  const tm = schema.teamMembers;
+  const others = alias(schema.teamMembers, "others");
+  const [stranded] = await db
+    .select({ teamId: tm.teamId })
+    .from(tm)
+    .where(
+      and(
+        eq(tm.userId, userId),
+        eq(tm.role, "owner"),
+        notExists(
+          db
+            .select({ one: others.userId })
+            .from(others)
+            .where(
+              and(
+                eq(others.teamId, tm.teamId),
+                eq(others.role, "owner"),
+                ne(others.userId, userId),
+              ),
+            ),
+        ),
+      ),
+    )
+    .limit(1);
+  if (stranded) {
+    throw new APIError("FORBIDDEN", {
+      message: "Transfer ownership of your teams before deleting your account.",
+    });
   }
-  console.warn("APP_BASE_URL is not set: using http://localhost:3000 outside production.");
-  return "http://localhost:3000";
+}
+
+/** Under SKIP_ENV_VALIDATION the env proxy carries the raw string, not the parsed list. */
+function trustedProxies(): string[] {
+  const raw: unknown = env.TRUSTED_PROXIES;
+  if (Array.isArray(raw)) return raw;
+  return parseCommaList(typeof raw === "string" ? raw : undefined) ?? ["127.0.0.1", "::1"];
 }
 
 /**
@@ -140,8 +189,17 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
       },
     }),
     session: {
+      freshAge: SESSION_FRESH_AGE_SECONDS,
       additionalFields: {
         activeTeamId: { type: "string", required: false, input: false },
+      },
+    },
+    user: {
+      deleteUser: {
+        enabled: true,
+        beforeDelete: async (user) => {
+          await assertNotSoleOwner(db, user.id);
+        },
       },
     },
     plugins: [
@@ -215,17 +273,26 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
     /**
      * Windows are seconds; storage is Better Auth's in-memory default
      * (per-process — fine for the single web replica this deploy runs).
-     * The IP key comes from the default x-forwarded-for header, matching the
-     * nginx config in SELF_HOSTING.md; a client-appended (spoofed) multi-value
-     * chain is rejected by Better Auth and collapses into one shared bucket,
-     * so spoofing cannot widen a limit.
+     * The IP key comes from `advanced.ipAddress` below: without a trusted
+     * proxy list Better Auth drops any multi-hop X-Forwarded-For chain into
+     * one shared bucket, so a client that appends its own hop could lock
+     * everyone out of sign-in.
      */
     rateLimit: {
       customRules: {
         "/request-password-reset": { window: 15 * 60, max: 3 },
         "/reset-password": { window: 15 * 60, max: 5 },
         "/reset-password/*": { window: 15 * 60, max: 5 },
+        "/oauth2/register": { window: 15 * 60, max: 10 },
       },
+    },
+    advanced: {
+      // Cloud sits behind Cloudflare only (the firewall admits nothing else),
+      // which sets the single-value cf-connecting-ip. Self-host walks the
+      // forwarded chain past the operator's declared proxies.
+      ipAddress: isCloudDeployment()
+        ? { ipAddressHeaders: ["cf-connecting-ip"] }
+        : { trustedProxies: trustedProxies() },
     },
     socialProviders: {
       ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
@@ -254,13 +321,28 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
       // redirect is the RFC 8252 signature of a native app, so classify it as one.
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path !== "/oauth2/register") return;
-        const body = ctx.body as
-          | { application_type?: string; redirect_uris?: string[] }
-          | undefined;
-        const loopbackOnly = body?.redirect_uris?.every(
-          (uri) => uri.startsWith("http://") && isLoopbackUrl(uri),
-        );
-        if (!body || body.application_type || !loopbackOnly) return;
+        const body = ctx.body as Record<string, unknown> | undefined;
+        if (!body) return;
+        const redirects = Array.isArray(body.redirect_uris)
+          ? body.redirect_uris.filter((uri): uri is string => typeof uri === "string")
+          : [];
+        const redirectOrigins = new Set(redirects.map(httpOrigin));
+        for (const field of CLIENT_LINK_FIELDS) {
+          const value = body[field];
+          if (typeof value !== "string") continue;
+          const origin = httpOrigin(value);
+          if (!value.startsWith("https://") || origin === null || !redirectOrigins.has(origin)) {
+            // In place: a body returned from the hook is defu-merged over the
+            // original, so a key merely absent from it would survive.
+            delete body[field];
+          }
+        }
+        if (
+          body.application_type ||
+          !redirects.every((uri) => uri.startsWith("http://") && isLoopbackUrl(uri))
+        ) {
+          return;
+        }
         return { context: { body: { ...body, application_type: "native" } } };
       }),
       // Registration persists a scope list (the client's own, or the server's

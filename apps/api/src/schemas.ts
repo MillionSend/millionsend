@@ -1,7 +1,8 @@
 import { z } from "@hono/zod-openapi";
 import {
   DAY_MS,
-  extractAddrSpec,
+  formatMailbox,
+  parseMailbox,
   parseScheduledAt,
   parseSingleSender,
   SCHEDULED_AT_FORMS,
@@ -15,8 +16,19 @@ import { SES_REGIONS } from "@millionsend/ses";
  * not drift — the contract test runs the official `resend` SDK against us.
  */
 
-const emailAddress = z.string().refine((v) => z.email().safeParse(extractAddrSpec(v)).success, {
-  message: "must be a valid email address (display names allowed)",
+/**
+ * SECURITY: every recipient is a trust boundary too — suppression, opt-out
+ * and quota checks all key off the parsed address, so an entry the MIME
+ * builder would split into several mailboxes ('a@x.com, b@y.com <c@z.com>')
+ * must be rejected outright. Stored in the canonical single-mailbox form.
+ */
+const emailAddress = z.string().transform((v, ctx) => {
+  const mailbox = parseMailbox(v);
+  if (!mailbox) {
+    ctx.addIssue({ code: "custom", message: "must be a single valid email address" });
+    return z.NEVER;
+  }
+  return formatMailbox(mailbox);
 });
 
 /**
@@ -29,12 +41,24 @@ const fromAddress = z.string().refine((v) => parseSingleSender(v) !== null, {
   message: "from must be a single address",
 });
 
+// Shape first (string | string[]), addresses second, so a bad entry reports
+// its own message instead of the union's generic "Invalid input".
 const recipientList = z
-  .union([emailAddress, z.array(emailAddress).min(1).max(50)])
-  .transform((v) => (Array.isArray(v) ? v : [v]));
+  .union([z.string(), z.array(z.string()).min(1).max(50)])
+  .transform((v) => (Array.isArray(v) ? v : [v]))
+  .pipe(z.array(emailAddress));
+
+/** SES rejects a message with more destinations than this, across to+cc+bcc. */
+export const MAX_RECIPIENTS_PER_EMAIL = 50;
 
 // Strict base64: canonical alphabet, correct padding, no whitespace.
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+// RFC 7231 media type: type "/" subtype, optional ; token=token|"quoted" parameters.
+const MEDIA_TYPE_TOKEN = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
+const MEDIA_TYPE_RE = new RegExp(
+  `^${MEDIA_TYPE_TOKEN}/${MEDIA_TYPE_TOKEN}(?:\\s*;\\s*${MEDIA_TYPE_TOKEN}=(?:${MEDIA_TYPE_TOKEN}|"[^"\\r\\n]*"))*$`,
+);
 
 /**
  * Wire shape from resend's parseEmailToApiOptions. Only inline base64
@@ -50,6 +74,20 @@ const attachmentSchema = z
     path: z.string().optional(),
   })
   .superRefine((a, ctx) => {
+    if (hasHeaderControlChar(a.filename)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["filename"],
+        message: "filename must not contain control characters",
+      });
+    }
+    if (a.content_type !== undefined && !MEDIA_TYPE_RE.test(a.content_type)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["content_type"],
+        message: "content_type must be a media type like application/pdf",
+      });
+    }
     if (a.path !== undefined) {
       ctx.addIssue({
         code: "custom",
@@ -80,35 +118,35 @@ const attachmentSchema = z
   });
 
 /**
- * Headers the transport owns: overriding them could forge identity or routing
- * (From, Return-Path, Bcc), break MIME assembly (Content-Type), or strip
- * compliance headers (List-Unsubscribe). Rejected case-insensitively; the
- * worker additionally reassigns its own headers last (defense in depth).
+ * Custom headers are allowlisted, not denylisted: mail leaves through a
+ * shared SES identity, so a tenant must not be able to forge authentication
+ * verdicts (Authentication-Results, ARC-*, Received-SPF), alternate senders
+ * (Resent-*, Sender, Return-Path), read-receipt targets
+ * (Disposition-Notification-To, Return-Receipt-To, Errors-To) or list
+ * headers the transport owns. Allowed: any X-* header except the X-SES-* and
+ * X-MillionSend-* families, plus this vetted set of threading/priority
+ * headers. Matched case-insensitively; the worker still reassigns its own
+ * headers last (defense in depth).
  */
-const RESERVED_HEADERS = new Set([
-  "from",
-  "sender",
-  "to",
-  "cc",
-  "bcc",
-  "reply-to",
-  "subject",
-  "date",
-  "message-id",
-  "mime-version",
-  "content-type",
-  "content-transfer-encoding",
-  "content-disposition",
-  "return-path",
-  "received",
-  "dkim-signature",
-  "list-unsubscribe",
-  "list-unsubscribe-post",
-  "list-id",
-  "precedence",
-  "auto-submitted",
-  "x-millionsend-email-id",
+const ALLOWED_HEADERS = new Set([
+  "in-reply-to",
+  "references",
+  "importance",
+  "priority",
+  "comments",
+  "keywords",
+  "organization",
 ]);
+
+const ALLOWED_HEADERS_HINT = `X-* (except X-SES-*) or ${[...ALLOWED_HEADERS].join(", ")}`;
+
+function isAllowedHeaderName(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (lower.startsWith("x-")) {
+    return !lower.startsWith("x-ses-") && !lower.startsWith("x-millionsend-");
+  }
+  return ALLOWED_HEADERS.has(lower);
+}
 
 // RFC 5322 field name: printable US-ASCII except colon.
 const HEADER_NAME_RE = /^[!-9;-~]+$/;
@@ -124,18 +162,17 @@ function hasHeaderControlChar(value: string): boolean {
 
 const customHeadersSchema = z.record(z.string(), z.string()).superRefine((headers, ctx) => {
   for (const [name, value] of Object.entries(headers)) {
-    const lower = name.toLowerCase();
-    if (RESERVED_HEADERS.has(lower) || lower.startsWith("x-ses-")) {
-      ctx.addIssue({
-        code: "custom",
-        path: [name],
-        message: `"${name}" is a reserved header set by the transport`,
-      });
-    } else if (!HEADER_NAME_RE.test(name)) {
+    if (!HEADER_NAME_RE.test(name)) {
       ctx.addIssue({
         code: "custom",
         path: [name],
         message: `"${name}" is not a valid header name`,
+      });
+    } else if (!isAllowedHeaderName(name)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [name],
+        message: `"${name}" is not an allowed header; use ${ALLOWED_HEADERS_HINT}`,
       });
     }
     if (hasHeaderControlChar(value)) {
@@ -180,7 +217,13 @@ export const sendEmailRequestSchema = z
     to: recipientList
       .describe("Recipient address or list of up to 50")
       .openapi({ example: ["delivered@resend.dev"] }),
-    subject: z.string().min(1).describe("Subject line"),
+    subject: z
+      .string()
+      .min(1)
+      .refine((v) => !hasHeaderControlChar(v), {
+        message: "subject must not contain control characters",
+      })
+      .describe("Subject line"),
     html: z.string().optional().describe("HTML body; at least one of html/text is required"),
     text: z.string().optional().describe("Plain-text body; at least one of html/text is required"),
     cc: recipientList.optional().describe("Cc address or list"),
@@ -216,6 +259,10 @@ export const sendEmailRequestSchema = z
   .refine((v) => v.html !== undefined || v.text !== undefined, {
     message: "Either html or text must be provided",
   })
+  .refine(
+    (v) => v.to.length + (v.cc?.length ?? 0) + (v.bcc?.length ?? 0) <= MAX_RECIPIENTS_PER_EMAIL,
+    { message: `to, cc and bcc together cannot exceed ${MAX_RECIPIENTS_PER_EMAIL} recipients` },
+  )
   .openapi("SendEmailRequest");
 
 export type SendEmailRequest = z.infer<typeof sendEmailRequestSchema>;
@@ -259,6 +306,10 @@ export const updateEmailRequestSchema = z
 export const updateEmailResponseSchema = z
   .object({ object: z.literal("email"), id: z.uuid() })
   .openapi("UpdateEmailResponse");
+
+export const removeEmailResponseSchema = z
+  .object({ object: z.literal("email"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveEmailResponse");
 
 const emailListItemSchema = z.object({
   id: z.uuid(),
@@ -482,9 +533,7 @@ export const removeContactPropertyResponseSchema = z
  * set means every contact of the team.
  */
 
-const replyToList = z
-  .union([emailAddress, z.array(emailAddress).min(1).max(50)])
-  .transform((v) => (Array.isArray(v) ? v : [v]));
+const replyToList = recipientList;
 
 export const createBroadcastRequestSchema = z
   .object({

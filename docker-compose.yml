@@ -3,7 +3,7 @@ services:
     image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     environment:
       POSTGRES_USER: millionsend
-      POSTGRES_PASSWORD: millionsend
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-millionsend}
       POSTGRES_DB: millionsend
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -28,11 +28,19 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    # Above the supervisor's 35 s child-exit budget (scripts/start.mjs).
+    stop_grace_period: 45s
     init: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/web/.next/cache
+      - /app/apps/docs/.next/cache
+      - /app/apps/docs/.source
 
   smtp:
     build: .
@@ -56,6 +64,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/web/.next/cache
+      - /app/apps/docs/.next/cache
+      - /app/apps/docs/.source
 
   backup:
     # Optional scheduled pg_dump to S3-compatible storage. Stays disabled (the
@@ -69,6 +83,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    volumes:
+      # pg_dump stages the dump on disk before upload; a volume rather than
+      # tmpfs so a large database does not land in RAM.
+      - backup-scratch:/tmp
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +108,13 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/apps/web/.next/cache
+      - /app/apps/docs/.next/cache
+      - /app/apps/docs/.source
 
 volumes:
   pgdata:
+  backup-scratch:

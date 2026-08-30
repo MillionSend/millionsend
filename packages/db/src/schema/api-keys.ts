@@ -1,4 +1,12 @@
-import { index, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  type AnyPgColumn,
+  index,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { domains } from "./domains.js";
 import { teams } from "./teams.js";
 
@@ -26,6 +34,11 @@ export const apiKeys = pgTable(
     // restrict, never set-null: deleting a domain must not silently widen a
     // scoped key into an all-domains key — the delete flow revokes such keys first.
     domainId: uuid("domain_id").references(() => domains.id, { onDelete: "restrict" }),
+    // Which API key minted this one (null for dashboard-created keys): a
+    // leaked key can mint descendants, and this is the trail to revoke them.
+    createdByApiKeyId: uuid("created_by_api_key_id").references((): AnyPgColumn => apiKeys.id, {
+      onDelete: "set null",
+    }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),

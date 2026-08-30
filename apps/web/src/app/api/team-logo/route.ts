@@ -1,5 +1,7 @@
 import { getDb, schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
+import { appOrigin } from "@/lib/api-base-url";
+import { isCrossOriginMutation } from "@/lib/http-url";
 import { sniffImageType, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
 import { getAuth } from "@/server/auth";
 import { listMemberships } from "@/server/membership";
@@ -36,6 +38,7 @@ async function requireTeamAdmin(request: Request, teamId: string): Promise<Admin
 
 export async function POST(request: Request) {
   if (!uploadsEnabled()) return new Response(null, { status: 404 });
+  if (isCrossOriginMutation(request, appOrigin())) return new Response(null, { status: 403 });
 
   let form: FormData;
   try {
@@ -75,6 +78,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   if (!uploadsEnabled()) return new Response(null, { status: 404 });
+  if (isCrossOriginMutation(request, appOrigin())) return new Response(null, { status: 403 });
 
   const teamId = new URL(request.url).searchParams.get("teamId");
   if (!teamId) return new Response(null, { status: 400 });

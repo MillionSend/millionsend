@@ -8,15 +8,28 @@ import { GCM_IV_LENGTH, GCM_TAG_LENGTH } from "./constants.js";
  * KEK rotation re-wraps DEKs without re-encrypting bodies.
  */
 export interface Keyring {
-  wrapDek(dek: Buffer): Promise<{ wrapped: Buffer; keyVersion: number }>;
-  unwrapDek(wrapped: Buffer, keyVersion: number): Promise<Buffer>;
+  wrapDek(dek: Buffer, context?: DekContext): Promise<{ wrapped: Buffer; keyVersion: number }>;
+  unwrapDek(wrapped: Buffer, keyVersion: number, context?: DekContext): Promise<Buffer>;
   /**
    * Present when the keyring supplies the DEK itself so it can serve a
    * cached (DEK, wrapped) pair — wrapping through KMS costs a network
    * round-trip per call. envelope.ts prefers this over wrapDek when present;
    * the returned dek is the caller's copy to scrub.
    */
-  generateWrappedDek?(): Promise<{ dek: Buffer; wrapped: Buffer; keyVersion: number }>;
+  generateWrappedDek?(
+    context?: DekContext,
+  ): Promise<{ dek: Buffer; wrapped: Buffer; keyVersion: number }>;
+}
+
+/**
+ * What a wrapped DEK is for. Keyrings that can bind key material to it (KMS
+ * encryption context) refuse to unwrap under a different context, so a DEK
+ * lifted from one team's row cannot be unwrapped for another. Absent on
+ * legacy envelopes sealed before binding existed.
+ */
+export interface DekContext {
+  teamId: string;
+  purpose: string;
 }
 
 export class EnvKeyring implements Keyring {
@@ -41,7 +54,13 @@ export class EnvKeyring implements Keyring {
   }
 
   static fromBase64(kekBase64: string): EnvKeyring {
-    return new EnvKeyring(new Map([[1, Buffer.from(kekBase64, "base64")]]), 1);
+    const kek = Buffer.from(kekBase64, "base64");
+    // Buffer.from skips foreign characters, so a mangled key can decode to
+    // 32 bytes that differ from what sealed existing rows; canonical only.
+    if (kek.length !== 32 || kek.toString("base64") !== kekBase64) {
+      throw new Error("KEK must be 32 bytes of canonical base64");
+    }
+    return new EnvKeyring(new Map([[1, kek]]), 1);
   }
 
   // async so every failure path rejects — callers' .catch must never be

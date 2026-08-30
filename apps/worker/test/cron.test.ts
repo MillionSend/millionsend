@@ -310,3 +310,29 @@ it("retention purge prefers the instance setting over the env-derived default", 
   await db.insert(schema.instanceSettings).values({ emailRetentionDays: 10 });
   expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(1);
 });
+
+it("reconcile fails a claim that never reached SES (worker killed mid-send) with an event", async () => {
+  const now = new Date();
+  const old = (mins: number) => new Date(now.getTime() - mins * 60 * 1000);
+  const base = { teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" };
+  const [interrupted] = await db
+    .insert(schema.emails)
+    .values({ ...base, latestStatus: "queued", createdAt: old(60), sentAt: old(30) })
+    .returning({ id: schema.emails.id });
+  // A fresh claim is a send in progress; hands off.
+  const [inFlight] = await db
+    .insert(schema.emails)
+    .values({ ...base, latestStatus: "queued", createdAt: old(60), sentAt: old(1) })
+    .returning({ id: schema.emails.id });
+  if (!interrupted || !inFlight) throw new Error("insert failed");
+
+  await reconcileStalledSends(db, { enqueueSend: async () => {}, now });
+
+  expect(await statusOf(interrupted.id)).toBe("failed");
+  expect(await statusOf(inFlight.id)).toBe("queued");
+  const events = await db
+    .select()
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, interrupted.id));
+  expect(events.map((e) => [e.type, e.data?.reason])).toEqual([["failed", "send_interrupted"]]);
+});

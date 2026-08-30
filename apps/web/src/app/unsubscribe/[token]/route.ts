@@ -1,6 +1,7 @@
-import { recordContactActivity } from "@millionsend/core";
+import { hashRecipient, recordContactActivity } from "@millionsend/core";
 import { getDb, schema } from "@millionsend/db";
 import { eq, sql } from "drizzle-orm";
+import { appBaseUrl } from "@/lib/api-base-url";
 import { postUnsubscribeLocation, preferenceTopics, targetForToken } from "../lookup";
 
 /**
@@ -14,11 +15,14 @@ import { postUnsubscribeLocation, preferenceTopics, targetForToken } from "../lo
  * and POST serves the confirm form plus RFC 8058 one-click posts
  * (form-encoded `List-Unsubscribe=One-Click`, which must get a bare 2xx,
  * not a redirect).
+ *
+ * Redirects are built on APP_BASE_URL, never request.url: behind a reverse
+ * proxy that rewrites Host the request URL names the upstream (localhost:3000).
  */
-export async function GET(request: Request, ctx: { params: Promise<{ token: string }> }) {
+export async function GET(_request: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
   return Response.redirect(
-    new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}`, request.url),
+    new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}`, appBaseUrl()),
     302,
   );
 }
@@ -69,7 +73,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
       );
     }
     return Response.redirect(
-      new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}?saved=1`, request.url),
+      new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}?saved=1`, appBaseUrl()),
       303,
     );
   }
@@ -105,6 +109,18 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
         updatedAt: new Date(),
       })
       .where(eq(schema.contacts.id, target.contactId));
+    // The contact flag is mutable and dies with the row; the suppression is
+    // the retained opt-out record that outlives delete/re-import and API
+    // re-subscribes. Repeats hit the (team, hash) unique index and no-op.
+    await db
+      .insert(schema.suppressions)
+      .values({
+        teamId: target.teamId,
+        email: target.email,
+        emailHash: hashRecipient(target.email),
+        reason: "one_click_unsubscribe",
+      })
+      .onConflictDoNothing();
     // alreadyDone guards the timeline: scanner re-hits must not duplicate the event.
     if (!target.alreadyDone) {
       await recordContactActivity(db, {
@@ -118,8 +134,5 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
   if (form.get("List-Unsubscribe") === "One-Click") {
     return new Response(null, { status: 200 });
   }
-  return Response.redirect(
-    postUnsubscribeLocation(request.url, token, target.customization.redirectUrl),
-    303,
-  );
+  return Response.redirect(postUnsubscribeLocation(token, target.customization.redirectUrl), 303);
 }

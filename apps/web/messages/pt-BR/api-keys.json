@@ -28,7 +28,8 @@
     "domain": "Domínio",
     "domainAny": "Qualquer domínio",
     "submit": "Criar chave",
-    "permissionTooltip": "Acesso total gerencia tudo pela API — domínios, contatos, transmissões, chaves.\n\nAcesso de envio só pode enviar e-mails."
+    "permissionTooltip": "Acesso total gerencia tudo pela API — domínios, contatos, transmissões, chaves.\n\nAcesso de envio só pode enviar e-mails.",
+    "staleSession": "Sua sessão é antiga demais para criar uma chave. Entre novamente e tente de novo."
   },
   "reveal": {
     "title": "Chave de API criada",

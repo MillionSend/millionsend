@@ -3,6 +3,7 @@ import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, exists, or } from "drizzle-orm";
 import { z } from "zod";
+import { listMemberships } from "../membership";
 import { router, teamProcedure } from "../trpc";
 
 /**
@@ -64,7 +65,10 @@ export const connectedAppsRouter = router({
     }));
   }),
 
-  // Members revoke their own grants; owners/admins can cut off anyone's.
+  // Members revoke their own grants; owners/admins can cut off anyone's —
+  // except an all-teams grant, which only someone who administers every team
+  // the holder belongs to may revoke, since revoking it cuts the client off
+  // in teams outside this admin's reach.
   revoke: teamProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
@@ -78,8 +82,24 @@ export const connectedAppsRouter = router({
         .from(schema.oauthConsent)
         .where(and(eq(schema.oauthConsent.id, input.id), grantVisibleFromTeam(ctx.db, ctx.teamId)));
       if (!consent) throw new TRPCError({ code: "NOT_FOUND" });
-      if (consent.userId !== ctx.session.user.id && ctx.role === "member") {
-        throw new TRPCError({ code: "FORBIDDEN" });
+      if (consent.userId !== ctx.session.user.id) {
+        if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
+        if (consent.referenceId === ALL_TEAMS_GRANT && consent.userId) {
+          const [holderTeams, adminTeams] = await Promise.all([
+            listMemberships(ctx.db, consent.userId),
+            listMemberships(ctx.db, ctx.session.user.id),
+          ]);
+          const administered = new Set(
+            adminTeams.filter((m) => m.role !== "member").map((m) => m.teamId),
+          );
+          if (holderTeams.some((m) => !administered.has(m.teamId))) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message:
+                "This grant also covers teams you do not administer. Only its holder can revoke it.",
+            });
+          }
+        }
       }
       await ctx.db.transaction(async (tx) => {
         // Tokens carry the grant's own referenceId — ctx.teamId for a

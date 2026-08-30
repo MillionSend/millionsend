@@ -1,6 +1,7 @@
 import {
   EMAIL_RETENTION_DAYS_DEFAULT,
   env,
+  isCloudDeployment,
   SES_MAX_SEND_RATE_DEFAULT,
   trackingSubdomainsSupported,
 } from "@millionsend/config";
@@ -31,20 +32,28 @@ function effectiveSetting(dbValue: number | null, envRaw: string | undefined, fa
   return { value: fallback, source: "default" as const };
 }
 
-function isCloudDeployment(): boolean {
-  return process.env.IS_CLOUD === "true" || process.env.IS_CLOUD === "1";
-}
-
-async function canManageInstance(ctx: {
+type OperatorCtx = {
   db: Parameters<typeof isInstanceOperator>[0];
   session: { user: { id: string } };
-  role: "owner" | "admin" | "member";
-}): Promise<boolean> {
+};
+
+async function canManageInstance(ctx: OperatorCtx & { role: "owner" | "admin" | "member" }) {
   return (
     !isCloudDeployment() &&
     ctx.role !== "member" &&
     (await isInstanceOperator(ctx.db, ctx.session.user.id))
   );
+}
+
+/**
+ * Instance-wide facts (the platform's SES account, env configuration) are
+ * the operator's, not any tenant's: in cloud they do not exist for anyone
+ * else. Self-host members may read them — the instance is theirs.
+ */
+async function assertInstanceVisible(ctx: OperatorCtx): Promise<void> {
+  if (isCloudDeployment() && !(await isInstanceOperator(ctx.db, ctx.session.user.id))) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
 }
 
 /**
@@ -75,34 +84,54 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
      * AWS_DEFAULT_CHAIN=true — an unset env merely gets the chain "attempted",
      * so the dashboard warns instead of assuming it works.
      */
-    awsReadiness: teamProcedure.query(() => ({
-      credentialsConfigured: awsCredentialsConfigured(),
-      region: env.AWS_REGION,
-    })),
+    awsReadiness: teamProcedure.query(async ({ ctx }) => {
+      await assertInstanceVisible(ctx);
+      return {
+        credentialsConfigured: awsCredentialsConfigured(),
+        region: env.AWS_REGION,
+      };
+    }),
 
-    /** Env-side SES settings the setup page reports alongside awsReadiness. */
-    sesEnv: teamProcedure.query(() => ({
-      snsTopicsConfigured: Boolean(env.SNS_TOPIC_ARNS?.length),
-      configurationSetConfigured: Boolean(env.SES_CONFIGURATION_SET),
-      maxSendRate: env.SES_MAX_SEND_RATE,
-      // The setup page bakes the SNS subscription endpoint into its generated
-      // setup script; null means the events section is omitted.
+    /**
+     * Deployment facts every tenant's screens need, cloud included — nothing
+     * here describes the operator's account.
+     */
+    features: teamProcedure.query(() => ({
+      // Region new domain identities are provisioned in.
+      region: env.AWS_REGION,
+      // Local tracking hosts get a "links will not resolve" warning.
       appBaseUrl: env.APP_BASE_URL ?? null,
-      // Why the sign-in screen may hide "Forgot password?": recovery needs
-      // SES credentials plus AUTH_EMAIL_FROM.
-      passwordRecoveryEnabled: passwordRecoveryEnabled(),
       // Why the domain screen may omit the branded tracking subdomain field.
       trackingSubdomainsSupported: trackingSubdomainsSupported(),
       // Why cloud domains without a tracking subdomain ship untracked links.
       trackingRequiresSubdomain: isCloudDeployment(),
     })),
 
+    /** Env-side SES settings the setup page reports alongside awsReadiness. */
+    sesEnv: teamProcedure.query(async ({ ctx }) => {
+      await assertInstanceVisible(ctx);
+      return {
+        snsTopicsConfigured: Boolean(env.SNS_TOPIC_ARNS?.length),
+        configurationSetConfigured: Boolean(env.SES_CONFIGURATION_SET),
+        maxSendRate: env.SES_MAX_SEND_RATE,
+        // The setup page bakes the SNS subscription endpoint into its
+        // generated setup script; null means the events section is omitted.
+        appBaseUrl: env.APP_BASE_URL ?? null,
+        // Why the sign-in screen may hide "Forgot password?": recovery needs
+        // SES credentials plus AUTH_EMAIL_FROM.
+        passwordRecoveryEnabled: passwordRecoveryEnabled(),
+        trackingSubdomainsSupported: trackingSubdomainsSupported(),
+        trackingRequiresSubdomain: isCloudDeployment(),
+      };
+    }),
+
     /**
      * Live SESv2 GetAccount, run on demand from the SES setup page. AWS
      * failures come back as a typed { ok: false } value — raw SDK errors
      * never propagate to the client as thrown tRPC errors.
      */
-    sesAccount: teamProcedure.query(async () => {
+    sesAccount: teamProcedure.query(async ({ ctx }) => {
+      await assertInstanceVisible(ctx);
       try {
         const overview = await getAccountOverview(deps.accountClient());
         return { ok: true as const, ...overview };
@@ -117,12 +146,13 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
     }),
 
     /**
-     * Instance-wide (NOT team-scoped) operator settings. Reads are open to
-     * any member; writes belong only to the first self-host user (the instance
+     * Instance-wide (NOT team-scoped) operator settings. Self-host members
+     * may read them; writes belong only to the first user (the instance
      * operator), and are never tenant-editable in cloud mode.
      */
     instanceSettings: router({
       get: teamProcedure.query(async ({ ctx }) => {
+        await assertInstanceVisible(ctx);
         const stored = await getInstanceSettings(ctx.db);
         return {
           sesMaxSendRate: effectiveSetting(

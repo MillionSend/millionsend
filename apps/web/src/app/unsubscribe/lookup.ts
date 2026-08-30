@@ -8,6 +8,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, or } from "drizzle-orm";
 import { z } from "zod";
+import { appBaseUrl } from "@/lib/api-base-url";
 import { uploadsEnabled } from "@/server/storage";
 
 /** Per-team customization the hosted confirm page applies; all fields optional. */
@@ -73,15 +74,15 @@ export async function preferenceTopics(
 /**
  * Where the browser lands after a (non-one-click) unsubscribe POST: the team's
  * configured redirect when set, else the in-place done state. Absolute string
- * so it can go straight into a Location header.
+ * (on APP_BASE_URL, never the request's Host) so it can go straight into a
+ * Location header.
  */
-export function postUnsubscribeLocation(
-  requestUrl: string,
-  token: string,
-  redirectUrl: string | null,
-): string {
+export function postUnsubscribeLocation(token: string, redirectUrl: string | null): string {
   if (redirectUrl) return redirectUrl;
-  return new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}?done=1`, requestUrl).toString();
+  return new URL(
+    `/unsubscribe/confirm/${encodeURIComponent(token)}?done=1`,
+    appBaseUrl(),
+  ).toString();
 }
 
 /**
