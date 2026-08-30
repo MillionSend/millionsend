@@ -154,6 +154,11 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
         consentPage: "/oauth/consent",
         scopes: OAUTH_SCOPES,
         resources: [{ identifier: mcpResourceUrl(), allowedScopes: [...MCP_SCOPES] }],
+        // The seeded oauthResource row must track this config: token issuance
+        // intersects requested scopes with the row's allowedScopes, so the
+        // default insertOnly mode would freeze the scope list at first-boot —
+        // every scope shipped later would be silently dropped from tokens.
+        resourceSeedMode: "merge",
         clientRegistrationDefaultResources: [mcpResourceUrl()],
         // MCP clients (Claude Code, Cursor) still self-register via RFC 7591.
         allowDynamicClientRegistration: true,
