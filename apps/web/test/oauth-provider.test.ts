@@ -519,4 +519,63 @@ describe("OAuth authorization server", () => {
     expect(status).toBe(200);
     expect(body.scope).toBe(RESOURCE_SCOPE);
   });
+
+  it("re-syncs the seeded resource's allowedScopes from config on a new boot", async () => {
+    const teamId = await createTeam(db);
+    const { userId, cookie } = await signUp("ada@example.com");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+    // First authorize lazily seeds the oauthResource row.
+    const first = await authorize(clientId, cookie);
+    expect(first.status).toBe(200);
+
+    // A deployment that shipped before a scope existed: the stored row lacks
+    // it. Token issuance intersects with allowedScopes, so without the merge
+    // reseed this would silently strip the newer scopes from every token.
+    await db
+      .update(schema.oauthResource)
+      .set({ allowedScopes: ["emails:send"] })
+      .where(eq(schema.oauthResource.identifier, RESOURCE));
+
+    const rebooted = createAuth(db);
+    const prior = auth;
+    auth = rebooted;
+    try {
+      // Same scopes as the stored consent, so the provider skips the consent
+      // screen and redirects straight to the callback with a code.
+      const verifier = randomBytes(32).toString("base64url");
+      const challenge = createHash("sha256").update(verifier).digest("base64url");
+      const query = new URLSearchParams({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: REDIRECT_URI,
+        scope: SCOPE,
+        state: "xyz",
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        resource: RESOURCE,
+      });
+      const res = await call(`/oauth2/authorize?${query}`, { cookie });
+      const callback = new URL(await redirectTarget(res), BASE);
+      expect(callback.origin + callback.pathname).toBe(REDIRECT_URI);
+      const code = callback.searchParams.get("code") ?? "";
+      const { status, body } = await token({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: REDIRECT_URI,
+        client_id: clientId,
+        code_verifier: verifier,
+        resource: RESOURCE,
+      });
+      expect(status).toBe(200);
+      expect(decodeJwt(body.access_token as string).scope).toBe(RESOURCE_SCOPE);
+      const [row] = await db
+        .select({ allowedScopes: schema.oauthResource.allowedScopes })
+        .from(schema.oauthResource)
+        .where(eq(schema.oauthResource.identifier, RESOURCE));
+      expect(row?.allowedScopes).toContain("webhooks:write");
+    } finally {
+      auth = prior;
+    }
+  });
 });
