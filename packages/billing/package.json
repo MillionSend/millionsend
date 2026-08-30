@@ -17,7 +17,7 @@
   "dependencies": {
     "@millionsend/db": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "stripe": "^22.5.0"
+    "stripe": "^22.6.0"
   },
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
