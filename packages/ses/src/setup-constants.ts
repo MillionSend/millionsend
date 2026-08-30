@@ -241,6 +241,12 @@ S3_ENDPOINT=
 S3_ACCESS_KEY_ID=
 S3_SECRET_ACCESS_KEY=
 
+# Optional dedicated credential for the backup job (falls back to S3_ACCESS_KEY_ID /
+# S3_SECRET_ACCESS_KEY). Scope it to the backup bucket only, so the key that
+# writes public logos can never read or delete a dump.
+S3_BACKUP_ACCESS_KEY_ID=
+S3_BACKUP_SECRET_ACCESS_KEY=
+
 # Defaults suit Cloudflare R2. Other S3-compatibles: set a real region if the
 # endpoint needs one, and rclone's provider name (AWS, Minio, ...) for the
 # backup job.
