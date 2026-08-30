@@ -116,6 +116,10 @@ export const emails = pgTable(
       .where(sql`${t.sesMessageId} is not null`),
     // Partial index drives the retention purge scan (rows whose body still exists).
     index("emails_body_unpurged_idx").on(t.createdAt).where(isNull(t.bodyPurgedAt)),
+    // Accept counts a team's parked rows whenever its daily quota is exhausted.
+    index("emails_team_quota_parked_idx")
+      .on(t.teamId)
+      .where(sql`${t.latestStatus} = 'queued_quota'`),
     // Fan-out idempotency spine: re-running a broadcast fan-out can never
     // insert (and thus never send) a second email to the same contact.
     uniqueIndex("emails_broadcast_contact_idx")

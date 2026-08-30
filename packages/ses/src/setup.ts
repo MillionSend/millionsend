@@ -3,14 +3,22 @@ import {
   CreateAccessKeyCommand,
   type CreateAccessKeyCommandOutput,
   CreatePolicyCommand,
+  CreatePolicyVersionCommand,
   CreateUserCommand,
   DeleteAccessKeyCommand,
   DeletePolicyCommand,
+  DeletePolicyVersionCommand,
   DeleteUserCommand,
   DetachUserPolicyCommand,
+  GetPolicyCommand,
+  type GetPolicyCommandOutput,
+  GetPolicyVersionCommand,
+  type GetPolicyVersionCommandOutput,
   IAMClient,
   ListAccessKeysCommand,
   type ListAccessKeysCommandOutput,
+  ListPolicyVersionsCommand,
+  type ListPolicyVersionsCommandOutput,
 } from "@aws-sdk/client-iam";
 import { CreateBucketCommand, HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import {
@@ -59,6 +67,11 @@ export function setupTopicArn(region: string, accountId: string): string {
 
 type SetupIamCommand =
   | CreatePolicyCommand
+  | GetPolicyCommand
+  | GetPolicyVersionCommand
+  | ListPolicyVersionsCommand
+  | CreatePolicyVersionCommand
+  | DeletePolicyVersionCommand
   | CreateUserCommand
   | AttachUserPolicyCommand
   | CreateAccessKeyCommand
@@ -173,6 +186,63 @@ async function ignoring(promise: Promise<unknown>, names: string[]): Promise<voi
   }
 }
 
+/** IAM's cap on versions per managed policy. */
+const IAM_POLICY_VERSION_LIMIT = 5;
+
+/** GetPolicyVersion returns the document URL-encoded; compare structurally. */
+function isCurrentPolicyDocument(encoded: string | undefined): boolean {
+  if (!encoded) return false;
+  try {
+    return (
+      JSON.stringify(JSON.parse(decodeURIComponent(encoded))) === JSON.stringify(SES_IAM_POLICY)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An adopted policy keeps the document it was created with, so an instance
+ * provisioned before an action or resource scope was added would stay short
+ * of it. Brings the default version up to SES_IAM_POLICY when it differs,
+ * dropping the oldest non-default version first when IAM's cap is reached.
+ * Returns true when a new version was published.
+ */
+async function syncAdoptedPolicy(iam: SetupIamClient, policyArn: string): Promise<boolean> {
+  const policy = (await iam.send(
+    new GetPolicyCommand({ PolicyArn: policyArn }),
+  )) as GetPolicyCommandOutput;
+  const defaultVersionId = policy.Policy?.DefaultVersionId;
+  if (!defaultVersionId) return false;
+  const current = (await iam.send(
+    new GetPolicyVersionCommand({ PolicyArn: policyArn, VersionId: defaultVersionId }),
+  )) as GetPolicyVersionCommandOutput;
+  if (isCurrentPolicyDocument(current.PolicyVersion?.Document)) return false;
+
+  const listed = (await iam.send(
+    new ListPolicyVersionsCommand({ PolicyArn: policyArn }),
+  )) as ListPolicyVersionsCommandOutput;
+  const versions = listed.Versions ?? [];
+  if (versions.length >= IAM_POLICY_VERSION_LIMIT) {
+    const oldest = versions
+      .filter((v) => !v.IsDefaultVersion && v.VersionId)
+      .sort((a, b) => (a.CreateDate?.getTime() ?? 0) - (b.CreateDate?.getTime() ?? 0))[0];
+    if (oldest?.VersionId) {
+      await iam.send(
+        new DeletePolicyVersionCommand({ PolicyArn: policyArn, VersionId: oldest.VersionId }),
+      );
+    }
+  }
+  await iam.send(
+    new CreatePolicyVersionCommand({
+      PolicyArn: policyArn,
+      PolicyDocument: JSON.stringify(SES_IAM_POLICY),
+      SetAsDefault: true,
+    }),
+  );
+  return true;
+}
+
 /**
  * Creates everything MillionSend needs in AWS. Re-runnable: resources that
  * already exist are adopted — but every run mints a NEW access key.
@@ -181,15 +251,19 @@ export async function runSetup(clients: SetupClients, input: SetupInput): Promis
   const step = input.onStep ?? (() => {});
 
   step(`IAM policy ${SETUP_NAMES.policy}`);
-  await ignoring(
-    clients.iam.send(
+  try {
+    await clients.iam.send(
       new CreatePolicyCommand({
         PolicyName: SETUP_NAMES.policy,
         PolicyDocument: JSON.stringify(SES_IAM_POLICY),
       }),
-    ),
-    ["EntityAlreadyExistsException"],
-  );
+    );
+  } catch (error) {
+    if (errorName(error) !== "EntityAlreadyExistsException") throw error;
+    if (await syncAdoptedPolicy(clients.iam, setupPolicyArn(input.accountId))) {
+      step(`IAM policy ${SETUP_NAMES.policy}: updated to the current document`);
+    }
+  }
 
   step(`IAM user ${SETUP_NAMES.user}`);
   await ignoring(clients.iam.send(new CreateUserCommand({ UserName: SETUP_NAMES.user })), [
@@ -410,10 +484,22 @@ export async function runTeardown(
   ]);
 
   step(`IAM policy ${SETUP_NAMES.policy}`);
-  await ignoring(
-    clients.iam.send(new DeletePolicyCommand({ PolicyArn: setupPolicyArn(input.accountId) })),
-    ["NoSuchEntityException"],
-  );
+  // DeletePolicy refuses while non-default versions (from adopt-time updates) remain.
+  const policyArn = setupPolicyArn(input.accountId);
+  try {
+    const listed = (await clients.iam.send(
+      new ListPolicyVersionsCommand({ PolicyArn: policyArn }),
+    )) as ListPolicyVersionsCommandOutput;
+    for (const version of listed.Versions ?? []) {
+      if (version.IsDefaultVersion || !version.VersionId) continue;
+      await clients.iam.send(
+        new DeletePolicyVersionCommand({ PolicyArn: policyArn, VersionId: version.VersionId }),
+      );
+    }
+    await clients.iam.send(new DeletePolicyCommand({ PolicyArn: policyArn }));
+  } catch (error) {
+    if (errorName(error) !== "NoSuchEntityException") throw error;
+  }
 }
 
 /** Default bucket names the storage step offers; the prompts allow overrides. */

@@ -26,8 +26,7 @@ describe("createSesSender", () => {
       emailId: "e1",
       to: ["Ok <ok@example.com>"],
       cc: ['"Doe, John" <cc@example.com>'],
-      bcc: undefined,
-    } as Parameters<ReturnType<typeof createSesSender>["sendRaw"]>[0]);
+    });
     expect(sent[0]).toMatchObject({
       Destination: { ToAddresses: ["ok@example.com"], CcAddresses: ["cc@example.com"] },
     });
@@ -40,7 +39,7 @@ describe("createSesSender", () => {
         raw: Buffer.from(""),
         emailId: "e2",
         to: ["a@x.com, b@y.com <ok@example.com>"],
-      } as Parameters<ReturnType<typeof createSesSender>["sendRaw"]>[0]),
+      }),
     ).rejects.toThrow(/single mailbox/);
     expect(sent).toHaveLength(0);
   });

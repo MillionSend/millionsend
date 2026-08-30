@@ -1,4 +1,4 @@
-import { verifyApiKey } from "@millionsend/core";
+import { generateApiKey, MAX_ACTIVE_API_KEYS, verifyApiKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -92,6 +92,30 @@ describe("apiKeys.create", () => {
     expect(row.keyHash).not.toContain(token);
     expect(verifyApiKey(token, row.keyHash)).toBe(true);
     expect(verifyApiKey(`${token}x`, row.keyHash)).toBe(false);
+  });
+
+  it("refuses to mint past the active-key cap until one is revoked", async () => {
+    const teamId = await createTeam(db, "team-a");
+    await db.insert(schema.apiKeys).values(
+      Array.from({ length: MAX_ACTIVE_API_KEYS - 1 }, (_, i) => {
+        const key = generateApiKey();
+        return {
+          teamId,
+          name: `k${i}`,
+          tokenPrefix: key.tokenPrefix,
+          keyHash: key.keyHash,
+          last4: key.last4,
+        };
+      }),
+    );
+    const { id } = await callerFor(teamId).apiKeys.create({ name: "last slot" });
+    await expect(callerFor(teamId).apiKeys.create({ name: "one too many" })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    });
+    await callerFor(teamId).apiKeys.revoke({ id });
+    await expect(callerFor(teamId).apiKeys.create({ name: "after revoke" })).resolves.toMatchObject(
+      { id: expect.any(String) },
+    );
   });
 
   it("mints tokens in the ms_ scheme", async () => {

@@ -9,14 +9,17 @@ import {
   beginIdempotent,
   type ContactActivityRow,
   canonicalBodyHash,
+  clearUnsubscribeSuppression,
   completeIdempotent,
   DAY_MS,
   decryptEmailBody,
+  estimateAttachmentBytes,
   extractTokenPrefix,
   fetchDeliverabilityHealth,
   findSuppressed,
   findTopicOptOuts,
   type Keyring,
+  MAX_ATTACHMENT_BYTES,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   parseScheduledAt,
@@ -762,7 +765,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
         ...(properties !== undefined ? { properties } : {}),
       })
       .where(teamContactWhere(teamId, idOrEmail))
-      .returning({ id: t.id });
+      .returning({ id: t.id, email: t.email });
+    // Only this explicit re-subscribe lifts the retained one-click opt-out;
+    // creating or importing the address again leaves it in place.
+    if (row && body.unsubscribed === false) {
+      await clearUnsubscribeSuppression(db, teamId, row.email);
+    }
     if (row && before && before.unsubscribed !== body.unsubscribed) {
       await recordContactActivity(db, {
         teamId,
@@ -2199,12 +2207,16 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   // a logging failure must never fail or slow the response. Headers are never
   // stored (Authorization included); see maskEmailPathSegments for what is.
   app.use("*", async (c, next) => {
+    const startedAt = Date.now();
     await next();
     const auth = c.get("auth");
     if (!auth || c.req.path.startsWith("/ses/")) return;
+    const durationMs = Date.now() - startedAt;
     const { method } = c.req;
     const path = maskEmailPathSegments(c.req.path);
     const statusCode = c.res.status;
+    const requestLength = c.req.header("content-length");
+    const responseLength = c.res.headers.get("content-length");
     // Cloned before the response is returned; the body read happens off the
     // request's critical path.
     const resClone = statusCode >= 400 ? c.res.clone() : null;
@@ -2212,9 +2224,13 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       const errorResponse = resClone ? await resClone.json().catch(() => null) : null;
       await deps.db.insert(schema.apiRequests).values({
         teamId: auth.teamId,
+        apiKeyId: auth.apiKeyId,
         method,
         path,
         statusCode,
+        durationMs,
+        requestBytes: requestLength == null ? null : Number(requestLength),
+        responseBytes: responseLength == null ? null : Number(responseLength),
         requestBody: null,
         responseBody: capLoggedJson(errorResponse),
       });
@@ -2551,6 +2567,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
     if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return { status: 403, name: "restricted_api_key", message: RESTRICTED_DOMAIN_MESSAGE };
+    }
+    if (estimateAttachmentBytes(body.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
+      const { body: rejected } = acceptRejection({
+        ok: false,
+        reason: "attachments_too_large",
+        maxBytes: MAX_ATTACHMENT_BYTES,
+      });
+      return { status: 422, name: "validation_error", message: rejected.message };
     }
     // Suppression (and topic opt-outs, which drop identically) is resolved
     // up front too, so an all-suppressed item fails at validation instead of
@@ -2910,6 +2934,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             keyVersion: bodyKeyVersion,
           },
           deps.keyring,
+          { teamId: auth.teamId, rowId: email.id },
         );
         html = body.html;
         text = body.text;

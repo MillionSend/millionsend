@@ -160,6 +160,7 @@ describe("smtp relay", () => {
         keyVersion: row.bodyKeyVersion!,
       },
       keyring,
+      { teamId: row.teamId, rowId: row.id },
     );
     expect(body.html).toContain("rich body");
     expect(body.text).toContain("plain body");

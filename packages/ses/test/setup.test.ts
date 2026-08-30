@@ -2,12 +2,17 @@ import {
   AttachUserPolicyCommand,
   CreateAccessKeyCommand,
   CreatePolicyCommand,
+  CreatePolicyVersionCommand,
   CreateUserCommand,
   DeleteAccessKeyCommand,
   DeletePolicyCommand,
+  DeletePolicyVersionCommand,
   DeleteUserCommand,
   DetachUserPolicyCommand,
+  GetPolicyCommand,
+  GetPolicyVersionCommand,
   ListAccessKeysCommand,
+  ListPolicyVersionsCommand,
 } from "@aws-sdk/client-iam";
 import { CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
 import {
@@ -35,6 +40,7 @@ import {
   runEventsSetup,
   runSetup,
   runTeardown,
+  SES_IAM_POLICY,
   type SetupClients,
   type StorageClient,
   setupEnvEntries,
@@ -52,14 +58,40 @@ function namedError(name: string): Error {
 /**
  * One fake for all three clients: records every command and answers by
  * command type. `errors` maps a command constructor name to the error its
- * send should throw (for already-exists / not-found reruns).
+ * send should throw (for already-exists / not-found reruns). `policy`
+ * describes an existing millionsend-ses policy: its default document and how
+ * many versions it carries (v1 oldest, the last one default).
  */
-function fakeClients(options: { errors?: Record<string, Error>; accessKeys?: string[] } = {}) {
+function fakeClients(
+  options: {
+    errors?: Record<string, Error>;
+    accessKeys?: string[];
+    policy?: { document: object; versions?: number };
+  } = {},
+) {
   const calls: object[] = [];
   const send = async (command: object): Promise<unknown> => {
     calls.push(command);
     const error = options.errors?.[command.constructor.name];
     if (error) throw error;
+    const policyVersions = options.policy?.versions ?? 1;
+    if (command instanceof GetPolicyCommand) {
+      return { Policy: { DefaultVersionId: `v${policyVersions}` } };
+    }
+    if (command instanceof GetPolicyVersionCommand) {
+      return {
+        PolicyVersion: { Document: encodeURIComponent(JSON.stringify(options.policy?.document)) },
+      };
+    }
+    if (command instanceof ListPolicyVersionsCommand) {
+      return {
+        Versions: Array.from({ length: policyVersions }, (_, i) => ({
+          VersionId: `v${i + 1}`,
+          IsDefaultVersion: i + 1 === policyVersions,
+          CreateDate: new Date(i * 1000),
+        })),
+      };
+    }
     if (command instanceof CreateAccessKeyCommand) {
       return { AccessKey: { AccessKeyId: "AKIATEST", SecretAccessKey: "secret123" } };
     }
@@ -200,16 +232,57 @@ describe("runSetup", () => {
   });
 
   it("tolerates already-existing resources on a rerun", async () => {
-    const { clients } = fakeClients({
+    const { clients, calls } = fakeClients({
       errors: {
         CreatePolicyCommand: namedError("EntityAlreadyExistsException"),
         CreateUserCommand: namedError("EntityAlreadyExistsException"),
         CreateConfigurationSetCommand: namedError("AlreadyExistsException"),
         CreateConfigurationSetEventDestinationCommand: namedError("AlreadyExistsException"),
       },
+      policy: { document: SES_IAM_POLICY },
     });
     const result = await runSetup(clients, input);
     expect(result.accessKeyId).toBe("AKIATEST");
+    // An adopted policy already on the current document is left alone.
+    expect(calls.some((c) => c instanceof CreatePolicyVersionCommand)).toBe(false);
+  });
+
+  const stalePolicy = {
+    Version: "2012-10-17",
+    Statement: [{ Effect: "Allow", Action: ["ses:SendEmail"], Resource: "*" }],
+  };
+  const adoptError = { CreatePolicyCommand: namedError("EntityAlreadyExistsException") };
+
+  it("publishes the current document as the default version of a stale adopted policy", async () => {
+    const { clients, calls } = fakeClients({
+      errors: adoptError,
+      policy: { document: stalePolicy, versions: 2 },
+    });
+    await runSetup(clients, input);
+    const created = calls.find(
+      (c) => c instanceof CreatePolicyVersionCommand,
+    ) as CreatePolicyVersionCommand;
+    expect(created.input).toEqual({
+      PolicyArn: "arn:aws:iam::123456789012:policy/millionsend-ses",
+      PolicyDocument: JSON.stringify(SES_IAM_POLICY),
+      SetAsDefault: true,
+    });
+    expect(calls.some((c) => c instanceof DeletePolicyVersionCommand)).toBe(false);
+  });
+
+  it("prunes the oldest non-default version first when the policy has five", async () => {
+    const { clients, calls } = fakeClients({
+      errors: adoptError,
+      policy: { document: stalePolicy, versions: 5 },
+    });
+    await runSetup(clients, input);
+    const deleted = calls.find(
+      (c) => c instanceof DeletePolicyVersionCommand,
+    ) as DeletePolicyVersionCommand;
+    expect(deleted.input.VersionId).toBe("v1");
+    expect(calls.indexOf(deleted)).toBeLessThan(
+      calls.findIndex((c) => c instanceof CreatePolicyVersionCommand),
+    );
   });
 
   it("maps the 2-key IAM limit to an actionable error", async () => {
@@ -241,6 +314,7 @@ describe("runTeardown", () => {
       DeleteAccessKeyCommand,
       DetachUserPolicyCommand,
       DeleteUserCommand,
+      ListPolicyVersionsCommand,
       DeletePolicyCommand,
     ]);
     const topic = calls.find((c) => c instanceof DeleteTopicCommand) as DeleteTopicCommand;
@@ -255,12 +329,24 @@ describe("runTeardown", () => {
         ListAccessKeysCommand: namedError("NoSuchEntityException"),
         DetachUserPolicyCommand: namedError("NoSuchEntityException"),
         DeleteUserCommand: namedError("NoSuchEntityException"),
-        DeletePolicyCommand: namedError("NoSuchEntityException"),
+        ListPolicyVersionsCommand: namedError("NoSuchEntityException"),
       },
     });
     await runTeardown(clients, { region: "us-east-1", accountId: "123456789012" });
     // A missing user skips key deletion instead of failing.
     expect(calls.some((c) => c instanceof DeleteAccessKeyCommand)).toBe(false);
+  });
+
+  it("drops non-default policy versions before deleting the policy", async () => {
+    const { clients, calls } = fakeClients({ policy: { document: SES_IAM_POLICY, versions: 3 } });
+    await runTeardown(clients, { region: "us-east-1", accountId: "123456789012" });
+    const dropped = calls
+      .filter((c) => c instanceof DeletePolicyVersionCommand)
+      .map((c) => (c as DeletePolicyVersionCommand).input.VersionId);
+    expect(dropped).toEqual(["v1", "v2"]);
+    expect(calls.findIndex((c) => c instanceof DeletePolicyCommand)).toBeGreaterThan(
+      calls.lastIndexOf(calls.find((c) => c instanceof DeletePolicyVersionCommand) as object),
+    );
   });
 });
 

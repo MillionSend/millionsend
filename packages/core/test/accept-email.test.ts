@@ -12,6 +12,7 @@ import {
 } from "../src/accept-email.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { PLAN_DAILY_LIMIT } from "../src/plans.js";
+import { DAY_MS, utcDay } from "../src/utc-day.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -68,6 +69,22 @@ describe("acceptEmail", () => {
     });
     expect(result).toMatchObject({ ok: true, parked: false });
     expect((await acceptedToday()) - before).toBe(4);
+  });
+
+  it("charges a scheduled send to its delivery day, not the accept day", async () => {
+    const scheduledAt = new Date(Date.now() + 3 * DAY_MS);
+    const result = await acceptEmail(deps(), auth(), { ...payload(), scheduledAt });
+    expect(result).toMatchObject({ ok: true, parked: false });
+    const [row] = await db
+      .select({ accepted: schema.usageCounters.accepted })
+      .from(schema.usageCounters)
+      .where(
+        and(
+          eq(schema.usageCounters.teamId, teamId),
+          eq(schema.usageCounters.day, utcDay(scheduledAt)),
+        ),
+      );
+    expect(row?.accepted).toBe(1);
   });
 
   it("rejects attachments whose decoded bytes exceed the cap", async () => {

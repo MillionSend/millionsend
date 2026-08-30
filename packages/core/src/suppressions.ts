@@ -67,3 +67,26 @@ export async function findSuppressed(
   }
   return suppressed;
 }
+
+/**
+ * Drops the retained one-click opt-out for an address. Only an explicit
+ * re-subscribe by the tenant (contact update with unsubscribed=false) calls
+ * this; creating or importing the same address again never does, so the
+ * opt-out keeps blocking until someone consciously clears it.
+ */
+export async function clearUnsubscribeSuppression(
+  db: Db,
+  teamId: string,
+  email: string,
+): Promise<void> {
+  const t = schema.suppressions;
+  await db
+    .delete(t)
+    .where(
+      and(
+        eq(t.teamId, teamId),
+        eq(t.reason, "one_click_unsubscribe"),
+        inArray(t.emailHash, [...new Set([hashRecipient(email), legacyHashRecipient(email)])]),
+      ),
+    );
+}

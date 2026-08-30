@@ -1,8 +1,8 @@
-import { deriveUnsubscribeKey, makeUnsubscribeToken } from "@millionsend/core";
+import { deriveUnsubscribeKey, hashRecipient, makeUnsubscribeToken } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseCsvContacts } from "@/lib/csv";
 import { createCaller } from "@/server/routers";
@@ -822,5 +822,59 @@ describe("parseCsvContacts", () => {
       { email: "alan@example.com" },
     ]);
     expect(parseCsvContacts("")).toEqual([]);
+  });
+});
+
+describe("retained one-click opt-out", () => {
+  const suppressionsFor = (teamId: string, email: string) =>
+    db
+      .select({ reason: schema.suppressions.reason })
+      .from(schema.suppressions)
+      .where(
+        and(
+          eq(schema.suppressions.teamId, teamId),
+          eq(schema.suppressions.emailHash, hashRecipient(email)),
+        ),
+      );
+
+  it("survives delete + re-import and clears only on an explicit re-subscribe", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const email = "opted@example.com";
+    await db.insert(schema.suppressions).values({
+      teamId,
+      email,
+      emailHash: hashRecipient(email),
+      reason: "one_click_unsubscribe",
+    });
+
+    await caller.audience.contacts.addMany({ rows: [{ email }] });
+    expect(await suppressionsFor(teamId, email)).toHaveLength(1);
+    const { id } = await caller.audience.contacts.add({ email: "other@example.com" });
+    await caller.audience.contacts.update({ id, unsubscribed: false });
+    expect(await suppressionsFor(teamId, email)).toHaveLength(1);
+
+    const [contact] = await db
+      .select({ id: schema.contacts.id })
+      .from(schema.contacts)
+      .where(and(eq(schema.contacts.teamId, teamId), eq(schema.contacts.email, email)));
+    if (!contact) throw new Error("imported contact missing");
+    await caller.audience.contacts.update({ id: contact.id, unsubscribed: false });
+    expect(await suppressionsFor(teamId, email)).toHaveLength(0);
+  });
+
+  it("never clears a bounce or complaint suppression", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const email = "bounced@example.com";
+    await db.insert(schema.suppressions).values({
+      teamId,
+      email,
+      emailHash: hashRecipient(email),
+      reason: "hard_bounce",
+    });
+    const { id } = await caller.audience.contacts.add({ email });
+    await caller.audience.contacts.update({ id, unsubscribed: false });
+    expect(await suppressionsFor(teamId, email)).toEqual([{ reason: "hard_bounce" }]);
   });
 });

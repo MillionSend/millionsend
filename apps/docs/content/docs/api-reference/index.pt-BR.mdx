@@ -36,9 +36,11 @@ Authorization: Bearer ms_...
 
 Chaves têm um nível de permissão: chaves de **acesso total** podem usar todos
 os endpoints, chaves de **somente envio** ficam confinadas a `/emails*`
-(qualquer outra coisa retorna `403 restricted_api_key`). Uma chave também
-pode ficar restrita a um único domínio, limitando de quais endereços `from`
-ela pode enviar.
+(qualquer outra coisa retorna `403 restricted_api_key`) — e mesmo ali,
+`GET /emails`, `GET /emails/{id}` e `DELETE /emails/{id}` exigem acesso
+total, já que as leituras devolvem os corpos armazenados e todo o arquivo do
+time. Uma chave também pode ficar restrita a um único domínio, limitando de
+quais endereços `from` ela pode enviar.
 
 ## Compatibilidade com Resend
 
@@ -55,8 +57,21 @@ deliberadas e explícitas:
   aliases de segments, e os endpoints de contato funcionam com ou sem id de
   audience (veja [Contatos](/pt-BR/concepts/contacts)).
 - Broadcasts suportam `canceled`, um status fora da união do Resend, e o
-  envio de broadcast pode retornar `403 sending_paused` quando sua taxa de
-  bounce ou reclamação cruza os limites de enforcement do SES.
+  envio de broadcast, `POST /emails` e `POST /emails/batch` podem retornar
+  `403 sending_paused` quando sua taxa de bounce ou reclamação cruza os
+  limites de enforcement do SES.
+- `POST /emails` e `POST /emails/batch` retornam `429 daily_quota_exceeded`
+  quando a cota diária de envio acabou e a fila de espera está cheia — tente
+  de novo depois da virada do dia em UTC.
+- `DELETE /emails/{id}` existe (o Resend não tem exclusão de emails).
+- `headers` personalizados seguem uma lista de permitidos: qualquer nome
+  `X-*` (exceto `X-SES-*` e `X-MillionSend-*`) mais `In-Reply-To`,
+  `References`, `Importance`, `Priority`, `Comments`, `Keywords` e
+  `Organization`; qualquer outro é `422`.
+- `to`, `cc` e `bcc` juntos não podem passar de 50 destinatários, e cada
+  endereço precisa ser uma única caixa postal — um nome de exibição contendo
+  `@` é rejeitado, e endereços aceitos voltam na forma canônica
+  `Nome <usuario@host>`.
 - Qualquer coisa não suportada é rejeitada com `422` em vez de descartada em
   silêncio (ex.: `tls` na atualização de domínio).
 

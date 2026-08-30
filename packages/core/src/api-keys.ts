@@ -45,3 +45,10 @@ export function verifyApiKey(presentedToken: string, storedKeyHashHex: string): 
   if (stored.length !== presented.length) return false;
   return timingSafeEqual(presented, stored);
 }
+
+/**
+ * Active keys per team, enforced on every minting surface. A full_access key
+ * can mint more keys, so without a cap a leaked key could fan out into an
+ * unbounded set of credentials (each with its own rate-limit bucket).
+ */
+export const MAX_ACTIVE_API_KEYS = 25;

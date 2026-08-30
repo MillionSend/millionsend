@@ -33,6 +33,13 @@ export interface SesSender {
     raw: Buffer;
     /** Server-owned fallback join key copied into an SES message tag. */
     emailId: string;
+    /**
+     * Envelope recipients from the stored, validated fields — the sender
+     * derives the SES Destination from these, never from the MIME headers.
+     */
+    to: string[];
+    cc?: string[] | null;
+    bcc?: string[] | null;
     configurationSetName?: string;
     /** SES region the sending identity is verified in; sender default when absent. */
     region?: string;
@@ -328,6 +335,7 @@ export async function sendEmail(
   }
   let body: EmailBody;
   let attachments: EmailAttachment[] | null;
+  const owner = { teamId: email.teamId, rowId: email.id };
   try {
     body = await decryptEmailBody(
       {
@@ -337,9 +345,12 @@ export async function sendEmail(
         keyVersion: bodyKeyVersion,
       },
       deps.keyring,
+      owner,
     );
     // Sealed alongside the body columns, on the same terminal/transient split.
-    attachments = email.attachments ? await openAttachments(email.attachments, deps.keyring) : null;
+    attachments = email.attachments
+      ? await openAttachments(email.attachments, deps.keyring, owner)
+      : null;
   } catch (err) {
     if (isTransientError(err)) throw err;
     await failQueuedEmail(db, email.id, "body_unreadable");
@@ -527,6 +538,9 @@ export async function sendEmail(
     ({ messageId } = await deps.ses.sendRaw({
       raw: mime,
       emailId: email.id,
+      to: email.to,
+      cc: email.cc,
+      bcc: email.bcc,
       ...(configurationSet ? { configurationSetName: configurationSet } : {}),
       ...(domain?.region ? { region: domain.region } : {}),
     }));

@@ -1,6 +1,8 @@
+import { env } from "@millionsend/config";
 import {
   DAY_MS,
   fetchDeliverabilityHealth,
+  fetchEffectivePlan,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   utcDay,
@@ -86,7 +88,8 @@ export const metricsRouter = router({
    * chart reads.
    */
   health: teamProcedure.query(async ({ ctx }) => {
-    const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId);
+    const plan = env.IS_CLOUD ? await fetchEffectivePlan(ctx.db, ctx.teamId) : null;
+    const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId, plan ? { plan } : {});
     return {
       ...health,
       thresholds: {

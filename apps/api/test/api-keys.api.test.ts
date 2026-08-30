@@ -1,12 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey } from "@millionsend/core";
+import { EnvKeyring, generateApiKey, MAX_ACTIVE_API_KEYS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
-import { MAX_ACTIVE_API_KEYS } from "../src/routes/api-keys.js";
 
 let db: Db;
 let close: () => Promise<void>;

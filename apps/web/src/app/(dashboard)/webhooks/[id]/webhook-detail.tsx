@@ -187,6 +187,7 @@ export function WebhookDetail({ id }: { id: string }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [testSent, setTestSent] = useState(false);
+  const [testError, setTestError] = useState<"testRateLimited" | "testFailed" | null>(null);
 
   const webhook = useQuery(trpc.webhooks.get.queryOptions({ id }));
   const deliveriesInput = { endpointId: id, offset: page * pageSize, limit: pageSize };
@@ -213,9 +214,14 @@ export function WebhookDetail({ id }: { id: string }) {
     trpc.webhooks.testDelivery.mutationOptions({
       onSuccess: () => {
         setTestSent(true);
+        setTestError(null);
         void queryClient.invalidateQueries({
           queryKey: trpc.webhooks.deliveries.list.queryKey(),
         });
+      },
+      onError: (error) => {
+        setTestSent(false);
+        setTestError(error.data?.code === "TOO_MANY_REQUESTS" ? "testRateLimited" : "testFailed");
       },
     }),
   );
@@ -340,18 +346,18 @@ export function WebhookDetail({ id }: { id: string }) {
                 <BtnSpinner on={testMutation.isPending} />
                 {t("detail.sendTest")}
               </button>
-              {testSent ? (
+              {testSent || testError ? (
                 <span
                   style={{
                     position: "absolute",
                     top: "calc(100% + 6px)",
                     right: 0,
                     whiteSpace: "nowrap",
-                    color: "var(--ms-muted)",
+                    color: testError ? "var(--ms-danger)" : "var(--ms-muted)",
                     fontSize: "var(--ms-fs-label)",
                   }}
                 >
-                  ✓ {t("detail.testQueued")}
+                  {testError ? t(`detail.${testError}`) : `✓ ${t("detail.testQueued")}`}
                 </span>
               ) : null}
             </div>

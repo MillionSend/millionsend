@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   decryptWebhookSecret,
@@ -63,10 +64,15 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
       const auth = c.get("auth");
       const body = c.req.valid("json");
       const secret = generateWebhookSecret();
-      const encrypted = await encryptWebhookSecret(secret, keyring);
+      const id = randomUUID();
+      const encrypted = await encryptWebhookSecret(secret, keyring, {
+        teamId: auth.teamId,
+        rowId: id,
+      });
       const [row] = await db
         .insert(w)
         .values({
+          id,
           teamId: auth.teamId,
           url: body.endpoint,
           secretCiphertext: encrypted.ciphertext,
@@ -158,6 +164,7 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
           keyVersion: row.secretKeyVersion,
         },
         keyring,
+        { teamId: row.teamId, rowId: row.id },
       );
       return c.json({ ...wire(row), object: "webhook" as const, signing_secret: secret }, 200);
     },

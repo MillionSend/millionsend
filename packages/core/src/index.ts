@@ -5,6 +5,7 @@ export {
   type AcceptEmailPayload,
   type AcceptEmailResult,
   acceptEmail,
+  estimateAttachmentBytes,
   MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
   type SenderDomainVerdict,
@@ -17,6 +18,7 @@ export {
   type GeneratedApiKey,
   generateApiKey,
   hashApiKey,
+  MAX_ACTIVE_API_KEYS,
   verifyApiKey,
 } from "./api-keys.js";
 export {
@@ -31,17 +33,21 @@ export {
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
 export { type ContactActivityRow, recordContactActivity } from "./contact-activities.js";
 export {
+  BOUND_ENVELOPE_VERSION_OFFSET,
   decryptEmailBody,
   decryptPayload,
   type EmailAttachment,
   type EmailBody,
   type EncryptedBody,
+  type EnvelopeBinding,
+  type EnvelopeKind,
+  type EnvelopeOwner,
   encryptEmailBody,
   encryptPayload,
   openAttachments,
   sealAttachments,
 } from "./crypto/envelope.js";
-export { EnvKeyring, type Keyring } from "./crypto/keyring.js";
+export { type DekContext, EnvKeyring, type Keyring } from "./crypto/keyring.js";
 export {
   CompositeKeyring,
   KMS_KEY_VERSION,
@@ -93,6 +99,7 @@ export {
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export { type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
 export {
+  ADMIN_MCP_SCOPES,
   ALL_TEAMS_GRANT,
   apiBaseUrl,
   MCP_RESOURCE_PATH,
@@ -100,7 +107,14 @@ export {
   type McpScope,
   mcpResourceUrl,
 } from "./oauth-scopes.js";
-export { PLAN_DAILY_LIMIT, PLAN_DOMAIN_LIMIT, type Plan } from "./plans.js";
+export {
+  effectivePlan,
+  fetchEffectivePlan,
+  PLAN_DAILY_LIMIT,
+  PLAN_DOMAIN_LIMIT,
+  PLAN_GRACE_DAYS,
+  type Plan,
+} from "./plans.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
 export {
@@ -120,6 +134,7 @@ export {
 } from "./ssrf.js";
 export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";
 export {
+  clearUnsubscribeSuppression,
   extractAddrSpec,
   findSuppressed,
   hashRecipient,

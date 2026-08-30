@@ -28,6 +28,15 @@ depending on the language's conventions — and the Node SDK also reads the
 `MILLIONSEND_BASE_URL` environment variable. See
 [Self-hosting](/self-hosting) for deploying the instance itself.
 
+Every SDK refuses a plain `http://` base URL unless the host is loopback
+(`localhost`, `127.0.0.1`, `::1`): an API key sent over cleartext to another
+machine is an API key on the wire. An instance reached over plain HTTP on a
+private network needs the per-SDK opt-in — Node `allowInsecureHttp`, Python
+`allow_insecure_http`, Go `AllowInsecureHTTP`, Ruby `allow_insecure_http`,
+PHP the `allowInsecureHttp` option, Rust `allow_insecure_http()`, Java the
+three-argument constructor, .NET `AllowInsecureHttp`, Elixir
+`allow_insecure_http` — or, better, a TLS reverse proxy in front of it.
+
 </DeploymentTab>
 </DeploymentTabs>
 

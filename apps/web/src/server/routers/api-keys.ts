@@ -1,7 +1,7 @@
-import { generateApiKey } from "@millionsend/core";
+import { generateApiKey, MAX_ACTIVE_API_KEYS } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { adminProcedure, freshAdminProcedure, router, teamProcedure } from "../trpc";
 
@@ -37,6 +37,16 @@ export const apiKeysRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const [active] = await ctx.db
+        .select({ n: count() })
+        .from(schema.apiKeys)
+        .where(and(eq(schema.apiKeys.teamId, ctx.teamId), isNull(schema.apiKeys.revokedAt)));
+      if ((active?.n ?? 0) >= MAX_ACTIVE_API_KEYS) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `A team can have at most ${MAX_ACTIVE_API_KEYS} active API keys; revoke one first.`,
+        });
+      }
       if (input.domainId) {
         // The scope is enforced server-side, but a key can only be scoped to a
         // domain the team actually owns and has verified — reject anything else.

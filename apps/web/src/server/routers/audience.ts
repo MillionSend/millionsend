@@ -1,4 +1,4 @@
-import { recordContactActivity, resultRows } from "@millionsend/core";
+import { clearUnsubscribeSuppression, recordContactActivity, resultRows } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -368,8 +368,13 @@ export const audienceRouter = router({
             updatedAt: new Date(),
           })
           .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
-          .returning({ id: t.id, unsubscribed: t.unsubscribed });
+          .returning({ id: t.id, email: t.email, unsubscribed: t.unsubscribed });
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        // Only this explicit re-subscribe lifts the retained one-click opt-out;
+        // add/addMany of the same address leave it in place.
+        if (input.unsubscribed === false) {
+          await clearUnsubscribeSuppression(ctx.db, ctx.teamId, row.email);
+        }
         if (before && before.unsubscribed !== row.unsubscribed) {
           await recordContactActivity(ctx.db, {
             teamId: ctx.teamId,

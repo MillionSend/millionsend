@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { env } from "@millionsend/config";
 import {
   decryptWebhookSecret,
@@ -172,10 +172,15 @@ export const webhooksRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const secret = generateWebhookSecret();
-      const encrypted = await encryptWebhookSecret(secret, getKeyring());
+      const id = randomUUID();
+      const encrypted = await encryptWebhookSecret(secret, getKeyring(), {
+        teamId: ctx.teamId,
+        rowId: id,
+      });
       const [row] = await ctx.db
         .insert(schema.webhookEndpoints)
         .values({
+          id,
           teamId: ctx.teamId,
           url: input.url,
           description: toStoredDescription(input.description),
@@ -316,6 +321,7 @@ export const webhooksRouter = router({
           keyVersion: endpoint.secretKeyVersion,
         },
         getKeyring(),
+        { teamId: endpoint.teamId, rowId: endpoint.id },
       );
       const payloadJson = JSON.stringify(payload);
       const headers = signWebhook(secret, {

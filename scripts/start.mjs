@@ -59,7 +59,7 @@ const ALL_PROCESSES = ["api", "worker", "web"];
 // script path is absolute and resolves the same from any cwd.
 if (process.argv[2] === "setup") {
   const cli = spawnSync(
-    join(root, "node_modules/.bin/tsx"),
+    join(root, "packages/db/node_modules/.bin/tsx"),
     [join(root, "scripts/aws-setup/index.ts"), ...process.argv.slice(3)],
     { cwd: process.cwd(), stdio: "inherit" },
   );

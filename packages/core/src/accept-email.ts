@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, count, eq } from "drizzle-orm";
@@ -8,6 +9,7 @@ import { reserveDailyQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
 import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppressions.js";
 import { findTopicOptOuts } from "./topics.js";
+import { utcDay } from "./utc-day.js";
 
 /**
  * Domain part of an RFC 5322 sender, lowercased. SECURITY: strict
@@ -88,6 +90,13 @@ export interface AcceptEmailPayload {
 /** Decoded attachment bytes allowed per email, summed across attachments. */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
+/** Decoded size of base64 attachments: 3 bytes per 4 chars; padding makes this a ≤2-byte overestimate. */
+export function estimateAttachmentBytes(
+  attachments: readonly { content?: string | undefined }[],
+): number {
+  return attachments.reduce((sum, a) => sum + Math.floor(((a.content?.length ?? 0) * 3) / 4), 0);
+}
+
 /**
  * Over-quota mail parks as queued_quota until the nightly drain; the backlog
  * is bounded to this many days' worth of the plan's limit so a key past its
@@ -126,12 +135,7 @@ export async function acceptEmail(
     tx?: Db | undefined;
   } = {},
 ): Promise<AcceptEmailResult> {
-  // Base64 decodes to 3 bytes per 4 chars; padding makes this a ≤2-byte overestimate.
-  const attachmentBytes = (payload.attachments ?? []).reduce(
-    (sum, a) => sum + Math.floor((a.content.length * 3) / 4),
-    0,
-  );
-  if (attachmentBytes > MAX_ATTACHMENT_BYTES) {
+  if (estimateAttachmentBytes(payload.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
     return { ok: false, reason: "attachments_too_large", maxBytes: MAX_ATTACHMENT_BYTES };
   }
 
@@ -165,14 +169,18 @@ export async function acceptEmail(
     [...to, ...(cc ?? []), ...(bcc ?? [])].map((r) => normalizeAddress(extractAddrSpec(r))),
   ).size;
 
+  // The row id is fixed before sealing: the envelope is bound to it.
+  const emailId = randomUUID();
+  const owner = { teamId: auth.teamId, rowId: emailId };
   const encrypted = await encryptEmailBody(
     { html: payload.html ?? null, text: payload.text ?? null },
     deps.keyring,
+    owner,
   );
   // Attachments are content like html/text: sealed at rest, purged with the body.
   const sealedAttachments =
     payload.attachments && payload.attachments.length > 0
-      ? await sealAttachments(payload.attachments, deps.keyring)
+      ? await sealAttachments(payload.attachments, deps.keyring, owner)
       : null;
 
   const limit = deps.isCloud ? PLAN_DAILY_LIMIT[auth.plan] : null;
@@ -180,10 +188,13 @@ export async function acceptEmail(
   // commit atomically (the quota contract). Over-quota mail is parked as
   // queued_quota — still accepted, drained after the midnight rollover.
   const runAccept = async (txDb: Db) => {
+    // A scheduled send is charged to its delivery day, so a team cannot
+    // stack many days of the cap onto one future instant.
     const quota = await reserveDailyQuota(txDb, {
       teamId: auth.teamId,
       count: recipientCount,
       limit,
+      ...(payload.scheduledAt ? { day: utcDay(payload.scheduledAt) } : {}),
     });
     if (!quota.reserved && limit !== null) {
       const [parked] = await txDb
@@ -200,6 +211,7 @@ export async function acceptEmail(
     const [row] = await txDb
       .insert(schema.emails)
       .values({
+        id: emailId,
         teamId: auth.teamId,
         domainId: payload.domainId,
         apiKeyId: auth.apiKeyId,

@@ -22,8 +22,7 @@
     "id": "ID",
     "request": "Requisição",
     "response": "Resposta",
-    "noBody": "Sem corpo.",
-    "redacted": "Campos de conteúdo (html, text, attachments) são omitidos dos logs.",
-    "truncated": "Corpo acima de 16 KB — não armazenado."
+    "requestNotStored": "Corpos de requisição não são armazenados.",
+    "responseNotStored": "Só respostas de erro (4xx/5xx) são armazenadas."
   }
 }

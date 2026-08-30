@@ -151,6 +151,7 @@ async function attemptDelivery(
       keyVersion: endpoint.secretKeyVersion,
     },
     deps.keyring,
+    { teamId: endpoint.teamId, rowId: endpoint.id },
   );
 
   const body = JSON.stringify(delivery.payload);

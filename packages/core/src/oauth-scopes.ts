@@ -21,6 +21,13 @@ export const MCP_SCOPES = [
 export type McpScope = (typeof MCP_SCOPES)[number];
 
 /**
+ * Scopes whose tools are owner/admin only (the dashboard's adminProcedure
+ * line): the consent page withholds them from members and the MCP server
+ * refuses their tools for a member's token regardless of what it carries.
+ */
+export const ADMIN_MCP_SCOPES = ["domains:write", "webhooks:write"] as const satisfies McpScope[];
+
+/**
  * Grant referenceId / token team_id meaning "every team the user belongs
  * to", resolved per call. Not a uuid, so it can never collide with a team id.
  */

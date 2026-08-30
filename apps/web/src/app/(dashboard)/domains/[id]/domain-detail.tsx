@@ -349,8 +349,8 @@ export function DomainDetail({ id }: { id: string }) {
   // Set when the Configuration tab sends the user to the tracking CNAME:
   // switches to Records, pulses that group once, then clears itself.
   const [highlightTracking, setHighlightTracking] = useState(false);
-  const sesEnv = useQuery(trpc.system.sesEnv.queryOptions());
-  const trackingSubdomainsSupported = sesEnv.data?.trackingSubdomainsSupported ?? true;
+  const features = useQuery(trpc.system.features.queryOptions());
+  const trackingSubdomainsSupported = features.data?.trackingSubdomainsSupported ?? true;
   // The Records-tab header switch flips open+click together (one concept there;
   // Configuration keeps the granular toggles).
   const updateTracking = useMutation(
@@ -712,9 +712,9 @@ export function DomainDetail({ id }: { id: string }) {
             trackingSubdomain={data.trackingSubdomain}
             tlsMode={data.tlsMode}
             trackingCnameLive={rows.find((r) => r.group === "tracking")?.live}
-            trackingHostLocal={isLoopbackUrl(sesEnv.data?.appBaseUrl)}
+            trackingHostLocal={isLoopbackUrl(features.data?.appBaseUrl)}
             subdomainsSupported={trackingSubdomainsSupported}
-            trackingRequiresSubdomain={sesEnv.data?.trackingRequiresSubdomain ?? false}
+            trackingRequiresSubdomain={features.data?.trackingRequiresSubdomain ?? false}
             onShowTrackingRecords={() => {
               setTab("records");
               setHighlightTracking(true);
@@ -764,7 +764,7 @@ export function DomainDetail({ id }: { id: string }) {
                             <Switch
                               checked={data.clickTracking || data.openTracking}
                               disabled={
-                                updateTracking.isPending || isLoopbackUrl(sesEnv.data?.appBaseUrl)
+                                updateTracking.isPending || isLoopbackUrl(features.data?.appBaseUrl)
                               }
                               onChange={(checked) =>
                                 updateTracking.mutate({

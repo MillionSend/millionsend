@@ -1,6 +1,8 @@
 import { env } from "@millionsend/config";
 import {
+  DAY_MS,
   fetchDeliverabilityHealth,
+  fetchEffectivePlan,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   parseSingleSender,
@@ -22,6 +24,8 @@ import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../k
 import { router, teamProcedure } from "../trpc";
 import { assertSegment, savedSegmentPredicate } from "./segments";
 import { assertTopic, topicMembershipSql } from "./topics";
+
+const MAX_SCHEDULE_AHEAD_DAYS = 30;
 
 const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
   en: enDeliverability,
@@ -50,7 +54,8 @@ async function activeLocale(): Promise<AppLocale> {
  * and the limit it passed, in the caller's locale.
  */
 async function deliverabilityGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | null> {
-  const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId);
+  const plan = env.IS_CLOUD ? await fetchEffectivePlan(ctx.db, ctx.teamId) : null;
+  const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId, plan ? { plan } : {});
   const reason =
     health.status === "paused" ? health.reasons.find((r) => r.tier === "paused") : null;
   if (!reason) return null;
@@ -352,6 +357,13 @@ export const broadcastsRouter = router({
       const guardError = await deliverabilityGuard(ctx);
       if (guardError) throw guardError;
       const scheduledAt = input.scheduledAt ?? new Date();
+      // Same horizon as the API: a body must not sit out the retention purge.
+      if (scheduledAt.getTime() > Date.now() + MAX_SCHEDULE_AHEAD_DAYS * DAY_MS) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Broadcasts can be scheduled at most ${MAX_SCHEDULE_AHEAD_DAYS} days ahead.`,
+        });
+      }
       const b = schema.broadcasts;
       // status filter re-checked in the UPDATE so two concurrent sends cannot
       // both flip the row.
