@@ -2,6 +2,7 @@ import {
   type BillingStripe,
   createCheckoutSession,
   createPortalSession,
+  hasLiveSubscription,
   PAID_PLANS,
 } from "@millionsend/billing";
 import { env } from "@millionsend/config";
@@ -54,6 +55,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         currentPeriodEnd: team.currentPeriodEnd,
         dailyLimit: PLAN_DAILY_LIMIT[team.plan],
         hasCustomer: team.stripeCustomerId !== null,
+        canCheckout: !hasLiveSubscription(team.planStatus),
       };
     }),
 
@@ -62,6 +64,11 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
       .mutation(async ({ ctx, input }) => {
         requireCloud();
         const team = await loadTeam(ctx.db, ctx.teamId);
+        // Plan changes on a live subscription go through the portal; a second
+        // Checkout would create a second subscription.
+        if (hasLiveSubscription(team.planStatus)) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED" });
+        }
         const url = await createCheckoutSession(
           { db: ctx.db, stripe: deps.stripe() },
           {

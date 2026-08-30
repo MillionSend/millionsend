@@ -6,6 +6,7 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
+import { MAX_ACTIVE_API_KEYS } from "../src/routes/api-keys.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -102,9 +103,43 @@ describe("POST /api-keys", () => {
         .where(eq(schema.apiRequests.path, "/api-keys"));
       const created = logs.find((l) => l.method === "POST" && l.statusCode === 200);
       expect(created).toBeDefined();
-      expect(created?.responseBody).toMatchObject({ id: body.id, token: "[redacted]" });
-      expect(JSON.stringify(created)).not.toContain(body.token);
+      expect(created?.responseBody).toBeNull();
+      expect(JSON.stringify(logs)).not.toContain(body.token);
     });
+  });
+
+  it("records which key minted the new one", async () => {
+    const res = await call(fullKey, "POST", "/api-keys", { name: "child" });
+    const { id } = (await res.json()) as { id: string };
+    const [minter] = await db
+      .select({ id: schema.apiKeys.id })
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.tokenPrefix, fullKey.slice(0, 9)));
+    const [row] = await db.select().from(schema.apiKeys).where(eq(schema.apiKeys.id, id));
+    expect(row?.createdByApiKeyId).toBe(minter?.id);
+  });
+
+  it("422s past the active-key cap, counting revoked keys as free slots", async () => {
+    const capTeam = await createTeam(db, "keys-cap-team");
+    const minter = await insertKey(capTeam);
+    for (let i = 1; i < MAX_ACTIVE_API_KEYS; i++) await insertKey(capTeam);
+    const over = await call(minter, "POST", "/api-keys", { name: "one-too-many" });
+    expect(over.status).toBe(422);
+    expect(await over.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/at most \d+ active API keys/),
+    });
+
+    const [victim] = await db
+      .select({ id: schema.apiKeys.id })
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.teamId, capTeam))
+      .limit(1);
+    await db
+      .update(schema.apiKeys)
+      .set({ revokedAt: new Date() })
+      .where(eq(schema.apiKeys.id, victim?.id ?? ""));
+    expect((await call(minter, "POST", "/api-keys", { name: "fits-again" })).status).toBe(200);
   });
 
   it("creates sending_access keys", async () => {

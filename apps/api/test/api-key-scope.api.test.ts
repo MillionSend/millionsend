@@ -90,6 +90,36 @@ describe("sending_access keys are confined to the send surface", () => {
     const res = await call(sendKey, "POST", `/emails/${crypto.randomUUID()}/cancel`);
     expect(res.status).not.toBe(403);
   });
+
+  it("403s reading the archive (GET /emails, GET /emails/{id}) and deleting", async () => {
+    const sent = await call(fullKey, "POST", "/emails", fromAcme);
+    const { id } = (await sent.json()) as { id: string };
+    for (const [method, path] of [
+      ["GET", "/emails"],
+      ["GET", `/emails/${id}`],
+      ["DELETE", `/emails/${id}`],
+    ] as const) {
+      const res = await call(sendKey, method, path);
+      expect(res.status, `${method} ${path}`).toBe(403);
+      expect(await res.json()).toMatchObject({ statusCode: 403, name: "restricted_api_key" });
+    }
+    expect((await call(fullKey, "GET", `/emails/${id}`)).status).toBe(200);
+  });
+
+  it("cannot cancel or reschedule another key's scheduled email", async () => {
+    const scheduled = { ...fromAcme, scheduled_at: "in 1 hour" };
+    const theirs = (await (await call(fullKey, "POST", "/emails", scheduled)).json()) as {
+      id: string;
+    };
+    const mine = (await (await call(sendKey, "POST", "/emails", scheduled)).json()) as {
+      id: string;
+    };
+    expect((await call(sendKey, "POST", `/emails/${theirs.id}/cancel`)).status).toBe(404);
+    expect(
+      (await call(sendKey, "PATCH", `/emails/${theirs.id}`, { scheduled_at: "in 2 hours" })).status,
+    ).toBe(404);
+    expect((await call(sendKey, "POST", `/emails/${mine.id}/cancel`)).status).toBe(200);
+  });
 });
 
 describe("domain-scoped keys may only send from their domain", () => {
@@ -102,6 +132,17 @@ describe("domain-scoped keys may only send from their domain", () => {
   it("sends from its own domain", async () => {
     const res = await call(domainKey, "POST", "/emails", fromAcme);
     expect(res.status).toBe(200);
+  });
+
+  it("cannot cancel a scheduled email from another domain", async () => {
+    const theirs = (await (
+      await call(fullKey, "POST", "/emails", { ...fromOther, scheduled_at: "in 1 hour" })
+    ).json()) as { id: string };
+    const mine = (await (
+      await call(fullKey, "POST", "/emails", { ...fromAcme, scheduled_at: "in 1 hour" })
+    ).json()) as { id: string };
+    expect((await call(domainKey, "POST", `/emails/${theirs.id}/cancel`)).status).toBe(404);
+    expect((await call(domainKey, "POST", `/emails/${mine.id}/cancel`)).status).toBe(200);
   });
 
   it("enforces the same rule in a batch", async () => {

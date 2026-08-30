@@ -8,7 +8,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 /**
  * Delivers one webhook. The job payload carries only the deliveryId; every
@@ -26,9 +26,77 @@ export interface DeliverDeps {
   now?: () => Date;
 }
 
-export type DeliverOutcome = "success" | "retry" | "exhausted" | "skipped";
+export type DeliverOutcome = "success" | "retry" | "exhausted" | "skipped" | "deferred";
 
 const RESPONSE_SNIPPET_CHARS = 1024;
+
+/**
+ * Circuit breaker: once this many of an endpoint's most recent settled
+ * deliveries all exhausted their retries with no success in between, the
+ * endpoint is auto-disabled and receives nothing further until re-enabled.
+ */
+export const WEBHOOK_AUTO_DISABLE_AFTER = 20;
+
+/**
+ * Per-endpoint in-flight cap, tracked in this process (the worker runs as a
+ * single process, like the send-rate bucket). Beyond the cap a job is handed
+ * back to the queue for a moment instead of holding a delivery worker, so
+ * one slow receiver cannot occupy every worker at once.
+ */
+const ENDPOINT_MAX_IN_FLIGHT = 2;
+const DEFER_MS = 5_000;
+const inFlight = new Map<string, number>();
+
+/** Terminal abandon for a delivery whose job will never run again. */
+export async function abandonWebhookDelivery(db: Db, deliveryId: string): Promise<boolean> {
+  const [row] = await db
+    .update(schema.webhookDeliveries)
+    .set({ status: "exhausted", nextAttemptAt: null })
+    .where(
+      and(
+        eq(schema.webhookDeliveries.id, deliveryId),
+        inArray(schema.webhookDeliveries.status, ["pending", "failed"]),
+      ),
+    )
+    .returning({ id: schema.webhookDeliveries.id });
+  return row !== undefined;
+}
+
+/**
+ * Trips the breaker when the endpoint's last WEBHOOK_AUTO_DISABLE_AFTER
+ * settled deliveries are all exhausted. Ordered by delivery creation, which
+ * approximates "consecutive" closely enough for a dead endpoint.
+ */
+async function autoDisableIfDead(db: Db, endpointId: string): Promise<boolean> {
+  const d = schema.webhookDeliveries;
+  const recent = db
+    .select({ status: d.status })
+    .from(d)
+    .where(and(eq(d.endpointId, endpointId), inArray(d.status, ["success", "exhausted"])))
+    .orderBy(desc(d.createdAt), desc(d.id))
+    .limit(WEBHOOK_AUTO_DISABLE_AFTER)
+    .as("recent");
+  const [stats] = await db
+    .select({
+      settled: sql<number>`count(*)::int`,
+      succeeded: sql<number>`count(*) filter (where ${recent.status} = 'success')::int`,
+    })
+    .from(recent);
+  if (!stats || stats.settled < WEBHOOK_AUTO_DISABLE_AFTER || stats.succeeded > 0) return false;
+  const [row] = await db
+    .update(schema.webhookEndpoints)
+    .set({ status: "auto_disabled" })
+    .where(
+      and(
+        eq(schema.webhookEndpoints.id, endpointId),
+        eq(schema.webhookEndpoints.status, "enabled"),
+      ),
+    )
+    .returning({ id: schema.webhookEndpoints.id });
+  if (row)
+    console.warn(`webhook.deliver: endpoint ${endpointId} auto-disabled after repeated failures`);
+  return row !== undefined;
+}
 
 export async function deliverWebhook(
   db: Db,
@@ -49,13 +117,32 @@ export async function deliverWebhook(
   if (endpoint.status !== "enabled") {
     // Endpoint turned off after the delivery was queued: abandon, don't stall
     // the retry sweep on a row that will never send.
-    await db
-      .update(schema.webhookDeliveries)
-      .set({ status: "exhausted", nextAttemptAt: null })
-      .where(eq(schema.webhookDeliveries.id, delivery.id));
+    await abandonWebhookDelivery(db, delivery.id);
     return "skipped";
   }
+  const now = deps.now?.() ?? new Date();
+  const active = inFlight.get(endpoint.id) ?? 0;
+  if (active >= ENDPOINT_MAX_IN_FLIGHT) {
+    await deps.reenqueue(delivery.id, new Date(now.getTime() + DEFER_MS));
+    return "deferred";
+  }
+  inFlight.set(endpoint.id, active + 1);
+  try {
+    return await attemptDelivery(db, deps, delivery, endpoint, now);
+  } finally {
+    const left = (inFlight.get(endpoint.id) ?? 1) - 1;
+    if (left > 0) inFlight.set(endpoint.id, left);
+    else inFlight.delete(endpoint.id);
+  }
+}
 
+async function attemptDelivery(
+  db: Db,
+  deps: DeliverDeps,
+  delivery: typeof schema.webhookDeliveries.$inferSelect,
+  endpoint: typeof schema.webhookEndpoints.$inferSelect,
+  now: Date,
+): Promise<DeliverOutcome> {
   const secret = await decryptWebhookSecret(
     {
       ciphertext: endpoint.secretCiphertext,
@@ -66,7 +153,6 @@ export async function deliverWebhook(
     deps.keyring,
   );
 
-  const now = deps.now?.() ?? new Date();
   const body = JSON.stringify(delivery.payload);
   const headers = signWebhook(secret, {
     msgId: delivery.messageId,
@@ -117,5 +203,6 @@ export async function deliverWebhook(
     })
     .where(eq(schema.webhookDeliveries.id, delivery.id));
   if (nextAttemptAt) await deps.reenqueue(delivery.id, nextAttemptAt);
+  if (exhausted) await autoDisableIfDead(db, endpoint.id);
   return exhausted ? "exhausted" : "retry";
 }

@@ -58,7 +58,9 @@ export default function AcceptInvitePage() {
           </>
         ) : accept.isError ? (
           <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-ui)" }}>
-            {t("invitations.accept.invalid")}
+            {accept.error.data?.code === "FORBIDDEN"
+              ? t("invitations.accept.emailMismatch")
+              : t("invitations.accept.invalid")}
           </p>
         ) : (
           <>

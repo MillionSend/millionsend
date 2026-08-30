@@ -10,7 +10,11 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { type DeliverDeps, deliverWebhook } from "../src/handlers/deliver-webhook.js";
+import {
+  type DeliverDeps,
+  deliverWebhook,
+  WEBHOOK_AUTO_DISABLE_AFTER,
+} from "../src/handlers/deliver-webhook.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -199,4 +203,62 @@ it("disabled endpoint: no request, delivery abandoned", async () => {
   expect(await deliverWebhook(db, deps, { deliveryId: id })).toBe("skipped");
   expect(deps.posts).toHaveLength(0);
   expect((await deliveryRow(id)).status).toBe("exhausted");
+});
+
+it("auto-disables an endpoint once its recent settled deliveries are all exhausted", async () => {
+  const endpointId = await insertEndpoint();
+  for (let i = 0; i < WEBHOOK_AUTO_DISABLE_AFTER - 1; i += 1) {
+    await insertDelivery(endpointId, { status: "exhausted", attempts: 6 });
+  }
+  // A still-retrying row is not settled and must not count either way.
+  await insertDelivery(endpointId, { status: "failed", attempts: 2 });
+  const id = await insertDelivery(endpointId, { status: "failed", attempts: 5 });
+  const deps = fakeDeps(async () => ({ status: 503, body: "down" }));
+
+  expect(await deliverWebhook(db, deps, { deliveryId: id })).toBe("exhausted");
+  const [endpoint] = await db
+    .select({ status: schema.webhookEndpoints.status })
+    .from(schema.webhookEndpoints)
+    .where(eq(schema.webhookEndpoints.id, endpointId));
+  expect(endpoint?.status).toBe("auto_disabled");
+});
+
+it("one success inside the window keeps the breaker open", async () => {
+  const endpointId = await insertEndpoint();
+  for (let i = 0; i < WEBHOOK_AUTO_DISABLE_AFTER; i += 1) {
+    await insertDelivery(endpointId, { status: "exhausted", attempts: 6 });
+  }
+  await insertDelivery(endpointId, { status: "success", attempts: 1 });
+  const id = await insertDelivery(endpointId, { status: "failed", attempts: 5 });
+  const deps = fakeDeps(async () => ({ status: 503, body: "down" }));
+
+  expect(await deliverWebhook(db, deps, { deliveryId: id })).toBe("exhausted");
+  const [endpoint] = await db
+    .select({ status: schema.webhookEndpoints.status })
+    .from(schema.webhookEndpoints)
+    .where(eq(schema.webhookEndpoints.id, endpointId));
+  expect(endpoint?.status).toBe("enabled");
+});
+
+it("caps in-flight deliveries per endpoint: the overflow is deferred, not queued behind a stall", async () => {
+  const endpointId = await insertEndpoint();
+  const ids = await Promise.all([1, 2, 3].map(() => insertDelivery(endpointId)));
+  let release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const deps = fakeDeps(async () => {
+    await gate;
+    return { status: 200, body: "ok" };
+  });
+
+  const running = ids.map((id) => deliverWebhook(db, deps, { deliveryId: id }));
+  // Let the first two claim their slots before the third arrives.
+  await new Promise((r) => setTimeout(r, 50));
+  release();
+  const outcomes = await Promise.all(running);
+  expect(outcomes.filter((o) => o === "success")).toHaveLength(2);
+  expect(outcomes.filter((o) => o === "deferred")).toHaveLength(1);
+  expect(deps.reenqueued).toHaveLength(1);
+  expect(deps.posts).toHaveLength(2);
 });

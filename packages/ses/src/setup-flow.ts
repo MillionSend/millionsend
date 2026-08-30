@@ -2,7 +2,7 @@
 // detection, plan assembly, secret policy, and the compose-command choice.
 // I/O stays in setup-cli.ts; everything here takes injected readers/probes.
 import { randomBytes } from "node:crypto";
-import { setupPlan, upsertEnv } from "./setup.js";
+import { setupPlan, unquoteEnvValue, upsertEnv } from "./setup.js";
 
 /** Compose file names `docker compose` picks up on its own, most common first. */
 export const COMPOSE_FILENAMES = [
@@ -88,7 +88,7 @@ export function envValue(content: string | null, key: string): string | null {
   if (content === null) return null;
   for (const line of content.split("\n")) {
     const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
-    if (match && match[1] === key) return (match[2] ?? "").trim();
+    if (match && match[1] === key) return unquoteEnvValue((match[2] ?? "").trim());
   }
   return null;
 }
@@ -101,6 +101,19 @@ export function missingSecrets(content: string): string[] {
 /** Same shape the .env.example comments suggest: openssl rand -base64 32. */
 export function generateSecret(): string {
   return randomBytes(32).toString("base64");
+}
+
+/**
+ * A fresh .env gets its own Postgres password instead of the compose default;
+ * the postgres service and DATABASE_URL both read it from the same file.
+ * base64url keeps the URL free of percent-encoding.
+ */
+export function freshDatabaseEntries(): Record<string, string> {
+  const password = randomBytes(24).toString("base64url");
+  return {
+    POSTGRES_PASSWORD: password,
+    DATABASE_URL: `postgres://millionsend:${password}@postgres:5432/millionsend`,
+  };
 }
 
 /** Printed when the operator defers a secret to generate it themselves. */

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import styles from "./auth.module.css";
 import { StrengthMeter } from "./auth-form";
@@ -115,9 +115,16 @@ export function ForgotPasswordForm({
  * better-auth's ?error=INVALID_TOKEN redirect) and a consumed/expired token on
  * submit both land in the same invalid view with a link to request a new one.
  */
-export function ResetPasswordForm({ token }: { token: string | null }) {
+export function ResetPasswordForm({ token: initialToken }: { token: string | null }) {
   const t = useTranslations("auth.reset");
   const router = useRouter();
+  // Held in state so the token survives the URL scrub below.
+  const [token] = useState(initialToken);
+  // The bearer token arrived as ?token=; drop it from the address bar so it
+  // does not linger in history, bookmarks, or anything that copies the URL.
+  useEffect(() => {
+    if (initialToken) window.history.replaceState(null, "", window.location.pathname);
+  }, [initialToken]);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

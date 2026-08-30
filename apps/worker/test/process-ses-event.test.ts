@@ -328,3 +328,34 @@ it("unknown event types are a no-op", async () => {
   await processSesEvent(db, makeEvent({ eventType: "Subscription", sesMessageId: "mid-unknown" }));
   expect(await statusOf(emailId)).toBe("sent");
 });
+
+it("suppresses only addresses the email was sent to — never a payload-supplied stranger", async () => {
+  const emailId = await insertSentEmail("mid-bounce-scope", ["real@example.com"]);
+  await db
+    .update(schema.emails)
+    .set({ cc: ["Copied <copy@example.com>"] })
+    .where(eq(schema.emails.id, emailId));
+  await processSesEvent(
+    db,
+    makeEvent({
+      eventType: "Bounce",
+      sesMessageId: "mid-bounce-scope",
+      bounce: {
+        bounceType: "Permanent",
+        bounceSubType: "General",
+        recipients: ["Real@Example.com", "copy@example.com", "stranger@example.com"],
+      },
+    }),
+  );
+
+  const hashes = (
+    await db
+      .select({ h: schema.suppressions.emailHash })
+      .from(schema.suppressions)
+      .where(eq(schema.suppressions.sourceEmailId, emailId))
+  ).map((r) => r.h);
+  expect(hashes).toHaveLength(2);
+  expect(hashes).toContain(hashRecipient("real@example.com"));
+  expect(hashes).toContain(hashRecipient("copy@example.com"));
+  expect(hashes).not.toContain(hashRecipient("stranger@example.com"));
+});

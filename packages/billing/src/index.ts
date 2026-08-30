@@ -3,6 +3,7 @@ export {
   type BillingTeam,
   createCheckoutSession,
   createPortalSession,
+  hasLiveSubscription,
 } from "./checkout.js";
 export {
   PAID_PLANS,
@@ -11,5 +12,6 @@ export {
   planFromSubscription,
   resolvePrices,
 } from "./prices.js";
-export { type BillingStripe, createStripe } from "./stripe.js";
-export { handleWebhook, type WebhookDeps } from "./webhook.js";
+export { type BillingStripe, createStripe, isLiveKey } from "./stripe.js";
+export { cancelTeamSubscription, reconcileTeamPlan } from "./subscription.js";
+export { handleWebhook, purgeStripeEvents, type WebhookDeps } from "./webhook.js";

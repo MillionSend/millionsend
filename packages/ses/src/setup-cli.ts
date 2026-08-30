@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
@@ -31,6 +31,7 @@ import {
   detectDirState,
   envValue,
   flowPlan,
+  freshDatabaseEntries,
   generateSecret,
   isCloudEnv,
   missingSecrets,
@@ -215,10 +216,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     // --- env step ---
     const envPath = join(process.cwd(), ".env");
     let env = state.envContent;
+    // The file holds every secret: owner-only on create, and re-asserted on
+    // each write so a pre-existing world-readable .env is tightened too.
+    const saveEnv = (): void => {
+      if (env === null) return;
+      writeFileSync(envPath, env, { mode: 0o600 });
+      chmodSync(envPath, 0o600);
+    };
     if (env === null) {
       if (await offer(rl, "No .env here — create one from the built-in template?", interactive)) {
-        env = envTemplate();
-        writeFileSync(envPath, env);
+        env = upsertEnv(envTemplate(), freshDatabaseEntries());
+        saveEnv();
         console.log(dim(`Wrote ${envPath}.`));
       } else {
         console.log(dim(`Skipped. Manual: curl -o .env ${ENV_EXAMPLE_URL}`));
@@ -230,13 +238,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const writeEnv = (entries: Record<string, string>): boolean => {
       if (env === null) return false;
       env = upsertEnv(env, entries);
-      writeFileSync(envPath, env);
+      saveEnv();
       return true;
     };
     const enableProfile = (profile: string): boolean => {
       if (env === null) return false;
       env = withComposeProfile(env, profile);
-      writeFileSync(envPath, env);
+      saveEnv();
       return true;
     };
     if (cloud && !isCloudEnv(env)) writeEnv({ IS_CLOUD: "true" });

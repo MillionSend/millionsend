@@ -84,10 +84,9 @@ beforeAll(async () => {
 afterAll(() => close());
 
 describe("api request logging", () => {
-  it("logs an authenticated request with content fields redacted and no headers", async () => {
+  it("logs an authenticated request as metadata only: no bodies, no headers", async () => {
     const res = await post(validBody);
     expect(res.status).toBe(200);
-    const { id: emailId } = (await res.json()) as { id: string };
 
     const [row] = await waitForRows(1);
     expect(row).toMatchObject({
@@ -95,16 +94,36 @@ describe("api request logging", () => {
       method: "POST",
       path: "/emails",
       statusCode: 200,
+      requestBody: null,
+      responseBody: null,
     });
-    expect(row?.requestBody).toMatchObject({
-      from: validBody.from,
-      subject: "s",
-      html: "[redacted]",
-      text: "[redacted]",
+    // Neither the API key nor any recipient/content lands in the row.
+    const serialized = JSON.stringify(row);
+    expect(serialized).not.toContain(token);
+    expect(serialized).not.toContain("r@example.com");
+    expect(serialized).not.toContain("secret");
+  });
+
+  it("stores the API's own error body for failed requests, still no request body", async () => {
+    await db.delete(schema.apiRequests);
+    const res = await post({ ...validBody, html: undefined, text: undefined });
+    expect(res.status).toBe(422);
+
+    const [row] = await waitForRows(1);
+    expect(row?.statusCode).toBe(422);
+    expect(row?.requestBody).toBeNull();
+    expect(row?.responseBody).toMatchObject({ statusCode: 422, name: "validation_error" });
+  });
+
+  it("masks email path segments", async () => {
+    await db.delete(schema.apiRequests);
+    const res = await app.request("/contacts/someone%40example.com", {
+      headers: { authorization: `Bearer ${token}` },
     });
-    expect(row?.responseBody).toEqual({ id: emailId });
-    // Headers are never stored — the API key must not appear anywhere in the row.
-    expect(JSON.stringify(row)).not.toContain(token);
+    expect(res.status).toBe(404);
+    const [row] = await waitForRows(1);
+    expect(row?.path).toBe("/contacts/[email]");
+    expect(JSON.stringify(row)).not.toContain("someone");
   });
 
   it("skips unauthenticated requests and the SNS endpoint", async () => {
@@ -128,7 +147,7 @@ describe("api request logging", () => {
     expect(rows[0]?.statusCode).toBe(200);
   });
 
-  it("redacts content fields in logged RESPONSE bodies (GET /emails/{id})", async () => {
+  it("never stores a success response body (GET /emails/{id} serves decrypted content)", async () => {
     await db.delete(schema.apiRequests);
     const res = await post({ ...validBody, to: ["readback@example.com"] });
     expect(res.status).toBe(200);
@@ -141,33 +160,20 @@ describe("api request logging", () => {
     // The live response still serves the decrypted content...
     expect(await read.json()).toMatchObject({ html: "<p>secret</p>", text: "secret" });
 
-    // ...but the stored log copy must not become a plaintext copy of the
-    // encrypted body.
+    // ...but the log must not become a plaintext copy of the encrypted body.
     const rows = await waitForRows(2);
     const logged = rows.find((r) => r.method === "GET");
-    expect(logged?.responseBody).toMatchObject({ html: "[redacted]", text: "[redacted]" });
-    expect(JSON.stringify(logged?.responseBody)).not.toContain("secret");
+    expect(logged?.responseBody).toBeNull();
+    expect(JSON.stringify(rows)).not.toContain("secret");
   });
 
-  it("recursively redacts every item in batch request logs", async () => {
+  it("stores no body for batch requests either", async () => {
     await db.delete(schema.apiRequests);
-    const res = await postBatch([
-      validBody,
-      {
-        ...validBody,
-        to: ["second@example.com"],
-        html: "<p>second secret</p>",
-        text: "second secret",
-      },
-    ]);
+    const res = await postBatch([validBody, { ...validBody, to: ["second@example.com"] }]);
     expect(res.status).toBe(200);
 
     const [row] = await waitForRows(1);
-    expect(row?.requestBody).toEqual([
-      expect.objectContaining({ html: "[redacted]", text: "[redacted]" }),
-      expect.objectContaining({ html: "[redacted]", text: "[redacted]" }),
-    ]);
-    expect(JSON.stringify(row?.requestBody)).not.toContain("secret");
+    expect(row).toMatchObject({ path: "/emails/batch", requestBody: null, responseBody: null });
   });
 
   it("rejects oversized bodies before authentication or parsing", async () => {
@@ -190,14 +196,14 @@ describe("api request logging", () => {
     expect(await loggedRows()).toHaveLength(0);
   });
 
-  it("stores a truncation marker instead of oversized bodies", async () => {
+  it("stores a truncation marker instead of an oversized error body", async () => {
     await db.delete(schema.apiRequests);
-    const res = await post({ ...validBody, subject: "x".repeat(20_000) });
-    expect(res.status).toBe(200);
+    // The validation message echoes the offending header name.
+    const res = await post({ ...validBody, headers: { ["Y".repeat(20_000)]: "v" } });
+    expect(res.status).toBe(422);
 
     const [row] = await waitForRows(1);
-    expect(row?.requestBody).toEqual({ truncated: true });
-    expect(row?.responseBody).toMatchObject({ id: expect.any(String) });
+    expect(row?.responseBody).toEqual({ truncated: true });
   });
 
   // Kept last: it destroys the api_requests table for this suite's db.

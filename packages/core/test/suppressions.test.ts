@@ -2,7 +2,8 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { findSuppressed, hashRecipient } from "../src/suppressions.js";
+import { sha256Hex } from "../src/hash.js";
+import { findSuppressed, hashRecipient, normalizeAddress } from "../src/suppressions.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -17,6 +18,27 @@ afterAll(() => close());
 describe("suppressions", () => {
   it("normalizes before hashing", () => {
     expect(hashRecipient("  User@Example.COM ")).toBe(hashRecipient("user@example.com"));
+    expect(hashRecipient("Bob <bob@example.com>")).toBe(hashRecipient("bob@example.com"));
+    // NFKC folds fullwidth lookalikes; a trailing root dot is the same domain.
+    expect(hashRecipient("ｂｏｂ@example.com")).toBe(hashRecipient("bob@example.com"));
+    expect(hashRecipient("bob@example.com.")).toBe(hashRecipient("bob@example.com"));
+    // Plus-tags stay distinct: the receiving MTA treats them as different mailboxes.
+    expect(hashRecipient("bob+1@example.com")).not.toBe(hashRecipient("bob@example.com"));
+    expect(normalizeAddress("Ｂob@Example.COM.")).toBe("bob@example.com");
+  });
+
+  it("still matches rows hashed before normalization existed", async () => {
+    // Legacy hash: addr-spec lowercased only, no NFKC — differs from today's.
+    const legacy = sha256Hex("ｏｌｄ@example.com");
+    expect(legacy).not.toBe(hashRecipient("ｏｌｄ@example.com"));
+    await db.insert(schema.suppressions).values({
+      teamId,
+      email: "ｏｌｄ@example.com",
+      emailHash: legacy,
+      reason: "hard_bounce",
+    });
+    const suppressed = await findSuppressed(db, teamId, ["ｏｌｄ@example.com"]);
+    expect(suppressed).toEqual(new Set(["ｏｌｄ@example.com"]));
   });
 
   it("finds only the suppressed subset, case-insensitively", async () => {

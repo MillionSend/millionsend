@@ -3,7 +3,7 @@ import { getDb } from "@millionsend/db";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { cookies } from "next/headers";
 import superjson from "superjson";
-import { getAuth } from "./auth";
+import { getAuth, SESSION_FRESH_AGE_SECONDS } from "./auth";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership, type TeamRole } from "./membership";
 import { getQueue } from "./queue";
 
@@ -21,7 +21,7 @@ export interface SessionUser {
 export interface AuthSession {
   user: SessionUser;
   /** The session row; optional so tests can fake a context without one. */
-  session?: { id: string };
+  session?: { id: string; createdAt?: Date };
 }
 
 export interface Context {
@@ -105,3 +105,24 @@ export const adminProcedure = teamProcedure.use(({ ctx, next }) => {
   if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
   return next();
 });
+
+/**
+ * Step-up gate for actions that turn a browser session into a durable
+ * credential (minting API keys and the like): the session must have been
+ * established within SESSION_FRESH_AGE_SECONDS, so a week-old sliding
+ * session on a shared machine cannot silently do it. A context without the
+ * session row (test fakes) fails closed.
+ */
+const freshSession = t.middleware(({ ctx, next }) => {
+  const createdAt = ctx.session?.session?.createdAt;
+  if (!createdAt || Date.now() - createdAt.getTime() >= SESSION_FRESH_AGE_SECONDS * 1000) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "Your session is too old for this action. Sign in again to continue.",
+    });
+  }
+  return next();
+});
+
+export const freshProcedure = protectedProcedure.use(freshSession);
+export const freshAdminProcedure = adminProcedure.use(freshSession);

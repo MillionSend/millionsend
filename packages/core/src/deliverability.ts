@@ -4,6 +4,7 @@ import type { Db } from "@millionsend/db";
 // module's thresholds. The type-only Db import above is erased.
 import * as schema from "@millionsend/db/schema";
 import { and, eq, gte, sql } from "drizzle-orm";
+import type { Plan } from "./plans.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -27,6 +28,16 @@ export const PAUSE_COMPLAINT_RATE = 0.001;
  * of rate: a handful of bounces in a tiny sample must never pause an account.
  */
 export const MIN_GUARDRAIL_VOLUME = 1000;
+
+/**
+ * Plan-scaled floor for cloud teams: a free team caps at 700 sends/week, so
+ * the default floor would never let the guardrail engage for it.
+ */
+export const MIN_GUARDRAIL_VOLUME_BY_PLAN: Record<Plan, number> = {
+  free: 100,
+  pro: MIN_GUARDRAIL_VOLUME,
+  scale: MIN_GUARDRAIL_VOLUME,
+};
 
 /** Trailing window, in UTC calendar days, that rates are computed over. */
 export const GUARDRAIL_WINDOW_DAYS = 7;
@@ -77,20 +88,19 @@ function tierFor(rate: number, warn: number, pause: number): "warning" | "paused
 
 /**
  * Pure guardrail decision from a window's counts. Rates are always computed
- * for display, but no tier fires below MIN_GUARDRAIL_VOLUME. `sent` is the
- * successfully sent count (the denominator every rate divides by); zero sends
- * yields zero rates, never NaN.
+ * for display, but no tier fires below `minVolume` (MIN_GUARDRAIL_VOLUME by
+ * default). `sent` is the successfully sent count (the denominator every
+ * rate divides by); zero sends yields zero rates, never NaN.
  */
-export function evaluateDeliverability(counts: {
-  sent: number;
-  bounced: number;
-  complained: number;
-}): DeliverabilityEvaluation {
+export function evaluateDeliverability(
+  counts: { sent: number; bounced: number; complained: number },
+  minVolume: number = MIN_GUARDRAIL_VOLUME,
+): DeliverabilityEvaluation {
   const { sent, bounced, complained } = counts;
   const bounceRate = sent > 0 ? bounced / sent : 0;
   const complaintRate = sent > 0 ? complained / sent : 0;
 
-  if (sent < MIN_GUARDRAIL_VOLUME) {
+  if (sent < minVolume) {
     return { bounceRate, complaintRate, status: "ok", reasons: [] };
   }
 
@@ -119,7 +129,8 @@ export function evaluateDeliverability(counts: {
 export async function fetchDeliverabilityHealth(
   db: Db,
   teamId: string,
-  opts?: { now?: Date; windowDays?: number },
+  /** `plan` lowers the volume floor for cloud plans; omit on self-host. */
+  opts?: { now?: Date; windowDays?: number; plan?: Plan },
 ): Promise<DeliverabilityHealth> {
   const windowDays = opts?.windowDays ?? GUARDRAIL_WINDOW_DAYS;
   const now = (opts?.now ?? new Date()).getTime();
@@ -138,11 +149,10 @@ export async function fetchDeliverabilityHealth(
     .where(and(eq(c.teamId, teamId), gte(c.day, since)));
 
   const sent = Number(row?.sent ?? 0);
-  const evaluation = evaluateDeliverability({
-    sent,
-    bounced: Number(row?.bounced ?? 0),
-    complained: Number(row?.complained ?? 0),
-  });
+  const evaluation = evaluateDeliverability(
+    { sent, bounced: Number(row?.bounced ?? 0), complained: Number(row?.complained ?? 0) },
+    opts?.plan ? MIN_GUARDRAIL_VOLUME_BY_PLAN[opts.plan] : MIN_GUARDRAIL_VOLUME,
+  );
 
   return { ...evaluation, sent, windowDays };
 }

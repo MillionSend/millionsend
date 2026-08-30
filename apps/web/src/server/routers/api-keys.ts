@@ -3,7 +3,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { adminProcedure, router, teamProcedure } from "../trpc";
+import { adminProcedure, freshAdminProcedure, router, teamProcedure } from "../trpc";
 
 export const apiKeysRouter = router({
   list: teamProcedure.query(async ({ ctx }) => {
@@ -27,7 +27,7 @@ export const apiKeysRouter = router({
     return rows;
   }),
 
-  create: adminProcedure
+  create: freshAdminProcedure
     .input(
       z.object({
         name: z.string().trim().min(1).max(80),

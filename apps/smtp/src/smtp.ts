@@ -3,12 +3,12 @@ import {
   type ApiKeyAuth,
   acceptEmail,
   authenticateApiKey,
-  extractAddrSpec,
+  formatMailbox,
+  parseMailbox,
   verifySenderDomain,
 } from "@millionsend/core";
 import { type AddressObject, simpleParser } from "mailparser";
 import { SMTPServer, type SMTPServerDataStream, type SMTPServerSession } from "smtp-server";
-import { z } from "zod";
 
 /** Mirrors Resend's SMTP contract: fixed username, an API key as password. */
 export const SMTP_USERNAME = "millionsend";
@@ -16,11 +16,20 @@ export const SMTP_USERNAME = "millionsend";
 // SESv2 rejects raw messages over 40 MB, and nothing larger can ever send.
 export const MAX_MESSAGE_BYTES = 40 * 1024 * 1024;
 
+/** Same per-field cap as POST /emails, applied to the envelope. */
+export const MAX_RCPT_TO = 50;
+export const MAX_CLIENTS = 100;
+export const MAX_CONNECTIONS_PER_IP = 10;
+/** Failed AUTH attempts per connection before it is dropped. */
+export const MAX_AUTH_FAILURES = 3;
+
 export interface SmtpDeps extends AcceptEmailDeps {
   /** STARTTLS keypair; omitted → AUTH stays disabled unless explicitly allowed. */
   tls?: { key: Buffer; cert: Buffer } | undefined;
   /** Private-network escape hatch. Never enable on an untrusted network. */
   allowInsecureAuth?: boolean | undefined;
+  /** Defaults to MAX_MESSAGE_BYTES; lowered only by tests. */
+  maxMessageBytes?: number | undefined;
 }
 
 function smtpError(responseCode: number, message: string): Error {
@@ -34,22 +43,29 @@ function toSmtpError(err: unknown): Error {
   return smtpError(451, "Temporary local error, please retry");
 }
 
-/** Flatten mailparser address headers back to RFC 5322 mailbox strings. */
-function toMailboxes(header: AddressObject | AddressObject[] | undefined): string[] {
+/**
+ * Flatten mailparser address headers to canonical single-mailbox strings.
+ * Re-serialising through formatMailbox + parseMailbox rejects what the strict
+ * parser rejects (control characters in decoded encoded-word names, names
+ * carrying an address, malformed addr-specs). Group members carry no address
+ * of their own and are dropped: the envelope decides delivery anyway.
+ */
+function toMailboxes(header: AddressObject | AddressObject[] | undefined, field: string): string[] {
   const objects = header === undefined ? [] : Array.isArray(header) ? header : [header];
   const out: string[] = [];
   for (const obj of objects) {
     for (const entry of obj.value) {
       if (!entry.address) continue;
-      out.push(entry.name ? `${entry.name} <${entry.address}>` : entry.address);
+      const mailbox = formatMailbox({ name: entry.name || undefined, address: entry.address });
+      if (!parseMailbox(mailbox)) throw smtpError(553, `Invalid ${field} address`);
+      out.push(mailbox);
     }
   }
   return out;
 }
 
-// Same rule as the HTTP API's address schema: valid addr-spec, display
-// names allowed.
-const isValidMailbox = (mailbox: string) => z.email().safeParse(extractAddrSpec(mailbox)).success;
+const addrKey = (mailbox: string): string =>
+  (parseMailbox(mailbox)?.address ?? mailbox).toLowerCase();
 
 /**
  * MIME message → the shared accept pipeline. Throws errors carrying SMTP
@@ -68,21 +84,23 @@ async function handleMessage(
     throw smtpError(554, "Attachments are not yet supported");
   }
 
-  const [from] = toMailboxes(parsed.from);
+  const [from] = toMailboxes(parsed.from, "From");
   if (!from) throw smtpError(553, "A From header with a single address is required");
-  const to = toMailboxes(parsed.to);
-  if (to.length === 0) throw smtpError(553, "At least one To recipient is required");
-  const cc = toMailboxes(parsed.cc);
-  const replyTo = toMailboxes(parsed.replyTo);
-  // Envelope recipients absent from To/Cc are the BCCs — their addresses
-  // never appear in message headers.
-  const headerAddrs = new Set([...to, ...cc].map((m) => extractAddrSpec(m).toLowerCase()));
-  const bcc = session.envelope.rcptTo
-    .map((r) => r.address)
-    .filter((a) => !headerAddrs.has(a.toLowerCase()));
+  const replyTo = toMailboxes(parsed.replyTo, "Reply-To");
 
-  const invalid = [from, ...to, ...cc, ...bcc, ...replyTo].find((m) => !isValidMailbox(m));
-  if (invalid !== undefined) throw smtpError(553, `Invalid address: ${invalid}`);
+  // The envelope is authoritative, as for any MTA: only RCPT TO addresses
+  // are delivered. To/Cc headers decide which of them are visible; the rest
+  // are BCCs, whose addresses never appear in message headers.
+  const envelope = session.envelope.rcptTo.map((r) => r.address);
+  if (envelope.some((a) => !parseMailbox(a))) throw smtpError(553, "Invalid envelope recipient");
+  const envelopeKeys = new Set(envelope.map(addrKey));
+  const to = toMailboxes(parsed.to, "To").filter((m) => envelopeKeys.has(addrKey(m)));
+  if (to.length === 0) {
+    throw smtpError(553, "At least one To recipient must also be an envelope recipient");
+  }
+  const cc = toMailboxes(parsed.cc, "Cc").filter((m) => envelopeKeys.has(addrKey(m)));
+  const headerKeys = new Set([...to, ...cc].map(addrKey));
+  const bcc = envelope.filter((a) => !headerKeys.has(addrKey(a)));
 
   const subject = parsed.subject;
   if (!subject) throw smtpError(553, "A non-empty Subject header is required");
@@ -118,7 +136,13 @@ async function handleMessage(
     text,
     domainId: domain.domainId,
   });
-  if (!result.ok) throw smtpError(550, "All recipients are suppressed");
+  if (!result.ok) {
+    if (result.reason === "quota_backlog_full") {
+      throw smtpError(452, "Daily quota exceeded and the parked backlog is full");
+    }
+    if (result.reason === "attachments_too_large") throw smtpError(552, "Attachments too large");
+    throw smtpError(550, "All recipients are suppressed");
+  }
   return `Queued as ${result.id}`;
 }
 
@@ -128,6 +152,11 @@ async function handleMessage(
  * "millionsend", password an ms_ API key.
  */
 export function createSmtpServer(deps: SmtpDeps): SMTPServer {
+  const maxMessageBytes = deps.maxMessageBytes ?? MAX_MESSAGE_BYTES;
+  const connectionsByIp = new Map<string, number>();
+  // Sessions admitted by onConnect; onClose also fires for rejected ones.
+  const admitted = new Set<string>();
+  const authFailures = new Map<string, number>();
   return new SMTPServer({
     // Without a keypair STARTTLS is withdrawn. Plaintext AUTH requires an
     // explicit opt-in; smtp-server otherwise rejects it before onAuth.
@@ -135,8 +164,26 @@ export function createSmtpServer(deps: SmtpDeps): SMTPServer {
       ? { key: deps.tls.key, cert: deps.tls.cert }
       : { hideSTARTTLS: true, allowInsecureAuth: deps.allowInsecureAuth ?? false }),
     authMethods: ["PLAIN", "LOGIN"],
-    size: MAX_MESSAGE_BYTES,
-    onAuth(auth, _session, callback) {
+    size: maxMessageBytes,
+    maxClients: MAX_CLIENTS,
+    onConnect(session, callback) {
+      const open = connectionsByIp.get(session.remoteAddress) ?? 0;
+      if (open >= MAX_CONNECTIONS_PER_IP) {
+        callback(smtpError(421, "Too many connections from your address, try again later"));
+        return;
+      }
+      connectionsByIp.set(session.remoteAddress, open + 1);
+      admitted.add(session.id);
+      callback();
+    },
+    onClose(session) {
+      authFailures.delete(session.id);
+      if (!admitted.delete(session.id)) return;
+      const open = (connectionsByIp.get(session.remoteAddress) ?? 1) - 1;
+      if (open <= 0) connectionsByIp.delete(session.remoteAddress);
+      else connectionsByIp.set(session.remoteAddress, open);
+    },
+    onAuth(auth, session, callback) {
       void (async () => {
         if (auth.username !== SMTP_USERNAME) {
           throw smtpError(535, `Authentication failed: username must be "${SMTP_USERNAME}"`);
@@ -146,14 +193,37 @@ export function createSmtpServer(deps: SmtpDeps): SMTPServer {
           throw smtpError(535, "Authentication failed: password must be a valid API key");
         }
         callback(null, { user: verified });
-      })().catch((err) => callback(toSmtpError(err)));
+      })().catch((err) => {
+        const failures = (authFailures.get(session.id) ?? 0) + 1;
+        authFailures.set(session.id, failures);
+        // 421 makes smtp-server close the connection after the reply.
+        callback(
+          failures >= MAX_AUTH_FAILURES
+            ? smtpError(421, "Too many failed authentication attempts")
+            : toSmtpError(err),
+        );
+      });
+    },
+    onRcptTo(_address, session, callback) {
+      if (session.envelope.rcptTo.length >= MAX_RCPT_TO) {
+        callback(smtpError(452, "Too many recipients"));
+        return;
+      }
+      callback();
     },
     onData(stream: SMTPServerDataStream, session, callback) {
       const chunks: Buffer[] = [];
-      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+      let received = 0;
+      // smtp-server only flags an oversized message; the bytes still arrive.
+      // Stop retaining them past the cap so a huge DATA cannot exhaust memory.
+      stream.on("data", (chunk: Buffer) => {
+        received += chunk.length;
+        if (received > maxMessageBytes) chunks.length = 0;
+        else chunks.push(chunk);
+      });
       stream.once("end", () => {
         void (async () => {
-          if (stream.sizeExceeded) {
+          if (stream.sizeExceeded || received > maxMessageBytes) {
             throw smtpError(552, "Message exceeds the maximum size");
           }
           // Set by onAuth; auth is mandatory, so a missing user is a bug.

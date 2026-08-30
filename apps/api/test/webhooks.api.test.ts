@@ -105,7 +105,7 @@ describe("POST /webhooks", () => {
     ).toBe(true);
   });
 
-  it("redacts signing_secret from the request log", async () => {
+  it("keeps signing_secret out of the request log", async () => {
     const created = await createWebhook({
       endpoint: "https://example.com/hooks/logged",
       events: ["email.sent"],
@@ -115,12 +115,11 @@ describe("POST /webhooks", () => {
         .select()
         .from(schema.apiRequests)
         .where(eq(schema.apiRequests.path, "/webhooks"));
-      const entry = logs.find(
-        (l) => l.method === "POST" && (l.responseBody as { id?: string } | null)?.id === created.id,
-      );
+      const entry = logs.find((l) => l.method === "POST" && l.statusCode === 200);
       expect(entry).toBeDefined();
-      expect(entry?.responseBody).toMatchObject({ signing_secret: "[redacted]" });
-      expect(JSON.stringify(entry)).not.toContain(created.signing_secret);
+      // Success responses are never stored, so the secret cannot land here.
+      expect(entry?.responseBody).toBeNull();
+      expect(JSON.stringify(logs)).not.toContain(created.signing_secret);
     });
   });
 

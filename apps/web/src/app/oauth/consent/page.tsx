@@ -2,6 +2,7 @@ import { getDb, schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { httpOrigin } from "@/lib/http-url";
 import { getAuth, OAUTH_SCOPES } from "@/server/auth";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership, listMemberships } from "@/server/membership";
 import { ConsentForm } from "./consent-form";
@@ -30,7 +31,14 @@ export default async function ConsentPage({
   const clientId = query.get("client_id");
   const [client] = clientId
     ? await db
-        .select({ name: schema.oauthClient.name, uri: schema.oauthClient.uri })
+        .select({
+          clientId: schema.oauthClient.clientId,
+          name: schema.oauthClient.name,
+          uri: schema.oauthClient.uri,
+          redirectUris: schema.oauthClient.redirectUris,
+          createdAt: schema.oauthClient.createdAt,
+          skipConsent: schema.oauthClient.skipConsent,
+        })
         .from(schema.oauthClient)
         .where(eq(schema.oauthClient.clientId, clientId))
     : [];
@@ -47,10 +55,27 @@ export default async function ConsentPage({
 
   return (
     <ConsentForm
-      app={client ? { name: client.name, uri: client.uri } : null}
+      app={
+        client
+          ? {
+              clientId: client.clientId,
+              name: client.name,
+              uri: client.uri,
+              // Where the code (and the user) end up after Allow — the one
+              // fact about the app the registrant could not make up.
+              redirectOrigins: [
+                ...new Set(client.redirectUris.map(httpOrigin).filter((o) => o !== null)),
+              ],
+              // Only operator-trusted clients skip consent; everything else
+              // self-registered and is shown as such.
+              unverified: !client.skipConsent,
+              registeredAt: client.createdAt?.toISOString() ?? null,
+            }
+          : null
+      }
       userEmail={session.user.email}
       scopes={scopes}
-      teams={teams.map(({ teamId, teamName }) => ({ teamId, teamName }))}
+      teams={teams.map(({ teamId, teamName, role }) => ({ teamId, teamName, role }))}
       defaultTeamId={active?.teamId ?? null}
     />
   );

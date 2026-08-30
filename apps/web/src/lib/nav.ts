@@ -1,14 +1,26 @@
 /**
  * A post-auth redirect target taken from a query param, constrained to an
  * in-app path so a crafted `?next=` can never bounce a signed-in user to an
- * external origin. Accepted only when it starts with a single "/" whose next
- * char is neither "/" nor "\": browsers treat both "//host" and "/\host" as
- * protocol-relative and would navigate off-site. Encoded forms (%2f, %5c) stay
- * literal in the path and never decode to a second leading slash, so they fall
- * through to `fallback` as ordinary non-matching paths.
+ * external origin. The check is parse-based rather than a prefix test: the
+ * URL parser strips ASCII tab/newline and treats "\" as "/", so "/\t//host"
+ * or "/\host" would otherwise pass a "single leading slash" test and still
+ * navigate off-site. Control characters are rejected outright; anything else
+ * must resolve to the same origin, and the normalized path is returned.
+ * Encoded forms (%2f, %5c) stay literal in the path and never decode to a
+ * second leading slash, so they are ordinary same-origin paths.
  */
 export function safeNextPath(next: string | null | undefined, fallback: string): string {
-  return next?.startsWith("/") && !/^\/[/\\]/.test(next) ? next : fallback;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the control range is exactly what must be rejected
+  if (!next?.startsWith("/") || /[\u0000-\u001f\u007f]/.test(next)) return fallback;
+  const base = "http://next.invalid";
+  let url: URL;
+  try {
+    url = new URL(next, base);
+  } catch {
+    return fallback;
+  }
+  if (url.origin !== base) return fallback;
+  return url.pathname + url.search + url.hash;
 }
 
 /** True when `pathname` is `href` or nested under it ("/emails/123" → "/emails"). */

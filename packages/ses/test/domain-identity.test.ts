@@ -125,7 +125,7 @@ describe("createDomainIdentity", () => {
     });
   });
 
-  it("adopts an already-existing identity by re-applying the signing key", async () => {
+  it("adopts an already-existing identity by re-applying the signing key when asked", async () => {
     const { client, calls } = fakeClient((command) => {
       if (command instanceof CreateEmailIdentityCommand) {
         throw Object.assign(new Error("identity exists"), { name: "AlreadyExistsException" });
@@ -136,6 +136,7 @@ describe("createDomainIdentity", () => {
       domain: "example.com",
       mailFromSubdomain: "send",
       dkim: DKIM,
+      adoptExisting: true,
     });
     expect(calls.map((c) => c.constructor.name)).toEqual([
       "CreateEmailIdentityCommand",
@@ -150,6 +151,24 @@ describe("createDomainIdentity", () => {
         DomainSigningPrivateKey: DKIM.privateKeyB64,
       },
     });
+  });
+
+  it("propagates AlreadyExistsException without re-keying unless adoption is enabled", async () => {
+    const { client, calls } = fakeClient((command) => {
+      if (command instanceof CreateEmailIdentityCommand) {
+        throw Object.assign(new Error("identity exists"), { name: "AlreadyExistsException" });
+      }
+      return {};
+    });
+    await expect(
+      createDomainIdentity(client, {
+        domain: "example.com",
+        mailFromSubdomain: "send",
+        dkim: DKIM,
+      }),
+    ).rejects.toMatchObject({ name: "AlreadyExistsException" });
+    // Neither the signing key nor MAIL FROM of the existing identity is touched.
+    expect(calls.map((c) => c.constructor.name)).toEqual(["CreateEmailIdentityCommand"]);
   });
 
   it("rethrows create failures other than AlreadyExistsException", async () => {

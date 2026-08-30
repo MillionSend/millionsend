@@ -145,6 +145,25 @@ describe("fetchDeliverabilityHealth", () => {
     expect(health.reasons).toEqual([{ metric: "bounce", rate: 0.06, tier: "paused" }]);
   });
 
+  it("lowers the volume floor for the free plan when a plan is given", async () => {
+    const teamId = await createTeam(db, "deliverability-free");
+    const now = new Date("2026-08-14T12:00:00.000Z");
+    // 200 sends at 10% bounce: under the default 1000 floor, over free's 100.
+    await db.insert(schema.usageCounters).values({
+      teamId,
+      day: utcDay(now.getTime()),
+      accepted: 200,
+      sent: 200,
+      bounced: 20,
+      complained: 0,
+    });
+    expect((await fetchDeliverabilityHealth(db, teamId, { now })).status).toBe("ok");
+    expect((await fetchDeliverabilityHealth(db, teamId, { now, plan: "pro" })).status).toBe("ok");
+    expect((await fetchDeliverabilityHealth(db, teamId, { now, plan: "free" })).status).toBe(
+      "paused",
+    );
+  });
+
   it("returns ok with zero rates for a team that has never sent", async () => {
     const teamId = await createTeam(db, "deliverability-empty");
     const health = await fetchDeliverabilityHealth(db, teamId, {

@@ -74,7 +74,10 @@ async function signUp(email: string): Promise<{ userId: string; cookie: string }
   return { userId: response.user.id, cookie };
 }
 
-async function registerClient(scope?: string): Promise<string> {
+async function registerClient(
+  scope?: string,
+  extra: Record<string, unknown> = {},
+): Promise<string> {
   const res = await call("/oauth2/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -85,11 +88,26 @@ async function registerClient(scope?: string): Promise<string> {
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       ...(scope !== undefined ? { scope } : {}),
+      ...extra,
     }),
   });
   const body = (await res.json()) as { client_id: string };
   expect(res.status, JSON.stringify(body)).toBe(201);
   return body.client_id;
+}
+
+async function clientRow(clientId: string) {
+  const [row] = await db
+    .select({
+      uri: schema.oauthClient.uri,
+      icon: schema.oauthClient.icon,
+      tos: schema.oauthClient.tos,
+      policy: schema.oauthClient.policy,
+      applicationType: schema.oauthClient.applicationType,
+    })
+    .from(schema.oauthClient)
+    .where(eq(schema.oauthClient.clientId, clientId));
+  return row;
 }
 
 /** Authorization-code + PKCE round trip as an MCP client would run it. */
@@ -322,6 +340,81 @@ describe("OAuth authorization server", () => {
     const membersGrant = grants.find((g) => g.userId === member.userId);
     await ownerCaller.connectedApps.revoke({ id: membersGrant?.id ?? "" });
     expect(await ownerCaller.connectedApps.list()).toHaveLength(1);
+  });
+
+  it("keeps registration links only when https on a redirect URI's own origin", async () => {
+    // A loopback (native) client has no web origin to vouch for: every link
+    // is dropped, registration still succeeds.
+    const native = await registerClient(undefined, {
+      client_uri: "https://claude.ai",
+      logo_uri: "https://claude.ai/logo.png",
+    });
+    expect(await clientRow(native)).toMatchObject({
+      uri: null,
+      icon: null,
+      applicationType: "native",
+    });
+
+    const web = await registerClient(undefined, {
+      redirect_uris: ["https://app.example/cb"],
+      client_uri: "https://app.example",
+      logo_uri: "https://app.example/logo.png",
+      tos_uri: "http://app.example/tos",
+      policy_uri: "https://other.example/policy",
+    });
+    expect(await clientRow(web)).toMatchObject({
+      uri: "https://app.example",
+      icon: "https://app.example/logo.png",
+      tos: null,
+      policy: null,
+    });
+  });
+
+  it("lets a non-holder revoke an all-teams grant only when administering every team of the holder", async () => {
+    const first = await createTeam(db, "first");
+    const second = await createTeam(db, "second");
+    const ada = await signUp("ada@example.com");
+    await addMember(ada.userId, first, "owner");
+    await addMember(ada.userId, second, "member");
+    const bob = await signUp("bob@example.com");
+    await addMember(bob.userId, second, "owner");
+    const carol = await signUp("carol@example.com");
+    await addMember(carol.userId, first, "owner");
+    await addMember(carol.userId, second, "owner");
+    const [session] = await db
+      .select({ id: schema.session.id })
+      .from(schema.session)
+      .where(eq(schema.session.userId, ada.userId));
+    if (!session) throw new Error("no session");
+    await createCaller({
+      db,
+      session: { user: { id: ada.userId, email: "ada@example.com", name: "ada" }, session },
+      teamId: null,
+      role: null,
+    }).team.grantTeam({ teamId: "*" });
+    const clientId = await registerClient();
+    await authorize(clientId, ada.cookie);
+
+    const callerFor = (userId: string, email: string, teamId: string) =>
+      createCaller({
+        db,
+        session: { user: { id: userId, email, name: email } },
+        teamId,
+        role: "owner",
+      });
+    const [grant] = await callerFor(bob.userId, "bob@example.com", second).connectedApps.list();
+    // Bob administers second only; the grant also reaches into first.
+    await expect(
+      callerFor(bob.userId, "bob@example.com", second).connectedApps.revoke({
+        id: grant?.id ?? "",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(await db.select().from(schema.oauthConsent)).toHaveLength(1);
+
+    await callerFor(carol.userId, "carol@example.com", first).connectedApps.revoke({
+      id: grant?.id ?? "",
+    });
+    expect(await db.select().from(schema.oauthConsent)).toHaveLength(0);
   });
 
   it("issues only the scopes accepted on the consent screen", async () => {

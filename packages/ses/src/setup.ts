@@ -516,6 +516,31 @@ export function setupEnvEntries(region: string, result: SetupResult): Record<str
 }
 
 /**
+ * A dotenv-safe rendering of a value. CR/LF never survive (a line break would
+ * start a new line, and with it a new key), and anything outside the
+ * characters compose reads verbatim is quoted — single quotes when possible
+ * (nothing is interpolated inside them), double quotes otherwise.
+ */
+export function quoteEnvValue(value: string): string {
+  const flat = value.replace(/[\r\n]/g, "");
+  if (/^[\w@%+=:,./-]*$/.test(flat)) return flat;
+  if (!flat.includes("'")) return `'${flat}'`;
+  // ponytail: a "$" inside double quotes is left for compose to interpolate;
+  // write it as "$$" here if a value ever needs both quote kinds and a "$".
+  return `"${flat.replace(/[\\"]/g, "\\$&")}"`;
+}
+
+/** Inverse of quoteEnvValue for the two quote styles it writes. */
+export function unquoteEnvValue(raw: string): string {
+  const quote = raw[0];
+  if ((quote === "'" || quote === '"') && raw.length >= 2 && raw.endsWith(quote)) {
+    const inner = raw.slice(1, -1);
+    return quote === '"' ? inner.replace(/\\([\\"])/g, "$1") : inner;
+  }
+  return raw;
+}
+
+/**
  * Rewrites `KEY=...` lines in a dotenv file, appending keys it does not have
  * yet. Matching tolerates the dotenv variants a hand-edited file accumulates —
  * leading whitespace, `export `, spaces around `=`, an empty value — so an
@@ -534,13 +559,13 @@ export function upsertEnv(content: string, entries: Record<string, string>): str
       out.push(line);
     } else if (!replaced.has(key)) {
       replaced.add(key);
-      out.push(`${key}=${value}`);
+      out.push(`${key}=${quoteEnvValue(value)}`);
     }
   }
   const missing = [...wanted].filter(([key]) => !replaced.has(key));
   if (missing.length > 0) {
     while (out.length > 0 && out[out.length - 1] === "") out.pop();
-    for (const [key, value] of missing) out.push(`${key}=${value}`);
+    for (const [key, value] of missing) out.push(`${key}=${quoteEnvValue(value)}`);
     out.push("");
   }
   return out.join("\n");

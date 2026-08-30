@@ -109,3 +109,9 @@ it("cloud mode requires the KMS key, both Stripe secrets, and APP_BASE_URL", () 
     "IS_CLOUD=true requires STRIPE_WEBHOOK_SECRET",
   );
 });
+
+it("refuses a KMS key outside cloud mode", () => {
+  expect(() => assertEnvConsistency(fakeEnv({ KMS_KEY_ID: "kms" }))).toThrow(
+    "KMS_KEY_ID is set but IS_CLOUD is false",
+  );
+});

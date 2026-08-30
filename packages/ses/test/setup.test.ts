@@ -310,6 +310,17 @@ describe("setupEnvEntries / upsertEnv", () => {
     const next = upsertEnv(content, { AWS_REGION: "us-east-1" });
     expect(next).toBe("AWS_REGION=us-east-1\n# note\nOTHER=keep\n");
   });
+
+  it("quotes values dotenv would misread and strips line breaks", () => {
+    const next = upsertEnv("", {
+      AUTH_EMAIL_FROM: "Ops <ops@example.com>",
+      TRICKY: 'it\'s "$money"',
+      PLAIN: "base64+/=\r\nINJECTED=1",
+    });
+    expect(next).toBe(
+      `AUTH_EMAIL_FROM='Ops <ops@example.com>'\nTRICKY="it's \\"$money\\""\nPLAIN=base64+/=INJECTED=1\n`,
+    );
+  });
 });
 
 function fakeStorageClient(options: { headError?: Error } = {}) {

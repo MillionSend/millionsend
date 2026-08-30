@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, describe, expect, it } from "vitest";
-import { isBlockedIp, postJson } from "../src/ssrf.js";
+import { isBlockedIp, postFailureCode, postJson } from "../src/ssrf.js";
 
 describe("isBlockedIp", () => {
   it.each([
@@ -12,7 +12,17 @@ describe("isBlockedIp", () => {
     "169.254.169.254",
     "172.16.0.1",
     "172.31.255.255",
+    "192.0.0.1",
+    "192.0.2.1",
     "192.168.1.1",
+    "198.18.0.1",
+    "198.19.255.255",
+    "198.51.100.7",
+    "203.0.113.9",
+    "224.0.0.1",
+    "239.255.255.255",
+    "240.0.0.1",
+    "255.255.255.255",
     "::",
     "::1",
     "fc00::1",
@@ -23,7 +33,10 @@ describe("isBlockedIp", () => {
     "::ffff:7f00:1",
     "::ffff:a00:1",
     "::ffff:a9fe:a9fe",
+    "::ffff:0:7f00:1",
     "::7f00:1",
+    "2001::1",
+    "2001:0:4136:e378:8000:63bf:3fff:fdd2",
     "64:ff9b::7f00:1",
     "64:ff9b:1::7f00:1",
     "2002:7f00:1::",
@@ -38,12 +51,21 @@ describe("isBlockedIp", () => {
     expect(isBlockedIp(ip)).toBe(true);
   });
 
-  it.each(["8.8.8.8", "1.1.1.1", "172.15.0.1", "172.32.0.1", "100.128.0.1", "2606:4700::1111"])(
-    "allows %s",
-    (ip) => {
-      expect(isBlockedIp(ip)).toBe(false);
-    },
-  );
+  it.each([
+    "8.8.8.8",
+    "1.1.1.1",
+    "172.15.0.1",
+    "172.32.0.1",
+    "100.128.0.1",
+    "192.0.1.1",
+    "198.17.0.1",
+    "198.20.0.1",
+    "223.255.255.255",
+    "2606:4700::1111",
+    "2001:1::1",
+  ])("allows %s", (ip) => {
+    expect(isBlockedIp(ip)).toBe(false);
+  });
 });
 
 describe("postJson guard", () => {
@@ -139,5 +161,25 @@ describe("postJson delivery (allowLocalhost)", () => {
       allowLocalhost: true,
     });
     expect(redirect.status).toBe(302);
+  });
+});
+
+describe("postFailureCode", () => {
+  it.each([
+    [new Error("webhook url resolves to a blocked address"), "url_rejected"],
+    [Object.assign(new Error("getaddrinfo ENOTFOUND x"), { code: "ENOTFOUND" }), "dns_failed"],
+    [
+      Object.assign(new Error("connect ECONNREFUSED 1.2.3.4:443"), { code: "ECONNREFUSED" }),
+      "connection_refused",
+    ],
+    [Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }), "connection_reset"],
+    [Object.assign(new Error("The operation was aborted"), { name: "TimeoutError" }), "timeout"],
+    [
+      Object.assign(new Error("self signed certificate"), { code: "DEPTH_ZERO_SELF_SIGNED_CERT" }),
+      "tls_failed",
+    ],
+    [new Error("something else"), "delivery_failed"],
+  ] as const)("maps %s to a fixed code", (err, code) => {
+    expect(postFailureCode(err)).toBe(code);
   });
 });

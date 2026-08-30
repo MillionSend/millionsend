@@ -8,7 +8,8 @@ import { ACTIVE_TEAM_COOKIE, getActiveMembership } from "@/server/membership";
  * CSV export for the dashboard list surfaces. Authenticated by the Better Auth
  * session (never an API key) and scoped to the session's active team — the
  * teamId comes only from membership, never from the request, so no query param
- * can widen the export past the caller's own team.
+ * can widen the export past the caller's own team. Admin-only: a full dump
+ * of the audience or mail archive is not a member-level action.
  */
 export async function GET(request: Request, ctx: { params: Promise<{ resource: string }> }) {
   const session = await getAuth().api.getSession({ headers: request.headers });
@@ -21,7 +22,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ resource: s
     session.user.id,
     cookieStore.get(ACTIVE_TEAM_COOKIE)?.value,
   );
-  if (!membership) return new Response(null, { status: 403 });
+  if (!membership || membership.role === "member") return new Response(null, { status: 403 });
 
   const { resource } = await ctx.params;
   const url = new URL(request.url);

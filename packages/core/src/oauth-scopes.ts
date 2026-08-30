@@ -8,6 +8,7 @@ export const MCP_SCOPES = [
   "emails:read",
   "audience:read",
   "audience:write",
+  "broadcasts:read",
   "broadcasts:write",
   "domains:read",
   "domains:write",

@@ -63,7 +63,14 @@ const SAMPLE_DOC = {
   ],
 };
 
+// send verifies the From domain like the API does, so every draft's sender
+// domain is a verified team domain.
+async function seedVerifiedDomain(teamId: string, name = "example.com") {
+  await db.insert(schema.domains).values({ teamId, name, region: "us-east-1", status: "verified" });
+}
+
 async function seedDraft(teamId: string) {
+  await seedVerifiedDomain(teamId);
   const caller = callerFor(teamId);
   const { id } = await caller.broadcasts.create(DRAFT_INPUT);
   return { caller, id };
@@ -306,6 +313,36 @@ describe("broadcasts.send", () => {
       enqueueBroadcastSend: async () => {
         throw new Error("queue down");
       },
+    });
+    await caller.broadcasts.send({ id });
+    expect((await broadcastRow(id))?.status).toBe("scheduled");
+  });
+
+  it("refuses to send from a domain the team has not verified", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await seedVerifiedDomain(teamId, "verified.example.com");
+    await db
+      .insert(schema.domains)
+      .values({ teamId, name: "pending.example.com", region: "us-east-1", status: "pending" });
+    const foreignTeam = await createTeam(db, "team-b");
+    await seedVerifiedDomain(foreignTeam, "foreign.example.com");
+
+    for (const from of [
+      "a@pending.example.com",
+      "a@foreign.example.com",
+      "a@nowhere.example.com",
+    ]) {
+      const { id } = await caller.broadcasts.create({ ...DRAFT_INPUT, from });
+      await expect(caller.broadcasts.send({ id })).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        message: expect.stringContaining("not verified"),
+      });
+      expect((await broadcastRow(id))?.status).toBe("draft");
+    }
+    const { id } = await caller.broadcasts.create({
+      ...DRAFT_INPUT,
+      from: "a@verified.example.com",
     });
     await caller.broadcasts.send({ id });
     expect((await broadcastRow(id))?.status).toBe("scheduled");

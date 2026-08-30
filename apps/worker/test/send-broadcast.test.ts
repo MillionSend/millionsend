@@ -822,3 +822,37 @@ it("a null-filter (manual) segment fans out to its members only", async () => {
   expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
   expect((await emailsOf(broadcastId)).map((r) => r.to[0])).toEqual(["picked@example.com"]);
 });
+
+it("applyMergeFields only lets web/mail URLs open an href or src; anything else falls back", () => {
+  const contact = {
+    email: "ada@example.com",
+    firstName: null,
+    lastName: null,
+    properties: {
+      site: "https://ada.example/?a=1&b=2",
+      evil: "javascript:alert(1)",
+      data: "data:text/html,hi",
+      mail: "mailto:ada@example.com",
+    },
+  };
+  const html = (s: string) => applyMergeFields(s, contact, { html: true });
+  expect(html('<a href="{{{site}}}">x</a>')).toBe(
+    '<a href="https://ada.example/?a=1&amp;b=2">x</a>',
+  );
+  expect(html('<a href="{{{mail}}}">x</a>')).toBe('<a href="mailto:ada@example.com">x</a>');
+  expect(html('<a href="{{{evil}}}">x</a>')).toBe('<a href="">x</a>');
+  expect(html('<a href="{{{evil|https://safe.example}}}">x</a>')).toBe(
+    '<a href="https://safe.example">x</a>',
+  );
+  expect(html('<img src="{{{data}}}">')).toBe('<img src="">');
+  expect(html("<a href='{{{evil}}}'>x</a>")).toBe("<a href=''>x</a>");
+  // Outside a URL slot the value is ordinary escaped text; a fixed scheme
+  // ahead of the token cannot be overridden either.
+  expect(html("<p>{{{evil}}}</p>")).toBe("<p>javascript:alert(1)</p>");
+  expect(html('<a href="https://x.example/{{{evil}}}">x</a>')).toBe(
+    '<a href="https://x.example/javascript:alert(1)">x</a>',
+  );
+  expect(applyMergeFields('href="{{{evil}}}"', contact, { html: false })).toBe(
+    'href="javascript:alert(1)"',
+  );
+});

@@ -242,7 +242,7 @@ export function TeamSwitcher({
           </div>
           {createTeam.isError ? (
             <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
-              {t("error")}
+              {createTeam.error.data?.code === "FORBIDDEN" ? t("limit") : t("error")}
             </p>
           ) : null}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>

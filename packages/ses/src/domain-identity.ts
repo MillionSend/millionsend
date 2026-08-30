@@ -80,13 +80,13 @@ export interface DomainVerification {
  * Registers the domain as an SES identity with BYODKIM signing and points its
  * custom MAIL FROM at `<mailFromSubdomain>.<domain>` for SPF/DMARC alignment.
  *
- * An identity that already exists is adopted rather than treated as an
- * error: a partial earlier create (identity registered in SES but never
- * recorded by the caller) would otherwise make the domain permanently
- * un-creatable. Safe under the single-operator AWS account assumption —
- * any pre-existing identity for the domain belongs to the same operator.
- * Adoption re-applies the new signing key so SES signs with the key whose
- * public half the caller is about to publish.
+ * With `adoptExisting`, an identity that already exists is re-keyed rather
+ * than treated as an error: a partial earlier create (identity registered
+ * in SES but never recorded by the caller) would otherwise make the domain
+ * permanently un-creatable. Only safe when every identity in the AWS
+ * account belongs to the caller's operator (self-host). In a shared cloud
+ * account the AlreadyExistsException propagates instead: adopting there
+ * would re-key another tenant's identity and break its DKIM.
  */
 export async function createDomainIdentity(
   client: SesIdentityClient,
@@ -94,6 +94,7 @@ export async function createDomainIdentity(
     domain: string;
     mailFromSubdomain: string;
     dkim: { selector: string; privateKeyB64: string };
+    adoptExisting?: boolean | undefined;
   },
 ): Promise<void> {
   try {
@@ -107,7 +108,9 @@ export async function createDomainIdentity(
       }),
     );
   } catch (error) {
-    if ((error as { name?: string }).name !== "AlreadyExistsException") throw error;
+    if (!params.adoptExisting || (error as { name?: string }).name !== "AlreadyExistsException") {
+      throw error;
+    }
     await client.send(
       new PutEmailIdentityDkimSigningAttributesCommand({
         EmailIdentity: params.domain,

@@ -41,6 +41,8 @@ curl -o .env https://raw.githubusercontent.com/MillionSend/millionsend/main/.env
 In `.env` (everything else defaults to a working local setup):
 
 - `MASTER_ENCRYPTION_KEY` and `BETTER_AUTH_SECRET` — `openssl rand -base64 32` each.
+  The file now holds every secret the instance has: `chmod 600 .env`, and keep
+  it out of version control and backups.
 - `APP_BASE_URL` — the URL you open the dashboard at. The default
   `http://localhost:3000` works locally; set your real `https://` URL when exposing
   it, or sign-in is rejected as an untrusted origin.

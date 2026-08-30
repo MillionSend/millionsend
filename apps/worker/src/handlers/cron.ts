@@ -13,7 +13,7 @@ import {
   type DnsResolver,
   type SesIdentityClient,
 } from "@millionsend/ses";
-import { and, asc, eq, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
 /**
  * Safety net for webhook.deliver jobs lost between the delivery-row insert
@@ -95,6 +95,9 @@ export interface DrainResult {
 /** Sentinel: the row left queued_quota concurrently; roll the reservation back. */
 class DrainRaced extends Error {}
 
+/** Parked rows loaded per page; the backlog is unbounded (see acceptEmail). */
+const DRAIN_PAGE = 500;
+
 /**
  * Midnight drain of quota-parked emails. Parked emails hold NO reservation
  * (accept-time reservation failed — that is why they parked), so each one
@@ -107,73 +110,119 @@ class DrainRaced extends Error {}
  * rest — errors are collected and rethrown at the end so the cron retries.
  */
 export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainResult> {
-  const parked = await db
-    .select({
-      id: schema.emails.id,
-      teamId: schema.emails.teamId,
-      plan: schema.teams.plan,
-      scheduledAt: schema.emails.scheduledAt,
-    })
-    .from(schema.emails)
-    .innerJoin(schema.teams, eq(schema.emails.teamId, schema.teams.id))
-    .where(eq(schema.emails.latestStatus, "queued_quota"))
-    .orderBy(asc(schema.emails.createdAt));
-
   const exhausted = new Set<string>();
   const failures: unknown[] = [];
   let drained = 0;
-  for (const email of parked) {
-    if (exhausted.has(email.teamId)) continue;
-    const limit = deps.isCloud ? PLAN_DAILY_LIMIT[email.plan] : null;
-    try {
-      const outcome = await db
-        .transaction(async (tx) => {
-          const txDb = tx as unknown as Db;
-          const quota = await reserveDailyQuota(txDb, { teamId: email.teamId, count: 1, limit });
-          if (!quota.reserved) return "exhausted" as const;
-          const moved = await transitionQueueState(txDb, email.id, {
-            from: "queued_quota",
-            to: "queued",
-          });
-          if (!moved) throw new DrainRaced();
-          return "moved" as const;
-        })
-        .catch((err) => {
-          if (err instanceof DrainRaced) return "raced" as const;
-          throw err;
-        });
-      if (outcome === "exhausted") {
-        exhausted.add(email.teamId);
-        continue;
-      }
-      if (outcome === "raced") continue;
-      try {
-        await deps.enqueueSend(email.id, email.scheduledAt ?? undefined);
-      } catch (err) {
-        // A "queued" email with no job would only be picked up by the
-        // reconcile sweep; re-park it so the drain retry handles it sooner.
-        await transitionQueueState(db, email.id, { from: "queued", to: "queued_quota" });
-        await releaseDailyQuota(db, { teamId: email.teamId, count: 1 });
-        throw err;
-      }
-      drained += 1;
-    } catch (err) {
-      failures.push(err);
+  // Keyset pages over (createdAt, id): global oldest-first order keeps the
+  // per-team fairness, and a row that stays parked (exhausted team, failed
+  // enqueue) can never be re-read into an infinite loop.
+  let cursor: { createdAt: Date; id: string } | undefined;
+  for (;;) {
+    const page = await db
+      .select({
+        id: schema.emails.id,
+        teamId: schema.emails.teamId,
+        plan: schema.teams.plan,
+        scheduledAt: schema.emails.scheduledAt,
+        createdAt: schema.emails.createdAt,
+      })
+      .from(schema.emails)
+      .innerJoin(schema.teams, eq(schema.emails.teamId, schema.teams.id))
+      .where(
+        and(
+          eq(schema.emails.latestStatus, "queued_quota"),
+          cursor
+            ? sql`(${schema.emails.createdAt}, ${schema.emails.id}) > (${cursor.createdAt}, ${cursor.id}::uuid)`
+            : undefined,
+        ),
+      )
+      .orderBy(asc(schema.emails.createdAt), asc(schema.emails.id))
+      .limit(DRAIN_PAGE);
+    const last = page.at(-1);
+    if (!last) break;
+    cursor = { createdAt: last.createdAt, id: last.id };
+    for (const email of page) {
+      drained += await drainOne(db, deps, email, exhausted, failures);
     }
   }
   if (failures.length > 0) {
     throw new Error(`quota drain: ${failures.length} email(s) failed`, { cause: failures[0] });
   }
-  return { drained, stillParked: parked.length - drained };
+  const [rest] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.emails)
+    .where(eq(schema.emails.latestStatus, "queued_quota"));
+  return { drained, stillParked: rest?.n ?? 0 };
 }
+
+/** Returns 1 when the email moved to queued and its job was enqueued, else 0. */
+async function drainOne(
+  db: Db,
+  deps: DrainDeps,
+  email: {
+    id: string;
+    teamId: string;
+    plan: keyof typeof PLAN_DAILY_LIMIT;
+    scheduledAt: Date | null;
+  },
+  exhausted: Set<string>,
+  failures: unknown[],
+): Promise<number> {
+  if (exhausted.has(email.teamId)) return 0;
+  const limit = deps.isCloud ? PLAN_DAILY_LIMIT[email.plan] : null;
+  try {
+    const outcome = await db
+      .transaction(async (tx) => {
+        const txDb = tx as unknown as Db;
+        const quota = await reserveDailyQuota(txDb, { teamId: email.teamId, count: 1, limit });
+        if (!quota.reserved) return "exhausted" as const;
+        const moved = await transitionQueueState(txDb, email.id, {
+          from: "queued_quota",
+          to: "queued",
+        });
+        if (!moved) throw new DrainRaced();
+        return "moved" as const;
+      })
+      .catch((err) => {
+        if (err instanceof DrainRaced) return "raced" as const;
+        throw err;
+      });
+    if (outcome === "exhausted") {
+      exhausted.add(email.teamId);
+      return 0;
+    }
+    if (outcome === "raced") return 0;
+    try {
+      await deps.enqueueSend(email.id, email.scheduledAt ?? undefined);
+    } catch (err) {
+      // A "queued" email with no job would only be picked up by the
+      // reconcile sweep; re-park it so the drain retry handles it sooner.
+      await transitionQueueState(db, email.id, { from: "queued", to: "queued_quota" });
+      await releaseDailyQuota(db, { teamId: email.teamId, count: 1 });
+      throw err;
+    }
+    return 1;
+  } catch (err) {
+    failures.push(err);
+    return 0;
+  }
+}
+
+/** Re-enqueues per sweep; a larger backlog waits for the next run. */
+const RECONCILE_BATCH = 1000;
 
 /**
  * Safety net for the enqueue-after-commit gap: an accepted email whose
  * email.send job was lost (API crashed before enqueueing, drain crashed
  * between commit and enqueue) is re-enqueued. Idempotent by construction —
  * the queue collapses duplicates per emailId while a job is queued, and the
- * send handler's claim makes a stray extra job harmless. Claimed rows
- * (sentAt set) are deliberately excluded: those may already be at SES.
+ * send handler's claim makes a stray extra job harmless. Attempts are capped
+ * by the queue's dead-letter path, which fails the row after its retries.
+ *
+ * A claim (sentAt set) that never recorded an SES MessageId is a send
+ * interrupted between claim and accept (worker killed mid-flight). Nothing
+ * else ever picks such a row up, so after a generous window it is failed
+ * with an event rather than left queued forever.
  */
 export async function reconcileStalledSends(
   db: Db,
@@ -181,6 +230,28 @@ export async function reconcileStalledSends(
 ): Promise<number> {
   const now = deps.now ?? new Date();
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
+  const interrupted = await db
+    .update(schema.emails)
+    .set({ latestStatus: "failed", sentAt: null })
+    .where(
+      and(
+        eq(schema.emails.latestStatus, "queued"),
+        isNotNull(schema.emails.sentAt),
+        isNull(schema.emails.sesMessageId),
+        lt(schema.emails.sentAt, staleBefore),
+      ),
+    )
+    .returning({ id: schema.emails.id });
+  if (interrupted.length > 0) {
+    await db.insert(schema.emailEvents).values(
+      interrupted.map((email) => ({
+        emailId: email.id,
+        type: "failed" as const,
+        occurredAt: now,
+        data: { source: "worker", reason: "send_interrupted" },
+      })),
+    );
+  }
   const stalled = await db
     .select({ id: schema.emails.id, scheduledAt: schema.emails.scheduledAt })
     .from(schema.emails)
@@ -191,7 +262,8 @@ export async function reconcileStalledSends(
         lt(schema.emails.createdAt, staleBefore),
       ),
     )
-    .orderBy(asc(schema.emails.createdAt));
+    .orderBy(asc(schema.emails.createdAt))
+    .limit(RECONCILE_BATCH);
   for (const email of stalled) {
     await deps.enqueueSend(email.id, email.scheduledAt ?? undefined);
   }
@@ -341,6 +413,17 @@ export async function reverifyDomains(db: Db, deps: ReverifyDomainsDeps): Promis
         })
         .where(eq(schema.domains.id, domain.id));
     } catch (err) {
+      if ((err as { name?: string }).name === "NotFoundException") {
+        // The SES identity is gone (deleted outside the app): the stored
+        // status is a lie the send gate would keep trusting. Terminal —
+        // re-adding the domain is the only way back.
+        await db
+          .update(schema.domains)
+          .set({ status: "failed", lastCheckedAt: now })
+          .where(eq(schema.domains.id, domain.id));
+        console.warn(`domains.reverify: ${domain.name} has no SES identity; marked failed`);
+        continue;
+      }
       failed += 1;
       console.warn(`domains.reverify: ${domain.name} failed`, err);
     }

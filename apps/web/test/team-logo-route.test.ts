@@ -84,11 +84,15 @@ async function seedTeam(role: TeamRole | null = "owner"): Promise<string> {
   return teamId;
 }
 
-function uploadRequest(teamId: string, bytes: Uint8Array<ArrayBuffer>): Request {
+function uploadRequest(
+  teamId: string,
+  bytes: Uint8Array<ArrayBuffer>,
+  headers: Record<string, string> = {},
+): Request {
   const form = new FormData();
   form.set("teamId", teamId);
   form.set("file", new File([bytes], "logo.png", { type: "image/png" }));
-  return new Request("http://localhost/api/team-logo", { method: "POST", body: form });
+  return new Request("http://localhost/api/team-logo", { method: "POST", body: form, headers });
 }
 
 function deleteRequest(teamId: string): Request {
@@ -113,6 +117,21 @@ describe("POST /api/team-logo", () => {
     h.session = null;
     const res = await POST(uploadRequest(teamId, PNG));
     expect(res.status).toBe(401);
+  });
+
+  it("403s a cross-origin request before touching auth or storage", async () => {
+    vi.stubEnv("APP_BASE_URL", "https://app.example.com");
+    const teamId = await seedTeam("owner");
+    expect(
+      (await POST(uploadRequest(teamId, PNG, { origin: "https://evil.example" }))).status,
+    ).toBe(403);
+    expect(
+      (await POST(uploadRequest(teamId, PNG, { "sec-fetch-site": "cross-site" }))).status,
+    ).toBe(403);
+    expect(h.puts).toEqual([]);
+    const same = await POST(uploadRequest(teamId, PNG, { origin: "https://app.example.com" }));
+    expect(same.status).toBe(200);
+    expect(h.puts).toHaveLength(1);
   });
 
   it("403s for a non-member and for role member", async () => {

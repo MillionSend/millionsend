@@ -10,19 +10,24 @@ let db: Db;
 let close: () => Promise<void>;
 let app: ReturnType<typeof createApi>;
 let token: string;
+let teamId: string;
 
-beforeAll(async () => {
-  ({ db, close } = await createTestDb());
-  const teamId = await createTeam(db, "rate-limit");
+async function insertKey(team: string): Promise<string> {
   const key = generateApiKey();
-  token = key.token;
   await db.insert(schema.apiKeys).values({
-    teamId,
+    teamId: team,
     name: "limited",
     tokenPrefix: key.tokenPrefix,
     keyHash: key.keyHash,
     last4: key.last4,
   });
+  return key.token;
+}
+
+beforeAll(async () => {
+  ({ db, close } = await createTestDb());
+  teamId = await createTeam(db, "rate-limit");
+  token = await insertKey(teamId);
   app = createApi({
     db,
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
@@ -50,4 +55,54 @@ it("atomically limits each API key and returns a retry boundary", async () => {
 
   const [bucket] = await db.select().from(schema.apiRateLimits);
   expect(bucket?.count).toBe(3);
+});
+
+it("caps a team across all of its keys, so minting keys cannot multiply the limit", async () => {
+  const team = await createTeam(db, "team-cap");
+  const keys = [await insertKey(team), await insertKey(team)];
+  const teamApp = createApi({
+    db,
+    keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+    isCloud: false,
+    rateLimitPerMinute: 100,
+    teamRateLimitPerMinute: 3,
+    enqueueEmailSend: async () => {},
+  });
+  const call = (key: string) =>
+    teamApp.request("/topics", { headers: { authorization: `Bearer ${key}` } });
+
+  expect((await call(keys[0] ?? "")).status).toBe(200);
+  expect((await call(keys[1] ?? "")).status).toBe(200);
+  expect((await call(keys[0] ?? "")).status).toBe(200);
+  const limited = await call(keys[1] ?? "");
+  expect(limited.status).toBe(429);
+  expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+});
+
+it("throttles repeated authentication failures per client IP (cloud reads cf-connecting-ip)", async () => {
+  const cloudApp = createApi({
+    db,
+    keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+    isCloud: true,
+    enqueueEmailSend: async () => {},
+  });
+  const fail = (ip: string) =>
+    cloudApp.request("/emails", {
+      headers: { authorization: "Bearer ms_nopenopenopenope", "cf-connecting-ip": ip },
+    });
+  let last: Response | undefined;
+  for (let i = 0; i < 20; i++) {
+    last = await fail("203.0.113.7");
+    expect(last.status).toBe(401);
+  }
+  const limited = await fail("203.0.113.7");
+  expect(limited.status).toBe(429);
+  expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+  expect(await limited.json()).toMatchObject({ name: "rate_limit_exceeded" });
+  // Another address is untouched, and a valid key from the throttled one still works.
+  expect((await fail("203.0.113.8")).status).toBe(401);
+  const ok = await cloudApp.request("/topics", {
+    headers: { authorization: `Bearer ${token}`, "cf-connecting-ip": "203.0.113.7" },
+  });
+  expect(ok.status).toBe(200);
 });

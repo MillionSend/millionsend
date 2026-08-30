@@ -20,7 +20,8 @@
     "create": "Create team",
     "nameLabel": "Team name",
     "submit": "Create",
-    "error": "Could not create the team. Try again."
+    "error": "Could not create the team. Try again.",
+    "limit": "You already own the maximum number of teams."
   },
   "select": {
     "searchPlaceholder": "Search…",

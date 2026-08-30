@@ -8,3 +8,10 @@ export const PLAN_DAILY_LIMIT: Record<Plan, number | null> = {
   pro: 3000,
   scale: null,
 };
+
+/** Sender domains per team per plan; null = unlimited. Self-host ignores plans entirely. */
+export const PLAN_DOMAIN_LIMIT: Record<Plan, number | null> = {
+  free: 3,
+  pro: 20,
+  scale: 100,
+};

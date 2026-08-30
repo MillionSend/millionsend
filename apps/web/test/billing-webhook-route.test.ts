@@ -19,6 +19,7 @@ const payload = JSON.stringify({
   id: "evt_1",
   object: "event",
   type: "customer.created",
+  livemode: false,
   data: { object: { id: "cus_1" } },
 });
 

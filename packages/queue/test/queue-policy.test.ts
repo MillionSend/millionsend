@@ -5,7 +5,7 @@ import { Queue } from "../src/index.js";
 // implementation's INSERT ... ON CONFLICT DO NOTHING: a pre-existing queue
 // keeps its stored policy no matter what the caller asks for.
 const queues = new Map<string, { policy: string }>();
-const sent: { name: string; opts: { singletonKey?: string } }[] = [];
+const sent: { name: string; opts: { singletonKey?: string; deadLetter?: string } }[] = [];
 
 vi.mock("pg-boss", () => ({
   PgBoss: class {
@@ -18,7 +18,11 @@ vi.mock("pg-boss", () => ({
       const q = queues.get(name);
       return q ? { name, policy: q.policy } : null;
     }
-    async send(name: string, _data: unknown, opts: { singletonKey?: string }): Promise<string> {
+    async send(
+      name: string,
+      _data: unknown,
+      opts: { singletonKey?: string; deadLetter?: string },
+    ): Promise<string> {
       sent.push({ name, opts });
       return "job-1";
     }
@@ -45,4 +49,14 @@ it("fails loudly when a pre-existing queue has a policy that ignores singletonKe
   );
   // The job was never enqueued — silent duplicate sends are worse than a 500.
   expect(sent).toHaveLength(0);
+});
+
+it("routes retry-exhausted send and delivery jobs to a dead-letter queue that exists first", async () => {
+  const queue = await Queue.start("postgres://unused");
+  await queue.send("email.send", { emailId: "e1" }, { dedupeKey: "e1" });
+  await queue.send("ses.event", { event: {} as never, snsMessageId: "s1" }, { dedupeKey: "s1" });
+  expect(queues.has("email.send.dead")).toBe(true);
+  expect(sent[0]?.opts).toMatchObject({ deadLetter: "email.send.dead" });
+  // Event ingestion has no terminal row state to record; no dead letter there.
+  expect(sent[1]?.opts).not.toHaveProperty("deadLetter");
 });

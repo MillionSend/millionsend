@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { PAID_PLANS, type PaidPlan, PLAN_LOOKUP_KEYS } from "./prices.js";
+import { PAID_PLANS, type PaidPlan, PLAN_LOOKUP_KEYS, PRODUCT_METADATA_KEY } from "./prices.js";
 
 /** The Stripe surface provisioning touches; the real client satisfies it, tests inject a fake. */
 export interface ProvisionStripe {
@@ -33,8 +33,6 @@ export interface ProvisionStripe {
   };
 }
 
-/** Products are found again by this metadata key, never by name (names are free to change). */
-export const PRODUCT_METADATA_KEY = "millionsend_plan";
 /** Portal configurations carry this marker so re-runs update rather than duplicate. */
 export const PORTAL_METADATA = { millionsend: "portal" } as const;
 /** Stripe Tax code "Software as a service (SaaS) — business use". */
@@ -114,8 +112,9 @@ async function ensureProduct(
 /**
  * Prices are immutable in Stripe, so an amount change creates a new price
  * and moves the lookup key onto it (transfer_lookup_key), then archives the
- * old one. Existing subscriptions keep their old price; the app resolves
- * plans by lookup key, so new checkouts pick up the new amount immediately.
+ * old one. Existing subscriptions keep their old price (identified by the
+ * product's metadata thereafter); new checkouts pick up the new amount
+ * immediately.
  */
 async function ensurePrice(
   stripe: ProvisionStripe,

@@ -1,4 +1,4 @@
-import { handleWebhook } from "@millionsend/billing";
+import { handleWebhook, isLiveKey } from "@millionsend/billing";
 import { env } from "@millionsend/config";
 import { getDb } from "@millionsend/db";
 import { getStripe } from "@/server/billing";
@@ -15,6 +15,7 @@ export async function POST(request: Request) {
     db: getDb(),
     stripe: getStripe(),
     webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? "",
+    livemode: isLiveKey(env.STRIPE_SECRET_KEY ?? ""),
   });
   return new Response(null, { status });
 }

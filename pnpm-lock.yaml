@@ -310,6 +310,9 @@ importers:
       '@aws-sdk/client-sqs':
         specifier: ^3.1111.0
         version: 3.1111.0
+      '@millionsend/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@millionsend/config':
         specifier: workspace:*
         version: link:../../packages/config

@@ -10,6 +10,8 @@ import { codeRichTags } from "@/lib/code-rich-tags";
 import { MCP_TOOLS } from "./mcp-tools";
 
 const MCP_DOCS_URL = "https://docs.millionsend.com/mcp";
+/* Pinned: `npx -y mcp-remote` would run whatever version npm serves next. */
+const MCP_REMOTE = "mcp-remote@0.8.2";
 
 /* Client names are product names, not translatable copy. */
 const CLIENTS = ["claudeCode", "claudeDesktop", "cursor", "vscode"] as const;
@@ -33,7 +35,7 @@ function clientSnippet(client: Client, url: string): { code: string; language: H
   "mcpServers": {
     "millionsend": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "${url}"]
+      "args": ["-y", "${MCP_REMOTE}", "${url}"]
     }
   }
 }`,

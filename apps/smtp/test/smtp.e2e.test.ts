@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, connect, type Socket } from "node:net";
 import { decryptEmailBody, EnvKeyring, generateApiKey, hashRecipient } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -7,7 +7,12 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import nodemailer from "nodemailer";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createSmtpServer, SMTP_USERNAME } from "../src/smtp.js";
+import {
+  createSmtpServer,
+  MAX_CONNECTIONS_PER_IP,
+  MAX_RCPT_TO,
+  SMTP_USERNAME,
+} from "../src/smtp.js";
 
 let db: Db;
 let closeDb: () => Promise<void>;
@@ -46,18 +51,64 @@ beforeAll(async () => {
     keyHash: key.keyHash,
     last4: key.last4,
   });
-  server = createSmtpServer({
-    db,
-    keyring,
-    isCloud: true,
-    allowInsecureAuth: true,
-    enqueueEmailSend: async (emailId, opts) => {
-      enqueued.push({ emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) });
-    },
-  });
+  server = createSmtpServer(serverDeps());
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   port = (server.server.address() as AddressInfo).port;
 });
+
+const serverDeps = () => ({
+  db,
+  keyring,
+  isCloud: true,
+  allowInsecureAuth: true,
+  enqueueEmailSend: async (emailId: string, opts?: { startAfter?: Date }) => {
+    enqueued.push({ emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) });
+  },
+});
+
+const emailRow = async (response: string) => {
+  const id = /Queued as (\S+)/.exec(response)?.[1];
+  const [row] = await db
+    .select()
+    .from(schema.emails)
+    .where(eq(schema.emails.id, id as string));
+  if (!row) throw new Error("email row missing");
+  return row;
+};
+
+/** Raw SMTP client: waits for each final reply line, then sends the next command. */
+const dialogue = (commands: string[], atPort = port): Promise<string[]> =>
+  new Promise((resolve, reject) => {
+    const socket = connect(atPort, "127.0.0.1");
+    const replies: string[] = [];
+    let buf = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (data: string) => {
+      buf += data;
+      let eol = buf.indexOf("\r\n");
+      while (eol !== -1) {
+        const line = buf.slice(0, eol);
+        buf = buf.slice(eol + 2);
+        if (/^\d{3} /.test(line)) {
+          replies.push(line);
+          const next = commands[replies.length - 1];
+          if (next === undefined) socket.end();
+          else socket.write(`${next}\r\n`);
+        }
+        eol = buf.indexOf("\r\n");
+      }
+    });
+    socket.on("close", () => resolve(replies));
+    socket.on("error", reject);
+  });
+
+const greeting = (): Promise<{ socket: Socket; line: string }> =>
+  new Promise((resolve, reject) => {
+    const socket = connect(port, "127.0.0.1");
+    socket.setEncoding("utf8");
+    socket.once("data", (line: string) => resolve({ socket, line }));
+    socket.on("error", reject);
+  });
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(resolve));
@@ -204,6 +255,111 @@ describe("smtp relay", () => {
         text: "t",
       }),
     ).rejects.toMatchObject({ responseCode: 554 });
+  });
+
+  it("stores display names canonically quoted", async () => {
+    const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+      from: { name: "Doe, John", address: "a@acme.dev" },
+      to: { name: "Roe, Jane", address: "r@example.com" },
+      subject: "s",
+      text: "t",
+    });
+    const row = await emailRow(info.response);
+    expect(row.from).toBe('"Doe, John" <a@acme.dev>');
+    expect(row.to).toEqual(['"Roe, Jane" <r@example.com>']);
+  });
+
+  it("rejects a display name that carries an address with 553", async () => {
+    await expect(
+      transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+        from: "a@acme.dev",
+        to: { name: "ceo@victim.com", address: "r@example.com" },
+        subject: "s",
+        text: "t",
+      }),
+    ).rejects.toMatchObject({ responseCode: 553 });
+  });
+
+  it("delivers to the envelope only: header-only recipients are dropped, envelope extras are BCC", async () => {
+    const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+      from: "a@acme.dev",
+      to: ["r@example.com", "ghost@example.com"],
+      subject: "s",
+      text: "t",
+      envelope: { from: "a@acme.dev", to: ["r@example.com", "hidden@example.com"] },
+    });
+    const row = await emailRow(info.response);
+    expect(row.to).toEqual(["r@example.com"]);
+    expect(row.bcc).toEqual(["hidden@example.com"]);
+  });
+
+  it("caps RCPT TO at MAX_RCPT_TO with 452", async () => {
+    const rcpts = Array.from({ length: MAX_RCPT_TO + 1 }, (_, i) => `many${i}@example.com`);
+    const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail({
+      from: "a@acme.dev",
+      to: "many0@example.com",
+      subject: "s",
+      text: "t",
+      envelope: { from: "a@acme.dev", to: rcpts },
+    });
+    expect(info.accepted).toHaveLength(MAX_RCPT_TO);
+    expect(info.rejected).toEqual([rcpts[MAX_RCPT_TO]]);
+  });
+
+  it("drops the connection after repeated AUTH failures", async () => {
+    const bad = `AUTH PLAIN ${Buffer.from(`\0${SMTP_USERNAME}\0ms_live_wrong`).toString("base64")}`;
+    const replies = await dialogue(["EHLO client.test", bad, bad, bad, "NOOP"]);
+    expect(replies.slice(2, 4).every((r) => r.startsWith("535"))).toBe(true);
+    expect(replies[4]).toMatch(/^421/);
+    // The server hung up: NOOP got no reply.
+    expect(replies).toHaveLength(5);
+  });
+
+  it("refuses connections past the per-IP cap", async () => {
+    const open: Socket[] = [];
+    try {
+      for (let i = 0; i < MAX_CONNECTIONS_PER_IP; i++) {
+        const { socket, line } = await greeting();
+        open.push(socket);
+        expect(line).toMatch(/^220/);
+      }
+      const extra = await greeting();
+      open.push(extra.socket);
+      expect(extra.line).toMatch(/^421/);
+    } finally {
+      for (const socket of open) socket.destroy();
+    }
+    // Slots are released on close.
+    await new Promise((r) => setTimeout(r, 50));
+    const { socket, line } = await greeting();
+    socket.destroy();
+    expect(line).toMatch(/^220/);
+  });
+
+  it("rejects an oversized DATA with 552 without buffering it", async () => {
+    const small = createSmtpServer({ ...serverDeps(), maxMessageBytes: 2048 });
+    await new Promise<void>((resolve) => small.listen(0, "127.0.0.1", resolve));
+    const smallPort = (small.server.address() as AddressInfo).port;
+    try {
+      await expect(
+        nodemailer
+          .createTransport({
+            host: "127.0.0.1",
+            port: smallPort,
+            secure: false,
+            ignoreTLS: true,
+            auth: { user: SMTP_USERNAME, pass: token },
+          })
+          .sendMail({
+            from: "a@acme.dev",
+            to: "r@example.com",
+            subject: "s",
+            text: "x".repeat(10 * 1024),
+          }),
+      ).rejects.toMatchObject({ responseCode: 552 });
+    } finally {
+      await new Promise<void>((resolve) => small.close(resolve));
+    }
   });
 
   it("rejects attachments with 554", async () => {

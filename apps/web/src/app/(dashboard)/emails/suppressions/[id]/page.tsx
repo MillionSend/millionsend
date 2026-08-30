@@ -103,6 +103,9 @@ export default function SuppressionDetailPage() {
   const queryClient = useQueryClient();
 
   const query = useQuery(trpc.emails.suppressions.get.queryOptions({ id }, { retry: false }));
+  const teamList = useQuery(trpc.team.list.queryOptions());
+  const role = teamList.data?.teams.find((m) => m.teamId === teamList.data?.activeTeamId)?.role;
+  const canRemove = role === "owner" || role === "admin";
   const removeMutation = useMutation(
     trpc.emails.suppressions.remove.mutationOptions({
       onSuccess: () => {
@@ -164,15 +167,17 @@ export default function SuppressionDetailPage() {
         }
         title={row.email ?? "—"}
         actions={
-          <button
-            type="button"
-            className="ms-btn ms-btn-destructive"
-            disabled={removeMutation.isPending}
-            onClick={() => removeMutation.mutate({ id: row.id })}
-          >
-            <BtnSpinner on={removeMutation.isPending} />
-            {t("suppressions.remove")}
-          </button>
+          canRemove ? (
+            <button
+              type="button"
+              className="ms-btn ms-btn-destructive"
+              disabled={removeMutation.isPending}
+              onClick={() => removeMutation.mutate({ id: row.id })}
+            >
+              <BtnSpinner on={removeMutation.isPending} />
+              {t("suppressions.remove")}
+            </button>
+          ) : null
         }
       />
 

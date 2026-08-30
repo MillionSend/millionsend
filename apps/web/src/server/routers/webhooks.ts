@@ -4,13 +4,14 @@ import {
   decryptWebhookSecret,
   encryptWebhookSecret,
   generateWebhookSecret,
+  postFailureCode,
   postJson,
   signWebhook,
   WEBHOOK_EVENT_TYPES,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getKeyring } from "../keyring";
 import { adminProcedure, router, teamProcedure } from "../trpc";
@@ -36,6 +37,34 @@ function toStoredDescription(description: string | undefined | null): string | n
 }
 
 const SUCCESS_RATE_WINDOW = 30;
+
+// Test fires are synchronous outbound requests from the app's egress. Ports
+// and volume are pinned so the button cannot double as a port scanner or a
+// reachability probe (the ordinary delivery path is async and retried).
+const TEST_DELIVERY_PORTS = new Set(["", "443", "8443"]);
+const TEST_DELIVERY_PER_MINUTE = 10;
+
+function testPortAllowed(url: string): boolean {
+  return env.WEBHOOK_ALLOW_LOCALHOST || TEST_DELIVERY_PORTS.has(new URL(url).port);
+}
+
+/** Test deliveries this team fired in the last minute (DB window: works across app instances). */
+async function recentTestDeliveries(db: Db, teamId: string): Promise<number> {
+  const d = schema.webhookDeliveries;
+  const t = schema.webhookEndpoints;
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(d)
+    .innerJoin(t, eq(d.endpointId, t.id))
+    .where(
+      and(
+        eq(t.teamId, teamId),
+        sql`${d.payload}->>'test' = 'true'`,
+        gt(d.createdAt, new Date(Date.now() - 60_000)),
+      ),
+    );
+  return row?.n ?? 0;
+}
 
 function toEnabled(status: (typeof schema.webhookEndpoints.$inferSelect)["status"]): boolean {
   return status === "enabled";
@@ -247,6 +276,9 @@ export const webhooksRouter = router({
     .input(z.object({ id: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       await requireEndpoint(ctx.db, ctx.teamId, input.id);
+      if ((await recentTestDeliveries(ctx.db, ctx.teamId)) >= TEST_DELIVERY_PER_MINUTE) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS" });
+      }
       const messageId = `msg_${randomBytes(12).toString("base64url")}`;
       const payload = {
         type: "email.sent",
@@ -294,17 +326,22 @@ export const webhooksRouter = router({
       let responseCode: number | null = null;
       let body = "";
       let ok = false;
-      try {
-        const res = await postJson(endpoint.url, {
-          body: payloadJson,
-          headers: { ...headers, "content-type": "application/json" },
-          allowLocalhost: env.NODE_ENV === "development",
-        });
-        responseCode = res.status;
-        body = res.body;
-        ok = res.status >= 200 && res.status < 300;
-      } catch (err) {
-        body = err instanceof Error ? err.message : "delivery failed";
+      if (!testPortAllowed(endpoint.url)) {
+        body = "port_not_allowed";
+      } else {
+        try {
+          const res = await postJson(endpoint.url, {
+            body: payloadJson,
+            headers: { ...headers, "content-type": "application/json" },
+            allowLocalhost: env.WEBHOOK_ALLOW_LOCALHOST,
+          });
+          responseCode = res.status;
+          body = res.body;
+          ok = res.status >= 200 && res.status < 300;
+        } catch (err) {
+          // Fixed codes only: the raw socket message is a host fingerprint.
+          body = postFailureCode(err);
+        }
       }
       await ctx.db
         .update(schema.webhookDeliveries)

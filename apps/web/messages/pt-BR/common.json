@@ -20,7 +20,8 @@
     "create": "Criar time",
     "nameLabel": "Nome do time",
     "submit": "Criar",
-    "error": "Falha ao criar o time. Tente de novo."
+    "error": "Falha ao criar o time. Tente de novo.",
+    "limit": "Você já é proprietário do número máximo de times."
   },
   "select": {
     "searchPlaceholder": "Buscar…",

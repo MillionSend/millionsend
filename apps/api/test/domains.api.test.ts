@@ -1,5 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey, hashApiKey } from "@millionsend/core";
+import {
+  DOMAIN_CREATE_LIMIT_PER_HOUR,
+  EnvKeyring,
+  generateApiKey,
+  hashApiKey,
+  PLAN_DOMAIN_LIMIT,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
@@ -19,6 +25,7 @@ let otherTeamKey: string;
 interface FakeSesState {
   dkimStatus?: DkimVerificationStatus;
   verifiedForSending?: boolean;
+  createError?: Error;
   deleteError?: Error;
 }
 
@@ -32,6 +39,7 @@ function fakeSes(state: FakeSesState = {}) {
         name,
         input: (command as unknown as { input: Record<string, unknown> }).input,
       });
+      if (name === "CreateEmailIdentityCommand" && state.createError) throw state.createError;
       if (name === "DeleteEmailIdentityCommand" && state.deleteError) throw state.deleteError;
       if (name === "GetEmailIdentityCommand") {
         return {
@@ -63,11 +71,13 @@ function makeApp(opts: {
   dns?: DnsResolver;
   appBaseUrl?: string | undefined;
   trackingSubdomains?: boolean | undefined;
+  isCloud?: boolean;
+  authEmailFrom?: string;
 }) {
   const deps: ApiDeps = {
     db,
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
-    isCloud: false,
+    isCloud: opts.isCloud ?? false,
     enqueueEmailSend: async () => {},
     appBaseUrl: opts.appBaseUrl,
     trackingSubdomains: opts.trackingSubdomains,
@@ -75,6 +85,7 @@ function makeApp(opts: {
       clientForRegion: () => opts.client,
       dns: opts.dns ?? fakeDns(),
       defaultRegion: "sa-east-1",
+      authEmailFrom: opts.authEmailFrom,
     },
   };
   return createApi(deps);
@@ -211,6 +222,90 @@ describe("POST /domains", () => {
     const res = await call(app, fullKey, "POST", "/domains", { name: "dupe.example.com" });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ statusCode: 409, name: "conflict" });
+  });
+});
+
+describe("POST /domains in cloud (shared AWS account)", () => {
+  const ALREADY_EXISTS = Object.assign(new Error("exists"), { name: "AlreadyExistsException" });
+  async function cloudTeam(slug: string) {
+    const id = await createTeam(db, slug);
+    return { id, key: await insertKey(id) };
+  }
+
+  it("409s a domain another team holds in the same region and never re-keys it", async () => {
+    const a = await cloudTeam("cloud-a");
+    const b = await cloudTeam("cloud-b");
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, isCloud: true });
+    const first = await call(app, a.key, "POST", "/domains", {
+      name: "victim.example.com",
+      region: "us-east-1",
+    });
+    expect(first.status).toBe(200);
+    const second = await call(app, b.key, "POST", "/domains", {
+      name: "victim.example.com",
+      region: "us-east-1",
+    });
+    expect(second.status).toBe(409);
+    expect(calls.filter((c) => c.name === "CreateEmailIdentityCommand")).toHaveLength(1);
+  });
+
+  it("409s instead of adopting an identity SES already holds", async () => {
+    const t = await cloudTeam("cloud-c");
+    const { client, calls } = fakeSes({ createError: ALREADY_EXISTS });
+    const res = await call(makeApp({ client, isCloud: true }), t.key, "POST", "/domains", {
+      name: "taken.example.com",
+    });
+    expect(res.status).toBe(409);
+    expect(calls.map((c) => c.name)).toEqual(["CreateEmailIdentityCommand"]);
+    expect(
+      await db.select().from(schema.domains).where(eq(schema.domains.teamId, t.id)),
+    ).toHaveLength(0);
+  });
+
+  it("still adopts an orphaned identity on self-host", async () => {
+    const { client, calls } = fakeSes({ createError: ALREADY_EXISTS });
+    const res = await call(makeApp({ client }), fullKey, "POST", "/domains", {
+      name: "orphan.example.com",
+    });
+    expect(res.status).toBe(200);
+    expect(calls.map((c) => c.name)).toContain("PutEmailIdentityDkimSigningAttributesCommand");
+  });
+
+  it("422s public mailbox providers everywhere and platform/system-mail domains in cloud", async () => {
+    const authEmailFrom = "MillionSend <no-reply@mail.ms-ops.dev>";
+    const cloud = makeApp({ ...fakeSes(), isCloud: true, authEmailFrom });
+    for (const name of ["gmail.com", "millionsend.com", "mail.ms-ops.dev"]) {
+      const res = await call(cloud, fullKey, "POST", "/domains", { name });
+      expect(res.status, name).toBe(422);
+    }
+    const selfHost = makeApp({ ...fakeSes(), authEmailFrom });
+    expect((await call(selfHost, fullKey, "POST", "/domains", { name: "gmail.com" })).status).toBe(
+      422,
+    );
+    expect(
+      (await call(selfHost, fullKey, "POST", "/domains", { name: "mail.ms-ops.dev" })).status,
+    ).toBe(200);
+  });
+
+  it("caps domains per plan and rate-limits creation", async () => {
+    const t = await cloudTeam("cloud-d");
+    const app = makeApp({ ...fakeSes(), isCloud: true });
+    const create = (i: number) =>
+      call(app, t.key, "POST", "/domains", { name: `d${i}.example.com` });
+    const freeLimit = PLAN_DOMAIN_LIMIT.free ?? 0;
+    for (let i = 0; i < freeLimit; i++) expect((await create(i)).status).toBe(200);
+    const capped = await create(freeLimit);
+    expect(capped.status).toBe(403);
+    expect(await capped.json()).toMatchObject({ name: "plan_limit_reached" });
+
+    await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, t.id));
+    for (let i = freeLimit; i < DOMAIN_CREATE_LIMIT_PER_HOUR; i++) {
+      expect((await create(i)).status).toBe(200);
+    }
+    const limited = await create(DOMAIN_CREATE_LIMIT_PER_HOUR);
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ name: "rate_limit_exceeded" });
   });
 });
 
@@ -483,6 +578,50 @@ describe("DELETE /domains/{id}", () => {
       .where(eq(schema.apiKeys.keyHash, hashApiKey(scopedToken)));
     expect(key?.revokedAt).not.toBeNull();
     expect(key?.domainId).toBeNull();
+  });
+
+  it("fails the domain's queued emails in the delete and keeps an identity other rows share", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client });
+    const { id } = await createDomain(app, "cascade.example.com");
+    const base = {
+      teamId,
+      domainId: id,
+      from: "a@cascade.example.com",
+      to: ["r@x.com"],
+      subject: "s",
+    };
+    const [queued, sent] = await db
+      .insert(schema.emails)
+      .values([
+        { ...base, latestStatus: "queued", scheduledAt: new Date(Date.now() + 60_000) },
+        { ...base, latestStatus: "delivered", sentAt: new Date() },
+      ])
+      .returning({ id: schema.emails.id });
+    // Self-host: another team registered the same identity in the same region.
+    await db
+      .insert(schema.domains)
+      .values({ teamId: otherTeamId, name: "cascade.example.com", region: "sa-east-1" });
+
+    const res = await call(app, fullKey, "DELETE", `/domains/${id}`);
+    expect(res.status).toBe(200);
+    expect(calls.some((c) => c.name === "DeleteEmailIdentityCommand")).toBe(false);
+    expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(0);
+
+    const status = async (emailId: string | undefined) =>
+      (
+        await db
+          .select({ s: schema.emails.latestStatus })
+          .from(schema.emails)
+          .where(eq(schema.emails.id, emailId ?? ""))
+      )[0]?.s;
+    expect(await status(queued?.id)).toBe("failed");
+    expect(await status(sent?.id)).toBe("delivered");
+    const events = await db
+      .select({ type: schema.emailEvents.type })
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.emailId, queued?.id ?? ""));
+    expect(events).toEqual([{ type: "failed" }]);
   });
 
   it("tolerates an identity already gone from SES", async () => {

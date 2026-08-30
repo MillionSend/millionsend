@@ -4,6 +4,7 @@ import {
   buildUnsubscribeUrl,
   decryptEmailBody,
   type EmailAttachment,
+  type EmailBody,
   enqueueWebhookDeliveries,
   extractAddrSpec,
   findSuppressed,
@@ -43,6 +44,12 @@ export interface SendDeps {
   ses: SesSender;
   /** Deployment-wide SES configuration set, used when the domain has none. */
   defaultConfigurationSet?: string | undefined;
+  /**
+   * Awaited right before the send claim, after every check that can still
+   * skip or fail the email — a token spent on a row that never reaches SES
+   * is send capacity stolen from every other tenant.
+   */
+  throttle?: (() => Promise<void>) | undefined;
   /** Re-enqueue a not-yet-due scheduled email at its due time. */
   reschedule?: ((emailId: string, at: Date) => Promise<void>) | undefined;
   /** Enqueue a webhook.deliver job; email.sent webhooks are skipped when absent. */
@@ -90,13 +97,26 @@ interface SendEligibility {
   eligible: boolean;
   topicId: string | null;
   reason?: string;
+  /** Recipients suppressed since accept; the send drops them (accept-time strip semantics). */
+  strip?: Set<string>;
 }
 
 async function checkSendEligibility(
   db: Db,
   email: typeof schema.emails.$inferSelect,
 ): Promise<SendEligibility> {
-  if (!email.contactId) return { eligible: true, topicId: null };
+  if (!email.contactId) {
+    // Bounces and complaints recorded after accept (a scheduled or
+    // quota-parked row can wait days) are honored the way accept does:
+    // strip the hit, refuse only when no primary recipient is left.
+    const recipients = [...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])];
+    const suppressed = await findSuppressed(db, email.teamId, recipients);
+    if (suppressed.size === 0) return { eligible: true, topicId: null };
+    if (email.to.every((r) => suppressed.has(r))) {
+      return { eligible: false, topicId: null, reason: "recipient_suppressed" };
+    }
+    return { eligible: true, topicId: null, strip: suppressed };
+  }
 
   const [contact] = await db
     .select({ email: schema.contacts.email, unsubscribed: schema.contacts.unsubscribed })
@@ -169,6 +189,79 @@ async function suppressQueuedEmail(db: Db, emailId: string, reason: string): Pro
   return true;
 }
 
+/** Drops suppressed recipients from the row (and the in-memory copy the MIME is built from). */
+async function stripRecipients(
+  db: Db,
+  email: typeof schema.emails.$inferSelect,
+  suppressed: Set<string>,
+): Promise<void> {
+  const keep = (list: string[]): string[] => list.filter((r) => !suppressed.has(r));
+  email.to = keep(email.to);
+  email.cc = email.cc && keep(email.cc);
+  email.bcc = email.bcc && keep(email.bcc);
+  await db
+    .update(schema.emails)
+    .set({ to: email.to, cc: email.cc, bcc: email.bcc })
+    .where(and(eq(schema.emails.id, email.id), eq(schema.emails.latestStatus, "queued")));
+}
+
+/**
+ * Terminal failure for a still-queued email: releases any send claim, moves
+ * the row to "failed" and records why. Returns false when the row already
+ * left "queued" (sent, canceled, suppressed) — nothing to fail then.
+ */
+export async function failQueuedEmail(db: Db, emailId: string, reason: string): Promise<boolean> {
+  const [updated] = await db
+    .update(schema.emails)
+    .set({ latestStatus: "failed", sentAt: null })
+    .where(and(eq(schema.emails.id, emailId), eq(schema.emails.latestStatus, "queued")))
+    .returning({ id: schema.emails.id });
+  if (!updated) return false;
+  await db.insert(schema.emailEvents).values({
+    emailId,
+    type: "failed",
+    occurredAt: new Date(),
+    data: { source: "worker", reason },
+  });
+  return true;
+}
+
+/**
+ * SES errors that no retry can fix: the message itself (MessageRejected,
+ * BadRequest) or the sending identity/account is refused. Throttling,
+ * SendingPaused and 5xx stay retryable.
+ */
+const TERMINAL_SES_ERRORS = new Set([
+  "MessageRejected",
+  "MailFromDomainNotVerifiedException",
+  "AccountSuspendedException",
+  "BadRequestException",
+]);
+
+/**
+ * Whether an error came from infrastructure that may recover (a KMS/network
+ * hiccup) rather than from the data itself. Envelope decrypt raises plain
+ * Errors for a corrupt blob or unknown key version — those never heal and
+ * retrying only burns KMS calls.
+ */
+function isTransientError(err: unknown): boolean {
+  const e = err as {
+    name?: string;
+    syscall?: string;
+    $fault?: string;
+    $retryable?: unknown;
+    $metadata?: { httpStatusCode?: number };
+  };
+  return (
+    e.$fault === "server" ||
+    e.$retryable !== undefined ||
+    (e.$metadata?.httpStatusCode ?? 0) >= 500 ||
+    typeof e.syscall === "string" ||
+    e.name === "TimeoutError" ||
+    e.name === "AbortError"
+  );
+}
+
 export async function sendEmail(
   db: Db,
   deps: SendDeps,
@@ -194,25 +287,13 @@ export async function sendEmail(
       ? "suppressed"
       : "skipped";
   }
-
-  const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
-  if (!bodyCiphertext || !bodyIv || !bodyWrappedDek || bodyKeyVersion === null) {
-    await applyStatusCas(db, email.id, "failed");
-    return "failed";
-  }
-  const body = await decryptEmailBody(
-    {
-      ciphertext: bodyCiphertext,
-      iv: bodyIv,
-      wrappedDek: bodyWrappedDek,
-      keyVersion: bodyKeyVersion,
-    },
-    deps.keyring,
-  );
+  if (eligibility.strip) await stripRecipients(db, email, eligibility.strip);
 
   // SES identities are verified per region: the send must target the
   // domain's region, not a single deployment-wide one. The name also seeds
   // the broadcast List-Id below, so it is loaded here before header assembly.
+  // Checked before the body decrypt: an unsendable row must not cost a KMS
+  // call on every attempt.
   const domain = email.domainId
     ? (
         await db
@@ -232,9 +313,38 @@ export async function sendEmail(
       )[0]
     : undefined;
   if (domain?.status !== "verified") {
-    throw new Error(`email ${email.id}: sending domain is not currently verified`);
+    // Terminal, not retried: a domain demoted or deleted after accept does
+    // not come back on its own, and the row would otherwise ride the retry
+    // and reconcile loops until its body is purged.
+    await failQueuedEmail(db, email.id, "domain_not_verified");
+    return "failed";
   }
   const configurationSet = domain.sesConfigurationSet ?? deps.defaultConfigurationSet;
+
+  const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
+  if (!bodyCiphertext || !bodyIv || !bodyWrappedDek || bodyKeyVersion === null) {
+    await failQueuedEmail(db, email.id, "body_missing");
+    return "failed";
+  }
+  let body: EmailBody;
+  let attachments: EmailAttachment[] | null;
+  try {
+    body = await decryptEmailBody(
+      {
+        ciphertext: bodyCiphertext,
+        iv: bodyIv,
+        wrappedDek: bodyWrappedDek,
+        keyVersion: bodyKeyVersion,
+      },
+      deps.keyring,
+    );
+    // Sealed alongside the body columns, on the same terminal/transient split.
+    attachments = email.attachments ? await openAttachments(email.attachments, deps.keyring) : null;
+  } catch (err) {
+    if (isTransientError(err)) throw err;
+    await failQueuedEmail(db, email.id, "body_unreadable");
+    return "failed";
+  }
 
   // App-layer engagement tracking: when the domain has click or open tracking
   // on, WE rewrite links through our redirect endpoint and inject our pixel
@@ -361,12 +471,6 @@ export async function sendEmail(
     headers["Auto-Submitted"] = "auto-generated";
   }
 
-  // Sealed alongside the body columns; a corrupt blob throws and the job
-  // retries, mirroring a body decrypt failure.
-  const attachments = email.attachments
-    ? await openAttachments(email.attachments, deps.keyring)
-    : null;
-
   const mime = await buildRawMime({
     from: email.from,
     to: email.to,
@@ -380,14 +484,25 @@ export async function sendEmail(
     headers,
   });
 
+  // The rate-limit wait comes before the final re-check so that check stays
+  // immediately ahead of the claim.
+  await deps.throttle?.();
+
   // Re-check immediately before the atomic claim: quota delays and throttling
   // can leave a row queued long enough for a recipient to opt out after the
-  // broadcast fan-out first selected them.
+  // broadcast fan-out first selected them. A recipient suppressed in the
+  // meantime invalidates the MIME already built, so the row is stripped and
+  // handed straight back to the queue.
   eligibility = await checkSendEligibility(db, email);
   if (!eligibility.eligible) {
     return (await suppressQueuedEmail(db, email.id, eligibility.reason ?? "ineligible"))
       ? "suppressed"
       : "skipped";
+  }
+  if (eligibility.strip) {
+    await stripRecipients(db, email, eligibility.strip);
+    await deps.reschedule?.(email.id, new Date());
+    return "deferred";
   }
 
   // Atomic claim (sentAt doubles as the claim marker): closes the
@@ -416,10 +531,16 @@ export async function sendEmail(
       ...(domain?.region ? { region: domain.region } : {}),
     }));
   } catch (err) {
-    // sendRaw threw ⇒ the SDK exhausted its own retries without an accept:
-    // release the claim so the job retry can send. (After a SUCCESSFUL
-    // sendRaw the claim is never released — a bookkeeping failure then
-    // leaves the row claimed rather than risking a duplicate delivery.)
+    // sendRaw threw ⇒ the SDK exhausted its own retries without an accept.
+    // A permanent refusal ends the email here; anything else releases the
+    // claim so the job retry can send. (After a SUCCESSFUL sendRaw the claim
+    // is never released — a bookkeeping failure then leaves the row claimed
+    // rather than risking a duplicate delivery.)
+    const name = (err as { name?: string }).name ?? "";
+    if (TERMINAL_SES_ERRORS.has(name)) {
+      await failQueuedEmail(db, email.id, `ses_${name}`);
+      return "failed";
+    }
     await db
       .update(schema.emails)
       .set({ sentAt: null })

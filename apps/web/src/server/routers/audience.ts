@@ -6,7 +6,7 @@ import { and, asc, desc, eq, ilike, inArray, isNotNull, or, type SQL, sql } from
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
-import { router, teamProcedure } from "../trpc";
+import { adminProcedure, router, teamProcedure } from "../trpc";
 import { assertSegment, segmentPredicate } from "./segments";
 import { assertTopic, topicMembershipSql } from "./topics";
 
@@ -506,8 +506,9 @@ export const audienceRouter = router({
 
     /** Bulk delete. No timeline rows: the contacts' activities cascade away
      * with them. Ownership is asserted up front so a foreign id rejects the
-     * whole batch before any row is gone. */
-    bulkDelete: teamProcedure
+     * whole batch before any row is gone. Admin-only: mass data loss is not
+     * a member-level action. */
+    bulkDelete: adminProcedure
       .input(z.object({ contactIds: bulkContactIds }))
       .mutation(async ({ ctx, input }) => {
         const contactIds = await assertContacts(ctx, input.contactIds);

@@ -21,24 +21,34 @@ import {
 const KEY_ID = "arn:aws:kms:us-east-1:123456789012:key/test";
 const OTHER_KEY_ID = "arn:aws:kms:us-east-1:123456789012:key/other";
 
-// Fake KMS: "wraps" by prefixing the encrypting KeyId, and like real KMS
-// fails Decrypt when the pinned KeyId differs from the key that produced the
-// blob.
+// Fake KMS: "wraps" by prefixing the encrypting KeyId and encryption
+// context, and like real KMS fails Decrypt when the pinned KeyId or the
+// supplied context differs from what produced the blob.
 function fakeKms(): { client: KmsDekClient; calls: { encrypt: number; decrypt: number } } {
   const calls = { encrypt: 0, decrypt: 0 };
+  const header = (keyId: string, context: Record<string, string> | undefined) =>
+    `${keyId}|${JSON.stringify(context ?? null)}|`;
   const client: KmsDekClient = {
-    async encrypt({ KeyId, Plaintext }) {
+    async encrypt({ KeyId, Plaintext, EncryptionContext }) {
       calls.encrypt += 1;
-      return { CiphertextBlob: Buffer.concat([Buffer.from(`${KeyId}|`), Buffer.from(Plaintext)]) };
+      return {
+        CiphertextBlob: Buffer.concat([
+          Buffer.from(header(KeyId, EncryptionContext)),
+          Buffer.from(Plaintext),
+        ]),
+      };
     },
-    async decrypt({ KeyId, CiphertextBlob }) {
+    async decrypt({ KeyId, CiphertextBlob, EncryptionContext }) {
       calls.decrypt += 1;
       const blob = Buffer.from(CiphertextBlob);
-      const sep = blob.indexOf("|");
-      if (blob.subarray(0, sep).toString() !== KeyId) {
-        throw new Error("IncorrectKeyException: blob was not encrypted under the requested key");
+      const expected = Buffer.from(header(KeyId, EncryptionContext));
+      if (!blob.subarray(0, expected.length).equals(expected)) {
+        if (blob.subarray(0, KeyId.length + 1).toString() !== `${KeyId}|`) {
+          throw new Error("IncorrectKeyException: blob was not encrypted under the requested key");
+        }
+        throw new Error("InvalidCiphertextException: encryption context mismatch");
       }
-      return { Plaintext: blob.subarray(sep + 1) };
+      return { Plaintext: blob.subarray(expected.length) };
     },
   };
   return { client, calls };
@@ -134,6 +144,40 @@ describe("KmsKeyring", () => {
     await expect(keyring.generateWrappedDek()).resolves.toMatchObject({
       keyVersion: KMS_KEY_VERSION,
     });
+  });
+
+  it("binds wraps to the team and purpose, caching one DEK per context", async () => {
+    const { client, calls } = fakeKms();
+    const keyring = new KmsKeyring(client, KEY_ID);
+    const a = await encryptPayload(Buffer.from("a1"), keyring, {
+      teamId: "team-a",
+      rowId: "r1",
+      kind: "email_body",
+    });
+    const a2 = await encryptPayload(Buffer.from("a2"), keyring, {
+      teamId: "team-a",
+      rowId: "r2",
+      kind: "email_body",
+    });
+    const b = await encryptPayload(Buffer.from("b1"), keyring, {
+      teamId: "team-b",
+      rowId: "r1",
+      kind: "email_body",
+    });
+    expect(calls.encrypt).toBe(2);
+    expect(a.wrappedDek.equals(a2.wrappedDek)).toBe(true);
+    expect(a.wrappedDek.equals(b.wrappedDek)).toBe(false);
+    // The DEK lifted from team A's row is refused for team B, before the
+    // envelope's own AAD check ever runs.
+    await expect(
+      keyring.unwrapDek(a.wrappedDek, KMS_KEY_VERSION, { teamId: "team-b", purpose: "email_body" }),
+    ).rejects.toThrow(/encryption context mismatch/);
+    await expect(
+      decryptPayload(a, keyring, { teamId: "team-b", rowId: "r1", kind: "email_body" }),
+    ).rejects.toThrow(/encryption context mismatch/);
+    await expect(
+      decryptPayload(a, keyring, { teamId: "team-a", rowId: "r1", kind: "email_body" }),
+    ).resolves.toEqual(Buffer.from("a1"));
   });
 
   it("unwrap cache: repeated unwraps of one item hit the LRU, TTL expiry refetches", async () => {

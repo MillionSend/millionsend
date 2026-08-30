@@ -21,7 +21,7 @@ export function isBlockedIp(ip: string): boolean {
   const family = isIP(ip);
   if (family === 4) {
     const parts = ip.split(".").map(Number);
-    const [a = -1, b = -1] = parts;
+    const [a = -1, b = -1, c = -1] = parts;
     return (
       a === 0 || // 0.0.0.0/8 ("this network")
       a === 10 || // 10.0.0.0/8
@@ -29,7 +29,13 @@ export function isBlockedIp(ip: string): boolean {
       (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10 CGNAT
       (a === 169 && b === 254) || // 169.254.0.0/16 link-local incl. cloud metadata
       (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
-      (a === 192 && b === 168) // 192.168.0.0/16
+      (a === 192 && b === 0 && c === 0) || // 192.0.0.0/24 IETF protocol assignments
+      (a === 192 && b === 0 && c === 2) || // 192.0.2.0/24 TEST-NET-1
+      (a === 192 && b === 168) || // 192.168.0.0/16
+      (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15 benchmarking
+      (a === 198 && b === 51 && c === 100) || // 198.51.100.0/24 TEST-NET-2
+      (a === 203 && b === 0 && c === 113) || // 203.0.113.0/24 TEST-NET-3
+      a >= 224 // 224.0.0.0/4 multicast, 240.0.0.0/4 reserved, broadcast
     );
   }
   if (family === 6) {
@@ -41,8 +47,9 @@ export function isBlockedIp(ip: string): boolean {
     const firstWord = words[0] ?? 0;
     return (
       isIpv6Loopback(ip) || // ::1 and :: (unspecified)
-      isEmbeddedIpv4(words) || // ::ffff:7f00:1, ::7f00:1, NAT64 and 6to4
+      isEmbeddedIpv4(words) || // ::ffff:7f00:1, ::ffff:0:7f00:1, ::7f00:1, NAT64 and 6to4
       (firstWord === 0x100 && words.slice(1, 4).every((word) => word === 0)) || // 100::/64 discard-only
+      (firstWord === 0x2001 && words[1] === 0) || // 2001::/32 Teredo (tunnels to an embedded v4)
       (firstWord === 0x2001 && words[1] === 0x0db8) || // 2001:db8::/32 documentation
       (firstWord & 0xfe00) === 0xfc00 || // fc00::/7 unique local
       (firstWord & 0xffc0) === 0xfe80 || // fe80::/10 link-local
@@ -59,13 +66,16 @@ function isIpv6Loopback(ip: string): boolean {
 }
 
 function isEmbeddedIpv4(words: number[]): boolean {
-  const firstFiveZero = words.slice(0, 5).every((word) => word === 0);
-  const compatibleOrMapped = firstFiveZero && (words[5] === 0 || words[5] === 0xffff);
+  const firstFourZero = words.slice(0, 4).every((word) => word === 0);
+  const compatibleOrMapped =
+    firstFourZero && words[4] === 0 && (words[5] === 0 || words[5] === 0xffff);
+  // ::ffff:0:0/96 (SIIT "IPv4-translated", deprecated but still parsed).
+  const translated = firstFourZero && words[4] === 0xffff && words[5] === 0;
   const nat64WellKnown =
     words[0] === 0x64 && words[1] === 0xff9b && words.slice(2, 6).every((word) => word === 0);
   const nat64Local = words[0] === 0x64 && words[1] === 0xff9b && words[2] === 1;
   const sixToFour = words[0] === 0x2002;
-  return compatibleOrMapped || nat64WellKnown || nat64Local || sixToFour;
+  return compatibleOrMapped || translated || nat64WellKnown || nat64Local || sixToFour;
 }
 
 function expandIpv6(ip: string): number[] {
@@ -96,7 +106,39 @@ export interface PostJsonResult {
   body: string;
 }
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+export type PostFailureCode =
+  | "url_rejected"
+  | "dns_failed"
+  | "connection_refused"
+  | "connection_reset"
+  | "timeout"
+  | "tls_failed"
+  | "delivery_failed";
+
+/**
+ * Folds a postJson rejection into a fixed code. Anything persisted or shown
+ * for a user-chosen target must go through this: raw socket/TLS messages
+ * would tell the caller more about the host than a status code does.
+ */
+export function postFailureCode(err: unknown): PostFailureCode {
+  const e = err as { name?: string; code?: string; message?: string };
+  const message = e.message ?? "";
+  const code = e.code ?? "";
+  if (message.startsWith("webhook url")) return "url_rejected";
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "dns_failed";
+  if (code === "ECONNREFUSED") return "connection_refused";
+  if (code === "ECONNRESET" || code === "EPIPE") return "connection_reset";
+  if (code === "ETIMEDOUT" || e.name === "TimeoutError" || e.name === "AbortError")
+    return "timeout";
+  if (code.startsWith("ERR_TLS_") || code.startsWith("CERT_") || /certificate|SSL/i.test(message)) {
+    return "tls_failed";
+  }
+  return "delivery_failed";
+}
+
+// Short on purpose: a receiver that stalls holds a delivery worker for the
+// whole window, and every retry pays it again.
+const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024;
 
 /**

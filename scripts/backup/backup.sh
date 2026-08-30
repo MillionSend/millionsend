@@ -2,7 +2,9 @@
 # One backup cycle: pg_dump -Fc (already compressed) -> upload to an
 # S3-compatible bucket -> verify the uploaded size -> prune old dumps.
 # Configured entirely from the shared S3_* credentials plus the S3_BACKUP_* /
-# BACKUP_* env (see .env.example); reuses the stack's DATABASE_URL. Invoked
+# BACKUP_* env (see .env.example); reuses the stack's DATABASE_URL. With
+# BACKUP_AGE_RECIPIENT set (an age public key, age1...) the dump is encrypted
+# before upload; restore with `age --decrypt -i <key file>` first. Invoked
 # with arguments it instead runs them with the rclone env prepared — the
 # documented restore path (`... backup.sh sh -c 'rclone ...'`).
 # shellcheck disable=SC3040 # BusyBox ash does support pipefail
@@ -35,6 +37,12 @@ trap 'rm -f "$dump"' EXIT
 
 echo "backup: dumping database"
 pg_dump --format=custom --file "$dump" "$DATABASE_URL"
+if [ -n "${BACKUP_AGE_RECIPIENT:-}" ]; then
+  age --encrypt --recipient "$BACKUP_AGE_RECIPIENT" --output "${dump}.age" "$dump"
+  rm -f "$dump"
+  dump="${dump}.age"
+  name="${name}.age"
+fi
 local_size=$(wc -c <"$dump")
 
 echo "backup: uploading ${name} (${local_size} bytes)"
@@ -48,7 +56,10 @@ if [ "${remote_size:-0}" != "$local_size" ] || [ "$local_size" -eq 0 ]; then
   exit 1
 fi
 
+# Only this job's own dumps, directly under the prefix: anything else that
+# shares the bucket path is left alone.
 echo "backup: pruning dumps older than ${BACKUP_RETENTION_DAYS:-14} days"
-rclone delete --min-age "${BACKUP_RETENTION_DAYS:-14}d" "$remote"
+rclone delete --min-age "${BACKUP_RETENTION_DAYS:-14}d" --max-depth 1 \
+  --include 'millionsend-*.dump' --include 'millionsend-*.dump.age' "$remote"
 
 echo "backup: done (${name})"

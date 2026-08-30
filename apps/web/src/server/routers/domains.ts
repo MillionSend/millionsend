@@ -1,5 +1,13 @@
 import { resolveNs as dnsResolveNs } from "node:dns/promises";
 import { env, trackingSubdomainsSupported } from "@millionsend/config";
+import {
+  createFixedWindowLimiter,
+  DOMAIN_CREATE_LIMIT_PER_HOUR,
+  failQueuedEmailsForDomain,
+  isIdentitySharedByOtherDomains,
+  isReservedSenderDomain,
+  PLAN_DOMAIN_LIMIT,
+} from "@millionsend/core";
 import { recordCheck } from "@millionsend/core/domain-status";
 import { type Db, schema } from "@millionsend/db";
 import {
@@ -191,6 +199,10 @@ async function requireDomain(db: Db, teamId: string, id: string) {
 }
 
 export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
+  // Identity creation provisions a shared AWS resource; cloud caps it per
+  // team so one tenant cannot burn the account's CreateEmailIdentity
+  // throttle for everyone.
+  const createLimited = createFixedWindowLimiter(DOMAIN_CREATE_LIMIT_PER_HOUR, 3_600_000);
   return router({
     list: teamProcedure.query(({ ctx }) =>
       ctx.db
@@ -245,21 +257,72 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         }),
       )
       .mutation(async ({ ctx, input }) => {
+        // env is read per call (not at module load) so tests can stub the
+        // deployment mode first.
+        const isCloud = Boolean(env.IS_CLOUD);
+        if (isReservedSenderDomain(input.name, { isCloud, authEmailFrom: env.AUTH_EMAIL_FROM })) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "This domain cannot be added as a sender",
+          });
+        }
         const [existing] = await ctx.db
           .select({ id: schema.domains.id })
           .from(schema.domains)
           .where(and(eq(schema.domains.teamId, ctx.teamId), eq(schema.domains.name, input.name)));
         if (existing) throw new TRPCError({ code: "CONFLICT", message: "domain already added" });
+        if (isCloud) {
+          // SES identities are account-wide per region and every cloud tenant
+          // shares the account, so a domain another team holds in this region
+          // is taken — adopting it would re-key their DKIM.
+          const [taken] = await ctx.db
+            .select({ id: schema.domains.id })
+            .from(schema.domains)
+            .where(
+              and(eq(schema.domains.name, input.name), eq(schema.domains.region, input.region)),
+            );
+          if (taken) {
+            throw new TRPCError({ code: "CONFLICT", message: "domain already registered" });
+          }
+          const [team] = await ctx.db
+            .select({ plan: schema.teams.plan })
+            .from(schema.teams)
+            .where(eq(schema.teams.id, ctx.teamId));
+          const limit = team ? PLAN_DOMAIN_LIMIT[team.plan] : null;
+          const [owned] = await ctx.db
+            .select({ n: count() })
+            .from(schema.domains)
+            .where(eq(schema.domains.teamId, ctx.teamId));
+          if (limit !== null && (owned?.n ?? 0) >= limit) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `Your plan allows up to ${limit} domains`,
+            });
+          }
+          if (createLimited(ctx.teamId)) {
+            throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many domains created" });
+          }
+        }
 
         // BYODKIM: the private key lives only in this block — handed to SES,
         // then dereferenced. It must never be stored, returned, or logged.
         let dkim: ReturnType<typeof generateDkimKeyPair> | null = generateDkimKeyPair();
         const dkimPublicKey = dkim.publicKeyB64;
-        await createDomainIdentity(deps.clientForRegion(input.region), {
-          domain: input.name,
-          mailFromSubdomain: input.mailFromSubdomain,
-          dkim: { selector: DKIM_SELECTOR, privateKeyB64: dkim.privateKeyB64 },
-        });
+        try {
+          await createDomainIdentity(deps.clientForRegion(input.region), {
+            domain: input.name,
+            mailFromSubdomain: input.mailFromSubdomain,
+            dkim: { selector: DKIM_SELECTOR, privateKeyB64: dkim.privateKeyB64 },
+            // Self-host: the whole AWS account is the operator's, so an
+            // identity with no row (partial earlier create) is safe to adopt.
+            adoptExisting: !isCloud,
+          });
+        } catch (error) {
+          if ((error as { name?: string }).name === "AlreadyExistsException") {
+            throw new TRPCError({ code: "CONFLICT", message: "domain already registered" });
+          }
+          throw error;
+        }
         dkim = null;
 
         let created: { id: string } | undefined;
@@ -397,23 +460,33 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
 
     delete: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
-      try {
-        await deleteDomainIdentity(deps.clientForRegion(domain.region), { domain: domain.name });
-      } catch (error) {
-        // An identity already gone from SES must not block removing the row.
-        if ((error as { name?: string }).name !== "NotFoundException") throw error;
+      // The SES identity is shared by every row with the same (name, region):
+      // it goes only with the last of them.
+      if (!(await isIdentitySharedByOtherDomains(ctx.db, domain))) {
+        try {
+          await deleteDomainIdentity(deps.clientForRegion(domain.region), { domain: domain.name });
+        } catch (error) {
+          // An identity already gone from SES must not block removing the row.
+          if ((error as { name?: string }).name !== "NotFoundException") throw error;
+        }
       }
-      // api_keys.domainId is ON DELETE restrict: a key scoped to this domain
-      // would block the delete, and set-null would silently widen it to an
-      // all-domains key. So revoke every scoped key and drop its FK first — a
-      // revoked key never authenticates, and clearing domainId frees the delete.
-      await ctx.db
-        .update(schema.apiKeys)
-        .set({ revokedAt: new Date(), domainId: null })
-        .where(and(eq(schema.apiKeys.teamId, ctx.teamId), eq(schema.apiKeys.domainId, domain.id)));
-      await ctx.db
-        .delete(schema.domains)
-        .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));
+      await ctx.db.transaction(async (tx) => {
+        const txDb = tx as unknown as Db;
+        await failQueuedEmailsForDomain(txDb, { teamId: ctx.teamId, domainId: domain.id });
+        // api_keys.domainId is ON DELETE restrict: a key scoped to this domain
+        // would block the delete, and set-null would silently widen it to an
+        // all-domains key. So revoke every scoped key and drop its FK first — a
+        // revoked key never authenticates, and clearing domainId frees the delete.
+        await txDb
+          .update(schema.apiKeys)
+          .set({ revokedAt: new Date(), domainId: null })
+          .where(
+            and(eq(schema.apiKeys.teamId, ctx.teamId), eq(schema.apiKeys.domainId, domain.id)),
+          );
+        await txDb
+          .delete(schema.domains)
+          .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));
+      });
       return { id: domain.id };
     }),
   });

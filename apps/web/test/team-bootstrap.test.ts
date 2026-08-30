@@ -2,9 +2,10 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getActiveMembership } from "@/server/membership";
 import { createCaller } from "@/server/routers";
+import { MAX_OWNED_TEAMS_CLOUD } from "@/server/routers/team-bootstrap";
 import type { Context } from "@/server/trpc";
 
 let db: Db;
@@ -15,6 +16,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await close();
 });
 
@@ -73,6 +75,22 @@ describe("team.createTeam", () => {
       .from(schema.teamMembers)
       .where(eq(schema.teamMembers.userId, "u1"));
     expect(memberships).toHaveLength(2);
+  });
+
+  it("caps owned teams per user on cloud; memberships elsewhere do not count", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    await insertUser("u1", "u1@example.com");
+    await insertUser("u2", "u2@example.com");
+    const theirs = await callerFor("u2").team.createTeam({ name: "Theirs" });
+    await db.insert(schema.teamMembers).values({ teamId: theirs.teamId, userId: "u1" });
+    for (let i = 0; i < MAX_OWNED_TEAMS_CLOUD; i++) {
+      await callerFor("u1").team.createTeam({ name: `Team ${i}` });
+    }
+    await expect(callerFor("u1").team.createTeam({ name: "One more" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    vi.stubEnv("IS_CLOUD", "");
+    await expect(callerFor("u1").team.createTeam({ name: "Self-host" })).resolves.toBeTruthy();
   });
 
   it("selects the new team via the cookie setter", async () => {

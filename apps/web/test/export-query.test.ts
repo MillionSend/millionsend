@@ -26,7 +26,11 @@ afterEach(async () => {
 function callerFor(teamId: string) {
   return createCaller({
     db,
-    session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
+    // A fresh session row: api key creation is gated on session age.
+    session: {
+      user: { id: "u1", email: "u1@example.com", name: "u1" },
+      session: { id: "s1", createdAt: new Date() },
+    },
     teamId,
     role: "owner",
   });
