@@ -1,6 +1,4 @@
-import type { Db } from "@millionsend/db";
-import { schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
+import type { schema } from "@millionsend/db";
 import { DAY_MS } from "./utc-day.js";
 
 export type Plan = (typeof schema.planEnum.enumValues)[number];
@@ -22,15 +20,6 @@ export function effectivePlan(
 ): Plan {
   if (plan === "free" || !currentPeriodEnd) return plan;
   return currentPeriodEnd.getTime() + PLAN_GRACE_DAYS * DAY_MS < now.getTime() ? "free" : plan;
-}
-
-/** effectivePlan for a team row; null when the team does not exist. */
-export async function fetchEffectivePlan(db: Db, teamId: string): Promise<Plan | null> {
-  const [team] = await db
-    .select({ plan: schema.teams.plan, currentPeriodEnd: schema.teams.currentPeriodEnd })
-    .from(schema.teams)
-    .where(eq(schema.teams.id, teamId));
-  return team ? effectivePlan(team.plan, team.currentPeriodEnd) : null;
 }
 
 /** Daily send caps per plan; null = unlimited. Self-host ignores plans entirely. */

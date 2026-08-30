@@ -1,30 +1,9 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 
-export const AUDIT_ACTIONS = [
-  "api_key.created",
-  "api_key.revoked",
-  "domain.created",
-  "domain.verified",
-  "domain.deleted",
-  "webhook.created",
-  "webhook.updated",
-  "webhook.deleted",
-  "member.invited",
-  "member.joined",
-  "member.removed",
-  "member.role_changed",
-  "member.left",
-  "invitation.revoked",
-  "team.created",
-  "team.deleted",
-  "instance.settings_updated",
-  "billing.checkout_started",
-  "billing.portal_opened",
-  "billing.subscription_updated",
-] as const;
+import { AUDIT_ACTIONS, type AuditAction } from "./audit-actions.js";
 
-export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+export { AUDIT_ACTIONS, type AuditAction };
 
 /** Who did it: a signed-in user, an API key, an OAuth (MCP) token, Stripe, or the platform itself. */
 export type AuditActor = { userId: string } | { apiKeyId: string } | "oauth" | "stripe" | "system";

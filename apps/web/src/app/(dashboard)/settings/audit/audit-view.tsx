@@ -1,6 +1,6 @@
 "use client";
 
-import { AUDIT_ACTIONS, type AuditAction } from "@millionsend/core";
+import { AUDIT_ACTIONS, type AuditAction } from "@millionsend/core/audit-actions";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { RelativeTime } from "@/components/relative-time";
