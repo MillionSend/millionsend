@@ -1,4 +1,9 @@
-import { clearUnsubscribeSuppression, recordContactActivity, resultRows } from "@millionsend/core";
+import {
+  clearUnsubscribeSuppression,
+  eraseRecipient,
+  recordContactActivity,
+  resultRows,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -385,13 +390,16 @@ export const audienceRouter = router({
         return row;
       }),
 
+    /** Deleting a contact is an erasure: the address is scrubbed from email
+     * history, event/webhook payloads and API logs, not just the row. */
     delete: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       const t = schema.contacts;
       const [row] = await ctx.db
         .delete(t)
         .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
-        .returning({ id: t.id });
+        .returning({ id: t.id, email: t.email });
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await eraseRecipient(ctx.db, ctx.teamId, row.email);
       return { id: row.id };
     }),
 
@@ -521,7 +529,10 @@ export const audienceRouter = router({
         const deleted = await ctx.db
           .delete(t)
           .where(and(inArray(t.id, contactIds), eq(t.teamId, ctx.teamId)))
-          .returning({ id: t.id });
+          .returning({ id: t.id, email: t.email });
+        // ponytail: one cross-table scan per address; fold the batch into one
+        // regex alternation if bulk deletes get slow.
+        for (const row of deleted) await eraseRecipient(ctx.db, ctx.teamId, row.email);
         return { deleted: deleted.length };
       }),
 
@@ -664,6 +675,23 @@ export const audienceRouter = router({
         return { subscribed: input.subscribed };
       }),
   }),
+
+  /**
+   * Explicit erasure request for any address, contact or not: drops the
+   * contact row when one exists, then scrubs every other copy. Admin-only —
+   * it rewrites history the whole team relies on.
+   */
+  eraseRecipient: adminProcedure
+    .input(z.object({ email: emailSchema }))
+    .mutation(async ({ ctx, input }) => {
+      const t = schema.contacts;
+      const deleted = await ctx.db
+        .delete(t)
+        .where(and(eq(t.teamId, ctx.teamId), sql`lower(${t.email}) = ${input.email.toLowerCase()}`))
+        .returning({ id: t.id });
+      const erased = await eraseRecipient(ctx.db, ctx.teamId, input.email);
+      return { contact: deleted.length > 0, ...erased };
+    }),
 
   properties: router({
     /**

@@ -8,7 +8,11 @@ import {
   drainQuotaParked,
   purgeExpiredApiRequests,
   purgeExpiredEmailBodies,
+  purgeExpiredEmailMetadata,
+  purgeExpiredSessions,
+  reconcileBillingPlans,
   reconcileStalledSends,
+  stripExpiredEventPayloads,
 } from "../src/handlers/cron.js";
 
 let db: Db;
@@ -335,4 +339,171 @@ it("reconcile fails a claim that never reached SES (worker killed mid-send) with
     .from(schema.emailEvents)
     .where(eq(schema.emailEvents.emailId, interrupted.id));
   expect(events.map((e) => [e.type, e.data?.reason])).toEqual([["failed", "send_interrupted"]]);
+});
+
+it("metadata purge deletes whole expired rows (events cascade) and old deliveries, keeping fresh and future-scheduled ones", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  const base = { teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" };
+  const insert = async (createdAt: Date, scheduledAt?: Date) => {
+    const [row] = await db
+      .insert(schema.emails)
+      .values({ ...base, latestStatus: "delivered", createdAt, scheduledAt: scheduledAt ?? null })
+      .returning({ id: schema.emails.id });
+    if (!row) throw new Error("insert failed");
+    return row.id;
+  };
+  const old = await insert(new Date("2025-01-01T00:00:00Z"));
+  const fresh = await insert(new Date("2026-08-01T00:00:00Z"));
+  const future = await insert(new Date("2025-01-01T00:00:00Z"), new Date("2026-09-01T00:00:00Z"));
+  await db
+    .insert(schema.emailEvents)
+    .values({ emailId: old, type: "delivered", occurredAt: now, data: { eventType: "Delivery" } });
+  const [endpoint] = await db
+    .insert(schema.webhookEndpoints)
+    .values({
+      teamId,
+      url: "https://hooks.example.com",
+      secretCiphertext: Buffer.from("c"),
+      secretIv: Buffer.from("i"),
+      secretWrappedDek: Buffer.from("d"),
+      secretKeyVersion: 1,
+      secretLast4: "abcd",
+    })
+    .returning({ id: schema.webhookEndpoints.id });
+  if (!endpoint) throw new Error("insert failed");
+  const delivery = (createdAt: Date, emailId: string | null) => ({
+    endpointId: endpoint.id,
+    emailId,
+    messageId: `msg_${createdAt.getTime()}`,
+    eventType: "email.delivered",
+    payload: { type: "email.delivered" },
+    createdAt,
+  });
+  await db
+    .insert(schema.webhookDeliveries)
+    .values([delivery(new Date("2025-01-01T00:00:00Z"), old), delivery(now, fresh)]);
+
+  expect(await purgeExpiredEmailMetadata(db, { retentionDays: 365, now })).toEqual({
+    emails: 1,
+    deliveries: 1,
+  });
+  const remaining = await db.select({ id: schema.emails.id }).from(schema.emails);
+  expect(remaining.map((r) => r.id).sort()).toEqual([fresh, future].sort());
+  expect(await db.select().from(schema.emailEvents)).toHaveLength(0);
+  expect(await db.select().from(schema.webhookDeliveries)).toHaveLength(1);
+  expect(await purgeExpiredEmailMetadata(db, { retentionDays: 365, now })).toEqual({
+    emails: 0,
+    deliveries: 0,
+  });
+});
+
+it("payload strip nulls expired event data and drops delivery data/response on the body window", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  const [email] = await db
+    .insert(schema.emails)
+    .values({ teamId, from: "a@acme.dev", to: ["r@example.com"], subject: "s" })
+    .returning({ id: schema.emails.id });
+  if (!email) throw new Error("insert failed");
+  await db.insert(schema.emailEvents).values([
+    {
+      emailId: email.id,
+      type: "bounced",
+      occurredAt: new Date("2026-07-01T00:00:00Z"),
+      data: {
+        eventType: "Bounce",
+        bounce: { bouncedRecipients: [{ emailAddress: "r@example.com" }] },
+      },
+    },
+    {
+      emailId: email.id,
+      type: "delivered",
+      occurredAt: new Date("2026-08-10T00:00:00Z"),
+      data: { eventType: "Delivery" },
+    },
+  ]);
+  const [endpoint] = await db
+    .insert(schema.webhookEndpoints)
+    .values({
+      teamId,
+      url: "https://hooks.example.com",
+      secretCiphertext: Buffer.from("c"),
+      secretIv: Buffer.from("i"),
+      secretWrappedDek: Buffer.from("d"),
+      secretKeyVersion: 1,
+      secretLast4: "abcd",
+    })
+    .returning({ id: schema.webhookEndpoints.id });
+  if (!endpoint) throw new Error("insert failed");
+  const [oldDelivery] = await db
+    .insert(schema.webhookDeliveries)
+    .values({
+      endpointId: endpoint.id,
+      emailId: email.id,
+      messageId: "msg_old",
+      eventType: "email.bounced",
+      payload: { type: "email.bounced", test: "true", data: { to: ["r@example.com"] } },
+      lastResponseBody: "r@example.com",
+      createdAt: new Date("2026-07-01T00:00:00Z"),
+    })
+    .returning({ id: schema.webhookDeliveries.id });
+  if (!oldDelivery) throw new Error("insert failed");
+
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 1,
+    deliveries: 1,
+  });
+  const events = await db
+    .select({ type: schema.emailEvents.type, data: schema.emailEvents.data })
+    .from(schema.emailEvents)
+    .orderBy(schema.emailEvents.occurredAt);
+  expect(events).toEqual([
+    { type: "bounced", data: null },
+    { type: "delivered", data: { eventType: "Delivery" } },
+  ]);
+  const [row] = await db
+    .select()
+    .from(schema.webhookDeliveries)
+    .where(eq(schema.webhookDeliveries.id, oldDelivery.id));
+  expect(row?.payload).toEqual({ type: "email.bounced", test: "true" });
+  expect(row?.lastResponseBody).toBeNull();
+  // Already-stripped rows are not rewritten on the next run.
+  expect(await stripExpiredEventPayloads(db, { defaultRetentionDays: 30, now })).toEqual({
+    events: 0,
+    deliveries: 0,
+  });
+});
+
+it("session purge drops only expired sessions", async () => {
+  const now = new Date("2026-08-14T00:00:00Z");
+  await db.insert(schema.user).values({ id: "u1", name: "u1", email: "u1@example.com" });
+  await db.insert(schema.session).values([
+    { id: "s-old", token: "t-old", userId: "u1", expiresAt: new Date("2026-08-01T00:00:00Z") },
+    { id: "s-live", token: "t-live", userId: "u1", expiresAt: new Date("2026-09-01T00:00:00Z") },
+  ]);
+  expect(await purgeExpiredSessions(db, now)).toBe(1);
+  expect(
+    (await db.select({ id: schema.session.id }).from(schema.session)).map((r) => r.id),
+  ).toEqual(["s-live"]);
+});
+
+it("billing reconcile visits only teams with a Stripe customer and isolates failures", async () => {
+  const withStripe = await createTeam(db, "stripe-team");
+  await db
+    .update(schema.teams)
+    .set({ stripeCustomerId: "cus_1" })
+    .where(eq(schema.teams.id, withStripe));
+  const failing = await createTeam(db, "failing-team");
+  await db
+    .update(schema.teams)
+    .set({ stripeCustomerId: "cus_2" })
+    .where(eq(schema.teams.id, failing));
+  const visited: string[] = [];
+  const result = await reconcileBillingPlans(db, {
+    reconcileTeam: async (id) => {
+      visited.push(id);
+      if (id === failing) throw new Error("stripe down");
+    },
+  });
+  expect(result).toEqual({ reconciled: 1, failed: 1 });
+  expect(visited.sort()).toEqual([withStripe, failing].sort());
 });

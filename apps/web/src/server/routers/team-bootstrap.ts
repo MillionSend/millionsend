@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { slugify } from "@/lib/slug";
+import { recordAudit } from "../audit";
 import { listMemberships } from "../membership";
 import { type AuthSession, type Context, protectedProcedure, router } from "../trpc";
 
@@ -112,6 +113,14 @@ export const teamBootstrapRouter = router({
           });
           // A freshly created team becomes the active one.
           await selectTeam(ctx, created.teamId);
+          await recordAudit(
+            { ...ctx, teamId: created.teamId },
+            {
+              action: "team.created",
+              target: { type: "team", id: created.teamId },
+              metadata: { name: input.name.trim() },
+            },
+          );
           return created;
         } catch (error) {
           if (!isUniqueViolation(error)) throw error;

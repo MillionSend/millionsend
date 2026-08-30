@@ -14,7 +14,7 @@ import {
   type DnsResolver,
   type SesIdentityClient,
 } from "@millionsend/ses";
-import { and, asc, eq, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
 /**
  * Safety net for webhook.deliver jobs lost between the delivery-row insert
@@ -434,4 +434,156 @@ export async function reverifyDomains(db: Db, deps: ReverifyDomainsDeps): Promis
     }
   }
   return { checked: batch.length, failed, capped };
+}
+
+/** Rows per statement in the retention loops; keeps each lock window short on a backlog. */
+const PURGE_BATCH = 1000;
+
+/**
+ * Metadata retention: whole email rows (recipients, subject, headers, tags —
+ * events cascade with them) past the metadata window are deleted in batches.
+ * Webhook deliveries only lose their email_id on that cascade, so they age
+ * out here on the same clock. Future-scheduled rows are kept like the body
+ * purge does. Env-only window; no instance setting overrides it.
+ */
+export async function purgeExpiredEmailMetadata(
+  db: Db,
+  params: { retentionDays: number; now?: Date },
+): Promise<{ emails: number; deliveries: number }> {
+  const now = params.now ?? new Date();
+  const cutoff = new Date(now.getTime() - params.retentionDays * DAY_MS);
+  const e = schema.emails;
+  let emails = 0;
+  for (;;) {
+    const batch = await db
+      .delete(e)
+      .where(
+        inArray(
+          e.id,
+          db
+            .select({ id: e.id })
+            .from(e)
+            .where(and(lt(e.createdAt, cutoff), or(isNull(e.scheduledAt), lte(e.scheduledAt, now))))
+            .limit(PURGE_BATCH),
+        ),
+      )
+      .returning({ id: e.id });
+    emails += batch.length;
+    if (batch.length < PURGE_BATCH) break;
+  }
+  const d = schema.webhookDeliveries;
+  let deliveries = 0;
+  for (;;) {
+    const batch = await db
+      .delete(d)
+      .where(
+        inArray(
+          d.id,
+          db.select({ id: d.id }).from(d).where(lt(d.createdAt, cutoff)).limit(PURGE_BATCH),
+        ),
+      )
+      .returning({ id: d.id });
+    deliveries += batch.length;
+    if (batch.length < PURGE_BATCH) break;
+  }
+  return { emails, deliveries };
+}
+
+/**
+ * Content-window strip for provider and webhook payloads, on the SAME
+ * effective window as email bodies. email_events.data is the raw SES subset
+ * (recipient addresses, diagnostics, remote MTAs) and is dropped whole — the
+ * typed `type` column keeps the timeline readable. Webhook deliveries keep
+ * their envelope (type, created_at, test marker) and lose `data` and the
+ * captured response body.
+ */
+export async function stripExpiredEventPayloads(
+  db: Db,
+  params: { defaultRetentionDays: number; now?: Date },
+): Promise<{ events: number; deliveries: number }> {
+  const { emailRetentionDays } = await getInstanceSettings(db);
+  const retentionDays = emailRetentionDays ?? params.defaultRetentionDays;
+  const now = params.now ?? new Date();
+  const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
+  const ev = schema.emailEvents;
+  let events = 0;
+  for (;;) {
+    const batch = await db
+      .update(ev)
+      .set({ data: null })
+      .where(
+        inArray(
+          ev.id,
+          db
+            .select({ id: ev.id })
+            .from(ev)
+            .where(and(lt(ev.occurredAt, cutoff), isNotNull(ev.data)))
+            .limit(PURGE_BATCH),
+        ),
+      )
+      .returning({ id: ev.id });
+    events += batch.length;
+    if (batch.length < PURGE_BATCH) break;
+  }
+  const d = schema.webhookDeliveries;
+  let deliveries = 0;
+  for (;;) {
+    const batch = await db
+      .update(d)
+      .set({ payload: sql`${d.payload} - 'data'`, lastResponseBody: null })
+      .where(
+        inArray(
+          d.id,
+          db
+            .select({ id: d.id })
+            .from(d)
+            .where(
+              and(
+                lt(d.createdAt, cutoff),
+                or(sql`${d.payload} ? 'data'`, isNotNull(d.lastResponseBody)),
+              ),
+            )
+            .limit(PURGE_BATCH),
+        ),
+      )
+      .returning({ id: d.id });
+    deliveries += batch.length;
+    if (batch.length < PURGE_BATCH) break;
+  }
+  return { events, deliveries };
+}
+
+/** Better Auth never deletes expired sessions; their IP/user-agent would otherwise sit forever. */
+export async function purgeExpiredSessions(db: Db, now = new Date()): Promise<number> {
+  const rows = await db
+    .delete(schema.session)
+    .where(lt(schema.session.expiresAt, now))
+    .returning({ id: schema.session.id });
+  return rows.length;
+}
+
+/**
+ * Daily plan reconcile against Stripe for every team with a customer: covers
+ * webhooks that were dropped or arrived out of order. One team's failure is
+ * logged and never blocks the rest.
+ */
+export async function reconcileBillingPlans(
+  db: Db,
+  deps: { reconcileTeam: (teamId: string) => Promise<void> },
+): Promise<{ reconciled: number; failed: number }> {
+  const teams = await db
+    .select({ id: schema.teams.id })
+    .from(schema.teams)
+    .where(isNotNull(schema.teams.stripeCustomerId))
+    .orderBy(asc(schema.teams.id));
+  let failed = 0;
+  for (const team of teams) {
+    try {
+      await deps.reconcileTeam(team.id);
+    } catch (err) {
+      failed += 1;
+      console.warn(`billing.reconcile: team ${team.id} failed`, err);
+    }
+  }
+  return { reconciled: teams.length - failed, failed };
 }

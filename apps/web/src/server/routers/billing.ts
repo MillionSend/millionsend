@@ -12,6 +12,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { getStripe } from "../billing";
 import { adminProcedure, router, teamProcedure } from "../trpc";
@@ -79,6 +80,11 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
             cancelUrl: billingPageUrl(),
           },
         );
+        await recordAudit(ctx, {
+          action: "billing.checkout_started",
+          target: { type: "team", id: ctx.teamId },
+          metadata: { plan: input.plan },
+        });
         return { url };
       }),
 
@@ -90,6 +96,10 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         customerId: team.stripeCustomerId,
         returnUrl: billingPageUrl(),
         configuration: env.STRIPE_PORTAL_CONFIG,
+      });
+      await recordAudit(ctx, {
+        action: "billing.portal_opened",
+        target: { type: "team", id: ctx.teamId },
       });
       return { url };
     }),

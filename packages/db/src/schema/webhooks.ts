@@ -57,6 +57,7 @@ export const webhookDeliveries = pgTable(
   },
   (t) => [
     index("webhook_deliveries_endpoint_idx").on(t.endpointId, t.createdAt),
+    index("webhook_deliveries_created_idx").on(t.createdAt),
     // The retry worker polls non-terminal rows; keep that scan on a small
     // partial index that rows exit as soon as they reach a terminal status.
     index("webhook_deliveries_open_idx")

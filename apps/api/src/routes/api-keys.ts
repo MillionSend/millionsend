@@ -1,5 +1,10 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
-import { generateApiKey, MAX_ACTIVE_API_KEYS } from "@millionsend/core";
+import {
+  apiRequestActor,
+  generateApiKey,
+  MAX_ACTIVE_API_KEYS,
+  recordAudit,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, count, desc, eq, isNull } from "drizzle-orm";
@@ -89,6 +94,17 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
         })
         .returning({ id: k.id });
       if (!row) throw new Error("api key insert returned no row");
+      await recordAudit(db, {
+        teamId: auth.teamId,
+        actor: apiRequestActor(auth),
+        action: "api_key.created",
+        target: { type: "api_key", id: row.id },
+        metadata: {
+          name: body.name,
+          permission: body.permission,
+          domainId: body.domain_id ?? null,
+        },
+      });
       // The full secret exists only in this response — the row stores
       // tokenPrefix + hash + last4, and the request logger redacts `token`.
       return c.json({ id: row.id, token: generated.token }, 200);
@@ -176,6 +192,12 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
         )
         .returning({ id: k.id });
       if (!row) return c.json(errorBody(404, "not_found", "API key not found"), 404);
+      await recordAudit(db, {
+        teamId: auth.teamId,
+        actor: apiRequestActor(auth),
+        action: "api_key.revoked",
+        target: { type: "api_key", id: row.id },
+      });
       return c.json({ object: "api_key" as const, id: row.id, deleted: true as const }, 200);
     },
   );

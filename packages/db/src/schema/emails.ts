@@ -1,4 +1,4 @@
-import { isNull, sql } from "drizzle-orm";
+import { isNotNull, isNull, sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -150,5 +150,7 @@ export const emailEvents = pgTable(
     uniqueIndex("email_events_sns_message_id_idx")
       .on(t.snsMessageId)
       .where(sql`${t.snsMessageId} is not null`),
+    // Partial index drives the retention strip scan (rows whose provider payload still exists).
+    index("email_events_data_unstripped_idx").on(t.occurredAt).where(isNotNull(t.data)),
   ],
 );

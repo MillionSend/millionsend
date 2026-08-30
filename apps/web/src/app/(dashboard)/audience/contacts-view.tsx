@@ -183,6 +183,8 @@ export function AudienceContactsView() {
   const [importError, setImportError] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; email: string } | null>(null);
+  const [eraseOpen, setEraseOpen] = useState(false);
+  const [eraseEmail, setEraseEmail] = useState("");
 
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
@@ -281,10 +283,23 @@ export function AudienceContactsView() {
     trpc.audience.contacts.bulkSubscribeTopics.mutationOptions(),
   );
   const bulkDeleteMutation = useMutation(trpc.audience.contacts.bulkDelete.mutationOptions());
+  const eraseMutation = useMutation(
+    trpc.audience.eraseRecipient.mutationOptions({
+      onSuccess: () => {
+        setEraseOpen(false);
+        setEraseEmail("");
+        invalidate();
+      },
+    }),
+  );
 
   // Stable identities: Modal's focus effect depends on onClose.
   const closeAdd = useCallback(() => setAddOpen(false), []);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
+  const closeErase = useCallback(() => {
+    setEraseOpen(false);
+    setEraseEmail("");
+  }, []);
   const closeImport = useCallback(() => {
     setImportOpen(false);
     setImportRows(null);
@@ -359,7 +374,7 @@ export function AudienceContactsView() {
   }, [bulkBusy, selected, t, bulkDeleteMutation.mutateAsync, clearSelection, invalidate]);
 
   const anyModalOpen =
-    addOpen || importOpen || deleteTarget !== null || bulkModal !== null || bulkBusy;
+    addOpen || importOpen || eraseOpen || deleteTarget !== null || bulkModal !== null || bulkBusy;
 
   // Bulk keyboard bindings, live while a selection exists and no dialog or
   // text field owns the keys: E = edit menu, ⌫ = delete, Esc = clear.
@@ -405,6 +420,11 @@ export function AudienceContactsView() {
     deleteMutation.mutate({ id: deleteTarget.id });
   }
 
+  function submitErase() {
+    if (eraseMutation.isPending || eraseEmail.trim().length === 0) return;
+    eraseMutation.mutate({ email: eraseEmail.trim() });
+  }
+
   async function runImport() {
     if (!importRows || importRows.length === 0 || importing) return;
     setImporting(true);
@@ -435,7 +455,16 @@ export function AudienceContactsView() {
         actions={
           <>
             {canManage ? (
-              <ExportCsvLink href={`/export/contacts${exportQs ? `?${exportQs}` : ""}`} />
+              <>
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-secondary"
+                  onClick={() => setEraseOpen(true)}
+                >
+                  {t("contacts.erase")}
+                </button>
+                <ExportCsvLink href={`/export/contacts${exportQs ? `?${exportQs}` : ""}`} />
+              </>
             ) : null}
             <AddContactsSplit onManual={() => setAddOpen(true)} onCsv={() => setImportOpen(true)} />
             <ResourceApiButton resource="contacts" />
@@ -900,6 +929,52 @@ export function AudienceContactsView() {
             >
               <BtnSpinner on={deleteMutation.isPending} />
               {t("contacts.deleteConfirm")} <ConfirmKeycap />
+            </button>
+          </ModalFooter>
+        </form>
+      </Modal>
+
+      <Modal
+        open={eraseOpen}
+        onClose={closeErase}
+        onConfirm={submitErase}
+        title={t("contacts.eraseTitle")}
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitErase();
+          }}
+        >
+          <p style={{ margin: "0 0 18px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
+            {t("contacts.eraseBody")}
+          </p>
+          <div className="ms-field">
+            <label htmlFor="erase-email">{t("contacts.emailLabel")}</label>
+            <input
+              id="erase-email"
+              className={`ms-input mono${eraseMutation.isError ? " error" : ""}`}
+              style={{ width: "100%" }}
+              placeholder={t("contacts.emailPlaceholder")}
+              disabled={eraseMutation.isPending}
+              value={eraseEmail}
+              onChange={(event) => setEraseEmail(event.target.value)}
+            />
+          </div>
+          {eraseMutation.isError ? (
+            <p className="ms-field-error">{t("contacts.eraseInvalid")}</p>
+          ) : null}
+          <ModalFooter>
+            <button type="button" className="ms-btn ms-btn-secondary" onClick={closeErase}>
+              {common("cancel")} <span className="ms-keycap">Esc</span>
+            </button>
+            <button
+              type="submit"
+              className="ms-btn ms-btn-destructive"
+              disabled={eraseMutation.isPending || eraseEmail.trim().length === 0}
+            >
+              <BtnSpinner on={eraseMutation.isPending} />
+              {t("contacts.eraseConfirm")} <ConfirmKeycap />
             </button>
           </ModalFooter>
         </form>

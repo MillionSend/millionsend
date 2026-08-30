@@ -13,6 +13,7 @@ import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
+import { recordAudit } from "../audit";
 import { getKeyring } from "../keyring";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
@@ -193,6 +194,11 @@ export const webhooksRouter = router({
         })
         .returning({ id: schema.webhookEndpoints.id });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await recordAudit(ctx, {
+        action: "webhook.created",
+        target: { type: "webhook", id: row.id },
+        metadata: { url: input.url },
+      });
       // The full secret exists only in this response — the row stores only
       // ciphertext, and no other code path returns or logs the plaintext.
       return { id: row.id, secret };
@@ -259,6 +265,11 @@ export const webhooksRouter = router({
         .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
         .returning({ id: t.id, status: t.status });
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await recordAudit(ctx, {
+        action: "webhook.updated",
+        target: { type: "webhook", id: row.id },
+        metadata: set,
+      });
       return { id: row.id, enabled: toEnabled(row.status) };
     }),
 
@@ -268,8 +279,13 @@ export const webhooksRouter = router({
     const [row] = await ctx.db
       .delete(t)
       .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
-      .returning({ id: t.id });
+      .returning({ id: t.id, url: t.url });
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    await recordAudit(ctx, {
+      action: "webhook.deleted",
+      target: { type: "webhook", id: row.id },
+      metadata: { url: row.url },
+    });
     return { id: row.id };
   }),
 

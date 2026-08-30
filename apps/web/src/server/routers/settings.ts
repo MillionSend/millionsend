@@ -18,6 +18,7 @@ import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { isHexColor } from "@/lib/hex-color";
 import { isHttpUrl } from "@/lib/http-url";
+import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { getStripe } from "../billing";
 import { smtpRelayOffered } from "../smtp";
@@ -225,9 +226,9 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
       delete: teamProcedure.mutation(async ({ ctx }) => {
         if (ctx.role !== "owner") throw new TRPCError({ code: "FORBIDDEN" });
         if (env.IS_CLOUD) await deps.cancelSubscription(ctx.db, ctx.teamId);
-        const { domains, logoUrl } = await ctx.db.transaction(async (tx) => {
+        const { domains, logoUrl, name } = await ctx.db.transaction(async (tx) => {
           const [team] = await tx
-            .select({ logoUrl: schema.teams.logoUrl })
+            .select({ logoUrl: schema.teams.logoUrl, name: schema.teams.name })
             .from(schema.teams)
             .where(eq(schema.teams.id, ctx.teamId));
           if (!team) throw new TRPCError({ code: "NOT_FOUND" });
@@ -239,12 +240,17 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
           await tx.delete(schema.broadcasts).where(eq(schema.broadcasts.teamId, ctx.teamId));
           await tx.delete(schema.apiKeys).where(eq(schema.apiKeys.teamId, ctx.teamId));
           await tx.delete(schema.teams).where(eq(schema.teams.id, ctx.teamId));
-          return { domains, logoUrl: team.logoUrl };
+          return { domains, logoUrl: team.logoUrl, name: team.name };
         });
         await Promise.allSettled([
           ...domains.map((domain) => deps.deleteSesIdentity(domain)),
           ...(logoUrl ? [deps.deleteLogo(logoUrl)] : []),
         ]);
+        await recordAudit(ctx, {
+          action: "team.deleted",
+          target: { type: "team", id: ctx.teamId },
+          metadata: { name },
+        });
         return { teamId: ctx.teamId };
       }),
     }),
@@ -282,6 +288,11 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
             .update(schema.teamMembers)
             .set({ role: input.role })
             .where(eq(schema.teamMembers.id, target.id));
+          await recordAudit(ctx, {
+            action: "member.role_changed",
+            target: { type: "user", id: input.userId },
+            metadata: { from: target.role, to: input.role },
+          });
           return { userId: input.userId, role: input.role };
         }),
 
@@ -299,12 +310,22 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
             await assertAnotherOwner(ctx.db, ctx.teamId, input.userId);
           }
           await removeMembership(ctx.db, ctx.teamId, input.userId);
+          await recordAudit(ctx, {
+            action: "member.removed",
+            target: { type: "user", id: input.userId },
+            metadata: { role: target.role },
+          });
           return { userId: input.userId };
         }),
 
       leave: teamProcedure.mutation(async ({ ctx }) => {
         if (ctx.role === "owner") await assertAnotherOwner(ctx.db, ctx.teamId, ctx.session.user.id);
         await removeMembership(ctx.db, ctx.teamId, ctx.session.user.id);
+        await recordAudit(ctx, {
+          action: "member.left",
+          target: { type: "user", id: ctx.session.user.id },
+          metadata: { role: ctx.role },
+        });
         return { teamId: ctx.teamId };
       }),
     }),
@@ -354,6 +375,11 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
               })
               .returning({ id: schema.teamInvitations.id });
             if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+            await recordAudit(ctx, {
+              action: "member.invited",
+              target: { type: "invitation", id: row.id },
+              metadata: { email: input.email, role: input.role },
+            });
             return {
               id: row.id,
               email: input.email,
@@ -383,6 +409,10 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
           )
           .returning({ id: schema.teamInvitations.id });
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        await recordAudit(ctx, {
+          action: "invitation.revoked",
+          target: { type: "invitation", id: row.id },
+        });
         return { id: row.id };
       }),
 
@@ -416,7 +446,7 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
             }
           }
 
-          const teamId = await ctx.db.transaction(async (tx) => {
+          const joined = await ctx.db.transaction(async (tx) => {
             const [claimed] = await tx
               .update(schema.teamInvitations)
               .set({ acceptedAt: new Date() })
@@ -440,11 +470,19 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
               .onConflictDoNothing({
                 target: [schema.teamMembers.teamId, schema.teamMembers.userId],
               });
-            return claimed.teamId;
+            return claimed;
           });
 
-          ctx.setActiveTeamCookie?.(teamId);
-          return { teamId };
+          ctx.setActiveTeamCookie?.(joined.teamId);
+          await recordAudit(
+            { ...ctx, teamId: joined.teamId },
+            {
+              action: "member.joined",
+              target: { type: "user", id: ctx.session.user.id },
+              metadata: { role: joined.role, invitationId: inviteId },
+            },
+          );
+          return { teamId: joined.teamId };
         }),
     }),
 

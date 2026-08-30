@@ -13,6 +13,7 @@ import {
   completeIdempotent,
   DAY_MS,
   decryptEmailBody,
+  eraseRecipient,
   estimateAttachmentBytes,
   extractTokenPrefix,
   fetchDeliverabilityHealth,
@@ -781,8 +782,18 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
     return row;
   };
 
-  const deleteContactOp = async (teamId: string, idOrEmail: string) =>
-    (await db.delete(t).where(teamContactWhere(teamId, idOrEmail)).returning({ id: t.id }))[0];
+  const deleteContactOp = async (teamId: string, idOrEmail: string) => {
+    const row = (
+      await db
+        .delete(t)
+        .where(teamContactWhere(teamId, idOrEmail))
+        .returning({ id: t.id, email: t.email })
+    )[0];
+    // Deleting a contact is an erasure: the address must not survive in
+    // email history, event payloads or API logs.
+    if (row) await eraseRecipient(db, teamId, row.email);
+    return row;
+  };
 
   app.openapi(
     createRoute({

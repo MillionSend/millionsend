@@ -7,7 +7,8 @@
     "smtp": "SMTP",
     "mcp": "MCP",
     "unsubscribe": "Unsubscribe page",
-    "connectedApps": "Connected apps"
+    "connectedApps": "Connected apps",
+    "audit": "Audit log"
   },
   "smtp": {
     "title": "SMTP",
@@ -308,5 +309,47 @@
     "deleteAccountBody": "Permanently delete your account and sign you out everywhere. Teams you are the only owner of must be deleted or handed over first. This cannot be undone.",
     "deleteAccountError": "Could not delete the account. Delete or hand over the teams you own, sign in again, and retry.",
     "hint": "Deletions are immediate and irreversible."
+  },
+  "audit": {
+    "title": "Audit log",
+    "subtitle": "Who changed what in this team. Entries are permanent.",
+    "when": "When",
+    "who": "Who",
+    "action": "Action",
+    "target": "Target",
+    "actors": {
+      "api_key": "API key",
+      "oauth": "Connected app",
+      "stripe": "Stripe",
+      "system": "System",
+      "deletedUser": "Deleted user"
+    },
+    "actions": {
+      "api_key.created": "Created API key",
+      "api_key.revoked": "Revoked API key",
+      "domain.created": "Added domain",
+      "domain.verified": "Verified domain",
+      "domain.deleted": "Deleted domain",
+      "webhook.created": "Created webhook",
+      "webhook.updated": "Updated webhook",
+      "webhook.deleted": "Deleted webhook",
+      "member.invited": "Invited member",
+      "member.joined": "Joined the team",
+      "member.removed": "Removed member",
+      "member.role_changed": "Changed member role",
+      "member.left": "Left the team",
+      "invitation.revoked": "Revoked invitation",
+      "team.created": "Created team",
+      "team.deleted": "Deleted team",
+      "instance.settings_updated": "Updated instance settings",
+      "billing.checkout_started": "Started checkout",
+      "billing.portal_opened": "Opened billing portal",
+      "billing.subscription_updated": "Subscription changed"
+    },
+    "empty": "Nothing recorded yet.",
+    "loadMore": "Load more",
+    "loadError": "Could not load the audit log.",
+    "retry": "Retry",
+    "forbidden": "Only owners and admins can read the audit log."
   }
 }

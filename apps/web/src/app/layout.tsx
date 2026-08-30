@@ -15,8 +15,10 @@ import { THEME_INIT_SCRIPT, THEME_KEY } from "@/lib/theme";
 export function generateMetadata(): Metadata {
   return {
     ...(env.APP_BASE_URL ? { metadataBase: new URL(env.APP_BASE_URL) } : {}),
-    title: "MillionSend",
+    title: { default: "MillionSend", template: "%s · MillionSend" },
     description: "The open-source email platform.",
+    // Everything behind the sign-in is private; the auth pages opt back in.
+    robots: { index: false, follow: false },
     icons: { icon: "/logo/millionsend-favicon.svg" },
     openGraph: {
       siteName: "MillionSend",

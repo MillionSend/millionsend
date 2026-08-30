@@ -15,6 +15,7 @@ import {
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { isAwsCredentialError } from "@/lib/aws-errors";
+import { recordAudit } from "../audit";
 import { isInstanceOperator } from "../instance-operator";
 import { awsCredentialsConfigured, passwordRecoveryEnabled } from "../system-mail";
 import { router, teamProcedure } from "../trpc";
@@ -187,6 +188,7 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
               target: schema.instanceSettings.id,
               set: { ...input, updatedAt: new Date() },
             });
+          await recordAudit(ctx, { action: "instance.settings_updated", metadata: input });
         }),
     }),
   });

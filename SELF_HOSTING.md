@@ -516,7 +516,11 @@ docker compose start millionsend smtp
   (owner/admin). Defaults are 14/s and 30 days until changed there; the worker picks
   up a rate change within a minute, retention on the next purge run. (`SES_MAX_SEND_RATE`
   and `EMAIL_RETENTION_DAYS` remain honored as boot overrides if set in the
-  environment, but are no longer part of the documented setup.)
+  environment, but are no longer part of the documented setup.) Whole email rows —
+  recipients, subject, status, events — and webhook delivery records outlive their
+  bodies and are deleted after `EMAIL_METADATA_RETENTION_DAYS` (default 365).
+  Deleting a contact tombstones its address across email history, event payloads and
+  API logs; only the suppression hash is kept.
 - One worker container only: the SES rate limiter is in-memory, so N worker replicas
   send at N × the configured send rate. Scale the worker vertically, or divide the
   rate by the replica count.

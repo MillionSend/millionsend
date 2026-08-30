@@ -7,7 +7,8 @@
     "smtp": "SMTP",
     "mcp": "MCP",
     "unsubscribe": "Página de cancelamento",
-    "connectedApps": "Aplicativos conectados"
+    "connectedApps": "Aplicativos conectados",
+    "audit": "Registro de auditoria"
   },
   "smtp": {
     "title": "SMTP",
@@ -308,5 +309,47 @@
     "deleteAccountBody": "Exclui permanentemente sua conta e encerra todas as suas sessões. Equipes das quais você é o único proprietário precisam ser excluídas ou transferidas antes. Isso não pode ser desfeito.",
     "deleteAccountError": "Não foi possível excluir a conta. Exclua ou transfira as equipes que você possui, entre de novo e tente outra vez.",
     "hint": "Exclusões são imediatas e irreversíveis."
+  },
+  "audit": {
+    "title": "Registro de auditoria",
+    "subtitle": "Quem alterou o quê nesta equipe. Os registros são permanentes.",
+    "when": "Quando",
+    "who": "Quem",
+    "action": "Ação",
+    "target": "Alvo",
+    "actors": {
+      "api_key": "Chave de API",
+      "oauth": "App conectado",
+      "stripe": "Stripe",
+      "system": "Sistema",
+      "deletedUser": "Usuário excluído"
+    },
+    "actions": {
+      "api_key.created": "Criou chave de API",
+      "api_key.revoked": "Revogou chave de API",
+      "domain.created": "Adicionou domínio",
+      "domain.verified": "Verificou domínio",
+      "domain.deleted": "Excluiu domínio",
+      "webhook.created": "Criou webhook",
+      "webhook.updated": "Atualizou webhook",
+      "webhook.deleted": "Excluiu webhook",
+      "member.invited": "Convidou membro",
+      "member.joined": "Entrou na equipe",
+      "member.removed": "Removeu membro",
+      "member.role_changed": "Alterou função de membro",
+      "member.left": "Saiu da equipe",
+      "invitation.revoked": "Revogou convite",
+      "team.created": "Criou equipe",
+      "team.deleted": "Excluiu equipe",
+      "instance.settings_updated": "Atualizou configurações da instância",
+      "billing.checkout_started": "Iniciou checkout",
+      "billing.portal_opened": "Abriu portal de cobrança",
+      "billing.subscription_updated": "Assinatura alterada"
+    },
+    "empty": "Nada registrado ainda.",
+    "loadMore": "Carregar mais",
+    "loadError": "Não foi possível carregar o registro de auditoria.",
+    "retry": "Tentar de novo",
+    "forbidden": "Somente proprietários e administradores podem ler o registro de auditoria."
   }
 }

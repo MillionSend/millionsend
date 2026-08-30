@@ -1,0 +1,2 @@
+CREATE INDEX "email_events_data_unstripped_idx" ON "email_events" USING btree ("occurred_at") WHERE "email_events"."data" is not null;--> statement-breakpoint
+CREATE INDEX "webhook_deliveries_created_idx" ON "webhook_deliveries" USING btree ("created_at");

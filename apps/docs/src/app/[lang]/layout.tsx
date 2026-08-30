@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { i18nUI } from "@/lib/i18n-ui";
 import { baseOptions } from "@/lib/layout.shared";
+import { DOCS_ORIGIN } from "@/lib/site";
 import { source } from "@/lib/source";
 
 interface LayoutProps {
@@ -15,11 +16,11 @@ interface LayoutProps {
 export async function generateMetadata(props: LayoutProps): Promise<Metadata> {
   const { lang } = await props.params;
   return {
-    metadataBase: new URL("https://docs.millionsend.com"),
+    metadataBase: new URL(DOCS_ORIGIN),
     openGraph: { siteName: "MillionSend Docs", type: "website", images: "/og.png" },
     twitter: { card: "summary_large_image" },
     title: {
-      template: "%s | MillionSend Docs",
+      template: "%s · MillionSend Docs",
       default: "MillionSend Docs",
     },
     description:
