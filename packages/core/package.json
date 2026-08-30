@@ -8,6 +8,10 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./audit-actions": {
+      "types": "./src/audit-actions.ts",
+      "default": "./src/audit-actions.ts"
+    },
     "./bounce-guidance": {
       "types": "./src/bounce-guidance.ts",
       "default": "./src/bounce-guidance.ts"

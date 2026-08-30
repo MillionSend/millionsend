@@ -120,7 +120,6 @@ export {
 } from "./oauth-scopes.js";
 export {
   effectivePlan,
-  fetchEffectivePlan,
   PLAN_DAILY_LIMIT,
   PLAN_DOMAIN_LIMIT,
   PLAN_GRACE_DAYS,
@@ -152,6 +151,7 @@ export {
   normalizeAddress,
 } from "./suppressions.js";
 export { INVITE_TTL_MS, signInviteToken, verifyInviteToken } from "./team-invitations.js";
+export { fetchEffectivePlan } from "./team-plan.js";
 export { findTopicOptOuts, isSubscribedToTopic } from "./topics.js";
 export {
   deriveTrackingKey,
