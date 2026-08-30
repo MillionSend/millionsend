@@ -119,12 +119,20 @@ export async function postJson(rawUrl: string, opts: PostJsonOptions): Promise<P
     throw new Error(`webhook url resolves to a blocked address`);
   }
 
-  // Validation happens inside the lookup and the validated address is the one
-  // the socket connects to — the pin that makes rebinding impossible.
+  // Validation happens inside the lookup and the validated addresses are the
+  // ones the socket connects to — the pin that makes rebinding impossible.
+  // The socket calls this with `all: true` when autoSelectFamily is on (the
+  // Node ≥20 default) and expects an address ARRAY back then; answering with
+  // a single address there makes net throw "Invalid IP address: undefined",
+  // killing every delivery to a hostname.
   const pinnedLookup: typeof dnsLookup = ((
     host: string,
-    _options: object,
-    cb: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
+    options: { all?: boolean },
+    cb: (
+      err: NodeJS.ErrnoException | null,
+      address: string | { address: string; family: number }[],
+      family?: number,
+    ) => void,
   ): void => {
     dnsLookup(host, { all: true, verbatim: true }, (err, addresses) => {
       if (err) return cb(err, "", 0);
@@ -134,6 +142,9 @@ export async function postJson(rawUrl: string, opts: PostJsonOptions): Promise<P
       }
       const first = addresses[0];
       if (!first) return cb(new Error("webhook url did not resolve"), "", 0);
+      // Every returned address was validated above, so whichever one the
+      // socket picks stays inside the guard.
+      if (options?.all === true) return cb(null, addresses);
       cb(null, first.address, first.family);
     });
   }) as typeof dnsLookup;

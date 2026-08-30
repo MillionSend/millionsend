@@ -461,7 +461,7 @@ export function DomainDetail({ id }: { id: string }) {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 22,
+            gap: 28,
             padding: "20px 0",
             borderTop: "1px solid var(--ms-line)",
             borderBottom: "1px solid var(--ms-line)",
@@ -638,7 +638,7 @@ export function DomainDetail({ id }: { id: string }) {
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 22,
+          gap: 28,
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
           borderBottom: "1px solid var(--ms-line)",

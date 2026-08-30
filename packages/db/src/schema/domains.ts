@@ -27,7 +27,8 @@ export const domains = pgTable(
     dkimPublicKey: text("dkim_public_key"),
     mailFromSubdomain: text("mail_from_subdomain").notNull().default("send"),
     trackingSubdomain: text("tracking_subdomain"),
-    clickTracking: boolean("click_tracking").notNull().default(true),
+    // Both tracking kinds are off by default, as the Domains docs promise.
+    clickTracking: boolean("click_tracking").notNull().default(false),
     openTracking: boolean("open_tracking").notNull().default(false),
     tlsMode: tlsModeEnum("tls_mode").notNull().default("opportunistic"),
     sesConfigurationSet: text("ses_configuration_set"),

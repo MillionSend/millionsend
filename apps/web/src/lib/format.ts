@@ -100,3 +100,13 @@ export function maskApiKey(tokenPrefix: string, last4: string): string {
   const scheme = tokenPrefix.startsWith("ms_") ? "ms_" : tokenPrefix;
   return `${scheme}••••••••${last4}`;
 }
+
+/**
+ * URL for display surfaces (chips, table cells, headings): the scheme is
+ * noise there — endpoints are https-only, so it carries no information.
+ * Copy affordances must still copy the full URL; pass this only as the
+ * visible text.
+ */
+export function displayUrl(url: string): string {
+  return url.replace(/^https?:\/\//, "");
+}

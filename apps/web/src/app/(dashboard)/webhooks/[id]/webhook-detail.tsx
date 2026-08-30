@@ -16,20 +16,11 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
+import { displayUrl } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { maskWebhookSecret, WEBHOOK_EVENT_META, type WebhookEventType } from "@/lib/webhook-events";
 import { ListFooter, PAGE_SIZES } from "../../emails/list-parts";
 import { DeliveryStatusBadge, WebhookStatusBadge } from "../webhook-status-badge";
-
-/** "example.com/hooks" — the H1 form of an endpoint URL. */
-function hostAndPath(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}`;
-  } catch {
-    return url;
-  }
-}
 
 function DeliveriesTableHead() {
   const t = useTranslations("webhooks");
@@ -287,7 +278,7 @@ export function WebhookDetail({ id }: { id: string }) {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 22,
+            gap: 28,
             padding: "20px 0",
             borderTop: "1px solid var(--ms-line)",
             borderBottom: "1px solid var(--ms-line)",
@@ -330,7 +321,7 @@ export function WebhookDetail({ id }: { id: string }) {
   return (
     <>
       <PageHeader
-        title={hostAndPath(data.url)}
+        title={displayUrl(data.url)}
         breadcrumb={
           <>
             <Crumb href="/webhooks" label={nav("webhooks")} />
@@ -389,7 +380,7 @@ export function WebhookDetail({ id }: { id: string }) {
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 22,
+          gap: 28,
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
           borderBottom: "1px solid var(--ms-line)",
@@ -397,7 +388,7 @@ export function WebhookDetail({ id }: { id: string }) {
         }}
       >
         <MetaItem label={t("detail.url")}>
-          <CopyChip value={data.url} />
+          <CopyChip value={data.url} display={displayUrl(data.url)} />
         </MetaItem>
         <MetaItem label={t("detail.signingSecret")}>
           <span className="ms-mono">{maskWebhookSecret(data.secretLast4)}</span>
