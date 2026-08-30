@@ -72,6 +72,9 @@ export const env = createEnv({
   server: {
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+    // Git SHA baked into the image (Dockerfile ARG GIT_SHA); reported by the
+    // API's /health so a running deployment can be matched to a commit.
+    MILLIONSEND_REVISION: z.string().default("unknown"),
     API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(600),
     DATABASE_URL: z.url(),
 

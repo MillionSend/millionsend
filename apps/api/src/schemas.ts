@@ -1,11 +1,16 @@
 import { z } from "@hono/zod-openapi";
 import {
+  CONTACT_PROPERTY_KEY_MAX_LENGTH,
+  CONTACT_PROPERTY_MAX_KEYS,
+  CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   DAY_MS,
   formatMailbox,
   parseMailbox,
   parseScheduledAt,
   parseSingleSender,
   SCHEDULED_AT_FORMS,
+  SEGMENT_FILTER_MAX_CONDITIONS,
+  SEGMENT_FILTER_VALUE_MAX_LENGTH,
   WEBHOOK_EVENT_TYPES,
 } from "@millionsend/core";
 import { SES_REGIONS } from "@millionsend/ses";
@@ -380,6 +385,14 @@ export const errorSchema = z
 
 const subscriptionEnum = z.enum(["opt_in", "opt_out"]);
 
+// Kept as unknown values so the handler can coerce scalars to strings and
+// reject nested objects/arrays (and over-long values) with a precise 422.
+const contactPropertiesInputSchema = z
+  .record(z.string().max(CONTACT_PROPERTY_KEY_MAX_LENGTH), z.unknown())
+  .refine((map) => Object.keys(map).length <= CONTACT_PROPERTY_MAX_KEYS, {
+    message: `at most ${CONTACT_PROPERTY_MAX_KEYS} properties`,
+  });
+
 export const createContactRequestSchema = z
   .object({
     // Bare addr-spec only — a contact record is an address, not a mailbox
@@ -388,10 +401,7 @@ export const createContactRequestSchema = z
     first_name: z.string().optional().describe("First name"),
     last_name: z.string().optional().describe("Last name"),
     unsubscribed: z.boolean().optional().describe("Global opt-out from all marketing sends"),
-    // Kept as unknown values so the handler can coerce scalars to strings and
-    // reject nested objects/arrays with a precise 422 message.
-    properties: z
-      .record(z.string(), z.unknown())
+    properties: contactPropertiesInputSchema
       .optional()
       .describe("Flat map of custom properties (string or number values)"),
     // Initial associations, written in the same transaction as the contact.
@@ -413,10 +423,7 @@ export const updateContactRequestSchema = z
     first_name: z.string().nullable().optional().describe("First name; null clears it"),
     last_name: z.string().nullable().optional().describe("Last name; null clears it"),
     unsubscribed: z.boolean().optional().describe("Global opt-out from all marketing sends"),
-    // Kept as unknown values so the handler can coerce scalars to strings and
-    // reject nested objects/arrays with a precise 422 message.
-    properties: z
-      .record(z.string(), z.unknown())
+    properties: contactPropertiesInputSchema
       .optional()
       .describe("Custom properties to set (merged); null removes a key"),
   })
@@ -481,10 +488,10 @@ const contactPropertyTypeSchema = z.enum(["string", "number"]);
 // property only accepts values that parse to a finite number).
 export const createContactPropertyRequestSchema = z
   .object({
-    key: z.string().trim().min(1).max(200),
+    key: z.string().trim().min(1).max(CONTACT_PROPERTY_KEY_MAX_LENGTH),
     type: contactPropertyTypeSchema,
     fallback_value: z
-      .union([z.string().max(1000), z.number()])
+      .union([z.string().max(CONTACT_PROPERTY_VALUE_MAX_LENGTH), z.number()])
       .nullable()
       .optional(),
   })
@@ -494,7 +501,7 @@ export const createContactPropertyRequestSchema = z
 export const updateContactPropertyRequestSchema = z
   .object({
     fallback_value: z
-      .union([z.string().max(1000), z.number()])
+      .union([z.string().max(CONTACT_PROPERTY_VALUE_MAX_LENGTH), z.number()])
       .nullable()
       .optional(),
   })
@@ -656,14 +663,16 @@ export const cancelBroadcastResponseSchema = z
 const segmentFilterInputSchema = z
   .object({
     match: z.enum(["all", "any"]),
-    conditions: z.array(
-      z.object({
-        field: z.string(),
-        op: z.string(),
-        // Present but nullable; presence ops (is_set/is_not_set) send null.
-        value: z.string().nullable(),
-      }),
-    ),
+    conditions: z
+      .array(
+        z.object({
+          field: z.string(),
+          op: z.string(),
+          // Present but nullable; presence ops (is_set/is_not_set) send null.
+          value: z.string().max(SEGMENT_FILTER_VALUE_MAX_LENGTH).nullable(),
+        }),
+      )
+      .max(SEGMENT_FILTER_MAX_CONDITIONS),
   })
   .openapi("SegmentFilter");
 

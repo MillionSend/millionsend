@@ -288,6 +288,18 @@ describe("segmentFilterSchema / segmentWhere: validation", () => {
     ).toBe(false);
   });
 
+  it("caps the condition count and value length", () => {
+    const cond = { field: "email", op: "equals", value: "x" };
+    const fifty = { match: "all" as const, conditions: Array.from({ length: 50 }, () => cond) };
+    expect(segmentFilterSchema.safeParse(fifty).success).toBe(true);
+    expect(
+      segmentFilterSchema.safeParse({ ...fifty, conditions: [...fifty.conditions, cond] }).success,
+    ).toBe(false);
+    expect(segmentFilterSchema.safeParse(all({ ...cond, value: "x".repeat(501) })).success).toBe(
+      false,
+    );
+  });
+
   it("rejects a property field with an empty key", () => {
     expect(
       segmentFilterSchema.safeParse(all({ field: "property:", op: "equals", value: "x" })).success,

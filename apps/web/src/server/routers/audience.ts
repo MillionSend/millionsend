@@ -1,4 +1,7 @@
 import {
+  CONTACT_PROPERTY_KEY_MAX_LENGTH,
+  CONTACT_PROPERTY_MAX_KEYS,
+  CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   clearUnsubscribeSuppression,
   eraseRecipient,
   recordContactActivity,
@@ -20,7 +23,14 @@ const emailSchema = z.string().trim().pipe(z.email()).pipe(z.string().max(320));
 const personName = z.string().trim().max(200);
 // Resend-style custom fields: a flat map of string→string. Non-string
 // values are rejected at the boundary.
-const propertiesSchema = z.record(z.string(), z.string());
+const propertiesSchema = z
+  .record(
+    z.string().max(CONTACT_PROPERTY_KEY_MAX_LENGTH),
+    z.string().max(CONTACT_PROPERTY_VALUE_MAX_LENGTH),
+  )
+  .refine((map) => Object.keys(map).length <= CONTACT_PROPERTY_MAX_KEYS, {
+    message: `at most ${CONTACT_PROPERTY_MAX_KEYS} properties`,
+  });
 
 /** Guards contact-keyed procedures: NOT_FOUND outside the team. */
 async function assertContact(ctx: { db: Db; teamId: string }, contactId: string): Promise<void> {
@@ -752,9 +762,9 @@ export const audienceRouter = router({
       .input(
         z
           .object({
-            key: z.string().trim().min(1).max(200),
+            key: z.string().trim().min(1).max(CONTACT_PROPERTY_KEY_MAX_LENGTH),
             type: z.enum(["string", "number"]).default("string"),
-            fallbackValue: z.string().max(1000).optional(),
+            fallbackValue: z.string().max(CONTACT_PROPERTY_VALUE_MAX_LENGTH).optional(),
           })
           // A number property's fallback must read back as a finite number —
           // it is stored as text and coerced per type at the wire.

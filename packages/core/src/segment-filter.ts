@@ -31,6 +31,9 @@ const BOOL_OPS = ["is_true", "is_false"] as const;
 const DATE_OPS = ["before", "after"] as const;
 const PROPERTY_PREFIX = "property:";
 
+export const SEGMENT_FILTER_MAX_CONDITIONS = 50;
+export const SEGMENT_FILTER_VALUE_MAX_LENGTH = 500;
+
 type TextOp = (typeof TEXT_OPS)[number];
 
 /** A text op that ignores its `value` — presence tests, not comparisons. */
@@ -43,7 +46,7 @@ const conditionSchema = z
     field: z.string(),
     op: z.string(),
     // Key is present but nullable; presence ops ignore it, so null is valid there.
-    value: z.string().nullable(),
+    value: z.string().max(SEGMENT_FILTER_VALUE_MAX_LENGTH).nullable(),
   })
   .superRefine((cond, ctx) => {
     const isProperty = cond.field.startsWith(PROPERTY_PREFIX);
@@ -85,7 +88,7 @@ const conditionSchema = z
 /** The saved-filter shape; `z.infer` matches the DB `SegmentFilter` type. */
 export const segmentFilterSchema: z.ZodType<SegmentFilter> = z.object({
   match: z.enum(["all", "any"]),
-  conditions: z.array(conditionSchema),
+  conditions: z.array(conditionSchema).max(SEGMENT_FILTER_MAX_CONDITIONS),
 });
 
 /** Thrown when a filter fails validation; the API turns this into a 422. */

@@ -9,7 +9,10 @@ import { z } from "zod";
  *   1. SigningCertURL must be HTTPS on an sns.<region>.amazonaws.com host
  *      with a .pem path — never fetch an attacker-supplied cert location.
  *   2. TopicArn must be in the deployment's allowlist.
- *   3. The RSA signature over the canonical string must validate against the
+ *   3. Timestamp must be within 15 minutes of now: a valid signature never
+ *      expires on its own, so without this a captured message replays
+ *      forever (MessageId dedupe downstream is a backstop, not a gate).
+ *   4. The RSA signature over the canonical string must validate against the
  *      certificate's public key (SignatureVersion 1 = SHA1, 2 = SHA256).
  */
 
@@ -124,6 +127,8 @@ export interface VerifyOptions {
 
 export type VerifyResult = { ok: true } | { ok: false; reason: string };
 
+const MAX_TIMESTAMP_SKEW_MS = 15 * 60 * 1000;
+
 export async function verifySnsMessage(
   msg: SnsMessage,
   opts: VerifyOptions,
@@ -133,6 +138,10 @@ export async function verifySnsMessage(
   }
   if (!opts.allowedTopicArns.includes(msg.TopicArn)) {
     return { ok: false, reason: "topic not in allowlist" };
+  }
+  const sentAt = Date.parse(msg.Timestamp);
+  if (Number.isNaN(sentAt) || Math.abs(Date.now() - sentAt) > MAX_TIMESTAMP_SKEW_MS) {
+    return { ok: false, reason: "timestamp missing or outside the freshness window" };
   }
   if (!isAllowedCertUrl(msg.SigningCertURL)) {
     return { ok: false, reason: "signing cert URL rejected" };
@@ -163,12 +172,16 @@ export async function verifySnsMessage(
 /** Default HTTPS fetcher with an in-process cache (certs are immutable). */
 export function createCachingCertFetcher(): CertFetcher {
   const cache = new Map<string, string>();
-  return async (url: string) => {
+  return async (rawUrl: string) => {
+    // isAllowedCertUrl gates callers before this runs; re-check defensively.
+    if (!isAllowedCertUrl(rawUrl)) throw new Error("cert URL rejected");
+    // Query/fragment dropped: the cert lives at the path, and a per-message
+    // random query string would otherwise grow the cache without bound.
+    const parsed = new URL(rawUrl);
+    const url = `${parsed.origin}${parsed.pathname}`;
     const hit = cache.get(url);
     if (hit) return hit;
-    // isAllowedCertUrl gates callers before this runs; re-check defensively.
-    if (!isAllowedCertUrl(url)) throw new Error("cert URL rejected");
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error(`cert fetch failed: ${res.status}`);
     const pem = await res.text();
     cache.set(url, pem);
