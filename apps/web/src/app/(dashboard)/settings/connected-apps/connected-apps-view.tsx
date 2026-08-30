@@ -28,7 +28,11 @@ export function ConnectedAppsView() {
     }),
   );
   // Stable identity: Modal's focus effect depends on onClose.
-  const closeRevoke = useCallback(() => setRevokeTarget(null), []);
+  const { reset: resetRevoke } = revokeMutation;
+  const closeRevoke = useCallback(() => {
+    setRevokeTarget(null);
+    resetRevoke();
+  }, [resetRevoke]);
   const confirmRevoke = () => {
     if (!revokeTarget || revokeMutation.isPending) return;
     revokeMutation.mutate({ id: revokeTarget.id });
@@ -128,6 +132,13 @@ export function ConnectedAppsView() {
             <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
               {t("revokeConfirm.body", { name: revokeTarget.name })}
             </p>
+            {revokeMutation.isError ? (
+              <p className="ms-field-error" style={{ margin: 0 }}>
+                {revokeMutation.error.data?.code === "FORBIDDEN"
+                  ? t("revokeAllTeamsForbidden")
+                  : revokeMutation.error.message}
+              </p>
+            ) : null}
             <ModalFooter>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeRevoke}>
                 {common("cancel")} <span className="ms-keycap">Esc</span>

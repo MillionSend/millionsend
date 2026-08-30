@@ -1,5 +1,5 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
-import { generateApiKey } from "@millionsend/core";
+import { generateApiKey, MAX_ACTIVE_API_KEYS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, count, desc, eq, isNull } from "drizzle-orm";
@@ -12,13 +12,6 @@ import {
   listQuerySchema,
   removeApiKeyResponseSchema,
 } from "../schemas.js";
-
-/**
- * Active keys per team. A full_access key can mint more keys, so without a
- * cap a leaked key could fan out into an unbounded set of credentials (each
- * with its own rate-limit bucket).
- */
-export const MAX_ACTIVE_API_KEYS = 25;
 
 export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
   const jsonErr = (description: string) => ({

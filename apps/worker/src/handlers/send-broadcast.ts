@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import {
   broadcastSendSpacingMs,
   buildUnsubscribeHeaders,
   encryptEmailBody,
   fetchDeliverabilityHealth,
+  fetchEffectivePlan,
   findSuppressed,
   isSubscribedToTopic,
   type Keyring,
@@ -181,12 +183,9 @@ export async function sendBroadcast(
   // and fanning out anyway would mail a canceled audience.
   if (!claimed) return "skipped";
 
-  const [team] = await db
-    .select({ plan: schema.teams.plan })
-    .from(schema.teams)
-    .where(eq(schema.teams.id, broadcast.teamId));
-  if (!team) throw new Error(`broadcast ${broadcast.id}: team ${broadcast.teamId} not found`);
-  const dailyLimit = deps.isCloud ? PLAN_DAILY_LIMIT[team.plan] : null;
+  const plan = await fetchEffectivePlan(db, broadcast.teamId);
+  if (!plan) throw new Error(`broadcast ${broadcast.id}: team ${broadcast.teamId} not found`);
+  const dailyLimit = deps.isCloud ? PLAN_DAILY_LIMIT[plan] : null;
 
   // Topic-scoped send: fetch the topic's default once (it gates every contact
   // with no explicit override) and hydrate per-batch override rows below. A
@@ -207,7 +206,11 @@ export async function sendBroadcast(
   // degraded since) is throttled here, not hard-halted — the initiation guards
   // (tRPC + API) are what block NEW paused sends; the fan-out's only job is to
   // avoid the burst. Evaluated once so the whole campaign shares one drip base.
-  const health = await fetchDeliverabilityHealth(db, broadcast.teamId);
+  const health = await fetchDeliverabilityHealth(
+    db,
+    broadcast.teamId,
+    deps.isCloud ? { plan } : {},
+  );
   const spacingMs = broadcastSendSpacingMs(health.status);
   const startMs = Date.now();
   let emitted = 0;
@@ -317,12 +320,14 @@ export async function sendBroadcast(
         s === null
           ? null
           : applyMergeFields(substituteUnsubscribeUrl(s, unsubscribeUrl), contact, opts);
+      const emailId = randomUUID();
       const encrypted = await encryptEmailBody(
         {
           html: personalize(baseHtml, { html: true }),
           text: personalize(broadcast.text, { html: false }),
         },
         deps.keyring,
+        { teamId: broadcast.teamId, rowId: emailId },
       );
       // Quota reservation and email insert commit atomically (the quota
       // contract), same as the API accept path — a broadcast must not
@@ -334,6 +339,7 @@ export async function sendBroadcast(
         const [row] = await tx
           .insert(schema.emails)
           .values({
+            id: emailId,
             teamId: broadcast.teamId,
             domainId: domain.id,
             broadcastId: broadcast.id,

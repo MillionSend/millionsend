@@ -184,6 +184,7 @@ export const emailsRouter = router({
             keyVersion: email.bodyKeyVersion,
           },
           kr,
+          { teamId: email.teamId, rowId: email.id },
         );
       } catch {
         // Undecryptable (corrupt ciphertext, unknown KEK version) reads as

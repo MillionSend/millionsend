@@ -31,8 +31,22 @@ const hintStyle: React.CSSProperties = {
   fontSize: 12,
 };
 
-function isConflict(error: unknown): boolean {
-  return (error as { data?: { code?: string } } | null)?.data?.code === "CONFLICT";
+// Router error codes that have a dedicated message; anything else falls back
+// to the server message.
+const CREATE_ERROR_KEYS = {
+  CONFLICT: "new.conflict",
+  BAD_REQUEST: "new.reserved",
+  PRECONDITION_FAILED: "new.planLimit",
+  TOO_MANY_REQUESTS: "new.rateLimited",
+} as const;
+
+function createErrorKey(
+  error: unknown,
+): (typeof CREATE_ERROR_KEYS)[keyof typeof CREATE_ERROR_KEYS] | null {
+  const code = (error as { data?: { code?: string } } | null)?.data?.code;
+  return code && code in CREATE_ERROR_KEYS
+    ? CREATE_ERROR_KEYS[code as keyof typeof CREATE_ERROR_KEYS]
+    : null;
 }
 
 /** Wizard step 02: the created domain's DNS records, rendered in-page after create. */
@@ -173,8 +187,8 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
   const trpc = useTRPC();
   const team = useQuery(trpc.settings.team.get.queryOptions());
   const [name, setName] = useState("");
-  const readiness = useQuery(trpc.system.awsReadiness.queryOptions());
-  const provisionedRegion = readiness.data?.region as DomainRegion | undefined;
+  const features = useQuery(trpc.system.features.queryOptions());
+  const provisionedRegion = features.data?.region as DomainRegion | undefined;
   const [region, setRegion] = useState<DomainRegion>("us-east-1");
   useEffect(() => {
     if (provisionedRegion) setRegion(provisionedRegion);
@@ -206,6 +220,8 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
   }
 
   if (createdId) return <DnsRecordsStep id={createdId} />;
+
+  const errorKey = create.isError ? createErrorKey(create.error) : null;
 
   return (
     <>
@@ -323,8 +339,8 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
 
           {create.isError ? (
             <p style={{ margin: "14px 0 0", color: "var(--ms-danger)", fontSize: 13 }}>
-              {isConflict(create.error)
-                ? t("new.conflict")
+              {errorKey
+                ? t(errorKey)
                 : isAwsCredentialError(create.error.message)
                   ? t.rich("new.credentialsError", codeRichTags)
                   : create.error.message || t("new.error")}

@@ -1,5 +1,6 @@
 import {
   DAY_MS,
+  effectivePlan,
   getInstanceSettings,
   PLAN_DAILY_LIMIT,
   releaseDailyQuota,
@@ -123,6 +124,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
         id: schema.emails.id,
         teamId: schema.emails.teamId,
         plan: schema.teams.plan,
+        currentPeriodEnd: schema.teams.currentPeriodEnd,
         scheduledAt: schema.emails.scheduledAt,
         createdAt: schema.emails.createdAt,
       })
@@ -163,13 +165,16 @@ async function drainOne(
     id: string;
     teamId: string;
     plan: keyof typeof PLAN_DAILY_LIMIT;
+    currentPeriodEnd: Date | null;
     scheduledAt: Date | null;
   },
   exhausted: Set<string>,
   failures: unknown[],
 ): Promise<number> {
   if (exhausted.has(email.teamId)) return 0;
-  const limit = deps.isCloud ? PLAN_DAILY_LIMIT[email.plan] : null;
+  const limit = deps.isCloud
+    ? PLAN_DAILY_LIMIT[effectivePlan(email.plan, email.currentPeriodEnd)]
+    : null;
   try {
     const outcome = await db
       .transaction(async (tx) => {

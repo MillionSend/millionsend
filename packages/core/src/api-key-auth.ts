@@ -2,7 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { extractTokenPrefix, verifyApiKey } from "./api-keys.js";
-import type { Plan } from "./plans.js";
+import { effectivePlan, type Plan } from "./plans.js";
 
 /** SECURITY: the only source of teamId for API-key-authenticated requests. */
 export interface ApiKeyAuth {
@@ -40,6 +40,7 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
       permission: schema.apiKeys.permission,
       domainId: schema.apiKeys.domainId,
       plan: schema.teams.plan,
+      currentPeriodEnd: schema.teams.currentPeriodEnd,
     })
     .from(schema.apiKeys)
     .innerJoin(schema.teams, eq(schema.apiKeys.teamId, schema.teams.id))
@@ -58,7 +59,7 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
   }
   return {
     teamId: match.teamId,
-    plan: match.plan,
+    plan: effectivePlan(match.plan, match.currentPeriodEnd),
     apiKeyId: match.id,
     permission: match.permission,
     domainId: match.domainId,

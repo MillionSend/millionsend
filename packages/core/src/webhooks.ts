@@ -2,7 +2,12 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq } from "drizzle-orm";
-import { decryptPayload, type EncryptedBody, encryptPayload } from "./crypto/envelope.js";
+import {
+  decryptPayload,
+  type EncryptedBody,
+  type EnvelopeOwner,
+  encryptPayload,
+} from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
 
 /**
@@ -141,15 +146,23 @@ export const WEBHOOK_MAX_ATTEMPTS = WEBHOOK_RETRY_SCHEDULE_MS.length;
 export async function encryptWebhookSecret(
   secret: string,
   keyring: Keyring,
+  owner?: EnvelopeOwner,
 ): Promise<EncryptedBody> {
-  return encryptPayload(Buffer.from(secret, "utf8"), keyring);
+  return encryptPayload(
+    Buffer.from(secret, "utf8"),
+    keyring,
+    owner && { ...owner, kind: "webhook_secret" },
+  );
 }
 
 export async function decryptWebhookSecret(
   encrypted: EncryptedBody,
   keyring: Keyring,
+  owner?: EnvelopeOwner,
 ): Promise<string> {
-  return (await decryptPayload(encrypted, keyring)).toString("utf8");
+  return (
+    await decryptPayload(encrypted, keyring, owner && { ...owner, kind: "webhook_secret" })
+  ).toString("utf8");
 }
 
 /**

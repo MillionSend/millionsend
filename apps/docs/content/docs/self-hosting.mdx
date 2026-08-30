@@ -56,8 +56,9 @@ docker compose up -d
 ```
 
 Migrations run on boot, so that is the whole upgrade. The compose file runs
-`ghcr.io/millionsend/millionsend:latest`, which follows `main` — every build
-there passed the test suite first. To hold a version, set `MILLIONSEND_IMAGE`
+`ghcr.io/millionsend/millionsend:latest`, the latest tagged release (`:1.2.3`
+and `:1.2` tags exist alongside it; `:edge` follows `main`, where every build
+passed the test suite first). To hold a version, set `MILLIONSEND_IMAGE`
 in `.env` to a version tag or an immutable digest
 (`ghcr.io/millionsend/millionsend@sha256:…`; `docker image ls --digests` shows
 what is running) and `docker compose up -d`. The previous pin put back is the
@@ -105,6 +106,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | Postgres connection string. The default matches the compose `postgres` service. |
+| `POSTGRES_PASSWORD` | Password of the compose `postgres` service (default `millionsend`); the setup wizard generates one and puts it in `DATABASE_URL` too. Keep both in sync. |
 | `MASTER_ENCRYPTION_KEY` | Encryption key for email bodies at rest. Generate with `openssl rand -base64 32`. Losing it makes stored bodies unrecoverable; changing it orphans old bodies. Back it up with the database. |
 | `BETTER_AUTH_SECRET` | Dashboard session signing secret. Generate with `openssl rand -base64 32`. |
 | `APP_BASE_URL` | Public base URL of the deployment — the origin browsers use to reach the dashboard (e.g. `https://mail.example.com`). Sign-in is only accepted from this origin; SNS subscriptions, unsubscribe links, and tracking links derive from it. It must match the exact scheme+host+port you open the dashboard on — including a custom `WEB_PORT` — or login and signup fail with an "invalid origin" error. Default `http://localhost:3000`. |
@@ -124,8 +126,10 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 
 | Variable | Purpose |
 | --- | --- |
-| `MILLIONSEND_IMAGE` | Standalone deploy only: which image to run. The default `ghcr.io/millionsend/millionsend:latest` follows `main`, so `docker compose pull` is the upgrade. Set a version tag or an immutable `ghcr.io/millionsend/millionsend@sha256:…` digest to hold a version (`MILLIONSEND_BACKUP_IMAGE` pins the backup sidecar the same way). |
+| `MILLIONSEND_IMAGE` | Standalone deploy only: which image to run. The default `ghcr.io/millionsend/millionsend:latest` is the latest tagged release (`:edge` follows `main`), so `docker compose pull` is the upgrade. Set a version tag or an immutable `ghcr.io/millionsend/millionsend@sha256:…` digest to hold a version (`MILLIONSEND_BACKUP_IMAGE` pins the backup sidecar the same way). |
 | `ALLOW_SIGNUP` | The first user can always register; after that signup stays closed unless this is `true`. Keep `false` when the dashboard is reachable from the internet. |
+| `TRUSTED_PROXIES` | Reverse proxies whose forwarded-client-IP headers (`X-Forwarded-For`, `CF-Connecting-IP`) are believed, comma-separated IPs or CIDRs. Default `127.0.0.1,::1` covers a proxy on the same host; add your proxy's address when it runs elsewhere. See the [nginx section](#production-nginx--tls). |
+| `WEBHOOK_ALLOW_LOCALHOST` | Local development only: lets webhook endpoints (test fires included) target `http://` and loopback/private addresses on any port. Keep `false` on any internet-reachable instance. |
 | `COMPOSE_PROFILES` | Optional compose services, comma-separated: `smtp` (the relay; mount a STARTTLS keypair first), and in the standalone file also `docs` (this documentation site) and `backup` (scheduled dumps). |
 | `PORT` | API port (default `3001`). Under compose this moves both the container's listen port and the published host port together. |
 | `WEB_PORT` | Host port the compose file publishes the dashboard on (the web process is always 3000 inside the container). Keep `APP_BASE_URL` in sync. |
@@ -147,7 +151,8 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `S3_REGION` / `S3_PROVIDER` | Defaults `auto` / `Cloudflare` suit R2. Other S3-compatibles set a real region if the endpoint needs one, and rclone's provider name (`AWS`, `Minio`, …) for the backup job. |
 | `S3_STORAGE_BUCKET` / `S3_STORAGE_PUBLIC_URL` | Public uploads bucket (team logos) and the public base URL it serves from. Set together; unset hides the upload UI everywhere. |
 | `S3_BACKUP_BUCKET` | PRIVATE bucket for scheduled database dumps — never the public uploads bucket. Unset disables the `backup` service. |
-| `S3_BACKUP_PREFIX` / `BACKUP_CRON` / `BACKUP_RETENTION_DAYS` | Backup tuning: object key prefix (default `backups`), dump schedule (default `0 3 * * *`, UTC), days of dumps kept (default 14). |
+| `S3_BACKUP_PREFIX` / `BACKUP_CRON` / `BACKUP_RETENTION_DAYS` | Backup tuning: object key prefix (default `backups`), daily dump schedule (`<minute> <hour> * * *`, UTC, default `0 3 * * *`; any other shape makes the service exit 1), days of dumps kept (default 14). |
+| `BACKUP_AGE_RECIPIENT` | age public key (`age1…`); set to encrypt dumps before upload. Restore with `age --decrypt -i <key file>` first. |
 
 ## AWS setup
 
@@ -169,10 +174,12 @@ stops sending. Re-running setup is safe, but each run mints a new access key —
 delete stale ones in the IAM console.
 
 No Node on the server? The same CLI ships inside the image — run it from the
-deploy directory, which it reads and writes as `/work`:
+deploy directory, which it reads and writes as `/work` (the wizard writes
+nothing outside it, so run it as yourself and the `.env` it creates is yours,
+mode 600):
 
 ```sh
-docker run --rm -it --user root -v "$PWD":/work -w /work -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:latest setup
+docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/home/ms -v ~/.aws:/home/ms/.aws:ro -v "$PWD":/work -w /work ghcr.io/millionsend/millionsend:latest setup
 ```
 
 Prefer not to run a CLI? The dashboard's **Settings → SES** page offers a
@@ -191,7 +198,10 @@ Manual equivalent: an SNS standard topic (same region as SES) subscribed to
 `https://<your-host>/ses/events` (or to an SQS queue whose policy lets the
 topic send and whose URL is in `.env` as `SQS_QUEUE_URL`), its ARN in `.env`
 as `SNS_TOPIC_ARNS`; an SES configuration set with an event destination
-pointing at the topic, its name in `.env` as `SES_CONFIGURATION_SET`. Restart
+pointing at the topic (event types: Delivery, Delivery Delay, Bounce,
+Complaint, Reject, Rendering Failure — do NOT subscribe Open or Click, which
+makes SES rewrite every link and inject its own pixel while MillionSend tracks
+engagement itself), its name in `.env` as `SES_CONFIGURATION_SET`. Restart
 after setting them. Without `SES_CONFIGURATION_SET`, sends go out without a
 configuration set and emit no events.
 
@@ -324,6 +334,7 @@ server {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
@@ -359,6 +370,7 @@ server {
         proxy_pass http://127.0.0.1:3002;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
@@ -378,7 +390,20 @@ sudo certbot --nginx --redirect -d mail.example.com -d api.example.com -d docs.e
 Then set `APP_BASE_URL=https://mail.example.com` and
 `PUBLIC_API_URL=https://api.example.com` in `.env` and restart. `APP_BASE_URL`
 must be the **exact public https origin of the dashboard** — any other value
-makes login and signup fail with an "invalid origin" error.
+makes login and signup fail with an "invalid origin" error. Forward `Host` and
+`X-Forwarded-Host` to the dashboard and docs upstreams as above, so any
+absolute URL either app derives from the request names the public hostname
+rather than `localhost`.
+
+Client addresses (sign-in rate limits, audit entries) come from
+`X-Forwarded-For`, and only proxies listed in `TRUSTED_PROXIES` (comma-separated
+IPs or CIDRs; default `127.0.0.1,::1`, which covers nginx on the same host)
+are believed. With `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`
+each hop appends itself, and the chain is walked right-to-left past every
+trusted proxy, so the first untrusted address is the client. Add your proxy's
+address when it runs on another host, and a CDN's ranges when one sits in
+front of nginx; headers from any other source are ignored and the socket
+address is used instead.
 
 The compose files bind every application port to loopback by default
 (`WEB_BIND_ADDRESS`, `API_BIND_ADDRESS`, `DOCS_BIND_ADDRESS`,
@@ -461,14 +486,23 @@ S3_BACKUP_BUCKET=millionsend-backups
 ```
 
 Then add `backup` to `COMPOSE_PROFILES` in `.env` and `docker compose up -d`:
-the service dumps once immediately, and after that on `BACKUP_CRON` (default
-`0 3 * * *`, UTC). Each dump is `pg_dump -Fc`
+the service dumps once immediately, and after that daily on `BACKUP_CRON`
+(default `0 3 * * *`, UTC). Only the daily form `<minute> <hour> * * *` is
+honoured — the sidecar runs unprivileged as `postgres` with every capability
+dropped, so the schedule is a sleep loop rather than crond, and any other
+shape makes the service exit 1. Each dump is `pg_dump -Fc`
 (compressed custom format, named `millionsend-YYYYMMDD-HHMMSS.dump`), its
 uploaded size is verified against the bucket before anything else happens, and
 dumps older than `BACKUP_RETENTION_DAYS` (default 14) are pruned.
 `S3_BACKUP_PREFIX` (default `backups`) sets the object key prefix. Other
 S3-compatible stores work by setting `S3_PROVIDER` to rclone's provider
 name (`AWS`, `Minio`, …) and a real region if the endpoint needs one.
+
+Set `BACKUP_AGE_RECIPIENT` to an [age](https://age-encryption.org) public key
+(`age1…`) to encrypt each dump before upload (`.dump.age`); the bucket then
+never holds a readable copy of the database. Keep the matching private key
+with `MASTER_ENCRYPTION_KEY`, and restore with `age --decrypt -i <key file>`
+before `pg_restore`.
 
 The dumps contain email bodies encrypted with `MASTER_ENCRYPTION_KEY` — back
 that key up separately, or restored bodies are unrecoverable.

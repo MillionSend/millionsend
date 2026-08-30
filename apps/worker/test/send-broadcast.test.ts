@@ -145,6 +145,7 @@ it("a broadcast with no segment or topic fans out to ALL subscribed team contact
       keyVersion: first.bodyKeyVersion ?? 0,
     },
     keyring,
+    { teamId: first.teamId, rowId: first.id },
   );
   expect(body.html).not.toContain("{{{UNSUBSCRIBE_URL}}}");
   expect(body.text).not.toContain("{{{UNSUBSCRIBE_URL}}}");
@@ -177,6 +178,7 @@ it("substitutes the {{{RESEND_UNSUBSCRIBE_URL}}} alias in html and text", async 
       keyVersion: row.bodyKeyVersion ?? 0,
     },
     keyring,
+    { teamId: row.teamId, rowId: row.id },
   );
   expect(body.html).not.toContain("{{{");
   expect(body.text).not.toContain("{{{");
@@ -501,6 +503,7 @@ it("fan-out injects the preheader into html only when preview_text is set", asyn
         keyVersion: row.bodyKeyVersion ?? 0,
       },
       keyring,
+      { teamId: row.teamId, rowId: row.id },
     );
   };
 
@@ -607,6 +610,7 @@ it("fan-out personalizes merge fields per contact in html and text", async () =>
       keyVersion: email.bodyKeyVersion ?? 0,
     },
     keyring,
+    { teamId: email.teamId, rowId: email.id },
   );
   // Hostile name and property escaped in html, raw in text; null field →
   // fallback; unknown property token resolves to "" (never leaked); unsubscribe
@@ -665,6 +669,7 @@ it("opt-in topic: default (no row) and explicit-in send; explicit opt-out is ski
       keyVersion: first.bodyKeyVersion ?? 0,
     },
     keyring,
+    { teamId: first.teamId, rowId: first.id },
   );
   const token = body.html?.match(new RegExp(`${BASE_URL}/unsubscribe/([^"]+)`))?.[1] ?? "";
   expect(verifyUnsubscribeToken(token, secretKey)).toEqual({

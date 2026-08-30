@@ -35,7 +35,9 @@ Authorization: Bearer ms_...
 
 Keys have a permission level: **full access** keys can use every endpoint,
 **sending only** keys are confined to `/emails*` (anything else returns
-`403 restricted_api_key`). A key can additionally be scoped to a single
+`403 restricted_api_key`) — and even there, `GET /emails`, `GET /emails/{id}`
+and `DELETE /emails/{id}` need full access, since reads return stored bodies
+and the team's whole archive. A key can additionally be scoped to a single
 domain, restricting which `from` addresses it may send.
 
 ## Resend compatibility
@@ -51,8 +53,20 @@ remaining deltas are deliberate and loud:
   segments, and contact endpoints work with or without an audience id (see
   [Contacts](/concepts/contacts)).
 - Broadcasts support `canceled`, a status outside Resend's union, and
-  broadcast sends can return `403 sending_paused` when your bounce or
-  complaint rate crosses the SES enforcement thresholds.
+  broadcast sends, `POST /emails` and `POST /emails/batch` can return
+  `403 sending_paused` when your bounce or complaint rate crosses the SES
+  enforcement thresholds.
+- `POST /emails` and `POST /emails/batch` return `429 daily_quota_exceeded`
+  when the day's sending quota is spent and the queued backlog is full — retry
+  after the UTC day rolls over.
+- `DELETE /emails/{id}` exists (Resend has no email deletion).
+- Custom `headers` are allowlisted: any `X-*` name (except `X-SES-*` and
+  `X-MillionSend-*`) plus `In-Reply-To`, `References`, `Importance`,
+  `Priority`, `Comments`, `Keywords` and `Organization`; anything else is a
+  `422`.
+- `to`, `cc` and `bcc` together cannot exceed 50 recipients, and each address
+  must be a single mailbox — a display name containing `@` is rejected, and
+  accepted addresses read back in canonical `Name <user@host>` form.
 - Anything unsupported is rejected with `422` rather than silently dropped
   (e.g. `tls` on domain update).
 

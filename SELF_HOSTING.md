@@ -74,8 +74,9 @@ docker compose up -d
 ```
 
 Migrations run on boot, so that is the whole upgrade. The compose file runs
-`ghcr.io/millionsend/millionsend:latest`, which follows `main` — every build
-there passed the test suite first. To hold a version, set `MILLIONSEND_IMAGE`
+`ghcr.io/millionsend/millionsend:latest`, the latest tagged release (`:1.2.3`
+and `:1.2` tags exist alongside it; `:edge` follows `main`, where every build
+passed the test suite first). To hold a version, set `MILLIONSEND_IMAGE`
 in `.env` to a version tag or an immutable digest
 (`ghcr.io/millionsend/millionsend@sha256:…`; `docker image ls --digests` shows
 what is running) and `docker compose up -d`. The previous pin put back is the
@@ -137,8 +138,10 @@ run mints a new access key — delete stale ones in the IAM console.
 for a future end-user CLI that talks to the MillionSend API.)
 
 No Node on the server? The same CLI ships inside the image — run it from the
-deploy directory, which it reads and writes as `/work`:
-`docker run --rm -it --user root -v "$PWD":/work -w /work -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:latest setup`.
+deploy directory, which it reads and writes as `/work` (the wizard writes
+nothing outside it, so run it as yourself and the `.env` it creates is yours,
+mode 600):
+`docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/home/ms -v ~/.aws:/home/ms/.aws:ro -v "$PWD":/work -w /work ghcr.io/millionsend/millionsend:latest setup`.
 
 Prefer not to run a CLI? The dashboard's Settings → SES page offers a CloudFormation
 quick-create link and a pre-filled shell script that create the same resources.
@@ -158,9 +161,10 @@ Manual equivalent: an SNS standard topic (same region as SES) subscribed to
 `https://<your-host>/ses/events` (or to an SQS queue whose policy lets the topic
 send and whose URL is in `.env` as `SQS_QUEUE_URL`), its ARN in `.env` as
 `SNS_TOPIC_ARNS`; an SES configuration set with an event destination pointing at
-the topic (event types: Send, Delivery, Delivery Delay, Bounce, Complaint, Open,
-Click, Reject, Rendering Failure), its name in `.env` as `SES_CONFIGURATION_SET`.
-Restart after setting them. Without `SES_CONFIGURATION_SET`, sends go out without
+the topic (event types: Delivery, Delivery Delay, Bounce, Complaint, Reject,
+Rendering Failure), its name in `.env` as `SES_CONFIGURATION_SET`. Do NOT
+subscribe Open or Click: that makes SES rewrite every link and inject its own
+pixel, while MillionSend tracks engagement itself. Restart after setting them. Without `SES_CONFIGURATION_SET`, sends go out without
 a configuration set and emit no events.
 
 The https SNS subscription confirms itself once the app runs with
@@ -296,6 +300,7 @@ server {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
@@ -331,6 +336,7 @@ server {
         proxy_pass http://127.0.0.1:3002;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
@@ -350,7 +356,20 @@ sudo certbot --nginx --redirect -d mail.example.com -d api.example.com -d docs.e
 Then set `APP_BASE_URL=https://mail.example.com` and
 `PUBLIC_API_URL=https://api.example.com` in `.env` and restart. `APP_BASE_URL`
 must be the exact public https origin of the dashboard — any other value makes
-login and signup fail with an "invalid origin" error.
+login and signup fail with an "invalid origin" error. Forward `Host` and
+`X-Forwarded-Host` to the dashboard and docs upstreams as above, so any
+absolute URL either app derives from the request names the public hostname
+rather than `localhost`.
+
+Client addresses (sign-in rate limits, audit entries) come from
+`X-Forwarded-For`, and only proxies listed in `TRUSTED_PROXIES` (comma-separated
+IPs or CIDRs; default `127.0.0.1,::1`, which covers nginx on the same host)
+are believed. With `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`
+each hop appends itself, and the chain is walked right-to-left past every
+trusted proxy, so the first untrusted address is the client. Add your
+proxy's address when it runs on another host, and a CDN's ranges when one
+sits in front of nginx; headers from any other source are ignored and the
+socket address is used instead.
 
 The compose files bind every application port to loopback by default so only a
 local reverse proxy reaches them. Docker publishes ports by editing iptables
@@ -449,12 +468,21 @@ S3_BACKUP_BUCKET=millionsend-backups
 ```
 
 Then add `backup` to `COMPOSE_PROFILES` in `.env` and `docker compose up -d`:
-the service dumps once immediately, and after that on `BACKUP_CRON` (default
-`0 3 * * *`, UTC). Each dump is `pg_dump -Fc`
+the service dumps once immediately, and after that daily on `BACKUP_CRON`
+(default `0 3 * * *`, UTC). Only the daily form `<minute> <hour> * * *` is
+honoured — the sidecar runs unprivileged as `postgres` with every capability
+dropped, so the schedule is a sleep loop rather than crond, and any other
+shape makes the service exit 1. Each dump is `pg_dump -Fc`
 (compressed custom format, named `millionsend-YYYYMMDD-HHMMSS.dump`), its
 uploaded size is verified against the bucket before anything else happens, and
 dumps older than `BACKUP_RETENTION_DAYS` (default 14) are pruned.
 `S3_BACKUP_PREFIX` (default `backups`) sets the object key prefix.
+
+Set `BACKUP_AGE_RECIPIENT` to an [age](https://age-encryption.org) public key
+(`age1…`) to encrypt each dump before upload (`.dump.age`); the bucket then
+never holds a readable copy of the database. Keep the matching private key
+with `MASTER_ENCRYPTION_KEY`, and restore with `age --decrypt -i <key file>`
+before `pg_restore`.
 
 The dumps contain email bodies encrypted with `MASTER_ENCRYPTION_KEY` — back
 that key up separately, or restored bodies are unrecoverable.
@@ -496,6 +524,10 @@ docker compose start millionsend smtp
   per container (default `all`).
 - Email bodies are encrypted at rest with `MASTER_ENCRYPTION_KEY` and purged after
   the retention window. Back up the key with the database.
+- Webhook endpoints must be public `https://` hosts; loopback and private
+  addresses are refused, test fires included. For local development set
+  `WEBHOOK_ALLOW_LOCALHOST=true` to allow `http://` and loopback/private
+  targets on any port. Keep it `false` on any internet-reachable instance.
 
 </details>
 

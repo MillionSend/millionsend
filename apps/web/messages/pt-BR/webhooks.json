@@ -74,6 +74,8 @@
     "eyebrow": "Webhook",
     "sendTest": "Enviar evento de teste",
     "testQueued": "Evento de teste na fila.",
+    "testRateLimited": "Muitos eventos de teste — tente de novo em um minuto.",
+    "testFailed": "Não foi possível enviar o evento de teste.",
     "moreActions": "Ações do webhook",
     "url": "URL",
     "description": "Descrição",

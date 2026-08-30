@@ -74,6 +74,8 @@
     "eyebrow": "Webhook",
     "sendTest": "Send test event",
     "testQueued": "Test event queued.",
+    "testRateLimited": "Too many test events — try again in a minute.",
+    "testFailed": "Couldn't send the test event.",
     "moreActions": "Webhook actions",
     "url": "URL",
     "description": "Description",

@@ -1,8 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  ADMIN_MCP_SCOPES,
   ALL_TEAMS_GRANT,
   type ApiKeyAuth,
+  effectivePlan,
   MCP_RESOURCE_PATH,
   MCP_SCOPES,
   type McpScope,
@@ -178,23 +180,33 @@ function createTokenVerifier(
       if (claims.data.team_id === ALL_TEAMS_GRANT) {
         // All-teams grant: resolve the memberships now (same freshness rule
         // as the single-team check) and pick the team per tool call.
-        const teams: McpTeam[] = await db
-          .select({
-            teamId: m.teamId,
-            name: schema.teams.name,
-            plan: schema.teams.plan,
-            role: m.role,
-          })
-          .from(m)
-          .innerJoin(schema.teams, eq(m.teamId, schema.teams.id))
-          .where(eq(m.userId, claims.data.sub))
-          .orderBy(asc(m.createdAt));
+        const teams: McpTeam[] = (
+          await db
+            .select({
+              teamId: m.teamId,
+              name: schema.teams.name,
+              plan: schema.teams.plan,
+              currentPeriodEnd: schema.teams.currentPeriodEnd,
+              role: m.role,
+            })
+            .from(m)
+            .innerJoin(schema.teams, eq(m.teamId, schema.teams.id))
+            .where(eq(m.userId, claims.data.sub))
+            .orderBy(asc(m.createdAt))
+        ).map(({ currentPeriodEnd, ...t }) => ({
+          ...t,
+          plan: effectivePlan(t.plan, currentPeriodEnd),
+        }));
         const first = teams[0];
         if (!first) throw invalid("Token holder is no longer a member of any team");
         extra = { auth: teamAuth(first), userId: claims.data.sub, role: first.role, teams };
       } else {
         const [membership] = await db
-          .select({ plan: schema.teams.plan, role: m.role })
+          .select({
+            plan: schema.teams.plan,
+            currentPeriodEnd: schema.teams.currentPeriodEnd,
+            role: m.role,
+          })
           .from(m)
           .innerJoin(schema.teams, eq(m.teamId, schema.teams.id))
           .where(and(eq(m.userId, claims.data.sub), eq(m.teamId, claims.data.team_id)));
@@ -202,7 +214,7 @@ function createTokenVerifier(
         extra = {
           auth: {
             teamId: claims.data.team_id,
-            plan: membership.plan,
+            plan: effectivePlan(membership.plan, membership.currentPeriodEnd),
             apiKeyId: null,
             permission: "full_access",
             domainId: null,
@@ -307,13 +319,19 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       inputSchema: S;
       readOnly?: boolean;
       destructive?: boolean;
-      /** Owner/admin only, like the dashboard's adminProcedure. */
+      /** Owner/admin only even though read-only (e.g. a read that returns a secret). */
       admin?: boolean;
     },
     run: (args: z.output<S>) => Promise<CallToolResult>,
   ) => {
     if (!hasScope(scopes, scope)) return;
-    if (cfg.admin && !canAdmin) return;
+    // Like the dashboard's adminProcedure: every write in an admin scope is
+    // refused to a member's token whatever scopes it carries; plain reads in
+    // those scopes stay open to members, matching the dashboard.
+    const admin =
+      cfg.admin === true ||
+      ((ADMIN_MCP_SCOPES as readonly McpScope[]).includes(scope) && !cfg.readOnly);
+    if (admin && !canAdmin) return;
     server.registerTool(
       name,
       {
@@ -344,7 +362,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
             ),
           );
         }
-        if (cfg.admin && !isAdmin(team.role)) {
+        if (admin && !isAdmin(team.role)) {
           return Promise.resolve(
             toolResult(
               errorBody(
@@ -812,7 +830,6 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       description:
         "Create a webhook endpoint subscribed to email events. The response includes the Standard Webhooks signing secret (whsec_…) used to verify deliveries — store it; it is also retrievable via get_webhook.",
       inputSchema: createWebhookRequestSchema,
-      admin: true,
     },
     (body) => api("POST", "/webhooks", body),
   );
@@ -825,7 +842,6 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       inputSchema: updateWebhookRequestSchema.extend({
         id: z.uuid().describe("Webhook id from list_webhooks"),
       }),
-      admin: true,
     },
     ({ id, ...body }) => api("PATCH", `/webhooks/${enc(id)}`, body),
   );
@@ -836,7 +852,6 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       description: "Delete a webhook endpoint. Deliveries to it stop immediately.",
       inputSchema: z.object({ id: z.uuid().describe("Webhook id from list_webhooks") }),
       destructive: true,
-      admin: true,
     },
     ({ id }) => api("DELETE", `/webhooks/${enc(id)}`),
   );
@@ -848,7 +863,6 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
         description:
           "Add a sending domain (region optional). Returns the DNS records to create; the domain sends once they verify.",
         inputSchema: createDomainRequestSchema,
-        admin: true,
       },
       (body) => api("POST", "/domains", body),
     );
@@ -860,7 +874,6 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
         inputSchema: updateDomainRequestSchema.extend({
           id: z.uuid().describe("Domain id from list_domains"),
         }),
-        admin: true,
       },
       ({ id, ...body }) => api("PATCH", `/domains/${enc(id)}`, body),
     );
@@ -871,7 +884,6 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
         description:
           "Re-check a domain's DNS records and SES verification, returning fresh status.",
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
-        admin: true,
       },
       ({ id }) => api("POST", `/domains/${enc(id)}/verify`),
     );
@@ -883,7 +895,6 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
           "Remove a sending domain and its SES identity. Sends from it stop immediately; this cannot be undone.",
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
         destructive: true,
-        admin: true,
       },
       ({ id }) => api("DELETE", `/domains/${enc(id)}`),
     );

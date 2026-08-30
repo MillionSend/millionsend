@@ -2,6 +2,7 @@ import { cancelTeamSubscription } from "@millionsend/billing";
 import { env } from "@millionsend/config";
 import {
   DAY_MS,
+  effectivePlan,
   INVITE_TTL_MS,
   PLAN_DAILY_LIMIT,
   type Plan,
@@ -186,18 +187,20 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
             name: schema.teams.name,
             slug: schema.teams.slug,
             plan: schema.teams.plan,
+            currentPeriodEnd: schema.teams.currentPeriodEnd,
             logoUrl: schema.teams.logoUrl,
           })
           .from(schema.teams)
           .where(eq(schema.teams.id, ctx.teamId));
         if (!team) throw new TRPCError({ code: "NOT_FOUND" });
+        const { currentPeriodEnd, ...rest } = team;
         const logoUploadsEnabled = uploadsEnabled();
         return {
-          ...team,
+          ...rest,
           // Storage off ⇒ stored URLs may be dead; the UI falls back to the tile.
           logoUrl: logoUploadsEnabled ? team.logoUrl : null,
           logoUploadsEnabled,
-          planDailyLimit: planDailyLimit(team.plan),
+          planDailyLimit: planDailyLimit(effectivePlan(team.plan, currentPeriodEnd)),
         };
       }),
 
@@ -537,7 +540,7 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
           const since = utcDay(Date.now() - (days - 1) * DAY_MS);
 
           const [team] = await ctx.db
-            .select({ plan: schema.teams.plan })
+            .select({ plan: schema.teams.plan, currentPeriodEnd: schema.teams.currentPeriodEnd })
             .from(schema.teams)
             .where(eq(schema.teams.id, ctx.teamId));
           if (!team) throw new TRPCError({ code: "NOT_FOUND" });
@@ -560,7 +563,7 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
             rows,
             today: {
               accepted: rows.find((r) => r.day === today)?.accepted ?? 0,
-              limit: planDailyLimit(team.plan),
+              limit: planDailyLimit(effectivePlan(team.plan, team.currentPeriodEnd)),
             },
           };
         }),

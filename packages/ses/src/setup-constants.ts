@@ -68,6 +68,8 @@ export const SES_IAM_POLICY_JSON = JSON.stringify(SES_IAM_POLICY, null, 2);
 export function envTemplate(): string {
   return `# MillionSend self-host configuration.
 # Save as .env, generate the two secrets below, and \`docker compose up -d\`.
+# This file holds every secret the instance has: keep it readable by its
+# owner only (chmod 600 .env) and out of version control and backups.
 
 # --- Required ---
 
@@ -76,11 +78,15 @@ export function envTemplate(): string {
 # (e.g. postgres://postgres:postgres@localhost:5432/millionsend).
 DATABASE_URL=postgres://millionsend:millionsend@postgres:5432/millionsend
 
+# Password of the compose postgres service; the setup wizard generates one and
+# puts it in DATABASE_URL too. Keep both in sync.
+POSTGRES_PASSWORD=millionsend
+
 # Standalone deploy/docker-compose.yml only: the image to run. The default,
-# ghcr.io/millionsend/millionsend:latest, follows main (every build there
-# passed the test suite first), so \`docker compose pull\` is the upgrade. Set a
-# version tag or an immutable @sha256 digest here to hold a version; the
-# backup sidecar pins the same way.
+# ghcr.io/millionsend/millionsend:latest, is the latest tagged release, so
+# \`docker compose pull\` is the upgrade; :edge follows main (every build there
+# passed the test suite first). Set a version tag or an immutable @sha256
+# digest here to hold a version; the backup sidecar pins the same way.
 # MILLIONSEND_IMAGE=ghcr.io/millionsend/millionsend@sha256:<digest>
 # MILLIONSEND_BACKUP_IMAGE=ghcr.io/millionsend/backup@sha256:<digest>
 
@@ -89,15 +95,16 @@ DATABASE_URL=postgres://millionsend:millionsend@postgres:5432/millionsend
 # documentation site) and backup (scheduled dumps; needs S3_BACKUP_BUCKET).
 # COMPOSE_PROFILES=docs,backup
 
-# Encryption key for email bodies at rest. Generate: openssl rand -base64 32
-# Losing it makes stored bodies unrecoverable; changing it orphans old bodies.
+# Encryption key for email bodies at rest and the root the tracking and
+# unsubscribe link keys derive from. Generate: openssl rand -base64 32
+# Always required, cloud included. Losing it makes stored bodies
+# unrecoverable; changing it orphans old bodies and every link already mailed.
 MASTER_ENCRYPTION_KEY=
 
 # Cloud only (IS_CLOUD=true): AWS KMS key (ARN or key id) that wraps per-email
-# data keys instead of MASTER_ENCRYPTION_KEY; self-host leaves it unset. When
-# migrating an existing instance to cloud, keep MASTER_ENCRYPTION_KEY set
-# alongside it - bodies sealed under the old key stay readable while new ones
-# are sealed under KMS.
+# data keys instead of MASTER_ENCRYPTION_KEY, which stays set (bodies sealed
+# under it remain readable; links still derive from it). Boot refuses it
+# when IS_CLOUD is false.
 # KMS_KEY_ID=
 
 # Dashboard session signing secret. Generate: openssl rand -base64 32
@@ -203,6 +210,17 @@ PRIVACY_URL=
 # account. Leave unset to hide password recovery entirely.
 AUTH_EMAIL_FROM=
 
+# Reverse proxies whose forwarded-client-IP headers (X-Forwarded-For,
+# CF-Connecting-IP) are trusted, comma-separated. Default: loopback only,
+# which covers a proxy on the same host. Add your proxy's address when it
+# runs elsewhere; an untrusted source's headers are ignored and the socket
+# address is used instead.
+# TRUSTED_PROXIES=127.0.0.1,::1
+
+# Local development only: let webhook endpoints target http:// and
+# private/loopback addresses. Keep false on any internet-reachable instance.
+WEBHOOK_ALLOW_LOCALHOST=false
+
 # Leave false. true enables hosted-cloud behavior (KMS, Stripe billing).
 IS_CLOUD=false
 
@@ -244,12 +262,17 @@ S3_STORAGE_PUBLIC_URL=
 S3_BACKUP_BUCKET=
 
 # Backup tuning, meaningful only with S3_BACKUP_BUCKET set: object key prefix
-# inside the bucket (default backups), dump schedule (BusyBox cron syntax,
-# UTC, default 0 3 * * *; one dump also runs at every service start), and how
-# many days of dumps to keep before pruning (default 14).
+# inside the bucket (default backups), dump schedule (default 0 3 * * *, UTC;
+# only the daily form \`<minute> <hour> * * *\` is honoured, any other shape
+# makes the backup service exit 1; one dump also runs at every service
+# start), and how many days of dumps to keep before pruning (default 14).
 S3_BACKUP_PREFIX=
 BACKUP_CRON=
 BACKUP_RETENTION_DAYS=
+
+# age public key (age1...); set to encrypt dumps before upload. Restore with
+# \`age --decrypt -i <key file>\` first.
+BACKUP_AGE_RECIPIENT=
 
 # --- Social login (optional) ---
 

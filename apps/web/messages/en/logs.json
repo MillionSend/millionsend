@@ -22,8 +22,7 @@
     "id": "ID",
     "request": "Request",
     "response": "Response",
-    "noBody": "No body.",
-    "redacted": "Content fields (html, text, attachments) are redacted from logs.",
-    "truncated": "Body over 16 KB — not stored."
+    "requestNotStored": "Request bodies are not stored.",
+    "responseNotStored": "Only error responses (4xx/5xx) are stored."
   }
 }

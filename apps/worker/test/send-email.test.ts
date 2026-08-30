@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   EnvKeyring,
   encryptEmailBody,
@@ -928,4 +928,34 @@ it("the send-rate token is taken only after every check that can still skip the 
   const emailId = await insertEmail();
   expect(await sendEmail(db, { keyring, ses, throttle }, { emailId })).toBe("sent");
   expect(throttled).toBe(1);
+});
+
+it("a body sealed for one row refuses to open on another: copied columns fail the send", async () => {
+  const { ses, sends } = fakeSes("mid-bound");
+  const idA = randomUUID();
+  const sealed = await encryptEmailBody({ html: null, text: "for A" }, keyring, {
+    teamId,
+    rowId: idA,
+  });
+  const bound = {
+    bodyCiphertext: sealed.ciphertext,
+    bodyIv: sealed.iv,
+    bodyWrappedDek: sealed.wrappedDek,
+    bodyKeyVersion: sealed.keyVersion,
+  };
+  await insertEmail({ id: idA, ...bound });
+  const idB = await insertEmail(bound);
+
+  expect(await sendEmail(db, { keyring, ses }, { emailId: idB })).toBe("failed");
+  expect(sends).toHaveLength(0);
+  const [rowB] = await db.select().from(schema.emails).where(eq(schema.emails.id, idB));
+  expect(rowB?.latestStatus).toBe("failed");
+  const events = await db
+    .select({ data: schema.emailEvents.data })
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, idB));
+  expect(events.map((e) => e.data?.reason)).toEqual(["body_unreadable"]);
+
+  expect(await sendEmail(db, { keyring, ses }, { emailId: idA })).toBe("sent");
+  expect(sends[0]?.raw.toString()).toContain("for A");
 });

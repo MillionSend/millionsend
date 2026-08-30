@@ -77,6 +77,9 @@
     },
     "submit": "Adicionar domínio",
     "conflict": "Este domínio já foi adicionado.",
+    "reserved": "Este domínio não pode ser usado como remetente.",
+    "planLimit": "O limite de domínios do seu plano foi atingido.",
+    "rateLimited": "Muitos domínios adicionados recentemente — tente de novo mais tarde.",
     "error": "Não foi possível adicionar o domínio.",
     "credentialsError": "A AWS rejeitou as credenciais da requisição — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code>. Veja <code>SELF_HOSTING.md</code>."
   },

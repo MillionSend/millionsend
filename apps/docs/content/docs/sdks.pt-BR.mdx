@@ -30,6 +30,16 @@ conforme a convenção da linguagem — e o SDK de Node também lê a variável 
 ambiente `MILLIONSEND_BASE_URL`. Veja
 [Auto-hospedagem](/pt-BR/self-hosting) para implantar a instância em si.
 
+Todo SDK recusa uma URL base em `http://` puro, a menos que o host seja
+loopback (`localhost`, `127.0.0.1`, `::1`): uma chave de API enviada em texto
+puro para outra máquina é uma chave de API exposta na rede. Uma instância
+acessada por HTTP puro em uma rede privada exige o opt-in de cada SDK — Node
+`allowInsecureHttp`, Python `allow_insecure_http`, Go `AllowInsecureHTTP`,
+Ruby `allow_insecure_http`, PHP a opção `allowInsecureHttp`, Rust
+`allow_insecure_http()`, Java o construtor de três argumentos, .NET
+`AllowInsecureHttp`, Elixir `allow_insecure_http` — ou, melhor, um reverse
+proxy TLS na frente dela.
+
 </DeploymentTab>
 </DeploymentTabs>
 

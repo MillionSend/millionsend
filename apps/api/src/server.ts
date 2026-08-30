@@ -48,7 +48,7 @@ const app = createApi({
   appBaseUrl: env.APP_BASE_URL,
   publicApiUrl: env.PUBLIC_API_URL,
   trackingSubdomains: trackingSubdomainsSupported(),
-  ses: { clientForRegion, defaultRegion: env.AWS_REGION },
+  ses: { clientForRegion, defaultRegion: env.AWS_REGION, authEmailFrom: env.AUTH_EMAIL_FROM },
   enqueueEmailSend: async (emailId, opts) => {
     await queue.send(
       "email.send",

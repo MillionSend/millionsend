@@ -21,23 +21,10 @@ function Microlabel({ children }: { children: React.ReactNode }) {
 }
 
 /** REQUEST/RESPONSE panel: pretty-printed JSON in a mono pre, scrolls inside. */
-function JsonSection({
-  label,
-  value,
-  note,
-  noBody,
-}: {
-  label: string;
-  value: unknown;
-  note?: string | undefined;
-  noBody: string;
-}) {
+function JsonSection({ label, value, noBody }: { label: string; value: unknown; noBody: string }) {
   return (
     <section style={{ marginTop: 26 }}>
       <div className="ms-microlabel">{label}</div>
-      {note ? (
-        <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 6 }}>{note}</div>
-      ) : null}
       <div
         style={{
           marginTop: 10,
@@ -194,8 +181,6 @@ export default function LogDetailPage() {
     );
   }
 
-  const redacted = JSON.stringify(log.requestBody ?? null).includes('"[redacted]"');
-
   return (
     <>
       <PageHeader
@@ -250,13 +235,12 @@ export default function LogDetailPage() {
       <JsonSection
         label={t("detail.request")}
         value={log.requestBody}
-        note={redacted ? t("detail.redacted") : undefined}
-        noBody={t("detail.noBody")}
+        noBody={t("detail.requestNotStored")}
       />
       <JsonSection
         label={t("detail.response")}
         value={log.responseBody}
-        noBody={t("detail.noBody")}
+        noBody={t("detail.responseNotStored")}
       />
     </>
   );

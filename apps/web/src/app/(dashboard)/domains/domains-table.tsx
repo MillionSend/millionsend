@@ -21,6 +21,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
+import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, StateCard } from "../emails/list-parts";
 import { AwsCredentialsBanner } from "./aws-credentials-banner";
 import { type DomainStatus, DomainStatusBadge } from "./domain-status";
@@ -57,6 +58,8 @@ export function DomainsView() {
   const trpc = useTRPC();
   const router = useRouter();
   const domains = useQuery(trpc.domains.list.queryOptions());
+  const role = useTeamRole();
+  const canExport = role === "owner" || role === "admin";
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [confirmText, setConfirmText] = useState("");
@@ -141,7 +144,7 @@ export function DomainsView() {
         {...(summary ? { subtitle: summary } : {})}
         actions={
           <>
-            <ExportCsvLink href="/export/domains" />
+            {canExport ? <ExportCsvLink href="/export/domains" /> : null}
             <Link href="/domains/new" className="ms-btn ms-btn-primary">
               <PlusGlyph size={14} />
               {t("list.addDomain")}

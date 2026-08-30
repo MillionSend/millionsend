@@ -683,17 +683,22 @@ describe("attachments and custom headers", () => {
     expect(res.status).toBe(200);
     const { id } = (await res.json()) as { id: string };
     const [row] = await db
-      .select({ headers: schema.emails.headers, attachments: schema.emails.attachments })
+      .select({
+        teamId: schema.emails.teamId,
+        headers: schema.emails.headers,
+        attachments: schema.emails.attachments,
+      })
       .from(schema.emails)
       .where(eq(schema.emails.id, id));
-    expect(row?.headers).toEqual({ "X-Entity-Ref-ID": "ref-1" });
+    if (!row) throw new Error("email row missing");
+    expect(row.headers).toEqual({ "X-Entity-Ref-ID": "ref-1" });
     // Sealed at rest: neither the payload nor the filename is stored in the clear.
-    expect(row?.attachments).toBeTruthy();
-    expect(row?.attachments).not.toContain(pdfBase64);
-    expect(row?.attachments).not.toContain("x.pdf");
-    expect(await openAttachments(row?.attachments ?? "", keyring)).toEqual([
-      { filename: "x.pdf", content: pdfBase64, contentType: "application/pdf" },
-    ]);
+    expect(row.attachments).toBeTruthy();
+    expect(row.attachments).not.toContain(pdfBase64);
+    expect(row.attachments).not.toContain("x.pdf");
+    expect(
+      await openAttachments(row.attachments ?? "", keyring, { teamId: row.teamId, rowId: id }),
+    ).toEqual([{ filename: "x.pdf", content: pdfBase64, contentType: "application/pdf" }]);
   });
 
   it("rejects path attachments with a clear message, never fetching the URL", async () => {

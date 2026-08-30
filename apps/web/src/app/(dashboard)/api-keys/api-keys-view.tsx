@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
@@ -18,8 +19,10 @@ import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { authClient } from "@/lib/auth-client";
 import { maskApiKey } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
+import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter } from "../emails/list-parts";
 
 /** Mirrors the loaded table: name, masked mono token, two relative times, menu column. */
@@ -69,6 +72,9 @@ export function ApiKeysView() {
   const nav = useTranslations("nav");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const role = useTeamRole();
+  const canExport = role === "owner" || role === "admin";
 
   const listQuery = useQuery(trpc.apiKeys.list.queryOptions());
   const keys = listQuery.data;
@@ -131,6 +137,14 @@ export function ApiKeysView() {
     if (!revokeTarget || revokeMutation.isPending) return;
     revokeMutation.mutate({ id: revokeTarget.id });
   };
+  // Minting a key needs a recently established session; /login bounces an
+  // existing session straight back, so the re-auth starts with a sign-out.
+  const signInAgain = async () => {
+    await authClient.signOut();
+    router.push("/login?next=/api-keys");
+    router.refresh();
+  };
+  const createError = createMutation.error;
 
   return (
     <>
@@ -138,7 +152,7 @@ export function ApiKeysView() {
         title={nav("apiKeys")}
         actions={
           <>
-            <ExportCsvLink href="/export/api-keys" />
+            {canExport ? <ExportCsvLink href="/export/api-keys" /> : null}
             <button
               type="button"
               className="ms-btn ms-btn-primary"
@@ -315,6 +329,33 @@ export function ApiKeysView() {
                 ]}
               />
             </div>
+            {createError ? (
+              <div
+                className="ms-field-error"
+                style={{
+                  margin: 0,
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                {createError.data?.code === "UNAUTHORIZED" ? (
+                  <>
+                    <span>{t("create.staleSession")}</span>
+                    <button
+                      type="button"
+                      className="ms-btn ms-btn-secondary"
+                      onClick={() => void signInAgain()}
+                    >
+                      {t("create.signInAgain")}
+                    </button>
+                  </>
+                ) : (
+                  createError.message
+                )}
+              </div>
+            ) : null}
             <ModalFooter>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeCreate}>
                 {common("cancel")} <span className="ms-keycap">Esc</span>

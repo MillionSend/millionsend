@@ -278,6 +278,16 @@ describe("broadcasts.send", () => {
     expect((await broadcastRow(id))?.scheduledAt?.getTime()).toBe(later.getTime());
   });
 
+  it("refuses a scheduledAt more than 30 days ahead", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { caller, id } = await seedDraft(teamId);
+    const tooLate = new Date(Date.now() + 31 * 86_400_000);
+    await expect(caller.broadcasts.send({ id, scheduledAt: tooLate })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    expect((await broadcastRow(id))?.status).toBe("draft");
+  });
+
   it("blocks sending when APP_BASE_URL is not configured", async () => {
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);

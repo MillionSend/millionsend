@@ -40,6 +40,10 @@ export async function generateStaticParams() {
   return source.generateParams();
 }
 
+// Unknown slugs 404 statically; on-demand rendering would try to persist the
+// 404 into .next, which fails on a read-only rootfs.
+export const dynamicParams = false;
+
 export async function generateMetadata(props: PageParams): Promise<Metadata> {
   const { lang, slug } = await props.params;
   const page = source.getPage(slug, lang);

@@ -28,6 +28,7 @@ import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
 import { formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
+import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, SearchBox, StateCard } from "../emails/list-parts";
 import { AudienceTabs } from "./audience-tabs";
 
@@ -196,6 +197,9 @@ export function AudienceContactsView() {
   const bulkMenuRef = useRef<HTMLDivElement>(null);
   useDismiss(bulkMenuRef, bulkMenuOpen, () => setBulkMenuOpen(false));
 
+  const role = useTeamRole();
+  // Export and bulk delete are admin-only server-side.
+  const canManage = role === "owner" || role === "admin";
   const segments = useQuery(trpc.segments.list.queryOptions());
   const stats = useQuery(trpc.audience.contacts.stats.queryOptions());
   const growth = useQuery(trpc.audience.contacts.growth.queryOptions());
@@ -378,14 +382,14 @@ export function AudienceContactsView() {
       } else if (event.key === "e" || event.key === "E") {
         event.preventDefault();
         setBulkMenuOpen((v) => !v);
-      } else if (event.key === "Backspace" || event.key === "Delete") {
+      } else if (canManage && (event.key === "Backspace" || event.key === "Delete")) {
         event.preventDefault();
         void runBulkDelete();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected.size, anyModalOpen, bulkMenuOpen, clearSelection, runBulkDelete]);
+  }, [selected.size, anyModalOpen, bulkMenuOpen, canManage, clearSelection, runBulkDelete]);
 
   function submitAdd() {
     if (addMutation.isPending || newEmail.trim().length === 0) return;
@@ -430,7 +434,9 @@ export function AudienceContactsView() {
         title={t("list.title")}
         actions={
           <>
-            <ExportCsvLink href={`/export/contacts${exportQs ? `?${exportQs}` : ""}`} />
+            {canManage ? (
+              <ExportCsvLink href={`/export/contacts${exportQs ? `?${exportQs}` : ""}`} />
+            ) : null}
             <AddContactsSplit onManual={() => setAddOpen(true)} onCsv={() => setImportOpen(true)} />
             <ResourceApiButton resource="contacts" />
           </>
@@ -954,15 +960,17 @@ export function AudienceContactsView() {
               </div>
             ) : null}
           </div>
-          <button
-            type="button"
-            className="ms-btn ms-btn-destructive"
-            disabled={bulkBusy}
-            onClick={() => void runBulkDelete()}
-          >
-            <BtnSpinner on={bulkBusy && bulkModal === null} />
-            {t("contacts.bulk.delete")} <span className="ms-keycap">⌫</span>
-          </button>
+          {canManage ? (
+            <button
+              type="button"
+              className="ms-btn ms-btn-destructive"
+              disabled={bulkBusy}
+              onClick={() => void runBulkDelete()}
+            >
+              <BtnSpinner on={bulkBusy && bulkModal === null} />
+              {t("contacts.bulk.delete")} <span className="ms-keycap">⌫</span>
+            </button>
+          ) : null}
           {bulkError && bulkModal === null ? (
             <span className="ms-field-error" style={{ margin: 0 }}>
               {t("contacts.bulk.error")}

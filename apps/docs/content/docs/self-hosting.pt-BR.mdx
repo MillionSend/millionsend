@@ -58,8 +58,9 @@ docker compose up -d
 ```
 
 As migrações rodam no boot, então a atualização é só isso. O arquivo compose
-roda `ghcr.io/millionsend/millionsend:latest`, que acompanha a `main` — todo
-build ali passou pela suíte de testes antes. Para segurar uma versão, defina
+roda `ghcr.io/millionsend/millionsend:latest`, a release mais recente com tag
+(as tags `:1.2.3` e `:1.2` existem ao lado dela; `:edge` acompanha a `main`,
+onde todo build passou pela suíte de testes antes). Para segurar uma versão, defina
 `MILLIONSEND_IMAGE` no `.env` com uma tag de versão ou um digest imutável
 (`ghcr.io/millionsend/millionsend@sha256:…`; `docker image ls --digests`
 mostra o que está rodando) e rode `docker compose up -d`. Colocar de volta o
@@ -109,6 +110,7 @@ auto-hospedada não tem limites de plano.
 | Variável | Propósito |
 | --- | --- |
 | `DATABASE_URL` | String de conexão do Postgres. O padrão corresponde ao serviço `postgres` do compose. |
+| `POSTGRES_PASSWORD` | Senha do serviço `postgres` do compose (padrão `millionsend`); o assistente de setup gera uma e a coloca também em `DATABASE_URL`. Mantenha as duas em sincronia. |
 | `MASTER_ENCRYPTION_KEY` | Chave de criptografia dos corpos de email em repouso. Gere com `openssl rand -base64 32`. Perdê-la torna os corpos armazenados irrecuperáveis; trocá-la órfã os corpos antigos. Faça backup junto com o banco. |
 | `BETTER_AUTH_SECRET` | Segredo de assinatura das sessões do painel. Gere com `openssl rand -base64 32`. |
 | `APP_BASE_URL` | URL base pública da implantação — a origem que os navegadores usam para acessar o painel (ex.: `https://mail.example.com`). O login só é aceito a partir dessa origem; assinaturas SNS, links de descadastro e links de rastreamento derivam dela. Precisa corresponder exatamente ao esquema+host+porta em que você abre o painel — inclusive um `WEB_PORT` customizado — ou login e cadastro falham com erro de "invalid origin". Padrão `http://localhost:3000`. |
@@ -128,8 +130,10 @@ auto-hospedada não tem limites de plano.
 
 | Variável | Propósito |
 | --- | --- |
-| `MILLIONSEND_IMAGE` | Só no deploy standalone: qual imagem rodar. O padrão `ghcr.io/millionsend/millionsend:latest` acompanha a `main`, então `docker compose pull` é a atualização. Defina uma tag de versão ou um digest imutável `ghcr.io/millionsend/millionsend@sha256:…` para segurar uma versão (`MILLIONSEND_BACKUP_IMAGE` fixa o sidecar de backup do mesmo jeito). |
+| `MILLIONSEND_IMAGE` | Só no deploy standalone: qual imagem rodar. O padrão `ghcr.io/millionsend/millionsend:latest` é a release mais recente com tag (`:edge` acompanha a `main`), então `docker compose pull` é a atualização. Defina uma tag de versão ou um digest imutável `ghcr.io/millionsend/millionsend@sha256:…` para segurar uma versão (`MILLIONSEND_BACKUP_IMAGE` fixa o sidecar de backup do mesmo jeito). |
 | `ALLOW_SIGNUP` | O primeiro usuário sempre pode se registrar; depois disso o cadastro fica fechado a menos que isto seja `true`. Mantenha `false` quando o painel é acessível pela internet. |
+| `TRUSTED_PROXIES` | Reverse proxies cujos headers de IP do cliente (`X-Forwarded-For`, `CF-Connecting-IP`) são confiáveis, IPs ou CIDRs separados por vírgula. O padrão `127.0.0.1,::1` cobre um proxy no mesmo host; adicione o endereço do seu proxy quando ele roda em outro lugar. Veja a [seção de nginx](#produção-nginx--tls). |
+| `WEBHOOK_ALLOW_LOCALHOST` | Só para desenvolvimento local: permite que endpoints de webhook (disparos de teste incluídos) apontem para `http://` e endereços de loopback/privados em qualquer porta. Mantenha `false` em qualquer instância acessível pela internet. |
 | `COMPOSE_PROFILES` | Serviços opcionais do compose, separados por vírgula: `smtp` (o relay; monte um par de chaves STARTTLS antes) e, no arquivo standalone, também `docs` (este site de documentação) e `backup` (dumps agendados). |
 | `PORT` | Porta da API (padrão `3001`). No compose, move junto a porta interna do contêiner e a porta publicada no host. |
 | `WEB_PORT` | Porta do host em que o compose publica o painel (o processo web é sempre 3000 dentro do contêiner). Mantenha `APP_BASE_URL` em sincronia. |
@@ -151,7 +155,8 @@ auto-hospedada não tem limites de plano.
 | `S3_REGION` / `S3_PROVIDER` | Os padrões `auto` / `Cloudflare` servem para o R2. Outros serviços compatíveis com S3 definem uma região real se o endpoint exigir, e o nome do provider no rclone (`AWS`, `Minio`, …) para o job de backup. |
 | `S3_STORAGE_BUCKET` / `S3_STORAGE_PUBLIC_URL` | Bucket público de uploads (logos de time) e a URL base pública de onde ele serve. Defina juntas; sem elas a UI de upload não aparece em lugar nenhum. |
 | `S3_BACKUP_BUCKET` | Bucket PRIVADO para os dumps agendados do banco — nunca o bucket público de uploads. Sem ele o serviço `backup` fica desligado. |
-| `S3_BACKUP_PREFIX` / `BACKUP_CRON` / `BACKUP_RETENTION_DAYS` | Ajustes do backup: prefixo das chaves (padrão `backups`), agenda dos dumps (padrão `0 3 * * *`, UTC) e dias de dumps mantidos (padrão 14). |
+| `S3_BACKUP_PREFIX` / `BACKUP_CRON` / `BACKUP_RETENTION_DAYS` | Ajustes do backup: prefixo das chaves (padrão `backups`), agenda diária dos dumps (`<minuto> <hora> * * *`, UTC, padrão `0 3 * * *`; qualquer outro formato faz o serviço sair com código 1) e dias de dumps mantidos (padrão 14). |
+| `BACKUP_AGE_RECIPIENT` | Chave pública age (`age1…`); defina para criptografar os dumps antes do upload. Para restaurar, rode `age --decrypt -i <arquivo da chave>` primeiro. |
 
 ## Configuração da AWS
 
@@ -175,10 +180,12 @@ execução para de enviar. Repetir o setup é seguro, mas cada execução gera u
 nova chave de acesso — apague as antigas no console do IAM.
 
 Sem Node no servidor? O mesmo CLI vem dentro da imagem — rode-o a partir do
-diretório de deploy, que ele lê e escreve como `/work`:
+diretório de deploy, que ele lê e escreve como `/work` (o assistente não
+escreve nada fora dele, então rode-o como o seu usuário e o `.env` criado fica
+seu, com modo 600):
 
 ```sh
-docker run --rm -it --user root -v "$PWD":/work -w /work -v ~/.aws:/root/.aws ghcr.io/millionsend/millionsend:latest setup
+docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/home/ms -v ~/.aws:/home/ms/.aws:ro -v "$PWD":/work -w /work ghcr.io/millionsend/millionsend:latest setup
 ```
 
 Prefere não rodar um CLI? A página **Configurações → SES** do painel oferece
@@ -198,8 +205,11 @@ Equivalente manual: um tópico SNS standard (mesma região do SES) inscrito em
 `https://<seu-host>/ses/events` (ou em uma fila SQS cuja política permita o
 envio pelo tópico e cuja URL esteja no `.env` como `SQS_QUEUE_URL`), com o
 ARN no `.env` como `SNS_TOPIC_ARNS`; um configuration set do SES com um event
-destination apontando para o tópico, com o nome no `.env` como
-`SES_CONFIGURATION_SET`. Reinicie depois de defini-los. Sem
+destination apontando para o tópico (tipos de evento: Delivery, Delivery
+Delay, Bounce, Complaint, Reject, Rendering Failure — NÃO inscreva Open nem
+Click, pois isso faz o SES reescrever todo link e injetar o próprio pixel,
+enquanto o MillionSend rastreia o engajamento por conta própria), com o nome
+no `.env` como `SES_CONFIGURATION_SET`. Reinicie depois de defini-los. Sem
 `SES_CONFIGURATION_SET`, os envios saem sem configuration set e não emitem
 eventos.
 
@@ -337,6 +347,7 @@ server {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
@@ -373,6 +384,7 @@ server {
         proxy_pass http://127.0.0.1:3002;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
@@ -392,7 +404,21 @@ sudo certbot --nginx --redirect -d mail.example.com -d api.example.com -d docs.e
 Depois defina `APP_BASE_URL=https://mail.example.com` e
 `PUBLIC_API_URL=https://api.example.com` no `.env` e reinicie. `APP_BASE_URL`
 precisa ser a **origem https pública exata do painel** — qualquer outro valor
-faz login e cadastro falharem com erro de "invalid origin".
+faz login e cadastro falharem com erro de "invalid origin". Encaminhe `Host` e
+`X-Forwarded-Host` para os upstreams do painel e da documentação como acima,
+para que qualquer URL absoluta que os apps derivem da requisição use o
+hostname público em vez de `localhost`.
+
+Os endereços dos clientes (limites de tentativas de login, entradas de
+auditoria) vêm de `X-Forwarded-For`, e só os proxies listados em
+`TRUSTED_PROXIES` (IPs ou CIDRs separados por vírgula; padrão `127.0.0.1,::1`,
+que cobre o nginx no mesmo host) são levados em conta. Com
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` cada salto se
+acrescenta à lista, e a cadeia é percorrida da direita para a esquerda pulando
+todos os proxies confiáveis, então o primeiro endereço não confiável é o
+cliente. Adicione o endereço do seu proxy quando ele roda em outro host, e as
+faixas de um CDN quando houver um na frente do nginx; headers de qualquer outra
+origem são ignorados e o endereço do socket é usado no lugar.
 
 Os arquivos compose vinculam toda porta de aplicação ao loopback por padrão
 (`WEB_BIND_ADDRESS`, `API_BIND_ADDRESS`, `DOCS_BIND_ADDRESS`,
@@ -481,7 +507,11 @@ S3_BACKUP_BUCKET=millionsend-backups
 
 Depois adicione `backup` a `COMPOSE_PROFILES` no `.env` e rode
 `docker compose up -d`: o serviço faz um dump imediatamente e, depois disso,
-segue o `BACKUP_CRON` (padrão `0 3 * * *`, UTC). Cada dump é um
+um por dia no `BACKUP_CRON` (padrão `0 3 * * *`, UTC). Só a forma diária
+`<minuto> <hora> * * *` é aceita — o sidecar roda sem privilégios como
+`postgres`, com todas as capabilities removidas, então a agenda é um loop de
+sleep em vez de crond, e qualquer outro formato faz o serviço sair com código
+1. Cada dump é um
 `pg_dump -Fc` (formato custom comprimido, nomeado
 `millionsend-YYYYMMDD-HHMMSS.dump`), o tamanho enviado é verificado contra o
 bucket antes de qualquer outra coisa, e dumps mais antigos que
@@ -489,6 +519,13 @@ bucket antes de qualquer outra coisa, e dumps mais antigos que
 `backups`) define o prefixo das chaves. Outros serviços compatíveis com S3
 funcionam definindo `S3_PROVIDER` com o nome do provider no rclone
 (`AWS`, `Minio`, …) e uma região real se o endpoint exigir.
+
+Defina `BACKUP_AGE_RECIPIENT` com uma chave pública
+[age](https://age-encryption.org) (`age1…`) para criptografar cada dump antes
+do upload (`.dump.age`); o bucket nunca guarda uma cópia legível do banco.
+Mantenha a chave privada correspondente junto com `MASTER_ENCRYPTION_KEY`, e
+na restauração rode `age --decrypt -i <arquivo da chave>` antes do
+`pg_restore`.
 
 Os dumps contêm corpos de email criptografados com `MASTER_ENCRYPTION_KEY` —
 faça backup dessa chave separadamente, ou os corpos restaurados ficam

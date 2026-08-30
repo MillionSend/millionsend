@@ -2,12 +2,6 @@ import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { parseMailbox } from "@millionsend/core";
 import type { SesSender } from "./handlers/send-email.js";
 
-type SendRawParams = Parameters<SesSender["sendRaw"]>[0] & {
-  to?: readonly string[] | undefined;
-  cc?: readonly string[] | null | undefined;
-  bcc?: readonly string[] | null | undefined;
-};
-
 /**
  * Envelope recipients are derived from the stored, validated recipient
  * fields — never from the raw MIME headers — so a To header can never widen
@@ -38,22 +32,19 @@ export function createSesSender(defaultRegion: string): SesSender {
     return client;
   };
   return {
-    async sendRaw({ raw, emailId, configurationSetName, region, to, cc, bcc }: SendRawParams) {
+    async sendRaw({ raw, emailId, configurationSetName, region, to, cc, bcc }) {
       const ToAddresses = toAddrSpecs(to);
+      if (!ToAddresses) throw new Error("no envelope recipients; refusing to send");
       const CcAddresses = toAddrSpecs(cc);
       const BccAddresses = toAddrSpecs(bcc);
       const out = await clientFor(region ?? defaultRegion).send(
         new SendEmailCommand({
           Content: { Raw: { Data: raw } },
-          ...(ToAddresses
-            ? {
-                Destination: {
-                  ToAddresses,
-                  ...(CcAddresses ? { CcAddresses } : {}),
-                  ...(BccAddresses ? { BccAddresses } : {}),
-                },
-              }
-            : {}),
+          Destination: {
+            ToAddresses,
+            ...(CcAddresses ? { CcAddresses } : {}),
+            ...(BccAddresses ? { BccAddresses } : {}),
+          },
           EmailTags: [{ Name: "millionsend_email_id", Value: emailId }],
           ...(configurationSetName ? { ConfigurationSetName: configurationSetName } : {}),
         }),

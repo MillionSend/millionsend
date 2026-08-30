@@ -4,6 +4,7 @@ import {
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
+  fetchEffectivePlan,
   isIdentitySharedByOtherDomains,
   isReservedSenderDomain,
   PLAN_DOMAIN_LIMIT,
@@ -284,11 +285,8 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           if (taken) {
             throw new TRPCError({ code: "CONFLICT", message: "domain already registered" });
           }
-          const [team] = await ctx.db
-            .select({ plan: schema.teams.plan })
-            .from(schema.teams)
-            .where(eq(schema.teams.id, ctx.teamId));
-          const limit = team ? PLAN_DOMAIN_LIMIT[team.plan] : null;
+          const plan = await fetchEffectivePlan(ctx.db, ctx.teamId);
+          const limit = plan ? PLAN_DOMAIN_LIMIT[plan] : null;
           const [owned] = await ctx.db
             .select({ n: count() })
             .from(schema.domains)

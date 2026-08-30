@@ -77,6 +77,9 @@
     },
     "submit": "Add domain",
     "conflict": "This domain is already added.",
+    "reserved": "This domain can't be used as a sender.",
+    "planLimit": "Your plan's domain limit is reached.",
+    "rateLimited": "Too many domains added recently — try again later.",
     "error": "Couldn't add the domain.",
     "credentialsError": "AWS rejected the request credentials — check <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code>. See <code>SELF_HOSTING.md</code>."
   },
