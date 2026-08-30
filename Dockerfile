@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 
-FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS deps
+FROM node:26-slim@sha256:c0753125a3789977aefe869cbebccf70e3cfd7ea84ca48547458f02e4f1d7146 AS deps
 WORKDIR /app
 RUN corepack enable pnpm
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -26,7 +26,7 @@ RUN rm -rf apps/*/.next/cache node_modules apps/*/node_modules packages/*/node_m
 # .ts sources), and workspace packages export TS source, so there is no pruned
 # "dist" to copy. The image is larger than a bundled build; that is the
 # accepted tradeoff for zero build tooling in the backends.
-FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runtime
+FROM node:26-slim@sha256:c0753125a3789977aefe869cbebccf70e3cfd7ea84ca48547458f02e4f1d7146 AS runtime
 WORKDIR /app
 ARG GIT_SHA=unknown
 ENV NODE_ENV=production
