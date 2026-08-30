@@ -13,6 +13,15 @@ const config: NextConfig = {
     // user data that could go stale.
     staleTimes: { dynamic: 30, static: 180 },
   },
+  async redirects() {
+    return [
+      {
+        source: "/llms-full.txt",
+        destination: "https://docs.millionsend.com/llms-full.txt",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     const scriptPolicy =
       process.env.NODE_ENV === "development"

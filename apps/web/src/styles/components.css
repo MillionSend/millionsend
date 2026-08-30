@@ -1528,3 +1528,51 @@ svg:focus {
 .ms-label-row label {
   margin-bottom: 0;
 }
+
+/* Status pages (404 / error boundary): the counting-number treatment as the
+   hero, one serif sentence, one muted line, the app's own buttons. Erode is
+   display type only, never UI text or digits. */
+@font-face {
+  font-family: "Erode";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/Erode-Medium.woff2") format("woff2");
+}
+.ms-status {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+}
+.ms-status-code {
+  font-size: clamp(64px, 12vw, 96px);
+  line-height: 1;
+  color: var(--ms-bone);
+}
+.ms-status-title {
+  margin: 0;
+  font-family: "Erode", Georgia, "Times New Roman", serif;
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--ms-bone);
+}
+.ms-status-body {
+  margin: 0;
+  max-width: 440px;
+  font-size: var(--ms-fs-body);
+  color: var(--ms-muted);
+}
+.ms-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 8px;
+}

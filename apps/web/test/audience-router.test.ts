@@ -809,6 +809,79 @@ describe("unsubscribe route", () => {
   });
 });
 
+describe("recipient erasure", () => {
+  const seedTrail = async (teamId: string, email: string) => {
+    const [row] = await db
+      .insert(schema.emails)
+      .values({ teamId, from: "a@acme.dev", to: [email, "keep@example.com"], subject: "s" })
+      .returning({ id: schema.emails.id });
+    await db.insert(schema.suppressions).values({
+      teamId,
+      email,
+      emailHash: hashRecipient(email),
+      reason: "hard_bounce",
+    });
+    await db
+      .insert(schema.apiRequests)
+      .values({ teamId, method: "DELETE", path: `/contacts/${email}`, statusCode: 200 });
+    return row?.id ?? "";
+  };
+  const trailOf = async (emailId: string, teamId: string, email: string) => {
+    const [row] = await db
+      .select({ to: schema.emails.to })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, emailId));
+    const [suppression] = await db
+      .select({ email: schema.suppressions.email })
+      .from(schema.suppressions)
+      .where(
+        and(
+          eq(schema.suppressions.teamId, teamId),
+          eq(schema.suppressions.emailHash, hashRecipient(email)),
+        ),
+      );
+    const requests = await db.select({ id: schema.apiRequests.id }).from(schema.apiRequests);
+    return { to: row?.to, suppressionEmail: suppression?.email, requests: requests.length };
+  };
+
+  it("contact delete scrubs the address everywhere but keeps the suppression hash", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const email = "gone@example.com";
+    const { id } = await caller.audience.contacts.add({ email });
+    const emailId = await seedTrail(teamId, email);
+
+    await caller.audience.contacts.delete({ id });
+
+    expect(await contactRow(id)).toBeNull();
+    expect(await trailOf(emailId, teamId, email)).toEqual({
+      to: ["[erased]", "keep@example.com"],
+      suppressionEmail: null,
+      requests: 0,
+    });
+  });
+
+  it("eraseRecipient is admin-only and works for addresses that were never contacts", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const email = "never@example.com";
+    const emailId = await seedTrail(teamId, email);
+
+    const member = createCaller({
+      db,
+      session: { user: { id: "u2", email: "u2@example.com", name: "u2" } },
+      teamId,
+      role: "member",
+    });
+    await expect(member.audience.eraseRecipient({ email })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+
+    const result = await callerFor(teamId).audience.eraseRecipient({ email: email.toUpperCase() });
+    expect(result).toMatchObject({ contact: false, emails: 1, suppressions: 1, apiRequests: 1 });
+    expect((await trailOf(emailId, teamId, email)).to).toEqual(["[erased]", "keep@example.com"]);
+  });
+});
+
 describe("parseCsvContacts", () => {
   it("maps headered files, quoted fields included, and falls back to first-column emails", async () => {
     expect(

@@ -143,6 +143,9 @@ export const env = createEnv({
     // Days email BODIES are kept; metadata and events are unaffected.
     // Bootstrap value only — the instance_settings row overrides it.
     EMAIL_RETENTION_DAYS: z.coerce.number().int().min(1).default(EMAIL_RETENTION_DAYS_DEFAULT),
+    // Whole email rows (recipients, subject, status, events) outlive their bodies,
+    // which age out on EMAIL_RETENTION_DAYS.
+    EMAIL_METADATA_RETENTION_DAYS: z.coerce.number().int().min(1).default(365),
 
     // Public base URL of this deployment; SNS subscriptions and hosted
     // unsubscribe pages are derived from it.

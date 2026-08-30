@@ -3,6 +3,15 @@
 @import "fumadocs-ui/css/preset.css";
 @import "fumadocs-openapi/css/preset.css";
 
+/* Erode Medium (Fontshare): display type for the status pages only. */
+@font-face {
+  font-family: "Erode";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/Erode-Medium.woff2") format("woff2");
+}
+
 /*
  * MillionSend brand ("Rollover"): void black surfaces, bone text, one steel
  * accent. Dark is the primary theme; light keeps the neutral preset.

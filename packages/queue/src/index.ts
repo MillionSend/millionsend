@@ -74,6 +74,9 @@ export const CRON_JOBS = {
   // Every 15 min: re-check live DNS so a removed record demotes a verified
   // domain (blocking sends) without waiting for a page open.
   "domains.reverify": "*/15 * * * *",
+  // Daily: re-read each Stripe customer's subscription so a dropped webhook
+  // cannot leave a team on the wrong plan. No-op off cloud.
+  "billing.reconcile": "20 3 * * *",
 } as const;
 
 export type CronJobName = keyof typeof CRON_JOBS;

@@ -3,6 +3,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { recordAudit } from "../audit";
 import { adminProcedure, freshAdminProcedure, router, teamProcedure } from "../trpc";
 
 export const apiKeysRouter = router({
@@ -81,6 +82,15 @@ export const apiKeysRouter = router({
         })
         .returning({ id: schema.apiKeys.id });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await recordAudit(ctx, {
+        action: "api_key.created",
+        target: { type: "api_key", id: row.id },
+        metadata: {
+          name: input.name.trim(),
+          permission: input.permission,
+          domainId: input.domainId ?? null,
+        },
+      });
       // The full secret exists only in this response — the row stores
       // tokenPrefix + hash + last4, and no other code path returns or logs it.
       return { id: row.id, token: generated.token };
@@ -101,6 +111,7 @@ export const apiKeysRouter = router({
       )
       .returning({ id: schema.apiKeys.id });
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    await recordAudit(ctx, { action: "api_key.revoked", target: { type: "api_key", id: row.id } });
     return { id: row.id };
   }),
 });

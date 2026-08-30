@@ -1,18 +1,16 @@
+import { i18n } from "@/lib/i18n";
+import { absoluteUrl } from "@/lib/site";
 import { source } from "@/lib/source";
 
-// Origin comes from the incoming request so links stay correct on any
-// deployment (docs.millionsend.com, a self-host, localhost) — never cached at
-// build time.
-export const dynamic = "force-dynamic";
+export const revalidate = false;
 
-export function GET(request: Request): Response {
-  const origin = new URL(request.url).origin;
+export function GET(): Response {
   // Serves the default locale (English — the source of truth) only. Agents
   // reach pt-BR pages via their locale-prefixed .md URLs (/pt-BR/<page>.md).
-  const lines = source.getPages().map((page) => {
+  const lines = source.getPages(i18n.defaultLanguage).map((page) => {
     const md = page.url === "/" ? "/index.md" : `${page.url}.md`;
     const description = page.data.description ? `: ${page.data.description}` : "";
-    return `- [${page.data.title}](${origin}${md})${description}`;
+    return `- [${page.data.title}](${absoluteUrl(md)})${description}`;
   });
 
   const body = [
@@ -21,8 +19,8 @@ export function GET(request: Request): Response {
     "> MillionSend is an open-source, Resend-compatible email platform — hosted at millionsend.com (API: api.millionsend.com) or self-hosted on your own AWS SES.",
     "",
     "Every page is available as raw markdown by appending `.md` to its URL.",
-    `The full documentation in one file: ${origin}/llms-full.txt`,
-    `The API's OpenAPI 3.1 spec (generated from code): ${origin}/openapi.json`,
+    `The full documentation in one file: ${absoluteUrl("/llms-full.txt")}`,
+    `The API's OpenAPI 3.1 spec (generated from code): ${absoluteUrl("/openapi.json")}`,
     "",
     "## Pages",
     "",

@@ -110,8 +110,13 @@
     "importError": "Não foi possível importar os contatos.",
     "importDone": "Concluir",
     "deleteTitle": "Excluir contato",
-    "deleteBody": "{email} será removido dos seus contatos.",
+    "deleteBody": "{email} será removido dos seus contatos e apagado do histórico de emails e dos logs de API.",
     "deleteConfirm": "Excluir contato",
+    "erase": "Apagar endereço",
+    "eraseTitle": "Apagar um endereço",
+    "eraseBody": "Remove o contato, se existir, substitui o endereço na lista de destinatários de cada email, limpa os payloads de entrega e de webhooks e exclui os logs de API correspondentes. A lista de supressão mantém um hash para o endereço continuar bloqueado. Isto não pode ser desfeito.",
+    "eraseConfirm": "Apagar endereço",
+    "eraseInvalid": "Informe um endereço de email válido.",
     "bulk": {
       "selectAll": "Selecionar todos os contatos carregados",
       "selectRow": "Selecionar {email}",
@@ -134,7 +139,7 @@
       "subscribeTopicsBody": "{count, plural, one {# contato é inscrito} other {# contatos são inscritos}} em cada tópico escolhido.",
       "subscribeTopicsConfirm": "Inscrever",
       "deleteTitle": "Excluir contatos",
-      "deleteBody": "{count, plural, one {# contato é removido} other {# contatos são removidos}} permanentemente dos seus contatos.",
+      "deleteBody": "{count, plural, one {# contato é removido} other {# contatos são removidos}} permanentemente dos seus contatos e apagados do histórico de emails e dos logs de API.",
       "deleteConfirm": "Excluir contatos",
       "error": "Não foi possível aplicar a alteração. Tente de novo."
     },

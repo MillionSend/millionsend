@@ -71,11 +71,15 @@
   "confirmTitle": "Are you sure?",
   "confirm": "Confirm",
   "notFound": {
+    "title": "No such page.",
     "body": "Wrong address, or the page moved.",
-    "cta": "Go to the dashboard"
+    "cta": "Go to the dashboard",
+    "docs": "Documentation"
   },
   "errorPage": {
+    "title": "Something broke.",
     "body": "The error is on our side. Reload, or try again in a moment.",
-    "retry": "Try again"
+    "retry": "Try again",
+    "cta": "Go to the dashboard"
   }
 }

@@ -1,5 +1,6 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  apiRequestActor,
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
@@ -7,6 +8,7 @@ import {
   isLoopbackUrl,
   isReservedSenderDomain,
   PLAN_DOMAIN_LIMIT,
+  recordAudit,
 } from "@millionsend/core";
 import { recordCheck } from "@millionsend/core/domain-status";
 import { type Db, schema } from "@millionsend/db";
@@ -270,6 +272,13 @@ export function registerDomainRoutes(
         throw error;
       }
       if (!row) throw new Error("domain insert returned no row");
+      await recordAudit(db, {
+        teamId: auth.teamId,
+        actor: apiRequestActor(auth),
+        action: "domain.created",
+        target: { type: "domain", id: row.id },
+        metadata: { name: row.name, region },
+      });
       return c.json({ ...toWire(row), records: wireRecords(row, null, deps) }, 200);
     },
   );
@@ -387,6 +396,15 @@ export function registerDomainRoutes(
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
+      if (status === "verified" && domain.status !== "verified") {
+        await recordAudit(db, {
+          teamId: auth.teamId,
+          actor: apiRequestActor(auth),
+          action: "domain.verified",
+          target: { type: "domain", id: domain.id },
+          metadata: { name: domain.name },
+        });
+      }
       // Full object with per-record status — the promised "fresh status"
       // without a get_domain round-trip. Additive over the SDK's { id }.
       const fresh = {
@@ -557,6 +575,13 @@ export function registerDomainRoutes(
             and(eq(schema.apiKeys.teamId, auth.teamId), eq(schema.apiKeys.domainId, domain.id)),
           );
         await txDb.delete(d).where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
+      });
+      await recordAudit(db, {
+        teamId: auth.teamId,
+        actor: apiRequestActor(auth),
+        action: "domain.deleted",
+        target: { type: "domain", id: domain.id },
+        metadata: { name: domain.name },
       });
       return c.json({ object: "domain" as const, id: domain.id, deleted: true as const }, 200);
     },

@@ -110,8 +110,13 @@
     "importError": "Could not import contacts.",
     "importDone": "Done",
     "deleteTitle": "Delete contact",
-    "deleteBody": "{email} is removed from your contacts.",
+    "deleteBody": "{email} is removed from your contacts and scrubbed from email history and API logs.",
     "deleteConfirm": "Delete contact",
+    "erase": "Erase address",
+    "eraseTitle": "Erase an address",
+    "eraseBody": "Removes the contact if there is one, replaces the address in every email's recipient list, scrubs delivery and webhook payloads, and deletes matching API logs. The suppression list keeps a hash so the address stays blocked. This cannot be undone.",
+    "eraseConfirm": "Erase address",
+    "eraseInvalid": "Enter a valid email address.",
     "bulk": {
       "selectAll": "Select all loaded contacts",
       "selectRow": "Select {email}",
@@ -134,7 +139,7 @@
       "subscribeTopicsBody": "{count, plural, one {# contact is} other {# contacts are}} subscribed to every chosen topic.",
       "subscribeTopicsConfirm": "Subscribe",
       "deleteTitle": "Delete contacts",
-      "deleteBody": "{count, plural, one {# contact is} other {# contacts are}} permanently removed from your contacts.",
+      "deleteBody": "{count, plural, one {# contact is} other {# contacts are}} permanently removed from your contacts and scrubbed from email history and API logs.",
       "deleteConfirm": "Delete contacts",
       "error": "Could not apply the change. Try again."
     },

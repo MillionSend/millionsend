@@ -8,9 +8,8 @@ import { Skeleton } from "@/components/skeleton";
 import { Tooltip } from "@/components/tooltip";
 import { WarnCard } from "@/components/warn-card";
 import { codeRichTags } from "@/lib/code-rich-tags";
+import { SMTP_DOCS_URL } from "@/lib/docs-links";
 import { useTRPC } from "@/lib/trpc";
-
-const SMTP_DOCS_URL = "https://docs.millionsend.com/smtp";
 
 function FieldRow({
   label,

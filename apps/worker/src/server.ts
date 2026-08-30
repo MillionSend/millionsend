@@ -1,4 +1,5 @@
 import { SQSClient } from "@aws-sdk/client-sqs";
+import { createStripe, purgeStripeEvents, reconcileTeamPlan } from "@millionsend/billing";
 import { env, trackingSubdomainsSupported } from "@millionsend/config";
 import {
   deriveTrackingKey,
@@ -19,10 +20,14 @@ import {
   drainQuotaParked,
   purgeExpiredApiRequests,
   purgeExpiredEmailBodies,
+  purgeExpiredEmailMetadata,
+  purgeExpiredSessions,
+  reconcileBillingPlans,
   reconcileStalledBroadcasts,
   reconcileStalledSends,
   reconcileWebhookDeliveries,
   reverifyDomains,
+  stripExpiredEventPayloads,
 } from "./handlers/cron.js";
 import { abandonWebhookDelivery, deliverWebhook } from "./handlers/deliver-webhook.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
@@ -40,6 +45,10 @@ if (!env.MASTER_ENCRYPTION_KEY) {
 
 const db = getDb();
 const keyring = createKeyringFromEnv(env);
+// Days whole email rows (recipients, subject, events) are kept; bodies age
+// out earlier on EMAIL_RETENTION_DAYS. Read here until it joins the env schema.
+const metadataRetentionDays = env.EMAIL_METADATA_RETENTION_DAYS;
+const stripe = env.IS_CLOUD && env.STRIPE_SECRET_KEY ? createStripe(env.STRIPE_SECRET_KEY) : null;
 const masterKeyBytes = Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64");
 const unsubscribeSecretKey = deriveUnsubscribeKey(masterKeyBytes);
 // App-layer tracking signs tokens with an HKDF-derived key; defaultBaseUrl is
@@ -233,9 +242,36 @@ await queue.scheduleCrons({
     const requests = await purgeExpiredApiRequests(db, {
       defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
     });
-    if (purged > 0 || requests > 0) {
-      console.log(`retention.purge: purged=${purged} apiRequests=${requests}`);
+    const stripped = await stripExpiredEventPayloads(db, {
+      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
+    });
+    const metadata = await purgeExpiredEmailMetadata(db, { retentionDays: metadataRetentionDays });
+    const sessions = await purgeExpiredSessions(db);
+    const stripeEvents = await purgeStripeEvents(db);
+    const counts = {
+      purged,
+      apiRequests: requests,
+      events: stripped.events,
+      deliveries: stripped.deliveries,
+      emails: metadata.emails,
+      oldDeliveries: metadata.deliveries,
+      sessions,
+      stripeEvents,
+    };
+    if (Object.values(counts).some((n) => n > 0)) {
+      console.log(
+        `retention.purge: ${Object.entries(counts)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(" ")}`,
+      );
     }
+  },
+  "billing.reconcile": async () => {
+    if (!stripe) return;
+    const result = await reconcileBillingPlans(db, {
+      reconcileTeam: (teamId) => reconcileTeamPlan({ db, stripe, log: console.warn }, teamId),
+    });
+    console.log(`billing.reconcile: reconciled=${result.reconciled} failed=${result.failed}`);
   },
   "idempotency.purge": async () => {
     await purgeExpiredIdempotencyKeys(db);

@@ -71,11 +71,15 @@
   "confirmTitle": "Tem certeza?",
   "confirm": "Confirmar",
   "notFound": {
+    "title": "Essa página não existe.",
     "body": "Endereço errado, ou a página mudou de lugar.",
-    "cta": "Ir para o painel"
+    "cta": "Ir para o painel",
+    "docs": "Documentação"
   },
   "errorPage": {
+    "title": "Algo quebrou.",
     "body": "O erro é do nosso lado. Recarregue, ou tente de novo em instantes.",
-    "retry": "Tentar de novo"
+    "retry": "Tentar de novo",
+    "cta": "Ir para o painel"
   }
 }

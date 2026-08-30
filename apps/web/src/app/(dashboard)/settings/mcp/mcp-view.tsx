@@ -7,9 +7,9 @@ import { CodeHighlight, type HighlightLanguage } from "@/components/code-highlig
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
+import { MCP_DOCS_URL } from "@/lib/docs-links";
 import { MCP_TOOLS } from "./mcp-tools";
 
-const MCP_DOCS_URL = "https://docs.millionsend.com/mcp";
 /* Pinned: `npx -y mcp-remote` would run whatever version npm serves next. */
 const MCP_REMOTE = "mcp-remote@0.8.2";
 

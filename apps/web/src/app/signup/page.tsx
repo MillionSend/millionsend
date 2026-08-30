@@ -1,5 +1,7 @@
 import { env } from "@millionsend/config";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { AuthForm } from "@/components/auth/auth-form";
 import { enabledSocialProviders, hasSession } from "@/server/auth";
 
@@ -16,4 +18,9 @@ export default async function SignupPage() {
       legal={{ termsUrl: env.TERMS_URL ?? null, privacyUrl: env.PRIVACY_URL ?? null }}
     />
   );
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("auth");
+  return { title: t("signup.submit"), robots: { index: true, follow: true } };
 }

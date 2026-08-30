@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getLLMText } from "@/lib/get-llm-text";
 import { i18n, isLocale } from "@/lib/i18n";
+import { absoluteUrl } from "@/lib/site";
 import { source } from "@/lib/source";
 
 export const revalidate = false;
@@ -20,7 +21,11 @@ export async function GET(
   if (!page) notFound();
 
   return new Response(await getLLMText(page), {
-    headers: { "Content-Type": "text/markdown; charset=utf-8" },
+    headers: {
+      "Content-Type": "text/markdown; charset=utf-8",
+      // The markdown rendition is the HTML page's duplicate for search engines.
+      Link: `<${absoluteUrl(page.url)}>; rel="canonical"`,
+    },
   });
 }
 

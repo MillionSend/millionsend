@@ -22,6 +22,16 @@ export {
   verifyApiKey,
 } from "./api-keys.js";
 export {
+  AUDIT_ACTIONS,
+  type AuditAction,
+  type AuditActor,
+  type AuditEvent,
+  apiRequestActor,
+  type ParsedAuditActor,
+  parseAuditActor,
+  recordAudit,
+} from "./audit.js";
+export {
   BOUNCE_GUIDANCE_KEYS,
   type BounceCategory,
   type BounceGuidance,
@@ -89,6 +99,7 @@ export {
   strictDomainStatus,
 } from "./domain-status.js";
 export { firstRow, resultRows } from "./driver-result.js";
+export { ERASED_TOMBSTONE, type EraseRecipientResult, eraseRecipient } from "./erase-recipient.js";
 export {
   beginIdempotent,
   completeIdempotent,

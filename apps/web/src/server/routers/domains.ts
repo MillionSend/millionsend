@@ -30,6 +30,7 @@ import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
 import { isUniqueViolation } from "@/lib/db-errors";
+import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
@@ -346,6 +347,11 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           throw error;
         }
         if (!created) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        await recordAudit(ctx, {
+          action: "domain.created",
+          target: { type: "domain", id: created.id },
+          metadata: { name: input.name, region: input.region },
+        });
         return { id: created.id };
       }),
 
@@ -393,6 +399,13 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));
+      if (status === "verified" && domain.status !== "verified") {
+        await recordAudit(ctx, {
+          action: "domain.verified",
+          target: { type: "domain", id: domain.id },
+          metadata: { name: domain.name },
+        });
+      }
       return {
         status,
         dkimStatus: verification.dkimStatus,
@@ -484,6 +497,11 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         await txDb
           .delete(schema.domains)
           .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));
+      });
+      await recordAudit(ctx, {
+        action: "domain.deleted",
+        target: { type: "domain", id: domain.id },
+        metadata: { name: domain.name },
       });
       return { id: domain.id };
     }),
