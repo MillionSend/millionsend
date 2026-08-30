@@ -11,6 +11,10 @@ export const MCP_SCOPES = [
   "broadcasts:write",
   "domains:read",
   "domains:write",
+  // One scope for the whole webhook surface: even reads return signing
+  // secrets (the SDK wire retrieves them by design), so a read/write split
+  // would imply a safety boundary that does not exist.
+  "webhooks:write",
 ] as const;
 
 export type McpScope = (typeof MCP_SCOPES)[number];

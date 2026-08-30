@@ -76,13 +76,20 @@ afterAll(() => close());
 describe("topics teamId isolation", () => {
   let topicA: string;
 
-  it("creates a topic scoped to team A", async () => {
+  it("creates a topic scoped to team A, returning the full object", async () => {
     const res = await call(tokenA, "POST", "/topics", {
       name: "News",
       default_subscription: "opt_out",
     });
     expect(res.status).toBe(200);
-    topicA = (await json(res)).id ?? "";
+    const body = await json(res);
+    // Full object on create — an agent can confirm what it made without a re-read.
+    expect(body).toMatchObject({
+      name: "News",
+      default_subscription: "opt_out",
+      visibility: "private",
+    });
+    topicA = body.id ?? "";
     expect(topicA).toMatch(/^[0-9a-f-]{36}$/);
   });
 
@@ -117,7 +124,8 @@ describe("topics teamId isolation", () => {
 
   it("team B cannot see team A's topic in its list", async () => {
     const res = await call(tokenB, "GET", "/topics");
-    expect((await json(res)).data).toEqual([]);
+    // The shared list envelope; topics are never paginated.
+    expect(await json(res)).toEqual({ object: "list", data: [], has_more: false });
   });
 
   it("team B cannot GET team A's topic", async () => {

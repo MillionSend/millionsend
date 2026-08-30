@@ -138,6 +138,8 @@ ferramentas cobertas pelas permissões concedidas.
 | `list_contact_properties` | `audience:read` | Lista as propriedades customizadas de contato. |
 | `list_broadcasts` | `broadcasts:write` | Lista broadcasts com o status. |
 | `get_broadcast` | `broadcasts:write` | Busca um broadcast. |
+| `list_webhooks` | `webhooks:write` | Lista os webhooks (linhas de lista nunca trazem o segredo de assinatura). |
+| `get_webhook` | `webhooks:write` | Busca um webhook, incluindo o segredo de assinatura. |
 | `list_domains` | `domains:read` | Lista domínios de envio com o status de verificação. |
 | `get_domain` | `domains:read` | Busca um domínio com os registros DNS. |
 | `send_email` | `emails:send` | Envia ou agenda um e-mail transacional. |
@@ -164,6 +166,9 @@ ferramentas cobertas pelas permissões concedidas.
 | `send_broadcast` | `broadcasts:write` | Envia ou agenda um rascunho de broadcast. |
 | `cancel_broadcast` | `broadcasts:write` | Cancela um broadcast agendado. |
 | `delete_broadcast` | `broadcasts:write` | Exclui um rascunho de broadcast. |
+| `create_webhook` | `webhooks:write` | Cria um webhook; a resposta inclui o segredo de assinatura. |
+| `update_webhook` | `webhooks:write` | Atualiza URL, eventos ou status de um webhook. |
+| `delete_webhook` | `webhooks:write` | Exclui um webhook. |
 | `create_domain` | `domains:write` | Adiciona um domínio de envio e retorna os registros DNS. |
 | `update_domain` | `domains:write` | Muda as configurações de rastreamento de um domínio. |
 | `verify_domain` | `domains:write` | Reverifica o DNS e a verificação SES de um domínio. |

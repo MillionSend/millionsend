@@ -209,6 +209,8 @@ describe("tool listing", () => {
       "list_contact_properties",
       "list_broadcasts",
       "get_broadcast",
+      "list_webhooks",
+      "get_webhook",
       "list_domains",
       "get_domain",
       "send_email",
@@ -235,6 +237,9 @@ describe("tool listing", () => {
       "send_broadcast",
       "cancel_broadcast",
       "delete_broadcast",
+      "create_webhook",
+      "update_webhook",
+      "delete_webhook",
       "create_domain",
       "update_domain",
       "verify_domain",
@@ -514,4 +519,32 @@ describe('all-teams tokens (team_id claim "*")', () => {
     });
     expect(res.status).toBe(401);
   });
+});
+
+it("create_webhook surfaces the signing secret verbatim and lists back without it", async () => {
+  const client = await connect(await mintToken({ scope: "webhooks:write" }));
+  expect((await client.listTools()).tools.map((t) => t.name)).toEqual([
+    "list_webhooks",
+    "get_webhook",
+    "create_webhook",
+    "update_webhook",
+    "delete_webhook",
+  ]);
+  const created = await client.callTool({
+    name: "create_webhook",
+    arguments: {
+      endpoint: "https://acme.dev/api/webhooks/millionsend",
+      events: ["email.bounced", "email.complained"],
+    },
+  });
+  expect(created.isError).toBeFalsy();
+  const { id, signing_secret } = resultJson(created) as { id: string; signing_secret: string };
+  expect(signing_secret).toMatch(/^whsec_/);
+  const listed = resultJson(await client.callTool({ name: "list_webhooks", arguments: {} }));
+  const listedText = JSON.stringify(listed);
+  expect(listedText).toContain(id);
+  expect(listedText).not.toContain(signing_secret);
+  const got = resultJson(await client.callTool({ name: "get_webhook", arguments: { id } }));
+  expect((got as { signing_secret?: string }).signing_secret).toBe(signing_secret);
+  await client.close();
 });

@@ -9,6 +9,11 @@ ao vivo: um contato que passa a corresponder ao filtro entra no segmento
 imediatamente, e a contagem de contatos que você vê é computada no momento da
 leitura.
 
+Um segmento criado **sem filtro** é uma **lista manual de membros**: você
+adiciona e remove contatos explicitamente (pelo dashboard, ou via
+`POST /contacts/{id}/segments/{segmentId}` e o `add_contact_to_segment` do MCP). Os dois
+tipos valem igualmente como alvo de broadcast.
+
 Os filtros atuam sobre campos do contato (email, nome, estado de inscrição,
 data de criação) e sobre
 [propriedades customizadas](/pt-BR/concepts/contacts#o-que-um-contato-armazena),

@@ -58,7 +58,7 @@ export function registerContactPropertyRoutes(app: OpenAPIHono<Env>, db: Db): vo
       },
       responses: {
         200: {
-          content: { "application/json": { schema: contactPropertyIdResponseSchema } },
+          content: { "application/json": { schema: getContactPropertyResponseSchema } },
           description: "Contact property created",
         },
         409: jsonErr("Property already exists"),
@@ -84,11 +84,13 @@ export function registerContactPropertyRoutes(app: OpenAPIHono<Env>, db: Db): vo
           fallbackValue: fallback.stored,
         })
         .onConflictDoNothing()
-        .returning({ id: p.id });
+        .returning();
       if (!row) {
         return c.json(errorBody(409, "validation_error", "Property already exists"), 409);
       }
-      return c.json({ object: "contact_property" as const, id: row.id }, 200);
+      // Full object (not just { object, id }): additive, and lets an agent
+      // confirm the create without a re-read.
+      return c.json({ ...wire(row), object: "contact_property" as const }, 200);
     },
   );
 

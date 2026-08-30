@@ -79,7 +79,15 @@ describe("contact properties API (/contact-properties)", () => {
       fallback_value: "2",
     });
     expect(res.status).toBe(200);
-    numberId = (await json(res)).id as string;
+    const body = await json(res);
+    // Full object on create — an agent can confirm what it made without a re-read.
+    expect(body).toMatchObject({
+      object: "contact_property",
+      key: "seats",
+      type: "number",
+      fallback_value: 2,
+    });
+    numberId = body.id as string;
 
     const fetched = await json(await call(tokenA, "GET", `/contact-properties/${numberId}`));
     expect(fetched).toMatchObject({ key: "seats", type: "number", fallback_value: 2 });

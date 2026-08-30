@@ -39,7 +39,11 @@ transacional, mais o tratamento específico de broadcast:
   customizadas) são substituídos no template.
 - **Links de descadastro** — headers `List-Unsubscribe` de um clique
   (RFC 8058) e um link de descadastro hospedado são adicionados a cada
-  mensagem.
+  mensagem. Para colocar o link no corpo, escreva `{{{UNSUBSCRIBE_URL}}}` —
+  ele é substituído por destinatário pela URL de descadastro hospedada.
+  `{{{RESEND_UNSUBSCRIBE_URL}}}` é um alias suportado, então templates
+  escritos para o Resend continuam funcionando sem mudança (e voltam sem
+  mudança).
 
 <Callout type="info">
 Em uma instância auto-hospedada, os links de descadastro são construídos a

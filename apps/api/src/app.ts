@@ -1112,7 +1112,9 @@ function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
       },
       responses: {
         200: {
-          content: { "application/json": { schema: topicIdResponseSchema } },
+          // Full object (not just { id }): additive over the SDK's { id }
+          // typing, and lets an agent confirm the create without a re-read.
+          content: { "application/json": { schema: topicResponseSchema } },
           description: "Topic created",
         },
         422: jsonErr("Validation error"),
@@ -1133,9 +1135,9 @@ function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
           // Omitted → the column default ('private').
           ...(body.visibility !== undefined ? { visibility: body.visibility } : {}),
         })
-        .returning({ id: b.id });
+        .returning();
       if (!row) throw new Error("topic insert returned no row");
-      return c.json({ id: row.id }, 200);
+      return c.json(toWire(row), 200);
     },
   );
 
@@ -1157,7 +1159,12 @@ function registerTopicRoutes(app: OpenAPIHono<Env>, db: Db): void {
         .from(b)
         .where(eq(b.teamId, auth.teamId))
         .orderBy(asc(b.createdAt), asc(b.id));
-      return c.json({ data: rows.map(toWire) }, 200);
+      // Same envelope as the other list endpoints; topics are never paginated,
+      // so has_more is always false.
+      return c.json(
+        { object: "list" as const, data: rows.map(toWire), has_more: false as const },
+        200,
+      );
     },
   );
 

@@ -36,7 +36,11 @@ plus broadcast-specific handling:
 - **Merge fields** — per-contact values (name, custom properties) are
   substituted into the template.
 - **Unsubscribe links** — RFC 8058 one-click `List-Unsubscribe` headers and a
-  hosted unsubscribe link are added to every message.
+  hosted unsubscribe link are added to every message. To place the link in
+  the body yourself, write `{{{UNSUBSCRIBE_URL}}}` — it is replaced
+  per-recipient with their hosted unsubscribe URL.
+  `{{{RESEND_UNSUBSCRIBE_URL}}}` is a supported alias, so templates written
+  for Resend keep working unchanged (and roll back unchanged).
 
 <Callout type="info">
 On a self-hosted instance, unsubscribe links are built from `APP_BASE_URL`,

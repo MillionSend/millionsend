@@ -135,6 +135,8 @@ their granted permissions cover.
 | `list_contact_properties` | `audience:read` | List the custom contact property definitions. |
 | `list_broadcasts` | `broadcasts:write` | List broadcasts with their status. |
 | `get_broadcast` | `broadcasts:write` | Get one broadcast. |
+| `list_webhooks` | `webhooks:write` | List webhook endpoints (list rows never carry signing secrets). |
+| `get_webhook` | `webhooks:write` | Get one webhook, including its signing secret. |
 | `list_domains` | `domains:read` | List sending domains with verification status. |
 | `get_domain` | `domains:read` | Get one domain with its DNS records. |
 | `send_email` | `emails:send` | Send or schedule a transactional email. |
@@ -161,6 +163,9 @@ their granted permissions cover.
 | `send_broadcast` | `broadcasts:write` | Send or schedule a draft broadcast. |
 | `cancel_broadcast` | `broadcasts:write` | Cancel a scheduled broadcast. |
 | `delete_broadcast` | `broadcasts:write` | Delete a draft broadcast. |
+| `create_webhook` | `webhooks:write` | Create a webhook endpoint; the response includes the signing secret. |
+| `update_webhook` | `webhooks:write` | Update a webhook's URL, events or status. |
+| `delete_webhook` | `webhooks:write` | Delete a webhook endpoint. |
 | `create_domain` | `domains:write` | Add a sending domain and get its DNS records. |
 | `update_domain` | `domains:write` | Change a domain's tracking settings. |
 | `verify_domain` | `domains:write` | Re-check a domain's DNS and SES verification. |

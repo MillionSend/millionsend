@@ -42,7 +42,13 @@ const ms = new MillionSend("ms_...", { baseUrl: "https://api.millionsend.com" })
 ## 3. Re-create what lives outside the request path
 
 - **Webhooks** — endpoints are per-platform state; re-create yours under
-  **Webhooks** in the dashboard.
+  **Webhooks** in the dashboard, via `POST /webhooks`, or with the MCP's
+  `create_webhook` — verification is Standard Webhooks (`whsec_` secret,
+  `webhook-id`/`-timestamp`/`-signature` headers), same as Resend.
+- **Unsubscribe placeholders** — broadcast bodies using
+  `{{{RESEND_UNSUBSCRIBE_URL}}}` keep working: it is a supported alias of
+  `{{{UNSUBSCRIBE_URL}}}`, replaced per-recipient with the hosted
+  unsubscribe link. No template changes on the way in, none on a rollback.
 - **Contacts** — import via CSV under **Audience**, or `POST /contacts` with
   the same payloads your Resend integration used.
 - **Suppressions** — bounce and complaint suppressions accumulate from your
