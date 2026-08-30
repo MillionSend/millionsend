@@ -28,8 +28,10 @@ RUN rm -rf apps/*/.next/cache node_modules apps/*/node_modules packages/*/node_m
 # accepted tradeoff for zero build tooling in the backends.
 FROM node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runtime
 WORKDIR /app
+ARG GIT_SHA=unknown
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV MILLIONSEND_REVISION=$GIT_SHA
 RUN groupadd --system millionsend && useradd --system --gid millionsend millionsend
 # Root-owned tree: the process that runs this source cannot rewrite it. Only
 # Next's runtime caches (image optimizer, fetch cache) and the docs' MDX

@@ -43,6 +43,11 @@ export {
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
 export { type ContactActivityRow, recordContactActivity } from "./contact-activities.js";
 export {
+  CONTACT_PROPERTY_KEY_MAX_LENGTH,
+  CONTACT_PROPERTY_MAX_KEYS,
+  CONTACT_PROPERTY_VALUE_MAX_LENGTH,
+} from "./contact-properties.js";
+export {
   BOUND_ENVELOPE_VERSION_OFFSET,
   decryptEmailBody,
   decryptPayload,
@@ -128,6 +133,8 @@ export {
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
 export {
+  SEGMENT_FILTER_MAX_CONDITIONS,
+  SEGMENT_FILTER_VALUE_MAX_LENGTH,
   SegmentFilterError,
   segmentContactsWhere,
   segmentFilterSchema,

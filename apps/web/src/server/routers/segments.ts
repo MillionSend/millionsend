@@ -1,4 +1,9 @@
-import { segmentContactsWhere, segmentWhere } from "@millionsend/core";
+import {
+  SEGMENT_FILTER_MAX_CONDITIONS,
+  SEGMENT_FILTER_VALUE_MAX_LENGTH,
+  segmentContactsWhere,
+  segmentWhere,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -22,9 +27,15 @@ type SegmentRow = typeof schema.segments.$inferSelect;
  */
 const filterInputSchema = z.object({
   match: z.enum(["all", "any"]),
-  conditions: z.array(
-    z.object({ field: z.string(), op: z.string(), value: z.string().nullable() }),
-  ),
+  conditions: z
+    .array(
+      z.object({
+        field: z.string(),
+        op: z.string(),
+        value: z.string().max(SEGMENT_FILTER_VALUE_MAX_LENGTH).nullable(),
+      }),
+    )
+    .max(SEGMENT_FILTER_MAX_CONDITIONS),
 });
 
 /** Guards a segmentId belongs to the caller's team; returns the row. */

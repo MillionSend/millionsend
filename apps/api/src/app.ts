@@ -7,6 +7,7 @@ import {
   acceptEmail,
   authenticateApiKey,
   beginIdempotent,
+  CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   type ContactActivityRow,
   canonicalBodyHash,
   clearUnsubscribeSuppression,
@@ -155,6 +156,8 @@ export interface ApiDeps {
   trackingSubdomains?: boolean | undefined;
   /** Per-key fixed-window request cap. Defaults to 600 requests/minute. */
   rateLimitPerMinute?: number | undefined;
+  /** Deployed source revision, reported by /health. */
+  revision?: string | undefined;
   /**
    * Per-team fixed-window request cap across all of the team's keys, so
    * minting keys cannot multiply the per-key cap. Defaults to 3000/minute.
@@ -352,7 +355,14 @@ function coerceContactProperties(
     if (types.get(key.toLowerCase()) === "number" && numericPropertyValue(value) === null) {
       return { ok: false, message: `property "${key}" must be a number` };
     }
-    out[key] = String(value);
+    const text = String(value);
+    if (text.length > CONTACT_PROPERTY_VALUE_MAX_LENGTH) {
+      return {
+        ok: false,
+        message: `property "${key}" exceeds ${CONTACT_PROPERTY_VALUE_MAX_LENGTH} characters`,
+      };
+    }
+    out[key] = text;
   }
   return { ok: true, properties: out };
 }
@@ -379,7 +389,7 @@ function wireContactProperties(
 }
 
 async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
-  const res = await fetch(subscribeUrl);
+  const res = await fetch(subscribeUrl, { signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`SNS subscription confirmation failed: ${res.status}`);
 }
 
@@ -2195,7 +2205,8 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   );
   app.use("*", secureHeaders());
 
-  app.get("/health", (c) => c.json({ ok: true }));
+  const health = { status: "ok" as const, revision: deps.revision ?? "unknown" };
+  app.get("/health", (c) => c.json(health));
 
   app.doc("/openapi.json", {
     openapi: "3.1.0",

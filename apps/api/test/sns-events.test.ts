@@ -61,7 +61,7 @@ function baseNotification(message: unknown): UnsignedSnsMessage {
     MessageId: "sns-mid-1",
     TopicArn: SNS_TEST_TOPIC_ARN,
     Message: typeof message === "string" ? message : JSON.stringify(message),
-    Timestamp: "2026-08-14T00:00:00.000Z",
+    Timestamp: new Date().toISOString(),
     SignatureVersion: "2",
     SigningCertURL: SNS_TEST_CERT_URL,
   };
@@ -156,7 +156,7 @@ it("SubscriptionConfirmation: confirms only sns.<region>.amazonaws.com URLs", as
     MessageId: "sns-sub-1",
     TopicArn: SNS_TEST_TOPIC_ARN,
     Message: "You have chosen to subscribe",
-    Timestamp: "2026-08-14T00:00:00.000Z",
+    Timestamp: new Date().toISOString(),
     SignatureVersion: "2",
     SigningCertURL: SNS_TEST_CERT_URL,
     Token: "tok",

@@ -45,6 +45,7 @@ const app = createApi({
   keyring,
   isCloud: env.IS_CLOUD,
   rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
+  revision: env.MILLIONSEND_REVISION,
   appBaseUrl: env.APP_BASE_URL,
   publicApiUrl: env.PUBLIC_API_URL,
   trackingSubdomains: trackingSubdomainsSupported(),

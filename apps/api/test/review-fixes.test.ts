@@ -63,9 +63,16 @@ beforeAll(async () => {
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
     isCloud: true,
     enqueueEmailSend: async () => {},
+    revision: "abc1234",
   });
 });
 afterAll(() => close());
+
+it("/health reports the deployed revision without auth", async () => {
+  const res = await app.request("/health");
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ status: "ok", revision: "abc1234" });
+});
 
 describe("sender domain enforcement", () => {
   it("rejects an unverified team domain", async () => {

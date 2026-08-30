@@ -2,9 +2,10 @@ import { createSign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   canonicalString,
+  createCachingCertFetcher,
   isAllowedCertUrl,
   type SnsMessage,
   verifySnsMessage,
@@ -29,7 +30,7 @@ function baseNotification(): Omit<SnsMessage, "Signature"> {
     MessageId: "mid-1",
     TopicArn: TOPIC,
     Message: JSON.stringify({ eventType: "Delivery" }),
-    Timestamp: "2026-08-14T00:00:00.000Z",
+    Timestamp: new Date().toISOString(),
     SignatureVersion: "2",
     SigningCertURL: CERT_URL,
   };
@@ -97,7 +98,7 @@ describe("verifySnsMessage", () => {
       MessageId: "mid-2",
       TopicArn: TOPIC,
       Message: "You have chosen to subscribe...",
-      Timestamp: "2026-08-14T00:00:00.000Z",
+      Timestamp: new Date().toISOString(),
       SignatureVersion: "2",
       SigningCertURL: CERT_URL,
       Token: "tok-123",
@@ -108,9 +109,38 @@ describe("verifySnsMessage", () => {
     expect(await verifySnsMessage(tampered, opts)).toMatchObject({ ok: false });
   });
 
+  it("rejects a Timestamp missing or more than 15 minutes from now", async () => {
+    const stale = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+    const future = new Date(Date.now() + 16 * 60 * 1000).toISOString();
+    for (const Timestamp of [stale, future, "not-a-date"]) {
+      const result = await verifySnsMessage(sign({ ...baseNotification(), Timestamp }), opts);
+      expect(result).toMatchObject({ ok: false, reason: /freshness/ });
+    }
+    const recent = new Date(Date.now() - 14 * 60 * 1000).toISOString();
+    expect(
+      await verifySnsMessage(sign({ ...baseNotification(), Timestamp: recent }), opts),
+    ).toEqual({ ok: true });
+  });
+
   it("rejects unknown signature versions", async () => {
     const msg = sign(baseNotification());
     const result = await verifySnsMessage({ ...msg, SignatureVersion: "3" }, opts);
     expect(result).toMatchObject({ ok: false, reason: /unsupported signature version/ });
+  });
+});
+
+describe("createCachingCertFetcher", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("caches by origin + path so a varying query string cannot grow the cache", async () => {
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      fetched.push(url);
+      return new Response(CERT, { status: 200 });
+    });
+    const fetchCert = createCachingCertFetcher();
+    expect(await fetchCert(`${CERT_URL}?a=1`)).toBe(CERT);
+    expect(await fetchCert(`${CERT_URL}?b=2`)).toBe(CERT);
+    expect(fetched).toEqual([CERT_URL]);
   });
 });

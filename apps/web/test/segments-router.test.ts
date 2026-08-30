@@ -221,6 +221,27 @@ describe("segments reject a malformed filter with 422", () => {
     ).rejects.toMatchObject({ code: "UNPROCESSABLE_CONTENT" });
     expect(await caller.segments.list()).toEqual([]);
   });
+
+  it("rejects oversized filters at the input boundary", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const cond = { field: "email", op: "equals", value: "x" };
+    await expect(
+      caller.segments.count({
+        filter: filterOf(
+          "all",
+          Array.from({ length: 51 }, () => cond),
+        ),
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      caller.segments.create({
+        name: "long",
+        filter: filterOf("all", [{ ...cond, value: "x".repeat(501) }]),
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(await caller.segments.list()).toEqual([]);
+  });
 });
 
 describe("builder produces a valid filter shape", () => {

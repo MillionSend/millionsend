@@ -182,6 +182,18 @@ describe("audience.contacts.addMany", () => {
     expect((await caller.audience.contacts.stats()).contacts).toBe(1);
   });
 
+  it("caps properties at 100 keys, 200-char keys, and 1000-char values", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const tooMany = Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`k${i}`, "v"]));
+    for (const properties of [tooMany, { ["k".repeat(201)]: "v" }, { k: "v".repeat(1001) }]) {
+      await expect(
+        caller.audience.contacts.add({ email: "cap@example.com", properties }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    expect((await caller.audience.contacts.stats()).contacts).toBe(0);
+  });
+
   it("caps a batch at 1000 rows", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
