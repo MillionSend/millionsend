@@ -16,9 +16,8 @@ set -euo pipefail
 export RCLONE_CONFIG=/dev/null
 export RCLONE_S3_PROVIDER="${S3_PROVIDER:-Cloudflare}"
 export RCLONE_S3_ENDPOINT="${S3_ENDPOINT}"
-# A dedicated backup credential keeps the public-uploads key away from the dumps.
-export RCLONE_S3_ACCESS_KEY_ID="${S3_BACKUP_ACCESS_KEY_ID:-${S3_ACCESS_KEY_ID}}"
-export RCLONE_S3_SECRET_ACCESS_KEY="${S3_BACKUP_SECRET_ACCESS_KEY:-${S3_SECRET_ACCESS_KEY}}"
+export RCLONE_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID}"
+export RCLONE_S3_SECRET_ACCESS_KEY="${S3_SECRET_ACCESS_KEY}"
 export RCLONE_S3_REGION="${S3_REGION:-auto}"
 # The bucket must already exist. Skipping rclone's bucket probe/create lets
 # R2 tokens scoped to a single bucket (no ListBuckets permission) work.
