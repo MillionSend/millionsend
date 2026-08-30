@@ -39,6 +39,9 @@ beforeAll(async () => {
       status: "verified",
       verifiedAt: new Date(),
       sesConfigurationSet: "ms-config-set",
+      // The suite's tracking assertions are calibrated to a click-tracking
+      // domain; the column default is off, so opt in explicitly.
+      clickTracking: true,
     })
     .returning({ id: schema.domains.id });
   if (!domain) throw new Error("domain insert failed");

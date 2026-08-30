@@ -580,14 +580,14 @@ describe("domains.delete", () => {
 });
 
 describe("domains.updateConfiguration", () => {
-  it("persists toggles and the subdomain, and defaults are open=off click=on", async () => {
+  it("persists toggles and the subdomain, and both tracking kinds default off", async () => {
     const teamId = await createTeam(db);
     const caller = callerFor(teamId, fakeSes().deps);
     const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
 
     const before = await caller.domains.get({ id });
     expect(before.openTracking).toBe(false);
-    expect(before.clickTracking).toBe(true);
+    expect(before.clickTracking).toBe(false);
     expect(before.trackingSubdomain).toBeNull();
     expect(before.tlsMode).toBe("opportunistic");
 

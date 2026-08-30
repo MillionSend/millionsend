@@ -22,7 +22,6 @@ import { type ApiDeps, type Env, errorBody, isUniqueViolation, keysetPage } from
 import {
   createDomainRequestSchema,
   createDomainResponseSchema,
-  domainIdResponseSchema,
   errorSchema,
   getDomainResponseSchema,
   listDomainsResponseSchema,
@@ -302,8 +301,8 @@ export function registerDomainRoutes(
       request: { params: idParam },
       responses: {
         200: {
-          content: { "application/json": { schema: domainIdResponseSchema } },
-          description: "Verification check triggered",
+          content: { "application/json": { schema: getDomainResponseSchema } },
+          description: "Verification result: the domain with per-record status",
         },
         404: jsonErr("Not found"),
       },
@@ -315,7 +314,7 @@ export function registerDomainRoutes(
       // The shared source of truth the dashboard verify and the worker cron
       // also run: SES status + live DNS folded into the strict stored status
       // the send gate keys off.
-      const { status } = await computeDomainVerification(
+      const { status, verification } = await computeDomainVerification(
         ses.clientForRegion(domain.region),
         ses.dns ?? nodeDnsResolver,
         domain,
@@ -329,7 +328,21 @@ export function registerDomainRoutes(
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
-      return c.json({ object: "domain" as const, id: domain.id }, 200);
+      // Full object with per-record status — the promised "fresh status"
+      // without a get_domain round-trip. Additive over the SDK's { id }.
+      const fresh = {
+        ...domain,
+        status,
+        verifiedAt: status === "verified" && !domain.verifiedAt ? now : domain.verifiedAt,
+      };
+      return c.json(
+        {
+          object: "domain" as const,
+          ...toWire(fresh),
+          records: wireRecords(fresh, verification, deps),
+        },
+        200,
+      );
     },
   );
 
@@ -343,8 +356,8 @@ export function registerDomainRoutes(
       },
       responses: {
         200: {
-          content: { "application/json": { schema: domainIdResponseSchema } },
-          description: "Domain updated",
+          content: { "application/json": { schema: getDomainResponseSchema } },
+          description: "Domain updated; full object with records",
         },
         404: jsonErr("Not found"),
         422: jsonErr("Validation error"),
@@ -420,7 +433,27 @@ export function registerDomainRoutes(
           .set(set)
           .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
       }
-      return c.json({ object: "domain" as const, id: domain.id }, 200);
+      // Full object so the caller sees the settings it just changed —
+      // additive over the SDK's { id }. Records come from SES's cached
+      // verification, same as GET.
+      const updated = {
+        ...domain,
+        openTracking: set.openTracking ?? domain.openTracking,
+        clickTracking: set.clickTracking ?? domain.clickTracking,
+        trackingSubdomain:
+          set.trackingSubdomain !== undefined ? set.trackingSubdomain : domain.trackingSubdomain,
+      };
+      const verification = await getDomainVerification(ses.clientForRegion(domain.region), {
+        domain: domain.name,
+      });
+      return c.json(
+        {
+          object: "domain" as const,
+          ...toWire(updated),
+          records: wireRecords(updated, verification, deps),
+        },
+        200,
+      );
     },
   );
 

@@ -84,6 +84,25 @@ describe("postJson delivery (allowLocalhost)", () => {
     return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   }
 
+  it("delivers to a hostname (pinned lookup feeds the socket's all-addresses form)", async () => {
+    // A hostname (not an IP literal) routes through the custom lookup, which
+    // the socket calls with `all: true` under autoSelectFamily (Node ≥20
+    // default) — a single-address answer there breaks with "Invalid IP
+    // address: undefined" and no hostname delivery ever succeeds.
+    const base = await listen((_req, res) => {
+      res.writeHead(200);
+      res.end("ok");
+    });
+    const port = new URL(base).port;
+    const res = await postJson(`http://localhost:${port}/hook`, {
+      body: "{}",
+      headers: {},
+      allowLocalhost: true,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toBe("ok");
+  });
+
   it("POSTs, returns status, does not follow redirects, caps the body", async () => {
     const seen: { method?: string; body?: string; sigHeader?: string } = {};
     const base = await listen((req, res) => {

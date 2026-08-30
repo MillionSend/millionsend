@@ -299,7 +299,7 @@ export default function ContactDetailPage() {
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-          gap: 22,
+          gap: 28,
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
           borderBottom: "1px solid var(--ms-line)",
@@ -332,7 +332,7 @@ export default function ContactDetailPage() {
         style={{
           display: "grid",
           gridTemplateColumns: "1fr 1fr",
-          gap: 22,
+          gap: 28,
           padding: "20px 0",
           borderBottom: "1px solid var(--ms-line)",
         }}

@@ -19,6 +19,7 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
+import { displayUrl } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import {
   WEBHOOK_EVENT_GROUPS,
@@ -288,7 +289,7 @@ export function WebhooksView() {
                         textUnderlineOffset: 3,
                       }}
                     >
-                      {webhook.url}
+                      {displayUrl(webhook.url)}
                     </Link>
                   </td>
                   <td>

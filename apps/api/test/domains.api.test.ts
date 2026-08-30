@@ -161,8 +161,9 @@ describe("POST /domains", () => {
       name: "updates.example.com",
       status: "pending",
       region: "eu-west-1",
+      // Both tracking kinds start off, as the Domains docs promise.
       open_tracking: false,
-      click_tracking: true,
+      click_tracking: false,
       tracking_subdomain: null,
       capabilities: { sending: "enabled", receiving: "disabled" },
     });
@@ -289,7 +290,10 @@ describe("POST /domains/{id}/verify", () => {
     });
     const res = await call(app, fullKey, "POST", `/domains/${id}/verify`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ object: "domain", id });
+    // Full object with the freshly computed status — no get_domain round-trip.
+    const verifyBody = (await res.json()) as Record<string, unknown>;
+    expect(verifyBody).toMatchObject({ object: "domain", id, status: "verified" });
+    expect(Array.isArray(verifyBody.records)).toBe(true);
 
     const [after] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(after?.status).toBe("verified");
@@ -319,7 +323,14 @@ describe("PATCH /domains/{id}", () => {
       tracking_subdomain: "email",
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ object: "domain", id });
+    // Full object echoing the settings just changed.
+    expect(await res.json()).toMatchObject({
+      object: "domain",
+      id,
+      open_tracking: true,
+      click_tracking: false,
+      tracking_subdomain: "email",
+    });
 
     const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(row).toMatchObject({
