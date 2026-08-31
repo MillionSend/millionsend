@@ -962,11 +962,24 @@ it("a broadcast fan-out writes exactly one broadcastId-keyed insights row", asyn
     .returning({ id: schema.broadcasts.id });
   if (!broadcast) throw new Error("broadcast insert failed");
   const unsubscribe = { secretKey: randomBytes(32), baseUrl: "https://app.example.com" };
+  let insightsInserts = 0;
+  const countingDb = new Proxy(db as object, {
+    get(target, prop) {
+      if (prop === "insert") {
+        return (table: unknown) => {
+          if (table === schema.emailInsights) insightsInserts += 1;
+          return (target as Db).insert(table as never);
+        };
+      }
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? (v as () => unknown).bind(target) : v;
+    },
+  }) as Db;
   for (const addr of ["ins-a@example.com", "ins-b@example.com"]) {
     const contactId = await insertContact(addr);
     const emailId = await insertEmail({ broadcastId: broadcast.id, contactId, to: [addr] });
     const deps: SendDeps = { keyring, ses: fakeSes(`mid-ins-bc-${addr}`).ses, unsubscribe };
-    expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+    expect(await sendEmail(countingDb, deps, { emailId })).toBe("sent");
   }
 
   const rows = await db
@@ -976,6 +989,8 @@ it("a broadcast fan-out writes exactly one broadcastId-keyed insights row", asyn
   expect(rows).toHaveLength(1);
   expect(rows[0]?.emailId).toBeNull();
   expect(rows[0]?.marketing).toBe(true);
+  // The second fan-out send must skip the engine + insert on the point-read.
+  expect(insightsInserts).toBe(1);
 });
 
 it("an insights insert failure never fails the accepted send", async () => {

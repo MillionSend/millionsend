@@ -97,6 +97,31 @@ describe("computeDomainVerification", () => {
     );
   });
 
+  it("a resolver outage (all lookups inconclusive) demotes despite SES's cached SUCCESS", async () => {
+    // The dropped-zone case: SERVFAIL/lame delegation everywhere must not
+    // leave the domain verified on AWS's stale cache.
+    const servfail: DnsResolver = {
+      resolveTxt: async () => {
+        throw new Error("servfail");
+      },
+      resolveMx: async () => {
+        throw new Error("servfail");
+      },
+      resolveCname: async () => {
+        throw new Error("servfail");
+      },
+    };
+    const result = await computeDomainVerification(
+      fakeSes({ dkimStatus: "SUCCESS", mailFromStatus: "SUCCESS", verifiedForSending: true }),
+      servfail,
+      DOMAIN,
+    );
+    expect(result.status).toBe("pending");
+    // The snapshot keeps the distinct inconclusive value.
+    expect(result.dnsRecords.every((r) => r.status === "unknown")).toBe(true);
+    expect(result.dmarc).toEqual({ status: "unknown" });
+  });
+
   it("never throws on NXDOMAIN/timeout — a dead resolver reads pending, not an error", async () => {
     const throwing: DnsResolver = {
       resolveTxt: async () => {
@@ -126,6 +151,12 @@ describe("computeDomainVerification", () => {
   it("verificationDbPatch: an unknown DMARC lookup persists neither policy nor checkedAt", () => {
     const now = new Date();
     const dnsRecords = [
+      {
+        group: "verification",
+        name: "sel._domainkey.d.com",
+        type: "TXT",
+        status: "found" as const,
+      },
       { group: "dmarc", name: "_dmarc.d.com", type: "TXT", status: "unknown" as const },
     ];
     expect(verificationDbPatch({ dnsRecords, dmarc: { status: "unknown" } }, now)).toEqual({
@@ -139,6 +170,35 @@ describe("computeDomainVerification", () => {
       dmarcPolicy: null,
       dmarcCheckedAt: now,
     });
+  });
+
+  it("verificationDbPatch: an all-unknown result never clobbers the stored snapshot", () => {
+    const now = new Date();
+    const allUnknown = [
+      {
+        group: "verification",
+        name: "sel._domainkey.d.com",
+        type: "TXT",
+        status: "unknown" as const,
+      },
+      { group: "sending", name: "send.d.com", type: "MX", status: "unknown" as const },
+    ];
+    expect(
+      verificationDbPatch({ dnsRecords: allUnknown, dmarc: { status: "unknown" } }, now),
+    ).toEqual({});
+    // A partial result (one conclusive record) still writes.
+    const partial = [
+      {
+        group: "verification",
+        name: "sel._domainkey.d.com",
+        type: "TXT",
+        status: "found" as const,
+      },
+      { group: "sending", name: "send.d.com", type: "MX", status: "unknown" as const },
+    ];
+    expect(verificationDbPatch({ dnsRecords: partial, dmarc: { status: "unknown" } }, now)).toEqual(
+      { dnsRecords: partial },
+    );
   });
 
   it("SES DKIM hard failure surfaces as failed regardless of live DNS", async () => {

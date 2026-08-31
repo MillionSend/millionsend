@@ -22,7 +22,7 @@ import {
   formatRelative,
   formatUtcTimestampMs,
 } from "@/lib/format";
-import { BAND_TONE } from "@/lib/score-band";
+import { BAND_TONE, checkGlyph, formatScoreTenths } from "@/lib/score-band";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
@@ -183,26 +183,6 @@ function CodeBlock({ value }: { value: string }) {
 const TAB_KEYS = ["preview", "text", "html", "insights"] as const;
 type Tab = (typeof TAB_KEYS)[number];
 
-/** Text-icon glyph + status color per check row (DESIGN.md icon system). */
-function checkGlyph(check: EmailCheckResult): { glyph: string; color: string } {
-  switch (check.status) {
-    case "fail":
-      return {
-        glyph: "✕",
-        color:
-          check.severity === "critical" || check.severity === "major"
-            ? "var(--ms-danger)"
-            : "var(--ms-warn)",
-      };
-    case "unknown":
-      return { glyph: "?", color: "var(--ms-muted)" };
-    case "not_applicable":
-      return { glyph: "—", color: "var(--ms-faint)" };
-    default:
-      return { glyph: "✓", color: "var(--ms-success)" };
-  }
-}
-
 interface EmailInsights {
   scoreTenths: number;
   band: ScoreBand;
@@ -241,11 +221,6 @@ function InsightsSection({ insights }: { insights: EmailInsights }) {
   ] as const;
   const notApplicable = checks.filter((c) => c.status === "not_applicable");
   const openCheck = openCheckId ? checks.find((c) => c.id === openCheckId) : undefined;
-
-  const score1 = new Intl.NumberFormat(locale, {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  });
 
   /** Mono data line under a check — hostnames, sizes, policies; never URLs. */
   function detailLine(check: EmailCheckResult): string | null {
@@ -311,7 +286,7 @@ function InsightsSection({ insights }: { insights: EmailInsights }) {
     <div style={{ padding: "20px 18px" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
         <span className="ms-digits" style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1 }}>
-          {score1.format(insights.scoreTenths / 10)}
+          {formatScoreTenths(insights.scoreTenths, locale)}
         </span>
         <span className="ms-digits" style={{ fontSize: 15, color: "var(--ms-muted)" }}>
           {t("insights.outOfTen")}

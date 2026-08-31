@@ -13,6 +13,9 @@ describe("registrableDomain", () => {
     expect(registrableDomain("loja.example.com.br")).toBe("example.com.br");
     expect(registrableDomain("send.shop.co.uk")).toBe("shop.co.uk");
     expect(registrableDomain("mail.example.co.jp")).toBe("example.co.jp");
+    expect(registrableDomain("mail.acme.co.il")).toBe("acme.co.il");
+    expect(registrableDomain("news.acme.com.ph")).toBe("acme.com.ph");
+    expect(registrableDomain("send.acme.co.th")).toBe("acme.co.th");
   });
 
   it("tolerates uppercase and a trailing dot", () => {
@@ -25,11 +28,13 @@ describe("isRootDomainSend", () => {
   it("is true at the registrable apex", () => {
     expect(isRootDomainSend("acme.com")).toBe(true);
     expect(isRootDomainSend("acme.com.br")).toBe(true);
+    expect(isRootDomainSend("acme.co.il")).toBe(true);
     expect(isRootDomainSend("Acme.COM")).toBe(true);
   });
 
   it("is false for a subdomain", () => {
     expect(isRootDomainSend("mail.acme.com")).toBe(false);
     expect(isRootDomainSend("news.acme.com.br")).toBe(false);
+    expect(isRootDomainSend("mail.acme.co.il")).toBe(false);
   });
 });

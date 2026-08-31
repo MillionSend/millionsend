@@ -20,6 +20,13 @@ describe("combineRecordStatus", () => {
     }
   });
 
+  it("an inconclusive lookup (unknown) folds like missing — conservative-closed for sending", () => {
+    // SERVFAIL/lame delegation must not hide behind SES's cached SUCCESS.
+    for (const sesGate of ["verified", "pending", undefined] as const) {
+      expect(combineRecordStatus({ live: "unknown", sesGate })).toBe("missing");
+    }
+  });
+
   it("found + no AWS gate (DMARC/tracking) is verified on our lookup alone", () => {
     expect(combineRecordStatus({ live: "found", sesGate: undefined })).toBe("verified");
   });
@@ -89,6 +96,15 @@ describe("strictDomainStatus", () => {
 
   it("a required record still pending at SES keeps the domain pending", () => {
     expect(strictDomainStatus("SUCCESS", [{ status: "pending", live: "found" }])).toBe("pending");
+  });
+
+  it("a dropped zone (all lookups unknown) demotes despite SES's cached SUCCESS", () => {
+    expect(
+      strictDomainStatus("SUCCESS", [
+        { status: "verified", live: "unknown" },
+        { status: "verified", live: "unknown" },
+      ]),
+    ).toBe("pending");
   });
 
   it("optional (null-status) records never gate", () => {

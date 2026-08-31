@@ -148,6 +148,46 @@ it("persists the published DMARC policy alongside the verification pass", async 
   expect(row.dnsRecords?.find((r) => r.group === "dmarc")?.status).toBe("found");
 });
 
+it("a resolver outage demotes to pending but keeps the last good snapshot", async () => {
+  const goodSnapshot = [
+    {
+      group: "verification",
+      name: "sel._domainkey.zone.dev",
+      type: "TXT",
+      status: "found" as const,
+    },
+    { group: "sending", name: "send.zone.dev", type: "MX", status: "found" as const },
+  ];
+  const checkedAt = new Date("2026-01-02T00:00:00Z");
+  const id = await insertDomain({ name: "zone.dev", status: "verified", lastCheckedAt: stale });
+  await db
+    .update(schema.domains)
+    .set({ dnsRecords: goodSnapshot, dmarcPolicy: "reject", dmarcCheckedAt: checkedAt })
+    .where(eq(schema.domains.id, id));
+  const servfail: DnsResolver = {
+    resolveTxt: async () => {
+      throw new Error("servfail");
+    },
+    resolveMx: async () => {
+      throw new Error("servfail");
+    },
+    resolveCname: async () => {
+      throw new Error("servfail");
+    },
+  };
+
+  await reverifyDomains(db, { clientForRegion, resolver: servfail });
+
+  const row = await domainRow(id);
+  // Conservative-closed for the send gate: an inconclusive pass demotes...
+  expect(row.status).toBe("pending");
+  // ...conservative-open for scoring: the all-unknown pass writes neither
+  // snapshot nor DMARC, so a blip never stamps a score penalty.
+  expect(row.dnsRecords).toEqual(goodSnapshot);
+  expect(row.dmarcPolicy).toBe("reject");
+  expect(row.dmarcCheckedAt?.getTime()).toBe(checkedAt.getTime());
+});
+
 it("a per-domain SES error does not abort the batch", async () => {
   const bad = await insertDomain({
     name: "bad.dev",

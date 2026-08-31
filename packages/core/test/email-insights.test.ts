@@ -101,17 +101,22 @@ describe("catalog contract", () => {
 });
 
 describe("marketing classification", () => {
-  it("promotes on broadcast, topic, List-Unsubscribe header, or unsubscribe anchor", () => {
+  it("promotes on broadcast, topic, or unsubscribe anchor — send shape and body only", () => {
     expect(evaluateEmailInsights(input({ isBroadcast: true })).marketing).toBe(true);
     expect(evaluateEmailInsights(input({ hasTopic: true })).marketing).toBe(true);
-    expect(
-      evaluateEmailInsights(input({ finalHeaders: { "List-Unsubscribe": "<x>" } })).marketing,
-    ).toBe(true);
     expect(evaluateEmailInsights(input({ preTrackingHtml: BODY_MKT })).marketing).toBe(true);
   });
 
   it("stays transactional when no marketing signal is present", () => {
     expect(evaluateEmailInsights(input()).marketing).toBe(false);
+  });
+
+  it("a caller List-Unsubscribe header never promotes — adding it must not lower the score", () => {
+    const res = evaluateEmailInsights(
+      input({ finalHeaders: { "List-Unsubscribe": "<mailto:u@acme.com>" } }),
+    );
+    expect(res.marketing).toBe(false);
+    expect(res.checks.find((c) => c.id === "list_unsubscribe")?.status).toBe("not_applicable");
   });
 });
 
@@ -182,6 +187,9 @@ describe("list_unsubscribe", () => {
   it("passes when the caller supplied both headers, case-insensitively", () => {
     const c = check(
       input({
+        // Marketing by body shape (unsubscribe anchor), not broadcast/topic —
+        // those read passed_by_design via our own injection.
+        preTrackingHtml: BODY_MKT,
         finalHeaders: {
           "list-unsubscribe": "<mailto:u@acme.com>",
           "LIST-UNSUBSCRIBE-POST": "List-Unsubscribe=One-Click",
@@ -192,9 +200,15 @@ describe("list_unsubscribe", () => {
     expect(c.status).toBe("pass");
   });
 
-  it("fails when only List-Unsubscribe is present without -Post", () => {
+  it("fails a body-unsubscribe-link marketing send with a mailto-only header (no -Post)", () => {
     expect(
-      check(input({ finalHeaders: { "List-Unsubscribe": "<x>" } }), "list_unsubscribe").status,
+      check(
+        input({
+          preTrackingHtml: BODY_MKT,
+          finalHeaders: { "List-Unsubscribe": "<mailto:u@acme.com>" },
+        }),
+        "list_unsubscribe",
+      ).status,
     ).toBe("fail");
   });
 });
@@ -229,11 +243,11 @@ describe("no_shorteners", () => {
     expect(check(input(), "no_shorteners").status).toBe("pass");
   });
 
-  it("fails on a shortener host, exact or subdomain", () => {
-    const html = '<a href="https://bit.ly/x">a</a><a href="https://www.youtu.be/v">b</a>';
+  it("fails a generic shortener host, exact or subdomain, even untracked", () => {
+    const html = '<a href="https://bit.ly/x">a</a><a href="https://www.tinyurl.com/v">b</a>';
     const c = check(input({ preTrackingHtml: html }), "no_shorteners");
     expect(c.status).toBe("fail");
-    expect(c.detail?.shorteners).toEqual(["bit.ly", "www.youtu.be"]);
+    expect(c.detail?.shorteners).toEqual(["bit.ly", "www.tinyurl.com"]);
     expect(c.detail?.note).toBeUndefined();
   });
 
@@ -252,6 +266,29 @@ describe("no_shorteners", () => {
       "no_shorteners",
     );
     expect(c.detail?.note).toBe("double_redirect_with_click_tracking");
+  });
+
+  it("fails youtu.be only when click tracking actually wraps it", () => {
+    const html = '<a href="https://youtu.be/v">watch</a>';
+    const wrapped = check(
+      input({
+        preTrackingHtml: html,
+        tracking: {
+          clickEnabled: true,
+          openEnabled: false,
+          brandedHostUsed: true,
+          sharedFallbackUsed: false,
+          shippedUntracked: false,
+        },
+      }),
+      "no_shorteners",
+    );
+    expect(wrapped.status).toBe("fail");
+    expect(wrapped.detail?.shorteners).toEqual(["youtu.be"]);
+
+    const untracked = check(input({ preTrackingHtml: html }), "no_shorteners");
+    expect(untracked.status).toBe("pass");
+    expect(untracked.detail?.note).toBe("prefer_full_youtube_watch_urls");
   });
 });
 
@@ -327,6 +364,15 @@ describe("visible_unsubscribe", () => {
     expect(c.status).toBe("fail");
     expect(c.detail).toEqual({ beforeClipPoint: false });
   });
+
+  it("measures the clip point in bytes: multibyte content clips earlier than its char index", () => {
+    // 60k two-byte chars = 120KB before the anchor, though the char index is
+    // well under the 102400 limit.
+    const html = `<p>${"é".repeat(60_000)}</p>${UNSUB_ANCHOR}`;
+    const c = check(mkt({ preTrackingHtml: html }), "visible_unsubscribe");
+    expect(c.status).toBe("fail");
+    expect(c.detail).toEqual({ beforeClipPoint: false });
+  });
 });
 
 describe("phishing_links", () => {
@@ -362,6 +408,30 @@ describe("phishing_links", () => {
     const c = check(input({ preTrackingHtml: html }), "phishing_links");
     expect(c.status).toBe("fail");
     expect(c.detail?.reasons).toContain("text_claims_https");
+  });
+
+  it("does not flag dotted non-URL tokens like product names or filenames", () => {
+    expect(
+      check(
+        input({ preTrackingHtml: '<a href="https://evil.example/x">Download Node.js</a>' }),
+        "phishing_links",
+      ).status,
+    ).toBe("pass");
+    expect(
+      check(
+        input({ preTrackingHtml: '<a href="https://evil.example/x">annual-report.pdf</a>' }),
+        "phishing_links",
+      ).status,
+    ).toBe("pass");
+  });
+
+  it("still flags a visible common-TLD domain linking elsewhere", () => {
+    const c = check(
+      input({ preTrackingHtml: '<a href="https://evil.example/x">paypal.com</a>' }),
+      "phishing_links",
+    );
+    expect(c.status).toBe("fail");
+    expect(c.detail?.reasons).toEqual(["text_domain_mismatch"]);
   });
 });
 
@@ -464,6 +534,25 @@ describe("tracking_unbranded", () => {
     const c = check(input(), "tracking_unbranded");
     expect(c.status).toBe("pass");
     expect(c.detail).toEqual({ tracking: "off" });
+  });
+
+  it("is not_applicable for a text-only send even with tracking enabled", () => {
+    expect(
+      check(
+        input({
+          html: null,
+          preTrackingHtml: null,
+          tracking: {
+            clickEnabled: true,
+            openEnabled: true,
+            brandedHostUsed: false,
+            sharedFallbackUsed: false,
+            shippedUntracked: false,
+          },
+        }),
+        "tracking_unbranded",
+      ).status,
+    ).toBe("not_applicable");
   });
 
   it("fails a send shipped untracked for want of a subdomain", () => {

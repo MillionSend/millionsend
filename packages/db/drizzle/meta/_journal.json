@@ -92,6 +92,13 @@
       "when": 1788141906808,
       "tag": "0012_email_insights",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788145653831,
+      "tag": "0013_backfill_hard_bounced",
+      "breakpoints": true
     }
   ]
 }

@@ -106,8 +106,8 @@
       },
       "no_shorteners": {
         "title": "No link shorteners",
-        "description": "Shortened links (bit.ly, tinyurl and similar) hide the destination and are heavily abused. With click tracking on, a shortener becomes a tracking-wrapped double redirect — a documented phishing pattern for Gmail.",
-        "advice": "Use full destination URLs. Click tracking already reports what was clicked."
+        "description": "Shortened links (bit.ly, tinyurl and similar) hide the destination and are heavily abused. With click tracking on, a shortener becomes a tracking-wrapped double redirect — a documented phishing pattern for Gmail. youtu.be is YouTube's own share domain and only counts while click tracking would wrap it.",
+        "advice": "Use full destination URLs — youtube.com/watch instead of youtu.be. Click tracking already reports what was clicked."
       },
       "body_size": {
         "title": "HTML size",

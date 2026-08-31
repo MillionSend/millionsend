@@ -106,8 +106,8 @@
       },
       "no_shorteners": {
         "title": "Sem encurtadores de link",
-        "description": "Links encurtados (bit.ly, tinyurl e similares) escondem o destino e são muito usados em abusos. Com rastreamento de cliques ativo, um encurtador vira um redirecionamento duplo embrulhado pelo rastreador — padrão de phishing documentado no Gmail.",
-        "advice": "Use URLs completas. O rastreamento de cliques já informa o que foi clicado."
+        "description": "Links encurtados (bit.ly, tinyurl e similares) escondem o destino e são muito usados em abusos. Com rastreamento de cliques ativo, um encurtador vira um redirecionamento duplo embrulhado pelo rastreador — padrão de phishing documentado no Gmail. youtu.be é o domínio de compartilhamento do próprio YouTube e só conta enquanto o rastreamento de cliques o embrulharia.",
+        "advice": "Use URLs completas — youtube.com/watch em vez de youtu.be. O rastreamento de cliques já informa o que foi clicado."
       },
       "body_size": {
         "title": "Tamanho do HTML",

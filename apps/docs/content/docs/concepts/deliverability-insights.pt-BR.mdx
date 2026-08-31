@@ -37,7 +37,7 @@ pontos.
 | `auth_alignment` | critical | 3.5 | Todos | SPF e DKIM alinhados com o domínio do From. |
 | `list_unsubscribe` | major | 1.5 | Marketing | Headers `List-Unsubscribe` e `List-Unsubscribe-Post` (descadastro em um clique). |
 | `link_domains_match` | major | 1.25 | Todos | Ao menos um link aponta de volta para o seu domínio de envio. |
-| `no_shorteners` | major | 1.25 | Todos | Nenhum encurtador de link público (bit.ly, tinyurl, …). |
+| `no_shorteners` | major | 1.25 | Todos | Nenhum encurtador de link público (bit.ly, tinyurl, …); youtu.be só conta enquanto o rastreamento de cliques o embrulharia. |
 | `body_size` | major | 1 | Todos | HTML abaixo de ~100 KB — acima disso o Gmail corta a mensagem. |
 | `plain_text` | major | 1 | Todos | Uma parte em texto puro junto com o HTML. |
 | `visible_unsubscribe` | major | 1 | Marketing | Um link de descadastro visível no corpo, antes do ponto de corte do Gmail. |
@@ -98,7 +98,6 @@ são reescritas.
 Um email é classificado como **marketing** quando qualquer uma destas vale:
 
 - é um broadcast ou um envio por tópico;
-- quem chamou forneceu um header `List-Unsubscribe`;
 - o corpo contém um link de descadastro visível.
 
 Todo o resto é transacional, e as verificações exclusivas de marketing

@@ -19,6 +19,7 @@ import {
   extractTokenPrefix,
   fetchAccountScore,
   fetchDeliverabilityHealth,
+  fetchEmailInsights,
   findSuppressed,
   findTopicOptOuts,
   type Keyring,
@@ -288,28 +289,12 @@ async function findTeamTopic(
   return row;
 }
 
-/**
- * Insights row for an email: keyed by emailId (API sends), else by its
- * broadcastId (broadcast fan-out shares ONE row). Team-scoped as defense in
- * depth. Rows exist only for emails sent after the feature landed — there is
- * deliberately no backfill — so absence is a normal state, not an error.
- */
-async function findEmailInsights(
+function findEmailInsights(
   db: Db,
   teamId: string,
   email: { id: string; broadcastId: string | null },
 ) {
-  const i = schema.emailInsights;
-  const [byEmail] = await db
-    .select()
-    .from(i)
-    .where(and(eq(i.teamId, teamId), eq(i.emailId, email.id)));
-  if (byEmail || email.broadcastId === null) return byEmail;
-  const [byBroadcast] = await db
-    .select()
-    .from(i)
-    .where(and(eq(i.teamId, teamId), eq(i.broadcastId, email.broadcastId)));
-  return byBroadcast;
+  return fetchEmailInsights(db, teamId, { emailId: email.id, broadcastId: email.broadcastId });
 }
 
 /** Maps a validated Resend-shaped send body to the shared accept payload. */

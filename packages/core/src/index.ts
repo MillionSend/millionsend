@@ -126,6 +126,7 @@ export {
   SHORTENER_HOSTS,
   scoreBand,
 } from "./email-insights.js";
+export { type EmailInsightsRow, fetchEmailInsights } from "./email-insights-lookup.js";
 export { ERASED_TOMBSTONE, type EraseRecipientResult, eraseRecipient } from "./erase-recipient.js";
 export {
   beginIdempotent,

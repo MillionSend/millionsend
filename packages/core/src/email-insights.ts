@@ -119,7 +119,18 @@ const DMARC_STALE_MS = 24 * 60 * 60 * 1000;
 const MINOR_CAP_HUNDREDTHS = 150;
 
 const UNSUB_TEXT = /unsubscrib|opt[ -]?out|descadastr|cancelar (a )?inscri/i;
-const DOMAIN_TOKEN = /[a-z0-9-]+\.[a-z]{2,}/gi;
+const DOMAIN_TOKEN = /(https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi;
+
+/**
+ * Final labels that make a bare dotted token in anchor text read as a domain
+ * claim (vs 'Node.js' or 'report.pdf'). False negatives on exotic TLDs are
+ * acceptable for a heuristic; false positives are not.
+ */
+const COMMON_TLDS = new Set(
+  "com net org io co dev app ai me info biz edu gov br uk de fr es it nl pt pl se ch at be dk no fi ie cz gr ro hu jp cn in ru ca au us mx ar cl il za kr tw hk sg th ph my vn tr nz id sa ae eg ng ke".split(
+    " ",
+  ),
+);
 const NO_REPLY_LOCAL = /^(no-?reply|do-?not-?reply|nao-?responda)/i;
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 
@@ -203,12 +214,13 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
     (a) => a.href.includes("/unsubscribe") || UNSUB_TEXT.test(a.text),
   );
 
-  // Deliberate asymmetry: a List-Unsubscribe header (or in-body unsubscribe
-  // anchor) may PROMOTE to marketing — the safe direction — but its absence
-  // never demotes. Absence-based demotion would make list_unsubscribe unable
-  // to ever fire: the classifier would eat its own check.
-  const marketing =
-    input.isBroadcast || input.hasTopic || hasListUnsub || unsubAnchor !== undefined;
+  // Classification rests only on send shape and body content. A caller
+  // List-Unsubscribe header deliberately does NOT promote: header-based
+  // promotion punished partial compliance — a mailto-only header pushed a
+  // transactional send into the very list_unsubscribe check it then failed,
+  // scoring worse than omitting the header. Absence never demotes either:
+  // the classifier must not eat its own check.
+  const marketing = input.isBroadcast || input.hasTopic || unsubAnchor !== undefined;
 
   const snap = input.domainSnapshot;
   const dmarcKnown =
@@ -262,13 +274,25 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
               .filter((h) => [...SHORTENER_HOSTS].some((s) => h === s || h.endsWith(`.${s}`))),
           ),
         ];
-        if (found.length === 0) return { status: "pass" };
+        // youtu.be is YouTube's own share domain and only harmful when our
+        // click tracking actually wraps it (shortener + wrapper = double
+        // redirect, the documented Gmail phishing trigger); generic
+        // shorteners are opaque and abused, so they fail regardless.
+        const wrapped =
+          input.tracking.clickEnabled &&
+          (input.tracking.brandedHostUsed || input.tracking.sharedFallbackUsed);
+        const failing = found.filter(
+          (h) => wrapped || !(h === "youtu.be" || h.endsWith(".youtu.be")),
+        );
+        if (failing.length === 0) {
+          return found.length > 0
+            ? { status: "pass", detail: { note: "prefer_full_youtube_watch_urls" } }
+            : { status: "pass" };
+        }
         return {
           status: "fail",
           detail: {
-            shorteners: found,
-            // Shortener + our click-tracking wrapper = double redirect, the
-            // documented Gmail phishing trigger.
+            shorteners: failing,
             ...(input.tracking.clickEnabled ? { note: "double_redirect_with_click_tracking" } : {}),
           },
         };
@@ -289,7 +313,10 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
       case "visible_unsubscribe": {
         if (html === null) return { status: "not_applicable" };
         if (!unsubAnchor) return { status: "fail" };
-        const beforeClipPoint = unsubAnchor.index < GMAIL_CLIP_BYTES;
+        // Gmail clips on BYTES; multibyte content shifts the boundary left of
+        // the char index, so measure the prefix in utf8 bytes.
+        const beforeClipPoint =
+          Buffer.byteLength(html.slice(0, unsubAnchor.index), "utf8") < GMAIL_CLIP_BYTES;
         return { status: beforeClipPoint ? "pass" : "fail", detail: { beforeClipPoint } };
       }
       case "phishing_links": {
@@ -300,7 +327,14 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
             reasons.add("ip_literal_host");
           } else {
             for (const t of l.text.matchAll(DOMAIN_TOKEN)) {
-              if (registrableDomain(t[0]) !== registrableDomain(l.host)) {
+              const scheme = t[1];
+              const claimed = scheme === undefined ? t[0] : t[0].slice(scheme.length);
+              // Only URL-like tokens are domain claims: a scheme or www.
+              // prefix, or a common-TLD final label.
+              const urlLike = scheme !== undefined || claimed.toLowerCase().startsWith("www.");
+              const lastLabel = claimed.slice(claimed.lastIndexOf(".") + 1).toLowerCase();
+              if (!urlLike && !COMMON_TLDS.has(lastLabel)) continue;
+              if (registrableDomain(claimed) !== registrableDomain(l.host)) {
                 reasons.add("text_domain_mismatch");
                 break;
               }
@@ -333,6 +367,8 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
         return { status: "pass" };
       }
       case "tracking_unbranded": {
+        // Text-only body: nothing is wrapped or pixeled, whatever the flags say.
+        if (html === null) return { status: "not_applicable" };
         const t = input.tracking;
         if (!t.clickEnabled && !t.openEnabled)
           return { status: "pass", detail: { tracking: "off" } };

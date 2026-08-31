@@ -304,6 +304,23 @@ describe("emails.get", () => {
     expect(email.insights).toMatchObject({ scoreTenths: 92, band: "excellent", marketing: true });
   });
 
+  it("ignores an insights row belonging to another team", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const teamB = await createTeam(db, "team-b");
+    const id = await insertEmail(baseEmail(teamA));
+    await db.insert(schema.emailInsights).values({
+      teamId: teamB,
+      emailId: id,
+      marketing: false,
+      checks: [],
+      scoreTenths: 80,
+      scoreVersion: 1,
+    });
+
+    const email = await caller(teamA).emails.get({ id });
+    expect(email.insights).toBeNull();
+  });
+
   it("returns null insights when no row exists (pre-feature sends have none)", async () => {
     const teamA = await createTeam(db, "team-a");
     const id = await insertEmail(baseEmail(teamA));

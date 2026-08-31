@@ -42,7 +42,10 @@ const stripDot = (host: string) => host.toLowerCase().replace(/\.$/, "");
 
 /**
  * NXDOMAIN/NODATA are conclusive absence; everything else (timeout, SERVFAIL,
- * network error) is inconclusive and must never read as a removed record.
+ * network error) is inconclusive and stays a distinct `unknown`. Consumers
+ * fold it in opposite directions: the send gate treats it like missing
+ * (conservative-closed, combineRecordStatus) while DMARC persistence skips it
+ * (conservative-open — a blip must never stamp a score penalty).
  */
 export function dnsErrorStatus(err: unknown): "missing" | "unknown" {
   const code = (err as { code?: string }).code;

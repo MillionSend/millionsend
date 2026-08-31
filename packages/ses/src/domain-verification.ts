@@ -115,18 +115,23 @@ export async function computeDomainVerification(
 /**
  * The domain-row columns every verification pass persists alongside
  * status/lastCheckedAt. An `unknown` DMARC lookup writes neither policy nor
- * checkedAt: an inconclusive check must not erase a known record.
+ * checkedAt: an inconclusive check must not erase a known record. Likewise a
+ * resolver outage (EVERY record `unknown`) skips the dnsRecords write —
+ * clobbering the last good snapshot with all-unknown rows would destroy the
+ * only conclusive picture consumers have; partial results still write.
  */
 export function verificationDbPatch(
   result: Pick<DomainVerificationResult, "dnsRecords" | "dmarc">,
   now: Date,
 ): {
-  dnsRecords: DomainVerificationResult["dnsRecords"];
+  dnsRecords?: DomainVerificationResult["dnsRecords"];
   dmarcPolicy?: DmarcPolicy | null;
   dmarcCheckedAt?: Date;
 } {
   return {
-    dnsRecords: result.dnsRecords,
+    ...(result.dnsRecords.every((r) => r.status === "unknown")
+      ? {}
+      : { dnsRecords: result.dnsRecords }),
     ...(result.dmarc.status !== "unknown"
       ? { dmarcPolicy: result.dmarc.policy ?? null, dmarcCheckedAt: now }
       : {}),

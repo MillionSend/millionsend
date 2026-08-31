@@ -600,47 +600,62 @@ export async function sendEmail(
   // Insights are best-effort bookkeeping on an already-accepted send: a bug
   // here must never fail (and so retry) the delivery.
   try {
-    const insights = evaluateEmailInsights({
-      html,
-      preTrackingHtml,
-      text,
-      from: email.from,
-      senderDomain: parseSingleSender(email.from)?.domain ?? "",
-      subject: email.subject,
-      finalHeaders: headers,
-      hasAttachments: attachments !== null && attachments.length > 0,
-      replyTo: email.replyTo,
-      isBroadcast: email.contactId !== null || email.broadcastId !== null,
-      hasTopic: email.topicId !== null,
-      tracking: {
-        clickEnabled: click,
-        openEnabled: open,
-        brandedHostUsed,
-        sharedFallbackUsed,
-        shippedUntracked,
-      },
-      domainSnapshot: { dmarcPolicy: domain.dmarcPolicy, dmarcCheckedAt: domain.dmarcCheckedAt },
-      now: new Date(),
-    });
-    const bodySize = insights.checks.find((c) => c.id === "body_size")?.detail?.htmlSizeBytes;
-    // Broadcast fan-out shares ONE row (content identical modulo the
-    // unsubscribe token): the first completed send writes it, the rest —
-    // and the reconcile re-send path on the emailId key — conflict-skip.
-    await db
-      .insert(schema.emailInsights)
-      .values({
-        teamId: email.teamId,
-        ...(email.broadcastId ? { broadcastId: email.broadcastId } : { emailId: email.id }),
-        marketing: insights.marketing,
-        checks: insights.checks as schema.EmailInsightCheck[],
-        scoreTenths: insights.scoreTenths,
-        scoreVersion: SCORE_VERSION,
-        htmlSizeBytes: typeof bodySize === "number" ? bodySize : null,
-        mimeSizeBytes: mime.length,
-      })
-      .onConflictDoNothing({
-        target: email.broadcastId ? schema.emailInsights.broadcastId : schema.emailInsights.emailId,
+    // Broadcast fan-out shares ONE broadcastId-keyed row, so after the first
+    // completed send one indexed point-read here replaces a full engine run
+    // (several whole-body regex passes) plus a no-op insert per recipient.
+    // Concurrent first sends still race harmlessly into onConflictDoNothing.
+    const [existing] = email.broadcastId
+      ? await db
+          .select({ id: schema.emailInsights.id })
+          .from(schema.emailInsights)
+          .where(eq(schema.emailInsights.broadcastId, email.broadcastId))
+          .limit(1)
+      : [];
+    if (!existing) {
+      const insights = evaluateEmailInsights({
+        html,
+        preTrackingHtml,
+        text,
+        from: email.from,
+        senderDomain: parseSingleSender(email.from)?.domain ?? "",
+        subject: email.subject,
+        finalHeaders: headers,
+        hasAttachments: attachments !== null && attachments.length > 0,
+        replyTo: email.replyTo,
+        isBroadcast: email.contactId !== null || email.broadcastId !== null,
+        hasTopic: email.topicId !== null,
+        tracking: {
+          clickEnabled: click,
+          openEnabled: open,
+          brandedHostUsed,
+          sharedFallbackUsed,
+          shippedUntracked,
+        },
+        domainSnapshot: { dmarcPolicy: domain.dmarcPolicy, dmarcCheckedAt: domain.dmarcCheckedAt },
+        now: new Date(),
       });
+      const bodySize = insights.checks.find((c) => c.id === "body_size")?.detail?.htmlSizeBytes;
+      // Broadcast fan-out shares ONE row (content identical modulo the
+      // unsubscribe token): the first completed send writes it, the rest —
+      // and the reconcile re-send path on the emailId key — conflict-skip.
+      await db
+        .insert(schema.emailInsights)
+        .values({
+          teamId: email.teamId,
+          ...(email.broadcastId ? { broadcastId: email.broadcastId } : { emailId: email.id }),
+          marketing: insights.marketing,
+          checks: insights.checks as schema.EmailInsightCheck[],
+          scoreTenths: insights.scoreTenths,
+          scoreVersion: SCORE_VERSION,
+          htmlSizeBytes: typeof bodySize === "number" ? bodySize : null,
+          mimeSizeBytes: mime.length,
+        })
+        .onConflictDoNothing({
+          target: email.broadcastId
+            ? schema.emailInsights.broadcastId
+            : schema.emailInsights.emailId,
+        });
+    }
   } catch (err) {
     console.error(`email.send: insights failed for ${email.id}`, err);
   }

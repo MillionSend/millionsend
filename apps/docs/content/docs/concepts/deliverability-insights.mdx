@@ -34,7 +34,7 @@ Each check reports one of five statuses: `pass`, `fail`, `passed_by_design`,
 | `auth_alignment` | critical | 3.5 | All | SPF and DKIM align with the From domain. |
 | `list_unsubscribe` | major | 1.5 | Marketing | `List-Unsubscribe` and `List-Unsubscribe-Post` headers (one-click unsubscribe). |
 | `link_domains_match` | major | 1.25 | All | At least one link points back at your sending domain. |
-| `no_shorteners` | major | 1.25 | All | No public link shorteners (bit.ly, tinyurl, …). |
+| `no_shorteners` | major | 1.25 | All | No public link shorteners (bit.ly, tinyurl, …); youtu.be counts only while click tracking would wrap it. |
 | `body_size` | major | 1 | All | HTML under ~100 KB — beyond that Gmail clips the message. |
 | `plain_text` | major | 1 | All | A plain-text part alongside the HTML. |
 | `visible_unsubscribe` | major | 1 | Marketing | A visible unsubscribe link in the body, before the Gmail clip point. |
@@ -93,7 +93,6 @@ directly comparable. Existing scores are never rewritten.
 An email is classified as **marketing** when any of these hold:
 
 - it is a broadcast or a topic send;
-- the caller supplied a `List-Unsubscribe` header;
 - the body contains a visible unsubscribe link.
 
 Everything else is transactional, and the marketing-only checks report

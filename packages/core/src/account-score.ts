@@ -138,7 +138,12 @@ export async function fetchAccountScore(
 ): Promise<AccountScore> {
   const now = (opts?.now ?? new Date()).getTime();
   const since = utcDay(now - (ACCOUNT_SCORE_WINDOW_DAYS - 1) * DAY_MS);
-  const sinceTs = new Date(now - ACCOUNT_SCORE_WINDOW_DAYS * DAY_MS);
+  // The content query windows on sentAt from the SAME UTC-day boundary the
+  // counters window on, or the two sub-scores measure different populations.
+  const sinceTs = new Date(since);
+  // Loose createdAt floor purely to drive the (teamId, createdAt) index:
+  // schedule cap 30d + window 30d + margin.
+  const createdFloor = new Date(now - 61 * DAY_MS);
 
   const c = schema.usageCounters;
   const e = schema.emails;
@@ -165,7 +170,7 @@ export async function fetchAccountScore(
       i,
       or(eq(i.emailId, e.id), and(isNotNull(e.broadcastId), eq(i.broadcastId, e.broadcastId))),
     )
-    .where(and(eq(e.teamId, teamId), gte(e.createdAt, sinceTs), isNotNull(e.sentAt)));
+    .where(and(eq(e.teamId, teamId), gte(e.createdAt, createdFloor), gte(e.sentAt, sinceTs)));
 
   const health = await fetchDeliverabilityHealth(db, teamId, {
     windowDays: GUARDRAIL_WINDOW_DAYS,

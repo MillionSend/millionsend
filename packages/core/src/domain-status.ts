@@ -9,7 +9,9 @@ export type DomainStatus = (typeof domainStatusEnum.enumValues)[number];
  * answer carries the expected value (a wrong/stale record); `missing` = the
  * name conclusively doesn't answer (removed record, NXDOMAIN, NODATA);
  * `unknown` = the lookup didn't conclude (timeout, SERVFAIL, network error) —
- * kept distinct so a resolver blip never reads as a removed record.
+ * kept a distinct value so the dnsRecords snapshot and DMARC persistence can
+ * tell a blip from a removed record, even though the send-gate fold below
+ * treats it like `missing`.
  * This is the real-time signal that catches a record removed seconds ago, which
  * SES's GetEmailIdentity keeps reporting as verified until it re-checks.
  */
@@ -46,14 +48,18 @@ export function combineRecordStatus({
   live: LiveDnsStatus | undefined;
   sesGate: SesGate | undefined;
 }): RecordStatus {
-  // Before our live lookup returns — or when it didn't conclude (`unknown`:
-  // timeout/SERVFAIL) — fall back to AWS's known status: a resolver blip must
-  // never demote a verified record. `verified` shows through; everything else
-  // reads `pending` until a conclusive live result arrives.
-  if (live === undefined || live === "unknown") {
+  // Before our live lookup returns, fall back to AWS's known status:
+  // `verified` shows through; everything else reads `pending`.
+  if (live === undefined) {
     return sesGate === "verified" ? "verified" : "pending";
   }
-  if (live === "missing") return "missing";
+  // The two consumers deliberately fold `unknown` in opposite directions:
+  // sending gate conservative-closed (an inconclusive lookup demotes like
+  // `missing` — falling back to SES's cached SUCCESS would leave a dropped
+  // zone sending forever; a transient blip demotes to pending for one
+  // reverify cycle and recovers), scoring conservative-open (DMARC
+  // persistence skips `unknown`, so a blip never stamps a score penalty).
+  if (live === "missing" || live === "unknown") return "missing";
   if (live === "mismatch") return "mismatch";
   // live === "found": our DNS passed — verified unless AWS is still pending.
   return sesGate === "pending" ? "pending" : "verified";

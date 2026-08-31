@@ -12,7 +12,7 @@ import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatDayUtc } from "@/lib/format";
-import { BAND_TONE } from "@/lib/score-band";
+import { BAND_TONE, formatScoreTenths } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
 
@@ -391,10 +391,6 @@ export default function MetricsPage() {
   const scoreQuery = useQuery(trpc.metrics.accountScore.queryOptions());
 
   const fmt = new Intl.NumberFormat(locale);
-  const score1 = new Intl.NumberFormat(locale, {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  });
   const pct1 = new Intl.NumberFormat(locale, {
     style: "percent",
     minimumFractionDigits: 1,
@@ -483,7 +479,7 @@ export default function MetricsPage() {
                   style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1, marginTop: 6 }}
                 >
                   {scoreQuery.data.scoreTenths != null ? (
-                    <Odometer formatted={score1.format(scoreQuery.data.scoreTenths / 10)} />
+                    <Odometer formatted={formatScoreTenths(scoreQuery.data.scoreTenths, locale)} />
                   ) : (
                     "—"
                   )}
@@ -517,7 +513,7 @@ export default function MetricsPage() {
                   <div className="ms-microlabel">{t("score.content")}</div>
                   <div className="ms-digits" style={{ fontSize: 20, marginTop: 4 }}>
                     {scoreQuery.data.contentScoreTenths != null
-                      ? score1.format(scoreQuery.data.contentScoreTenths / 10)
+                      ? formatScoreTenths(scoreQuery.data.contentScoreTenths, locale)
                       : "—"}
                   </div>
                   <div style={{ fontSize: 12.5, color: "var(--ms-faint)", marginTop: 3 }}>
@@ -528,7 +524,7 @@ export default function MetricsPage() {
                   <div className="ms-microlabel">{t("score.outcome")}</div>
                   <div className="ms-digits" style={{ fontSize: 20, marginTop: 4 }}>
                     {scoreQuery.data.outcomeScoreTenths != null
-                      ? score1.format(scoreQuery.data.outcomeScoreTenths / 10)
+                      ? formatScoreTenths(scoreQuery.data.outcomeScoreTenths, locale)
                       : "—"}
                   </div>
                   <div style={{ fontSize: 12.5, color: "var(--ms-faint)", marginTop: 3 }}>
