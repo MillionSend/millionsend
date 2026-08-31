@@ -23,6 +23,19 @@
   "engagement": {
     "denominator": "of delivered"
   },
+  "score": {
+    "title": "Account score",
+    "window": "last 30 days",
+    "outOfTen": "/ 10",
+    "content": "Content",
+    "contentLine": "Recipient-weighted insights score of sent emails",
+    "outcome": "Outcome",
+    "outcomeLine": "Complaints and hard bounces against sends",
+    "insufficient": "Not enough sends in the last 30 days.",
+    "capped": "Capped by sending guardrail.",
+    "complaintRate": "Complaint rate",
+    "hardBounceRate": "Hard-bounce rate"
+  },
   "open": {
     "title": "Open rate",
     "opened": "Opened"

@@ -254,6 +254,63 @@ describe("emails.get", () => {
 
     await expect(caller(teamB).emails.get({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
+
+  it("returns insights from an emailId-keyed row", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const id = await insertEmail(baseEmail(teamA));
+    await db.insert(schema.emailInsights).values({
+      teamId: teamA,
+      emailId: id,
+      marketing: false,
+      checks: [
+        { id: "dmarc_record", severity: "critical", status: "fail", penaltyHundredths: 350 },
+      ],
+      scoreTenths: 65,
+      scoreVersion: 1,
+      htmlSizeBytes: 2048,
+    });
+
+    const email = await caller(teamA).emails.get({ id });
+    expect(email.insights).toMatchObject({
+      scoreTenths: 65,
+      band: "needs_attention",
+      marketing: false,
+      htmlSizeBytes: 2048,
+      checks: [
+        { id: "dmarc_record", severity: "critical", status: "fail", penaltyHundredths: 350 },
+      ],
+    });
+    expect(email.insights?.computedAt).toBeInstanceOf(Date);
+  });
+
+  it("resolves a broadcast email's shared broadcastId-keyed insights row", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const [broadcast] = await db
+      .insert(schema.broadcasts)
+      .values({ teamId: teamA, from: "sender@acme.test", subject: "hello" })
+      .returning({ id: schema.broadcasts.id });
+    if (!broadcast) throw new Error("broadcast insert failed");
+    const id = await insertEmail({ ...baseEmail(teamA), broadcastId: broadcast.id });
+    await db.insert(schema.emailInsights).values({
+      teamId: teamA,
+      broadcastId: broadcast.id,
+      marketing: true,
+      checks: [],
+      scoreTenths: 92,
+      scoreVersion: 1,
+    });
+
+    const email = await caller(teamA).emails.get({ id });
+    expect(email.insights).toMatchObject({ scoreTenths: 92, band: "excellent", marketing: true });
+  });
+
+  it("returns null insights when no row exists (pre-feature sends have none)", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const id = await insertEmail(baseEmail(teamA));
+
+    const email = await caller(teamA).emails.get({ id });
+    expect(email.insights).toBeNull();
+  });
 });
 
 describe("emails.stats", () => {

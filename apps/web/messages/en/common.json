@@ -63,6 +63,12 @@
     "verified": "Verified",
     "pending": "Pending"
   },
+  "band": {
+    "excellent": "Excellent",
+    "good": "Good",
+    "needs_attention": "Needs attention",
+    "at_risk": "At risk"
+  },
   "unsavedWarn": "You have unsaved changes. Leave this page?",
   "draftRecovered": "Recovered unsaved changes ({time}).",
   "draftRestore": "Restore",

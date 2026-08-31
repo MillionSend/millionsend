@@ -341,8 +341,58 @@ export const getEmailResponseSchema = emailListItemSchema
     // RFC 5322 Message-ID ('<id@host>'); a placeholder until the send records
     // the provider message id.
     message_id: z.string(),
+    // Best-practice score (0-10, one decimal); null when no insights row
+    // exists (emails sent before the feature landed, or never sent).
+    score: z.number().nullable(),
   })
   .openapi("GetEmailResponse");
+
+const scoreBandEnum = z.enum(["excellent", "good", "needs_attention", "at_risk"]);
+
+// GET /emails/{id}/insights: the pre-send best-practice report computed when
+// the email was sent. Check ids, severities, statuses and bands are the frozen
+// wire enums from @millionsend/core CHECKS.
+export const emailInsightsResponseSchema = z
+  .object({
+    object: z.literal("email_insights"),
+    email_id: z.uuid(),
+    score: z.number().describe("Best-practice score, 0-10, one decimal"),
+    score_version: z.number().int(),
+    band: scoreBandEnum,
+    marketing: z.boolean(),
+    html_size_bytes: z.number().int().nullable(),
+    computed_at: z.string(),
+    checks: z.array(
+      z.object({
+        id: z.string().describe("Check id from the @millionsend/core check catalog"),
+        severity: z.enum(["critical", "major", "minor", "info"]),
+        status: z.enum(["pass", "fail", "passed_by_design", "not_applicable", "unknown"]),
+        penalty: z.number().describe("Points deducted from the score; 0 unless status is fail"),
+        detail: z.record(z.string(), z.unknown()).optional(),
+      }),
+    ),
+  })
+  .openapi("EmailInsightsResponse");
+
+// GET /deliverability: the account score over the trailing 30 days. Scores
+// are 0-10 with one decimal; null means not enough data to compute.
+export const deliverabilityResponseSchema = z
+  .object({
+    object: z.literal("deliverability"),
+    score: z.number().nullable(),
+    band: scoreBandEnum.nullable(),
+    content_score: z.number().nullable(),
+    outcome_score: z.number().nullable(),
+    complaint_rate: z.number(),
+    hard_bounce_rate: z.number(),
+    emails_sent: z.number().int(),
+    scored_recipients: z.number().int(),
+    window_days: z.number().int(),
+    insufficient_outcome_data: z.boolean(),
+    guardrail_status: z.enum(["ok", "warning", "paused"]),
+    score_version: z.number().int(),
+  })
+  .openapi("DeliverabilityResponse");
 
 /**
  * Resend SDK pagination (buildPaginationQuery): ?limit=&after= / ?before=,

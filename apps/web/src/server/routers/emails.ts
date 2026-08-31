@@ -1,4 +1,11 @@
-import { decryptEmailBody, type EmailBody, hashRecipient, utcDay } from "@millionsend/core";
+import {
+  decryptEmailBody,
+  type EmailBody,
+  type EmailCheckResult,
+  hashRecipient,
+  scoreBand,
+  utcDay,
+} from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gt, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
@@ -199,6 +206,45 @@ export const emailsRouter = router({
       .where(eq(ev.emailId, email.id))
       .orderBy(asc(ev.occurredAt), asc(ev.id));
 
+    // API sends have their own emailId-keyed row; broadcast recipients share
+    // the one broadcastId-keyed row. Emails sent before insights existed have
+    // neither — null is a normal state, not an error.
+    const i = schema.emailInsights;
+    let [insightsRow] = await ctx.db
+      .select({
+        scoreTenths: i.scoreTenths,
+        marketing: i.marketing,
+        htmlSizeBytes: i.htmlSizeBytes,
+        computedAt: i.computedAt,
+        checks: i.checks,
+      })
+      .from(i)
+      .where(eq(i.emailId, email.id))
+      .limit(1);
+    if (!insightsRow && email.broadcastId) {
+      [insightsRow] = await ctx.db
+        .select({
+          scoreTenths: i.scoreTenths,
+          marketing: i.marketing,
+          htmlSizeBytes: i.htmlSizeBytes,
+          computedAt: i.computedAt,
+          checks: i.checks,
+        })
+        .from(i)
+        .where(eq(i.broadcastId, email.broadcastId))
+        .limit(1);
+    }
+    const insights = insightsRow
+      ? {
+          scoreTenths: insightsRow.scoreTenths,
+          band: scoreBand(insightsRow.scoreTenths),
+          marketing: insightsRow.marketing,
+          htmlSizeBytes: insightsRow.htmlSizeBytes,
+          computedAt: insightsRow.computedAt,
+          checks: insightsRow.checks as EmailCheckResult[],
+        }
+      : null;
+
     let apiKeyName: string | null = null;
     if (email.apiKeyId) {
       const k = schema.apiKeys;
@@ -229,6 +275,7 @@ export const emailsRouter = router({
       html: body.html,
       text: body.text,
       events,
+      insights,
     };
   }),
 

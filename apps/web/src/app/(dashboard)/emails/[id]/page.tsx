@@ -1,5 +1,6 @@
 "use client";
 
+import type { EmailCheckResult, ScoreBand } from "@millionsend/core";
 import { parseSmtpDiagnostic, resolveBounceGuidance } from "@millionsend/core/bounce-guidance";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -21,6 +22,7 @@ import {
   formatRelative,
   formatUtcTimestampMs,
 } from "@/lib/format";
+import { BAND_TONE } from "@/lib/score-band";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 
@@ -178,8 +180,236 @@ function CodeBlock({ value }: { value: string }) {
   );
 }
 
-const TAB_KEYS = ["preview", "text", "html"] as const;
+const TAB_KEYS = ["preview", "text", "html", "insights"] as const;
 type Tab = (typeof TAB_KEYS)[number];
+
+/** Text-icon glyph + status color per check row (DESIGN.md icon system). */
+function checkGlyph(check: EmailCheckResult): { glyph: string; color: string } {
+  switch (check.status) {
+    case "fail":
+      return {
+        glyph: "✕",
+        color:
+          check.severity === "critical" || check.severity === "major"
+            ? "var(--ms-danger)"
+            : "var(--ms-warn)",
+      };
+    case "unknown":
+      return { glyph: "?", color: "var(--ms-muted)" };
+    case "not_applicable":
+      return { glyph: "—", color: "var(--ms-faint)" };
+    default:
+      return { glyph: "✓", color: "var(--ms-success)" };
+  }
+}
+
+interface EmailInsights {
+  scoreTenths: number;
+  band: ScoreBand;
+  marketing: boolean;
+  htmlSizeBytes: number | null;
+  computedAt: Date;
+  checks: EmailCheckResult[];
+}
+
+function InsightsSection({ insights }: { insights: EmailInsights }) {
+  const t = useTranslations("emails");
+  const common = useTranslations("common");
+  const locale = useLocale();
+  const [openCheckId, setOpenCheckId] = useState<string | null>(null);
+  const [naOpen, setNaOpen] = useState(false);
+
+  const { checks } = insights;
+  const groups = [
+    {
+      key: "attention",
+      rows: checks.filter(
+        (c) => c.status === "fail" && (c.severity === "critical" || c.severity === "major"),
+      ),
+    },
+    {
+      key: "improvements",
+      rows: checks.filter(
+        (c) => c.status === "fail" && (c.severity === "minor" || c.severity === "info"),
+      ),
+    },
+    {
+      key: "great",
+      rows: checks.filter((c) => c.status === "pass" || c.status === "passed_by_design"),
+    },
+    { key: "notChecked", rows: checks.filter((c) => c.status === "unknown") },
+  ] as const;
+  const notApplicable = checks.filter((c) => c.status === "not_applicable");
+  const openCheck = openCheckId ? checks.find((c) => c.id === openCheckId) : undefined;
+
+  const score1 = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+
+  /** Mono data line under a check — hostnames, sizes, policies; never URLs. */
+  function detailLine(check: EmailCheckResult): string | null {
+    const d = check.detail;
+    if (!d) return null;
+    switch (check.id) {
+      case "body_size":
+        return typeof d.htmlSizeBytes === "number"
+          ? t("insights.kb", { kb: Math.round(d.htmlSizeBytes / 1024) })
+          : null;
+      case "dmarc_record":
+        return typeof d.policy === "string" ? `p=${d.policy}` : null;
+      case "link_domains_match":
+        return Array.isArray(d.linkDomains) ? d.linkDomains.join(", ") : null;
+      case "no_shorteners":
+        return Array.isArray(d.shorteners) ? d.shorteners.join(", ") : null;
+      case "images_offsite":
+        return Array.isArray(d.imageDomains) ? d.imageDomains.join(", ") : null;
+      default:
+        return null;
+    }
+  }
+
+  function checkRow(check: EmailCheckResult, greyed = false) {
+    const { glyph, color } = checkGlyph(check);
+    return (
+      <button
+        key={check.id}
+        type="button"
+        onClick={() => setOpenCheckId(check.id)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          width: "100%",
+          background: "none",
+          border: 0,
+          borderBottom: "1px solid var(--ms-line)",
+          padding: "9px 2px",
+          font: "inherit",
+          color: greyed ? "var(--ms-faint)" : "var(--ms-bone)",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        <span aria-hidden="true" style={{ color, width: 14, flex: "none", fontSize: 12 }}>
+          {glyph}
+        </span>
+        <span style={{ fontSize: 13.5 }}>{t(`insights.check.${check.id}.title`)}</span>
+        {check.status === "passed_by_design" ? (
+          <span className="ms-chip" style={{ fontSize: 10.5, padding: "1px 7px" }}>
+            {t("insights.byDesign")}
+          </span>
+        ) : null}
+        <span aria-hidden="true" style={{ marginLeft: "auto", color: "var(--ms-faint)" }}>
+          ›
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ padding: "20px 18px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <span className="ms-digits" style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1 }}>
+          {score1.format(insights.scoreTenths / 10)}
+        </span>
+        <span className="ms-digits" style={{ fontSize: 15, color: "var(--ms-muted)" }}>
+          {t("insights.outOfTen")}
+        </span>
+        <span className={`ms-badge ms-badge-${BAND_TONE[insights.band]}`}>
+          {common(`band.${insights.band}`)}
+        </span>
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 6 }}>
+        {t("insights.reportFrom", { date: formatDayTime(insights.computedAt, locale) })}
+      </div>
+
+      {groups.map((group) =>
+        group.rows.length === 0 ? null : (
+          <div key={group.key} style={{ marginTop: 20 }}>
+            <div className="ms-microlabel">{t(`insights.groups.${group.key}`)}</div>
+            {group.key === "notChecked" ? (
+              <div style={{ fontSize: 12.5, color: "var(--ms-faint)", marginTop: 3 }}>
+                {t("insights.notCheckedWhy")}
+              </div>
+            ) : null}
+            <div style={{ marginTop: 4 }}>{group.rows.map((check) => checkRow(check))}</div>
+          </div>
+        ),
+      )}
+
+      {notApplicable.length > 0 ? (
+        <div style={{ marginTop: 20 }}>
+          <button
+            type="button"
+            className="ms-microlabel"
+            onClick={() => setNaOpen((v) => !v)}
+            style={{
+              background: "none",
+              border: 0,
+              padding: 0,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {t("insights.notApplicableToggle", { count: notApplicable.length })}
+            <span aria-hidden="true">{naOpen ? "▾" : "›"}</span>
+          </button>
+          {naOpen ? (
+            <div style={{ marginTop: 4 }}>
+              {notApplicable.map((check) => checkRow(check, true))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <Drawer
+        open={openCheck !== undefined}
+        onClose={() => setOpenCheckId(null)}
+        title={openCheck ? t(`insights.check.${openCheck.id}.title`) : ""}
+      >
+        {openCheck ? (
+          <>
+            <p style={{ fontSize: 13.5, color: "var(--ms-muted)", lineHeight: 1.6, marginTop: 16 }}>
+              {t(`insights.check.${openCheck.id}.description`)}
+            </p>
+            {openCheck.status === "passed_by_design" ? (
+              <p style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.6 }}>
+                {t("insights.byDesignNote")}
+              </p>
+            ) : null}
+            {openCheck.status === "unknown" ? (
+              <p style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.6 }}>
+                {t("insights.notCheckedWhy")}
+              </p>
+            ) : null}
+            <div className="ms-microlabel" style={{ margin: "18px 0 6px" }}>
+              {t("insights.adviceLabel")}
+            </div>
+            <p style={{ margin: 0, fontSize: 13.5, color: "var(--ms-bone)", lineHeight: 1.6 }}>
+              {t(`insights.check.${openCheck.id}.advice`)}
+            </p>
+            {detailLine(openCheck) ? (
+              <>
+                <div className="ms-microlabel" style={{ margin: "18px 0 6px" }}>
+                  {t("insights.detailLabel")}
+                </div>
+                <div
+                  className="ms-mono"
+                  style={{ fontSize: 12.5, color: "var(--ms-bone)", overflowWrap: "anywhere" }}
+                >
+                  {detailLine(openCheck)}
+                </div>
+              </>
+            ) : null}
+          </>
+        ) : null}
+      </Drawer>
+    </div>
+  );
+}
 
 /** Mirrors the loaded page's boxes (header, meta grid, events strip, body panel). */
 function EmailDetailSkeleton() {
@@ -318,7 +548,7 @@ function EmailDetailSkeleton() {
             borderBottom: "1px solid var(--ms-line)",
           }}
         >
-          {[52, 64, 44].map((width) => (
+          {[52, 64, 44, 58].map((width) => (
             <span key={width} style={{ fontSize: 13, padding: "5px 11px", display: "flex" }}>
               <Skeleton width={width} height="1lh" />
             </span>
@@ -476,12 +706,14 @@ export default function EmailDetailPage() {
     preview: email.html,
     text: email.text,
     html: email.html,
+    insights: null,
   };
   const currentContent = tabContent[tab];
   const tabLabels: Record<Tab, string> = {
     preview: t("detail.preview"),
     text: t("detail.plainText"),
     html: t("detail.html"),
+    insights: t("detail.insights"),
   };
 
   return (
@@ -814,7 +1046,57 @@ export default function EmailDetailPage() {
           overflow: "hidden",
         }}
       >
-        {email.bodyPurgedAt ? (
+        {/* The tab bar outlives the body purge: insights are content-derived
+            metadata and deliberately survive it, so the purge message replaces
+            only the preview/text/html panels. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "10px 12px",
+            borderBottom: "1px solid var(--ms-line)",
+          }}
+        >
+          {TAB_KEYS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              style={{
+                fontSize: 13,
+                padding: "5px 11px",
+                borderRadius: 8,
+                border: 0,
+                cursor: "pointer",
+                background: tab === key ? "var(--ms-panel-raised)" : "none",
+                color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
+                font: "inherit",
+              }}
+              onClick={() => setTab(key)}
+            >
+              {tabLabels[key]}
+            </button>
+          ))}
+          {currentContent ? (
+            <span style={{ marginLeft: "auto", padding: "0 6px" }}>
+              <CopyGlyph value={currentContent} />
+            </span>
+          ) : null}
+        </div>
+        {tab === "insights" ? (
+          email.insights ? (
+            <InsightsSection insights={email.insights} />
+          ) : (
+            <div style={{ padding: "16px 18px" }}>
+              <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
+                {t("insights.empty")}
+              </p>
+              <p style={{ margin: "6px 0 0", color: "var(--ms-faint)", fontSize: 13 }}>
+                {t("insights.emptyHint")}
+              </p>
+            </div>
+          )
+        ) : email.bodyPurgedAt ? (
           <p
             style={{
               margin: 0,
@@ -827,40 +1109,6 @@ export default function EmailDetailPage() {
           </p>
         ) : (
           <>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "10px 12px",
-                borderBottom: "1px solid var(--ms-line)",
-              }}
-            >
-              {TAB_KEYS.map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  style={{
-                    fontSize: 13,
-                    padding: "5px 11px",
-                    borderRadius: 8,
-                    border: 0,
-                    cursor: "pointer",
-                    background: tab === key ? "var(--ms-panel-raised)" : "none",
-                    color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
-                    font: "inherit",
-                  }}
-                  onClick={() => setTab(key)}
-                >
-                  {tabLabels[key]}
-                </button>
-              ))}
-              {currentContent ? (
-                <span style={{ marginLeft: "auto", padding: "0 6px" }}>
-                  <CopyGlyph value={currentContent} />
-                </span>
-              ) : null}
-            </div>
             {tab === "preview" &&
               (email.html ? (
                 <div

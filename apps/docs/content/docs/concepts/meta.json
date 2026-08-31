@@ -1,5 +1,14 @@
 {
   "title": "Concepts",
   "defaultOpen": true,
-  "pages": ["contacts", "segments", "topics", "broadcasts", "domains", "webhooks", "suppressions"]
+  "pages": [
+    "contacts",
+    "segments",
+    "topics",
+    "broadcasts",
+    "domains",
+    "webhooks",
+    "suppressions",
+    "deliverability-insights"
+  ]
 }

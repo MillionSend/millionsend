@@ -189,3 +189,62 @@ describe("metrics.health", () => {
     expect(result.reasons).toEqual([]);
   });
 });
+
+describe("metrics.accountScore", () => {
+  it("withholds the outcome sub-score under the sends floor and reports the shape", async () => {
+    const teamId = await createTeam(db, "acme");
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId, day: utcDay(0), sent: 40, complained: 1, hardBounced: 2 });
+
+    const result = await callerFor(teamId).metrics.accountScore();
+
+    expect(result).toMatchObject({
+      windowDays: 30,
+      scoreVersion: 1,
+      sent: 40,
+      contentRecipients: 0,
+      insufficientOutcomeData: true,
+      outcomeScoreTenths: null,
+      contentScoreTenths: null,
+      scoreTenths: null,
+      band: null,
+      guardrailStatus: "ok",
+    });
+    expect(result.complaintRate).toBeCloseTo(1 / 40);
+    expect(result.hardBounceRate).toBeCloseTo(2 / 40);
+  });
+
+  it("blends content and outcome into a banded headline once data suffices", async () => {
+    const teamId = await createTeam(db, "acme");
+    await db.insert(schema.usageCounters).values({ teamId, day: utcDay(0), sent: 1000 });
+    const [email] = await db
+      .insert(schema.emails)
+      .values({
+        teamId,
+        from: "sender@acme.test",
+        to: ["ada@example.com"],
+        subject: "hello",
+        sentAt: new Date(),
+      })
+      .returning({ id: schema.emails.id });
+    if (!email) throw new Error("email insert failed");
+    await db.insert(schema.emailInsights).values({
+      teamId,
+      emailId: email.id,
+      marketing: false,
+      checks: [],
+      scoreTenths: 80,
+      scoreVersion: 1,
+    });
+
+    const result = await callerFor(teamId).metrics.accountScore();
+
+    expect(result.contentScoreTenths).toBe(80);
+    expect(result.outcomeScoreTenths).toBe(100);
+    // min(0.4 × 80 + 0.6 × 100, 100 + 15) = 92
+    expect(result.scoreTenths).toBe(92);
+    expect(result.band).toBe("excellent");
+    expect(result.insufficientOutcomeData).toBe(false);
+  });
+});

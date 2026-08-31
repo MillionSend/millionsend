@@ -1,0 +1,140 @@
+---
+title: Deliverability Insights
+description: Best-practice checks and a score for every email you send.
+---
+
+MillionSend runs a set of sending best-practice checks on every email at send
+time, and turns the results into two numbers: a 0–10 score per email, and a
+rolling 30-day account score. The score measures **compliance with sending
+best practices** — it is not a prediction of inbox placement. Nobody outside
+Gmail knows Gmail's filter; what the score tells you is whether your mail
+gives mailbox providers a reason to distrust it.
+
+## When checks run
+
+Checks run at send time, while the message is in memory. Email bodies are
+encrypted at rest and purged on the retention clock, so send time is the only
+moment the content can be inspected — the check results and score persist
+after the body is gone. A broadcast is checked once; every email in its
+fan-out shares the result.
+
+Emails sent before this feature existed have no insights — there is no
+backfill. For those, the email's `score` is `null` and
+`GET /emails/{id}/insights` returns `404` with
+`Insights are not available for this email yet`.
+
+## The checks
+
+Each check reports one of five statuses: `pass`, `fail`, `passed_by_design`,
+`not_applicable` or `unknown`. Only `fail` costs points.
+
+| Check | Severity | Penalty | Applies | What it looks for |
+| --- | --- | --- | --- | --- |
+| `dmarc_record` | critical | 3.5 | All | The sender domain publishes a DMARC record. |
+| `auth_alignment` | critical | 3.5 | All | SPF and DKIM align with the From domain. |
+| `list_unsubscribe` | major | 1.5 | Marketing | `List-Unsubscribe` and `List-Unsubscribe-Post` headers (one-click unsubscribe). |
+| `link_domains_match` | major | 1.25 | All | At least one link points back at your sending domain. |
+| `no_shorteners` | major | 1.25 | All | No public link shorteners (bit.ly, tinyurl, …). |
+| `body_size` | major | 1 | All | HTML under ~100 KB — beyond that Gmail clips the message. |
+| `plain_text` | major | 1 | All | A plain-text part alongside the HTML. |
+| `visible_unsubscribe` | major | 1 | Marketing | A visible unsubscribe link in the body, before the Gmail clip point. |
+| `phishing_links` | major | 1 | All | No links to raw IP addresses, no link text naming a different domain than the destination, no `http:` links whose text claims https. |
+| `no_reply_from` | minor | 0.5 | Marketing | The From address is not `no-reply@`. |
+| `svg_images` | minor | 0.5 | All | No inline or linked SVG images — widely blocked by email clients. |
+| `attachments_marketing` | minor | 0.5 | Marketing | No attachments on marketing mail. |
+| `image_text_ratio` | minor | 0.4 | All | Images are accompanied by real visible text, not image-only mail. |
+| `tracking_unbranded` | minor | 0.4 | All | Open/click tracking runs on your branded subdomain, not a shared host. |
+| `root_domain_send` | minor | 0.25 | Marketing | Marketing is sent from a subdomain, not the root domain. |
+| `insecure_links` | minor | 0.25 | All | No plain `http:` links. |
+| `subject_lint` | minor | 0.25 | All | The subject is not mostly uppercase and has no `!!!`/`???` runs. |
+| `image_alt_text` | info | 0 | All | Every image has alt text. |
+| `images_offsite` | info | 0 | All | Images are hosted on your own domain. |
+| `bimi_ready` | info | 0 | All | DMARC policy is strong enough for BIMI (`p=quarantine` or `p=reject`). |
+| `reply_to_present` | info | 0 | All | A Reply-To exists when the From address is `no-reply@`. |
+
+Some checks can't fail on MillionSend and report `passed_by_design`:
+
+- `auth_alignment` — always. You can only send from a verified domain, and
+  domain verification is a hard gate before any send, so SPF and DKIM
+  alignment is guaranteed by construction.
+- `list_unsubscribe` — on broadcast and topic sends, where MillionSend
+  injects the one-click unsubscribe headers itself. On plain API sends the
+  check reads the headers you supplied.
+
+On Cloud, open/click tracking only ever runs on your branded tracking
+subdomain, so `tracking_unbranded` can only fail on self-hosted setups that
+use a shared tracking host.
+
+## Scoring
+
+Every email starts at 10 and loses the penalty of each failed check —
+critical and major fails in full, minor fails capped at 1.5 points combined,
+info checks never cost anything. `not_applicable` and `unknown` checks cost
+nothing. The floor is 0:
+
+```
+score = max(0, 10 − critical fails − major fails − min(1.5, minor fails))
+```
+
+| Score | Band |
+| --- | --- |
+| 9.0+ | Excellent (`excellent`) |
+| 7.0–8.9 | Good (`good`) |
+| 5.0–6.9 | Needs attention (`needs_attention`) |
+| below 5.0 | At risk (`at_risk`) |
+
+Every score carries a `score_version`, stamping which check table and weights
+scored that email. Weights may evolve; after a version bump, newer emails are
+scored by the newer table, and scores with different versions are not
+directly comparable. Existing scores are never rewritten.
+
+## Marketing vs transactional
+
+An email is classified as **marketing** when any of these hold:
+
+- it is a broadcast or a topic send;
+- the caller supplied a `List-Unsubscribe` header;
+- the body contains a visible unsubscribe link.
+
+Everything else is transactional, and the marketing-only checks report
+`not_applicable` there — a password reset is not penalized for lacking an
+unsubscribe link.
+
+## Account score
+
+The account score is a rolling 30-day view, built from two sub-scores:
+
+- **Content** — the recipient-weighted mean of per-email scores in the
+  window. A 100,000-recipient broadcast weighs 100,000; a test send to
+  yourself weighs 1.
+- **Outcome** — starts at 10 and loses points as your complaint and
+  hard-bounce rates rise. The complaint gradient is anchored to Google's
+  published spam-rate lines (stay below 0.10%, never reach 0.30%): 0 to 6
+  points lost across 0.1%–0.3%, down to 10 across 0.3%–1%. Hard bounces cost
+  0 to 4 points across 2%–5%, up to 6 across 5%–10%. Under 100 sends in the
+  window the outcome sub-score is withheld as "not enough data" rather than
+  fabricated from a tiny sample.
+
+The headline score is `min(0.4·C + 0.6·O, O + 1.5)`. The second term is a
+governor: immaculate content lint can never mask a real complaint problem.
+When one sub-score is unavailable, the headline is the other alone.
+
+The [sending guardrail](/concepts/broadcasts#guardrails) additionally caps
+the headline — at 6.9 while in warning, at 4.9 while paused — so the score
+and a sending pause can never disagree.
+
+<Callout type="warn">
+Amazon SES provides no Gmail feedback loop, so the complaint rate here
+structurally excludes Gmail — your real Gmail complaint rate can be worse
+than the number shown. [Google Postmaster
+Tools](https://postmaster.google.com) has the Gmail-side view.
+</Callout>
+
+## API and MCP
+
+Every email object carries its `score`. `GET /emails/{id}/insights` returns
+the full check results for one email, and `GET /deliverability` returns the
+account score, sub-scores, rates and guardrail status — see the
+[API reference](/api-reference). The same data is available to AI agents
+through the `get_email_insights` and `get_deliverability` tools on the
+[MCP server](/mcp).

@@ -60,9 +60,136 @@
     "preview": "Prévia",
     "plainText": "Texto simples",
     "html": "HTML",
+    "insights": "Insights",
     "bodyPurged": "Corpo removido após a janela de retenção.",
     "noHtml": "Sem corpo HTML.",
     "noText": "Sem corpo em texto simples."
+  },
+  "insights": {
+    "outOfTen": "/ 10",
+    "reportFrom": "Relatório de {date}",
+    "empty": "Sem insights para este e-mail.",
+    "emptyHint": "Ele foi enviado antes de os insights existirem, ou ainda não foi enviado. E-mails anteriores não são analisados retroativamente.",
+    "groups": {
+      "attention": "Requer atenção",
+      "improvements": "Melhorias",
+      "great": "Tudo certo",
+      "notChecked": "Não verificado"
+    },
+    "notCheckedWhy": "Estado do DNS indisponível no momento do envio.",
+    "notApplicableToggle": "{count, plural, one {# verificação não aplicável} other {# verificações não aplicáveis}}",
+    "byDesign": "por construção",
+    "byDesignNote": "O MillionSend garante isso estruturalmente — não há como falhar aqui.",
+    "adviceLabel": "O que fazer",
+    "detailLabel": "Detalhe",
+    "kb": "{kb} KB",
+    "check": {
+      "dmarc_record": {
+        "title": "Registro DMARC",
+        "description": "Seu domínio de envio publica uma política DMARC. Google, Yahoo e Microsoft exigem uma para remetentes em massa — p=none já os satisfaz; p=quarantine ou p=reject também desbloqueia o BIMI.",
+        "advice": "Adicione um registro TXT _dmarc ao seu domínio. Comece com p=none, acompanhe os relatórios e depois restrinja."
+      },
+      "auth_alignment": {
+        "title": "Alinhamento SPF e DKIM",
+        "description": "SPF e DKIM passam e se alinham ao domínio do remetente — o requisito básico de todos os grandes provedores.",
+        "advice": "Nada a fazer — o MillionSend verifica SPF e DKIM do seu domínio antes de qualquer envio sair."
+      },
+      "list_unsubscribe": {
+        "title": "Cabeçalhos de descadastro em um clique",
+        "description": "A mensagem carrega os cabeçalhos List-Unsubscribe e List-Unsubscribe-Post. Gmail e Yahoo exigem descadastro em um clique para remetentes em massa.",
+        "advice": "Envie marketing por transmissões ou tópicos — o MillionSend injeta os dois cabeçalhos automaticamente."
+      },
+      "link_domains_match": {
+        "title": "Links no seu domínio",
+        "description": "Pelo menos um link aponta para o seu domínio de envio. Uma mensagem cujos links vão todos para domínios de terceiros tem o formato típico de phishing.",
+        "advice": "Inclua ao menos um link para o seu próprio domínio, ou envie a partir do domínio para o qual você aponta."
+      },
+      "no_shorteners": {
+        "title": "Sem encurtadores de link",
+        "description": "Links encurtados (bit.ly, tinyurl e similares) escondem o destino e são muito usados em abusos. Com rastreamento de cliques ativo, um encurtador vira um redirecionamento duplo embrulhado pelo rastreador — padrão de phishing documentado no Gmail.",
+        "advice": "Use URLs completas. O rastreamento de cliques já informa o que foi clicado."
+      },
+      "body_size": {
+        "title": "Tamanho do HTML",
+        "description": "O Gmail corta mensagens cujo HTML passa de 102KB — tudo após o corte, rodapé de descadastro incluído, fica atrás de \"Exibir mensagem inteira\".",
+        "advice": "Mantenha o HTML abaixo de 102KB: menos estilos inline, conteúdo mais curto, nada embutido."
+      },
+      "plain_text": {
+        "title": "Versão em texto simples",
+        "description": "A mensagem inclui uma parte text/plain junto do HTML. E-mails só em HTML pontuam pior nos filtros de spam e quebram em clientes de texto.",
+        "advice": "Envie um corpo em texto junto de todo HTML."
+      },
+      "visible_unsubscribe": {
+        "title": "Link de descadastro visível",
+        "description": "O corpo contém um link de descadastro antes do ponto de corte do Gmail. Quem não encontra o link aperta \"Marcar como spam\".",
+        "advice": "Coloque um link de descadastro no rodapé e mantenha-o dentro dos primeiros 102KB de HTML."
+      },
+      "phishing_links": {
+        "title": "Sem padrões de phishing nos links",
+        "description": "Nenhum texto de link nomeando um domínio diferente do destino, nenhum link para endereço IP, nenhum link http se dizendo https — os padrões que filtros de phishing procuram.",
+        "advice": "Faça o texto do link corresponder ao destino e nunca aponte para IPs."
+      },
+      "no_reply_from": {
+        "title": "Remetente que aceita resposta",
+        "description": "O endereço do remetente não é uma caixa no-reply. Respostas são um sinal de engajamento que os provedores contam a seu favor.",
+        "advice": "Envie de um endereço monitorado; se precisar de no-reply, defina um Reply-To."
+      },
+      "svg_images": {
+        "title": "Sem imagens SVG",
+        "description": "SVG não renderiza na maioria dos clientes de e-mail — Gmail e Outlook mostram um espaço em branco no lugar.",
+        "advice": "Exporte as imagens como PNG ou JPEG."
+      },
+      "attachments_marketing": {
+        "title": "Sem anexos",
+        "description": "Marketing com anexos eleva a pontuação de spam e malware; remetentes em massa quase nunca anexam arquivos.",
+        "advice": "Hospede o arquivo e envie um link."
+      },
+      "image_text_ratio": {
+        "title": "Texto junto das imagens",
+        "description": "A mensagem tem texto visível de verdade junto das imagens. E-mail só de imagem, quase sem texto, é assinatura clássica de spam e fica ilegível com imagens bloqueadas.",
+        "advice": "Escreva a mensagem como texto; use imagens para apoiar, não substituir."
+      },
+      "tracking_unbranded": {
+        "title": "Domínio de rastreamento próprio",
+        "description": "O rastreamento de aberturas e cliques reescreve os links por um host de rastreamento. Em um subdomínio seu, os links continuam no seu domínio; em um host compartilhado, seu e-mail carrega a reputação de terceiros.",
+        "advice": "Verifique um subdomínio de rastreamento para que os links rastreados continuem seus."
+      },
+      "root_domain_send": {
+        "title": "Marketing em subdomínio",
+        "description": "Marketing enviado do domínio raiz amarra a reputação dele a todo o seu e-mail, transacional incluído.",
+        "advice": "Envie marketing de um subdomínio dedicado, como news.seudominio.com."
+      },
+      "insecure_links": {
+        "title": "Links em HTTPS",
+        "description": "Todos os links usam https. Links em http puro são sinalizados por scanners de segurança e podem ser adulterados no caminho.",
+        "advice": "Sirva os destinos por https e atualize as URLs."
+      },
+      "subject_lint": {
+        "title": "Linha de assunto",
+        "description": "O assunto evita caixa alta e sequências de !!! ou ??? — os dois disparam filtros de conteúdo.",
+        "advice": "Use caixa normal no assunto e remova a pontuação repetida."
+      },
+      "image_alt_text": {
+        "title": "Texto alternativo nas imagens",
+        "description": "Toda imagem carrega texto alternativo — o que o destinatário vê enquanto as imagens carregam ou ficam bloqueadas, e o que leitores de tela leem.",
+        "advice": "Dê um atributo alt a cada imagem relevante."
+      },
+      "images_offsite": {
+        "title": "Imagens no seu domínio",
+        "description": "As imagens carregam do seu domínio de envio. Hosts de terceiros amarram a renderização da mensagem a servidores que você não controla.",
+        "advice": "Hospede as imagens no seu próprio domínio."
+      },
+      "bimi_ready": {
+        "title": "Pronto para BIMI",
+        "description": "O BIMI exibe seu logotipo nas caixas de entrada compatíveis. Exige DMARC em p=quarantine ou p=reject — p=none não basta.",
+        "advice": "Restrinja o DMARC para quarantine ou reject e depois publique um registro BIMI com logotipo verificado."
+      },
+      "reply_to_present": {
+        "title": "Reply-To com remetente no-reply",
+        "description": "Envio de um endereço no-reply com o cabeçalho Reply-To definido, para que respostas ainda cheguem a uma caixa real.",
+        "advice": "Mantenha um Reply-To em todo envio de endereço no-reply."
+      }
+    }
   },
   "bouncedDrawer": {
     "title": "Detalhes do bounce",

@@ -238,6 +238,8 @@ describe("tool listing", () => {
     expect(names).toEqual([
       "list_emails",
       "get_email",
+      "get_email_insights",
+      "get_deliverability",
       "list_contacts",
       "get_contact",
       "list_segments",

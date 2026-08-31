@@ -12,6 +12,7 @@ import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatDayUtc } from "@/lib/format";
+import { BAND_TONE } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
 
@@ -339,6 +340,45 @@ function MetricsSkeleton() {
   );
 }
 
+/** Mirrors the loaded score card: label row, hero digits line, 4-column footer. */
+function AccountScoreSkeleton() {
+  return (
+    <div className="ms-kpi-card" style={{ marginTop: 18 }}>
+      <div className="ms-microlabel" style={{ display: "flex" }}>
+        <Skeleton width={110} height="1lh" />
+      </div>
+      <div
+        className="ms-digits"
+        style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1, marginTop: 6, display: "flex" }}
+      >
+        <Skeleton width={110} height="1lh" />
+      </div>
+      <div
+        className="ms-kpi-row"
+        style={{
+          display: "flex",
+          gap: 56,
+          marginTop: 16,
+          paddingTop: 14,
+          borderTop: "1px solid var(--ms-line)",
+          alignItems: "flex-start",
+        }}
+      >
+        {[0, 1, 2, 3].map((column) => (
+          <div key={column}>
+            <div className="ms-microlabel" style={{ display: "flex" }}>
+              <Skeleton width={80} height="1lh" />
+            </div>
+            <div className="ms-digits" style={{ fontSize: 20, marginTop: 4, display: "flex" }}>
+              <Skeleton width={44} height="1lh" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function MetricsPage() {
   const t = useTranslations("metrics");
   const common = useTranslations("common");
@@ -348,8 +388,13 @@ export default function MetricsPage() {
   // URL input — anything but a known range key falls back to the default.
   const days: Range = RANGES.find((r) => String(r) === rangeParam) ?? 15;
   const query = useQuery(trpc.metrics.window.queryOptions({ days }));
+  const scoreQuery = useQuery(trpc.metrics.accountScore.queryOptions());
 
   const fmt = new Intl.NumberFormat(locale);
+  const score1 = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
   const pct1 = new Intl.NumberFormat(locale, {
     style: "percent",
     minimumFractionDigits: 1,
@@ -421,6 +466,92 @@ export default function MetricsPage() {
               />
             </div>
           </div>
+
+          {scoreQuery.data === undefined ? (
+            <AccountScoreSkeleton />
+          ) : (
+            <div className="ms-kpi-card" style={{ marginTop: 18 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <div className="ms-microlabel">{t("score.title")}</div>
+                <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
+                  {t("score.window")}
+                </span>
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <div
+                  className="ms-digits"
+                  style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1, marginTop: 6 }}
+                >
+                  {scoreQuery.data.scoreTenths != null ? (
+                    <Odometer formatted={score1.format(scoreQuery.data.scoreTenths / 10)} />
+                  ) : (
+                    "—"
+                  )}
+                </div>
+                <span className="ms-digits" style={{ fontSize: 15, color: "var(--ms-muted)" }}>
+                  {t("score.outOfTen")}
+                </span>
+                {scoreQuery.data.band ? (
+                  <span className={`ms-badge ms-badge-${BAND_TONE[scoreQuery.data.band]}`}>
+                    {common(`band.${scoreQuery.data.band}`)}
+                  </span>
+                ) : null}
+                {scoreQuery.data.guardrailStatus !== "ok" ? (
+                  <span style={{ fontSize: 12.5, color: "var(--ms-warn)" }}>
+                    {t("score.capped")}
+                  </span>
+                ) : null}
+              </div>
+              <div
+                className="ms-kpi-row"
+                style={{
+                  display: "flex",
+                  gap: 56,
+                  marginTop: 16,
+                  paddingTop: 14,
+                  borderTop: "1px solid var(--ms-line)",
+                  alignItems: "flex-start",
+                }}
+              >
+                <div>
+                  <div className="ms-microlabel">{t("score.content")}</div>
+                  <div className="ms-digits" style={{ fontSize: 20, marginTop: 4 }}>
+                    {scoreQuery.data.contentScoreTenths != null
+                      ? score1.format(scoreQuery.data.contentScoreTenths / 10)
+                      : "—"}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "var(--ms-faint)", marginTop: 3 }}>
+                    {t("score.contentLine")}
+                  </div>
+                </div>
+                <div>
+                  <div className="ms-microlabel">{t("score.outcome")}</div>
+                  <div className="ms-digits" style={{ fontSize: 20, marginTop: 4 }}>
+                    {scoreQuery.data.outcomeScoreTenths != null
+                      ? score1.format(scoreQuery.data.outcomeScoreTenths / 10)
+                      : "—"}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "var(--ms-faint)", marginTop: 3 }}>
+                    {scoreQuery.data.insufficientOutcomeData
+                      ? t("score.insufficient")
+                      : t("score.outcomeLine")}
+                  </div>
+                </div>
+                <div>
+                  <div className="ms-microlabel">{t("score.complaintRate")}</div>
+                  <div className="ms-digits" style={{ fontSize: 20, marginTop: 4 }}>
+                    {pct2.format(scoreQuery.data.complaintRate)}
+                  </div>
+                </div>
+                <div>
+                  <div className="ms-microlabel">{t("score.hardBounceRate")}</div>
+                  <div className="ms-digits" style={{ fontSize: 20, marginTop: 4 }}>
+                    {pct2.format(scoreQuery.data.hardBounceRate)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="ms-card-row" style={{ display: "flex", gap: 18, marginTop: 18 }}>
             <RateCard

@@ -1,0 +1,146 @@
+---
+title: Insights de Entregabilidade
+description: Verificações de boas práticas e uma nota para cada email enviado.
+---
+
+O MillionSend executa um conjunto de verificações de boas práticas de envio
+em cada email no momento do envio, e transforma os resultados em dois
+números: uma nota de 0 a 10 por email, e uma nota da conta sobre uma janela
+móvel de 30 dias. A nota mede **conformidade com boas práticas de envio** —
+não é uma previsão de chegada à caixa de entrada. Ninguém fora do Gmail
+conhece o filtro do Gmail; o que a nota diz é se o seu email dá aos
+provedores um motivo para desconfiar dele.
+
+## Quando as verificações rodam
+
+As verificações rodam no momento do envio, enquanto a mensagem está em
+memória. Corpos de email são criptografados em repouso e removidos pelo
+relógio de retenção, então o envio é o único momento em que o conteúdo pode
+ser inspecionado — os resultados e a nota persistem depois que o corpo é
+removido. Um broadcast é verificado uma vez; todos os emails do fan-out
+compartilham o resultado.
+
+Emails enviados antes desta funcionalidade existir não têm insights — não há
+backfill. Para eles, o `score` do email é `null` e
+`GET /emails/{id}/insights` retorna `404` com
+`Insights are not available for this email yet`.
+
+## As verificações
+
+Cada verificação reporta um de cinco status: `pass`, `fail`,
+`passed_by_design`, `not_applicable` ou `unknown`. Apenas `fail` custa
+pontos.
+
+| Verificação | Severidade | Penalidade | Aplica-se | O que verifica |
+| --- | --- | --- | --- | --- |
+| `dmarc_record` | critical | 3.5 | Todos | O domínio remetente publica um registro DMARC. |
+| `auth_alignment` | critical | 3.5 | Todos | SPF e DKIM alinhados com o domínio do From. |
+| `list_unsubscribe` | major | 1.5 | Marketing | Headers `List-Unsubscribe` e `List-Unsubscribe-Post` (descadastro em um clique). |
+| `link_domains_match` | major | 1.25 | Todos | Ao menos um link aponta de volta para o seu domínio de envio. |
+| `no_shorteners` | major | 1.25 | Todos | Nenhum encurtador de link público (bit.ly, tinyurl, …). |
+| `body_size` | major | 1 | Todos | HTML abaixo de ~100 KB — acima disso o Gmail corta a mensagem. |
+| `plain_text` | major | 1 | Todos | Uma parte em texto puro junto com o HTML. |
+| `visible_unsubscribe` | major | 1 | Marketing | Um link de descadastro visível no corpo, antes do ponto de corte do Gmail. |
+| `phishing_links` | major | 1 | Todos | Nenhum link para endereço IP, nenhum texto de link citando um domínio diferente do destino, nenhum link `http:` cujo texto alega https. |
+| `no_reply_from` | minor | 0.5 | Marketing | O endereço From não é `no-reply@`. |
+| `svg_images` | minor | 0.5 | Todos | Nenhuma imagem SVG inline ou vinculada — amplamente bloqueadas por clientes de email. |
+| `attachments_marketing` | minor | 0.5 | Marketing | Nenhum anexo em email de marketing. |
+| `image_text_ratio` | minor | 0.4 | Todos | Imagens acompanhadas de texto visível de verdade, não email só de imagem. |
+| `tracking_unbranded` | minor | 0.4 | Todos | Tracking de abertura/clique roda no seu subdomínio próprio, não em um host compartilhado. |
+| `root_domain_send` | minor | 0.25 | Marketing | Marketing enviado de um subdomínio, não do domínio raiz. |
+| `insecure_links` | minor | 0.25 | Todos | Nenhum link `http:` puro. |
+| `subject_lint` | minor | 0.25 | Todos | O assunto não é majoritariamente maiúsculo e não tem sequências de `!!!`/`???`. |
+| `image_alt_text` | info | 0 | Todos | Toda imagem tem texto alternativo. |
+| `images_offsite` | info | 0 | Todos | Imagens hospedadas no seu próprio domínio. |
+| `bimi_ready` | info | 0 | Todos | Política DMARC forte o suficiente para BIMI (`p=quarantine` ou `p=reject`). |
+| `reply_to_present` | info | 0 | Todos | Um Reply-To existe quando o From é `no-reply@`. |
+
+Algumas verificações não podem falhar no MillionSend e reportam
+`passed_by_design`:
+
+- `auth_alignment` — sempre. Você só envia de um domínio verificado, e a
+  verificação de domínio é um portão obrigatório antes de qualquer envio,
+  então o alinhamento de SPF e DKIM é garantido por construção.
+- `list_unsubscribe` — em broadcasts e envios por tópico, onde o próprio
+  MillionSend injeta os headers de descadastro em um clique. Em envios pela
+  API a verificação lê os headers que você forneceu.
+
+No Cloud, o tracking de abertura/clique só roda no seu subdomínio de
+tracking próprio, então `tracking_unbranded` só pode falhar em instâncias
+self-hosted que usam um host de tracking compartilhado.
+
+## Pontuação
+
+Cada email começa em 10 e perde a penalidade de cada verificação que falhou —
+falhas critical e major por inteiro, falhas minor limitadas a 1.5 ponto no
+total, verificações info nunca custam nada. `not_applicable` e `unknown` não
+custam nada. O piso é 0:
+
+```
+nota = max(0, 10 − falhas critical − falhas major − min(1.5, falhas minor))
+```
+
+| Nota | Faixa |
+| --- | --- |
+| 9.0+ | Excelente (`excellent`) |
+| 7.0–8.9 | Boa (`good`) |
+| 5.0–6.9 | Precisa de atenção (`needs_attention`) |
+| abaixo de 5.0 | Em risco (`at_risk`) |
+
+Toda nota carrega um `score_version`, marcando qual tabela de verificações e
+pesos pontuou aquele email. Os pesos podem evoluir; depois de um bump de
+versão, emails mais novos são pontuados pela tabela mais nova, e notas com
+versões diferentes não são diretamente comparáveis. Notas existentes nunca
+são reescritas.
+
+## Marketing vs transacional
+
+Um email é classificado como **marketing** quando qualquer uma destas vale:
+
+- é um broadcast ou um envio por tópico;
+- quem chamou forneceu um header `List-Unsubscribe`;
+- o corpo contém um link de descadastro visível.
+
+Todo o resto é transacional, e as verificações exclusivas de marketing
+reportam `not_applicable` — um email de redefinição de senha não é penalizado
+por não ter link de descadastro.
+
+## Nota da conta
+
+A nota da conta é uma visão móvel de 30 dias, construída de duas sub-notas:
+
+- **Conteúdo** — a média das notas por email ponderada por destinatários na
+  janela. Um broadcast de 100.000 destinatários pesa 100.000; um envio de
+  teste para você mesmo pesa 1.
+- **Resultado** — começa em 10 e perde pontos conforme suas taxas de
+  reclamação e hard bounce sobem. O gradiente de reclamações é ancorado nas
+  linhas de taxa de spam publicadas pelo Google (fique abaixo de 0,10%,
+  nunca alcance 0,30%): 0 a 6 pontos perdidos entre 0,1%–0,3%, caindo até 10
+  entre 0,3%–1%. Hard bounces custam 0 a 4 pontos entre 2%–5%, até 6 entre
+  5%–10%. Com menos de 100 envios na janela a sub-nota de resultado é retida
+  como "dados insuficientes" em vez de fabricada de uma amostra minúscula.
+
+A nota principal é `min(0,4·C + 0,6·O, O + 1,5)`. O segundo termo é um
+governador: um lint de conteúdo imaculado nunca mascara um problema real de
+reclamações. Quando uma sub-nota está indisponível, a nota principal é a
+outra sozinha.
+
+O [guardrail de envio](/concepts/broadcasts#guardrails) adicionalmente limita
+a nota principal — em 6.9 durante warning, em 4.9 durante pausa — para que a
+nota e uma pausa de envio nunca possam discordar.
+
+<Callout type="warn">
+O Amazon SES não oferece feedback loop do Gmail, então a taxa de reclamação
+aqui exclui estruturalmente o Gmail — sua taxa real de reclamação no Gmail
+pode ser pior que o número exibido. O [Google Postmaster
+Tools](https://postmaster.google.com) tem a visão do lado do Gmail.
+</Callout>
+
+## API e MCP
+
+Todo objeto de email carrega seu `score`. `GET /emails/{id}/insights`
+retorna os resultados completos das verificações de um email, e
+`GET /deliverability` retorna a nota da conta, sub-notas, taxas e status do
+guardrail — veja a [referência da API](/api-reference). Os mesmos dados
+estão disponíveis para agentes de IA pelas tools `get_email_insights` e
+`get_deliverability` no [servidor MCP](/mcp).

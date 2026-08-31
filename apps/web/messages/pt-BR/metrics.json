@@ -23,6 +23,19 @@
   "engagement": {
     "denominator": "das entregues"
   },
+  "score": {
+    "title": "Nota da conta",
+    "window": "últimos 30 dias",
+    "outOfTen": "/ 10",
+    "content": "Conteúdo",
+    "contentLine": "Nota dos e-mails enviados, ponderada por destinatários",
+    "outcome": "Resultado",
+    "outcomeLine": "Reclamações e bounces permanentes sobre os envios",
+    "insufficient": "Envios insuficientes nos últimos 30 dias.",
+    "capped": "Limitada pela proteção de envio.",
+    "complaintRate": "Taxa de reclamação",
+    "hardBounceRate": "Taxa de bounce permanente"
+  },
   "open": {
     "title": "Taxa de abertura",
     "opened": "Aberturas"

@@ -418,9 +418,9 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
   return { checks, scoreTenths: Math.round(hundredths / 10), marketing };
 }
 
-export function scoreBand(
-  scoreTenths: number,
-): "excellent" | "good" | "needs_attention" | "at_risk" {
+export type ScoreBand = "excellent" | "good" | "needs_attention" | "at_risk";
+
+export function scoreBand(scoreTenths: number): ScoreBand {
   if (scoreTenths >= 90) return "excellent";
   if (scoreTenths >= 70) return "good";
   if (scoreTenths >= 50) return "needs_attention";

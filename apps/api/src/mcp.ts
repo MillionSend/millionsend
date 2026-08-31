@@ -418,6 +418,28 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     ({ id }) => api("GET", `/emails/${enc(id)}`),
   );
   tool(
+    "get_email_insights",
+    "emails:read",
+    {
+      description:
+        "Get the best-practice report for one email, computed when it was sent: per-check results (id, severity, pass/fail, points deducted) and a 0-10 score. The score measures compliance with sending best practices — it is NOT an inbox-placement probability. To improve it, fix what each failing check describes; never 'optimize' by disabling open/click tracking, removing unsubscribe links, or stripping legitimate content.",
+      inputSchema: z.object({ email_id: z.uuid().describe("Email id returned by send_email") }),
+      readOnly: true,
+    },
+    ({ email_id }) => api("GET", `/emails/${enc(email_id)}/insights`),
+  );
+  tool(
+    "get_deliverability",
+    "emails:read",
+    {
+      description:
+        "Get the team's deliverability standing over the trailing 30 days: a 0-10 headline score with band, content and outcome sub-scores, complaint and hard-bounce rates, and guardrail status. The score measures best-practice compliance and recipient outcomes for the account — it is NOT an inbox-placement probability. Improve it by fixing per-email check failures (get_email_insights) and list hygiene, never by disabling tracking or stripping content.",
+      inputSchema: z.object({}),
+      readOnly: true,
+    },
+    () => api("GET", "/deliverability"),
+  );
+  tool(
     "list_contacts",
     "audience:read",
     {

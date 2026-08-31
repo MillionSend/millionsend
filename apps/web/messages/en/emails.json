@@ -60,9 +60,136 @@
     "preview": "Preview",
     "plainText": "Plain text",
     "html": "HTML",
+    "insights": "Insights",
     "bodyPurged": "Body purged after retention window.",
     "noHtml": "No HTML body.",
     "noText": "No plain-text body."
+  },
+  "insights": {
+    "outOfTen": "/ 10",
+    "reportFrom": "Report from {date}",
+    "empty": "No insights for this email.",
+    "emptyHint": "It was sent before insights existed, or it hasn't been sent yet. Earlier emails are not analyzed retroactively.",
+    "groups": {
+      "attention": "Needs attention",
+      "improvements": "Improvements",
+      "great": "Doing great",
+      "notChecked": "Not checked"
+    },
+    "notCheckedWhy": "DNS state unavailable at send time.",
+    "notApplicableToggle": "{count, plural, one {# check not applicable} other {# checks not applicable}}",
+    "byDesign": "by design",
+    "byDesignNote": "MillionSend enforces this structurally — it cannot fail here.",
+    "adviceLabel": "What to do",
+    "detailLabel": "Detail",
+    "kb": "{kb} KB",
+    "check": {
+      "dmarc_record": {
+        "title": "DMARC record",
+        "description": "Your sending domain publishes a DMARC policy. Google, Yahoo and Microsoft require one for bulk senders — p=none already satisfies them; p=quarantine or p=reject additionally unlocks BIMI.",
+        "advice": "Add a _dmarc TXT record to your domain. Start at p=none, watch the reports, then tighten."
+      },
+      "auth_alignment": {
+        "title": "SPF and DKIM alignment",
+        "description": "SPF and DKIM pass and align with your From domain — the base requirement of every major mailbox provider.",
+        "advice": "Nothing to do — MillionSend verifies SPF and DKIM on your domain before any send leaves."
+      },
+      "list_unsubscribe": {
+        "title": "One-click unsubscribe headers",
+        "description": "The message carries List-Unsubscribe and List-Unsubscribe-Post headers. Gmail and Yahoo require one-click unsubscribe for bulk senders.",
+        "advice": "Send marketing through broadcasts or topics — MillionSend injects both headers automatically."
+      },
+      "link_domains_match": {
+        "title": "Links match your domain",
+        "description": "At least one link points at your sending domain. A message whose links all go to third-party domains matches a common phishing shape.",
+        "advice": "Link to your own domain at least once, or send from the domain you link to."
+      },
+      "no_shorteners": {
+        "title": "No link shorteners",
+        "description": "Shortened links (bit.ly, tinyurl and similar) hide the destination and are heavily abused. With click tracking on, a shortener becomes a tracking-wrapped double redirect — a documented phishing pattern for Gmail.",
+        "advice": "Use full destination URLs. Click tracking already reports what was clicked."
+      },
+      "body_size": {
+        "title": "HTML size",
+        "description": "Gmail clips messages whose HTML exceeds 102KB — everything past the clip point, unsubscribe footer included, hides behind \"View entire message\".",
+        "advice": "Keep the HTML under 102KB: fewer inlined styles, shorter content, nothing embedded."
+      },
+      "plain_text": {
+        "title": "Plain-text version",
+        "description": "The message ships a text/plain part alongside the HTML. HTML-only mail scores worse with spam filters and breaks in text-only clients.",
+        "advice": "Provide a text body with every HTML send."
+      },
+      "visible_unsubscribe": {
+        "title": "Visible unsubscribe link",
+        "description": "The body contains an unsubscribe link placed before Gmail's clip point. Recipients who can't find it press \"Report spam\" instead.",
+        "advice": "Put an unsubscribe link in the footer and keep it inside the first 102KB of HTML."
+      },
+      "phishing_links": {
+        "title": "No phishing-pattern links",
+        "description": "No link text naming a different domain than its destination, no links to raw IP addresses, no http links claiming to be https — the patterns phishing filters match on.",
+        "advice": "Make link text agree with the destination and never link to bare IPs."
+      },
+      "no_reply_from": {
+        "title": "Replyable From address",
+        "description": "The From address is not a no-reply mailbox. Replies are an engagement signal mailbox providers count in your favor.",
+        "advice": "Send from a monitored address; if you must use no-reply, set a Reply-To."
+      },
+      "svg_images": {
+        "title": "No SVG images",
+        "description": "SVG does not render in most email clients — Gmail and Outlook show a blank where the image should be.",
+        "advice": "Export images as PNG or JPEG."
+      },
+      "attachments_marketing": {
+        "title": "No attachments",
+        "description": "Marketing mail with attachments raises spam and malware scores; bulk senders almost never attach files.",
+        "advice": "Host the file and link to it instead."
+      },
+      "image_text_ratio": {
+        "title": "Text alongside images",
+        "description": "The message has real visible text next to its images. Image-heavy mail with almost no text is a classic spam signature and unreadable while images are blocked.",
+        "advice": "Write the message as text; use images to support it, not replace it."
+      },
+      "tracking_unbranded": {
+        "title": "Branded tracking domain",
+        "description": "Open and click tracking rewrite links through a tracking host. On a branded subdomain the links stay on your domain; on a shared host your mail borrows someone else's reputation.",
+        "advice": "Verify a tracking subdomain for your domain so tracked links stay yours."
+      },
+      "root_domain_send": {
+        "title": "Marketing on a subdomain",
+        "description": "Marketing sent from your root domain ties its reputation to all your mail, transactional included.",
+        "advice": "Send marketing from a dedicated subdomain such as news.yourdomain.com."
+      },
+      "insecure_links": {
+        "title": "HTTPS links",
+        "description": "Every link uses https. Plain-http links get flagged by security scanners and can be tampered with in transit.",
+        "advice": "Serve link targets over https and update the URLs."
+      },
+      "subject_lint": {
+        "title": "Subject line",
+        "description": "The subject avoids all-caps and runs of !!! or ??? — both trip content filters.",
+        "advice": "Sentence-case the subject and drop the repeated punctuation."
+      },
+      "image_alt_text": {
+        "title": "Image alt text",
+        "description": "Every image carries alt text — what recipients see while images load or stay blocked, and what screen readers read.",
+        "advice": "Give each meaningful image an alt attribute."
+      },
+      "images_offsite": {
+        "title": "Images on your domain",
+        "description": "Images load from your sending domain. Third-party image hosts tie the message's rendering to servers you don't control.",
+        "advice": "Host images on your own domain."
+      },
+      "bimi_ready": {
+        "title": "BIMI readiness",
+        "description": "BIMI shows your logo in supporting inboxes. It requires DMARC at p=quarantine or p=reject — p=none is not enough.",
+        "advice": "Tighten DMARC to quarantine or reject, then publish a BIMI record with a verified logo."
+      },
+      "reply_to_present": {
+        "title": "Reply-To with no-reply From",
+        "description": "Sending from a no-reply address with a Reply-To header set, so replies still reach a real mailbox.",
+        "advice": "Keep a Reply-To on every send from a no-reply address."
+      }
+    }
   },
   "bouncedDrawer": {
     "title": "Bounced details",

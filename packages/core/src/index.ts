@@ -12,6 +12,14 @@ export {
   senderDomain,
   verifySenderDomain,
 } from "./accept-email.js";
+export {
+  ACCOUNT_SCORE_WINDOW_DAYS,
+  type AccountScore,
+  type AccountScoreInput,
+  computeAccountScore,
+  fetchAccountScore,
+  MIN_OUTCOME_SENDS,
+} from "./account-score.js";
 export { type ApiKeyAuth, authenticateApiKey } from "./api-key-auth.js";
 export {
   extractTokenPrefix,
@@ -114,6 +122,7 @@ export {
   type EmailInsightsInput,
   evaluateEmailInsights,
   SCORE_VERSION,
+  type ScoreBand,
   SHORTENER_HOSTS,
   scoreBand,
 } from "./email-insights.js";

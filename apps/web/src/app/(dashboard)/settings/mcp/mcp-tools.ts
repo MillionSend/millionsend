@@ -5,6 +5,8 @@ import type { McpScope } from "@millionsend/core";
 export const MCP_TOOLS: { name: string; scope: McpScope; readOnly?: boolean }[] = [
   { name: "list_emails", scope: "emails:read", readOnly: true },
   { name: "get_email", scope: "emails:read", readOnly: true },
+  { name: "get_email_insights", scope: "emails:read", readOnly: true },
+  { name: "get_deliverability", scope: "emails:read", readOnly: true },
   { name: "list_contacts", scope: "audience:read", readOnly: true },
   { name: "get_contact", scope: "audience:read", readOnly: true },
   { name: "list_segments", scope: "audience:read", readOnly: true },

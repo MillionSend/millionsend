@@ -17,6 +17,7 @@ import {
   eraseRecipient,
   estimateAttachmentBytes,
   extractTokenPrefix,
+  fetchAccountScore,
   fetchDeliverabilityHealth,
   findSuppressed,
   findTopicOptOuts,
@@ -28,6 +29,7 @@ import {
   recordContactActivity,
   releaseIdempotent,
   SCHEDULED_AT_FORMS,
+  scoreBand,
   segmentContactsWhere,
   segmentFilterSchema,
   verifySenderDomain,
@@ -69,6 +71,8 @@ import {
   createContactRequestSchema,
   createSegmentRequestSchema,
   createTopicRequestSchema,
+  deliverabilityResponseSchema,
+  emailInsightsResponseSchema,
   errorSchema,
   getBroadcastResponseSchema,
   getContactResponseSchema,
@@ -282,6 +286,30 @@ async function findTeamTopic(
     .from(schema.topics)
     .where(and(eq(schema.topics.id, id), eq(schema.topics.teamId, teamId)));
   return row;
+}
+
+/**
+ * Insights row for an email: keyed by emailId (API sends), else by its
+ * broadcastId (broadcast fan-out shares ONE row). Team-scoped as defense in
+ * depth. Rows exist only for emails sent after the feature landed — there is
+ * deliberately no backfill — so absence is a normal state, not an error.
+ */
+async function findEmailInsights(
+  db: Db,
+  teamId: string,
+  email: { id: string; broadcastId: string | null },
+) {
+  const i = schema.emailInsights;
+  const [byEmail] = await db
+    .select()
+    .from(i)
+    .where(and(eq(i.teamId, teamId), eq(i.emailId, email.id)));
+  if (byEmail || email.broadcastId === null) return byEmail;
+  const [byBroadcast] = await db
+    .select()
+    .from(i)
+    .where(and(eq(i.teamId, teamId), eq(i.broadcastId, email.broadcastId)));
+  return byBroadcast;
 }
 
 /** Maps a validated Resend-shaped send body to the shared accept payload. */
@@ -2383,6 +2411,8 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.use("/webhooks/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerWebhookRoutes(app, deps.db, deps.keyring);
 
+  app.use("/deliverability", requireApiKey, enforceRateLimit, requireFullAccess);
+
   const sendRoute = createRoute({
     method: "post",
     path: "/emails",
@@ -2964,6 +2994,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         // Corrupt or purged body must not 500 the metadata read.
       }
     }
+    const insights = await findEmailInsights(deps.db, auth.teamId, email);
     return c.json(
       {
         object: "email" as const,
@@ -2989,6 +3020,101 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         // Internal quota-parking is invisible on the wire: the SDK's
         // last_event union has no 'queued_quota'.
         last_event: email.latestStatus === "queued_quota" ? "queued" : email.latestStatus,
+        score: insights ? insights.scoreTenths / 10 : null,
+      },
+      200,
+    );
+  });
+
+  const getInsightsRoute = createRoute({
+    method: "get",
+    path: "/emails/{id}/insights",
+    middleware: [requireFullAccess],
+    request: { params: z.object({ id: z.uuid() }) },
+    responses: {
+      200: {
+        content: { "application/json": { schema: emailInsightsResponseSchema } },
+        description: "Best-practice check results and score computed when the email was sent",
+      },
+      403: jsonErr("Restricted API key"),
+      404: jsonErr("Not found"),
+    },
+  });
+
+  app.openapi(getInsightsRoute, async (c) => {
+    const auth = c.get("auth");
+    const { id } = c.req.valid("param");
+    const [email] = await deps.db
+      .select({ id: schema.emails.id, broadcastId: schema.emails.broadcastId })
+      .from(schema.emails)
+      .where(and(eq(schema.emails.id, id), eq(schema.emails.teamId, auth.teamId)));
+    if (!email) return c.json(errorBody(404, "not_found", "Email not found"), 404);
+    const insights = await findEmailInsights(deps.db, auth.teamId, email);
+    if (!insights) {
+      return c.json(
+        errorBody(404, "not_found", "Insights are not available for this email yet"),
+        404,
+      );
+    }
+    return c.json(
+      {
+        object: "email_insights" as const,
+        email_id: email.id,
+        score: insights.scoreTenths / 10,
+        score_version: insights.scoreVersion,
+        band: scoreBand(insights.scoreTenths),
+        marketing: insights.marketing,
+        html_size_bytes: insights.htmlSizeBytes,
+        computed_at: insights.computedAt.toISOString(),
+        checks: insights.checks.map((check) => ({
+          id: check.id,
+          severity: check.severity,
+          status: check.status,
+          penalty: check.penaltyHundredths / 100,
+          ...(check.detail ? { detail: check.detail } : {}),
+        })),
+      },
+      200,
+    );
+  });
+
+  const deliverabilityRoute = createRoute({
+    method: "get",
+    path: "/deliverability",
+    responses: {
+      200: {
+        content: { "application/json": { schema: deliverabilityResponseSchema } },
+        description: "Account deliverability score over the trailing 30 days",
+      },
+      403: jsonErr("Restricted API key"),
+    },
+  });
+
+  app.openapi(deliverabilityRoute, async (c) => {
+    const auth = c.get("auth");
+    // Plan flows like sendingPausedError: cloud enforces plan floors,
+    // self-host uses the defaults.
+    const score = await fetchAccountScore(
+      deps.db,
+      auth.teamId,
+      deps.isCloud ? { plan: auth.plan } : {},
+    );
+    const tenths = (v: number | null) => (v === null ? null : v / 10);
+    return c.json(
+      {
+        object: "deliverability" as const,
+        score: tenths(score.scoreTenths),
+        band: score.band,
+        content_score: tenths(score.contentScoreTenths),
+        outcome_score: tenths(score.outcomeScoreTenths),
+        complaint_rate: score.complaintRate,
+        hard_bounce_rate: score.hardBounceRate,
+        emails_sent: score.sent,
+        scored_recipients: score.contentRecipients,
+        window_days: score.windowDays,
+        insufficient_outcome_data: score.insufficientOutcomeData,
+        guardrail_status: score.guardrailStatus,
+        score_version: score.scoreVersion,
       },
       200,
     );

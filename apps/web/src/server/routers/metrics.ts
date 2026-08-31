@@ -1,6 +1,7 @@
 import { env } from "@millionsend/config";
 import {
   DAY_MS,
+  fetchAccountScore,
   fetchDeliverabilityHealth,
   fetchEffectivePlan,
   PAUSE_BOUNCE_RATE,
@@ -99,5 +100,11 @@ export const metricsRouter = router({
         pauseComplaint: PAUSE_COMPLAINT_RATE,
       },
     };
+  }),
+
+  /** Rolling 30-day account score (content + outcome sub-scores). */
+  accountScore: teamProcedure.query(async ({ ctx }) => {
+    const plan = env.IS_CLOUD ? await fetchEffectivePlan(ctx.db, ctx.teamId) : null;
+    return fetchAccountScore(ctx.db, ctx.teamId, plan ? { plan } : {});
   }),
 });

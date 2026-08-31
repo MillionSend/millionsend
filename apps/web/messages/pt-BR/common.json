@@ -63,6 +63,12 @@
     "verified": "Verificado",
     "pending": "Pendente"
   },
+  "band": {
+    "excellent": "Excelente",
+    "good": "Bom",
+    "needs_attention": "Requer atenção",
+    "at_risk": "Em risco"
+  },
   "unsavedWarn": "Você tem alterações não salvas. Sair desta página?",
   "draftRecovered": "Alterações não salvas recuperadas ({time}).",
   "draftRestore": "Restaurar",
