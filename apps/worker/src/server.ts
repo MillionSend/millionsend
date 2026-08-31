@@ -22,6 +22,7 @@ import {
   purgeExpiredEmailBodies,
   purgeExpiredEmailMetadata,
   purgeExpiredSessions,
+  reapUnverifiedDomains,
   reconcileBillingPlans,
   reconcileStalledBroadcasts,
   reconcileStalledSends,
@@ -291,6 +292,14 @@ await queue.scheduleCrons({
     if (result.checked > 0 || result.failed > 0) {
       console.log(`domains.reverify: checked=${result.checked} failed=${result.failed}`);
     }
+  },
+  "domains.reap": async () => {
+    // Cloud-only: squatting is a cross-tenant problem. Self-host is one
+    // operator's own teams and adopts existing SES identities on create, so
+    // an unverified row blocks nobody there.
+    if (!env.IS_CLOUD) return;
+    const reaped = await reapUnverifiedDomains(db, { clientForRegion });
+    if (reaped > 0) console.log(`domains.reap: reaped=${reaped}`);
   },
 });
 

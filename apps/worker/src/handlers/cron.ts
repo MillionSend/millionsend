@@ -1,8 +1,11 @@
 import {
   DAY_MS,
   effectivePlan,
+  failQueuedEmailsForDomain,
   getInstanceSettings,
+  isIdentitySharedByOtherDomains,
   PLAN_DAILY_LIMIT,
+  recordAudit,
   releaseDailyQuota,
   reserveDailyQuota,
   transitionQueueState,
@@ -12,6 +15,8 @@ import { schema } from "@millionsend/db";
 import {
   computeDomainVerification,
   type DnsResolver,
+  deleteDomainIdentity,
+  getDomainVerification,
   type SesIdentityClient,
 } from "@millionsend/ses";
 import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
@@ -434,6 +439,114 @@ export async function reverifyDomains(db: Db, deps: ReverifyDomainsDeps): Promis
     }
   }
   return { checked: batch.length, failed, capped };
+}
+
+/**
+ * Never-verified domains older than this are reaped. SES stops searching DNS
+ * for the DKIM records 72 hours after identity creation and hard-fails the
+ * identity, so past this window the row can never verify again — deleting it
+ * costs its team nothing and frees the (name, region) slot.
+ */
+const REAP_UNVERIFIED_AFTER_MS = 72 * 60 * 60 * 1000;
+
+/** Sentinel: the domain verified between the sweep select and the delete. */
+class ReapRaced extends Error {}
+
+export interface ReapUnverifiedDomainsDeps {
+  clientForRegion: (region: string) => SesIdentityClient;
+  now?: Date;
+}
+
+/**
+ * Cloud-only sweep completing the exclusive domain claim: the create path
+ * 409s while any team holds (name, region), so an added-but-never-verified
+ * domain would squat the slot forever against the real DNS owner. Only rows
+ * that never verified are touched — verifiedAt survives demotion, so a domain
+ * that verified even once belongs to a team that proved DNS control and is
+ * never auto-deleted (its sends are already gated by status).
+ *
+ * Same guards as a user-initiated delete: the shared SES identity goes only
+ * with the last row referencing it, queued emails fail terminally, and
+ * domain-scoped api keys are revoked. Before the irreversible identity delete
+ * SES itself is asked — DKIM SUCCESS skips the reap — and the row delete is
+ * conditioned on verifiedAt still being null, so a promotion racing the sweep
+ * keeps both its identity and its row. One domain's failure never blocks the
+ * rest; an SES error leaves the row for the next run to retry.
+ */
+export async function reapUnverifiedDomains(
+  db: Db,
+  deps: ReapUnverifiedDomainsDeps,
+): Promise<number> {
+  const now = deps.now ?? new Date();
+  const cutoff = new Date(now.getTime() - REAP_UNVERIFIED_AFTER_MS);
+  const d = schema.domains;
+  const stale = await db
+    .select({ id: d.id })
+    .from(d)
+    .where(and(isNull(d.verifiedAt), lt(d.createdAt, cutoff)))
+    .orderBy(asc(d.createdAt));
+  let reaped = 0;
+  for (const { id } of stale) {
+    try {
+      const [domain] = await db
+        .select({ id: d.id, teamId: d.teamId, name: d.name, region: d.region })
+        .from(d)
+        .where(and(eq(d.id, id), isNull(d.verifiedAt)));
+      if (!domain) continue;
+      if (!(await isIdentitySharedByOtherDomains(db, domain))) {
+        try {
+          // The stored verifiedAt lags SES by up to a reverify cycle: a DKIM
+          // check that succeeded right at SES's 72h deadline may not be
+          // stamped yet. SUCCESS is proof the DNS owner published this row's
+          // token — never a squatter — so leave it for reverify to promote.
+          const live = await getDomainVerification(deps.clientForRegion(domain.region), {
+            domain: domain.name,
+          });
+          if (live.dkimStatus === "SUCCESS") continue;
+          await deleteDomainIdentity(deps.clientForRegion(domain.region), {
+            domain: domain.name,
+          });
+        } catch (err) {
+          // An identity already gone from SES must not block removing the row.
+          if ((err as { name?: string }).name !== "NotFoundException") throw err;
+        }
+      }
+      const deleted = await db
+        .transaction(async (tx) => {
+          const txDb = tx as unknown as Db;
+          await failQueuedEmailsForDomain(txDb, { teamId: domain.teamId, domainId: domain.id });
+          await txDb
+            .update(schema.apiKeys)
+            .set({ revokedAt: now, domainId: null })
+            .where(
+              and(eq(schema.apiKeys.teamId, domain.teamId), eq(schema.apiKeys.domainId, domain.id)),
+            );
+          const rows = await txDb
+            .delete(d)
+            .where(and(eq(d.id, domain.id), isNull(d.verifiedAt)))
+            .returning({ id: d.id });
+          if (rows.length === 0) throw new ReapRaced();
+          return true;
+        })
+        .catch((err) => {
+          if (err instanceof ReapRaced) return false;
+          throw err;
+        });
+      if (!deleted) continue;
+      await recordAudit(db, {
+        teamId: domain.teamId,
+        actor: "system",
+        action: "domain.deleted",
+        target: { type: "domain", id: domain.id },
+        metadata: { name: domain.name, region: domain.region, reason: "unverified_expired" },
+      });
+      reaped += 1;
+      console.log(`domains.reap: removed never-verified ${domain.name} (${domain.region})`);
+    } catch (err) {
+      console.warn(`domains.reap: domain ${id} failed`, err);
+    }
+  }
+  return reaped;
 }
 
 /** Rows per statement in the retention loops; keeps each lock window short on a backlog. */
