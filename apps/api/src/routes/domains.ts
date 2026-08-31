@@ -1,4 +1,5 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
+import { trackingCnameTarget } from "@millionsend/config";
 import {
   apiRequestActor,
   createFixedWindowLimiter,
@@ -132,7 +133,7 @@ function wireRecords(
       type: "CNAME",
       ttl: "Auto",
       status: "not_started",
-      value: new URL(deps.appBaseUrl).host,
+      value: trackingCnameTarget(deps.appBaseUrl),
     });
   }
   return records;

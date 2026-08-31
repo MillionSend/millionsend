@@ -8,5 +8,6 @@ export {
   parseEmailFrom,
   parseSnsTopicArns,
   SES_MAX_SEND_RATE_DEFAULT,
+  trackingCnameTarget,
   trackingSubdomainsSupported,
 } from "./env.js";

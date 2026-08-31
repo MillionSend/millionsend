@@ -185,6 +185,17 @@ export const env = createEnv({
     // trackingSubdomainsSupported(), which leaves self-host unconditionally on.
     ALLOW_TRACKING_SUBDOMAINS: boolFromString,
 
+    // Host a customer's branded tracking subdomain CNAMEs at. Set to a
+    // dedicated tracking edge (e.g. track.millionsend-dns.com — a small box
+    // that terminates TLS per customer hostname and proxies /t/* here) when
+    // this app itself cannot hold a certificate for customer hostnames, as on
+    // a multi-tenant cloud behind a CDN. Unset: the CNAME targets this app's
+    // own host, which only works where it can serve those hostnames directly.
+    TRACKING_EDGE_HOST: z.string().optional(),
+    // Shared secret the tracking edge sends when asking whether a hostname is
+    // a configured tracking subdomain (gates on-demand certificate issuance).
+    TRACKING_ASK_SECRET: z.string().optional(),
+
     // Social login for the dashboard. A provider's sign-in button appears
     // only when BOTH its client id and secret are set.
     GOOGLE_CLIENT_ID: z.string().optional(),
@@ -257,6 +268,14 @@ export function isCloudDeployment(e: Env = env): boolean {
 export function trackingSubdomainsSupported(e: Env = env): boolean {
   if (!isCloudDeployment(e)) return true;
   return envFlag(e.ALLOW_TRACKING_SUBDOMAINS);
+}
+
+/**
+ * The host a branded tracking subdomain CNAMEs at: the dedicated tracking edge
+ * when one is configured, otherwise this app's own host (from `appBaseUrl`).
+ */
+export function trackingCnameTarget(appBaseUrl: string, e: Env = env): string {
+  return e.TRACKING_EDGE_HOST ?? new URL(appBaseUrl).host;
 }
 
 const S3_CREDENTIAL_KEYS = ["S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const;

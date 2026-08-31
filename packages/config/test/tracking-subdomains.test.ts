@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { type Env, trackingSubdomainsSupported } from "../src/env.js";
+import { type Env, trackingCnameTarget, trackingSubdomainsSupported } from "../src/env.js";
 
 // Only the two fields the policy reads; the zod schema is not under test.
 function fakeEnv(overrides: Record<string, boolean>): Env {
@@ -18,4 +18,14 @@ it("withholds them on cloud until the operator declares per-hostname certificate
   expect(
     trackingSubdomainsSupported(fakeEnv({ IS_CLOUD: true, ALLOW_TRACKING_SUBDOMAINS: true })),
   ).toBe(true);
+});
+
+it("targets the tracking edge when one is set, else the app's own host", () => {
+  const app = "https://app.example.com";
+  expect(trackingCnameTarget(app, { TRACKING_EDGE_HOST: undefined } as unknown as Env)).toBe(
+    "app.example.com",
+  );
+  expect(
+    trackingCnameTarget(app, { TRACKING_EDGE_HOST: "track.example-dns.com" } as unknown as Env),
+  ).toBe("track.example-dns.com");
 });

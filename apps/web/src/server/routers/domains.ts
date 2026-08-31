@@ -1,5 +1,5 @@
 import { resolveNs as dnsResolveNs } from "node:dns/promises";
-import { env, trackingSubdomainsSupported } from "@millionsend/config";
+import { env, trackingCnameTarget, trackingSubdomainsSupported } from "@millionsend/config";
 import {
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
@@ -186,7 +186,7 @@ function buildTrackedRecords(
       group: "tracking",
       type: "CNAME",
       name: `${domain.trackingSubdomain}.${domain.name}`,
-      value: new URL(resolveBaseUrl(env.APP_BASE_URL)).host,
+      value: trackingCnameTarget(resolveBaseUrl(env.APP_BASE_URL)),
       status: null,
     });
   }
