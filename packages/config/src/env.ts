@@ -267,7 +267,11 @@ export function isCloudDeployment(e: Env = env): boolean {
  */
 export function trackingSubdomainsSupported(e: Env = env): boolean {
   if (!isCloudDeployment(e)) return true;
-  return envFlag(e.ALLOW_TRACKING_SUBDOMAINS);
+  // A configured tracking edge is itself the "per-hostname certificates are
+  // handled" signal, so it enables branded subdomains on its own. The flag
+  // stays for the rarer cloud that serves customer hostnames on the app host
+  // directly, with no separate edge.
+  return envFlag(e.ALLOW_TRACKING_SUBDOMAINS) || Boolean(e.TRACKING_EDGE_HOST);
 }
 
 /**

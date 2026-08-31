@@ -157,13 +157,11 @@ SES_CONFIGURATION_SET=
 # this is true. Keep false when the dashboard is reachable from the internet.
 ALLOW_SIGNUP=false
 
-# Hosted cloud only (ignored when IS_CLOUD=false): whether a team may point a
-# branded tracking subdomain — track.theirdomain.com, CNAME'd at this app — at
-# its tracked links. Self-host always allows it, because the operator owns the
-# reverse proxy and its certificates. A multi-tenant cloud needs a certificate
-# issued per customer hostname first (see TRACKING_EDGE_HOST): without one the
-# CNAME resolves, the TLS handshake fails, and every tracked link already mailed
-# is dead.
+# Hosted cloud only (ignored when IS_CLOUD=false): force branded tracking
+# subdomains on even without a TRACKING_EDGE_HOST — for a cloud that serves
+# customer hostnames on the app host itself. Setting TRACKING_EDGE_HOST already
+# enables them, so leave this false when you run a tracking edge. Self-host
+# always allows branded subdomains (the operator owns the proxy and its certs).
 ALLOW_TRACKING_SUBDOMAINS=false
 
 # Host a customer's branded tracking subdomain CNAMEs at. Leave unset and the

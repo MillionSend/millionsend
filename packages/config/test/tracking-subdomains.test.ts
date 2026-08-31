@@ -29,3 +29,13 @@ it("targets the tracking edge when one is set, else the app's own host", () => {
     trackingCnameTarget(app, { TRACKING_EDGE_HOST: "track.example-dns.com" } as unknown as Env),
   ).toBe("track.example-dns.com");
 });
+
+it("a configured tracking edge enables branded subdomains on cloud without the flag", () => {
+  expect(
+    trackingSubdomainsSupported({
+      IS_CLOUD: true,
+      ALLOW_TRACKING_SUBDOMAINS: false,
+      TRACKING_EDGE_HOST: "t.example-dns.com",
+    } as unknown as Env),
+  ).toBe(true);
+});
