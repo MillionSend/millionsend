@@ -192,16 +192,19 @@
   color: var(--ms-bone);
 }
 
-/* Cards */
+/* Cards — edge-lit lift off the void ground; the border sits a touch above
+   --ms-line so the lifted edge reads clean without going full --ms-line-strong. */
 .ms-card {
   background: var(--ms-panel);
-  border: 1px solid var(--ms-line);
+  border: 1px solid color-mix(in srgb, var(--ms-line-strong) 55%, var(--ms-line));
   border-radius: var(--ms-r-card);
+  box-shadow: var(--ms-shadow-card);
 }
 .ms-kpi-card {
   background: var(--ms-panel);
-  border: 1px solid var(--ms-line);
+  border: 1px solid color-mix(in srgb, var(--ms-line-strong) 55%, var(--ms-line));
   border-radius: var(--ms-r-card);
+  box-shadow: var(--ms-shadow-card);
   padding: 24px;
 }
 .ms-kpi-value {
@@ -728,6 +731,7 @@ table.ms-table {
   background: var(--ms-panel);
   border: 1px solid var(--ms-line-strong);
   border-radius: var(--ms-r-modal);
+  box-shadow: var(--ms-shadow-card);
   padding: 28px;
   width: 480px;
   max-width: calc(100vw - 48px);
@@ -784,6 +788,7 @@ svg:focus {
   background: var(--ms-panel);
   border: 1px solid var(--ms-line-strong);
   border-radius: 10px;
+  box-shadow: var(--ms-shadow-card);
   padding: 4px;
   min-width: 180px;
   box-sizing: border-box;
@@ -1074,6 +1079,7 @@ svg:focus {
   font-size: 12px;
   line-height: 1.45;
   color: var(--ms-bone);
+  box-shadow: var(--ms-shadow-card);
   /* Messages may carry \n paragraph breaks (e.g. the API-key permission
      explainer); render them instead of collapsing. */
   white-space: pre-line;
@@ -1108,6 +1114,7 @@ svg:focus {
   background: var(--ms-panel-raised);
   border: 1px solid var(--ms-line);
   border-radius: 12px;
+  box-shadow: var(--ms-shadow-card);
   padding: 18px 20px;
   max-width: 460px;
 }

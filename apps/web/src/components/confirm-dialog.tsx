@@ -71,9 +71,18 @@ export function ConfirmDialogHost() {
           close(true);
         }}
       >
-        <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-          {request?.message}
-        </p>
+        {/* Blank-line-separated paragraphs render as separate blocks so a
+            two-part message reads with breathing room instead of one wall. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {(request?.message ?? "").split("\n\n").map((para) => (
+            <p
+              key={para}
+              style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}
+            >
+              {para}
+            </p>
+          ))}
+        </div>
         <ModalFooter>
           <button type="button" className="ms-btn ms-btn-secondary" onClick={() => close(false)}>
             {request?.cancelLabel ?? common("cancel")} <span className="ms-keycap">Esc</span>
