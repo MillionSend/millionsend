@@ -6,6 +6,7 @@ import {
   failQueuedEmailsForDomain,
   fetchEffectivePlan,
   isIdentitySharedByOtherDomains,
+  isOperatorTeam,
   isReservedSenderDomain,
   PLAN_DOMAIN_LIMIT,
 } from "@millionsend/core";
@@ -262,7 +263,14 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         // env is read per call (not at module load) so tests can stub the
         // deployment mode first.
         const isCloud = Boolean(env.IS_CLOUD);
-        if (isReservedSenderDomain(input.name, { isCloud, authEmailFrom: env.AUTH_EMAIL_FROM })) {
+        const isOperator = isCloud && (await isOperatorTeam(ctx.db, ctx.teamId));
+        if (
+          isReservedSenderDomain(input.name, {
+            isCloud,
+            authEmailFrom: env.AUTH_EMAIL_FROM,
+            isOperator,
+          })
+        ) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "This domain cannot be added as a sender",

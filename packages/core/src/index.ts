@@ -90,6 +90,7 @@ export {
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
   isIdentitySharedByOtherDomains,
+  isOperatorTeam,
   isReservedSenderDomain,
   PLATFORM_DOMAIN,
 } from "./domain-lifecycle.js";

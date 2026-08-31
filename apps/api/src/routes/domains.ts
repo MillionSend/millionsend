@@ -6,6 +6,7 @@ import {
   failQueuedEmailsForDomain,
   isIdentitySharedByOtherDomains,
   isLoopbackUrl,
+  isOperatorTeam,
   isReservedSenderDomain,
   PLAN_DOMAIN_LIMIT,
   recordAudit,
@@ -190,10 +191,12 @@ export function registerDomainRoutes(
       const auth = c.get("auth");
       const body = c.req.valid("json");
       const region = body.region ?? defaultRegion;
+      const isOperator = deps.isCloud && (await isOperatorTeam(db, auth.teamId));
       if (
         isReservedSenderDomain(body.name, {
           isCloud: deps.isCloud,
           authEmailFrom: ses.authEmailFrom,
+          isOperator,
         })
       ) {
         return c.json(

@@ -1,5 +1,5 @@
 import { type Db, schema } from "@millionsend/db";
-import { and, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { parseSingleSender } from "./sender-address.js";
 
 /** Consumer mailbox providers no tenant can own; refused on every deployment. */
@@ -39,15 +39,39 @@ export const DOMAIN_CREATE_LIMIT_PER_HOUR = 10;
  */
 export function isReservedSenderDomain(
   name: string,
-  opts: { isCloud: boolean; authEmailFrom?: string | null | undefined },
+  opts: { isCloud: boolean; authEmailFrom?: string | null | undefined; isOperator?: boolean },
 ): boolean {
+  // Consumer mailbox providers are refused to everyone — nobody owns them.
   const reserved: string[] = [...PUBLIC_MAILBOX_DOMAINS];
-  if (opts.isCloud) {
+  // The platform domain and the system-mail domain are the operator's own, so
+  // the operator may send from them (dogfooding); a tenant registering them
+  // would take over account-wide system mail.
+  if (opts.isCloud && !opts.isOperator) {
     reserved.push(PLATFORM_DOMAIN);
     const authDomain = opts.authEmailFrom ? parseSingleSender(opts.authEmailFrom)?.domain : null;
     if (authDomain) reserved.push(authDomain);
   }
   return reserved.some((d) => name === d || name.endsWith(`.${d}`));
+}
+
+/**
+ * Whether `teamId` is a team the instance operator (the first registered user)
+ * belongs to. The operator is trusted to send from the platform's own domains;
+ * a tenant is not.
+ */
+export async function isOperatorTeam(db: Db, teamId: string): Promise<boolean> {
+  const [firstUser] = await db
+    .select({ id: schema.user.id })
+    .from(schema.user)
+    .orderBy(asc(schema.user.createdAt), asc(schema.user.id))
+    .limit(1);
+  if (!firstUser) return false;
+  const [member] = await db
+    .select({ id: schema.teamMembers.id })
+    .from(schema.teamMembers)
+    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.userId, firstUser.id)))
+    .limit(1);
+  return member !== undefined;
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   createFixedWindowLimiter,
   failQueuedEmailsForDomain,
   isIdentitySharedByOtherDomains,
+  isOperatorTeam,
   isReservedSenderDomain,
 } from "../src/domain-lifecycle.js";
 
@@ -37,6 +38,36 @@ describe("isReservedSenderDomain", () => {
       false,
     );
     expect(isReservedSenderDomain("millionsend.com", { isCloud: false })).toBe(false);
+  });
+
+  it("lets the operator send from the platform domain, but never a public provider", () => {
+    expect(isReservedSenderDomain("mail.millionsend.com", { isCloud: true })).toBe(true);
+    expect(
+      isReservedSenderDomain("mail.millionsend.com", { isCloud: true, isOperator: true }),
+    ).toBe(false);
+    expect(isReservedSenderDomain("gmail.com", { isCloud: true, isOperator: true })).toBe(true);
+  });
+});
+
+describe("isOperatorTeam", () => {
+  it("is true only for a team the first-registered user belongs to", async () => {
+    const [operator] = await db
+      .insert(schema.user)
+      .values({ id: "op-user", name: "Operator", email: "op@ms-ops.dev" })
+      .returning({ id: schema.user.id });
+    const [tenant] = await db
+      .insert(schema.user)
+      .values({ id: "tenant-user", name: "Tenant", email: "tenant@example.com" })
+      .returning({ id: schema.user.id });
+    const opTeam = await createTeam(db, "op-team");
+    const tenantTeam = await createTeam(db, "tenant-team");
+    await db.insert(schema.teamMembers).values([
+      { teamId: opTeam, userId: operator?.id ?? "", role: "owner" },
+      { teamId: tenantTeam, userId: tenant?.id ?? "", role: "owner" },
+    ]);
+
+    expect(await isOperatorTeam(db, opTeam)).toBe(true);
+    expect(await isOperatorTeam(db, tenantTeam)).toBe(false);
   });
 });
 
