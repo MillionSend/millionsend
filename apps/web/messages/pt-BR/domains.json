@@ -114,7 +114,16 @@
       "subdomainUnavailable": "Esta instalação não consegue servir links de rastreamento pelo seu próprio domínio no momento, então o subdomínio abaixo não está em uso — os emails saem com os links originais e sem pixel de abertura. Limpe-o para remover a configuração.",
       "localWarning": "O rastreamento precisa de uma URL acessível publicamente. A APP_BASE_URL desta instalação é local, então os destinatários nunca conseguem acessar os links rastreados nem o pixel de abertura — os controles ficam desativados até uma URL pública ser configurada.",
       "cloudRequiresSubdomain": "Aqui os links rastreados são servidos apenas pelo seu próprio subdomínio de rastreamento — um host compartilhado é o que bloqueadores de anúncio e filtros de spam aprendem a bloquear. Sem um, os emails saem com os links originais e sem pixel de abertura.",
-      "headerToggle": "Ativar ou desativar rastreamento de abertura e cliques"
+      "headerToggle": "Ativar ou desativar rastreamento de abertura e cliques",
+      "kindClick": "de cliques",
+      "kindOpen": "de aberturas",
+      "kindBoth": "de cliques e aberturas",
+      "confirmEnableTitle": "Ativar rastreamento {kind}?",
+      "confirmDisableTitle": "Desativar rastreamento {kind}?",
+      "confirmEnable": "Novos e-mails enviados por este domínio passarão a emitir eventos de rastreamento {kind}. E-mails já enviados não são afetados. Webhooks, automações e relatórios baseados nesses eventos começam a recebê-los imediatamente.",
+      "confirmDisable": "Novos e-mails enviados por este domínio deixarão de emitir eventos de rastreamento {kind}. E-mails já enviados mantêm seus dados, mas webhooks, automações e relatórios baseados nesses eventos param de recebê-los.",
+      "confirmEnableCta": "Ativar rastreamento {kind}",
+      "confirmDisableCta": "Desativar rastreamento {kind}"
     },
     "configuration": {
       "note": "O rastreamento é aplicado pelo MillionSend, não pelo SES. Quando desativado, os emails são enviados com os links intactos e sem pixel de abertura. Quando ativado, reescrevemos os links pelo seu host de rastreamento e injetamos um pixel 1×1 de abertura, gerando os eventos de abertura e clique por conta própria.",
@@ -167,7 +176,8 @@
     "error": "Não foi possível carregar o domínio.",
     "recordsError": "Não foi possível carregar os registros DNS.",
     "retry": "Tentar novamente",
-    "deleteError": "Não foi possível excluir o domínio. Tente novamente."
+    "deleteError": "Não foi possível excluir o domínio. Tente novamente.",
+    "recheckDns": "Verificar DNS novamente"
   },
   "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code> — veja <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Abrir configuração do SES",

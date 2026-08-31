@@ -114,7 +114,16 @@
       "subdomainUnavailable": "This deployment cannot serve tracking links from your own domain right now, so the subdomain below is not in use — emails ship with their original links and no open pixel. Clear it to remove the setting.",
       "localWarning": "Tracking needs a publicly reachable URL. This deployment's APP_BASE_URL is local, so recipients can never reach the tracked links or the open pixel — the toggles stay off until a public URL is configured.",
       "cloudRequiresSubdomain": "Tracked links here are served only from your own tracking subdomain — a shared tracking host is what ad blockers and spam filters learn to block. Without one, emails ship with their original links and no open pixel.",
-      "headerToggle": "Toggle open and click tracking"
+      "headerToggle": "Toggle open and click tracking",
+      "kindClick": "click",
+      "kindOpen": "open",
+      "kindBoth": "open & click",
+      "confirmEnableTitle": "Enable {kind} tracking?",
+      "confirmDisableTitle": "Disable {kind} tracking?",
+      "confirmEnable": "New emails sent through this domain will now emit {kind} tracking events. Emails already sent are not affected. Webhooks, automations, and reports built on these events start receiving them right away.",
+      "confirmDisable": "New emails sent through this domain will no longer emit {kind} tracking events. Emails already sent keep their data, but webhooks, automations, and reports built on these events stop receiving them.",
+      "confirmEnableCta": "Enable {kind} tracking",
+      "confirmDisableCta": "Disable {kind} tracking"
     },
     "configuration": {
       "note": "Tracking is applied by MillionSend, not SES. When off, emails ship the raw, untouched links and no open pixel. When on, we rewrite links through your tracking host and inject a 1×1 open pixel, then generate the open and click events ourselves.",
@@ -167,7 +176,8 @@
     "error": "Couldn't load the domain.",
     "recordsError": "Couldn't load DNS records.",
     "retry": "Retry",
-    "deleteError": "Couldn't delete the domain. Try again."
+    "deleteError": "Couldn't delete the domain. Try again.",
+    "recheckDns": "Re-check DNS"
   },
   "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code> — see <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Open SES setup",

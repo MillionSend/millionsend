@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import {
   type DnsRecord,
@@ -29,6 +30,24 @@ import { RegionLabel } from "../region-label";
 
 // Single lowercase DNS label — mirrors SUBDOMAIN_RE the domains router enforces.
 const DNS_LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/**
+ * Toggling tracking changes what every future send does, so it confirms first
+ * (kind is "click" | "open" | "both"). The dialog copy is intentionally about
+ * downstream events (webhooks, automations, reports), not just the pixel.
+ */
+function confirmTracking(
+  t: (key: string, values?: Record<string, string>) => string,
+  kindLabel: string,
+  enabling: boolean,
+): Promise<boolean> {
+  const state = enabling ? "Enable" : "Disable";
+  return confirmDialog({
+    title: t(`detail.tracking.confirm${state}Title`, { kind: kindLabel }),
+    message: t(`detail.tracking.confirm${state}`, { kind: kindLabel }),
+    confirmLabel: t(`detail.tracking.confirm${state}Cta`, { kind: kindLabel }),
+  });
+}
 
 /**
  * Status-tinted gradient banner (canvas: near-black ground, glow rising from
@@ -289,7 +308,11 @@ function ConfigurationPanel({
         <Switch
           checked={clickTracking}
           disabled={update.isPending || trackingHostLocal}
-          onChange={(checked) => update.mutate({ id, clickTracking: checked })}
+          onChange={async (checked) => {
+            if (await confirmTracking(t, t("detail.tracking.kindClick"), checked)) {
+              update.mutate({ id, clickTracking: checked });
+            }
+          }}
           ariaLabel={t("detail.tracking.click")}
         />
       </ConfigSection>
@@ -298,7 +321,11 @@ function ConfigurationPanel({
         <Switch
           checked={openTracking}
           disabled={update.isPending || trackingHostLocal}
-          onChange={(checked) => update.mutate({ id, openTracking: checked })}
+          onChange={async (checked) => {
+            if (await confirmTracking(t, t("detail.tracking.kindOpen"), checked)) {
+              update.mutate({ id, openTracking: checked });
+            }
+          }}
           ariaLabel={t("detail.tracking.open")}
         />
       </ConfigSection>
@@ -525,6 +552,12 @@ export function DomainDetail({ id }: { id: string }) {
     ...r,
     live: liveByKey.get(`${r.type}\t${r.name}\t${r.value}`),
   }));
+  // The DNS check only has a job while something is unverified: the domain
+  // identity, or a branded-tracking CNAME that has not resolved yet. Once
+  // everything is green there is nothing to re-read, so the header button
+  // hides and the action moves into the ⋯ menu for the rare manual re-check.
+  const trackingRow = rows.find((r) => r.group === "tracking");
+  const needsDnsCheck = status !== "verified" || (!!trackingRow && trackingRow.live !== "found");
 
   function recordsText(): string {
     return rows
@@ -555,23 +588,29 @@ export function DomainDetail({ id }: { id: string }) {
         }
         actions={
           <>
-            <button
-              type="button"
-              className={
-                status !== "verified" ? "ms-btn ms-btn-primary" : "ms-btn ms-btn-secondary"
-              }
-              title={t("detail.checkDnsTooltip")}
-              disabled={verify.isPending || minSpin}
-              onClick={runCheck}
-            >
-              <BtnSpinner on={verify.isPending || minSpin} />
-              {t("detail.checkDns")}
-            </button>
+            {needsDnsCheck ? (
+              <button
+                type="button"
+                className="ms-btn ms-btn-primary"
+                title={t("detail.checkDnsTooltip")}
+                disabled={verify.isPending || minSpin}
+                onClick={runCheck}
+              >
+                <BtnSpinner on={verify.isPending || minSpin} />
+                {t("detail.checkDns")}
+              </button>
+            ) : null}
             <div style={{ position: "relative" }}>
               <PopoverMenu
                 boxed
                 ariaLabel={t("detail.moreActions")}
                 items={[
+                  // The header Check DNS button hides once everything is
+                  // verified; keep a manual re-check reachable here for the
+                  // rare case a record was removed and SES has not caught up.
+                  ...(needsDnsCheck
+                    ? []
+                    : [{ label: t("detail.recheckDns"), onSelect: runCheck }, null]),
                   {
                     label: t("detail.forwardInstructions"),
                     onSelect: () => {
@@ -771,13 +810,17 @@ export function DomainDetail({ id }: { id: string }) {
                               disabled={
                                 updateTracking.isPending || isLoopbackUrl(features.data?.appBaseUrl)
                               }
-                              onChange={(checked) =>
-                                updateTracking.mutate({
-                                  id,
-                                  clickTracking: checked,
-                                  openTracking: checked,
-                                })
-                              }
+                              onChange={async (checked) => {
+                                if (
+                                  await confirmTracking(t, t("detail.tracking.kindBoth"), checked)
+                                ) {
+                                  updateTracking.mutate({
+                                    id,
+                                    clickTracking: checked,
+                                    openTracking: checked,
+                                  });
+                                }
+                              }}
                               ariaLabel={t("detail.tracking.headerToggle")}
                             />
                           ),
