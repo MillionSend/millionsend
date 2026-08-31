@@ -499,6 +499,18 @@ export function registerDomainRoutes(
           422,
         );
       }
+      // The tracking CNAME and the MAIL FROM (return-path) record would collide
+      // on the same host, so they must be different labels.
+      if (body.tracking_subdomain && body.tracking_subdomain === domain.mailFromSubdomain) {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            "The tracking subdomain must be different from the return-path subdomain",
+          ),
+          422,
+        );
+      }
 
       const set: Partial<
         Pick<

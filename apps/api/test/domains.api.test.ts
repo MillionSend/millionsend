@@ -496,6 +496,18 @@ describe("PATCH /domains/{id}", () => {
     expect(row?.trackingSubdomain).toBeNull();
   });
 
+  it("422s a tracking subdomain equal to the return-path (MAIL FROM) subdomain", async () => {
+    const app = makeApp({ ...fakeSes(), appBaseUrl: "https://app.example.dev" });
+    // custom_return_path defaults to "send".
+    const { id } = await createDomain(app, "clash.example.com");
+
+    const res = await call(app, fullKey, "PATCH", `/domains/${id}`, { tracking_subdomain: "send" });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ statusCode: 422, name: "validation_error" });
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomain).toBeNull();
+  });
+
   it("omits the tracking CNAME from the checklist where subdomains are not served", async () => {
     const open = makeApp({ ...fakeSes(), appBaseUrl: "https://app.example.dev" });
     const { id } = await createDomain(open, "hidden.example.com");

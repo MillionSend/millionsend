@@ -462,6 +462,14 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
               message: "Branded tracking subdomains are not available on this deployment",
             });
           }
+          // The tracking CNAME and the MAIL FROM (return-path) record would
+          // collide on the same host, so they must be different labels.
+          if (input.trackingSubdomain && input.trackingSubdomain === domain.mailFromSubdomain) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "The tracking subdomain must be different from the return-path subdomain",
+            });
+          }
           set.trackingSubdomain = input.trackingSubdomain || null;
         }
         if (input.tlsMode !== undefined) set.tlsMode = input.tlsMode;

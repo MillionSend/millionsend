@@ -833,4 +833,22 @@ describe("domains.updateConfiguration", () => {
     const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(row?.trackingSubdomain).toBeNull();
   });
+
+  it("refuses a tracking subdomain equal to the return-path (MAIL FROM) subdomain", async () => {
+    const teamId = await createTeam(db);
+    const caller = callerFor(teamId, fakeSes().deps);
+    // create defaults the MAIL FROM subdomain to "send".
+    const { id } = await caller.domains.create({ name: "clash.example.com", region: "us-east-1" });
+
+    await expect(
+      caller.domains.updateConfiguration({ id, trackingSubdomain: "send" }),
+    ).rejects.toThrow(/return-path/i);
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomain).toBeNull();
+
+    // A different label is accepted.
+    await caller.domains.updateConfiguration({ id, trackingSubdomain: "links" });
+    const [ok] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(ok?.trackingSubdomain).toBe("links");
+  });
 });
