@@ -7,6 +7,8 @@ import {
   recordCheck,
   strictDomainStatus,
 } from "@millionsend/core/domain-status";
+import { registrableDomain } from "@millionsend/core/org-domain";
+import { type DmarcLookup, type DmarcPolicy, lookupDmarc } from "./dmarc.js";
 import { checkDnsRecords, type DnsResolver } from "./dns-check.js";
 import {
   DKIM_SELECTOR,
@@ -33,6 +35,9 @@ export interface DomainVerificationResult {
   records: TrackedDnsRecord[];
   /** SES's raw cached verification, so a caller can surface it without a second GetEmailIdentity. */
   verification: DomainVerification;
+  /** Per-record live verdicts in the domains.dns_records snapshot shape. */
+  dnsRecords: { group: string; name: string; type: string; status: LiveDnsStatus }[];
+  dmarc: DmarcLookup;
 }
 
 /**
@@ -82,16 +87,48 @@ export async function computeDomainVerification(
           : null,
   }));
 
-  const live = await checkDnsRecords(records, resolver);
+  // DMARC discovery rides the same pass: one extra TXT query per verification,
+  // never per send — send-time insights read the persisted snapshot instead.
+  const [live, dmarc] = await Promise.all([
+    checkDnsRecords(records, resolver),
+    lookupDmarc(domain.name, registrableDomain(domain.name), resolver),
+  ]);
   const liveDns = records.map((record, i) => ({
     type: record.type,
     name: record.name,
     value: record.value,
     status: live[i] ?? "missing",
   }));
+  const dnsRecords = records.map((record, i) => ({
+    group: record.group,
+    name: record.name,
+    type: record.type,
+    status: live[i] ?? "unknown",
+  }));
   const status = strictDomainStatus(
     verification.dkimStatus,
     records.map((record, i) => ({ status: record.status, live: live[i] })),
   );
-  return { status, liveDns, records, verification };
+  return { status, liveDns, records, verification, dnsRecords, dmarc };
+}
+
+/**
+ * The domain-row columns every verification pass persists alongside
+ * status/lastCheckedAt. An `unknown` DMARC lookup writes neither policy nor
+ * checkedAt: an inconclusive check must not erase a known record.
+ */
+export function verificationDbPatch(
+  result: Pick<DomainVerificationResult, "dnsRecords" | "dmarc">,
+  now: Date,
+): {
+  dnsRecords: DomainVerificationResult["dnsRecords"];
+  dmarcPolicy?: DmarcPolicy | null;
+  dmarcCheckedAt?: Date;
+} {
+  return {
+    dnsRecords: result.dnsRecords,
+    ...(result.dmarc.status !== "unknown"
+      ? { dmarcPolicy: result.dmarc.policy ?? null, dmarcCheckedAt: now }
+      : {}),
+  };
 }

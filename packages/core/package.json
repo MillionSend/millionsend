@@ -24,6 +24,10 @@
       "types": "./src/domain-status.ts",
       "default": "./src/domain-status.ts"
     },
+    "./org-domain": {
+      "types": "./src/org-domain.ts",
+      "default": "./src/org-domain.ts"
+    },
     "./plans": {
       "types": "./src/plans.ts",
       "default": "./src/plans.ts"

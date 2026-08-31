@@ -18,6 +18,7 @@ import {
   deleteDomainIdentity,
   getDomainVerification,
   type SesIdentityClient,
+  verificationDbPatch,
 } from "@millionsend/ses";
 import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
@@ -409,16 +410,18 @@ export async function reverifyDomains(db: Db, deps: ReverifyDomainsDeps): Promis
   let failed = 0;
   for (const domain of batch) {
     try {
-      const { status } = await computeDomainVerification(
+      const result = await computeDomainVerification(
         deps.clientForRegion(domain.region),
         deps.resolver,
         domain,
       );
+      const { status } = result;
       await db
         .update(schema.domains)
         .set({
           status,
           lastCheckedAt: now,
+          ...verificationDbPatch(result, now),
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(eq(schema.domains.id, domain.id));

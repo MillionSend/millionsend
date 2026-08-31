@@ -8,6 +8,7 @@ export * from "./contact-activities.js";
 export * from "./contact-properties.js";
 export * from "./contacts.js";
 export * from "./domains.js";
+export * from "./email-insights.js";
 export * from "./emails.js";
 export * from "./idempotency.js";
 export * from "./instance-settings.js";

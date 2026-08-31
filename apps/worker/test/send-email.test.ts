@@ -81,7 +81,7 @@ function unwrapQp(mime: string): string {
 async function insertEmail(
   overrides: Partial<typeof schema.emails.$inferInsert> = {},
   bodyHtml = "<b>hi</b>",
-  bodyText = "hi",
+  bodyText: string | null = "hi",
 ): Promise<string> {
   const encrypted = await encryptEmailBody({ html: bodyHtml, text: bodyText }, keyring);
   const [row] = await db
@@ -928,6 +928,122 @@ it("the send-rate token is taken only after every check that can still skip the 
   const emailId = await insertEmail();
   expect(await sendEmail(db, { keyring, ses, throttle }, { emailId })).toBe("sent");
   expect(throttled).toBe(1);
+});
+
+async function insightsFor(emailId: string) {
+  const [row] = await db
+    .select()
+    .from(schema.emailInsights)
+    .where(eq(schema.emailInsights.emailId, emailId));
+  return row;
+}
+
+it("an API send writes an emailId-keyed insights row after the accept", async () => {
+  const { ses } = fakeSes("mid-insights");
+  const emailId = await insertEmail({}, "<p>hello there</p>", "hello there in plain text");
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+
+  const row = await insightsFor(emailId);
+  expect(row?.broadcastId).toBeNull();
+  expect(row?.teamId).toBe(teamId);
+  expect(row?.scoreVersion).toBe(1);
+  expect(row?.checks.length).toBeGreaterThan(15);
+  expect(row?.scoreTenths).toBeGreaterThan(0);
+  expect(row?.scoreTenths).toBeLessThanOrEqual(100);
+  expect(row?.htmlSizeBytes).toBeGreaterThan(0);
+  expect(row?.mimeSizeBytes).toBeGreaterThan(0);
+  expect(row?.checks.find((c) => c.id === "plain_text")?.status).toBe("pass");
+});
+
+it("a broadcast fan-out writes exactly one broadcastId-keyed insights row", async () => {
+  const [broadcast] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId, from: "Acme <a@acme.dev>", subject: "news" })
+    .returning({ id: schema.broadcasts.id });
+  if (!broadcast) throw new Error("broadcast insert failed");
+  const unsubscribe = { secretKey: randomBytes(32), baseUrl: "https://app.example.com" };
+  for (const addr of ["ins-a@example.com", "ins-b@example.com"]) {
+    const contactId = await insertContact(addr);
+    const emailId = await insertEmail({ broadcastId: broadcast.id, contactId, to: [addr] });
+    const deps: SendDeps = { keyring, ses: fakeSes(`mid-ins-bc-${addr}`).ses, unsubscribe };
+    expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  }
+
+  const rows = await db
+    .select()
+    .from(schema.emailInsights)
+    .where(eq(schema.emailInsights.broadcastId, broadcast.id));
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.emailId).toBeNull();
+  expect(rows[0]?.marketing).toBe(true);
+});
+
+it("an insights insert failure never fails the accepted send", async () => {
+  const { ses } = fakeSes("mid-ins-fail");
+  const emailId = await insertEmail();
+  const failingDb = new Proxy(db as object, {
+    get(target, prop) {
+      if (prop === "insert") {
+        return (table: unknown) => {
+          if (table === schema.emailInsights) throw new Error("insights insert down");
+          return (target as Db).insert(table as never);
+        };
+      }
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? (v as () => unknown).bind(target) : v;
+    },
+  }) as Db;
+
+  expect(await sendEmail(failingDb, { keyring, ses }, { emailId })).toBe("sent");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("sent");
+  expect(row?.sesMessageId).toBe("mid-ins-fail");
+  expect(await insightsFor(emailId)).toBeUndefined();
+});
+
+it("tracking off with no text part surfaces a plain_text fail in insights", async () => {
+  const [quiet] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "quiet.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  if (!quiet) throw new Error("domain insert failed");
+  const { ses } = fakeSes("mid-ins-notext");
+  const emailId = await insertEmail(
+    { domainId: quiet.id, from: "Quiet <a@quiet.dev>" },
+    "<p>html only, no text alternative</p>",
+    null,
+  );
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+
+  const row = await insightsFor(emailId);
+  expect(row?.checks.find((c) => c.id === "plain_text")?.status).toBe("fail");
+  expect(row?.checks.find((c) => c.id === "tracking_unbranded")?.status).toBe("pass");
+  expect(row?.scoreTenths).toBeLessThanOrEqual(90);
+});
+
+it("a transactional send is non-marketing and its marketing-only checks are not applicable", async () => {
+  const { ses } = fakeSes("mid-ins-tx");
+  const emailId = await insertEmail({}, "<p>your receipt</p>", "your receipt in plain text");
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+
+  const row = await insightsFor(emailId);
+  expect(row?.marketing).toBe(false);
+  const marketingOnly = [
+    "list_unsubscribe",
+    "visible_unsubscribe",
+    "no_reply_from",
+    "attachments_marketing",
+    "root_domain_send",
+  ];
+  for (const id of marketingOnly) {
+    expect(row?.checks.find((c) => c.id === id)?.status).toBe("not_applicable");
+  }
 });
 
 it("a body sealed for one row refuses to open on another: copied columns fail the send", async () => {

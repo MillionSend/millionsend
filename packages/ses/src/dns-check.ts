@@ -4,6 +4,7 @@ import {
   resolveTxt as dnsResolveTxt,
 } from "node:dns/promises";
 import type { LiveDnsStatus } from "@millionsend/core/domain-status";
+import { parseDmarcRecord } from "./dmarc.js";
 
 /** DNS access seam so callers inject a fake and tests hit no network. */
 export interface DnsResolver {
@@ -25,10 +26,10 @@ export interface DnsCheckRecord {
   priority?: number;
 }
 
-// A stalled resolver must not hang the whole check; a timeout reads as missing.
-const DNS_TIMEOUT_MS = 5000;
+// A stalled resolver must not hang the whole check; a timeout reads as unknown.
+export const DNS_TIMEOUT_MS = 5000;
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) => {
@@ -38,6 +39,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 const stripDot = (host: string) => host.toLowerCase().replace(/\.$/, "");
+
+/**
+ * NXDOMAIN/NODATA are conclusive absence; everything else (timeout, SERVFAIL,
+ * network error) is inconclusive and must never read as a removed record.
+ */
+export function dnsErrorStatus(err: unknown): "missing" | "unknown" {
+  const code = (err as { code?: string }).code;
+  return code === "ENOTFOUND" || code === "ENODATA" ? "missing" : "unknown";
+}
 
 // TXT values are stored quoted ("v=DKIM1; …"); the wire strips the quotes and
 // may split long values into chunks, so compare on the unquoted, rejoined,
@@ -70,11 +80,19 @@ async function checkOne(record: DnsCheckRecord, resolver: DnsResolver): Promise<
     }
     const rows = await withTimeout(resolver.resolveTxt(record.name), DNS_TIMEOUT_MS);
     if (rows.length === 0) return "missing";
+    // DMARC is policy-shaped, not value-exact: ANY valid v=DMARC1 record
+    // satisfies the row even when its policy differs from the recommended
+    // copy-paste value (p=none).
+    if (record.name.startsWith("_dmarc.")) {
+      return rows.some((chunks) => parseDmarcRecord(chunks.join("")) !== null)
+        ? "found"
+        : "mismatch";
+    }
     const want = normTxt(record.value);
     return rows.some((chunks) => normTxt(chunks.join("")) === want) ? "found" : "mismatch";
-  } catch {
-    // NXDOMAIN / NODATA / timeout — the record isn't answering, never throw.
-    return "missing";
+  } catch (err) {
+    // Never throw: NXDOMAIN/NODATA read missing, anything else unknown.
+    return dnsErrorStatus(err);
   }
 }
 

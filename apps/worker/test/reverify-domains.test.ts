@@ -41,13 +41,14 @@ function clientForRegion(region: string): SesIdentityClient {
 }
 
 /** Every required record resolves live, except SPF TXT for names in spfMissing. */
-function fakeDns(spfMissing = new Set<string>()): DnsResolver {
+function fakeDns(spfMissing = new Set<string>(), dmarc?: string): DnsResolver {
   return {
     resolveTxt: async (name) => {
       if (name.includes("._domainkey.")) return [["v=DKIM1; k=rsa; p=PUB"]];
       const spf = name.match(/^send\.(.+)$/);
       if (spf) return spfMissing.has(spf[1] ?? "") ? [] : [["v=spf1 include:amazonses.com ~all"]];
-      return []; // _dmarc never published
+      if (name.startsWith("_dmarc.") && dmarc) return [[dmarc]];
+      return []; // _dmarc not published unless the test provides it
     },
     resolveMx: async (name) =>
       name.startsWith("send.")
@@ -127,6 +128,24 @@ it("promotes a fully-present pending domain and stamps verifiedAt", async () => 
   expect(row.status).toBe("verified");
   expect(row.verifiedAt).not.toBeNull();
   expect(row.lastCheckedAt).not.toBeNull();
+  // The pass persists the per-record snapshot so send-time insights never do
+  // live DNS: required records found, unpublished DMARC conclusively missing.
+  expect(row.dnsRecords?.map((r) => r.status)).toEqual(["found", "found", "found", "missing"]);
+  expect(row.dmarcPolicy).toBeNull();
+  expect(row.dmarcCheckedAt).not.toBeNull();
+});
+
+it("persists the published DMARC policy alongside the verification pass", async () => {
+  const id = await insertDomain({ name: "good.dev", status: "pending", lastCheckedAt: stale });
+
+  await reverifyDomains(db, {
+    clientForRegion,
+    resolver: fakeDns(new Set(), "v=DMARC1; p=quarantine;"),
+  });
+
+  const row = await domainRow(id);
+  expect(row.dmarcPolicy).toBe("quarantine");
+  expect(row.dnsRecords?.find((r) => r.group === "dmarc")?.status).toBe("found");
 });
 
 it("a per-domain SES error does not abort the batch", async () => {

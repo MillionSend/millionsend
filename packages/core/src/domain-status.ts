@@ -7,11 +7,13 @@ export type DomainStatus = (typeof domainStatusEnum.enumValues)[number];
  * Live per-record DNS verdict, distinct from SES's cached verification status.
  * `found` = the expected record resolves; `mismatch` = the name answers but no
  * answer carries the expected value (a wrong/stale record); `missing` = the
- * name doesn't answer at all (removed record, NXDOMAIN, or lookup timeout).
+ * name conclusively doesn't answer (removed record, NXDOMAIN, NODATA);
+ * `unknown` = the lookup didn't conclude (timeout, SERVFAIL, network error) —
+ * kept distinct so a resolver blip never reads as a removed record.
  * This is the real-time signal that catches a record removed seconds ago, which
  * SES's GetEmailIdentity keeps reporting as verified until it re-checks.
  */
-export type LiveDnsStatus = "found" | "missing" | "mismatch";
+export type LiveDnsStatus = "found" | "missing" | "mismatch" | "unknown";
 
 /** The single source-of-truth verdict a DNS record row shows in its Status cell. */
 export type RecordStatus = "missing" | "mismatch" | "pending" | "verified";
@@ -44,11 +46,13 @@ export function combineRecordStatus({
   live: LiveDnsStatus | undefined;
   sesGate: SesGate | undefined;
 }): RecordStatus {
-  // Before our live lookup returns, fall back to AWS's known status (the
-  // Check-DNS button's own spinner signals that a fresh check is running, so
-  // rows don't need their own "checking" state). `verified` shows through;
-  // everything else reads `pending` until the live result arrives.
-  if (live === undefined) return sesGate === "verified" ? "verified" : "pending";
+  // Before our live lookup returns — or when it didn't conclude (`unknown`:
+  // timeout/SERVFAIL) — fall back to AWS's known status: a resolver blip must
+  // never demote a verified record. `verified` shows through; everything else
+  // reads `pending` until a conclusive live result arrives.
+  if (live === undefined || live === "unknown") {
+    return sesGate === "verified" ? "verified" : "pending";
+  }
   if (live === "missing") return "missing";
   if (live === "mismatch") return "mismatch";
   // live === "found": our DNS passed — verified unless AWS is still pending.

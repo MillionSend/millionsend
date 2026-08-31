@@ -105,6 +105,18 @@ export {
   strictDomainStatus,
 } from "./domain-status.js";
 export { firstRow, resultRows } from "./driver-result.js";
+export {
+  CHECKS,
+  type CheckId,
+  type CheckSeverity,
+  type CheckStatus,
+  type EmailCheckResult,
+  type EmailInsightsInput,
+  evaluateEmailInsights,
+  SCORE_VERSION,
+  SHORTENER_HOSTS,
+  scoreBand,
+} from "./email-insights.js";
 export { ERASED_TOMBSTONE, type EraseRecipientResult, eraseRecipient } from "./erase-recipient.js";
 export {
   beginIdempotent,
@@ -114,7 +126,7 @@ export {
   releaseIdempotent,
 } from "./idempotency.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
-export { type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
+export { ANCHOR_HREF, type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
 export {
   ADMIN_MCP_SCOPES,
   ALL_TEAMS_GRANT,
@@ -124,6 +136,7 @@ export {
   type McpScope,
   mcpResourceUrl,
 } from "./oauth-scopes.js";
+export { isRootDomainSend, registrableDomain } from "./org-domain.js";
 export {
   effectivePlan,
   PLAN_DAILY_LIMIT,

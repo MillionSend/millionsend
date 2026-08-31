@@ -6,6 +6,7 @@ import {
   type EmailAttachment,
   type EmailBody,
   enqueueWebhookDeliveries,
+  evaluateEmailInsights,
   extractAddrSpec,
   findSuppressed,
   hashRecipient,
@@ -13,7 +14,9 @@ import {
   type Keyring,
   makeUnsubscribeToken,
   openAttachments,
+  parseSingleSender,
   rewriteForTracking,
+  SCORE_VERSION,
   substituteUnsubscribeUrl,
   utcDay,
 } from "@millionsend/core";
@@ -312,6 +315,8 @@ export async function sendEmail(
             clickTracking: schema.domains.clickTracking,
             openTracking: schema.domains.openTracking,
             trackingSubdomain: schema.domains.trackingSubdomain,
+            dmarcPolicy: schema.domains.dmarcPolicy,
+            dmarcCheckedAt: schema.domains.dmarcCheckedAt,
           })
           .from(schema.domains)
           .where(
@@ -401,6 +406,12 @@ export async function sendEmail(
     if (html) html = substituteUnsubscribeUrl(html, url);
     if (text) text = substituteUnsubscribeUrl(text, url);
   }
+  // Captured before the tracking rewrite: insights link analysis needs the
+  // hrefs the recipient actually resolves, not our wrapper URLs.
+  const preTrackingHtml = html;
+  let brandedHostUsed = false;
+  let sharedFallbackUsed = false;
+  let shippedUntracked = false;
   // deps.tracking is always present in the running worker (the master key is
   // always available to derive the signing key); it is optional only so tests
   // that don't exercise tracking need not wire it, and its absence simply
@@ -412,6 +423,9 @@ export async function sendEmail(
         : null;
     const trackingBaseUrl =
       brandedHost ?? (deps.tracking.requireBrandedHost ? null : deps.tracking.defaultBaseUrl);
+    brandedHostUsed = brandedHost !== null;
+    sharedFallbackUsed = brandedHost === null && trackingBaseUrl != null;
+    shippedUntracked = !trackingBaseUrl;
     // A custom subdomain is self-sufficient; without one the redirect host is
     // APP_BASE_URL. Missing it would ship links pointing nowhere, so fail loud
     // — except under requireBrandedHost, where untracked is the intended
@@ -583,6 +597,53 @@ export async function sendEmail(
       target: [counter.teamId, counter.day],
       set: { sent: sql`${counter.sent} + 1` },
     });
+  // Insights are best-effort bookkeeping on an already-accepted send: a bug
+  // here must never fail (and so retry) the delivery.
+  try {
+    const insights = evaluateEmailInsights({
+      html,
+      preTrackingHtml,
+      text,
+      from: email.from,
+      senderDomain: parseSingleSender(email.from)?.domain ?? "",
+      subject: email.subject,
+      finalHeaders: headers,
+      hasAttachments: attachments !== null && attachments.length > 0,
+      replyTo: email.replyTo,
+      isBroadcast: email.contactId !== null || email.broadcastId !== null,
+      hasTopic: email.topicId !== null,
+      tracking: {
+        clickEnabled: click,
+        openEnabled: open,
+        brandedHostUsed,
+        sharedFallbackUsed,
+        shippedUntracked,
+      },
+      domainSnapshot: { dmarcPolicy: domain.dmarcPolicy, dmarcCheckedAt: domain.dmarcCheckedAt },
+      now: new Date(),
+    });
+    const bodySize = insights.checks.find((c) => c.id === "body_size")?.detail?.htmlSizeBytes;
+    // Broadcast fan-out shares ONE row (content identical modulo the
+    // unsubscribe token): the first completed send writes it, the rest —
+    // and the reconcile re-send path on the emailId key — conflict-skip.
+    await db
+      .insert(schema.emailInsights)
+      .values({
+        teamId: email.teamId,
+        ...(email.broadcastId ? { broadcastId: email.broadcastId } : { emailId: email.id }),
+        marketing: insights.marketing,
+        checks: insights.checks as schema.EmailInsightCheck[],
+        scoreTenths: insights.scoreTenths,
+        scoreVersion: SCORE_VERSION,
+        htmlSizeBytes: typeof bodySize === "number" ? bodySize : null,
+        mimeSizeBytes: mime.length,
+      })
+      .onConflictDoNothing({
+        target: email.broadcastId ? schema.emailInsights.broadcastId : schema.emailInsights.emailId,
+      });
+  } catch (err) {
+    console.error(`email.send: insights failed for ${email.id}`, err);
+  }
   // The sentAt claim above makes this path single-shot per email, so the
   // email.sent fan-out cannot double-fire on a job retry.
   if (deps.enqueueWebhookDelivery) {

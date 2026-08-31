@@ -4,6 +4,7 @@ export {
   type SesAccountClient,
   type SesAccountOverview,
 } from "./account.js";
+export { type DmarcLookup, type DmarcPolicy, lookupDmarc, parseDmarcRecord } from "./dmarc.js";
 export {
   checkDnsRecords,
   type DnsCheckRecord,
@@ -39,6 +40,7 @@ export {
   computeDomainVerification,
   type DomainVerificationResult,
   type TrackedDnsRecord,
+  verificationDbPatch,
 } from "./domain-verification.js";
 export { createKeyringFromEnv, type KeyringEnv } from "./kms.js";
 export {

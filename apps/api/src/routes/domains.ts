@@ -27,6 +27,7 @@ import {
   SES_REGIONS,
   type SesIdentityClient,
   type SesRegion,
+  verificationDbPatch,
 } from "@millionsend/ses";
 import { and, asc, count, desc, eq } from "drizzle-orm";
 import { type ApiDeps, type Env, errorBody, isUniqueViolation, keysetPage } from "../app.js";
@@ -385,17 +386,19 @@ export function registerDomainRoutes(
       // The shared source of truth the dashboard verify and the worker cron
       // also run: SES status + live DNS folded into the strict stored status
       // the send gate keys off.
-      const { status, verification } = await computeDomainVerification(
+      const result = await computeDomainVerification(
         ses.clientForRegion(domain.region),
         ses.dns ?? nodeDnsResolver,
         domain,
       );
+      const { status, verification } = result;
       const now = new Date();
       await db
         .update(d)
         .set({
           status,
           lastCheckedAt: now,
+          ...verificationDbPatch(result, now),
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));

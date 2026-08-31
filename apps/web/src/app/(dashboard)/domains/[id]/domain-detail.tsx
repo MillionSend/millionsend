@@ -344,7 +344,12 @@ export function DomainDetail({ id }: { id: string }) {
   // whose live status is Missing would flick back to AWS's cached Verified for
   // that instant. Holding the previous result keeps the badge stable.
   const [liveDns, setLiveDns] = useState<
-    { type: string; name: string; value: string; status: "found" | "missing" | "mismatch" }[]
+    {
+      type: string;
+      name: string;
+      value: string;
+      status: "found" | "missing" | "mismatch" | "unknown";
+    }[]
   >([]);
   // Set when the Configuration tab sends the user to the tracking CNAME:
   // switches to Records, pulses that group once, then clears itself.

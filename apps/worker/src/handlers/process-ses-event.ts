@@ -193,11 +193,21 @@ export async function processSesEvent(
             ? "complained"
             : null;
     if (counter) {
+      // bounced counts every bounce event; hard_bounced only Permanent ones —
+      // the deliverability score's bounce-rate input (transient greylisting
+      // must not read as a hard-bounce crisis).
+      const cols =
+        counter === "bounced" && event.bounce?.bounceType === "Permanent"
+          ? [counter, "hard_bounced"]
+          : [counter];
       await txDb.execute(sql`
-        insert into ${schema.usageCounters} (team_id, day, ${sql.raw(counter)})
-        values (${email.teamId}, ${day}, 1)
+        insert into ${schema.usageCounters} (team_id, day, ${sql.raw(cols.join(", "))})
+        values (${email.teamId}, ${day}, ${sql.raw(cols.map(() => "1").join(", "))})
         on conflict (team_id, day) do update
-          set ${sql.raw(counter)} = ${schema.usageCounters}.${sql.raw(counter)} + 1
+          set ${sql.join(
+            cols.map((col) => sql`${sql.raw(col)} = ${schema.usageCounters}.${sql.raw(col)} + 1`),
+            sql`, `,
+          )}
       `);
     }
 

@@ -25,6 +25,7 @@ import {
   getDomainVerification,
   nodeDnsResolver,
   type SesIdentityClient,
+  verificationDbPatch,
 } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq } from "drizzle-orm";
@@ -379,11 +380,12 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       const resolver = deps.dns ?? nodeDnsResolver;
       // The shared source of truth the worker cron also runs: SES status + live
       // DNS folded into the strict stored status the send gate keys off.
-      const { status, liveDns, verification } = await computeDomainVerification(
+      const result = await computeDomainVerification(
         deps.clientForRegion(domain.region),
         resolver,
         domain,
       );
+      const { status, liveDns, verification } = result;
       // The branded tracking CNAME never gates status, so computeDomainVerification
       // omits it — live-check it here so its row badge still reflects real DNS.
       if (domain.trackingSubdomain) {
@@ -404,6 +406,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         .set({
           status,
           lastCheckedAt: now,
+          ...verificationDbPatch(result, now),
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));

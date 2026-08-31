@@ -29,8 +29,9 @@ export interface RewriteOptions {
 
 // ponytail: naive attribute regex — a quoted `>` inside an <a> tag would fool
 // it, but that does not occur in real email HTML. Upgrade to a parser only if a
-// broken template surfaces it.
-const ANCHOR_HREF = /(<a\b[^>]*?\shref=)(["'])(.*?)\2/gi;
+// broken template surfaces it. Shared with email-insights so both sides see
+// the exact same set of anchors.
+export const ANCHOR_HREF = /(<a\b[^>]*?\shref=)(["'])(.*?)\2/gi;
 
 /**
  * Only sign absolute http(s) destinations. mailto:/tel:/relative links have no

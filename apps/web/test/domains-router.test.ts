@@ -454,6 +454,11 @@ describe("domains.verify", () => {
     const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(row?.status).toBe("pending");
     expect(row?.verifiedAt).toBeNull();
+    // Every verify pass persists the DNS snapshot, even while still pending.
+    expect(row?.dnsRecords?.length).toBeGreaterThan(0);
+    expect(row?.dnsRecords?.every((r) => r.status === "missing")).toBe(true);
+    expect(row?.dmarcPolicy).toBeNull();
+    expect(row?.dmarcCheckedAt).not.toBeNull();
   });
 });
 
@@ -511,7 +516,12 @@ describe("domains.verify live DNS", () => {
     });
     const result = await caller.domains.verify({ id });
     expect(result.liveDns.length).toBeGreaterThan(0);
-    expect(result.liveDns.every((r) => r.status === "missing")).toBe(true);
+    // NXDOMAIN is conclusive absence; the MX timeout is inconclusive, kept
+    // distinct so a resolver blip never reads as a removed record.
+    expect(result.liveDns.filter((r) => r.type !== "MX").every((r) => r.status === "missing")).toBe(
+      true,
+    );
+    expect(result.liveDns.find((r) => r.type === "MX")?.status).toBe("unknown");
   });
 });
 

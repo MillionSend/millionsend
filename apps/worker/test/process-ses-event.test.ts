@@ -94,10 +94,20 @@ it("Permanent bounce: status + suppression scoped to the owning team", async () 
   expect(supp?.teamId).toBe(teamId);
   expect(supp?.reason).toBe("hard_bounce");
   expect(supp?.sourceEmailId).toBe(emailId);
+  const [counter] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(counter?.bounced).toBe(1);
+  expect(counter?.hardBounced).toBe(1);
 });
 
 it("Transient bounce: status moves but nothing is suppressed", async () => {
   const emailId = await insertSentEmail("mid-soft", ["soft@example.com"]);
+  const [before] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
   await processSesEvent(
     db,
     makeEvent({
@@ -117,6 +127,13 @@ it("Transient bounce: status moves but nothing is suppressed", async () => {
     .from(schema.suppressions)
     .where(eq(schema.suppressions.emailHash, hashRecipient("soft@example.com")));
   expect(supp).toHaveLength(0);
+  // Transient bounces count in bounced but never in hard_bounced.
+  const [counter] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(counter?.bounced).toBe((before?.bounced ?? 0) + 1);
+  expect(counter?.hardBounced).toBe(before?.hardBounced ?? 0);
 });
 
 it("Complaint: suppression with reason complaint", async () => {
