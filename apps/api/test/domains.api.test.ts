@@ -306,7 +306,9 @@ describe("POST /domains in cloud (shared AWS account)", () => {
     const limited = await create(DOMAIN_CREATE_LIMIT_PER_HOUR);
     expect(limited.status).toBe(429);
     expect(await limited.json()).toMatchObject({ name: "rate_limit_exceeded" });
-  });
+    // Each successful create runs a real RSA keygen; 11 of them overrun the
+    // default 5s on loaded CI runners.
+  }, 30_000);
 });
 
 describe("GET /domains", () => {
