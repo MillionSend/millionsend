@@ -28,12 +28,12 @@ Two verification signals are shown side by side:
 
 Once verified, a domain's **Configuration** tab controls:
 
-- **Click tracking** — off by default. When on, links are rewritten through
-  MillionSend's own redirect endpoint to record `email.clicked` events. When
-  off, your links ship untouched.
-- **Open tracking** — off by default. When on, a tracking pixel records
-  `email.opened` events. Tracking is app-layer (MillionSend's endpoints, or
-  your custom tracking subdomain) — never SES's link rewriting.
+- **Click tracking** — off by default. When on, links are rewritten to redirect
+  through your own tracking subdomain to record `email.clicked` events, then send
+  the recipient on to the original URL. When off, your links ship untouched.
+- **Open tracking** — off by default. When on, a 1×1 pixel served from that same
+  tracking subdomain records `email.opened` events. Tracking is app-layer and
+  runs on your own domain — never SES's link rewriting.
 - **TLS mode** — `opportunistic` (default) or `enforced`, applied via the
   domain's SES configuration set.
 

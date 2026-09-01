@@ -29,12 +29,13 @@ Dois sinais de verificação aparecem lado a lado:
 Depois de verificado, a aba **Configuração** de um domínio controla:
 
 - **Rastreamento de cliques** — desligado por padrão. Ligado, os links são
-  reescritos pelo endpoint de redirecionamento do próprio MillionSend para
-  registrar eventos `email.clicked`. Desligado, seus links saem intocados.
-- **Rastreamento de aberturas** — desligado por padrão. Ligado, um pixel de
-  rastreamento registra eventos `email.opened`. O rastreamento é na camada do
-  app (endpoints do MillionSend, ou seu subdomínio de rastreamento
-  customizado) — nunca a reescrita de links do SES.
+  reescritos para redirecionar pelo seu próprio subdomínio de rastreamento para
+  registrar eventos `email.clicked`, e então seguem para a URL original.
+  Desligado, seus links saem intocados.
+- **Rastreamento de aberturas** — desligado por padrão. Ligado, um pixel 1×1
+  servido por esse mesmo subdomínio de rastreamento registra eventos
+  `email.opened`. O rastreamento é na camada do app e roda no seu próprio
+  domínio — nunca a reescrita de links do SES.
 - **Modo TLS** — `opportunistic` (padrão) ou `enforced`, aplicado via
   configuration set do SES do domínio.
 

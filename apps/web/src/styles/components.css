@@ -200,6 +200,23 @@
   border-radius: var(--ms-r-card);
   box-shadow: var(--ms-shadow-card);
 }
+/* Glowing card edge: a bright top border fading to the normal line down the
+   sides, over the outer card shadow. Set --ms-card-bg to match a non-default
+   surface. Uses a two-layer background so the gradient rides the border box. */
+.ms-card-glow {
+  --ms-card-bg: var(--ms-panel);
+  border: 1px solid transparent;
+  border-radius: var(--ms-r-card);
+  background:
+    linear-gradient(var(--ms-card-bg), var(--ms-card-bg)) padding-box,
+    linear-gradient(
+      to bottom,
+      var(--ms-glow-edge),
+      color-mix(in srgb, var(--ms-line-strong) 55%, var(--ms-line)) 45%
+    )
+    border-box;
+  box-shadow: var(--ms-shadow-card);
+}
 .ms-kpi-card {
   background: var(--ms-panel);
   border: 1px solid color-mix(in srgb, var(--ms-line-strong) 55%, var(--ms-line));
@@ -1111,15 +1128,18 @@ svg:focus {
 /* Recipient-preview mail card (add-domain) — reads as an email client in both
    themes: true white on paper, a raised panel on the dark ground. */
 .ms-mail-preview {
-  background: var(--ms-panel-raised);
-  border: 1px solid var(--ms-line);
+  --ms-mp-bg: var(--ms-panel-raised);
+  border: 1px solid transparent;
   border-radius: 12px;
+  background:
+    linear-gradient(var(--ms-mp-bg), var(--ms-mp-bg)) padding-box,
+    linear-gradient(to bottom, var(--ms-glow-edge), var(--ms-line) 45%) border-box;
   box-shadow: var(--ms-shadow-card);
   padding: 18px 20px;
   max-width: 460px;
 }
 :root[data-theme="light"] .ms-mail-preview {
-  background: #ffffff;
+  --ms-mp-bg: #ffffff;
 }
 
 /* Wordmark — the SVG's fills are bone-on-transparent, invisible on paper;

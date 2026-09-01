@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
-import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import {
   type DnsRecord,
@@ -29,24 +28,7 @@ import { isLoopbackUrl } from "@/lib/url";
 import { zoneRelativeName } from "@/lib/zone";
 import { DomainStatusBadge } from "../domain-status";
 import { RegionLabel } from "../region-label";
-
-/**
- * Toggling tracking changes what every future send does, so it confirms first
- * (kind is "click" | "open"). The dialog copy is intentionally about the
- * downstream events (webhooks and metrics), not just the pixel.
- */
-function confirmTracking(
-  t: (key: string, values?: Record<string, string>) => string,
-  kindLabel: string,
-  enabling: boolean,
-): Promise<boolean> {
-  const state = enabling ? "Enable" : "Disable";
-  return confirmDialog({
-    title: t(`detail.tracking.confirm${state}Title`, { kind: kindLabel }),
-    message: t(`detail.tracking.confirm${state}`, { kind: kindLabel }),
-    confirmLabel: t(`detail.tracking.confirm${state}Cta`, { kind: kindLabel }),
-  });
-}
+import { useTrackingToggle } from "../use-tracking-toggle";
 
 /**
  * Status-tinted gradient banner (canvas: near-black ground, glow rising from
@@ -264,18 +246,7 @@ function ConfigurationPanel({
   onShowTrackingRecords: () => void;
 }) {
   const t = useTranslations("domains");
-  const trpc = useTRPC();
-  const queryClient = useQueryClient();
   const router = useRouter();
-
-  const update = useMutation(
-    trpc.domains.updateConfiguration.mutationOptions({
-      onSuccess: () => {
-        void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
-        void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
-      },
-    }),
-  );
 
   // Cloud has no shared tracking host: flipping a switch on with no subdomain
   // yet opens the onboarding flow to set one up, rather than persisting a toggle
@@ -283,6 +254,11 @@ function ConfigurationPanel({
   // in place. cannotServe = cloud that also can't serve a subdomain at all.
   const needsOnboarding = trackingRequiresSubdomain && !trackingSubdomain;
   const cannotServe = needsOnboarding && !subdomainsSupported;
+  const { update, toggleKind } = useTrackingToggle(id, {
+    needsOnboarding,
+    clickTracking,
+    openTracking,
+  });
   const trackingVerified = trackingCname?.live === "found";
   const setupHref = `/domains/${id}/tracking`;
   const linkStyle: React.CSSProperties = {
@@ -298,10 +274,6 @@ function ConfigurationPanel({
 
   return (
     <div style={{ maxWidth: 1000 }}>
-      <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)" }}>
-        {t("detail.configuration.note")}
-      </div>
-
       {/* The branded subdomain is set up in its own onboarding flow; here we
           only surface the configured host and the way back into it. */}
       {trackingSubdomain ? (
@@ -381,16 +353,7 @@ function ConfigurationPanel({
         <Switch
           checked={clickTracking}
           disabled={update.isPending || trackingHostLocal || cannotServe}
-          onChange={async (checked) => {
-            // Enabling with no subdomain yet: send them to set one up first.
-            if (checked && needsOnboarding) {
-              router.push(`${setupHref}?enable=click`);
-              return;
-            }
-            if (await confirmTracking(t, t("detail.tracking.kindClick"), checked)) {
-              update.mutate({ id, clickTracking: checked });
-            }
-          }}
+          onChange={(checked) => toggleKind("click", checked)}
           ariaLabel={t("detail.tracking.click")}
         />
       </ConfigSection>
@@ -414,15 +377,7 @@ function ConfigurationPanel({
         <Switch
           checked={openTracking}
           disabled={update.isPending || trackingHostLocal || cannotServe}
-          onChange={async (checked) => {
-            if (checked && needsOnboarding) {
-              router.push(`${setupHref}?enable=open`);
-              return;
-            }
-            if (await confirmTracking(t, t("detail.tracking.kindOpen"), checked)) {
-              update.mutate({ id, openTracking: checked });
-            }
-          }}
+          onChange={(checked) => toggleKind("open", checked)}
           ariaLabel={t("detail.tracking.open")}
         />
       </ConfigSection>
@@ -481,6 +436,18 @@ export function DomainDetail({ id }: { id: string }) {
   const features = useQuery(trpc.system.features.queryOptions());
   const trackingSubdomainsSupported = features.data?.trackingSubdomainsSupported ?? true;
   const trackingRequiresSubdomain = features.data?.trackingRequiresSubdomain ?? false;
+  // Records-tab tracking switch: same gesture as the Configuration switches.
+  const trackingHostLocal = isLoopbackUrl(features.data?.appBaseUrl);
+  const recordsNeedsOnboarding = trackingRequiresSubdomain && !domain.data?.trackingSubdomain;
+  const trackingToggle = useTrackingToggle(id, {
+    needsOnboarding: recordsNeedsOnboarding,
+    clickTracking: domain.data?.clickTracking ?? false,
+    openTracking: domain.data?.openTracking ?? false,
+  });
+  const trackingSwitchDisabled =
+    trackingToggle.update.isPending ||
+    trackingHostLocal ||
+    (recordsNeedsOnboarding && !trackingSubdomainsSupported);
 
   const verify = useMutation(
     trpc.domains.verify.mutationOptions({
@@ -845,7 +812,7 @@ export function DomainDetail({ id }: { id: string }) {
             trackingSubdomain={data.trackingSubdomain}
             tlsMode={data.tlsMode}
             trackingCname={rows.find((r) => r.group === "tracking") ?? null}
-            trackingHostLocal={isLoopbackUrl(features.data?.appBaseUrl)}
+            trackingHostLocal={trackingHostLocal}
             subdomainsSupported={trackingSubdomainsSupported}
             trackingRequiresSubdomain={trackingRequiresSubdomain}
             onRecheck={runCheck}
@@ -892,17 +859,33 @@ export function DomainDetail({ id }: { id: string }) {
                   showStatus
                   highlightGroup={highlightTracking ? "tracking" : null}
                   forceGroups={status === "verified" ? ["tracking"] : []}
-                  emptyNotes={{
-                    tracking: t(
-                      // Cloud has no shared host: without a subdomain links ship
-                      // untracked, so never claim a default host serves them.
-                      trackingRequiresSubdomain
-                        ? "detail.groups.trackingNoteRequiresSubdomain"
-                        : trackingSubdomainsSupported
-                          ? "detail.groups.trackingNote"
-                          : "detail.groups.trackingNoteDefaultOnly",
-                    ),
+                  groupExtras={{
+                    // Same enable gesture as the Configuration tab, right on the
+                    // group header. Only meaningful once the domain can send.
+                    tracking:
+                      status === "verified" ? (
+                        <Switch
+                          checked={trackingToggle.masterChecked}
+                          disabled={trackingSwitchDisabled}
+                          onChange={trackingToggle.toggleMaster}
+                          ariaLabel={t("detail.tracking.enable")}
+                        />
+                      ) : null,
                   }}
+                  emptyNotes={
+                    // Cloud has no shared host, so an unconfigured group needs no
+                    // note — the switch is the affordance. Self-host keeps the
+                    // default-host explainer.
+                    trackingRequiresSubdomain
+                      ? {}
+                      : {
+                          tracking: t(
+                            trackingSubdomainsSupported
+                              ? "detail.groups.trackingNote"
+                              : "detail.groups.trackingNoteDefaultOnly",
+                          ),
+                        }
+                  }
                 />
               ) : (
                 <DnsRecordsTableSkeleton showStatus />

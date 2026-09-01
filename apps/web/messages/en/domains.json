@@ -103,8 +103,7 @@
       "dmarc": "DMARC (recommended)",
       "tracking": "Open & click tracking",
       "trackingNote": "Tracking links use the default host — no DNS records needed. Set a custom subdomain in Configuration to serve them from your own domain.",
-      "trackingNoteDefaultOnly": "Tracking links use the default host — no DNS records needed.",
-      "trackingNoteRequiresSubdomain": "No tracking subdomain yet, so links ship untracked. Enable tracking in Configuration to set one up and add its DNS record."
+      "trackingNoteDefaultOnly": "Tracking links use the default host — no DNS records needed."
     },
     "tracking": {
       "open": "Enable open tracking",
@@ -127,10 +126,11 @@
       "confirmDisable": "New mail from this domain will stop emitting {kind} events.\n\nEvents already recorded stay; your webhooks and metrics simply stop receiving new ones.",
       "confirmEnableCta": "Enable {kind} tracking",
       "confirmDisableCta": "Disable {kind} tracking",
-      "openLearnMore": "Learn more"
+      "openLearnMore": "Learn more",
+      "kindBoth": "click and open",
+      "enable": "Enable tracking"
     },
     "configuration": {
-      "note": "Tracking is applied by MillionSend, not SES. When off, emails ship the raw, untouched links and no open pixel. When on, we rewrite links through your tracking host and inject a 1×1 open pixel, then generate the open and click events ourselves.",
       "trackingMetrics": "Enable tracking metrics",
       "update": "Update",
       "linkPreview": "Your link: {host}/your-link",
@@ -186,11 +186,15 @@
       "title": "Set up tracking",
       "subtitle": "Click and open events are served from a subdomain of your own domain, so ad blockers and spam filters do not recognise a shared tracking host. Add its CNAME and verify it.",
       "options": "Tracking options",
-      "preview": "Preview",
       "save": "Save & show DNS record",
       "cancel": "Cancel",
       "change": "Change subdomain",
-      "add": "Add a custom subdomain"
+      "add": "Add a custom subdomain",
+      "previewTitle": "What recipients will see",
+      "previewSender": "Your brand",
+      "previewGreeting": "Hi Ana,",
+      "previewLinkLabel": "Your link:",
+      "previewCaption": "Live preview — the tracked link updates as you type."
     }
   },
   "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code> — see <code>SELF_HOSTING.md</code>.",

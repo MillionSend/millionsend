@@ -103,8 +103,7 @@
       "dmarc": "DMARC (recomendado)",
       "tracking": "Rastreamento de aberturas e cliques",
       "trackingNote": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário. Defina um subdomínio em Configuração para servi-los do seu próprio domínio.",
-      "trackingNoteDefaultOnly": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário.",
-      "trackingNoteRequiresSubdomain": "Nenhum subdomínio de rastreamento ainda, então os links são enviados sem rastreamento. Ative o rastreamento em Configuração para configurar um e adicionar seu registro DNS."
+      "trackingNoteDefaultOnly": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário."
     },
     "tracking": {
       "open": "Ativar rastreamento de aberturas",
@@ -127,10 +126,11 @@
       "confirmDisable": "Novos e-mails deste domínio deixam de emitir eventos {kind}.\n\nOs eventos já registrados permanecem; seus webhooks e métricas apenas param de receber novos.",
       "confirmEnableCta": "Ativar rastreamento {kind}",
       "confirmDisableCta": "Desativar rastreamento {kind}",
-      "openLearnMore": "Saiba mais"
+      "openLearnMore": "Saiba mais",
+      "kindBoth": "cliques e aberturas",
+      "enable": "Ativar rastreamento"
     },
     "configuration": {
-      "note": "O rastreamento é aplicado pelo MillionSend, não pelo SES. Quando desativado, os emails são enviados com os links intactos e sem pixel de abertura. Quando ativado, reescrevemos os links pelo seu host de rastreamento e injetamos um pixel 1×1 de abertura, gerando os eventos de abertura e clique por conta própria.",
       "trackingMetrics": "Ativar métricas de rastreamento",
       "update": "Atualizar",
       "linkPreview": "Seu link: {host}/seu-link",
@@ -186,11 +186,15 @@
       "title": "Configurar rastreamento",
       "subtitle": "Os eventos de clique e abertura são servidos por um subdomínio do seu próprio domínio, para que bloqueadores de anúncios e filtros de spam não reconheçam um host de rastreamento compartilhado. Adicione o CNAME e verifique-o.",
       "options": "Opções de rastreamento",
-      "preview": "Prévia",
       "save": "Salvar e mostrar registro DNS",
       "cancel": "Cancelar",
       "change": "Alterar subdomínio",
-      "add": "Adicionar um subdomínio personalizado"
+      "add": "Adicionar um subdomínio personalizado",
+      "previewTitle": "O que os destinatários verão",
+      "previewSender": "Sua marca",
+      "previewGreeting": "Olá Ana,",
+      "previewLinkLabel": "Seu link:",
+      "previewCaption": "Prévia ao vivo — o link rastreado atualiza enquanto você digita."
     }
   },
   "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code> — veja <code>SELF_HOSTING.md</code>.",

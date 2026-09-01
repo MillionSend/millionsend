@@ -75,7 +75,7 @@ function DnsRecordsStep({ id }: { id: string }) {
       />
       {/* Step 01 — done: recap of the created domain */}
       <div className="ms-step" style={{ display: "flex", gap: 44 }}>
-        <MarkerRail marker="01" done color="var(--ms-success)" />
+        <MarkerRail marker="01" done fadeTop color="var(--ms-success)" />
         <div style={{ flex: 1, minWidth: 0, paddingBottom: 28 }}>
           <div
             style={{
@@ -180,7 +180,7 @@ function DnsRecordsStep({ id }: { id: string }) {
 
       {/* Final step — fill in the DNS records */}
       <div className="ms-step" style={{ display: "flex", gap: 44 }}>
-        <MarkerRail marker={dnsMarker} color="var(--ms-bone)" line={false} />
+        <MarkerRail marker={dnsMarker} color="var(--ms-bone)" fadeBottom />
         <div style={{ flex: 1, minWidth: 0 }}>
           <h2 className="ms-display" style={{ fontSize: 22, margin: 0, color: "var(--ms-bone)" }}>
             {provider

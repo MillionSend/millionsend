@@ -28,7 +28,16 @@ export function StepRail({ current = 1, total = 2 }: { current?: number; total?:
         return (
           <span key={num} style={{ display: "contents" }}>
             {index > 0 ? (
-              <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />
+              <span
+                style={{
+                  flex: 1,
+                  width: 1,
+                  marginTop: 6,
+                  // Softens the join at each number instead of butting into it.
+                  background:
+                    "linear-gradient(to bottom, transparent, var(--ms-line) 22%, var(--ms-line) 78%, transparent)",
+                }}
+              />
             ) : null}
             <span
               className="ms-mono"
@@ -54,12 +63,18 @@ export function MarkerRail({
   color,
   line = true,
   done = false,
+  fadeTop = false,
+  fadeBottom = false,
 }: {
   marker: string;
   color: string;
   line?: boolean;
   /** Completed step: keeps the number and appends a check to its right. */
   done?: boolean;
+  /** First step: a short line fades in above the marker (no layout shift). */
+  fadeTop?: boolean;
+  /** Last step: a short line fades out below the marker instead of a hard stop. */
+  fadeBottom?: boolean;
 }) {
   return (
     <div
@@ -77,6 +92,19 @@ export function MarkerRail({
         className="ms-mono"
         style={{ position: "relative", fontSize: 11, color, whiteSpace: "nowrap" }}
       >
+        {fadeTop ? (
+          <span
+            style={{
+              position: "absolute",
+              left: "50%",
+              bottom: "calc(100% + 6px)",
+              transform: "translateX(-50%)",
+              width: 1,
+              height: 40,
+              background: "linear-gradient(to bottom, transparent, var(--ms-line))",
+            }}
+          />
+        ) : null}
         {marker}
         {done ? (
           // Absolutely positioned so the ✓ never shifts the number off the
@@ -94,7 +122,16 @@ export function MarkerRail({
           </span>
         ) : null}
       </span>
-      {line ? (
+      {fadeBottom ? (
+        <span
+          style={{
+            width: 1,
+            height: 56,
+            marginTop: 6,
+            background: "linear-gradient(to bottom, var(--ms-line), transparent)",
+          }}
+        />
+      ) : line ? (
         <span style={{ flex: 1, width: 1, background: "var(--ms-line)", marginTop: 6 }} />
       ) : null}
     </div>

@@ -58,6 +58,7 @@ export function TrackingOnboarding({ id }: { id: string }) {
           <MarkerRail
             marker="01"
             done={detailsDone}
+            fadeTop
             color={detailsDone ? "var(--ms-success)" : "var(--ms-bone)"}
           />
           <div style={{ flex: 1, minWidth: 0, paddingBottom: 28 }}>
@@ -91,7 +92,7 @@ export function TrackingOnboarding({ id }: { id: string }) {
 
         {/* Step 02 — DNS record for the saved subdomain */}
         <div className="ms-step" style={{ display: "flex", gap: 44 }}>
-          <MarkerRail marker="02" color="var(--ms-bone)" line={false} />
+          <MarkerRail marker="02" color="var(--ms-bone)" fadeBottom />
           <div style={{ flex: 1, minWidth: 0 }}>
             <h2
               className="ms-display"
