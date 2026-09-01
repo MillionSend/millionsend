@@ -29,7 +29,6 @@ import { isLoopbackUrl } from "@/lib/url";
 import { zoneRelativeName } from "@/lib/zone";
 import { DomainStatusBadge } from "../domain-status";
 import { RegionLabel } from "../region-label";
-import { TrackingSetup } from "../tracking-setup";
 
 /**
  * Toggling tracking changes what every future send does, so it confirms first
@@ -233,7 +232,6 @@ function TrackingCnameCard({
 function ConfigurationPanel({
   id,
   domainName,
-  mailFromSubdomain,
   openTracking,
   clickTracking,
   trackingSubdomain,
@@ -248,8 +246,6 @@ function ConfigurationPanel({
 }: {
   id: string;
   domainName: string;
-  /** Return-path subdomain (default "send"); the tracking subdomain must differ from it. */
-  mailFromSubdomain: string;
   openTracking: boolean;
   clickTracking: boolean;
   trackingSubdomain: string | null;
@@ -270,7 +266,7 @@ function ConfigurationPanel({
   const t = useTranslations("domains");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [editingSubdomain, setEditingSubdomain] = useState(false);
+  const router = useRouter();
 
   const update = useMutation(
     trpc.domains.updateConfiguration.mutationOptions({
@@ -281,12 +277,24 @@ function ConfigurationPanel({
     }),
   );
 
-  // Cloud has no shared tracking host, so without a subdomain tracking can only
-  // be turned on by first setting one up — enabling never flips a bare toggle.
+  // Cloud has no shared tracking host: flipping a switch on with no subdomain
+  // yet opens the onboarding flow to set one up, rather than persisting a toggle
+  // that would ship untracked links. A configured (or self-host) domain toggles
+  // in place. cannotServe = cloud that also can't serve a subdomain at all.
   const needsOnboarding = trackingRequiresSubdomain && !trackingSubdomain;
-  const showSetup = subdomainsSupported && (needsOnboarding || editingSubdomain);
-  const togglesShown = !showSetup && !needsOnboarding;
+  const cannotServe = needsOnboarding && !subdomainsSupported;
   const trackingVerified = trackingCname?.live === "found";
+  const setupHref = `/domains/${id}/tracking`;
+  const linkStyle: React.CSSProperties = {
+    background: "none",
+    border: 0,
+    padding: 0,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 12.5,
+    color: "var(--ms-bone)",
+    textDecoration: "underline",
+  };
 
   return (
     <div style={{ maxWidth: 1000 }}>
@@ -294,168 +302,130 @@ function ConfigurationPanel({
         {t("detail.configuration.note")}
       </div>
 
-      {subdomainsSupported || trackingSubdomain !== null ? (
-        showSetup ? (
-          <section style={{ paddingTop: 22, marginTop: 22, borderTop: "1px solid var(--ms-line)" }}>
-            <TrackingSetup
-              id={id}
-              domainName={domainName}
-              mailFromSubdomain={mailFromSubdomain}
-              initialSubdomain={trackingSubdomain}
-              initialClick={clickTracking}
-              initialOpen={openTracking}
-              onSaved={() => setEditingSubdomain(false)}
-              onCancel={editingSubdomain ? () => setEditingSubdomain(false) : undefined}
+      {/* The branded subdomain is set up in its own onboarding flow; here we
+          only surface the configured host and the way back into it. */}
+      {trackingSubdomain ? (
+        <ConfigSection
+          title={t("detail.configuration.trackingMetrics")}
+          description={t("detail.tracking.subdomainHint")}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span className="ms-mono" style={{ fontSize: 14, color: "var(--ms-bone)" }}>
+              {trackingSubdomain}.{domainName}
+            </span>
+            <span className={`ms-badge ${trackingVerified ? "ms-badge-success" : "ms-badge-warn"}`}>
+              {t(`detail.recordStatus.${trackingVerified ? "verified" : "pending"}`)}
+            </span>
+            {subdomainsSupported ? (
+              <button type="button" onClick={() => router.push(setupHref)} style={linkStyle}>
+                {t("detail.setup.change")}
+              </button>
+            ) : null}
+          </div>
+          {subdomainsSupported && trackingCname ? (
+            <TrackingCnameCard
+              record={trackingCname}
+              domain={domainName}
+              onRecheck={onRecheck}
+              recheckPending={recheckPending}
+              onShowRecords={onShowTrackingRecords}
             />
-          </section>
-        ) : (
-          <ConfigSection
-            title={t("detail.configuration.trackingMetrics")}
-            description={t("detail.tracking.subdomainHint")}
-          >
-            {trackingSubdomain && trackingCname ? (
-              <>
-                {/* Configured: the branded host, its live status, and the way
-                    back into setup — no Restart; the 72h reaper unsets a
-                    subdomain whose CNAME never resolves. */}
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <span className="ms-mono" style={{ fontSize: 14, color: "var(--ms-bone)" }}>
-                    {trackingSubdomain}.{domainName}
-                  </span>
-                  <span
-                    className={`ms-badge ${trackingVerified ? "ms-badge-success" : "ms-badge-warn"}`}
-                  >
-                    {t(`detail.recordStatus.${trackingVerified ? "verified" : "pending"}`)}
-                  </span>
-                  {subdomainsSupported ? (
-                    <button
-                      type="button"
-                      onClick={() => setEditingSubdomain(true)}
-                      style={{
-                        background: "none",
-                        border: 0,
-                        padding: 0,
-                        cursor: "pointer",
-                        fontFamily: "inherit",
-                        fontSize: 12.5,
-                        color: "var(--ms-bone)",
-                        textDecoration: "underline",
-                      }}
-                    >
-                      {t("detail.setup.change")}
-                    </button>
-                  ) : null}
-                </div>
-                {subdomainsSupported ? (
-                  <TrackingCnameCard
-                    record={trackingCname}
-                    domain={domainName}
-                    onRecheck={onRecheck}
-                    recheckPending={recheckPending}
-                    onShowRecords={onShowTrackingRecords}
-                  />
-                ) : (
-                  <WarnCard>{t("detail.tracking.subdomainUnavailable")}</WarnCard>
-                )}
-              </>
-            ) : (
-              // Self-host default host: a branded subdomain is optional branding.
-              <div>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 12,
-                    display: "flex",
-                    gap: 6,
-                    alignItems: "center",
-                    color: "var(--ms-muted)",
-                  }}
-                >
-                  <span
-                    aria-hidden
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: "50%",
-                      flexShrink: 0,
-                      background: "var(--ms-faint)",
-                    }}
-                  />
-                  {t("detail.configuration.subdomainNeutral")}
-                </p>
-                {subdomainsSupported ? (
-                  <button
-                    type="button"
-                    className="ms-btn ms-btn-secondary"
-                    style={{ marginTop: 12 }}
-                    onClick={() => setEditingSubdomain(true)}
-                  >
-                    {t("detail.setup.add")}
-                  </button>
-                ) : (
-                  <WarnCard>{t("detail.tracking.subdomainUnavailable")}</WarnCard>
-                )}
-              </div>
-            )}
-          </ConfigSection>
-        )
+          ) : !subdomainsSupported ? (
+            <WarnCard>{t("detail.tracking.subdomainUnavailable")}</WarnCard>
+          ) : null}
+        </ConfigSection>
+      ) : subdomainsSupported && !needsOnboarding ? (
+        // Self-host default host: a branded subdomain is optional; offer it.
+        <ConfigSection
+          title={t("detail.configuration.trackingMetrics")}
+          description={t("detail.tracking.subdomainHint")}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 12,
+                display: "flex",
+                gap: 6,
+                alignItems: "center",
+                color: "var(--ms-muted)",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  background: "var(--ms-faint)",
+                }}
+              />
+              {t("detail.configuration.subdomainNeutral")}
+            </p>
+            <button type="button" onClick={() => router.push(setupHref)} style={linkStyle}>
+              {t("detail.setup.add")}
+            </button>
+          </div>
+        </ConfigSection>
       ) : null}
 
       {trackingHostLocal ? <WarnCard>{t("detail.tracking.localWarning")}</WarnCard> : null}
 
-      {needsOnboarding && !subdomainsSupported ? (
-        <WarnCard>{t("detail.tracking.cloudRequiresSubdomain")}</WarnCard>
-      ) : null}
+      {cannotServe ? <WarnCard>{t("detail.tracking.cloudRequiresSubdomain")}</WarnCard> : null}
 
-      {/* Independent toggles only once a host is serving the events — during
-          cloud onboarding the options live in the setup card above instead. */}
-      {togglesShown ? (
-        <>
-          <ConfigSection
-            title={t("detail.tracking.click")}
-            description={t("detail.tracking.clickHint")}
-          >
-            <Switch
-              checked={clickTracking}
-              disabled={update.isPending || trackingHostLocal}
-              onChange={async (checked) => {
-                if (await confirmTracking(t, t("detail.tracking.kindClick"), checked)) {
-                  update.mutate({ id, clickTracking: checked });
-                }
-              }}
-              ariaLabel={t("detail.tracking.click")}
-            />
-          </ConfigSection>
-
-          <ConfigSection
-            title={t("detail.tracking.open")}
-            description={
-              <>
-                {t("detail.tracking.openHint")}{" "}
-                <a
-                  href={OPEN_TRACKING_DOCS_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: "var(--ms-bone)", textDecoration: "underline" }}
-                >
-                  {t("detail.tracking.openLearnMore")} ↗
-                </a>
-              </>
+      <ConfigSection
+        title={t("detail.tracking.click")}
+        description={t("detail.tracking.clickHint")}
+      >
+        <Switch
+          checked={clickTracking}
+          disabled={update.isPending || trackingHostLocal || cannotServe}
+          onChange={async (checked) => {
+            // Enabling with no subdomain yet: send them to set one up first.
+            if (checked && needsOnboarding) {
+              router.push(`${setupHref}?enable=click`);
+              return;
             }
-          >
-            <Switch
-              checked={openTracking}
-              disabled={update.isPending || trackingHostLocal}
-              onChange={async (checked) => {
-                if (await confirmTracking(t, t("detail.tracking.kindOpen"), checked)) {
-                  update.mutate({ id, openTracking: checked });
-                }
-              }}
-              ariaLabel={t("detail.tracking.open")}
-            />
-          </ConfigSection>
-        </>
-      ) : null}
+            if (await confirmTracking(t, t("detail.tracking.kindClick"), checked)) {
+              update.mutate({ id, clickTracking: checked });
+            }
+          }}
+          ariaLabel={t("detail.tracking.click")}
+        />
+      </ConfigSection>
+
+      <ConfigSection
+        title={t("detail.tracking.open")}
+        description={
+          <>
+            {t("detail.tracking.openHint")}{" "}
+            <a
+              href={OPEN_TRACKING_DOCS_URL}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--ms-bone)", textDecoration: "underline" }}
+            >
+              {t("detail.tracking.openLearnMore")} ↗
+            </a>
+          </>
+        }
+      >
+        <Switch
+          checked={openTracking}
+          disabled={update.isPending || trackingHostLocal || cannotServe}
+          onChange={async (checked) => {
+            if (checked && needsOnboarding) {
+              router.push(`${setupHref}?enable=open`);
+              return;
+            }
+            if (await confirmTracking(t, t("detail.tracking.kindOpen"), checked)) {
+              update.mutate({ id, openTracking: checked });
+            }
+          }}
+          ariaLabel={t("detail.tracking.open")}
+        />
+      </ConfigSection>
 
       <ConfigSection
         title={t("detail.configuration.tls")}
@@ -869,7 +839,6 @@ export function DomainDetail({ id }: { id: string }) {
           <ConfigurationPanel
             id={id}
             domainName={data.name}
-            mailFromSubdomain={data.mailFromSubdomain}
             openTracking={data.openTracking}
             clickTracking={data.clickTracking}
             trackingSubdomain={data.trackingSubdomain}

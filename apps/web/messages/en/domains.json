@@ -199,5 +199,19 @@
     "list": "List domains",
     "create": "Create domain",
     "verify": "Verify domain"
+  },
+  "trackingSetup": {
+    "title": "New tracking subdomain",
+    "subtitle": "Serve click and open tracking from your own subdomain.",
+    "steps": {
+      "details": "Details",
+      "dns": "DNS record"
+    },
+    "detailsTitle": "Details",
+    "detailsSubtitle": "All tracked links are served from this subdomain of your domain before reaching their destination.",
+    "dnsTitle": "DNS record",
+    "dnsSubtitle": "Add this CNAME at your DNS provider and verify it. Until it resolves, tracked links are not served yet.",
+    "dnsPending": "Add a subdomain above to get its DNS record.",
+    "done": "Done"
   }
 }

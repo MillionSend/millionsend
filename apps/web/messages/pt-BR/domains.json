@@ -199,5 +199,19 @@
     "list": "Listar domínios",
     "create": "Criar domínio",
     "verify": "Verificar domínio"
+  },
+  "trackingSetup": {
+    "title": "Novo subdomínio de rastreamento",
+    "subtitle": "Sirva o rastreamento de cliques e aberturas pelo seu próprio subdomínio.",
+    "steps": {
+      "details": "Detalhes",
+      "dns": "Registro DNS"
+    },
+    "detailsTitle": "Detalhes",
+    "detailsSubtitle": "Todos os links rastreados são servidos por este subdomínio do seu domínio antes de chegar ao destino.",
+    "dnsTitle": "Registro DNS",
+    "dnsSubtitle": "Adicione este CNAME no seu provedor de DNS e verifique-o. Até resolver, os links rastreados ainda não são servidos.",
+    "dnsPending": "Adicione um subdomínio acima para obter o registro DNS.",
+    "done": "Concluído"
   }
 }
