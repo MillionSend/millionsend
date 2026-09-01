@@ -37,6 +37,26 @@ Once verified, a domain's **Configuration** tab controls:
 - **TLS mode** — `opportunistic` (default) or `enforced`, applied via the
   domain's SES configuration set.
 
+## Open-rate accuracy
+
+Open tracking injects a 1×1 transparent pixel with a unique reference into the
+HTML body; loading that image records an `email.opened` event. It is a
+directional signal, not an exact count.
+
+Opens are **over-counted** when privacy proxies (Apple Mail Privacy Protection,
+for one) pre-load every image the moment mail arrives, or when security and
+anti-malware scanners fetch the pixel to inspect the message — neither means a
+human read anything.
+
+Opens are **under-counted** when the recipient's client blocks images, when the
+email has no HTML part (a plain-text send carries no pixel), or when Gmail clips
+a message over ~102 KB and the recipient never expands it.
+
+Clicks are the more reliable engagement signal. For purely transactional mail —
+receipts, password resets — consider leaving open tracking off: the pixel adds a
+tracking-shaped element some filters weigh against inbox placement, for a metric
+you can't fully trust anyway.
+
 ## API keys and domains
 
 An API key can be scoped to a single domain; such a key can only send from

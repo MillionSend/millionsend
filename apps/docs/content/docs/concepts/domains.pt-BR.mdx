@@ -38,6 +38,28 @@ Depois de verificado, a aba **Configuração** de um domínio controla:
 - **Modo TLS** — `opportunistic` (padrão) ou `enforced`, aplicado via
   configuration set do SES do domínio.
 
+## Precisão da taxa de abertura
+
+O rastreamento de aberturas injeta um pixel 1×1 transparente com uma referência
+única no corpo HTML; carregar essa imagem registra um evento `email.opened`. É
+um sinal direcional, não uma contagem exata.
+
+As aberturas são **contadas a mais** quando proxies de privacidade (o Apple Mail
+Privacy Protection, por exemplo) pré-carregam toda imagem no momento em que a
+mensagem chega, ou quando scanners de segurança e antimalware buscam o pixel
+para inspecionar a mensagem — nenhum dos dois significa que uma pessoa leu algo.
+
+As aberturas são **contadas a menos** quando o cliente do destinatário bloqueia
+imagens, quando o e-mail não tem parte HTML (um envio só-texto não carrega
+pixel), ou quando o Gmail corta uma mensagem acima de ~102 KB e o destinatário
+nunca a expande.
+
+Os cliques são o sinal de engajamento mais confiável. Para e-mails puramente
+transacionais — recibos, redefinições de senha — considere deixar o rastreamento
+de aberturas desligado: o pixel adiciona um elemento com cara de rastreamento
+que alguns filtros pesam contra a entrega na caixa de entrada, por uma métrica
+em que você não pode confiar totalmente de todo modo.
+
 ## Chaves de API e domínios
 
 Uma chave de API pode ficar restrita a um único domínio; essa chave só envia

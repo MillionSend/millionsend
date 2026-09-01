@@ -21,6 +21,7 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner, Spinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
 import { WarnCard } from "@/components/warn-card";
+import { OPEN_TRACKING_DOCS_URL } from "@/lib/docs-links";
 import { formatRelative, formatUtcMinute } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
@@ -119,7 +120,7 @@ function ConfigSection({
   children,
 }: {
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -438,7 +439,22 @@ function ConfigurationPanel({
         />
       </ConfigSection>
 
-      <ConfigSection title={t("detail.tracking.open")} description={t("detail.tracking.openHint")}>
+      <ConfigSection
+        title={t("detail.tracking.open")}
+        description={
+          <>
+            {t("detail.tracking.openHint")}{" "}
+            <a
+              href={OPEN_TRACKING_DOCS_URL}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--ms-bone)", textDecoration: "underline" }}
+            >
+              {t("detail.tracking.openLearnMore")} ↗
+            </a>
+          </>
+        }
+      >
         <Switch
           checked={openTracking}
           disabled={update.isPending || trackingHostLocal}

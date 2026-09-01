@@ -104,7 +104,7 @@
     },
     "tracking": {
       "open": "Ativar rastreamento de aberturas",
-      "openHint": "Injeta um pixel 1×1 — servido pelo seu subdomínio de rastreamento — para que uma renderização conte como abertura. O rastreamento de aberturas pode ser impreciso: muitos clientes pré-carregam ou bloqueiam imagens.",
+      "openHint": "Injeta um pixel 1×1 transparente com uma referência única, servido pelo seu subdomínio de rastreamento, para que uma renderização conte como abertura. As contagens são aproximadas — proxies de privacidade e scanners as inflam; imagens bloqueadas ou só-texto não contam.",
       "click": "Ativar rastreamento de cliques",
       "clickHint": "Reescreve cada link para redirecionar pelo seu subdomínio de rastreamento e depois encaminha o destinatário para a URL de destino original.",
       "subdomain": "Subdomínio de rastreamento",
@@ -122,7 +122,8 @@
       "confirmEnable": "Novos e-mails deste domínio passam a emitir eventos {kind}.\n\nOs e-mails já enviados não mudam — seus webhooks e métricas recebem os novos eventos na hora.",
       "confirmDisable": "Novos e-mails deste domínio deixam de emitir eventos {kind}.\n\nOs eventos já registrados permanecem; seus webhooks e métricas apenas param de receber novos.",
       "confirmEnableCta": "Ativar rastreamento {kind}",
-      "confirmDisableCta": "Desativar rastreamento {kind}"
+      "confirmDisableCta": "Desativar rastreamento {kind}",
+      "openLearnMore": "Saiba mais"
     },
     "configuration": {
       "note": "O rastreamento é aplicado pelo MillionSend, não pelo SES. Quando desativado, os emails são enviados com os links intactos e sem pixel de abertura. Quando ativado, reescrevemos os links pelo seu host de rastreamento e injetamos um pixel 1×1 de abertura, gerando os eventos de abertura e clique por conta própria.",

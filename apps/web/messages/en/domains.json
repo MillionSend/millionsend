@@ -104,7 +104,7 @@
     },
     "tracking": {
       "open": "Enable open tracking",
-      "openHint": "Injects a 1×1 pixel — served from your tracking subdomain — so a render counts as an open. Open tracking can be inaccurate: many clients pre-load or block images.",
+      "openHint": "Injects a 1×1 transparent pixel with a unique reference, served from your tracking subdomain, so a render counts as an open. Counts are approximate — privacy proxies and scanners inflate them; blocked or plain-text images miss them.",
       "click": "Enable click tracking",
       "clickHint": "Rewrites each link to redirect through your tracking subdomain, then sends the recipient on to the original destination URL.",
       "subdomain": "Tracking subdomain",
@@ -122,7 +122,8 @@
       "confirmEnable": "New mail from this domain will emit {kind} events.\n\nMail already sent stays as it is — your webhooks and metrics pick up the new events right away.",
       "confirmDisable": "New mail from this domain will stop emitting {kind} events.\n\nEvents already recorded stay; your webhooks and metrics simply stop receiving new ones.",
       "confirmEnableCta": "Enable {kind} tracking",
-      "confirmDisableCta": "Disable {kind} tracking"
+      "confirmDisableCta": "Disable {kind} tracking",
+      "openLearnMore": "Learn more"
     },
     "configuration": {
       "note": "Tracking is applied by MillionSend, not SES. When off, emails ship the raw, untouched links and no open pixel. When on, we rewrite links through your tracking host and inject a 1×1 open pixel, then generate the open and click events ourselves.",
