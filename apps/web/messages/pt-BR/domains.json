@@ -189,12 +189,7 @@
       "save": "Salvar e mostrar registro DNS",
       "cancel": "Cancelar",
       "change": "Alterar subdomínio",
-      "add": "Adicionar um subdomínio personalizado",
-      "previewTitle": "O que os destinatários verão",
-      "previewSender": "Sua marca",
-      "previewGreeting": "Olá Ana,",
-      "previewLinkLabel": "Seu link:",
-      "previewCaption": "Prévia ao vivo — o link rastreado atualiza enquanto você digita."
+      "add": "Adicionar um subdomínio personalizado"
     }
   },
   "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code> — veja <code>SELF_HOSTING.md</code>.",

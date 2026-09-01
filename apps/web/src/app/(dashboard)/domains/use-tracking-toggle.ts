@@ -11,15 +11,22 @@ type Kind = "click" | "open";
 /**
  * Enabling engagement tracking is the same gesture wherever it lives (the
  * Configuration tab's per-kind switches, the Records tab's group switch): it
- * confirms first — the change touches every future send — then, when the
- * deployment still needs a tracking subdomain, routes into the onboarding flow
- * instead of persisting a toggle that would ship untracked links. Disabling
- * just persists. This hook is that shared behavior; both call sites keep their
- * own mutation instance and stay in sync through query invalidation.
+ * confirms first — the change touches every future send — then routes into the
+ * onboarding flow instead of persisting in place. It routes there whenever the
+ * subdomain still needs setting up (cloud, no CNAME yet) OR a configured domain
+ * is turning tracking back on from fully off, so re-enabling always walks the
+ * same screen as first setup and "change subdomain". Flipping the second kind
+ * on while the first is already live, and any disable, just persist. Both call
+ * sites keep their own mutation instance and stay in sync via invalidation.
  */
 export function useTrackingToggle(
   id: string,
-  opts: { needsOnboarding: boolean; clickTracking: boolean; openTracking: boolean },
+  opts: {
+    needsOnboarding: boolean;
+    hasSubdomain: boolean;
+    clickTracking: boolean;
+    openTracking: boolean;
+  },
 ) {
   const t = useTranslations("domains");
   const trpc = useTRPC();
@@ -34,6 +41,11 @@ export function useTrackingToggle(
     }),
   );
 
+  const bothOff = !opts.clickTracking && !opts.openTracking;
+  // Turning tracking on goes through onboarding when there's no CNAME to serve
+  // it yet, or when a configured domain is being switched back on from off.
+  const enableRoutesToOnboarding = opts.needsOnboarding || (opts.hasSubdomain && bothOff);
+
   function confirm(kindLabel: string, enabling: boolean) {
     const state = enabling ? "Enable" : "Disable";
     return confirmDialog({
@@ -47,7 +59,7 @@ export function useTrackingToggle(
   async function toggleKind(kind: Kind, checked: boolean) {
     const label = t(kind === "click" ? "detail.tracking.kindClick" : "detail.tracking.kindOpen");
     if (!(await confirm(label, checked))) return;
-    if (checked && opts.needsOnboarding) {
+    if (checked && enableRoutesToOnboarding) {
       router.push(`/domains/${id}/tracking?enable=${kind}`);
       return;
     }
@@ -57,10 +69,10 @@ export function useTrackingToggle(
     });
   }
 
-  /** The Records-tab group switch: on = enable click (or onboard); off = both off. */
+  /** The Records-tab group switch: on = onboard (or enable click); off = both off. */
   async function toggleMaster(checked: boolean) {
     if (!(await confirm(t("detail.tracking.kindBoth"), checked))) return;
-    if (checked && opts.needsOnboarding) {
+    if (checked && enableRoutesToOnboarding) {
       router.push(`/domains/${id}/tracking?enable=click`);
       return;
     }

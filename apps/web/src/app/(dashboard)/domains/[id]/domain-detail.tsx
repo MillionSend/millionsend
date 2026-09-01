@@ -256,10 +256,12 @@ function ConfigurationPanel({
   const cannotServe = needsOnboarding && !subdomainsSupported;
   const { update, toggleKind } = useTrackingToggle(id, {
     needsOnboarding,
+    hasSubdomain: Boolean(trackingSubdomain),
     clickTracking,
     openTracking,
   });
   const trackingVerified = trackingCname?.live === "found";
+  const trackingOff = !clickTracking && !openTracking;
   const setupHref = `/domains/${id}/tracking`;
   const linkStyle: React.CSSProperties = {
     background: "none",
@@ -273,10 +275,12 @@ function ConfigurationPanel({
   };
 
   return (
-    <div style={{ maxWidth: 1000 }}>
-      {/* The branded subdomain is set up in its own onboarding flow; here we
-          only surface the configured host and the way back into it. */}
-      {trackingSubdomain ? (
+    <div className="ms-config-panel" style={{ maxWidth: 1000 }}>
+      {/* Branded subdomain: set up in its own onboarding flow; here we only
+          surface the configured host and the way back into it. Hidden while
+          tracking is fully off — nothing is being served, so there is nothing
+          to show until it's re-enabled through onboarding. */}
+      {!trackingOff && trackingSubdomain ? (
         <ConfigSection
           title={t("detail.configuration.trackingMetrics")}
           description={t("detail.tracking.subdomainHint")}
@@ -306,7 +310,7 @@ function ConfigurationPanel({
             <WarnCard>{t("detail.tracking.subdomainUnavailable")}</WarnCard>
           ) : null}
         </ConfigSection>
-      ) : subdomainsSupported && !needsOnboarding ? (
+      ) : !trackingOff && subdomainsSupported && !needsOnboarding ? (
         // Self-host default host: a branded subdomain is optional; offer it.
         <ConfigSection
           title={t("detail.configuration.trackingMetrics")}
@@ -439,8 +443,10 @@ export function DomainDetail({ id }: { id: string }) {
   // Records-tab tracking switch: same gesture as the Configuration switches.
   const trackingHostLocal = isLoopbackUrl(features.data?.appBaseUrl);
   const recordsNeedsOnboarding = trackingRequiresSubdomain && !domain.data?.trackingSubdomain;
+  const recordsTrackingOff = !domain.data?.clickTracking && !domain.data?.openTracking;
   const trackingToggle = useTrackingToggle(id, {
     needsOnboarding: recordsNeedsOnboarding,
+    hasSubdomain: Boolean(domain.data?.trackingSubdomain),
     clickTracking: domain.data?.clickTracking ?? false,
     openTracking: domain.data?.openTracking ?? false,
   });
@@ -472,6 +478,10 @@ export function DomainDetail({ id }: { id: string }) {
   // pending state for a floor keeps the Check DNS button's spinner visible so
   // the click registers as an action that ran.
   const [minSpin, setMinSpin] = useState(false);
+  // Bumped on every manual check so the 30s auto-check timer restarts from the
+  // click — otherwise an interval tick landing a second later reads as a phantom
+  // second spinner the user never triggered.
+  const [checkTick, setCheckTick] = useState(0);
   const [copiedKey, setCopiedKey] = useState<"instructions" | "prompt" | null>(null);
   const [tab, setTab] = useState<"records" | "configuration">("records");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -491,16 +501,20 @@ export function DomainDetail({ id }: { id: string }) {
     verifyMutate({ id });
   }, [id, verifyMutate]);
 
-  // Canvas: "checks run every 30 s" — the page re-checks SES itself while pending.
+  // Canvas: "checks run every 30 s" — the page re-checks SES itself while
+  // pending. checkTick restarts this window on a manual check so the two never
+  // fire back to back.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: checkTick is an intentional dep — bumping it re-arms the interval from the manual check.
   useEffect(() => {
     if (!checking) return;
     const timer = setInterval(() => verifyMutate({ id }), 30_000);
     return () => clearInterval(timer);
-  }, [checking, id, verifyMutate]);
+  }, [checking, id, verifyMutate, checkTick]);
 
   const runCheck = useCallback(() => {
     setMinSpin(true);
     setTimeout(() => setMinSpin(false), 600);
+    setCheckTick((n) => n + 1);
     verifyMutate({ id });
   }, [id, verifyMutate]);
 
@@ -854,7 +868,9 @@ export function DomainDetail({ id }: { id: string }) {
             <div style={{ marginTop: 22 }}>
               {records.isSuccess ? (
                 <DnsRecordsTable
-                  records={rows}
+                  // Tracking off: the group header + switch stay, but its CNAME
+                  // row drops — nothing is served, so there's no record to add.
+                  records={recordsTrackingOff ? rows.filter((r) => r.group !== "tracking") : rows}
                   domain={data.name}
                   showStatus
                   highlightGroup={highlightTracking ? "tracking" : null}
