@@ -52,7 +52,7 @@
     "name": "Name",
     "namePlaceholder": "updates.yourdomain.com",
     "nameHint": "Use a subdomain — it preserves your root domain's reputation.",
-    "nameError": "Enter a lowercase domain like <code>updates.yourdomain.com</code>.",
+    "nameError": "Enter a full domain like <code>updates.yourdomain.com</code> — lowercase, and with a dot.",
     "region": "Region",
     "recommended": "Recommended",
     "regionHint": "Select a region close to your users for the best performance.",

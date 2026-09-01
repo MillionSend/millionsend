@@ -52,7 +52,7 @@
     "name": "Nome",
     "namePlaceholder": "updates.seudominio.com",
     "nameHint": "Use um subdomínio — ele preserva a reputação do seu domínio raiz.",
-    "nameError": "Informe um domínio em minúsculas, como <code>updates.seudominio.com</code>.",
+    "nameError": "Insira um domínio completo como <code>updates.seudominio.com</code> — em minúsculas e com ponto.",
     "region": "Região",
     "recommended": "Recomendado",
     "regionHint": "Selecione uma região próxima aos seus usuários para o melhor desempenho.",
