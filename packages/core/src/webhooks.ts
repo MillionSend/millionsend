@@ -34,24 +34,45 @@ export function isWebhookEventType(value: string): value is WebhookEventType {
 }
 
 const SECRET_PREFIX = "whsec_";
+const SECRET_MIN_BYTES = 24;
+const SECRET_MAX_BYTES = 64;
 
 export function generateWebhookSecret(): string {
-  return SECRET_PREFIX + randomBytes(24).toString("base64");
+  return SECRET_PREFIX + randomBytes(SECRET_MIN_BYTES).toString("base64");
+}
+
+/**
+ * Key bytes of a `whsec_` secret, or null unless it is canonical base64 of
+ * 24–64 bytes. Canonical = re-encodes to the same string: a secret that only
+ * decodes leniently (base64url, missing padding) would sign deliveries that a
+ * strict receiver-side library cannot verify.
+ */
+export function parseWebhookSecret(secret: string): Buffer | null {
+  if (!secret.startsWith(SECRET_PREFIX)) return null;
+  const encoded = secret.slice(SECRET_PREFIX.length);
+  const key = Buffer.from(encoded, "base64");
+  if (key.length < SECRET_MIN_BYTES || key.length > SECRET_MAX_BYTES) return null;
+  return key.toString("base64") === encoded ? key : null;
 }
 
 function secretKey(secret: string): Buffer {
-  if (!secret.startsWith(SECRET_PREFIX)) {
-    throw new Error("webhook secret must start with whsec_");
-  }
-  const key = Buffer.from(secret.slice(SECRET_PREFIX.length), "base64");
-  if (key.length < 24) throw new Error("webhook secret key too short");
+  const key = parseWebhookSecret(secret);
+  if (!key) throw new Error("invalid webhook secret");
   return key;
 }
 
+/**
+ * One signature, two header names: `webhook-*` per Standard Webhooks and
+ * `svix-*` as Resend/Svix deliver it, so receivers written against either
+ * spec verify unchanged. Paired values are always identical.
+ */
 export interface WebhookSignatureHeaders {
   "webhook-id": string;
   "webhook-timestamp": string;
   "webhook-signature": string;
+  "svix-id": string;
+  "svix-timestamp": string;
+  "svix-signature": string;
 }
 
 /** @param timestamp unix seconds (Standard Webhooks wire format). */
@@ -60,11 +81,16 @@ export function signWebhook(
   params: { msgId: string; timestamp: number; payload: string },
 ): WebhookSignatureHeaders {
   const signedContent = `${params.msgId}.${params.timestamp}.${params.payload}`;
-  const signature = createHmac("sha256", secretKey(secret)).update(signedContent).digest("base64");
+  const hmac = createHmac("sha256", secretKey(secret)).update(signedContent).digest("base64");
+  const timestamp = String(params.timestamp);
+  const signature = `v1,${hmac}`;
   return {
     "webhook-id": params.msgId,
-    "webhook-timestamp": String(params.timestamp),
-    "webhook-signature": `v1,${signature}`,
+    "webhook-timestamp": timestamp,
+    "webhook-signature": signature,
+    "svix-id": params.msgId,
+    "svix-timestamp": timestamp,
+    "svix-signature": signature,
   };
 }
 

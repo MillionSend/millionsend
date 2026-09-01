@@ -6,6 +6,7 @@
     "segments",
     "topics",
     "broadcasts",
+    "templates",
     "domains",
     "webhooks",
     "suppressions",

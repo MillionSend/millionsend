@@ -12,9 +12,14 @@ teve hard bounce ou marcou você como spam.
 - **Hard bounce** — o servidor de destino rejeitou o endereço
   permanentemente.
 - **Reclamação** — o destinatário marcou uma mensagem como spam.
+- **Descadastro** — o destinatário usou o link de descadastro em um clique de
+  um broadcast. Além de marcar o contato, a saída fica registrada aqui para
+  sobreviver à exclusão e à reimportação do contato; só um
+  `PATCH /contacts/{id}` explícito com `unsubscribed: false` a remove.
+- **Manual** — você adicionou o endereço, no painel ou pela API.
 
-Ambos chegam como eventos do SES e suprimem o endereço automaticamente.
-Supressões são por time.
+Bounces e reclamações chegam como eventos do SES e suprimem o endereço
+automaticamente. Supressões são por time.
 
 ## O que a supressão faz
 
@@ -31,6 +36,34 @@ remover um endereço para permitir envios de novo — faça isso apenas quando
 souber que a causa foi corrigida (ex.: uma caixa que sempre existiu mas era
 rejeitada por um servidor mal configurado). A re-supressão é automática no
 próximo bounce ou reclamação.
+
+## API
+
+Os endpoints `/suppressions` espelham a superfície `suppressions` do Resend,
+então os métodos `suppressions.*` do SDK do Resend funcionam como estão. Cada
+entrada é lida como `{ id, email, origin, source_id, created_at }`, onde
+`origin` é `bounce`, `complaint`, `manual` ou `unsubscribe` e `source_id` é o
+email cujo bounce ou reclamação a criou.
+
+- `GET /suppressions?origin=bounce` — listagem com paginação por cursor,
+  opcionalmente filtrada por origem.
+- `GET /suppressions/{id}` e `DELETE /suppressions/{id}` — o segmento de
+  caminho é o id da supressão ou o endereço de email.
+- `POST /suppressions` com `{ "email": "..." }` — bloqueia o endereço com
+  origem `manual`. Idempotente: um endereço já suprimido por qualquer motivo
+  mantém sua entrada e sua origem, e o id existente é retornado.
+- `POST /suppressions/batch/add` com `{ "emails": [...] }` e
+  `POST /suppressions/batch/remove` com `{ "emails": [...] }` ou
+  `{ "ids": [...] }` — até 1000 entradas por chamada (o Resend limita a 100).
+  O add retorna um id por endereço distinto, na ordem de entrada; o remove
+  lista só as linhas de fato removidas.
+
+Duas particularidades do MillionSend: `origin: "unsubscribe"` é um valor a
+mais que o Resend não tem (a união de tipos do SDK dele não o inclui), e um
+endereço cujos dados pessoais foram apagados (LGPD/GDPR) continua bloqueando
+envios mas some da listagem e das buscas por email — fica acessível só pelo
+id, com `"[erased]"` como email, e suprimir o endereço de novo retorna esse
+id sem restaurá-lo.
 
 ## Por que isso importa
 

@@ -20,14 +20,14 @@ the [Discussions](https://github.com/orgs/MillionSend/discussions) to follow alo
 | Emails API (Resend-compatible) | ✅ | Send, batch, get, cancel — same request/response shapes as Resend. |
 | Idempotency | ✅ | `Idempotency-Key` header dedupes retried sends. |
 | API keys | ✅ | Create and revoke `ms_` keys from the dashboard, with last-used tracking. |
-| Suppression list | ✅ | Hard bounces and complaints suppressed automatically; review and remove per address. |
+| Suppression list | ✅ | Hard bounces and complaints suppressed automatically; review and remove per address, or manage via `/suppressions` (batch add/remove up to 1000). |
 | Metrics | ✅ | Daily sends with bounce and complaint rates tracked against SES thresholds. |
-| Webhooks (Standard Webhooks) | ✅ | Signed event deliveries with per-endpoint event selection and a delivery log. |
+| Webhooks (Standard Webhooks) | ✅ | Signed event deliveries (`webhook-*` and `svix-*` headers) with per-endpoint event selection, a delivery log, and bring-your-own `whsec_` secret. |
 | Domains + BYODKIM | ✅ | Guided DNS verification; bring your own DKIM key or let SES manage it. |
-| Contacts | ✅ | Team-wide contacts with subscribe state, segments, topics, and CSV import. |
+| Contacts | ✅ | Team-wide contacts with subscribe state, segments, topics, CSV import, and bulk `POST /contacts/batch`. |
 | One-click unsubscribe (RFC 8058) | ✅ | `List-Unsubscribe` headers plus a hosted unsubscribe page. |
 | Broadcasts | ✅ | Compose, schedule, and send to all contacts, a segment, or a topic; cancel while scheduled. |
-| Templates + merge fields | ✅ | Reusable templates with per-contact merge fields. |
+| Templates + merge fields | ✅ | Reusable templates with per-contact merge fields; `/templates` API with per-team aliases. |
 | API request logs | ✅ | Every API request recorded with request/response bodies, secrets redacted. |
 | SMTP relay | ✅ | Drop-in SMTP on port 2587; authenticate with an API key. |
 | Dashboard (en/pt-BR) | ✅ | Full dashboard in English and Brazilian Portuguese. |

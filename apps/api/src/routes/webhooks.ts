@@ -5,6 +5,7 @@ import {
   encryptWebhookSecret,
   generateWebhookSecret,
   type Keyring,
+  parseWebhookSecret,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -63,7 +64,17 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const secret = generateWebhookSecret();
+      if (body.signing_secret !== undefined && parseWebhookSecret(body.signing_secret) === null) {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            "signing_secret must be whsec_ followed by base64 of 24-64 bytes",
+          ),
+          422,
+        );
+      }
+      const secret = body.signing_secret ?? generateWebhookSecret();
       const id = randomUUID();
       const encrypted = await encryptWebhookSecret(secret, keyring, {
         teamId: auth.teamId,

@@ -32,6 +32,56 @@ matching is case-insensitive.
 
 Topic subscriptions are set per contact with `PATCH /contacts/{id}/topics`.
 
+## Bulk create
+
+`POST /contacts/batch` takes a JSON array of 1–1000 items, each shaped like
+a `POST /contacts` body, and writes them in one transaction (a MillionSend
+extension — Resend imports contacts only via CSV). The `on_conflict` query
+parameter decides what happens to an item whose email already belongs to a
+contact, or repeats inside the batch:
+
+- `error` (default) — the item fails: `409 Contact already exists` for an
+  existing contact, `422 Duplicate email in batch` for a repeat.
+- `skip` — the existing contact (or the first occurrence) is left untouched
+  and reported with `status: "skipped"` and its id.
+- `upsert` — the item is merged into the existing contact: `first_name` and
+  `last_name` only when provided, `properties` key by key (provided keys
+  overwrite), `segments` added, `topics` upserted. Repeats collapse into one
+  write.
+
+A batch never re-subscribes anyone: `unsubscribed: true` opts the contact
+out, but `unsubscribed: false` on an already unsubscribed contact is ignored
+— that stays an explicit `PATCH /contacts/{id}`. The suppression list is
+never touched either.
+
+The `x-batch-validation` header picks `strict` (default — the first failing
+item rejects the whole batch with its own status and a `contacts.{index}:`
+message prefix, nothing written) or `permissive` (the valid subset is written
+and failures are listed in `errors`).
+
+```sh
+curl -X POST "https://api.millionsend.com/contacts/batch?on_conflict=upsert" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -H "x-batch-validation: permissive" \
+  -d '[
+    { "email": "ana@example.com", "first_name": "Ana", "properties": { "plan": "pro" } },
+    { "email": "not-an-address" }
+  ]'
+```
+
+```json
+{
+  "data": [{ "object": "contact", "index": 0, "id": "9b2f…", "status": "updated" }],
+  "counts": { "created": 0, "updated": 1, "skipped": 0, "failed": 1 },
+  "errors": [{ "index": 1, "message": "email: Invalid email address" }]
+}
+```
+
+`data` keeps request order and lists one entry per successful item (status
+`created`, `updated` or `skipped`); `counts` always sum to the request
+length; `errors` appears only in permissive mode.
+
 ## CSV import and export
 
 The dashboard imports contacts from CSV (parsed client-side, then created in

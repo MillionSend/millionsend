@@ -34,6 +34,56 @@ de email; a comparação de email não diferencia maiúsculas.
 As inscrições em tópicos são definidas por contato com
 `PATCH /contacts/{id}/topics`.
 
+## Criação em lote
+
+`POST /contacts/batch` recebe um array JSON de 1 a 1000 itens, cada um no
+formato de um corpo de `POST /contacts`, e grava todos em uma única transação
+(uma extensão do MillionSend — o Resend só importa contatos via CSV). O
+parâmetro de query `on_conflict` decide o que acontece com um item cujo email
+já pertence a um contato, ou que se repete dentro do lote:
+
+- `error` (padrão) — o item falha: `409 Contact already exists` para um
+  contato existente, `422 Duplicate email in batch` para uma repetição.
+- `skip` — o contato existente (ou a primeira ocorrência) fica intocado e é
+  reportado com `status: "skipped"` e seu id.
+- `upsert` — o item é mesclado no contato existente: `first_name` e
+  `last_name` só quando informados, `properties` chave a chave (as chaves
+  informadas sobrescrevem), `segments` adicionados, `topics` atualizados.
+  Repetições são unificadas em uma única gravação.
+
+Um lote nunca reinscreve ninguém: `unsubscribed: true` descadastra o contato,
+mas `unsubscribed: false` em um contato já descadastrado é ignorado — isso
+continua sendo um `PATCH /contacts/{id}` explícito. A lista de supressão
+também nunca é tocada.
+
+O header `x-batch-validation` escolhe entre `strict` (padrão — o primeiro
+item inválido rejeita o lote inteiro com o status dele e o prefixo
+`contacts.{index}:` na mensagem, nada é gravado) e `permissive` (o
+subconjunto válido é gravado e as falhas são listadas em `errors`).
+
+```sh
+curl -X POST "https://api.millionsend.com/contacts/batch?on_conflict=upsert" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -H "x-batch-validation: permissive" \
+  -d '[
+    { "email": "ana@example.com", "first_name": "Ana", "properties": { "plan": "pro" } },
+    { "email": "nao-e-um-endereco" }
+  ]'
+```
+
+```json
+{
+  "data": [{ "object": "contact", "index": 0, "id": "9b2f…", "status": "updated" }],
+  "counts": { "created": 0, "updated": 1, "skipped": 0, "failed": 1 },
+  "errors": [{ "index": 1, "message": "email: Invalid email address" }]
+}
+```
+
+`data` mantém a ordem da requisição e traz uma entrada por item bem-sucedido
+(status `created`, `updated` ou `skipped`); `counts` sempre soma o tamanho
+da requisição; `errors` só aparece no modo permissivo.
+
 ## Importação e exportação CSV
 
 O painel importa contatos de CSV (interpretado no cliente e criado em lote) e

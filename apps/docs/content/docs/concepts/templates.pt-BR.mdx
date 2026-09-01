@@ -1,0 +1,61 @@
+---
+title: Templates
+description: Conteúdo de email reutilizável para broadcasts, gerenciado no painel ou pela API.
+---
+
+Um template é conteúdo de email reutilizável — assunto, HTML e uma parte em
+texto puro opcional — deixado pronto para o próximo
+[broadcast](/pt-BR/concepts/broadcasts). Componha um no editor de blocos do
+painel, com os mesmos campos de mesclagem por contato que os broadcasts usam,
+ou gerencie templates pela API. Escolher um template no compositor de
+broadcast copia o conteúdo dele como ponto de partida; editar o template
+depois não altera aquele broadcast, e apagá-lo deixa todos os broadcasts
+intactos.
+
+## Sem rascunhos, sem versões
+
+Toda gravação entra em vigor na hora. Não existe ciclo de rascunho/publicação
+nem histórico de versões: o que `GET /templates/{id}` retorna é o ponto de
+partida do próximo broadcast. Os campos no formato do Resend são preenchidos
+de acordo — `status` é sempre `published`, `published_at` é igual a
+`created_at`, `current_version_id` é o próprio id do template e
+`has_unpublished_versions` é `false` — e `POST /templates/{id}/publish` é
+um no-op idempotente, mantido para que o `templates.publish()` do SDK do
+Resend (e o `templates.create(...).publish()`) funcionem.
+
+## Aliases
+
+Um template pode ter um `alias` — letras, dígitos, `.`, `_` ou `-`,
+começando com letra ou dígito, até 100 caracteres, sensível a maiúsculas e
+único por time — e toda rota de template individual o aceita no lugar do id:
+`GET`, `PATCH`, `DELETE /templates/{id-ou-alias}`, `/publish` e
+`/duplicate`. Um alias já em uso é `409`, `"alias": null` no `PATCH` o
+remove, e um alias não pode ter a forma de um UUID (ficaria inacessível, já
+que UUIDs são resolvidos por id primeiro).
+
+## API
+
+- `POST /templates` com `{ name, html, subject?, text?, alias? }` →
+  `{ "object": "template", "id": "..." }`.
+- `GET /templates` — listagem com paginação por cursor;
+  `GET /templates/{id-ou-alias}` — o corpo completo.
+- `PATCH /templates/{id-ou-alias}` — qualquer um dos campos acima; `""` ou
+  `null` limpa `subject` ou `text`. Escrever `html` ou `text` transforma um
+  template criado no editor de blocos do dashboard em um de HTML puro (o
+  documento de blocos do editor é descartado, já que ele regeneraria o
+  conteúdo antigo no próximo salvamento pelo dashboard).
+- `DELETE /templates/{id-ou-alias}`.
+- `POST /templates/{id-ou-alias}/duplicate` — cria `<name> (copy)` com o
+  mesmo conteúdo e sem alias.
+
+## Ainda não suportado
+
+- `from`, `reply_to` e `variables` — um valor na criação ou atualização é
+  rejeitado com `422 <campo> is not supported on templates yet` em vez de
+  descartado em silêncio; as leituras retornam `null`, `null` e `[]`. Coloque
+  `from` e `reply_to` no broadcast, e use os campos de mesclagem diretamente
+  — propriedades de contato não precisam de variáveis declaradas.
+- Enviar com um id de template — nem `POST /emails` nem `POST /broadcasts`
+  aceitam uma referência a template ainda; passe `html`/`text` você mesmo
+  (para broadcasts, o seletor de template do compositor no painel copia o
+  conteúdo).

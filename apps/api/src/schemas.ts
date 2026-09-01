@@ -527,6 +527,73 @@ export const removeContactSegmentResponseSchema = z
   .openapi("RemoveContactSegmentResponse");
 
 /**
+ * POST /contacts/batch (MillionSend extension; Resend imports contacts only
+ * via CSV). Items are untyped here for the same reason as BatchEmailRequest:
+ * the handler validates each against CreateContactRequest itself so the
+ * x-batch-validation header can decide between failing the whole batch
+ * (strict) and per-index errors (permissive).
+ */
+export const batchContactsRequestSchema = z
+  .array(z.unknown().describe("A CreateContactRequest item"))
+  .min(1)
+  .max(1000)
+  .describe("1-1000 CreateContactRequest items")
+  .openapi("BatchContactsRequest");
+
+export const batchContactsQuerySchema = z.object({
+  on_conflict: z
+    .enum(["error", "skip", "upsert"])
+    .default("error")
+    .describe(
+      "What to do with an item whose email (case-insensitive) already belongs to a contact: " +
+        "`error` fails the item, `skip` leaves the contact untouched and reports its id, " +
+        "`upsert` merges the item into it. Also decides how an email repeated inside the batch " +
+        "is handled: `error` fails the later occurrence, `skip` keeps the first, `upsert` " +
+        "collapses them into one write (later scalar fields win, associations are unioned).",
+    ),
+});
+
+export const batchContactsHeadersSchema = z.object({
+  "x-batch-validation": z
+    .preprocess(
+      (v) => (typeof v === "string" ? v.toLowerCase() : v),
+      z.enum(["strict", "permissive"]).optional(),
+    )
+    .describe(
+      "`strict` (default): any invalid item rejects the whole batch with that item's status " +
+        "and a `contacts.{index}: ` message prefix, writing nothing. `permissive`: invalid " +
+        "items are listed in `errors` and the valid subset is written.",
+    ),
+});
+
+export const batchContactsResponseSchema = z
+  .object({
+    data: z
+      .array(
+        z.object({
+          object: z.literal("contact"),
+          index: z.number().int().describe("Position of the item in the request array"),
+          id: z.uuid().describe("The contact's id (the existing one for skipped/updated)"),
+          status: z.enum(["created", "updated", "skipped"]),
+        }),
+      )
+      .describe("One entry per successful item, in request order"),
+    counts: z
+      .object({
+        created: z.number().int(),
+        updated: z.number().int(),
+        skipped: z.number().int(),
+        failed: z.number().int(),
+      })
+      .describe("Per-status totals over the request items; they sum to the request length"),
+    errors: z
+      .array(z.object({ index: z.number().int(), message: z.string() }))
+      .optional()
+      .describe("Permissive mode only: the failed items by request index"),
+  })
+  .openapi("BatchContactsResponse");
+
+/**
  * Contact properties (/contact-properties): typed definitions layered over
  * the free-form contacts.properties map. Wire entity is ApiContactProperty:
  * snake_case, fallback_value typed per `type`.
@@ -943,6 +1010,12 @@ export const createWebhookRequestSchema = z
   .object({
     endpoint: webhookEndpointUrl,
     events: z.array(webhookEventSchema).min(1),
+    signing_secret: z
+      .string()
+      .optional()
+      .describe(
+        "Signing secret to use instead of minting one: whsec_ followed by base64 of 24-64 bytes, the format Resend/Svix issue. Carry over an existing secret so the receiver keeps verifying unchanged; omit to generate a new one.",
+      ),
   })
   .openapi("CreateWebhookRequest");
 
@@ -1031,3 +1104,214 @@ export const updateContactTopicsRequestSchema = z
 export const updateContactTopicsResponseSchema = z
   .object({ id: z.uuid() })
   .openapi("UpdateContactTopicsResponse");
+
+/**
+ * Suppressions — wire-compatible with the resend SDK's suppressions surface
+ * (incl. `suppressions.batch`). `origin` is the wire name of the internal
+ * reason enum; `unsubscribe` is a documented superset value (the retained RFC
+ * 8058 one-click opt-out) that Resend has no equivalent for.
+ */
+
+export const SUPPRESSION_ORIGIN_BY_REASON = {
+  hard_bounce: "bounce",
+  complaint: "complaint",
+  manual: "manual",
+  one_click_unsubscribe: "unsubscribe",
+} as const;
+
+export type SuppressionReason = keyof typeof SUPPRESSION_ORIGIN_BY_REASON;
+export type SuppressionOrigin = (typeof SUPPRESSION_ORIGIN_BY_REASON)[SuppressionReason];
+
+const suppressionOriginSchema = z.enum(["bounce", "complaint", "manual", "unsubscribe"]);
+
+/** Resend caps batch bodies at 100 addresses; accepting 1000 is a documented superset. */
+export const SUPPRESSION_BATCH_MAX = 1000;
+
+export const listSuppressionsQuerySchema = listQuerySchema.extend({
+  origin: suppressionOriginSchema
+    .optional()
+    .describe("Only suppressions of this origin: bounce, complaint, manual or unsubscribe"),
+});
+
+export const createSuppressionRequestSchema = z
+  .object({
+    email: z.email().describe("Bare email address to block; stored normalized (lowercase)"),
+  })
+  .openapi("CreateSuppressionRequest");
+
+export const batchAddSuppressionsRequestSchema = z
+  .object({
+    emails: z
+      .array(z.email())
+      .min(1)
+      .max(SUPPRESSION_BATCH_MAX)
+      .describe(`Addresses to block, up to ${SUPPRESSION_BATCH_MAX}; duplicates collapse`),
+  })
+  .openapi("BatchAddSuppressionsRequest");
+
+export const batchRemoveSuppressionsRequestSchema = z
+  .object({
+    emails: z
+      .array(z.email())
+      .min(1)
+      .max(SUPPRESSION_BATCH_MAX)
+      .optional()
+      .describe(`Addresses to unblock, up to ${SUPPRESSION_BATCH_MAX}`),
+    ids: z
+      .array(z.uuid())
+      .min(1)
+      .max(SUPPRESSION_BATCH_MAX)
+      .optional()
+      .describe(`Suppression ids to remove, up to ${SUPPRESSION_BATCH_MAX}`),
+  })
+  .refine((v) => (v.emails === undefined) !== (v.ids === undefined), {
+    message: "provide exactly one of emails or ids",
+  })
+  .openapi("BatchRemoveSuppressionsRequest");
+
+const suppressionListItemSchema = z.object({
+  id: z.uuid(),
+  email: z.string(),
+  origin: suppressionOriginSchema,
+  source_id: z.uuid().nullable().describe("Email id whose bounce/complaint created the entry"),
+  created_at: z.string(),
+});
+
+export const suppressionIdResponseSchema = z
+  .object({ object: z.literal("suppression"), id: z.uuid() })
+  .openapi("SuppressionIdResponse");
+
+export const getSuppressionResponseSchema = suppressionListItemSchema
+  .extend({ object: z.literal("suppression") })
+  .openapi("GetSuppressionResponse");
+
+export const listSuppressionsResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    data: z.array(suppressionListItemSchema),
+    has_more: z.boolean(),
+  })
+  .openapi("ListSuppressionsResponse");
+
+export const removeSuppressionResponseSchema = z
+  .object({ object: z.literal("suppression"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveSuppressionResponse");
+
+export const batchAddSuppressionsResponseSchema = z
+  .object({ data: z.array(suppressionIdResponseSchema) })
+  .openapi("BatchAddSuppressionsResponse");
+
+export const batchRemoveSuppressionsResponseSchema = z
+  .object({ data: z.array(removeSuppressionResponseSchema) })
+  .openapi("BatchRemoveSuppressionsResponse");
+
+/**
+ * Templates — wire-compatible with the resend SDK's templates surface.
+ * MillionSend templates have no draft/publish cycle and no version history
+ * (every save is live), so on the wire `status` is always "published",
+ * `published_at` is created_at, `current_version_id` is the template id and
+ * `has_unpublished_versions` is false. `from`, `reply_to` and `variables` are
+ * not modelled: a value on write is a 422, reads emit null/null/[] so the key
+ * set matches the SDK's Template type.
+ */
+
+export const TEMPLATE_ALIAS_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+// A uuid-shaped alias would be unreachable: GET /templates/{id} resolves a
+// uuid by id first.
+const templateAliasSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(TEMPLATE_ALIAS_PATTERN, {
+    message: "alias must be letters, digits, '.', '_' or '-', starting with a letter or digit",
+  })
+  .refine((a) => !z.uuid().safeParse(a).success, { message: "alias must not be a UUID" })
+  .describe("Case-sensitive handle, unique per team; GET /templates/{alias} resolves it");
+
+// Same limits as the dashboard editor.
+const templateNameSchema = z.string().trim().min(1).max(200);
+const templateSubjectSchema = z
+  .string()
+  .trim()
+  .max(998)
+  .nullable()
+  .describe('"" or null clears the subject');
+const templateBodySchema = z.string().max(500_000);
+
+// Declared so a caller's value reaches the handler (which 422s it) instead of
+// being stripped as an unknown key.
+const unsupportedTemplateFields = {
+  from: z.string().nullable().optional().describe("Not supported yet: any value is a 422"),
+  reply_to: z
+    .union([z.string(), z.array(z.string())])
+    .nullable()
+    .optional()
+    .describe("Not supported yet: any value is a 422"),
+  variables: z
+    .array(z.unknown())
+    .optional()
+    .describe("Not supported yet: a non-empty list is a 422"),
+};
+
+export const createTemplateRequestSchema = z
+  .object({
+    name: templateNameSchema,
+    subject: templateSubjectSchema.optional(),
+    html: templateBodySchema.min(1).describe("Stored as sent; the dashboard sanitizes at render"),
+    text: templateBodySchema.nullable().optional().describe('"" or null clears the text part'),
+    alias: templateAliasSchema.nullable().optional(),
+    ...unsupportedTemplateFields,
+  })
+  .openapi("CreateTemplateRequest");
+
+export const updateTemplateRequestSchema = z
+  .object({
+    name: templateNameSchema.optional(),
+    subject: templateSubjectSchema.optional(),
+    html: templateBodySchema.min(1).optional(),
+    text: templateBodySchema.nullable().optional(),
+    alias: templateAliasSchema.nullable().optional().describe("null clears the alias"),
+    ...unsupportedTemplateFields,
+  })
+  .openapi("UpdateTemplateRequest");
+
+const templateListItemSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  alias: z.string().nullable(),
+  status: z.literal("published"),
+  published_at: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export const templateIdResponseSchema = z
+  .object({ object: z.literal("template"), id: z.uuid() })
+  .openapi("TemplateIdResponse");
+
+export const getTemplateResponseSchema = templateListItemSchema
+  .extend({
+    object: z.literal("template"),
+    current_version_id: z.uuid(),
+    from: z.null(),
+    subject: z.string().nullable(),
+    reply_to: z.null(),
+    html: z.string(),
+    text: z.string().nullable(),
+    variables: z.array(z.unknown()).describe("Always empty"),
+    has_unpublished_versions: z.literal(false),
+  })
+  .openapi("GetTemplateResponse");
+
+export const listTemplatesResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    data: z.array(templateListItemSchema),
+    has_more: z.boolean(),
+  })
+  .openapi("ListTemplatesResponse");
+
+export const removeTemplateResponseSchema = z
+  .object({ object: z.literal("template"), id: z.uuid(), deleted: z.literal(true) })
+  .openapi("RemoveTemplateResponse");

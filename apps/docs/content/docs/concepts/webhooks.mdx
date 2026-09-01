@@ -35,6 +35,11 @@ webhook-timestamp: <unix seconds>
 webhook-signature: v1,<base64 HMAC-SHA256>
 ```
 
+The same three values are also sent as `svix-id`, `svix-timestamp` and
+`svix-signature` — the names Resend's docs tell receivers to read. One
+signature, two header names: a handler written for either family verifies
+without changes.
+
 The signed content is `{webhook-id}.{webhook-timestamp}.{raw body}`. Verify
 with any Standard Webhooks library, e.g. in Node:
 
@@ -50,6 +55,34 @@ const event = wh.verify(rawBody, {
 ```
 
 Always verify against the **raw** request body, and reject stale timestamps.
+
+## Bringing your own secret
+
+`POST /webhooks` accepts an optional `signing_secret`: `whsec_` followed by
+standard base64 of 24–64 bytes — the format Resend and Svix issue. Pass the
+secret your receiver already verifies with and the endpoint keeps working
+without a redeploy; omit it and MillionSend generates one. Anything else is
+rejected with `422 signing_secret must be whsec_ followed by base64 of 24-64
+bytes`.
+
+To carry a secret over from another provider, read it from their API or
+dashboard (Resend returns it on `GET /webhooks/{id}`) and create the endpoint
+here with the same value:
+
+```sh
+curl -X POST "https://api.millionsend.com/webhooks" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "endpoint": "https://example.com/webhooks/email",
+    "events": ["email.delivered", "email.bounced"],
+    "signing_secret": "whsec_..."
+  }'
+```
+
+The secret is returned on create and on `GET /webhooks/{id}`, never in list
+rows, and cannot be changed afterwards — delete and re-create the endpoint to
+rotate it.
 
 ## Delivery and retries
 

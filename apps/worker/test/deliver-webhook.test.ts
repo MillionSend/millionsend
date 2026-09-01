@@ -125,6 +125,10 @@ it("2xx: signs with Standard Webhooks headers and marks success", async () => {
       post.body,
     ),
   ).toBe(true);
+  // Resend/Svix receivers read the svix-* names; both sets go out, identical.
+  expect(post.headers["svix-id"]).toBe(post.headers["webhook-id"]);
+  expect(post.headers["svix-timestamp"]).toBe(post.headers["webhook-timestamp"]);
+  expect(post.headers["svix-signature"]).toBe(post.headers["webhook-signature"]);
 
   const row = await deliveryRow(id);
   expect(row.status).toBe("success");

@@ -11,9 +11,14 @@ marked you as spam.
 
 - **Hard bounce** — the receiving server permanently rejected the address.
 - **Complaint** — the recipient marked a message as spam.
+- **Unsubscribe** — the recipient used the one-click unsubscribe link of a
+  broadcast. Besides flagging the contact, the opt-out is retained here so it
+  survives deleting and re-importing the contact; only an explicit
+  `PATCH /contacts/{id}` with `unsubscribed: false` clears it.
+- **Manual** — you added the address, in the dashboard or via the API.
 
-Both arrive as SES events and suppress the address automatically. Suppressions
-are per team.
+Bounces and complaints arrive as SES events and suppress the address
+automatically. Suppressions are per team.
 
 ## What suppression does
 
@@ -29,6 +34,34 @@ remove an address to allow sending again — do this only when you know the
 cause is fixed (e.g. a mailbox that existed all along but was rejected by a
 misconfigured server). Re-suppression is automatic on the next bounce or
 complaint.
+
+## API
+
+The `/suppressions` endpoints mirror Resend's `suppressions` surface, so the
+Resend SDK's `suppressions.*` methods work as-is. Each entry reads as
+`{ id, email, origin, source_id, created_at }`, where `origin` is `bounce`,
+`complaint`, `manual` or `unsubscribe` and `source_id` is the email whose
+bounce or complaint created it.
+
+- `GET /suppressions?origin=bounce` — keyset-paginated list, optionally
+  filtered by origin.
+- `GET /suppressions/{id}` and `DELETE /suppressions/{id}` — the path
+  segment is the suppression id or the email address.
+- `POST /suppressions` with `{ "email": "..." }` — blocks the address with
+  origin `manual`. Idempotent: an address already suppressed for any reason
+  keeps its entry and origin, and its existing id is returned.
+- `POST /suppressions/batch/add` with `{ "emails": [...] }` and
+  `POST /suppressions/batch/remove` with `{ "emails": [...] }` or
+  `{ "ids": [...] }` — up to 1000 entries per call (Resend caps at 100).
+  Add returns one id per distinct address in input order; remove lists only
+  the rows actually removed.
+
+Two MillionSend specifics: `origin: "unsubscribe"` is a superset value Resend
+does not have (its SDK's type union lacks it), and an address whose personal
+data was erased (GDPR/LGPD) keeps blocking sends but is hidden from the list
+and from lookups by email — it is reachable by id only, reading
+`"[erased]"` as its email, and re-suppressing the address returns that id
+without restoring it.
 
 ## Why this matters
 

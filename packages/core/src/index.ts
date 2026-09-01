@@ -180,6 +180,7 @@ export {
   findSuppressed,
   hashRecipient,
   normalizeAddress,
+  suppressionHashesFor,
 } from "./suppressions.js";
 export { INVITE_TTL_MS, signInviteToken, verifyInviteToken } from "./team-invitations.js";
 export { fetchEffectivePlan } from "./team-plan.js";
@@ -209,6 +210,7 @@ export {
   enqueueWebhookDeliveries,
   generateWebhookSecret,
   isWebhookEventType,
+  parseWebhookSecret,
   signWebhook,
   verifyWebhookSignature,
   WEBHOOK_EVENT_TYPES,

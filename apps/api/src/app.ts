@@ -58,9 +58,15 @@ import { INTERNAL_AUTH, registerMcp } from "./mcp.js";
 import { registerApiKeyRoutes } from "./routes/api-keys.js";
 import { registerContactPropertyRoutes } from "./routes/contact-properties.js";
 import { type DomainsSesDeps, registerDomainRoutes } from "./routes/domains.js";
+import { registerSuppressionRoutes } from "./routes/suppressions.js";
+import { registerTemplateRoutes } from "./routes/templates.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import {
   addContactSegmentResponseSchema,
+  batchContactsHeadersSchema,
+  batchContactsQuerySchema,
+  batchContactsRequestSchema,
+  batchContactsResponseSchema,
   batchEmailRequestSchema,
   batchEmailResponseSchema,
   broadcastIdResponseSchema,
@@ -180,6 +186,11 @@ class IdempotencyTakeoverError extends Error {
 
 export function errorBody(status: number, name: string, message: string) {
   return { statusCode: status, name, message };
+}
+
+/** Wire message for a failed schema parse: `path: issue; path: issue`. */
+export function validationMessage(error: z.ZodError): string {
+  return error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
 }
 
 /**
@@ -606,26 +617,22 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
   });
 
   /**
-   * The team's segments for these ids as id→name, or null when any id is
-   * unknown/foreign. Truthy on full ownership, so boolean call sites read the
-   * same; the names feed activity-timeline snapshots.
+   * The team's own segments among `ids` as id→name; unknown/foreign ids are
+   * absent. The names feed activity-timeline snapshots.
    */
-  const ownsSegments = async (
-    teamId: string,
-    ids: string[],
-  ): Promise<Map<string, string> | null> => {
+  const teamSegmentNames = async (teamId: string, ids: string[]): Promise<Map<string, string>> => {
     if (ids.length === 0) return new Map();
     const owned = await db
       .select({ id: schema.segments.id, name: schema.segments.name })
       .from(schema.segments)
       .where(and(eq(schema.segments.teamId, teamId), inArray(schema.segments.id, ids)));
-    return owned.length === ids.length ? new Map(owned.map((s) => [s.id, s.name])) : null;
+    return new Map(owned.map((s) => [s.id, s.name]));
   };
 
-  const ownsTopics = async (
+  const teamTopicInfo = async (
     teamId: string,
     ids: string[],
-  ): Promise<Map<string, { name: string; defaultSubscribed: boolean }> | null> => {
+  ): Promise<Map<string, { name: string; defaultSubscribed: boolean }>> => {
     if (ids.length === 0) return new Map();
     const owned = await db
       .select({
@@ -635,119 +642,366 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       })
       .from(schema.topics)
       .where(and(eq(schema.topics.teamId, teamId), inArray(schema.topics.id, ids)));
-    return owned.length === ids.length
-      ? new Map(owned.map((r) => [r.id, { name: r.name, defaultSubscribed: r.defaultSubscribed }]))
-      : null;
+    return new Map(
+      owned.map((r) => [r.id, { name: r.name, defaultSubscribed: r.defaultSubscribed }]),
+    );
   };
 
-  type CreateContactResult =
-    | { ok: true; id: string }
-    | { ok: false; status: 404 | 409 | 422; name: string; message: string };
+  /**
+   * Full-ownership variants: the map when every id is the team's own, else
+   * null — truthy on ownership, so boolean call sites read the same.
+   */
+  const ownsSegments = async (teamId: string, ids: string[]) => {
+    const owned = await teamSegmentNames(teamId, ids);
+    return ids.every((id) => owned.has(id)) ? owned : null;
+  };
+
+  const ownsTopics = async (teamId: string, ids: string[]) => {
+    const owned = await teamTopicInfo(teamId, ids);
+    return ids.every((id) => owned.has(id)) ? owned : null;
+  };
+
+  // "validation_error" for 409 (not "conflict"): the name must be a
+  // RESEND_ERROR_CODE_KEY member for SDK clients.
+  type BatchItemError = { ok: false; status: 404 | 409 | 422; name: string; message: string };
+  type BatchItemResult =
+    | { ok: true; id: string; status: "created" | "updated" | "skipped" }
+    | BatchItemError;
+  type ContactConflictMode = "error" | "skip" | "upsert";
+
+  /** One write per lower(email) — the key of the contacts unique index. */
+  type BatchContactRow = {
+    indices: number[];
+    key: string;
+    email: string;
+    firstName: string | undefined;
+    lastName: string | undefined;
+    unsubscribed: boolean | undefined;
+    properties: Record<string, string>;
+    segmentIds: Set<string>;
+    topicSubs: Map<string, boolean>;
+  };
+
+  const topicActivity = (
+    teamId: string,
+    contactId: string,
+    topicId: string,
+    subscribed: boolean,
+    name: string | undefined,
+  ): ContactActivityRow => ({
+    teamId,
+    contactId,
+    type: subscribed ? "topic_opt_in" : "topic_opt_out",
+    data: { topicId, name: name ?? null },
+  });
 
   /**
-   * Creation shared by POST /contacts and its legacy audiences alias.
+   * Batch write shared by POST /contacts/batch and POST /contacts (a one-item
+   * strict batch). Results align with `items` by index; an item handed in as
+   * an error (wire-shape failure) passes through untouched. Strict mode
+   * returns before the first write when any item failed, so the caller can
+   * answer with that item's status; unattempted items are then undefined.
+   *
    * SECURITY: segment/topic associations are validated against the caller's
    * team before anything is written — a foreign id must not link a contact
-   * into another team's segment or topic. Contact + associations commit in one
-   * transaction, so a rejected association never leaves a bare contact behind.
+   * into another team's segment or topic. Contacts + associations commit in
+   * one transaction, so a rejected association never leaves a bare contact
+   * behind.
+   *
+   * Conflicts are classified from a pre-select that is not serializable with
+   * concurrent writers: a contact created (or a segment/topic deleted) in
+   * between fails the transaction with a unique/FK violation, and the batch is
+   * re-classified against the new state — so the item lands as a conflict or
+   * not-found, never as a 500.
    */
-  const createContactOp = async (
+  const batchContactsOp = async (
     teamId: string,
-    body: CreateContactRequest,
-  ): Promise<CreateContactResult> => {
-    let properties: Record<string, string> = {};
-    if (body.properties !== undefined) {
-      const coerced = coerceContactProperties(
-        body.properties,
-        await loadContactPropertyTypes(db, teamId),
-      );
-      if (!coerced.ok) {
-        return { ok: false, status: 422, name: "validation_error", message: coerced.message };
+    items: (CreateContactRequest | BatchItemError)[],
+    opts: { onConflict: ContactConflictMode; strict: boolean },
+  ): Promise<(BatchItemResult | undefined)[]> => {
+    const { onConflict, strict } = opts;
+    const results: (BatchItemResult | undefined)[] = items.map(() => undefined);
+    const types = await loadContactPropertyTypes(db, teamId);
+    const rows = new Map<string, BatchContactRow>();
+    for (const [i, item] of items.entries()) {
+      if ("ok" in item) {
+        results[i] = item;
+        continue;
       }
-      properties = coerced.properties;
-    }
-    const segmentIds = [...new Set((body.segments ?? []).map((s) => s.id))];
-    // A topic repeated in the payload: the last entry wins, matching the
-    // upsert semantics of PATCH /contacts/{id}/topics.
-    const topicSubs = new Map((body.topics ?? []).map((e) => [e.id, e.subscription === "opt_in"]));
-    const segmentNames = await ownsSegments(teamId, segmentIds);
-    if (!segmentNames) {
-      return { ok: false, status: 404, name: "not_found", message: "Segment not found" };
-    }
-    const topicInfo = await ownsTopics(teamId, [...topicSubs.keys()]);
-    if (!topicInfo) {
-      return { ok: false, status: 404, name: "not_found", message: "Topic not found" };
-    }
-    try {
-      const id = await db.transaction(async (tx) => {
-        const [row] = await tx
-          .insert(t)
-          .values({
-            teamId,
-            email: body.email,
-            firstName: body.first_name ?? null,
-            lastName: body.last_name ?? null,
-            unsubscribed: body.unsubscribed ?? false,
-            ...(body.unsubscribed ? { unsubscribedAt: new Date() } : {}),
-            properties,
-          })
-          .returning({ id: t.id });
-        if (!row) throw new Error("contact insert returned no row");
-        if (segmentIds.length > 0) {
-          await tx
-            .insert(schema.segmentMembers)
-            .values(segmentIds.map((segmentId) => ({ segmentId, contactId: row.id })));
+      let properties: Record<string, string> = {};
+      if (item.properties !== undefined) {
+        const coerced = coerceContactProperties(item.properties, types);
+        if (!coerced.ok) {
+          results[i] = {
+            ok: false,
+            status: 422,
+            name: "validation_error",
+            message: coerced.message,
+          };
+          continue;
         }
-        if (topicSubs.size > 0) {
-          await tx.insert(schema.contactTopicSubscriptions).values(
-            [...topicSubs].map(([topicId, subscribed]) => ({
-              contactId: row.id,
+        properties = coerced.properties;
+      }
+      const key = item.email.toLowerCase();
+      const segmentIds = new Set((item.segments ?? []).map((s) => s.id));
+      // A topic repeated in the payload: the last entry wins, matching the
+      // upsert semantics of PATCH /contacts/{id}/topics.
+      const topicSubs = new Map(
+        (item.topics ?? []).map((e) => [e.id, e.subscription === "opt_in"]),
+      );
+      const prior = rows.get(key);
+      if (!prior) {
+        rows.set(key, {
+          indices: [i],
+          key,
+          email: item.email,
+          firstName: item.first_name,
+          lastName: item.last_name,
+          unsubscribed: item.unsubscribed,
+          properties,
+          segmentIds,
+          topicSubs,
+        });
+        continue;
+      }
+      if (onConflict === "error") {
+        results[i] = {
+          ok: false,
+          status: 422,
+          name: "validation_error",
+          message: "Duplicate email in batch",
+        };
+        continue;
+      }
+      // skip: the first occurrence wins; upsert: collapse — later scalars
+      // override, associations union.
+      prior.indices.push(i);
+      if (onConflict === "upsert") {
+        if (item.first_name !== undefined) prior.firstName = item.first_name;
+        if (item.last_name !== undefined) prior.lastName = item.last_name;
+        if (item.unsubscribed !== undefined) prior.unsubscribed = item.unsubscribed;
+        Object.assign(prior.properties, properties);
+        for (const id of segmentIds) prior.segmentIds.add(id);
+        for (const [id, sub] of topicSubs) prior.topicSubs.set(id, sub);
+      }
+    }
+
+    const fail = (row: BatchContactRow, error: BatchItemError) => {
+      for (const i of row.indices) results[i] = error;
+    };
+    const succeed = (
+      row: BatchContactRow,
+      id: string,
+      status: "created" | "updated" | "skipped",
+    ) => {
+      for (const [n, i] of row.indices.entries()) {
+        results[i] = { ok: true, id, status: n > 0 && onConflict === "skip" ? "skipped" : status };
+      }
+    };
+    const notFound = (message: string): BatchItemError => ({
+      ok: false,
+      status: 404,
+      name: "not_found",
+      message,
+    });
+
+    for (let attempt = 0; ; attempt++) {
+      const pending = [...rows.values()].filter((r) => results[r.indices[0] ?? -1] === undefined);
+      const segmentNames = await teamSegmentNames(teamId, [
+        ...new Set(pending.flatMap((r) => [...r.segmentIds])),
+      ]);
+      const topicInfo = await teamTopicInfo(teamId, [
+        ...new Set(pending.flatMap((r) => [...r.topicSubs.keys()])),
+      ]);
+      const existing =
+        pending.length === 0
+          ? []
+          : await db
+              .select({ id: t.id, email: t.email, unsubscribed: t.unsubscribed })
+              .from(t)
+              .where(
+                and(
+                  eq(t.teamId, teamId),
+                  inArray(
+                    sql`lower(${t.email})`,
+                    pending.map((r) => r.key),
+                  ),
+                ),
+              );
+      const existingByKey = new Map(existing.map((e) => [e.email.toLowerCase(), e]));
+      const inserts: BatchContactRow[] = [];
+      const updates: { row: BatchContactRow; found: (typeof existing)[number] }[] = [];
+      for (const row of pending) {
+        if ([...row.segmentIds].some((id) => !segmentNames.has(id))) {
+          fail(row, notFound("Segment not found"));
+        } else if ([...row.topicSubs.keys()].some((id) => !topicInfo.has(id))) {
+          fail(row, notFound("Topic not found"));
+        } else {
+          const found = existingByKey.get(row.key);
+          if (!found) inserts.push(row);
+          else if (onConflict === "error") {
+            fail(row, {
+              ok: false,
+              status: 409,
+              name: "validation_error",
+              message: "Contact already exists",
+            });
+          } else if (onConflict === "skip") succeed(row, found.id, "skipped");
+          else updates.push({ row, found });
+        }
+      }
+      if (strict && results.some((r) => r !== undefined && !r.ok)) return results;
+      if (inserts.length === 0 && updates.length === 0) return results;
+
+      try {
+        const written = await db.transaction(async (tx) => {
+          const idByKey = new Map<string, string>();
+          if (inserts.length > 0) {
+            const created = await tx
+              .insert(t)
+              .values(
+                inserts.map((row) => ({
+                  teamId,
+                  email: row.email,
+                  firstName: row.firstName ?? null,
+                  lastName: row.lastName ?? null,
+                  unsubscribed: row.unsubscribed ?? false,
+                  ...(row.unsubscribed ? { unsubscribedAt: new Date() } : {}),
+                  properties: row.properties,
+                })),
+              )
+              .returning({ id: t.id, email: t.email });
+            for (const c of created) idByKey.set(c.email.toLowerCase(), c.id);
+          }
+          for (const { row, found } of updates) {
+            // A batch never re-subscribes anyone: unsubscribed:false on an
+            // opted-out contact is ignored, and the retained one-click
+            // suppression stays. Re-subscribing is the explicit PATCH.
+            const unsubscribe = row.unsubscribed === true && !found.unsubscribed;
+            await tx
+              .update(t)
+              .set({
+                updatedAt: new Date(),
+                ...(row.firstName !== undefined ? { firstName: row.firstName } : {}),
+                ...(row.lastName !== undefined ? { lastName: row.lastName } : {}),
+                ...(unsubscribe ? { unsubscribed: true, unsubscribedAt: new Date() } : {}),
+                ...(Object.keys(row.properties).length > 0
+                  ? { properties: sql`${t.properties} || ${JSON.stringify(row.properties)}::jsonb` }
+                  : {}),
+              })
+              .where(and(eq(t.id, found.id), eq(t.teamId, teamId)));
+            idByKey.set(row.key, found.id);
+          }
+          const writtenRows = [...inserts, ...updates.map((u) => u.row)].map((row) => {
+            const id = idByKey.get(row.key);
+            if (!id) throw new Error("contact write returned no row");
+            return { row, id };
+          });
+          const m = schema.segmentMembers;
+          const memberValues = writtenRows.flatMap(({ row, id }) =>
+            [...row.segmentIds].map((segmentId) => ({ segmentId, contactId: id })),
+          );
+          // Idempotent: `returning` lists only first joins, so the timeline
+          // records those alone.
+          const added =
+            memberValues.length === 0
+              ? []
+              : await tx
+                  .insert(m)
+                  .values(memberValues)
+                  .onConflictDoNothing()
+                  .returning({ segmentId: m.segmentId, contactId: m.contactId });
+          const s = schema.contactTopicSubscriptions;
+          const updatedIds = updates.map((u) => u.found.id);
+          // Effective state before the upsert (explicit row, else the topic's
+          // default) — the timeline records only real transitions.
+          const prior =
+            updatedIds.length === 0 || topicInfo.size === 0
+              ? []
+              : await tx
+                  .select({ contactId: s.contactId, topicId: s.topicId, subscribed: s.subscribed })
+                  .from(s)
+                  .where(
+                    and(
+                      inArray(s.contactId, updatedIds),
+                      inArray(s.topicId, [...topicInfo.keys()]),
+                    ),
+                  );
+          const subValues = writtenRows.flatMap(({ row, id }) =>
+            [...row.topicSubs].map(([topicId, subscribed]) => ({
+              contactId: id,
               topicId,
               subscribed,
             })),
           );
+          if (subValues.length > 0) {
+            await tx
+              .insert(s)
+              .values(subValues)
+              .onConflictDoUpdate({
+                target: [s.contactId, s.topicId],
+                set: { subscribed: sql`excluded.subscribed`, updatedAt: new Date() },
+              });
+          }
+          return { writtenRows, added, prior };
+        });
+
+        const activity: ContactActivityRow[] = [];
+        const priorSubs = new Map(
+          written.prior.map((p) => [`${p.contactId}:${p.topicId}`, p.subscribed]),
+        );
+        const updatedBy = new Map(updates.map((u) => [u.found.id, u]));
+        for (const { row, id } of written.writtenRows) {
+          const update = updatedBy.get(id);
+          if (!update) {
+            succeed(row, id, "created");
+            activity.push({ teamId, contactId: id, type: "contact_created" });
+            for (const [topicId, subscribed] of row.topicSubs) {
+              activity.push(
+                topicActivity(teamId, id, topicId, subscribed, topicInfo.get(topicId)?.name),
+              );
+            }
+            continue;
+          }
+          succeed(row, id, "updated");
+          if (row.unsubscribed === true && !update.found.unsubscribed) {
+            activity.push({ teamId, contactId: id, type: "unsubscribed" });
+          }
+          for (const [topicId, subscribed] of row.topicSubs) {
+            const before =
+              priorSubs.get(`${id}:${topicId}`) ?? topicInfo.get(topicId)?.defaultSubscribed;
+            if (before !== subscribed) {
+              activity.push(
+                topicActivity(teamId, id, topicId, subscribed, topicInfo.get(topicId)?.name),
+              );
+            }
+          }
         }
-        return row.id;
-      });
-      const activityRows: ContactActivityRow[] = [
-        { teamId, contactId: id, type: "contact_created" },
-        ...[...topicSubs].map(
-          ([topicId, subscribed]): ContactActivityRow => ({
+        for (const a of written.added) {
+          activity.push({
             teamId,
-            contactId: id,
-            type: subscribed ? "topic_opt_in" : "topic_opt_out",
-            data: { topicId, name: topicInfo.get(topicId)?.name ?? null },
-          }),
-        ),
-        ...segmentIds.map(
-          (segmentId): ContactActivityRow => ({
-            teamId,
-            contactId: id,
+            contactId: a.contactId,
             type: "segment_added",
-            data: { segmentId, name: segmentNames.get(segmentId) ?? null },
-          }),
-        ),
-      ];
-      await recordContactActivity(db, activityRows);
-      return { ok: true, id };
-    } catch (err) {
-      if (isUniqueViolation(err)) {
-        // "validation_error" (not "conflict"): the name must be a
-        // RESEND_ERROR_CODE_KEY member for SDK clients.
-        return {
-          ok: false,
-          status: 409,
-          name: "validation_error",
-          message: "Contact already exists",
-        };
+            data: { segmentId: a.segmentId, name: segmentNames.get(a.segmentId) ?? null },
+          });
+        }
+        await recordContactActivity(db, activity);
+        return results;
+      } catch (err) {
+        if (attempt < 2 && (isUniqueViolation(err) || isForeignKeyViolation(err))) continue;
+        throw err;
       }
-      // Ownership was checked before the transaction; a segment/topic deleted
-      // in between surfaces as an FK violation — still "not found".
-      if (isForeignKeyViolation(err)) {
-        return { ok: false, status: 404, name: "not_found", message: "Segment or topic not found" };
-      }
-      throw err;
     }
+  };
+
+  /** Creation shared by POST /contacts and its legacy audiences alias. */
+  const createContactOp = async (
+    teamId: string,
+    body: CreateContactRequest,
+  ): Promise<BatchItemResult> => {
+    const [result] = await batchContactsOp(teamId, [body], { onConflict: "error", strict: true });
+    if (!result) throw new Error("contact batch returned no result");
+    return result;
   };
 
   /** Update shared by PATCH /contacts/{id} and its legacy audiences alias. */
@@ -842,6 +1096,82 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
         return c.json(errorBody(result.status, result.name, result.message), result.status);
       }
       return c.json({ object: "contact" as const, id: result.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/contacts/batch",
+      summary: "Create contacts in bulk",
+      description:
+        "MillionSend extension: creates up to 1000 contacts in one request (Resend imports " +
+        "contacts only via CSV). Each item is a CreateContactRequest. `on_conflict` decides what " +
+        "happens to an email that already belongs to a contact — `error` (default), `skip`, or " +
+        "`upsert`. An upsert updates `first_name`/`last_name` only when provided, merges " +
+        "`properties` (provided keys overwrite), adds `segments` and upserts `topics`. " +
+        "`unsubscribed: true` opts the contact out; `unsubscribed: false` on an already " +
+        "unsubscribed contact is ignored — a batch never re-subscribes anyone, that stays an " +
+        "explicit PATCH /contacts/{id}. The `x-batch-validation` header picks strict (default, " +
+        "all-or-nothing) or permissive (valid subset written, failures listed in `errors`).",
+      request: {
+        query: batchContactsQuerySchema,
+        headers: batchContactsHeadersSchema,
+        body: { content: { "application/json": { schema: batchContactsRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: batchContactsResponseSchema } },
+          description: "Batch processed",
+        },
+        404: jsonErr("Unknown segment or topic (strict mode)"),
+        409: jsonErr("Contact already exists (strict mode, on_conflict=error)"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const strict = c.req.valid("header")["x-batch-validation"] !== "permissive";
+      const { on_conflict } = c.req.valid("query");
+      const items = c.req.valid("json").map((raw): CreateContactRequest | BatchItemError => {
+        const parsed = createContactRequestSchema.safeParse(raw);
+        return parsed.success
+          ? parsed.data
+          : {
+              ok: false,
+              status: 422,
+              name: "validation_error",
+              message: validationMessage(parsed.error),
+            };
+      });
+      const results = await batchContactsOp(auth.teamId, items, {
+        onConflict: on_conflict,
+        strict,
+      });
+      if (strict) {
+        const index = results.findIndex((r) => r !== undefined && !r.ok);
+        const failed = results[index];
+        if (failed && !failed.ok) {
+          return c.json(
+            errorBody(failed.status, failed.name, `contacts.${index}: ${failed.message}`),
+            failed.status,
+          );
+        }
+      }
+      const data: z.infer<typeof batchContactsResponseSchema>["data"] = [];
+      const errors: { index: number; message: string }[] = [];
+      const counts = { created: 0, updated: 0, skipped: 0, failed: 0 };
+      for (const [index, r] of results.entries()) {
+        if (!r) throw new Error(`contact batch left item ${index} unresolved`);
+        if (r.ok) {
+          data.push({ object: "contact", index, id: r.id, status: r.status });
+          counts[r.status]++;
+        } else {
+          errors.push({ index, message: r.message });
+          counts.failed++;
+        }
+      }
+      return c.json({ data, counts, ...(strict ? {} : { errors }) }, 200);
     },
   );
 
@@ -2167,14 +2497,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   const app = new OpenAPIHono<Env>({
     defaultHook: (result, c) => {
       if (!result.success) {
-        return c.json(
-          errorBody(
-            422,
-            "validation_error",
-            result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
-          ),
-          422,
-        );
+        return c.json(errorBody(422, "validation_error", validationMessage(result.error)), 422);
       }
     },
   });
@@ -2396,6 +2719,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.use("/webhooks/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerWebhookRoutes(app, deps.db, deps.keyring);
 
+  app.use("/suppressions", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/suppressions/*", requireApiKey, enforceRateLimit, requireFullAccess);
+  registerSuppressionRoutes(app, deps.db);
+
+  app.use("/templates", requireApiKey, enforceRateLimit, requireFullAccess);
+  app.use("/templates/*", requireApiKey, enforceRateLimit, requireFullAccess);
+  registerTemplateRoutes(app, deps.db);
+
   app.use("/deliverability", requireApiKey, enforceRateLimit, requireFullAccess);
 
   const sendRoute = createRoute({
@@ -2581,11 +2912,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   const validateBatchItem = async (auth: ApiKeyAuth, raw: unknown): Promise<BatchItemVerdict> => {
     const parsed = sendEmailRequestSchema.safeParse(raw);
     if (!parsed.success) {
-      return {
-        status: 422,
-        name: "validation_error",
-        message: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
-      };
+      return { status: 422, name: "validation_error", message: validationMessage(parsed.error) };
     }
     const body = parsed.data;
     if (body.topic_id != null && !(await findTeamTopic(deps.db, auth.teamId, body.topic_id))) {

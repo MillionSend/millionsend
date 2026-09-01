@@ -96,7 +96,7 @@ describe("official resend SDK: webhooks", () => {
     expect(JSON.stringify(listed.data)).not.toContain(signingSecret);
   });
 
-  it("verifies our signatures via the SDK's webhooks.verify", () => {
+  it("verifies our signatures via the SDK's webhooks.verify under both header names", () => {
     const payload = JSON.stringify({
       type: "email.delivered",
       created_at: new Date().toISOString(),
@@ -107,16 +107,63 @@ describe("official resend SDK: webhooks", () => {
       timestamp: Math.floor(Date.now() / 1000),
       payload,
     });
+    // Resend's docs tell receivers to read svix-*; Standard Webhooks says webhook-*.
+    for (const prefix of ["webhook", "svix"] as const) {
+      const event = resend.webhooks.verify({
+        payload,
+        webhookSecret: signingSecret,
+        headers: {
+          id: headers[`${prefix}-id`],
+          timestamp: headers[`${prefix}-timestamp`],
+          signature: headers[`${prefix}-signature`],
+        },
+      });
+      expect(event, prefix).toMatchObject({ type: "email.delivered" });
+    }
+  });
+
+  it("keeps a secret carried over from Resend: create with it, read it back, verify", async () => {
+    // Resend's GET /webhooks/{id} returns the secret; a migrating user passes
+    // it on create so the receiver they already run verifies unchanged.
+    const carried = `whsec_${randomBytes(24).toString("base64")}`;
+    const created = await resend.post<{ object: "webhook"; id: string; signing_secret: string }>(
+      "/webhooks",
+      {
+        endpoint: "https://example.com/hooks/migrated",
+        events: ["email.delivered"],
+        signing_secret: carried,
+      },
+    );
+    expect(created.error).toBeNull();
+    expect(created.data?.signing_secret).toBe(carried);
+    const id = created.data?.id ?? "";
+
+    const fetched = await resend.webhooks.get(id);
+    expect(fetched.data?.signing_secret).toBe(carried);
+
+    const payload = JSON.stringify({
+      type: "email.delivered",
+      created_at: new Date().toISOString(),
+      data: { email_id: "00000000-0000-0000-0000-000000000000" },
+    });
+    const headers = signWebhook(carried, {
+      msgId: "msg_migrated",
+      timestamp: Math.floor(Date.now() / 1000),
+      payload,
+    });
     const event = resend.webhooks.verify({
       payload,
-      webhookSecret: signingSecret,
+      webhookSecret: carried,
       headers: {
-        id: headers["webhook-id"],
-        timestamp: headers["webhook-timestamp"],
-        signature: headers["webhook-signature"],
+        id: headers["svix-id"],
+        timestamp: headers["svix-timestamp"],
+        signature: headers["svix-signature"],
       },
     });
     expect(event).toMatchObject({ type: "email.delivered" });
+
+    const removed = await resend.webhooks.remove(id);
+    expect(removed.error).toBeNull();
   });
 
   it("updates endpoint, events, and status", async () => {
@@ -144,6 +191,18 @@ describe("official resend SDK: webhooks", () => {
     expect(bad.data).toBeNull();
     expect(bad.error?.statusCode).toBe(422);
     expect(bad.error?.name).toBe("validation_error");
+
+    const badSecret = await resend.post("/webhooks", {
+      endpoint: "https://example.com/hooks/bad",
+      events: ["email.sent"],
+      signing_secret: "whsec_nope",
+    });
+    expect(badSecret.data).toBeNull();
+    expect(badSecret.error).toMatchObject({
+      statusCode: 422,
+      name: "validation_error",
+      message: "signing_secret must be whsec_ followed by base64 of 24-64 bytes",
+    });
   });
 
   it("removes the webhook", async () => {

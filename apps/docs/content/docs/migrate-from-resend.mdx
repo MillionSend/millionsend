@@ -44,15 +44,27 @@ const ms = new MillionSend("ms_...", { baseUrl: "https://api.millionsend.com" })
 - **Webhooks** — endpoints are per-platform state; re-create yours under
   **Webhooks** in the dashboard, via `POST /webhooks`, or with the MCP's
   `create_webhook` — verification is Standard Webhooks (`whsec_` secret,
-  `webhook-id`/`-timestamp`/`-signature` headers), same as Resend.
+  `webhook-id`/`-timestamp`/`-signature` headers, plus the `svix-*` aliases
+  Resend delivers), same as Resend. Pass your existing secret as
+  `signing_secret` on create (Resend returns it on `GET /webhooks/{id}`) and
+  the receiver you already run keeps verifying unchanged.
 - **Unsubscribe placeholders** — broadcast bodies using
   `{{{RESEND_UNSUBSCRIBE_URL}}}` keep working: it is a supported alias of
   `{{{UNSUBSCRIBE_URL}}}`, replaced per-recipient with the hosted
   unsubscribe link. No template changes on the way in, none on a rollback.
-- **Contacts** — import via CSV under **Audience**, or `POST /contacts` with
-  the same payloads your Resend integration used.
-- **Suppressions** — bounce and complaint suppressions accumulate from your
-  own traffic; they do not transfer from Resend.
+- **Contacts** — import via CSV under **Audience**, `POST /contacts` with
+  the same payloads your Resend integration used, or
+  [`POST /contacts/batch`](/concepts/contacts#bulk-create) for up to 1000 at
+  a time.
+- **Suppressions** — export your bounce and complaint lists from Resend and
+  load them with
+  [`POST /suppressions/batch/add`](/concepts/suppressions#api) (1000
+  addresses per call). They land with origin `manual`; new bounces and
+  complaints from your own traffic accumulate on top.
+- **Templates** — re-create them via `POST /templates` with the same `name`,
+  `subject`, `html`, `text` and `alias`. Every save is live (no
+  draft/publish step), and `from`, `reply_to` and `variables` are rejected
+  rather than dropped — see [Templates](/concepts/templates).
 
 Send one email through the new base URL and watch it move to **Delivered** on
 the Emails page — that is the whole migration.

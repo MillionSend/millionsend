@@ -1,0 +1,59 @@
+---
+title: Templates
+description: Reusable email content for broadcasts, managed in the dashboard or via the API.
+---
+
+A template is reusable email content — subject, HTML and an optional plain
+text part — kept ready for the next [broadcast](/concepts/broadcasts). Compose
+one in the dashboard's block editor, with the same per-contact merge fields
+broadcasts use, or manage templates via the API. Picking a template in the
+broadcast composer copies its content in as a starting point; editing the
+template later does not touch that broadcast, and deleting it leaves every
+broadcast intact.
+
+## No drafts, no versions
+
+Every save is live. There is no draft/publish cycle and no version history:
+what `GET /templates/{id}` returns is what the next broadcast starts from. The
+Resend-shaped fields are filled accordingly — `status` is always
+`published`, `published_at` equals `created_at`, `current_version_id` is the
+template's own id and `has_unpublished_versions` is `false` — and
+`POST /templates/{id}/publish` is an idempotent no-op, kept so the Resend
+SDK's `templates.publish()` (and `templates.create(...).publish()`) work.
+
+## Aliases
+
+A template can carry an `alias` — letters, digits, `.`, `_` or `-`, starting
+with a letter or digit, up to 100 characters, case-sensitive and unique per
+team — and every single-template route accepts it in place of the id:
+`GET`, `PATCH`, `DELETE /templates/{id-or-alias}`, `/publish` and
+`/duplicate`. A taken alias is `409`, `"alias": null` on `PATCH` clears it,
+and an alias cannot look like a UUID (it would be unreachable, since UUIDs
+resolve by id first).
+
+## API
+
+- `POST /templates` with `{ name, html, subject?, text?, alias? }` →
+  `{ "object": "template", "id": "..." }`.
+- `GET /templates` — keyset-paginated list; `GET /templates/{id-or-alias}` —
+  the full body.
+- `PATCH /templates/{id-or-alias}` — any of the fields above; `""` or `null`
+  clears `subject` or `text`. Writing `html` or `text` turns a template built
+  in the dashboard's block editor into a raw-HTML one (the editor's block
+  document is dropped, since it would otherwise regenerate the old content on
+  the next dashboard save).
+- `DELETE /templates/{id-or-alias}`.
+- `POST /templates/{id-or-alias}/duplicate` — creates `<name> (copy)` with the
+  same content and no alias.
+
+## Not supported yet
+
+- `from`, `reply_to` and `variables` — a value on create or update is
+  rejected with `422 <field> is not supported on templates yet` rather than
+  silently dropped; reads return `null`, `null` and `[]`. Put `from` and
+  `reply_to` on the broadcast, and use merge fields directly — contact
+  properties need no declared variables.
+- Sending with a template id — neither `POST /emails` nor `POST /broadcasts`
+  takes a template reference yet; pass `html`/`text` yourself (for
+  broadcasts, the dashboard composer's template picker copies the content
+  in).

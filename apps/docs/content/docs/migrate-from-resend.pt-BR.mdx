@@ -44,16 +44,29 @@ const ms = new MillionSend("ms_...", { baseUrl: "https://api.millionsend.com" })
 - **Webhooks** — endpoints são estado por plataforma; recrie os seus em
   **Webhooks** no painel, via `POST /webhooks`, ou com o `create_webhook` do
   MCP — a verificação é Standard Webhooks (segredo `whsec_`, headers
-  `webhook-id`/`-timestamp`/`-signature`), igual ao Resend.
+  `webhook-id`/`-timestamp`/`-signature`, mais os aliases `svix-*` que o
+  Resend entrega), igual ao Resend. Passe seu segredo atual como
+  `signing_secret` na criação (o Resend o retorna em `GET /webhooks/{id}`) e
+  o receptor que você já roda continua verificando sem mudanças.
 - **Placeholders de descadastro** — corpos de broadcast usando
   `{{{RESEND_UNSUBSCRIBE_URL}}}` continuam funcionando: é um alias suportado
   de `{{{UNSUBSCRIBE_URL}}}`, substituído por destinatário pelo link de
   descadastro hospedado. Nenhuma mudança de template na ida, nenhuma na
   volta.
-- **Contatos** — importe via CSV em **Audiência**, ou `POST /contacts` com os
-  mesmos payloads que sua integração com o Resend usava.
-- **Supressões** — supressões de bounce e reclamação se acumulam do seu
-  próprio tráfego; elas não transferem do Resend.
+- **Contatos** — importe via CSV em **Audiência**, `POST /contacts` com os
+  mesmos payloads que sua integração com o Resend usava, ou
+  [`POST /contacts/batch`](/pt-BR/concepts/contacts#criação-em-lote) para
+  até 1000 de uma vez.
+- **Supressões** — exporte suas listas de bounce e reclamação do Resend e
+  carregue-as com
+  [`POST /suppressions/batch/add`](/pt-BR/concepts/suppressions#api) (1000
+  endereços por chamada). Elas entram com origem `manual`; novos bounces e
+  reclamações do seu próprio tráfego se acumulam por cima.
+- **Templates** — recrie-os via `POST /templates` com os mesmos `name`,
+  `subject`, `html`, `text` e `alias`. Toda gravação entra em vigor na hora
+  (sem etapa de rascunho/publicação), e `from`, `reply_to` e `variables` são
+  rejeitados em vez de descartados — veja
+  [Templates](/pt-BR/concepts/templates).
 
 Envie um email pela nova base URL e veja-o chegar a **Entregue** na página de
 Emails — a migração é isso.

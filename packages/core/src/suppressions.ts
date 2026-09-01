@@ -45,6 +45,11 @@ function legacyHashRecipient(email: string): string {
   return sha256Hex(extractAddrSpec(email).toLowerCase());
 }
 
+/** Every hash form a stored suppression for `email` may carry (current first). */
+export function suppressionHashesFor(email: string): string[] {
+  return [...new Set([hashRecipient(email), legacyHashRecipient(email)])];
+}
+
 /** Returns the subset of `recipients` that are suppressed for this team. */
 export async function findSuppressed(
   db: Db,
@@ -53,9 +58,7 @@ export async function findSuppressed(
 ): Promise<Set<string>> {
   if (recipients.length === 0) return new Set();
   const t = schema.suppressions;
-  const hashesByRecipient = new Map(
-    recipients.map((r) => [r, [...new Set([hashRecipient(r), legacyHashRecipient(r)])]]),
-  );
+  const hashesByRecipient = new Map(recipients.map((r) => [r, suppressionHashesFor(r)]));
   const rows = await db
     .select({ emailHash: t.emailHash })
     .from(t)
@@ -86,7 +89,7 @@ export async function clearUnsubscribeSuppression(
       and(
         eq(t.teamId, teamId),
         eq(t.reason, "one_click_unsubscribe"),
-        inArray(t.emailHash, [...new Set([hashRecipient(email), legacyHashRecipient(email)])]),
+        inArray(t.emailHash, suppressionHashesFor(email)),
       ),
     );
 }

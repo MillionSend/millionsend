@@ -1,4 +1,4 @@
-import { index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
 
 // Reusable email content only — broadcasts copy a template's content at
@@ -12,6 +12,9 @@ export const templates = pgTable(
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    // Public-API handle (resend templates.alias): case-sensitive, unique per
+    // team, null for dashboard-only templates.
+    alias: text("alias"),
     subject: text("subject"),
     html: text("html").notNull(),
     text: text("text"),
@@ -21,5 +24,8 @@ export const templates = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("templates_team_idx").on(t.teamId)],
+  (t) => [
+    index("templates_team_idx").on(t.teamId),
+    uniqueIndex("templates_team_alias_idx").on(t.teamId, t.alias),
+  ],
 );

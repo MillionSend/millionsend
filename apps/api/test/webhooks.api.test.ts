@@ -123,6 +123,52 @@ describe("POST /webhooks", () => {
     });
   });
 
+  it("stores and returns a caller-supplied signing_secret", async () => {
+    const carried = `whsec_${randomBytes(32).toString("base64")}`;
+    const created = await createWebhook({
+      endpoint: "https://example.com/hooks/carried",
+      events: ["email.sent"],
+      signing_secret: carried,
+    });
+    expect(created.signing_secret).toBe(carried);
+
+    const got = (await (await call(fullKey, "GET", `/webhooks/${created.id}`)).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(got.signing_secret).toBe(carried);
+
+    const [row] = await db
+      .select()
+      .from(schema.webhookEndpoints)
+      .where(eq(schema.webhookEndpoints.id, created.id));
+    expect(row?.secretLast4).toBe(carried.slice(-4));
+    for (const [column, value] of Object.entries(row ?? {})) {
+      expect(String(value), `column ${column}`).not.toContain(carried);
+    }
+  });
+
+  it("422s a malformed signing_secret with a precise message", async () => {
+    for (const bad of [
+      "MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+      "whsec_short",
+      `whsec_${randomBytes(65).toString("base64")}`,
+      "whsec_-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7",
+    ]) {
+      const res = await call(fullKey, "POST", "/webhooks", {
+        endpoint: "https://example.com/hooks/bad-secret",
+        events: ["email.sent"],
+        signing_secret: bad,
+      });
+      expect(res.status, bad).toBe(422);
+      expect(await res.json()).toEqual({
+        statusCode: 422,
+        name: "validation_error",
+        message: "signing_secret must be whsec_ followed by base64 of 24-64 bytes",
+      });
+    }
+  });
+
   it("422s http endpoints, unknown events, and empty events", async () => {
     for (const body of [
       { endpoint: "http://example.com/hooks", events: ["email.sent"] },

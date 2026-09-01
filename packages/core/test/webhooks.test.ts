@@ -6,6 +6,7 @@ import {
   decryptWebhookSecret,
   encryptWebhookSecret,
   generateWebhookSecret,
+  parseWebhookSecret,
   signWebhook,
   verifyWebhookSignature,
 } from "../src/webhooks.js";
@@ -21,6 +22,24 @@ describe("signing", () => {
     expect(headers["webhook-id"]).toBe("msg_p5jXN8AQM9LWM0D4loKWxJek");
     expect(headers["webhook-timestamp"]).toBe("1614265330");
     expect(headers["webhook-signature"]).toBe("v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=");
+    // Same values under the svix-* names Resend receivers read.
+    expect(headers["svix-id"]).toBe(headers["webhook-id"]);
+    expect(headers["svix-timestamp"]).toBe(headers["webhook-timestamp"]);
+    expect(headers["svix-signature"]).toBe(headers["webhook-signature"]);
+    expect(Object.keys(headers).sort()).toEqual([
+      "svix-id",
+      "svix-signature",
+      "svix-timestamp",
+      "webhook-id",
+      "webhook-signature",
+      "webhook-timestamp",
+    ]);
+  });
+
+  it("refuses to sign with a secret parseWebhookSecret rejects", () => {
+    expect(() => signWebhook("whsec_short", { msgId: "m", timestamp: 1, payload: "{}" })).toThrow(
+      /invalid webhook secret/,
+    );
   });
 
   it("round-trips through verify", () => {
@@ -47,6 +66,31 @@ describe("signing", () => {
         now: new Date(now.getTime() + 10 * 60 * 1000),
       }),
     ).toBe(false);
+  });
+});
+
+describe("parseWebhookSecret", () => {
+  it("accepts whsec_ + canonical base64 of 24-64 bytes", () => {
+    expect(parseWebhookSecret("whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw")?.length).toBe(24);
+    expect(parseWebhookSecret(`whsec_${randomBytes(64).toString("base64")}`)?.length).toBe(64);
+    expect(parseWebhookSecret(generateWebhookSecret())).not.toBeNull();
+  });
+
+  it("rejects a missing prefix, out-of-range lengths, and non-canonical base64", () => {
+    const padded25 = randomBytes(25).toString("base64");
+    for (const bad of [
+      "MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+      "whsec_",
+      `whsec_${randomBytes(23).toString("base64")}`,
+      `whsec_${randomBytes(65).toString("base64")}`,
+      // base64url alphabet decodes leniently but is not what strict verifiers read.
+      "whsec_-_v7-_v7-_v7-_v7-_v7-_v7-_v7-_v7",
+      // Padding stripped.
+      `whsec_${padded25.replace(/=+$/, "")}`,
+      "whsec_not base64 at all!!",
+    ]) {
+      expect(parseWebhookSecret(bad), bad).toBeNull();
+    }
   });
 });
 
