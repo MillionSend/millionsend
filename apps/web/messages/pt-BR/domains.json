@@ -103,7 +103,8 @@
       "dmarc": "DMARC (recomendado)",
       "tracking": "Rastreamento de aberturas e cliques",
       "trackingNote": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário. Defina um subdomínio em Configuração para servi-los do seu próprio domínio.",
-      "trackingNoteDefaultOnly": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário."
+      "trackingNoteDefaultOnly": "Os links de rastreamento usam o host padrão — nenhum registro DNS é necessário.",
+      "trackingNoteRequiresSubdomain": "Nenhum subdomínio de rastreamento ainda, então os links são enviados sem rastreamento. Ative o rastreamento em Configuração para configurar um e adicionar seu registro DNS."
     },
     "tracking": {
       "open": "Ativar rastreamento de aberturas",

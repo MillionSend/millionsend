@@ -480,6 +480,7 @@ export function DomainDetail({ id }: { id: string }) {
   const [highlightTracking, setHighlightTracking] = useState(false);
   const features = useQuery(trpc.system.features.queryOptions());
   const trackingSubdomainsSupported = features.data?.trackingSubdomainsSupported ?? true;
+  const trackingRequiresSubdomain = features.data?.trackingRequiresSubdomain ?? false;
 
   const verify = useMutation(
     trpc.domains.verify.mutationOptions({
@@ -846,7 +847,7 @@ export function DomainDetail({ id }: { id: string }) {
             trackingCname={rows.find((r) => r.group === "tracking") ?? null}
             trackingHostLocal={isLoopbackUrl(features.data?.appBaseUrl)}
             subdomainsSupported={trackingSubdomainsSupported}
-            trackingRequiresSubdomain={features.data?.trackingRequiresSubdomain ?? false}
+            trackingRequiresSubdomain={trackingRequiresSubdomain}
             onRecheck={runCheck}
             recheckPending={verify.isPending || minSpin}
             onShowTrackingRecords={() => {
@@ -893,9 +894,13 @@ export function DomainDetail({ id }: { id: string }) {
                   forceGroups={status === "verified" ? ["tracking"] : []}
                   emptyNotes={{
                     tracking: t(
-                      trackingSubdomainsSupported
-                        ? "detail.groups.trackingNote"
-                        : "detail.groups.trackingNoteDefaultOnly",
+                      // Cloud has no shared host: without a subdomain links ship
+                      // untracked, so never claim a default host serves them.
+                      trackingRequiresSubdomain
+                        ? "detail.groups.trackingNoteRequiresSubdomain"
+                        : trackingSubdomainsSupported
+                          ? "detail.groups.trackingNote"
+                          : "detail.groups.trackingNoteDefaultOnly",
                     ),
                   }}
                 />

@@ -103,7 +103,8 @@
       "dmarc": "DMARC (recommended)",
       "tracking": "Open & click tracking",
       "trackingNote": "Tracking links use the default host — no DNS records needed. Set a custom subdomain in Configuration to serve them from your own domain.",
-      "trackingNoteDefaultOnly": "Tracking links use the default host — no DNS records needed."
+      "trackingNoteDefaultOnly": "Tracking links use the default host — no DNS records needed.",
+      "trackingNoteRequiresSubdomain": "No tracking subdomain yet, so links ship untracked. Enable tracking in Configuration to set one up and add its DNS record."
     },
     "tracking": {
       "open": "Enable open tracking",
