@@ -1,6 +1,6 @@
 import { SQSClient } from "@aws-sdk/client-sqs";
 import { createStripe, purgeStripeEvents, reconcileTeamPlan } from "@millionsend/billing";
-import { env, trackingSubdomainsSupported } from "@millionsend/config";
+import { env, trackingCnameTarget, trackingSubdomainsSupported } from "@millionsend/config";
 import {
   deriveTrackingKey,
   deriveUnsubscribeKey,
@@ -22,6 +22,7 @@ import {
   purgeExpiredEmailBodies,
   purgeExpiredEmailMetadata,
   purgeExpiredSessions,
+  reapStaleTrackingSubdomains,
   reapUnverifiedDomains,
   reconcileBillingPlans,
   reconcileStalledBroadcasts,
@@ -292,6 +293,19 @@ await queue.scheduleCrons({
     if (result.checked > 0 || result.failed > 0) {
       console.log(`domains.reverify: checked=${result.checked} failed=${result.failed}`);
     }
+    // Branded tracking CNAMEs never gate domain status, so reverify above skips
+    // them; sweep them here to clear a resolved subdomain's clock or unset one
+    // that never resolved. trackingCnameTarget short-circuits to the edge host
+    // before parsing APP_BASE_URL, so an empty fallback is only ever ignored.
+    const trackingCnameValue =
+      env.TRACKING_EDGE_HOST || env.APP_BASE_URL
+        ? trackingCnameTarget(env.APP_BASE_URL ?? "")
+        : null;
+    const tracking = await reapStaleTrackingSubdomains(db, {
+      resolver: nodeDnsResolver,
+      trackingCnameValue,
+    });
+    if (tracking.unset > 0) console.log(`domains.reap-tracking: unset=${tracking.unset}`);
   },
   "domains.reap": async () => {
     // Cloud-only: squatting is a cross-tenant problem. Self-host is one

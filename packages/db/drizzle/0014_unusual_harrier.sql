@@ -1,0 +1,1 @@
+ALTER TABLE "domains" ADD COLUMN "tracking_subdomain_set_at" timestamp with time zone;

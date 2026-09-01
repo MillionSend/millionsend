@@ -44,6 +44,11 @@ export const domains = pgTable(
     dkimPublicKey: text("dkim_public_key"),
     mailFromSubdomain: text("mail_from_subdomain").notNull().default("send"),
     trackingSubdomain: text("tracking_subdomain"),
+    // The 72h auto-unset clock for a branded tracking subdomain: stamped when a
+    // subdomain is adopted, cleared once its CNAME resolves (or on unset). While
+    // set, an unresolved subdomain past 72h is unset by the worker, mirroring how
+    // a never-verified domain is reaped. NULL = nothing pending to reap.
+    trackingSubdomainSetAt: timestamp("tracking_subdomain_set_at", { withTimezone: true }),
     // Both tracking kinds are off by default, as the Domains docs promise.
     clickTracking: boolean("click_tracking").notNull().default(false),
     openTracking: boolean("open_tracking").notNull().default(false),

@@ -13,6 +13,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import {
+  checkDnsRecords,
   computeDomainVerification,
   type DnsResolver,
   deleteDomainIdentity,
@@ -550,6 +551,69 @@ export async function reapUnverifiedDomains(
     }
   }
   return reaped;
+}
+
+export interface ReapTrackingSubdomainsDeps {
+  resolver: DnsResolver;
+  /** Expected CNAME target (app or edge host); null when it can't be computed. */
+  trackingCnameValue: string | null;
+  now?: Date;
+}
+
+/**
+ * Companion to the domain reaper for branded tracking subdomains, which unlike
+ * the main DNS records never gate domain status and so are never reverified.
+ * A subdomain whose CNAME resolves clears its 72h clock for good — a later DNS
+ * flap never re-arms it, mirroring how verifiedAt survives demotion. One still
+ * unconfigured 72h after being set is unset, so the domain falls back to the
+ * default host cleanly instead of shipping untracked links behind a dead
+ * subdomain. A transient resolver failure (unknown) is left for the next run
+ * rather than risking a false unset. No-ops when the target host is unknown
+ * (no APP_BASE_URL and no tracking edge host).
+ */
+export async function reapStaleTrackingSubdomains(
+  db: Db,
+  deps: ReapTrackingSubdomainsDeps,
+): Promise<{ verified: number; unset: number }> {
+  const target = deps.trackingCnameValue;
+  if (!target) return { verified: 0, unset: 0 };
+  const now = deps.now ?? new Date();
+  const cutoff = new Date(now.getTime() - REAP_UNVERIFIED_AFTER_MS);
+  const d = schema.domains;
+  const rows = await db
+    .select({
+      id: d.id,
+      name: d.name,
+      trackingSubdomain: d.trackingSubdomain,
+      setAt: d.trackingSubdomainSetAt,
+    })
+    .from(d)
+    .where(and(isNotNull(d.trackingSubdomain), isNotNull(d.trackingSubdomainSetAt)));
+  let verified = 0;
+  let unset = 0;
+  for (const row of rows) {
+    if (!row.trackingSubdomain) continue;
+    try {
+      const [live] = await checkDnsRecords(
+        [{ type: "CNAME", name: `${row.trackingSubdomain}.${row.name}`, value: target }],
+        deps.resolver,
+      );
+      if (live === "found") {
+        await db.update(d).set({ trackingSubdomainSetAt: null }).where(eq(d.id, row.id));
+        verified += 1;
+      } else if ((live === "missing" || live === "mismatch") && row.setAt && row.setAt < cutoff) {
+        await db
+          .update(d)
+          .set({ trackingSubdomain: null, trackingSubdomainSetAt: null })
+          .where(eq(d.id, row.id));
+        unset += 1;
+        console.log(`domains.reap-tracking: unset unverified ${row.trackingSubdomain}.${row.name}`);
+      }
+    } catch (err) {
+      console.warn(`domains.reap-tracking: ${row.name} failed`, err);
+    }
+  }
+  return { verified, unset };
 }
 
 /** Rows per statement in the retention loops; keeps each lock window short on a backlog. */

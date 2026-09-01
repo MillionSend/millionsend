@@ -42,7 +42,8 @@
     "stepLine2": "step 2 of 2 · add the records at your DNS provider",
     "steps": {
       "one": "Domain & region",
-      "two": "DNS records"
+      "two": "DNS records",
+      "tracking": "Tracking"
     },
     "cardTitle": "Domain",
     "recapSubtitle": "Added to your team.",
@@ -81,7 +82,9 @@
     "planLimit": "Your plan's domain limit is reached.",
     "rateLimited": "Too many domains added recently — try again later.",
     "error": "Couldn't add the domain.",
-    "credentialsError": "AWS rejected the request credentials — check <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code>. See <code>SELF_HOSTING.md</code>."
+    "credentialsError": "AWS rejected the request credentials — check <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code>. See <code>SELF_HOSTING.md</code>.",
+    "trackingTitle": "Set up tracking (optional)",
+    "trackingSubtitle": "Serve click and open tracking from your own subdomain. You can skip this and set it up later in the domain settings."
   },
   "detail": {
     "eyebrow": "Domain details",
@@ -177,7 +180,17 @@
     "recordsError": "Couldn't load DNS records.",
     "retry": "Retry",
     "deleteError": "Couldn't delete the domain. Try again.",
-    "recheckDns": "Re-check DNS"
+    "recheckDns": "Re-check DNS",
+    "setup": {
+      "title": "Set up tracking",
+      "subtitle": "Click and open events are served from a subdomain of your own domain, so ad blockers and spam filters do not recognise a shared tracking host. Add its CNAME and verify it.",
+      "options": "Tracking options",
+      "preview": "Preview",
+      "save": "Save & show DNS record",
+      "cancel": "Cancel",
+      "change": "Change subdomain",
+      "add": "Add a custom subdomain"
+    }
   },
   "awsCredentialsWarning": "AWS credentials are not configured — domain creation will fail unless the default AWS credential chain is available. Set <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code> — see <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Open SES setup",

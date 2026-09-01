@@ -515,13 +515,21 @@ export function registerDomainRoutes(
       const set: Partial<
         Pick<
           typeof schema.domains.$inferInsert,
-          "openTracking" | "clickTracking" | "trackingSubdomain"
+          "openTracking" | "clickTracking" | "trackingSubdomain" | "trackingSubdomainSetAt"
         >
       > = {};
       if (body.open_tracking !== undefined) set.openTracking = body.open_tracking;
       if (body.click_tracking !== undefined) set.clickTracking = body.click_tracking;
       if (body.tracking_subdomain !== undefined) {
-        set.trackingSubdomain = body.tracking_subdomain || null;
+        const nextSubdomain = body.tracking_subdomain || null;
+        set.trackingSubdomain = nextSubdomain;
+        // Same 72h auto-unset clock as the dashboard: arm on adopt/change,
+        // clear on removal, leave a re-save of the same value alone.
+        if (nextSubdomain === null) {
+          set.trackingSubdomainSetAt = null;
+        } else if (nextSubdomain !== domain.trackingSubdomain) {
+          set.trackingSubdomainSetAt = new Date();
+        }
       }
       if (Object.keys(set).length > 0) {
         await db

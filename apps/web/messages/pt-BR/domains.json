@@ -42,7 +42,8 @@
     "stepLine2": "passo 2 de 2 · adicione os registros no seu provedor de DNS",
     "steps": {
       "one": "Domínio e região",
-      "two": "Registros DNS"
+      "two": "Registros DNS",
+      "tracking": "Rastreamento"
     },
     "cardTitle": "Domínio",
     "recapSubtitle": "Adicionado ao seu time.",
@@ -81,7 +82,9 @@
     "planLimit": "O limite de domínios do seu plano foi atingido.",
     "rateLimited": "Muitos domínios adicionados recentemente — tente de novo mais tarde.",
     "error": "Não foi possível adicionar o domínio.",
-    "credentialsError": "A AWS rejeitou as credenciais da requisição — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code>. Veja <code>SELF_HOSTING.md</code>."
+    "credentialsError": "A AWS rejeitou as credenciais da requisição — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code>. Veja <code>SELF_HOSTING.md</code>.",
+    "trackingTitle": "Configurar rastreamento (opcional)",
+    "trackingSubtitle": "Sirva o rastreamento de cliques e aberturas pelo seu próprio subdomínio. Você pode pular e configurar depois nas configurações do domínio."
   },
   "detail": {
     "eyebrow": "Detalhes do domínio",
@@ -177,7 +180,17 @@
     "recordsError": "Não foi possível carregar os registros DNS.",
     "retry": "Tentar novamente",
     "deleteError": "Não foi possível excluir o domínio. Tente novamente.",
-    "recheckDns": "Verificar DNS novamente"
+    "recheckDns": "Verificar DNS novamente",
+    "setup": {
+      "title": "Configurar rastreamento",
+      "subtitle": "Os eventos de clique e abertura são servidos por um subdomínio do seu próprio domínio, para que bloqueadores de anúncios e filtros de spam não reconheçam um host de rastreamento compartilhado. Adicione o CNAME e verifique-o.",
+      "options": "Opções de rastreamento",
+      "preview": "Prévia",
+      "save": "Salvar e mostrar registro DNS",
+      "cancel": "Cancelar",
+      "change": "Alterar subdomínio",
+      "add": "Adicionar um subdomínio personalizado"
+    }
   },
   "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code> — veja <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Abrir configuração do SES",

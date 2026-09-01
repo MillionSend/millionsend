@@ -449,6 +449,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           openTracking: boolean;
           clickTracking: boolean;
           trackingSubdomain: string | null;
+          trackingSubdomainSetAt: Date | null;
           tlsMode: (typeof schema.tlsModeEnum.enumValues)[number];
         }> = {};
         if (input.openTracking !== undefined) set.openTracking = input.openTracking;
@@ -470,7 +471,16 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
               message: "The tracking subdomain must be different from the return-path subdomain",
             });
           }
-          set.trackingSubdomain = input.trackingSubdomain || null;
+          const nextSubdomain = input.trackingSubdomain || null;
+          set.trackingSubdomain = nextSubdomain;
+          // Arm the 72h auto-unset clock when a subdomain is newly adopted or
+          // changed; clear it when the subdomain is removed. Re-saving the same
+          // value leaves the running clock untouched.
+          if (nextSubdomain === null) {
+            set.trackingSubdomainSetAt = null;
+          } else if (nextSubdomain !== domain.trackingSubdomain) {
+            set.trackingSubdomainSetAt = new Date();
+          }
         }
         if (input.tlsMode !== undefined) set.tlsMode = input.tlsMode;
         const next = { ...domain, ...set };

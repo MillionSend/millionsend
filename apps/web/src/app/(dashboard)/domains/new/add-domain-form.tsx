@@ -21,6 +21,7 @@ import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { AwsCredentialsBanner } from "../aws-credentials-banner";
 import { DOMAIN_REGIONS, type DomainRegion, regionFlag } from "../regions";
+import { TrackingSetup } from "../tracking-setup";
 
 // Client-side pre-check only; the router's zod schema is authoritative.
 const HOSTNAME_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
@@ -56,10 +57,22 @@ function DnsRecordsStep({ id }: { id: string }) {
   const trpc = useTRPC();
   const domain = useQuery(trpc.domains.get.queryOptions({ id }));
   const records = useQuery(trpc.domains.records.queryOptions({ id }));
+  const features = useQuery(trpc.system.features.queryOptions());
   const provider = records.data?.provider ?? null;
+  // Branded tracking is an optional middle step here; deployments that can't
+  // serve it collapse straight to the DNS records, keeping the two-step shape.
+  const trackingStep = features.data?.trackingSubdomainsSupported ?? false;
+  const dnsMarker = trackingStep ? "03" : "02";
   return (
     <div className="ms-step-col" style={{ display: "flex", flexDirection: "column" }}>
-      <MobileStepBar steps={[t("new.steps.one"), t("new.steps.two")]} active={2} />
+      <MobileStepBar
+        steps={
+          trackingStep
+            ? [t("new.steps.one"), t("new.steps.tracking"), t("new.steps.two")]
+            : [t("new.steps.one"), t("new.steps.two")]
+        }
+        active={trackingStep ? 3 : 2}
+      />
       {/* Step 01 — done: recap of the created domain */}
       <div className="ms-step" style={{ display: "flex", gap: 44 }}>
         <MarkerRail marker="01" done color="var(--ms-success)" />
@@ -131,9 +144,43 @@ function DnsRecordsStep({ id }: { id: string }) {
         </div>
       </div>
 
-      {/* Step 02 — fill in the DNS records */}
+      {/* Step 02 — optional branded tracking. Saving a subdomain here adds its
+          CNAME to the records below; skipping just leaves tracking off. */}
+      {trackingStep ? (
+        <div className="ms-step" style={{ display: "flex", gap: 44 }}>
+          <MarkerRail marker="02" color="var(--ms-bone)" />
+          <div style={{ flex: 1, minWidth: 0, paddingBottom: 28 }}>
+            <h2
+              className="ms-display"
+              style={{ fontSize: 22, margin: "0 0 6px", color: "var(--ms-bone)" }}
+            >
+              {t("new.trackingTitle")}
+            </h2>
+            <p
+              style={{ margin: "0 0 18px", fontSize: 13, color: "var(--ms-muted)", maxWidth: 520 }}
+            >
+              {t("new.trackingSubtitle")}
+            </p>
+            {domain.isSuccess ? (
+              <TrackingSetup
+                heading={false}
+                id={id}
+                domainName={domain.data.name}
+                mailFromSubdomain={domain.data.mailFromSubdomain}
+                initialSubdomain={domain.data.trackingSubdomain}
+                initialClick={domain.data.clickTracking}
+                initialOpen={domain.data.openTracking}
+              />
+            ) : (
+              <Skeleton width={520} height={220} />
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Final step — fill in the DNS records */}
       <div className="ms-step" style={{ display: "flex", gap: 44 }}>
-        <MarkerRail marker="02" color="var(--ms-bone)" line={false} />
+        <MarkerRail marker={dnsMarker} color="var(--ms-bone)" line={false} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <h2 className="ms-display" style={{ fontSize: 22, margin: 0, color: "var(--ms-bone)" }}>
             {provider
