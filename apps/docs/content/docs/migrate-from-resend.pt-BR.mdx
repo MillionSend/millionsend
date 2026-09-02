@@ -54,7 +54,7 @@ O que ele faz:
 | Templates | Nome, alias, assunto, html, texto. `from`, `reply_to` e `variables` não podem ser armazenados — listados como passos manuais. |
 | Webhooks | Endpoint e eventos. O segredo de assinatura é copiado, então o receptor que você já roda continua verificando (as entregas carregam os headers `svix-*`). `--fresh-webhook-secrets` gera segredos novos. Eventos fora dos sete tipos `email.*` do MillionSend são descartados por webhook e listados. |
 | Supressões | Bounces, reclamações e entradas manuais, com sua origem. |
-| Domínios | Criados com região, return path e configurações de rastreamento. Os registros DNS precisam ser adicionados de novo — veja o passo 3. |
+| Domínios | Criados com região, return path e configurações de rastreamento. No MillionSend Cloud, os toggles de rastreamento só vêm junto com um subdomínio de rastreamento; sem ele, o relatório os lista para você configurar no painel. Os registros DNS precisam ser adicionados de novo — veja o passo 3. |
 | Broadcasts | Rascunhos e agendados entram como rascunhos. Enviados são pulados, a menos que `--include-sent`. |
 
 O que não vem: **chaves de API** (o Resend expõe apenas os nomes — o relatório

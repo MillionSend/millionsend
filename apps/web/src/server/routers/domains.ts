@@ -388,6 +388,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       const { status, liveDns, verification } = result;
       // The branded tracking CNAME never gates status, so computeDomainVerification
       // omits it — live-check it here so its row badge still reflects real DNS.
+      let trackingResolved = false;
       if (domain.trackingSubdomain) {
         const cname = buildTrackedRecords(domain, verification).find((r) => r.group === "tracking");
         if (cname) {
@@ -398,6 +399,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
             value: cname.value,
             status: live ?? "missing",
           });
+          trackingResolved = live === "found";
         }
       }
       const now = new Date();
@@ -410,6 +412,22 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));
+      // Seeing the tracking CNAME resolve clears its 72h clock, which is what
+      // lets the worker serve links through it without waiting for the reverify
+      // sweep. Scoped to the label that was checked: a subdomain changed while
+      // the DNS lookups ran has its own fresh clock, which this pass must not clear.
+      if (trackingResolved && domain.trackingSubdomainSetAt) {
+        await ctx.db
+          .update(schema.domains)
+          .set({ trackingSubdomainSetAt: null })
+          .where(
+            and(
+              eq(schema.domains.id, domain.id),
+              eq(schema.domains.teamId, ctx.teamId),
+              eq(schema.domains.trackingSubdomain, domain.trackingSubdomain ?? ""),
+            ),
+          );
+      }
       if (status === "verified" && domain.status !== "verified") {
         await recordAudit(ctx, {
           action: "domain.verified",

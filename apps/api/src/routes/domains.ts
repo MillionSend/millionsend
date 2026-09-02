@@ -15,6 +15,7 @@ import {
 import { recordCheck } from "@millionsend/core/domain-status";
 import { type Db, schema } from "@millionsend/db";
 import {
+  checkDnsRecords,
   computeDomainVerification,
   createDomainIdentity,
   DKIM_SELECTOR,
@@ -92,8 +93,9 @@ const toWire = (row: DomainRow) => ({
 
 /**
  * The domain's DNS checklist in the SDK's record shape. `verification` null =
- * SES not asked (create response): every row reads not_started. DMARC and the
- * tracking CNAME are never checked by SES, so they always read not_started.
+ * SES not asked (create response): every row reads not_started. DMARC is never
+ * checked by SES, so it always reads not_started; the tracking CNAME reads
+ * pending until a verify or the reverify sweep sees it resolve.
  */
 function wireRecords(
   domain: DomainRow,
@@ -132,7 +134,8 @@ function wireRecords(
       name: `${domain.trackingSubdomain}.${domain.name}`,
       type: "CNAME",
       ttl: "Auto",
-      status: "not_started",
+      // The 72h clock is cleared the first time the CNAME is seen to resolve.
+      status: domain.trackingSubdomainSetAt ? "pending" : "verified",
       value: trackingCnameTarget(deps.appBaseUrl),
     });
   }
@@ -387,12 +390,34 @@ export function registerDomainRoutes(
       // The shared source of truth the dashboard verify and the worker cron
       // also run: SES status + live DNS folded into the strict stored status
       // the send gate keys off.
+      const resolver = ses.dns ?? nodeDnsResolver;
       const result = await computeDomainVerification(
         ses.clientForRegion(domain.region),
-        ses.dns ?? nodeDnsResolver,
+        resolver,
         domain,
       );
       const { status, verification } = result;
+      // The branded tracking CNAME never gates status, so computeDomainVerification
+      // omits it. Seeing it resolve clears the 72h clock here, which is what lets
+      // the worker serve links through it without waiting for the reverify sweep.
+      const cnameFound =
+        domain.trackingSubdomain &&
+        domain.trackingSubdomainSetAt &&
+        deps.appBaseUrl &&
+        deps.trackingSubdomains !== false
+          ? (
+              await checkDnsRecords(
+                [
+                  {
+                    type: "CNAME",
+                    name: `${domain.trackingSubdomain}.${domain.name}`,
+                    value: trackingCnameTarget(deps.appBaseUrl),
+                  },
+                ],
+                resolver,
+              )
+            )[0] === "found"
+          : false;
       const now = new Date();
       await db
         .update(d)
@@ -403,6 +428,23 @@ export function registerDomainRoutes(
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
+      // Scoped to the label that was checked: a subdomain changed while the DNS
+      // lookups ran has its own fresh clock, which this pass must not clear.
+      const trackingResolved =
+        cnameFound &&
+        (
+          await db
+            .update(d)
+            .set({ trackingSubdomainSetAt: null })
+            .where(
+              and(
+                eq(d.id, domain.id),
+                eq(d.teamId, auth.teamId),
+                eq(d.trackingSubdomain, domain.trackingSubdomain ?? ""),
+              ),
+            )
+            .returning({ id: d.id })
+        ).length > 0;
       if (status === "verified" && domain.status !== "verified") {
         await recordAudit(db, {
           teamId: auth.teamId,
@@ -418,6 +460,7 @@ export function registerDomainRoutes(
         ...domain,
         status,
         verifiedAt: status === "verified" && !domain.verifiedAt ? now : domain.verifiedAt,
+        ...(trackingResolved ? { trackingSubdomainSetAt: null } : {}),
       };
       return c.json(
         {
@@ -512,6 +555,36 @@ export function registerDomainRoutes(
         );
       }
 
+      // Cloud serves tracking only from the domain's own subdomain (the worker
+      // ships clean links without one), so a request that would leave either
+      // kind on with no subdomain is refused instead of persisted as
+      // enabled-but-unserved. Turning tracking off is always allowed.
+      const keepsSubdomain =
+        body.tracking_subdomain !== undefined
+          ? Boolean(body.tracking_subdomain)
+          : Boolean(domain.trackingSubdomain);
+      const leavesTrackingOn =
+        (body.open_tracking ?? domain.openTracking) ||
+        (body.click_tracking ?? domain.clickTracking);
+      const enablingKind = body.open_tracking === true || body.click_tracking === true;
+      const clearingSubdomain = body.tracking_subdomain !== undefined && !body.tracking_subdomain;
+      if (
+        deps.isCloud &&
+        !keepsSubdomain &&
+        (enablingKind || (clearingSubdomain && leavesTrackingOn))
+      ) {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            deps.trackingSubdomains === false
+              ? "Tracking is served from the domain's own tracking subdomain, and this deployment cannot serve one, so tracking cannot be turned on."
+              : 'Tracking is served from the domain\'s own tracking subdomain, so it cannot be on without one. Pass tracking_subdomain (a label such as "links") in the same request — the response includes the CNAME record to add — or turn both tracking kinds off first.',
+          ),
+          422,
+        );
+      }
+
       const set: Partial<
         Pick<
           typeof schema.domains.$inferInsert,
@@ -546,6 +619,10 @@ export function registerDomainRoutes(
         clickTracking: set.clickTracking ?? domain.clickTracking,
         trackingSubdomain:
           set.trackingSubdomain !== undefined ? set.trackingSubdomain : domain.trackingSubdomain,
+        trackingSubdomainSetAt:
+          set.trackingSubdomainSetAt !== undefined
+            ? set.trackingSubdomainSetAt
+            : domain.trackingSubdomainSetAt,
       };
       const verification = await getDomainVerification(ses.clientForRegion(domain.region), {
         domain: domain.name,

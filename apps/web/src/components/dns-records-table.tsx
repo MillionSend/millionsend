@@ -5,6 +5,7 @@ import { CopyChip } from "@/components/copy-chip";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { codeRichTags } from "@/lib/code-rich-tags";
 import {
   combineRecordStatus,
   type LiveDnsStatus,
@@ -53,7 +54,7 @@ const RECORD_STATUS_TONE: Record<RecordStatus, string> = {
  * The single source-of-truth Status badge: our live DNS lookup gated by AWS's
  * verification. Sized to its label (inline-block) — never stretched to the cell.
  */
-function RecordStatusBadge({ status, note }: { status: RecordStatus; note?: string | undefined }) {
+function RecordStatusBadge({ status, note }: { status: RecordStatus; note?: React.ReactNode }) {
   const t = useTranslations("domains");
   return (
     <span
@@ -175,7 +176,8 @@ export function DnsRecordsTable({
                             })}
                             note={
                               record.inherited
-                                ? t("detail.inheritedDmarc", {
+                                ? t.rich("detail.inheritedDmarc", {
+                                    ...codeRichTags,
                                     from: record.inherited.name,
                                     policy: record.inherited.policy,
                                   })

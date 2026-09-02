@@ -37,6 +37,14 @@ Once verified, a domain's **Configuration** tab controls:
 - **TLS mode** — `opportunistic` (default) or `enforced`, applied via the
   domain's SES configuration set.
 
+Through the API and MCP, `update_domain` takes the same tracking settings.
+Tracking is served from the domain's own tracking subdomain: pass
+`tracking_subdomain` (a label such as `links`) and the response's `records[]`
+gains a Tracking CNAME whose status turns `verified` once it resolves. On
+MillionSend Cloud, turning either kind on without a subdomain is refused with a
+422. Until the CNAME resolves, links are not routed through it — Cloud ships
+them clean, self-host falls back to the app host.
+
 ## Open-rate accuracy
 
 Open tracking injects a 1×1 transparent pixel with a unique reference into the

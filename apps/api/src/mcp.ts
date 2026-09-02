@@ -578,7 +578,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       "domains:read",
       {
         description:
-          "Get one sending domain with its DNS records (DKIM, MAIL FROM) and per-record status.",
+          "Get one sending domain with its DNS records (DKIM, MAIL FROM, DMARC, and the Tracking CNAME once a tracking subdomain is set) and per-record status.",
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
         readOnly: true,
       },
@@ -883,7 +883,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       "domains:write",
       {
         description:
-          "Add a sending domain (region optional). Returns the DNS records to create; the domain sends once they verify.",
+          "Add a sending domain (region optional). Returns the DNS records to create; the domain sends once they verify. Open and click tracking start off — enable them with update_domain.",
         inputSchema: createDomainRequestSchema,
       },
       (body) => api("POST", "/domains", body),
@@ -892,7 +892,8 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       "update_domain",
       "domains:write",
       {
-        description: "Change a domain's open/click tracking settings.",
+        description:
+          "Change a domain's open/click tracking. Tracking is served from the domain's own tracking subdomain: pass tracking_subdomain (a label such as \"links\") and the returned records include its CNAME; links are tracked through it once that CNAME resolves (re-check with verify_domain). On MillionSend Cloud, turning tracking on without a subdomain is refused.",
         inputSchema: updateDomainRequestSchema.extend({
           id: z.uuid().describe("Domain id from list_domains"),
         }),

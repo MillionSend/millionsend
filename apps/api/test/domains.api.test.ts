@@ -398,6 +398,51 @@ describe("POST /domains/{id}/verify", () => {
     expect(after?.lastCheckedAt).toBeInstanceOf(Date);
   });
 
+  it("clears the tracking subdomain's 72h clock once its CNAME resolves", async () => {
+    const app = makeApp({
+      ...fakeSes(),
+      appBaseUrl: "https://app.example.dev",
+      dns: fakeDns({
+        resolveCname: async (name: string) =>
+          name === "links.cname.example.com" ? ["app.example.dev"] : [],
+      }),
+    });
+    const { id } = await createDomain(app, "cname.example.com");
+    await call(app, fullKey, "PATCH", `/domains/${id}`, { tracking_subdomain: "links" });
+    let [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomainSetAt).toBeInstanceOf(Date);
+
+    const res = await call(app, fullKey, "POST", `/domains/${id}/verify`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { records: unknown[] }).records).toContainEqual(
+      expect.objectContaining({
+        record: "Tracking",
+        name: "links.cname.example.com",
+        status: "verified",
+      }),
+    );
+    [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomainSetAt).toBeNull();
+  });
+
+  it("leaves the clock armed and the Tracking row pending while the CNAME does not resolve", async () => {
+    const app = makeApp({
+      ...fakeSes(),
+      appBaseUrl: "https://app.example.dev",
+      dns: fakeDns({ resolveCname: async () => ["elsewhere.example.net"] }),
+    });
+    const { id } = await createDomain(app, "unresolved.example.com");
+    await call(app, fullKey, "PATCH", `/domains/${id}`, { tracking_subdomain: "links" });
+
+    const res = await call(app, fullKey, "POST", `/domains/${id}/verify`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { records: unknown[] }).records).toContainEqual(
+      expect.objectContaining({ record: "Tracking", status: "pending" }),
+    );
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomainSetAt).toBeInstanceOf(Date);
+  });
+
   it("stays pending when a required record is live-missing despite SES success", async () => {
     const app = makeApp(fakeSes({ dkimStatus: "SUCCESS", verifiedForSending: true }));
     const { id } = await createDomain(app, "half.example.com");
@@ -454,6 +499,76 @@ describe("PATCH /domains/{id}", () => {
     await call(app, fullKey, "PATCH", `/domains/${id}`, { tracking_subdomain: "" });
     const [cleared] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
     expect(cleared?.trackingSubdomain).toBeNull();
+  });
+
+  it("cloud: refuses to leave tracking on without a tracking subdomain", async () => {
+    // A fresh team: the shared one already sits at its cloud plan cap.
+    const t = { key: await insertKey(await createTeam(db, "cloud-tracking")) };
+    const app = makeApp({ ...fakeSes(), isCloud: true, appBaseUrl: "https://app.example.dev" });
+    const created = await call(app, t.key, "POST", "/domains", { name: "gated.example.com" });
+    expect(created.status).toBe(200);
+    const { id } = (await created.json()) as { id: string };
+
+    const refused = await call(app, t.key, "PATCH", `/domains/${id}`, { click_tracking: true });
+    expect(refused.status).toBe(422);
+    expect(((await refused.json()) as { message: string }).message).toContain("tracking_subdomain");
+    let [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.clickTracking).toBe(false);
+
+    // A subdomain in the same request is accepted, and the CNAME to add comes
+    // back pending until it resolves.
+    const ok = await call(app, t.key, "PATCH", `/domains/${id}`, {
+      click_tracking: true,
+      tracking_subdomain: "links",
+    });
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { records: unknown[] }).records).toContainEqual(
+      expect.objectContaining({
+        record: "Tracking",
+        name: "links.gated.example.com",
+        status: "pending",
+      }),
+    );
+
+    // Removing the subdomain while tracking stays on is the same unserved state.
+    const clearing = await call(app, t.key, "PATCH", `/domains/${id}`, { tracking_subdomain: "" });
+    expect(clearing.status).toBe(422);
+    [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomain).toBe("links");
+
+    // Turning tracking off is always allowed, subdomain or not.
+    const off = await call(app, t.key, "PATCH", `/domains/${id}`, {
+      click_tracking: false,
+      tracking_subdomain: "",
+    });
+    expect(off.status).toBe(200);
+    [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row).toMatchObject({ clickTracking: false, trackingSubdomain: null });
+  });
+
+  it("cloud without subdomain support: says tracking cannot be turned on at all", async () => {
+    const t = { key: await insertKey(await createTeam(db, "cloud-nosub")) };
+    const app = makeApp({
+      ...fakeSes(),
+      isCloud: true,
+      appBaseUrl: "https://app.example.dev",
+      trackingSubdomains: false,
+    });
+    const created = await call(app, t.key, "POST", "/domains", { name: "nosub.example.com" });
+    expect(created.status).toBe(200);
+    const { id } = (await created.json()) as { id: string };
+    const res = await call(app, t.key, "PATCH", `/domains/${id}`, { open_tracking: true });
+    expect(res.status).toBe(422);
+    const { message } = (await res.json()) as { message: string };
+    expect(message).toContain("cannot be turned on");
+    expect(message).not.toContain("Pass tracking_subdomain");
+  });
+
+  it("self-host: tracking may turn on without a subdomain (the app host serves it)", async () => {
+    const app = makeApp({ ...fakeSes(), appBaseUrl: "https://app.example.dev" });
+    const { id } = await createDomain(app, "shared.example.com");
+    const res = await call(app, fullKey, "PATCH", `/domains/${id}`, { click_tracking: true });
+    expect(res.status).toBe(200);
   });
 
   it("422s adopting a tracking subdomain where the deployment cannot serve one", async () => {

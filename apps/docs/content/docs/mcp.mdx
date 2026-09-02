@@ -176,7 +176,7 @@ and admins.
 | `update_webhook` | `webhooks:write` | **admin** Update a webhook's URL, events or status. |
 | `delete_webhook` | `webhooks:write` | **admin** Delete a webhook endpoint. |
 | `create_domain` | `domains:write` | **admin** Add a sending domain and get its DNS records. |
-| `update_domain` | `domains:write` | **admin** Change a domain's tracking settings. |
+| `update_domain` | `domains:write` | **admin** Change a domain's tracking settings; `tracking_subdomain` is what yields the Tracking CNAME (required on Cloud). |
 | `verify_domain` | `domains:write` | **admin** Re-check a domain's DNS and SES verification. |
 | `delete_domain` | `domains:write` | **admin** Remove a domain and its SES identity. |
 

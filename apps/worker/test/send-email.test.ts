@@ -853,6 +853,78 @@ it("requireBrandedHost still tracks through the domain's own subdomain", async (
   expect(mime).not.toContain("fallback.test");
 });
 
+// A subdomain whose CNAME has not resolved (its 72h clock still armed) would
+// rewrite every link to a dead host, so the domain counts as having none
+// until a DNS check clears the clock.
+it("an unresolved tracking subdomain ships clean links under requireBrandedHost", async () => {
+  const [unresolved] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "unresolved.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+      clickTracking: true,
+      openTracking: false,
+      trackingSubdomain: "track",
+      trackingSubdomainSetAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  if (!unresolved) throw new Error("domain insert failed");
+  const { ses, sends } = fakeSes("mid-unresolved");
+  const emailId = await insertEmail(
+    { domainId: unresolved.id, from: "Pending <a@unresolved.dev>" },
+    `<a href="https://dest.test/a">go</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: {
+      secretKey: trackingSecret,
+      defaultBaseUrl: "https://fallback.test",
+      requireBrandedHost: true,
+    },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).toContain("https://dest.test/a");
+  expect(mime).not.toContain("track.unresolved.dev");
+  expect(mime).not.toContain("/t/c/");
+});
+
+it("an unresolved tracking subdomain falls back to the shared host where one is allowed", async () => {
+  const [unresolved] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "pendingsub.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+      clickTracking: true,
+      openTracking: false,
+      trackingSubdomain: "track",
+      trackingSubdomainSetAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  if (!unresolved) throw new Error("domain insert failed");
+  const { ses, sends } = fakeSes("mid-pendingsub");
+  const emailId = await insertEmail(
+    { domainId: unresolved.id, from: "Pending <a@pendingsub.dev>" },
+    `<a href="https://dest.test/a">go</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: { secretKey: trackingSecret, defaultBaseUrl: "https://fallback.test" },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).toContain("https://fallback.test/t/c/");
+  expect(mime).not.toContain("track.pendingsub.dev");
+});
+
 it("a permanent SES refusal fails the email with an event instead of retrying", async () => {
   const ses: SesSender = {
     async sendRaw() {

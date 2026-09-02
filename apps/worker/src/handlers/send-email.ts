@@ -315,6 +315,7 @@ export async function sendEmail(
             clickTracking: schema.domains.clickTracking,
             openTracking: schema.domains.openTracking,
             trackingSubdomain: schema.domains.trackingSubdomain,
+            trackingSubdomainSetAt: schema.domains.trackingSubdomainSetAt,
             dmarcPolicy: schema.domains.dmarcPolicy,
             dmarcCheckedAt: schema.domains.dmarcCheckedAt,
           })
@@ -417,8 +418,13 @@ export async function sendEmail(
   // that don't exercise tracking need not wire it, and its absence simply
   // leaves the body untouched.
   if (html && (click || open) && deps.tracking) {
+    // A subdomain whose CNAME has not resolved yet (its 72h clock still armed)
+    // would rewrite every link to a dead host, so until a DNS check or the
+    // reverify sweep clears the clock the domain counts as having none.
     const brandedHost =
-      domain?.trackingSubdomain && deps.tracking.allowSubdomains !== false
+      domain?.trackingSubdomain &&
+      !domain.trackingSubdomainSetAt &&
+      deps.tracking.allowSubdomains !== false
         ? `https://${domain.trackingSubdomain}.${domain.name}`
         : null;
     const trackingBaseUrl =

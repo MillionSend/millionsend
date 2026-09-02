@@ -103,7 +103,7 @@ function ConfigSection({
   children: React.ReactNode;
 }) {
   return (
-    <section style={{ paddingTop: 22, marginTop: 22, borderTop: "1px solid var(--ms-line)" }}>
+    <section className="ms-config-section">
       <h3 style={{ fontSize: 14, fontWeight: 500, color: "var(--ms-bone)", margin: 0 }}>{title}</h3>
       {description ? (
         <p style={{ fontSize: 12.5, color: "var(--ms-muted)", margin: "6px 0 0", lineHeight: 1.5 }}>

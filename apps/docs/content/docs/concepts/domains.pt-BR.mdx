@@ -39,6 +39,14 @@ Depois de verificado, a aba **Configuração** de um domínio controla:
 - **Modo TLS** — `opportunistic` (padrão) ou `enforced`, aplicado via
   configuration set do SES do domínio.
 
+Pela API e pelo MCP, `update_domain` recebe as mesmas configurações de
+rastreamento. O rastreamento é servido pelo subdomínio de rastreamento do próprio
+domínio: informe `tracking_subdomain` (um rótulo como `links`) e o `records[]`
+da resposta ganha um CNAME de rastreamento, cujo status passa a `verified` assim
+que ele resolve. No MillionSend Cloud, ligar qualquer um dos dois sem um
+subdomínio é recusado com 422. Enquanto o CNAME não resolve, os links não passam
+por ele — o Cloud os envia limpos, o self-host recorre ao host do app.
+
 ## Precisão da taxa de abertura
 
 O rastreamento de aberturas injeta um pixel 1×1 transparente com uma referência

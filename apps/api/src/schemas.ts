@@ -964,15 +964,28 @@ export const createDomainRequestSchema = z
 
 export const updateDomainRequestSchema = z
   .object({
-    click_tracking: z.boolean().optional(),
-    open_tracking: z.boolean().optional(),
+    click_tracking: z
+      .boolean()
+      .optional()
+      .describe(
+        "Rewrite links to redirect through the tracking subdomain and record email.clicked events. Off by default.",
+      ),
+    open_tracking: z
+      .boolean()
+      .optional()
+      .describe(
+        "Inject a tracking pixel served from the tracking subdomain and record email.opened events. Off by default.",
+      ),
     // Empty string or null clears the branded tracking subdomain.
     tracking_subdomain: z
       .string()
       .trim()
       .refine((v) => v === "" || SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
       .nullable()
-      .optional(),
+      .optional()
+      .describe(
+        'DNS label of the branded tracking host, e.g. "links" for links.<domain>. Setting it adds a Tracking CNAME to records[]; links are tracked through it once that CNAME resolves. Required on MillionSend Cloud to turn tracking on. Empty string or null clears it.',
+      ),
     // Accepted by the SDK but unsupported here; the handler answers 422
     // instead of silently ignoring a security-relevant setting.
     tls: z.unknown().optional(),

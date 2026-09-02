@@ -442,6 +442,40 @@ describe("domains.verify", () => {
     expect((await caller.domains.verify({ id: seed?.id ?? "" })).status).toBe("verified");
   });
 
+  it("verify clears the tracking subdomain's 72h clock once its CNAME resolves", async () => {
+    const teamId = await createTeam(db);
+    const dkimPublicKey = await seedAndPublicKey(teamId);
+    const [seed] = await db.select().from(schema.domains).where(eq(schema.domains.teamId, teamId));
+    const id = seed?.id ?? "";
+    // The resolver answers the CNAME only once the test has read the expected
+    // value off the records list, so the first verify sees it unresolved.
+    let cnameValue = "";
+    const caller = callerFor(
+      teamId,
+      fakeSes({
+        dkimStatus: "SUCCESS",
+        verifiedForSending: true,
+        dns: {
+          ...publishedDns(dkimPublicKey),
+          resolveCname: async (name: string) =>
+            name === "email.example.com" && cnameValue ? [cnameValue] : [],
+        },
+      }).deps,
+    );
+    await caller.domains.updateConfiguration({ id, trackingSubdomain: "email" });
+    await caller.domains.verify({ id });
+    let [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomainSetAt).toBeInstanceOf(Date);
+
+    const { records } = await caller.domains.records({ id });
+    cnameValue = records.find((r) => r.group === "tracking")?.value ?? "";
+    expect(cnameValue).not.toBe("");
+    const { liveDns } = await caller.domains.verify({ id });
+    expect(liveDns.find((r) => r.type === "CNAME")?.status).toBe("found");
+    [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomainSetAt).toBeNull();
+  });
+
   it("stays pending while DKIM is still propagating", async () => {
     const teamId = await createTeam(db);
     const { deps } = fakeSes({ dkimStatus: "PENDING" });
