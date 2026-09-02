@@ -13,14 +13,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "fumadocs-core": "^16.14.4",
-    "fumadocs-mdx": "^15.2.3",
-    "fumadocs-openapi": "^11.2.4",
-    "fumadocs-ui": "^16.14.4",
+    "fumadocs-core": "^16.15.4",
+    "fumadocs-mdx": "^15.4.0",
+    "fumadocs-openapi": "^11.3.5",
+    "fumadocs-ui": "^16.15.4",
     "next": "^16.3.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "shiki": "^3.14.0"
+    "shiki": "^4.4.3"
   },
   "devDependencies": {
     "@millionsend/api": "workspace:*",
@@ -30,7 +30,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "tailwindcss": "^4.1.0",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.3"
   }
 }
