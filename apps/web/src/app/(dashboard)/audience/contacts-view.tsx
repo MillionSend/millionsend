@@ -25,12 +25,13 @@ import { BtnSpinner } from "@/components/spinner";
 import { StatBlock } from "@/components/stat-block";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { CONTACT_STATUSES } from "@/lib/contact-status";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
 import { MIGRATE_DOCS_URL } from "@/lib/docs-links";
 import { formatDayUtc } from "@/lib/format";
 import { migrateCommand } from "@/lib/migrate-command";
 import { useTRPC } from "@/lib/trpc";
-import { useUrlState } from "@/lib/url-state";
+import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, SearchBox, StateCard } from "../emails/list-parts";
 import { AudienceTabs } from "./audience-tabs";
@@ -84,7 +85,7 @@ function ContactsSkeleton() {
               <Skeleton width={48} />
             </td>
             <td className="right" style={{ width: 40 }}>
-              <Skeleton width={22} height={30} radius="var(--ms-r-input)" />
+              <Skeleton width={28} height={28} radius={8} />
             </td>
           </tr>
         ))}
@@ -179,6 +180,8 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
   const [limit, setLimit] = useState(40);
   const [segmentId, setSegmentId] = useUrlState("segment");
   const [topicId, setTopicId] = useUrlState("topic");
+  const [statusParam, setStatus] = useUrlState("status");
+  const status = oneOf(CONTACT_STATUSES, statusParam, "");
   const deferredSearch = useDeferredValue(search.trim());
 
   const [addOpen, setAddOpen] = useState(false);
@@ -225,6 +228,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
       {
         limit,
         ...(deferredSearch ? { search: deferredSearch } : {}),
+        ...(status ? { status } : {}),
         ...(segmentId ? { segmentId } : {}),
         ...(topicId ? { topicId } : {}),
       },
@@ -233,7 +237,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
   );
   const items = useMemo(() => query.data?.pages.flatMap((page) => page.items) ?? [], [query.data]);
   const total = query.data?.pages[0]?.total ?? 0;
-  const filtered = deferredSearch !== "" || segmentId !== "" || topicId !== "";
+  const filtered = deferredSearch !== "" || status !== "" || segmentId !== "" || topicId !== "";
 
   // Selection tracks the visible list: rows that fall out (filter/search
   // change, deletion) are pruned; rows still visible after a page-size change
@@ -250,10 +254,11 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
     });
   }, [items, query.isPending]);
 
-  // Export mirrors the on-screen view: the search box plus the active segment
-  // and topic filters, so a filtered download matches the table.
+  // Export mirrors the on-screen view: the search box plus the active status,
+  // segment and topic filters, so a filtered download matches the table.
   const exportParams = new URLSearchParams();
   if (deferredSearch) exportParams.set("search", deferredSearch);
+  if (status) exportParams.set("status", status);
   if (segmentId) exportParams.set("segmentId", segmentId);
   if (topicId) exportParams.set("topicId", topicId);
   const exportQs = exportParams.toString();
@@ -563,6 +568,17 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
             ]}
           />
         ) : null}
+        <Select
+          value={status}
+          onChange={setStatus}
+          ariaLabel={t("filters.status")}
+          width={150}
+          options={[
+            { value: "", label: t("filters.anyStatus") },
+            { value: "subscribed", label: t("contacts.subscribed") },
+            { value: "unsubscribed", label: t("contacts.unsubscribedBadge") },
+          ]}
+        />
         {(topics.data ?? []).length > 0 ? (
           <Select
             value={topicId}
@@ -592,6 +608,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
             actionLabel={t("contacts.clearSearch")}
             onAction={() => {
               setSearch("");
+              setStatus("");
               setSegmentId("");
               setTopicId("");
             }}
@@ -638,17 +655,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                   >
                     {row.unsubscribed ? t("contacts.unsubscribedBadge") : t("contacts.subscribed")}
                     {!row.unsubscribed && row.topics.length > 1 ? (
-                      <span
-                        style={{
-                          marginLeft: 6,
-                          padding: "0 5px",
-                          borderRadius: 999,
-                          background: "color-mix(in srgb, var(--ms-success) 18%, transparent)",
-                          fontSize: "var(--ms-fs-micro)",
-                        }}
-                      >
-                        {row.topics.length}
-                      </span>
+                      <span className="ms-count">{row.topics.length}</span>
                     ) : null}
                   </span>
                 );
@@ -695,16 +702,35 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                     </td>
                     <td>
                       {row.segments.length > 0 ? (
+                        // First segment, then a "+N" count that lists the rest on
+                        // hover — the joined list overflowed the column on
+                        // contacts in every segment.
                         <span
                           style={{
-                            display: "block",
+                            display: "flex",
+                            alignItems: "center",
+                            minWidth: 0,
                             color: "var(--ms-muted)",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
                           }}
                         >
-                          {row.segments.join(", ")}
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {row.segments[0]}
+                          </span>
+                          {row.segments.length > 1 ? (
+                            // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only guard so pinning the segments tooltip does not also trigger the row navigation
+                            // biome-ignore lint/a11y/noStaticElementInteractions: click containment only, the tooltip trigger inside stays the interactive element
+                            <span onClick={(event) => event.stopPropagation()}>
+                              <Tooltip text={row.segments.join("\n")}>
+                                <span className="ms-count">+{row.segments.length - 1}</span>
+                              </Tooltip>
+                            </span>
+                          ) : null}
                         </span>
                       ) : (
                         <span style={{ color: "var(--ms-faint)" }}>—</span>
@@ -757,18 +783,6 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
               })}
             </tbody>
           </Table>
-          {query.hasNextPage ? (
-            <div style={{ marginTop: 16 }}>
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                onClick={() => query.fetchNextPage()}
-                disabled={query.isFetchingNextPage}
-              >
-                {t("contacts.loadMore")}
-              </button>
-            </div>
-          ) : null}
           <ListFooter
             left={t("contacts.pageOf", {
               pages: query.data?.pages.length ?? 1,
@@ -778,6 +792,15 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
             onSize={setLimit}
             sizeLabel={(size) => t("contacts.pageSize", { count: size })}
             singlePage={!query.hasNextPage && (query.data?.pages.length ?? 1) === 1}
+            loadMore={
+              query.hasNextPage
+                ? {
+                    label: t("contacts.loadMore"),
+                    onClick: () => query.fetchNextPage(),
+                    loading: query.isFetchingNextPage,
+                  }
+                : undefined
+            }
           />
         </>
       )}

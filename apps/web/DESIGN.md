@@ -61,7 +61,11 @@ Fixed 240px sidebar on `--ms-panel`; content column on void with the canvas
 main-block padding: `32px 40px` (40px gutters — never wider). Cards: panel
 fill, 1px line, 14px radius, 24px padding. Controls compact per the canvas
 overrides: `.ms-btn` 6px 12px, `.ms-input` 6px 10px / line-height 1.4,
-`.ms-btn-icon` an exact 30×30 square — everything lands ≈30px tall. Modals
+`.ms-btn-icon` an exact 30×30 square — everything lands ≈30px tall. Lists
+(`.ms-table`) run at 13px with 6px cell padding — ≈40px rows, so a page of
+contacts or emails fits a laptop viewport; "Load more" lives in the shared
+`ListFooter` at the right, beside the page-size chooser, and any secondary
+action under a table or section is right-aligned. Modals
 are **centered in the viewport** (both axes), overlay `rgba(0,0,0,.72)`, no
 blur.
 

@@ -157,6 +157,17 @@
   background: var(--ms-neutral-bg);
   border-color: var(--ms-neutral-border);
 }
+/* Count pill riding after a label ("Subscribed 4", "General +2"): tinted
+   from currentColor so it follows whatever text it sits in. */
+.ms-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--ms-r-chip);
+  font-size: var(--ms-fs-micro);
+  line-height: 1.5;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
 
 /* Sidebar nav */
 .ms-nav {
@@ -278,7 +289,9 @@ table.ms-table {
   border-collapse: separate;
   border-spacing: 0;
   width: 100%;
-  font-size: var(--ms-fs-ui);
+  /* Lists run at label size with tight rows (~40px with a row menu): a page
+     of contacts or emails should fit a laptop viewport without scrolling. */
+  font-size: var(--ms-fs-label);
 }
 .ms-table thead th {
   background: var(--ms-panel-raised);
@@ -286,7 +299,7 @@ table.ms-table {
   font-weight: 500;
   font-size: var(--ms-fs-label);
   text-align: left;
-  padding: 6px 14px;
+  padding: 5px 12px;
 }
 .ms-table thead th:first-child {
   border-radius: var(--ms-r-input) 0 0 var(--ms-r-input);
@@ -299,7 +312,7 @@ table.ms-table {
   text-align: right;
 }
 .ms-table td {
-  padding: 9px 14px;
+  padding: 6px 12px;
   line-height: 1.4;
   border-bottom: 1px solid var(--ms-line);
   color: var(--ms-bone);
@@ -307,12 +320,9 @@ table.ms-table {
 .ms-table td:last-child {
   color: var(--ms-muted);
 }
-/* Dense variant — DNS record tables at Resend density: slim header, ~5px rows. */
-.ms-table.dense thead th {
-  padding: 6px 12px;
-}
+/* Dense variant — DNS record tables: mono chips on ~4px rows. */
 .ms-table.dense td {
-  padding: 5px 12px;
+  padding: 4px 12px;
 }
 /* Row hover: no background wash — the row's link underlines instead (quieter,
    and the affordance sits on the thing you'd click). */

@@ -911,7 +911,7 @@ export function DomainDetail({ id }: { id: string }) {
           )}
 
           {status !== "verified" && provider?.url ? (
-            <div style={{ display: "flex", gap: 10, marginTop: 24, alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
               <a
                 className="ms-btn ms-btn-secondary"
                 style={{ textDecoration: "none" }}

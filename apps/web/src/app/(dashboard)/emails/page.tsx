@@ -264,7 +264,7 @@ export default function EmailsPage() {
                   className="hoverable"
                   onClick={() => router.push(`/emails/${row.id}`)}
                 >
-                  <td className="ms-mono" style={{ fontSize: 13 }}>
+                  <td className="ms-mono">
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
                       <EmailStatusIcon status={row.latestStatus} />
                       <Link href={`/emails/${row.id}`} onClick={(event) => event.stopPropagation()}>
@@ -288,18 +288,6 @@ export default function EmailsPage() {
               ))}
             </tbody>
           </Table>
-          {query.hasNextPage ? (
-            <div style={{ marginTop: 16 }}>
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                onClick={() => query.fetchNextPage()}
-                disabled={query.isFetchingNextPage}
-              >
-                {t("list.loadMore")}
-              </button>
-            </div>
-          ) : null}
           <ListFooter
             left={t("list.pageOf", {
               pages: query.data?.pages.length ?? 1,
@@ -309,6 +297,15 @@ export default function EmailsPage() {
             onSize={setLimit}
             sizeLabel={(size) => t("list.pageSize", { count: size })}
             singlePage={!query.hasNextPage && (query.data?.pages.length ?? 1) === 1}
+            loadMore={
+              query.hasNextPage
+                ? {
+                    label: t("list.loadMore"),
+                    onClick: () => query.fetchNextPage(),
+                    loading: query.isFetchingNextPage,
+                  }
+                : undefined
+            }
           />
         </>
       )}

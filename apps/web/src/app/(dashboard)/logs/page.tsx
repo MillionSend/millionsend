@@ -16,7 +16,7 @@ import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { statusCodeColor } from "@/lib/status-code-color";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
-import { SearchBox, StateCard } from "../emails/list-parts";
+import { ListFooter, SearchBox, StateCard } from "../emails/list-parts";
 
 const STATUS_CLASSES = ["2xx", "4xx", "5xx"] as const;
 type StatusClass = (typeof STATUS_CLASSES)[number];
@@ -226,7 +226,7 @@ export default function LogsPage() {
                       {row.path}
                     </Link>
                   </td>
-                  <td className="ms-mono" style={{ fontSize: 13 }}>
+                  <td className="ms-mono">
                     <span style={{ color: statusCodeColor(row.statusCode) }}>{row.statusCode}</span>
                   </td>
                   <td className="right">
@@ -237,16 +237,13 @@ export default function LogsPage() {
             </tbody>
           </Table>
           {query.hasNextPage ? (
-            <div style={{ marginTop: 16 }}>
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                onClick={() => query.fetchNextPage()}
-                disabled={query.isFetchingNextPage}
-              >
-                {t("list.loadMore")}
-              </button>
-            </div>
+            <ListFooter
+              loadMore={{
+                label: t("list.loadMore"),
+                onClick: () => query.fetchNextPage(),
+                loading: query.isFetchingNextPage,
+              }}
+            />
           ) : null}
         </>
       )}

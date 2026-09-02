@@ -7,7 +7,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
-import { StateCard } from "../../emails/list-parts";
+import { ListFooter, StateCard } from "../../emails/list-parts";
 
 const COL = { when: "16%", who: "24%", action: "28%" } as const;
 
@@ -137,16 +137,13 @@ export function AuditView() {
         </tbody>
       </Table>
       {query.hasNextPage ? (
-        <div style={{ marginTop: 16 }}>
-          <button
-            type="button"
-            className="ms-btn ms-btn-secondary"
-            onClick={() => query.fetchNextPage()}
-            disabled={query.isFetchingNextPage}
-          >
-            {t("loadMore")}
-          </button>
-        </div>
+        <ListFooter
+          loadMore={{
+            label: t("loadMore"),
+            onClick: () => query.fetchNextPage(),
+            loading: query.isFetchingNextPage,
+          }}
+        />
       ) : null}
     </>
   );

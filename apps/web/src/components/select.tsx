@@ -20,10 +20,12 @@ export interface SelectOption {
 /* Search input appears only when the list is long enough for scanning to hurt. */
 const SEARCH_THRESHOLD = 10;
 const TYPEAHEAD_RESET_MS = 500;
-/* Popover placement: breathing room to the viewport edge, and the minimum
-   below-space worth keeping before flipping the panel above the trigger. */
+/* Popover placement: breathing room to the viewport edge, the minimum
+   below-space worth keeping before flipping the panel above the trigger, and
+   the panel's width cap (max-content up to this). */
 const VIEWPORT_MARGIN = 16;
 const FLIP_THRESHOLD = 200;
+const MENU_MAX_WIDTH = 320;
 
 /**
  * Replacement for native <select>: compact .ms-input trigger + .ms-menu
@@ -53,7 +55,7 @@ export function Select({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const [placement, setPlacement] = useState({ above: false, maxHeight: 264 });
+  const [placement, setPlacement] = useState({ above: false, alignRight: false, maxHeight: 264 });
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const typeahead = useRef({ buffer: "", at: 0 });
@@ -84,14 +86,21 @@ export function Select({
     setActiveIndex(selectedIndex < 0 ? 0 : selectedIndex);
     // Size to the real viewport gap instead of a fixed cap: the list grows to
     // the space under the trigger, flipping above only when below is cramped
-    // and above has more room. Measured on open; a resize while open is rare
-    // enough that reopening is the recovery.
+    // and above has more room. A panel that could not grow to its full width
+    // rightward hangs from the trigger's right edge instead, so a filter at
+    // the end of a row never pushes the page into horizontal scroll. Measured
+    // on open; a resize while open is rare enough that reopening is the
+    // recovery.
     const rect = triggerRef.current?.getBoundingClientRect();
     if (rect) {
       const below = window.innerHeight - rect.bottom - VIEWPORT_MARGIN;
       const above = rect.top - VIEWPORT_MARGIN;
       const flip = below < FLIP_THRESHOLD && above > below;
-      setPlacement({ above: flip, maxHeight: Math.max(120, flip ? above : below) });
+      setPlacement({
+        above: flip,
+        alignRight: rect.left + MENU_MAX_WIDTH > window.innerWidth - VIEWPORT_MARGIN,
+        maxHeight: Math.max(120, flip ? above : below),
+      });
     }
     setOpen(true);
   }
@@ -238,10 +247,10 @@ export function Select({
           style={{
             position: "absolute",
             ...(placement.above ? { bottom: "calc(100% + 6px)" } : { top: "calc(100% + 6px)" }),
-            left: 0,
+            ...(placement.alignRight ? { right: 0 } : { left: 0 }),
             minWidth: "100%",
             width: "max-content",
-            maxWidth: 320,
+            maxWidth: MENU_MAX_WIDTH,
             // Rows must scroll to the panel edge and clip on the radius —
             // panel padding would crop them mid-item at the scroll boundary.
             padding: 0,

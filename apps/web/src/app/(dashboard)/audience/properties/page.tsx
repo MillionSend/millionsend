@@ -68,7 +68,7 @@ function PropertiesSkeleton() {
               <Skeleton width={48} />
             </td>
             <td className="right" style={{ width: 40 }}>
-              <Skeleton width={22} height={30} radius="var(--ms-r-input)" />
+              <Skeleton width={28} height={28} radius={8} />
             </td>
           </tr>
         ))}
@@ -312,7 +312,7 @@ export default function PropertiesPage() {
                       </span>
                     ) : null}
                   </td>
-                  <td style={{ color: "var(--ms-muted)", fontSize: 13 }}>{typeLabel(row.type)}</td>
+                  <td style={{ color: "var(--ms-muted)" }}>{typeLabel(row.type)}</td>
                   <td>
                     {row.fallbackValue ? (
                       <span style={{ color: "var(--ms-muted)", fontSize: 13 }}>
@@ -377,17 +377,6 @@ export default function PropertiesPage() {
               ))}
             </tbody>
           </Table>
-          {hasMore ? (
-            <div style={{ marginTop: 16 }}>
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                onClick={() => setPages((prev) => prev + 1)}
-              >
-                {t("loadMore")}
-              </button>
-            </div>
-          ) : null}
           <ListFooter
             left={t("pageOf", {
               pages: Math.max(1, Math.ceil(shownDefined.length / size)),
@@ -397,6 +386,11 @@ export default function PropertiesPage() {
             onSize={changeSize}
             sizeLabel={(value) => t("pageSize", { count: value })}
             singlePage={!hasMore && pages === 1}
+            loadMore={
+              hasMore
+                ? { label: t("loadMore"), onClick: () => setPages((prev) => prev + 1) }
+                : undefined
+            }
           />
         </>
       )}

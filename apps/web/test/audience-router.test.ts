@@ -267,6 +267,21 @@ describe("audience.contacts.list filters", () => {
     expect(emails).toEqual(["ada@x.com", "bob@x.com"]);
   });
 
+  it("narrows to subscribed or unsubscribed contacts, counting the scope", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await caller.audience.contacts.add({ email: "ada@x.com" });
+    const { id: bob } = await caller.audience.contacts.add({ email: "bob@x.com" });
+    await caller.audience.contacts.update({ id: bob, unsubscribed: true });
+
+    const unsubscribed = await caller.audience.contacts.list({ status: "unsubscribed" });
+    expect(unsubscribed.items.map((c) => c.email)).toEqual(["bob@x.com"]);
+    expect(unsubscribed.total).toBe(1);
+    const subscribed = await caller.audience.contacts.list({ status: "subscribed" });
+    expect(subscribed.items.map((c) => c.email)).toEqual(["ada@x.com"]);
+    expect(subscribed.total).toBe(1);
+  });
+
   it("narrows to a topic by effective membership (default plus explicit overrides)", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);

@@ -9,7 +9,9 @@
     "segment": "Segment",
     "topic": "Topic",
     "allContacts": "All contacts",
-    "anyTopic": "Any topic"
+    "anyTopic": "Any topic",
+    "status": "Status",
+    "anyStatus": "Any status"
   },
   "properties": {
     "title": "Audience",

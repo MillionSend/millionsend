@@ -63,7 +63,7 @@ function SegmentsSkeleton() {
               <Skeleton width={48} />
             </td>
             <td className="right" style={{ width: 40 }}>
-              <Skeleton width={22} height={30} radius="var(--ms-r-input)" />
+              <Skeleton width={28} height={28} radius={8} />
             </td>
           </tr>
         ))}
@@ -260,10 +260,8 @@ export default function SegmentsPage() {
                       ) : null}
                     </div>
                   </td>
-                  <td className="right ms-mono" style={{ fontSize: 13 }}>
-                    {nf.format(row.count)}
-                  </td>
-                  <td className="right ms-mono" style={{ fontSize: 13, color: "var(--ms-muted)" }}>
+                  <td className="right ms-mono">{nf.format(row.count)}</td>
+                  <td className="right ms-mono" style={{ color: "var(--ms-muted)" }}>
                     {nf.format(row.unsubscribedCount)}
                   </td>
                   <td className="right" style={{ color: "var(--ms-muted)" }}>
@@ -291,17 +289,6 @@ export default function SegmentsPage() {
               ))}
             </tbody>
           </Table>
-          {hasMore ? (
-            <div style={{ marginTop: 16 }}>
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                onClick={() => setPages((prev) => prev + 1)}
-              >
-                {t("loadMore")}
-              </button>
-            </div>
-          ) : null}
           <ListFooter
             left={t("pageOf", {
               pages: Math.max(1, Math.ceil(shownRows.length / size)),
@@ -311,6 +298,11 @@ export default function SegmentsPage() {
             onSize={changeSize}
             sizeLabel={(value) => t("pageSize", { count: value })}
             singlePage={!hasMore && pages === 1}
+            loadMore={
+              hasMore
+                ? { label: t("loadMore"), onClick: () => setPages((prev) => prev + 1) }
+                : undefined
+            }
           />
         </>
       )}

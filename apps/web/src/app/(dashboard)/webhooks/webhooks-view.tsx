@@ -331,17 +331,6 @@ export function WebhooksView() {
               ))}
             </tbody>
           </Table>
-          {webhooks.length > pages * pageSize ? (
-            <div style={{ marginTop: 16 }}>
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                onClick={() => setPages((p) => p + 1)}
-              >
-                {t("loadMore")}
-              </button>
-            </div>
-          ) : null}
           <ListFooter
             left={t("pageOf", {
               pages: Math.min(pages, Math.ceil(webhooks.length / pageSize)),
@@ -354,6 +343,11 @@ export function WebhooksView() {
             }}
             sizeLabel={(size) => t("pageSize", { count: size })}
             singlePage={pages === 1 && webhooks.length <= pageSize}
+            loadMore={
+              webhooks.length > pages * pageSize
+                ? { label: t("loadMore"), onClick: () => setPages((p) => p + 1) }
+                : undefined
+            }
           />
         </>
       ) : null}

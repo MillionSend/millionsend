@@ -6,8 +6,8 @@
   --ms-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --ms-fs-micro: 11px; /* uppercase metadata labels; letter-spacing .08em */
   --ms-fs-badge: 12px; /* status badges, pills */
-  --ms-fs-label: 13px; /* table headers, form labels, timestamps */
-  --ms-fs-ui: 14px; /* nav, buttons, table cells */
+  --ms-fs-label: 13px; /* table headers and cells, form labels, timestamps */
+  --ms-fs-ui: 14px; /* nav, buttons */
   --ms-fs-body: 15px; /* body copy, input values */
   --ms-fs-section: 17px; /* card section headings */
   --ms-fs-h2: 22px; /* card titles, drawer titles */

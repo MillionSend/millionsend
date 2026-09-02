@@ -254,7 +254,7 @@ export function DomainsView() {
                   <tbody>
                     {filtered.map((domain) => (
                       <tr key={domain.id}>
-                        <td className="ms-mono" style={{ fontSize: 13 }}>
+                        <td className="ms-mono">
                           <Link href={`/domains/${domain.id}`}>{domain.name}</Link>
                         </td>
                         <td>

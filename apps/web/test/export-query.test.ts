@@ -78,6 +78,25 @@ describe("contact export", () => {
     expect(rows.map((r) => r.email)).toEqual(["match@example.com"]);
   });
 
+  it("honors the status filter", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await caller.audience.contacts.add({ email: "in@example.com" });
+    const { id: out } = await caller.audience.contacts.add({ email: "out@example.com" });
+    await caller.audience.contacts.update({ id: out, unsubscribed: true });
+
+    const rows = await contactRowsForExport(db, teamId, { status: "unsubscribed" });
+    expect(rows.map((r) => r.email)).toEqual(["out@example.com"]);
+    const result = await buildExport(
+      db,
+      teamId,
+      "contacts",
+      new URLSearchParams("status=subscribed"),
+    );
+    expect(result?.csv).toContain("in@example.com");
+    expect(result?.csv).not.toContain("out@example.com");
+  });
+
   it("never exports another team's contacts", async () => {
     const teamA = await createTeam(db, "team-a");
     const teamB = await createTeam(db, "team-b");

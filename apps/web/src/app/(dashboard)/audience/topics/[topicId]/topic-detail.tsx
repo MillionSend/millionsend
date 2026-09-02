@@ -335,18 +335,6 @@ export function TopicDetail({ id }: { id: string }) {
                 })}
               </tbody>
             </Table>
-            {contacts.hasNextPage ? (
-              <div style={{ marginTop: 16 }}>
-                <button
-                  type="button"
-                  className="ms-btn ms-btn-secondary"
-                  onClick={() => contacts.fetchNextPage()}
-                  disabled={contacts.isFetchingNextPage}
-                >
-                  {tAud("contacts.loadMore")}
-                </button>
-              </div>
-            ) : null}
             <ListFooter
               left={tAud("contacts.pageOf", {
                 pages: contacts.data?.pages.length ?? 1,
@@ -356,6 +344,15 @@ export function TopicDetail({ id }: { id: string }) {
               onSize={setLimit}
               sizeLabel={(size) => tAud("contacts.pageSize", { count: size })}
               singlePage={!contacts.hasNextPage && (contacts.data?.pages.length ?? 1) === 1}
+              loadMore={
+                contacts.hasNextPage
+                  ? {
+                      label: tAud("contacts.loadMore"),
+                      onClick: () => contacts.fetchNextPage(),
+                      loading: contacts.isFetchingNextPage,
+                    }
+                  : undefined
+              }
             />
           </>
         )}

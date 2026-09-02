@@ -235,7 +235,7 @@ export default function SuppressionsPage() {
             <tbody>
               {items.map((row) => (
                 <tr key={row.id}>
-                  <td className="ms-mono" style={{ fontSize: 13 }}>
+                  <td className="ms-mono">
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
                       <EmailStatusIcon status={REASON_DOT[row.reason]} />
                       {row.email ? (
@@ -271,18 +271,6 @@ export default function SuppressionsPage() {
               ))}
             </tbody>
           </Table>
-          {query.hasNextPage ? (
-            <div style={{ marginTop: 16 }}>
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                onClick={() => query.fetchNextPage()}
-                disabled={query.isFetchingNextPage}
-              >
-                {t("suppressions.loadMore")}
-              </button>
-            </div>
-          ) : null}
           <ListFooter
             left={t("suppressions.pageOf", {
               pages: query.data?.pages.length ?? 1,
@@ -292,6 +280,15 @@ export default function SuppressionsPage() {
             onSize={setLimit}
             sizeLabel={(size) => t("suppressions.pageSize", { count: size })}
             singlePage={!query.hasNextPage && (query.data?.pages.length ?? 1) === 1}
+            loadMore={
+              query.hasNextPage
+                ? {
+                    label: t("suppressions.loadMore"),
+                    onClick: () => query.fetchNextPage(),
+                    loading: query.isFetchingNextPage,
+                  }
+                : undefined
+            }
           />
         </>
       )}

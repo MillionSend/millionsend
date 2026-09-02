@@ -55,9 +55,9 @@ function KeysSkeleton() {
               <Skeleton width={72} />
             </td>
             <td className="right">
-              {/* Loaded rows hold PopoverMenu's 30px icon trigger here — the
-                  row's tallest cell content, so the stand-in keeps 30px. */}
-              <Skeleton width={30} height={30} radius="var(--ms-r-input)" />
+              {/* Loaded rows hold PopoverMenu's 28px bare trigger here — the
+                  row's tallest cell content, so the stand-in keeps 28px. */}
+              <Skeleton width={28} height={28} radius={8} />
             </td>
           </tr>
         ))}

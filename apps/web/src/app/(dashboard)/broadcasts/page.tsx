@@ -17,7 +17,7 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
-import { StateCard } from "../emails/list-parts";
+import { ListFooter, StateCard } from "../emails/list-parts";
 import { type BroadcastStatus, StatusPill } from "./parts";
 
 function BroadcastsHead() {
@@ -64,7 +64,7 @@ function BroadcastsSkeleton() {
               <Skeleton width={48} />
             </td>
             <td className="right" style={{ width: 40 }}>
-              <Skeleton width={22} height={30} radius="var(--ms-r-input)" />
+              <Skeleton width={28} height={28} radius={8} />
             </td>
           </tr>
         ))}
@@ -248,16 +248,13 @@ export default function BroadcastsPage() {
             </tbody>
           </Table>
           {query.hasNextPage ? (
-            <div style={{ marginTop: 16 }}>
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                onClick={() => query.fetchNextPage()}
-                disabled={query.isFetchingNextPage}
-              >
-                {t("list.loadMore")}
-              </button>
-            </div>
+            <ListFooter
+              loadMore={{
+                label: t("list.loadMore"),
+                onClick: () => query.fetchNextPage(),
+                loading: query.isFetchingNextPage,
+              }}
+            />
           ) : null}
         </>
       )}

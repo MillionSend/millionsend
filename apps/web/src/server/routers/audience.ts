@@ -12,6 +12,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, ilike, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
+import { CONTACT_STATUSES } from "@/lib/contact-status";
 import { escapeLike } from "@/lib/sql";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { adminProcedure, router, teamProcedure } from "../trpc";
@@ -112,6 +113,7 @@ export const audienceRouter = router({
       .input(
         z.object({
           search: z.string().trim().max(200).optional(),
+          status: z.enum(CONTACT_STATUSES).optional(),
           segmentId: z.uuid().optional(),
           topicId: z.uuid().optional(),
           cursor: cursorSchema.optional(),
@@ -121,6 +123,7 @@ export const audienceRouter = router({
       .query(async ({ ctx, input }) => {
         const t = schema.contacts;
         const filters: (SQL | undefined)[] = [eq(t.teamId, ctx.teamId)];
+        if (input.status) filters.push(eq(t.unsubscribed, input.status === "unsubscribed"));
         if (input.search) {
           const pattern = `%${escapeLike(input.search)}%`;
           filters.push(

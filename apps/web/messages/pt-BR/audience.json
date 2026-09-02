@@ -9,7 +9,9 @@
     "segment": "Segmento",
     "topic": "Tópico",
     "allContacts": "Todos os contatos",
-    "anyTopic": "Qualquer tópico"
+    "anyTopic": "Qualquer tópico",
+    "status": "Status",
+    "anyStatus": "Qualquer status"
   },
   "properties": {
     "title": "Audiência",

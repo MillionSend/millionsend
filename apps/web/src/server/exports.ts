@@ -3,6 +3,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, gte, ilike, isNull, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
+import { CONTACT_STATUSES, type ContactStatus } from "@/lib/contact-status";
 import { type CsvColumn, toCsv } from "@/lib/csv-export";
 import { escapeLike } from "@/lib/sql";
 import { assertSegment, segmentPredicate } from "./routers/segments";
@@ -34,10 +35,11 @@ interface ContactExportRow {
 export async function contactRowsForExport(
   db: Db,
   teamId: string,
-  filters: { search?: string; segmentId?: string; topicId?: string },
+  filters: { search?: string; status?: ContactStatus; segmentId?: string; topicId?: string },
 ): Promise<ContactExportRow[]> {
   const t = schema.contacts;
   const conds: SQL[] = [eq(t.teamId, teamId)];
+  if (filters.status) conds.push(eq(t.unsubscribed, filters.status === "unsubscribed"));
   if (filters.search) {
     const pattern = `%${escapeLike(filters.search)}%`;
     const match = or(
@@ -227,11 +229,13 @@ export async function buildExport(
   switch (resource) {
     case "contacts": {
       const search = params.get("search") ?? undefined;
+      const status = CONTACT_STATUSES.find((s) => s === params.get("status"));
       // Non-uuid segment/topic params never reach the id-keyed guard query.
       const segmentId = asUuid(params.get("segmentId"));
       const topicId = asUuid(params.get("topicId"));
       const rows = await contactRowsForExport(db, teamId, {
         ...(search ? { search } : {}),
+        ...(status ? { status } : {}),
         ...(segmentId ? { segmentId } : {}),
         ...(topicId ? { topicId } : {}),
       });
