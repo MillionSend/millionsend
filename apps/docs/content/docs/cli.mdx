@@ -108,7 +108,7 @@ Written next to where you run the tool, mode 0600, never containing a key:
 | --- | --- |
 | `.millionsend/migrate-state.json` | Every id the tool created per resource, resume cursors, the plan hash. Written after every batch, so an interrupted run resumes where it stopped. |
 | `.millionsend/migrate-report.json` | The last run's report as data. |
-| `.millionsend/migrate-report.md` | The same report as Markdown: counts, the checklist, the DNS records per domain, the manual items. |
+| `.millionsend/migrate-report.md` | The same report as Markdown: counts, the checklist, the DNS records per domain, the id map (source topic and segment ids → MillionSend ids, for code that references them), the manual items. |
 
 `.millionsend/` is appended to `.gitignore` when one exists in the current
 directory; the tool says so once.

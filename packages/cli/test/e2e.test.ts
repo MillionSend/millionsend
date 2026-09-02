@@ -379,6 +379,11 @@ describe("millionsend (built bundle)", () => {
       expect(stdout).toContain("[ ] add DNS records for news.example.com");
       expect(stdout).toContain(`[ ] set RESEND_BASE_URL=${cloud.baseUrl} in your app`);
       expect(stdout).toContain(`[ ] create API keys: ${API_KEY_NAMES.join(", ")}`);
+      expect(stdout).toContain(
+        "[ ] replace Resend topic and segment ids in your code (id map below)",
+      );
+      expect(stdout).toContain("Id map (Resend id → id here):");
+      expect(stdout).toMatch(new RegExp(`topics/${TOPICS[0].name}\\s+\\S+ → [0-9a-f-]{36}`));
       expect(stdout).toContain("DNS records for news.example.com:");
       expect(stdout).toMatch(/Type\s+Name\s+Priority\s+Value\n\s+TXT\s+/);
       expect(stdout).toContain(

@@ -236,7 +236,7 @@ function idleOutcome(plan: Plan, state: MigrateState): ApplyOutcome {
     else if (item.action === "manual") c.manual += 1;
     else if (item.action === "skip") c.skipped += 1;
   }
-  return { state, counts, freshSecrets: [], domainRecords: {} };
+  return { state, counts, freshSecrets: [], domainRecords: {}, ids: [] };
 }
 
 const runReport = (prepared: Prepared, outcome: ApplyOutcome): Report =>

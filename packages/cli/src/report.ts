@@ -1,4 +1,4 @@
-import type { ApplyOutcome, Counts, ResourceCounts } from "./apply.js";
+import type { ApplyOutcome, Counts, IdMapping, ResourceCounts } from "./apply.js";
 import type { OutStream } from "./context.js";
 import { CLOUD_BILLING_URL, TRADEMARK_NOTICE } from "./meta.js";
 import {
@@ -41,6 +41,8 @@ export interface Report {
   /** Our DNS records per domain that still needs them. */
   dns: { domain: string; records: DnsRecord[] }[];
   apiKeys: string[];
+  /** Source id → target id for topics and segments, the resources code refers to by id. */
+  ids: IdMapping[];
   manual: Plan["manual"];
   failures: MigrateState["failures"];
   offer: Offer | null;
@@ -150,6 +152,9 @@ export function buildReport({
     ...dns.map((d) => `add DNS records for ${d.domain}`),
     `set ${plan.source.toUpperCase()}_BASE_URL=${baseUrl} in your app`,
     ...(apiKeys.length > 0 ? [`create API keys: ${apiKeys.join(", ")}`] : []),
+    ...(outcome.ids.length > 0
+      ? [`replace ${sourceLabel} topic and segment ids in your code (id map below)`]
+      : []),
     ...(manual.length > 0 ? [`review ${pluralize(manual.length, "manual note")}`] : []),
     ...(failures.length > 0 ? [`retry ${pluralize(failures.length, "failed item")}`] : []),
   ];
@@ -166,6 +171,7 @@ export function buildReport({
     checklist: { done, left },
     dns,
     apiKeys,
+    ids: outcome.ids,
     manual,
     failures,
     offer: buildOffer(usage, snapshot, domains, sourceLabel),
@@ -193,6 +199,13 @@ export function dnsTable(records: DnsRecord[]): string[] {
       .join("  ")
       .trimEnd();
   return [line(DNS_COLUMNS.map(([head]) => head)), ...rows.map(line)];
+}
+
+/** Column-aligned `resource/name  source-id → target-id` rows. */
+export function idTable(ids: IdMapping[]): string[] {
+  const names = ids.map((m) => `${m.resource}/${m.name}`);
+  const width = Math.max(...names.map((n) => n.length));
+  return ids.map((m, i) => `${names[i]?.padEnd(width)}  ${m.sourceId} → ${m.targetId}`);
 }
 
 const COUNT_LABEL: Partial<Record<Resource, string>> = { enrichment: "contacts enriched" };
@@ -242,6 +255,10 @@ export async function printSummary(out: OutStream, raw: Report): Promise<void> {
     out.write(`\nDNS records for ${domain}:\n`);
     for (const line of dnsTable(records)) out.write(`  ${line}\n`);
   }
+  if (report.ids.length > 0) {
+    out.write(`\nId map (${report.sourceLabel} id → id here):\n`);
+    for (const line of idTable(report.ids)) out.write(`  ${line}\n`);
+  }
   if (report.manual.length > 0) {
     out.write("\nManual notes:\n");
     for (const { title, detail } of report.manual) out.write(`  ! ${title} — ${detail}\n`);
@@ -289,6 +306,18 @@ export function renderReportMd(raw: Report): string {
   }
   if (report.apiKeys.length > 0) {
     lines.push("", "## API keys to create", "", ...report.apiKeys.map((name) => `- ${name}`));
+  }
+  if (report.ids.length > 0) {
+    lines.push(
+      "",
+      "## Id map",
+      "",
+      `| Resource | Name | ${report.sourceLabel} id | MillionSend id |`,
+      "| --- | --- | --- | --- |",
+      ...report.ids.map(
+        (m) => `| ${m.resource} | ${m.name} | \`${m.sourceId}\` | \`${m.targetId}\` |`,
+      ),
+    );
   }
   if (report.manual.length > 0) {
     lines.push(

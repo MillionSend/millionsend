@@ -44,6 +44,15 @@ export interface ApplyOutcome {
   freshSecrets: { endpoint: string; secret: string }[];
   /** DNS records of the domains created this run, as the target reports them. */
   domainRecords: Record<string, DnsRecord[]>;
+  /** Source id → target id for the resources code refers to by id. */
+  ids: IdMapping[];
+}
+
+export interface IdMapping {
+  resource: "topics" | "segments";
+  name: string;
+  sourceId: string;
+  targetId: string;
 }
 
 export interface ApplyInput {
@@ -148,7 +157,7 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
     state.updatedAt = new Date().toISOString();
     input.save(state);
   };
-  const outcome: ApplyOutcome = { state, counts, freshSecrets: [], domainRecords: {} };
+  const outcome: ApplyOutcome = { state, counts, freshSecrets: [], domainRecords: {}, ids: [] };
 
   // Target ids by name (broadcast references) and by source id (contact associations).
   const topicByName = new Map<string, string>();
@@ -454,5 +463,20 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
     finish(step, tally("suppressions").failed, total);
   }
 
+  const mapping = (
+    resource: IdMapping["resource"],
+    rows: { id: string; name: string }[],
+    bySource: ReadonlyMap<string, string>,
+  ): IdMapping[] =>
+    rows.flatMap((row) => {
+      const targetId = bySource.get(row.id);
+      return targetId === undefined
+        ? []
+        : [{ resource, name: row.name, sourceId: row.id, targetId }];
+    });
+  outcome.ids = [
+    ...mapping("topics", snapshot.topics, topicBySource),
+    ...mapping("segments", snapshot.segments, segmentBySource),
+  ];
   return outcome;
 }

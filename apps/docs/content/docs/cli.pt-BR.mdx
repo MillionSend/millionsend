@@ -110,7 +110,7 @@ uma chave:
 | --- | --- |
 | `.millionsend/migrate-state.json` | Cada id que a ferramenta criou por recurso, cursores de retomada, o hash do plano. Gravado após cada lote, então uma execução interrompida retoma de onde parou. |
 | `.millionsend/migrate-report.json` | O relatório da última execução como dados. |
-| `.millionsend/migrate-report.md` | O mesmo relatório em Markdown: contagens, o checklist, os registros DNS por domínio, os itens manuais. |
+| `.millionsend/migrate-report.md` | O mesmo relatório em Markdown: contagens, o checklist, os registros DNS por domínio, o mapa de ids (ids de tópicos e segmentos na origem → ids no MillionSend, para código que os referencia), os itens manuais. |
 
 `.millionsend/` é acrescentado ao `.gitignore` quando existe um no diretório
 atual; a ferramenta avisa uma vez.

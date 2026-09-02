@@ -1,6 +1,6 @@
 {
   "name": "@millionsend/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Migrate an email account to MillionSend: contacts, segments, topics, templates, webhooks, domains and suppressions — read from the source provider, written to your MillionSend instance, re-run safe",
   "license": "MIT",
   "type": "module",

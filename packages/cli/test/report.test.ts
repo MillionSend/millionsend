@@ -22,6 +22,7 @@ const report: Report = {
     },
   ],
   apiKeys: [HOSTILE],
+  ids: [{ resource: "topics", name: HOSTILE, sourceId: "src-id", targetId: "dst-id" }],
   manual: [{ title: `topics/${HOSTILE}`, detail: HOSTILE }],
   failures: [{ resource: "topics", key: HOSTILE, message: HOSTILE }],
   offer: {
