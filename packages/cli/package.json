@@ -21,6 +21,9 @@
   "engines": {
     "node": ">=18"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/index.js --banner:js='#!/usr/bin/env node' --define:__CLI_VERSION__=\"\\\"$npm_package_version\\\"\"",
     "prepublishOnly": "pnpm build",
