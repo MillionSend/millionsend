@@ -134,8 +134,8 @@ runs). `--dry-run` prints the full plan and exits.
 `teardown` deletes everything the setup created, including all access keys of the
 `millionsend` user, so a running server stops sending. Re-running is safe, but each
 run mints a new access key — delete stale ones in the IAM console.
-(`@millionsend/setup` is the self-host setup tool; `@millionsend/cli` stays reserved
-for a future end-user CLI that talks to the MillionSend API.)
+(`@millionsend/setup` is the self-host setup tool; `@millionsend/cli` is the end-user
+CLI that talks to the MillionSend API — migrations from other providers.)
 
 No Node on the server? The same CLI ships inside the image — run it from the
 deploy directory, which it reads and writes as `/work` (the wizard writes

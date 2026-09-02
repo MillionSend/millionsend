@@ -1,8 +1,20 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
+// Relative import, not a workspace dependency: this file is bundled into
+// @millionsend/setup and run under tsx from the repo root, and neither path
+// resolves package names. The prompt kit lives in the MIT package so the
+// AGPL wizard consumes it, never the reverse.
+import {
+  banner,
+  dim,
+  type LineReader,
+  lineReader,
+  pickBannerTier,
+  selectPrompt,
+  wrapText,
+} from "../../cli/src/tty-ui.js";
 import { SES_REGIONS, type SesRegion } from "./domain-identity.js";
 import {
   createSetupClients,
@@ -40,7 +52,6 @@ import {
   stateSummary,
   withComposeProfile,
 } from "./setup-flow.js";
-import { banner, dim, pickBannerTier, selectPrompt, wrapText } from "./tty-ui.js";
 
 // Wrapped at print time to the live terminal width — baked-in line breaks
 // double-wrap on narrow terminals (soft wrap first, then the hard break).
@@ -62,68 +73,6 @@ const REGION_HINTS: Record<SesRegion, string> = {
 
 /** selectPrompt value for the free-form region escape hatch (TTY only). */
 const OTHER_REGION = "__other__";
-
-/**
- * readline/promises' question() drops lines that arrive while no question is
- * pending, so piping all answers at once (`printf 'a\nb\n' | cli`) loses every
- * answer after the first and the next question hangs forever. This reader
- * queues every line as it arrives; question() consumes the queue, and EOF
- * resolves pending/future questions with "" (the "accept default" answer).
- */
-export function lineReader(
-  input: NodeJS.ReadableStream = process.stdin,
-  output: NodeJS.WritableStream = process.stdout,
-) {
-  const rl = createInterface({ input, output });
-  const queue: string[] = [];
-  let waiting: ((line: string) => void) | undefined;
-  let ended = false;
-  rl.on("line", (line) => {
-    if (waiting) {
-      const resolve = waiting;
-      waiting = undefined;
-      resolve(line);
-    } else {
-      queue.push(line);
-    }
-  });
-  rl.on("close", () => {
-    ended = true;
-    if (waiting) {
-      const resolve = waiting;
-      waiting = undefined;
-      resolve("");
-    }
-  });
-  return {
-    question(prompt: string): Promise<string> {
-      // Hand the prompt to readline instead of writing it to output directly:
-      // on a TTY, readline repaints the line on every edit (backspace, arrows)
-      // using only the prompt it was given, so a prompt it never saw gets
-      // erased down to nothing on the first backspace. On non-TTY output
-      // rl.prompt() writes the prompt text verbatim — piped bytes unchanged.
-      // After EOF readline has closed itself and prompt() would throw; the
-      // direct write keeps the prompt-then-"" contract byte-identical.
-      if (ended) {
-        output.write(prompt);
-      } else {
-        rl.setPrompt(prompt);
-        rl.prompt();
-      }
-      const line = queue.shift();
-      if (line !== undefined) return Promise.resolve(line);
-      if (ended) return Promise.resolve("");
-      return new Promise((resolve) => {
-        waiting = resolve;
-      });
-    },
-    close() {
-      rl.close();
-    },
-  };
-}
-
-type LineReader = ReturnType<typeof lineReader>;
 
 export type AuthAction = "proceed" | "offer-login" | "hint-exit";
 

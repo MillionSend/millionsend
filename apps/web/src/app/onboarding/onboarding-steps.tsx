@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { CopyGlyph } from "@/components/copy-chip";
 import { BtnSpinner } from "@/components/spinner";
 import { StatusBadge } from "@/components/status-badge";
+import { MIGRATE_DOCS_URL } from "@/lib/docs-links";
 import { jsSingleQuote, shellSingleQuote } from "@/lib/escape";
 import { formatDayTime, formatUtcTimestamp, maskApiKey } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
@@ -488,18 +489,20 @@ export function OnboardingSteps({
             </div>
             <div
               className="ms-meta-grid"
-              style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}
+              style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}
             >
               {(
                 [
                   { key: "domains", href: "/domains" },
                   { key: "webhooks", href: "/webhooks" },
                   { key: "team", href: "/settings" },
+                  { key: "migrate", href: MIGRATE_DOCS_URL, external: true },
                 ] as const
               ).map((card) => (
                 <Link
                   key={card.key}
                   href={card.href}
+                  {...("external" in card ? { target: "_blank", rel: "noreferrer" } : {})}
                   style={{
                     textDecoration: "none",
                     background: "var(--ms-panel)",

@@ -2,9 +2,9 @@
 
 The self-hosting setup wizard for
 [MillionSend](https://github.com/MillionSend/millionsend). One command in an
-empty directory takes you from nothing to a running instance. Deliberately not
-named `@millionsend/cli` — that name stays reserved for a future end-user CLI
-that talks to the MillionSend API.
+empty directory takes you from nothing to a running instance. Not to be
+confused with `@millionsend/cli`, the end-user CLI that talks to the
+MillionSend API (migrations from other providers).
 
 ```sh
 npx @millionsend/setup            # the wizard

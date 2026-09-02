@@ -1,0 +1,13 @@
+[
+  {
+    "id": "78261eea-8f8b-4381-83c6-79fa7120f1cf",
+    "name": "Active Users",
+    "audience_id": "78261eea-8f8b-4381-83c6-79fa7120f1cf",
+    "filter": {
+      "operator": "and",
+      "conditions": [{ "field": "plan", "op": "eq", "value": "pro" }]
+    },
+    "created_at": "2023-10-06 23:47:56.678+00",
+    "member_ids": ["e169aa45-1ecf-4183-9955-b1499d5701d3", "a2b3c4d5-e6f7-4a8b-9c0d-1e2f3a4b5c6d"]
+  }
+]

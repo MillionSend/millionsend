@@ -118,6 +118,40 @@ describe("POST /suppressions", () => {
       expect(await res.json()).toMatchObject({ statusCode: 422, name: "validation_error" });
     }
   });
+
+  it("records an explicit origin on new rows only, and refuses unsubscribe", async () => {
+    for (const [origin, reason] of [
+      ["bounce", "hard_bounce"],
+      ["complaint", "complaint"],
+      ["manual", "manual"],
+    ] as const) {
+      const res = await call(fullKey, "POST", "/suppressions", {
+        email: `origin-${origin}@example.com`,
+        origin,
+      });
+      expect(res.status, origin).toBe(200);
+      const { id } = (await res.json()) as { id: string };
+      expect((await readRow(id))?.reason).toBe(reason);
+      expect(await (await call(fullKey, "GET", `/suppressions/${id}`)).json()).toMatchObject({
+        origin,
+        source_id: null,
+      });
+    }
+
+    // An existing manual row is not rewritten as a bounce.
+    const manual = await suppress("stays-manual@example.com");
+    const again = await call(fullKey, "POST", "/suppressions", {
+      email: "stays-manual@example.com",
+      origin: "bounce",
+    });
+    expect(((await again.json()) as { id: string }).id).toBe(manual);
+    expect((await readRow(manual))?.reason).toBe("manual");
+
+    for (const origin of ["unsubscribe", "hard_bounce", ""]) {
+      const res = await call(fullKey, "POST", "/suppressions", { email: "x@example.com", origin });
+      expect(res.status, origin).toBe(422);
+    }
+  });
 });
 
 describe("GET /suppressions/{id-or-email}", () => {
@@ -304,6 +338,30 @@ describe("POST /suppressions/batch/add", () => {
     expect((await readRow(body.data[0]?.id ?? ""))?.email).toBe("batch-a@example.com");
     expect((await readRow(body.data[1]?.id ?? ""))?.email).toBe("batch-b@example.com");
     expect((await readRow(existing))?.reason).toBe("hard_bounce");
+  });
+
+  it("applies one origin to every row it creates, leaving existing rows alone", async () => {
+    const existing = await suppress("batch-origin-existing@example.com");
+    const res = await call(fullKey, "POST", "/suppressions/batch/add", {
+      emails: [
+        "batch-origin-a@example.com",
+        "batch-origin-b@example.com",
+        "batch-origin-existing@example.com",
+      ],
+      origin: "complaint",
+    });
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as { data: { id: string }[] };
+    expect((await readRow(data[0]?.id ?? ""))?.reason).toBe("complaint");
+    expect((await readRow(data[1]?.id ?? ""))?.reason).toBe("complaint");
+    expect(data[2]?.id).toBe(existing);
+    expect((await readRow(existing))?.reason).toBe("manual");
+
+    const bad = await call(fullKey, "POST", "/suppressions/batch/add", {
+      emails: ["x@example.com"],
+      origin: "unsubscribe",
+    });
+    expect(bad.status).toBe(422);
   });
 
   it("accepts more than Resend's 100 and caps at 1000", async () => {

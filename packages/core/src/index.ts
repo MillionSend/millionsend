@@ -202,7 +202,7 @@ export {
   verifyUnsubscribeToken,
 } from "./unsubscribe.js";
 export { isLoopbackUrl } from "./url.js";
-export { DAY_MS, utcDay } from "./utc-day.js";
+export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
 export {
   buildWebhookPayload,
   decryptWebhookSecret,

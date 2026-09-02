@@ -61,6 +61,11 @@
       "body": "Members manage emails, domains, and webhooks.",
       "link": "Team →"
     },
+    "migrate": {
+      "title": "Migrate from Resend",
+      "body": "One command moves contacts, segments, templates, webhooks and domains.",
+      "link": "Guide ↗"
+    },
     "instance": "Send rate and email retention are instance settings — set them in <link>Settings</link>."
   },
   "stepSes": {

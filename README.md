@@ -32,6 +32,7 @@ the [Discussions](https://github.com/orgs/MillionSend/discussions) to follow alo
 | SMTP relay | ✅ | Drop-in SMTP on port 2587; authenticate with an API key. |
 | Dashboard (en/pt-BR) | ✅ | Full dashboard in English and Brazilian Portuguese. |
 | Self-host (Docker) | ✅ | Compose file plus a setup wizard; sends through your own AWS SES. |
+| Migrate from Resend | ✅ | `npx @millionsend/cli migrate --from resend` moves contacts, segments, topics, templates, webhooks, domains and suppressions; read-only against Resend, safe to re-run before cutover. |
 
 ## Run it locally
 

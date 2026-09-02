@@ -212,6 +212,9 @@ const scheduledAtSchema = z.string().superRefine((v, ctx) => {
   }
 });
 
+export const TEMPLATE_UNSUPPORTED_MESSAGE =
+  "template is not supported yet — send html/text; template-based sending is coming";
+
 export const sendEmailRequestSchema = z
   .object({
     from: fromAddress
@@ -260,6 +263,17 @@ export const sendEmailRequestSchema = z
     headers: customHeadersSchema
       .optional()
       .describe("Extra message headers (transport headers are rejected)"),
+    // Declared so the key survives parsing and can be refused loudly; other
+    // unknown keys stay silently dropped for Resend compatibility.
+    template: z
+      .unknown()
+      .optional()
+      .describe("Not supported yet: any value is a 422. Send html/text instead"),
+  })
+  .refine((v) => v.template === undefined, {
+    message: TEMPLATE_UNSUPPORTED_MESSAGE,
+    path: ["template"],
+    abort: true,
   })
   .refine((v) => v.html !== undefined || v.text !== undefined, {
     message: "Either html or text must be provided",
@@ -393,6 +407,32 @@ export const deliverabilityResponseSchema = z
     score_version: z.number().int(),
   })
   .openapi("DeliverabilityResponse");
+
+/**
+ * GET /usage (MillionSend extension): the plan and quota picture a client
+ * needs before bulk work. Plan and limits are null off Cloud, where no plan
+ * applies.
+ */
+export const usageResponseSchema = z
+  .object({
+    object: z.literal("usage"),
+    cloud: z.boolean().describe("True on MillionSend Cloud, where plan limits apply"),
+    plan: z.enum(["free", "pro", "scale"]).nullable().describe("Effective plan; null self-hosted"),
+    limits: z.object({
+      emails_per_day: z.number().int().nullable().describe("null = unlimited or self-hosted"),
+      domains: z.number().int().nullable().describe("null = unlimited or self-hosted"),
+    }),
+    today: z.object({
+      emails_sent: z.number().int().describe("Emails accepted so far this UTC day"),
+      resets_at: z.string().describe("Next UTC midnight, when the daily counter resets"),
+    }),
+    team: z.object({ id: z.uuid(), name: z.string() }),
+    app_url: z
+      .string()
+      .nullable()
+      .describe("Dashboard origin, for building links; null when unset"),
+  })
+  .openapi("UsageResponse");
 
 /**
  * Resend SDK pagination (buildPaginationQuery): ?limit=&after= / ?before=,
@@ -1133,9 +1173,22 @@ export const listSuppressionsQuerySchema = listQuerySchema.extend({
     .describe("Only suppressions of this origin: bounce, complaint, manual or unsubscribe"),
 });
 
+/**
+ * Origin a caller may record on a new suppression (an import from another
+ * provider keeps its bounce/complaint history). `unsubscribe` is reserved
+ * for the one-click opt-out flow.
+ */
+const suppressionWriteOriginSchema = z
+  .enum(["bounce", "complaint", "manual"])
+  .optional()
+  .describe(
+    "Origin recorded on rows this request creates (default manual); an address already suppressed keeps its origin",
+  );
+
 export const createSuppressionRequestSchema = z
   .object({
     email: z.email().describe("Bare email address to block; stored normalized (lowercase)"),
+    origin: suppressionWriteOriginSchema,
   })
   .openapi("CreateSuppressionRequest");
 
@@ -1146,6 +1199,7 @@ export const batchAddSuppressionsRequestSchema = z
       .min(1)
       .max(SUPPRESSION_BATCH_MAX)
       .describe(`Addresses to block, up to ${SUPPRESSION_BATCH_MAX}; duplicates collapse`),
+    origin: suppressionWriteOriginSchema,
   })
   .openapi("BatchAddSuppressionsRequest");
 

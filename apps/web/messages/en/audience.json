@@ -73,6 +73,12 @@
     "addContacts": "Add contacts",
     "addManually": "Add manually",
     "importCsv": "Import CSV",
+    "importResend": "Import from Resend…",
+    "migrate": {
+      "title": "Import from Resend",
+      "body": "Runs on your machine; your Resend key never leaves it.",
+      "docs": "Migration guide"
+    },
     "email": "Email",
     "status": "Status",
     "segments": "Segments",

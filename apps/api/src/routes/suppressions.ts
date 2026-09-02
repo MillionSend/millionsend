@@ -65,9 +65,14 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
    * Blocks every address, returning one id per distinct normalized address
    * in first-occurrence order. An address already suppressed for any reason
    * (erased rows included) keeps its row untouched and reports its id:
-   * suppressing is "make sure this is blocked", not "record why".
+   * suppressing is "make sure this is blocked", not "record why". `reason`
+   * lands only on rows this call creates.
    */
-  const ensureSuppressed = async (teamId: string, emails: string[]): Promise<string[]> => {
+  const ensureSuppressed = async (
+    teamId: string,
+    emails: string[],
+    reason: SuppressionReason,
+  ): Promise<string[]> => {
     const entries = [...new Set(emails.map((e) => normalizeAddress(extractAddrSpec(e))))].map(
       (address) => ({ address, hashes: suppressionHashesFor(address) }),
     );
@@ -95,7 +100,7 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
             teamId,
             email: e.address,
             emailHash: hashRecipient(e.address),
-            reason: "manual" as const,
+            reason,
           })),
         )
         .onConflictDoUpdate({
@@ -123,14 +128,19 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
         200: {
           content: { "application/json": { schema: batchAddSuppressionsResponseSchema } },
           description:
-            "One entry per distinct address (case-insensitive) in input order; addresses already suppressed for any reason return their existing id. Accepts up to 1000 addresses (Resend: 100).",
+            "One entry per distinct address (case-insensitive) in input order; addresses already suppressed for any reason return their existing id and keep their origin. New rows record the request's origin (bounce, complaint or manual; default manual). Accepts up to 1000 addresses (Resend: 100).",
         },
         422: jsonErr("Validation error"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
-      const ids = await ensureSuppressed(auth.teamId, c.req.valid("json").emails);
+      const body = c.req.valid("json");
+      const ids = await ensureSuppressed(
+        auth.teamId,
+        body.emails,
+        reasonByOrigin[body.origin ?? "manual"],
+      );
       return c.json({ data: ids.map((id) => ({ object: "suppression" as const, id })) }, 200);
     },
   );
@@ -193,14 +203,19 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
         200: {
           content: { "application/json": { schema: suppressionIdResponseSchema } },
           description:
-            "Address blocked with origin manual. Idempotent: an address already suppressed for any reason (bounce, complaint, unsubscribe, manual) keeps its entry and its existing id is returned.",
+            "Address blocked with the given origin (bounce, complaint or manual; default manual). Idempotent: an address already suppressed for any reason (bounce, complaint, unsubscribe, manual) keeps its entry and origin, and its existing id is returned.",
         },
         422: jsonErr("Validation error"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
-      const [id] = await ensureSuppressed(auth.teamId, [c.req.valid("json").email]);
+      const body = c.req.valid("json");
+      const [id] = await ensureSuppressed(
+        auth.teamId,
+        [body.email],
+        reasonByOrigin[body.origin ?? "manual"],
+      );
       if (!id) throw new Error("suppression upsert returned no row");
       return c.json({ object: "suppression" as const, id }, 200);
     },

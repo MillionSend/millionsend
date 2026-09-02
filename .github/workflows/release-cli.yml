@@ -1,0 +1,39 @@
+name: release-cli
+
+# Publishes packages/cli (@millionsend/cli) at its current version to npm via
+# Trusted Publishing (OIDC): configure npmjs.com → package @millionsend/cli →
+# Settings → Trusted Publisher → GitHub Actions, repo MillionSend/millionsend,
+# workflow release-cli.yml. No token stored. npm only lets a Trusted Publisher
+# be configured on a package that already exists, so the very first version
+# is published by a maintainer from a laptop (`npm publish` in packages/cli);
+# every later version goes through this workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC for npm Trusted Publishing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The CLI's tests drive the built bundle end to end against the real API
+      # on PGlite; a green run here is the gate before anything reaches npm.
+      - run: pnpm --filter @millionsend/cli typecheck
+      - run: pnpm --filter @millionsend/cli test
+      # npm ≥ 11.5.1 exchanges the OIDC token itself; publish runs
+      # prepublishOnly (esbuild bundle).
+      - run: npm install -g npm@11.8.0
+      - run: npm publish
+        working-directory: packages/cli

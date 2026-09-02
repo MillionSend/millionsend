@@ -61,6 +61,11 @@
       "body": "Membros gerenciam e-mails, domínios e webhooks.",
       "link": "Time →"
     },
+    "migrate": {
+      "title": "Migre do Resend",
+      "body": "Um comando move contatos, segmentos, templates, webhooks e domínios.",
+      "link": "Guia ↗"
+    },
     "instance": "Taxa de envio e retenção de e-mails são configurações da instância — defina em <link>Configurações</link>."
   },
   "stepSes": {

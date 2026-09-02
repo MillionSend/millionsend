@@ -1,0 +1,23 @@
+[
+  {
+    "id": "34a080c9-b17d-4187-ad80-5af20266e535",
+    "current_version_id": "9c3f4a2b-1d2e-4f5a-8b6c-7d8e9f0a1b2c",
+    "name": "Welcome",
+    "alias": "welcome",
+    "from": "Acme <hello@example.com>",
+    "subject": "Welcome, {{{first_name}}}",
+    "reply_to": null,
+    "html": "<h1>Welcome, {{{first_name}}}</h1>",
+    "text": "Welcome, {{{first_name}}}",
+    "variables": [
+      { "id": "v1", "key": "first_name", "type": "string", "fallback_value": "there" },
+      { "id": "v2", "key": "credits", "type": "number", "fallback_value": 10 },
+      { "id": "v3", "key": "flags", "type": "object", "fallback_value": { "beta": true } }
+    ],
+    "status": "published",
+    "published_at": "2023-10-06 23:47:56.678+00",
+    "created_at": "2023-10-06 23:47:56.678+00",
+    "updated_at": "2023-10-06 23:47:56.678+00",
+    "has_unpublished_versions": false
+  }
+]

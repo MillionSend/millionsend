@@ -117,6 +117,27 @@ describe("official resend SDK: suppressions", () => {
     expect(unsubscribes.data?.data).toEqual([]);
   });
 
+  it("accepts the superset origin on add (raw request; the SDK type has no origin)", async () => {
+    const added = await resend.post<{ object: string; id: string }>("/suppressions", {
+      email: "imported-bounce@example.com",
+      origin: "bounce",
+    });
+    expect(added.error).toBeNull();
+    const got = await resend.suppressions.get("imported-bounce@example.com");
+    expect(got.data).toMatchObject({ id: added.data?.id, origin: "bounce", source_id: null });
+
+    const batch = await resend.post<{ data: { id: string }[] }>("/suppressions/batch/add", {
+      emails: ["imported-complaint@example.com"],
+      origin: "complaint",
+    });
+    expect(batch.error).toBeNull();
+    const one = await resend.suppressions.get("imported-complaint@example.com");
+    expect(one.data?.origin).toBe("complaint");
+    await resend.suppressions.batch.remove({
+      emails: ["imported-bounce@example.com", "imported-complaint@example.com"],
+    });
+  });
+
   it("422s an unknown origin filter", async () => {
     const bad = await resend.suppressions.list({ origin: "hard_bounce" as SuppressionOrigin });
     expect(bad.data).toBeNull();

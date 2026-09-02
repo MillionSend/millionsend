@@ -60,6 +60,7 @@ import { registerContactPropertyRoutes } from "./routes/contact-properties.js";
 import { type DomainsSesDeps, registerDomainRoutes } from "./routes/domains.js";
 import { registerSuppressionRoutes } from "./routes/suppressions.js";
 import { registerTemplateRoutes } from "./routes/templates.js";
+import { registerUsageRoutes } from "./routes/usage.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import {
   addContactSegmentResponseSchema,
@@ -2728,6 +2729,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   registerTemplateRoutes(app, deps.db);
 
   app.use("/deliverability", requireApiKey, enforceRateLimit, requireFullAccess);
+
+  app.use("/usage", requireApiKey, enforceRateLimit, requireFullAccess);
+  registerUsageRoutes(app, deps);
 
   const sendRoute = createRoute({
     method: "post",

@@ -1,22 +1,68 @@
 ---
 title: Migrate from Resend
-description: Point the Resend SDK you already run at MillionSend — the wire format is identical.
+description: One command moves your Resend account; two environment lines move your code — the wire format is identical.
 ---
 
 MillionSend's REST API is wire-compatible with Resend's: same endpoints, same
 request and response shapes. Migrating is a configuration change, not a
-rewrite.
+rewrite. The account data — contacts, segments, topics, templates, webhooks,
+domains, suppressions — moves with one command.
 
-## 1. Create your account and verify your domain
+## 1. Move your account
 
-Sign up ([MillionSend Cloud](https://millionsend.com), or your own
-[self-hosted](/self-hosting) instance), add your sending domain under
-**Domains**, and add the DKIM and MAIL FROM records it shows you. MillionSend
-uses its own DKIM keypair, so the records are new even for a domain that
-already sends through Resend — both can stay verified side by side while you
-migrate.
+Create an `ms_` API key with full access under **API keys** (MillionSend
+Cloud, or your own [self-hosted](/self-hosting) instance), then run, on your
+machine:
 
-Then create an `ms_` API key under **API keys**.
+```sh
+npx @millionsend/cli migrate --from resend
+```
+
+It asks for your Resend key (full access) and your MillionSend key, reads
+your Resend account, shows a plan, waits for confirmation, applies it and
+prints a summary. Self-hosted, name your instance's API URL:
+
+```sh
+npx @millionsend/cli migrate --from resend --to-url https://api.your-instance
+```
+
+What it does:
+
+- **Resend is only read.** Every request against Resend is a `GET` to a
+  documented endpoint; nothing there is created, changed or deleted. It is
+  throttled to 8 requests per second by default (Resend's limit is 10 per
+  team, shared with your production sending; `--rps` lowers it).
+- **Your keys never leave your machine.** The tool talks to `api.resend.com`
+  and to your MillionSend API only. Keys live in memory for the run, are never
+  written to a file, and are redacted from every log line. No telemetry, no
+  update check.
+- **Two passes.** Pass 1 creates properties, topics, segments, domains,
+  webhooks, templates and suppressions and upserts contacts with their
+  segment memberships. Pass 2 — only when the account uses contact properties
+  or topics — reads each contact once more to bring those over. Pass 2 is
+  resumable and skippable (`--skip enrichment`).
+- **Re-run before cutover.** Every run is a diff: existing rows are updated
+  when they differ and left alone when they match, contacts are upserted by
+  email. Run the same command again right before you switch traffic and the
+  contacts that arrived in between come across.
+
+| Resource | What moves |
+| --- | --- |
+| Contacts | Email, names, `unsubscribed`, properties, topic subscriptions, segment memberships. Opt-outs are preserved; nobody is re-subscribed. |
+| Segments, topics, properties | Matched by name / name / key: created when missing, updated when different. |
+| Templates | Name, alias, subject, html, text. `from`, `reply_to` and `variables` cannot be stored — listed as manual steps. |
+| Webhooks | Endpoint and events. The signing secret is copied, so the receiver you already run keeps verifying (deliveries carry the `svix-*` headers). `--fresh-webhook-secrets` mints new ones. Events outside MillionSend's seven `email.*` types are dropped per webhook and listed. |
+| Suppressions | Bounces, complaints and manual entries, with their origin. |
+| Domains | Created with region, return path and tracking settings. DNS records must be added again — see step 3. |
+| Broadcasts | Drafts and scheduled ones import as drafts. Sent ones are skipped unless `--include-sent`. |
+
+What cannot move: **API keys** (Resend exposes their names only — the report
+lists them as a to-do), **DKIM/DNS records** (keys are per provider), and
+**sent email history**. Audiences, deprecated in Resend, are skipped —
+segments cover them.
+
+Flags, environment variables, files, exit codes and CI usage are on the
+[CLI reference](/cli).
 
 ## 2. Point your existing code at MillionSend
 
@@ -39,32 +85,27 @@ import { MillionSend } from "millionsend";
 const ms = new MillionSend("ms_...", { baseUrl: "https://api.millionsend.com" });
 ```
 
-## 3. Re-create what lives outside the request path
+## 3. Finish what the CLI lists
 
-- **Webhooks** — endpoints are per-platform state; re-create yours under
-  **Webhooks** in the dashboard, via `POST /webhooks`, or with the MCP's
-  `create_webhook` — verification is Standard Webhooks (`whsec_` secret,
-  `webhook-id`/`-timestamp`/`-signature` headers, plus the `svix-*` aliases
-  Resend delivers), same as Resend. Pass your existing secret as
-  `signing_secret` on create (Resend returns it on `GET /webhooks/{id}`) and
-  the receiver you already run keeps verifying unchanged.
-- **Unsubscribe placeholders** — broadcast bodies using
-  `{{{RESEND_UNSUBSCRIBE_URL}}}` keep working: it is a supported alias of
-  `{{{UNSUBSCRIBE_URL}}}`, replaced per-recipient with the hosted
-  unsubscribe link. No template changes on the way in, none on a rollback.
-- **Contacts** — import via CSV under **Audience**, `POST /contacts` with
-  the same payloads your Resend integration used, or
-  [`POST /contacts/batch`](/concepts/contacts#bulk-create) for up to 1000 at
-  a time.
-- **Suppressions** — export your bounce and complaint lists from Resend and
-  load them with
-  [`POST /suppressions/batch/add`](/concepts/suppressions#api) (1000
-  addresses per call). They land with origin `manual`; new bounces and
-  complaints from your own traffic accumulate on top.
-- **Templates** — re-create them via `POST /templates` with the same `name`,
-  `subject`, `html`, `text` and `alias`. Every save is live (no
-  draft/publish step), and `from`, `reply_to` and `variables` are rejected
-  rather than dropped — see [Templates](/concepts/templates).
+The summary ends with a checklist. Three items are always on it:
+
+- **Add DNS records for each domain.** MillionSend uses its own DKIM keypair,
+  so the records are new even for a domain that already sends through
+  Resend. The report prints a copy-ready table of the records per domain
+  (also under **Domains** in the dashboard). Both providers can stay verified
+  side by side while you migrate.
+- **Set `RESEND_BASE_URL`** (step 2) in every environment that sends.
+- **Create API keys** — one per name the report lists (for example `prod`,
+  `staging`) under **API keys**.
+
+Two more appear when they apply: template `from` / `reply_to` values to set
+per send, and webhook event types MillionSend does not emit. Broadcast bodies
+need no change: `{{{RESEND_UNSUBSCRIBE_URL}}}` is a supported alias of
+`{{{UNSUBSCRIBE_URL}}}`.
 
 Send one email through the new base URL and watch it move to **Delivered** on
 the Emails page — that is the whole migration.
+
+---
+
+Resend is a trademark of Plus Five Five, Inc. MillionSend is not affiliated with or endorsed by Resend.

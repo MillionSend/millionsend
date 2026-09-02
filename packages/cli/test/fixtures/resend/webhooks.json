@@ -1,0 +1,10 @@
+[
+  {
+    "id": "479e3145-dd38-476b-932c-529ceb705947",
+    "endpoint": "https://webhook.example.com/handler",
+    "events": ["email.sent", "email.delivered", "contact.created"],
+    "status": "enabled",
+    "created_at": "2023-10-06 23:47:56.678+00",
+    "signing_secret": "whsec_dGhpcyBpcyBhIGZha2Ugc2VjcmV0MTIz"
+  }
+]

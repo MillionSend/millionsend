@@ -1,0 +1,52 @@
+[
+  {
+    "id": "e169aa45-1ecf-4183-9955-b1499d5701d3",
+    "email": "steve.wozniak@gmail.com",
+    "first_name": "Steve",
+    "last_name": "Wozniak",
+    "created_at": "2023-10-06 23:47:56.678+00",
+    "unsubscribed": false,
+    "properties": { "plan": "pro", "seats": 5 },
+    "topics": [
+      {
+        "id": "b6d24b8e-af0b-4c3c-be0c-359bbd97381e",
+        "name": "Product updates",
+        "description": "New features and changes",
+        "subscription": "opt_in"
+      },
+      {
+        "id": "c7e35c9f-b01c-4d4d-9f1d-46acce08492f",
+        "name": "Newsletter",
+        "description": null,
+        "subscription": "opt_out"
+      }
+    ]
+  },
+  {
+    "id": "a2b3c4d5-e6f7-4a8b-9c0d-1e2f3a4b5c6d",
+    "email": "ada@example.org",
+    "first_name": "Ada",
+    "last_name": null,
+    "created_at": "2024-05-01 12:00:00.000+00",
+    "unsubscribed": true,
+    "properties": { "plan": "pro", "seats": null },
+    "topics": [
+      {
+        "id": "b6d24b8e-af0b-4c3c-be0c-359bbd97381e",
+        "name": "Product updates",
+        "description": "New features and changes",
+        "subscription": "opt_out"
+      }
+    ]
+  },
+  {
+    "id": "f0e1d2c3-b4a5-4968-8776-655443322110",
+    "email": "grace@example.net",
+    "first_name": null,
+    "last_name": null,
+    "created_at": "2025-01-20 15:45:00.000+00",
+    "unsubscribed": false,
+    "properties": {},
+    "topics": []
+  }
+]

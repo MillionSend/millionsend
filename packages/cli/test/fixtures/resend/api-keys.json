@@ -1,0 +1,14 @@
+[
+  {
+    "id": "91f3200a-df72-4654-b0cd-f202395f5354",
+    "name": "Production",
+    "created_at": "2023-04-08 00:11:13.110779+00",
+    "last_used_at": "2026-08-30 12:00:00.000+00"
+  },
+  {
+    "id": "b0f9c6a2-1f3e-4a4c-9a3e-2f6d3f2f9c01",
+    "name": "Staging",
+    "created_at": "2023-10-06 23:47:56.678+00",
+    "last_used_at": null
+  }
+]

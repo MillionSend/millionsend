@@ -891,6 +891,45 @@ describe("recipient validation", () => {
   });
 });
 
+describe("template sends are refused, not silently stripped", () => {
+  const withTemplate = { ...validBody, template: { id: "welcome", variables: { name: "Ada" } } };
+  const notSupported = {
+    statusCode: 422,
+    name: "validation_error",
+    message: expect.stringMatching(/template is not supported yet — send html\/text/),
+  };
+
+  it("422s POST /emails even when html/text is present", async () => {
+    const res = await post(withTemplate);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject(notSupported);
+    // Template-only bodies name the template, not the missing html/text.
+    const { text: _text, ...templateOnly } = withTemplate;
+    const only = await post(templateOnly);
+    expect(only.status).toBe(422);
+    expect(((await only.json()) as { message: string }).message).not.toMatch(/html or text/);
+  });
+
+  it("422s POST /emails/batch on the offending index, accepting nothing", async () => {
+    const before = enqueuedSends.length;
+    const res = await app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify([validBody, withTemplate]),
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      ...notSupported,
+      message: expect.stringMatching(/^emails\.1: template: template is not supported yet/),
+    });
+    expect(enqueuedSends.length).toBe(before);
+  });
+
+  it("still drops other unknown keys silently", async () => {
+    expect((await post({ ...validBody, react: "<b/>", not_a_field: 1 })).status).toBe(200);
+  });
+});
+
 describe("quota backlog cap", () => {
   it("429s daily_quota_exceeded once the parked backlog is full, on single and batch sends", async () => {
     // Free plan: 100/day, backlog capped at 3 days' worth.

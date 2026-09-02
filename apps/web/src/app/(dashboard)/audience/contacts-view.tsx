@@ -9,6 +9,7 @@ import { ResourceApiButton } from "@/components/api-sheet";
 import { ChipMultiSelect } from "@/components/chip-multi-select";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { ContactAvatar } from "@/components/contact-avatar";
+import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { GrowthSparkline } from "@/components/growth-sparkline";
@@ -25,7 +26,9 @@ import { StatBlock } from "@/components/stat-block";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { type CsvContactRow, parseCsvContacts } from "@/lib/csv";
+import { MIGRATE_DOCS_URL } from "@/lib/docs-links";
 import { formatDayUtc } from "@/lib/format";
+import { migrateCommand } from "@/lib/migrate-command";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
@@ -90,8 +93,16 @@ function ContactsSkeleton() {
   );
 }
 
-/** "+ Add contacts" split: one primary trigger opening the two entry paths. */
-function AddContactsSplit({ onManual, onCsv }: { onManual: () => void; onCsv: () => void }) {
+/** "+ Add contacts" split: one primary trigger opening the three entry paths. */
+function AddContactsSplit({
+  onManual,
+  onCsv,
+  onMigrate,
+}: {
+  onManual: () => void;
+  onCsv: () => void;
+  onMigrate: () => void;
+}) {
   const t = useTranslations("audience");
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -130,6 +141,7 @@ function AddContactsSplit({ onManual, onCsv }: { onManual: () => void; onCsv: ()
             [
               [t("contacts.addManually"), onManual],
               [t("contacts.importCsv"), onCsv],
+              [t("contacts.importResend"), onMigrate],
             ] as const
           ).map(([label, onSelect]) => (
             <button
@@ -151,8 +163,8 @@ function AddContactsSplit({ onManual, onCsv }: { onManual: () => void; onCsv: ()
   );
 }
 
-/** The team's Contacts surface, rendered at /audience. */
-export function AudienceContactsView() {
+/** The team's Contacts surface, rendered at /audience. `migrateToUrl` is null on Cloud. */
+export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | null }) {
   const t = useTranslations("audience");
   const common = useTranslations("common");
   const locale = useLocale();
@@ -181,6 +193,7 @@ export function AudienceContactsView() {
     null,
   );
   const [importError, setImportError] = useState(false);
+  const [migrateOpen, setMigrateOpen] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; email: string } | null>(null);
   const [eraseOpen, setEraseOpen] = useState(false);
@@ -306,6 +319,7 @@ export function AudienceContactsView() {
     setImportResult(null);
     setImportError(false);
   }, []);
+  const closeMigrate = useCallback(() => setMigrateOpen(false), []);
   const closeBulkModal = useCallback(() => setBulkModal(null), []);
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
@@ -374,7 +388,13 @@ export function AudienceContactsView() {
   }, [bulkBusy, selected, t, bulkDeleteMutation.mutateAsync, clearSelection, invalidate]);
 
   const anyModalOpen =
-    addOpen || importOpen || eraseOpen || deleteTarget !== null || bulkModal !== null || bulkBusy;
+    addOpen ||
+    importOpen ||
+    migrateOpen ||
+    eraseOpen ||
+    deleteTarget !== null ||
+    bulkModal !== null ||
+    bulkBusy;
 
   // Bulk keyboard bindings, live while a selection exists and no dialog or
   // text field owns the keys: E = edit menu, ⌫ = delete, Esc = clear.
@@ -466,7 +486,11 @@ export function AudienceContactsView() {
                 <ExportCsvLink href={`/export/contacts${exportQs ? `?${exportQs}` : ""}`} />
               </>
             ) : null}
-            <AddContactsSplit onManual={() => setAddOpen(true)} onCsv={() => setImportOpen(true)} />
+            <AddContactsSplit
+              onManual={() => setAddOpen(true)}
+              onCsv={() => setImportOpen(true)}
+              onMigrate={() => setMigrateOpen(true)}
+            />
             <ResourceApiButton resource="contacts" />
           </>
         }
@@ -901,6 +925,23 @@ export function AudienceContactsView() {
             </ModalFooter>
           </>
         )}
+      </Modal>
+
+      <Modal open={migrateOpen} onClose={closeMigrate} title={t("contacts.migrate.title")}>
+        <p style={{ margin: "0 0 14px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
+          {t("contacts.migrate.body")}
+        </p>
+        <CopyChip value={migrateCommand(migrateToUrl)} title={migrateCommand(migrateToUrl)} />
+        <p style={{ margin: "14px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
+          <a href={MIGRATE_DOCS_URL} target="_blank" rel="noreferrer">
+            {t("contacts.migrate.docs")} ↗
+          </a>
+        </p>
+        <ModalFooter>
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={closeMigrate}>
+            {common("close")} <span className="ms-keycap">Esc</span>
+          </button>
+        </ModalFooter>
       </Modal>
 
       <Modal

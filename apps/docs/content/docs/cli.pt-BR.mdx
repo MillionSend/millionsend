@@ -1,0 +1,188 @@
+---
+title: CLI
+description: "@millionsend/cli — mova uma conta de e-mail para o MillionSend pelo terminal: plan, apply, status, rollback."
+---
+
+`@millionsend/cli` move uma conta de e-mail para o MillionSend — Cloud ou sua
+própria instância. Ele lê o provedor de origem, compara com o destino, aplica
+a diferença e grava um relatório. Hoje a única origem é o Resend.
+
+## Instalação
+
+Node 18 ou mais novo, sem dependências. Rode sem instalar:
+
+```sh
+npx @millionsend/cli migrate --from resend
+```
+
+Ou instale uma vez:
+
+```sh
+npm install -g @millionsend/cli
+millionsend --version
+```
+
+## Comandos
+
+```sh
+millionsend migrate --from resend                          # conectar, escolher recursos, planejar, confirmar, aplicar, resumo
+millionsend migrate plan --from resend [--out plan.json]   # somente leitura; saída 0 nada a fazer, 2 há mudanças, 1 erro
+millionsend migrate apply [plan.json] [--yes]              # aplica um plano salvo, ou planeja e aplica de uma vez
+millionsend migrate status                                 # o que a última execução criou e o que falta
+millionsend migrate rollback [--yes]                       # exclui apenas o que esta ferramenta criou
+millionsend --help | --version
+```
+
+- **`migrate`** é o caminho interativo: pergunta o que falta (chaves, URL de
+  destino), deixa você escolher recursos numa lista de caixas de seleção
+  (todas marcadas por padrão, exceto broadcasts enviados), mostra o plano,
+  pede confirmação, aplica e imprime o resumo.
+- **`migrate plan`** lê os dois lados e imprime o que mudaria sem gravar nada
+  no destino. `--out plan.json` salva. Antes de qualquer escrita, o plano
+  consulta o `GET /usage` do destino — plano, limites, flag de cloud — e diz
+  precisamente o que não cabe ("7 domínios a criar; o plano Free permite
+  3"), mais uma estimativa: "~2.140 requisições · cerca de 4 min a 8 req/s".
+- **`migrate apply`** aplica um plano salvo, ou planeja e aplica de uma vez.
+  Conflitos são resolvidos do mesmo jeito em toda execução: contatos passam
+  por upsert pelo e-mail; tópicos, segmentos, propriedades, webhooks,
+  templates e domínios são casados por nome, chave, endpoint ou alias e
+  atualizados quando seus campos diferem, deixados como estão quando são
+  iguais.
+- **`migrate status`** imprime o que a última execução criou e o que falta no
+  checklist. Não precisa de credenciais.
+- **`migrate rollback`** exclui apenas os ids que a ferramenta criou — nunca
+  linhas que ela só atualizou — em ordem inversa de dependência, depois de
+  imprimir a lista e pedir confirmação (`--yes` pula). Excluir contatos é uma
+  requisição por contato; o prompt mostra a estimativa de tempo.
+
+## Flags
+
+| Flag | Significado |
+| --- | --- |
+| `--from <provider>` | Provedor de origem. Só existe `resend`. |
+| `--from-key-stdin` | Lê a chave de API de origem do stdin (primeira linha). |
+| `--from-key <key>` | Chave de API de origem como argumento. Visível em listas de processos; a ferramenta avisa. Prefira a variável de ambiente. |
+| `--to-url <url>` | URL da API do MillionSend: `https://api.millionsend.com` para o Cloud, ou a URL da sua instância. |
+| `--to-key-stdin` | Lê a chave de API do MillionSend do stdin (segunda linha quando as duas flags de stdin estão presentes). |
+| `--to-key <key>` | Chave de API do MillionSend como argumento. Mesma ressalva. |
+| `--rps <n>` | Requisições por segundo contra a origem, de 1 a 10. Padrão 8: o Resend permite 10 por time, compartilhadas com o seu envio em produção. |
+| `--only <a,b>` | Migra apenas estes recursos. |
+| `--skip <a,b>` | Pula estes recursos. `enrichment` é a passagem por contato de propriedades e tópicos. |
+| `--on-conflict <mode>` | Contatos que já existem no destino: `upsert` (padrão), `skip`, `error`. |
+| `--include-sent` | Importa broadcasts enviados como rascunhos. Pulados por padrão. |
+| `--fresh-webhook-secrets` | Gera segredos de assinatura de webhook novos em vez de copiá-los. Mostrados uma vez, no relatório. |
+| `--fresh` | Esquece o progresso de retomada em `.millionsend/migrate-state.json` e lê tudo de novo. Os ids criados por execuções anteriores são mantidos, então o `rollback` continua funcionando. |
+| `--out <file>` | `migrate plan`: grava o plano como JSON. |
+| `--report <file>` | Grava também o relatório em Markdown neste caminho. |
+| `-y`, `--yes` | Pula confirmações. |
+| `--non-interactive` | Nunca pergunta; uma entrada faltante é saída 1. Automático quando o stdin não é um terminal, e com `--json`. |
+| `--json` | JSON no stdout, progresso no stderr. |
+| `-v`, `--verbose` | Registra cada requisição: `GET /contacts?limit=100 → 200 (143 ms)`. |
+| `--no-color` | Sem cores ANSI. `NO_COLOR` também é respeitado. |
+| `-h`, `--help` / `-V`, `--version` | Texto de ajuda / versão. |
+
+Nomes de recurso para `--only` e `--skip`, na ordem de aplicação: `domains`,
+`properties`, `topics`, `segments`, `contacts`, `enrichment`, `broadcasts`,
+`templates`, `webhooks`, `suppressions`, `api-keys`.
+
+## Ambiente
+
+| Variável | Significado |
+| --- | --- |
+| `RESEND_API_KEY` | Chave de API de origem, acesso total. A ferramenta só lê do Resend. |
+| `MILLIONSEND_API_KEY` | Chave de API do MillionSend, acesso total. |
+| `MILLIONSEND_BASE_URL` | URL da API do MillionSend, igual a `--to-url`. |
+| `NO_COLOR` | Desativa cores. |
+| `DO_NOT_TRACK` | Respeitada, sem efeito: a ferramenta não envia telemetria, nunca liga para casa e nunca verifica atualizações. |
+
+Cada chave é resolvida nesta ordem: variável de ambiente, depois a flag
+`-stdin`, depois a flag de argumento, depois — num terminal — um prompt
+mascarado. A URL de destino vem de `MILLIONSEND_BASE_URL` ou `--to-url`; num
+terminal sem nenhuma das duas, uma seleção oferece o MillionSend Cloud ou uma
+URL auto-hospedada.
+
+## Arquivos
+
+Gravados ao lado de onde você roda a ferramenta, modo 0600, nunca contendo
+uma chave:
+
+| Arquivo | Conteúdo |
+| --- | --- |
+| `.millionsend/migrate-state.json` | Cada id que a ferramenta criou por recurso, cursores de retomada, o hash do plano. Gravado após cada lote, então uma execução interrompida retoma de onde parou. |
+| `.millionsend/migrate-report.json` | O relatório da última execução como dados. |
+| `.millionsend/migrate-report.md` | O mesmo relatório em Markdown: contagens, o checklist, os registros DNS por domínio, os itens manuais. |
+
+`.millionsend/` é acrescentado ao `.gitignore` quando existe um no diretório
+atual; a ferramenta avisa uma vez.
+
+## Modelo de segurança
+
+- **Somente leitura na origem.** Toda requisição ao Resend é um `GET` a um
+  endpoint documentado, enviada com o `User-Agent`
+  `millionsend-cli/<versão>`. Escritas vão apenas para a sua API do
+  MillionSend.
+- **As chaves ficam em memória.** Nunca são gravadas em arquivo e são
+  redigidas de toda linha de log (`re_…`, `ms_…`, `whsec_…` e headers
+  `Authorization`).
+- **Dois hosts, nenhum terceiro.** A ferramenta contata `api.resend.com` e a
+  URL da API do MillionSend que você informou. Sem telemetria, sem
+  verificação de atualização.
+- **401 ou 403 de qualquer lado interrompe a execução.** Sem retentativa,
+  sem contorno.
+- **Limites de taxa são respeitados.** 429 aguarda o `retry-after`; 5xx e
+  erros de rede recuam exponencialmente, 5 tentativas. Cada retentativa é
+  registrada.
+- **Descadastros são preservados.** `unsubscribed` e opt-outs de tópico vêm
+  como estão; a ferramenta nunca reinscreve ninguém. Supressões mantêm a
+  origem (bounce, reclamação, manual).
+
+## Códigos de saída
+
+| Código | Significado |
+| --- | --- |
+| `0` | Sucesso — ou, para `migrate plan`, nada a fazer. |
+| `1` | Erro: argumentos inválidos, entrada faltante, chave rejeitada, falha irrecuperável. |
+| `2` | Apenas `migrate plan`: o plano tem mudanças. |
+| `3` | Parcial: alguns itens falharam. Detalhes no arquivo de estado e no relatório. |
+
+## Não interativo e CI
+
+Quando o stdin não é um terminal — ou com `--non-interactive` ou `--json` —
+a ferramenta nunca pergunta: uma entrada faltante sai com 1 e diz qual
+variável de ambiente ou flag definir. Passe chaves pelo ambiente ou pelo
+stdin, nunca como argumentos:
+
+```sh
+export RESEND_API_KEY=re_...
+export MILLIONSEND_API_KEY=ms_...
+export MILLIONSEND_BASE_URL=https://api.millionsend.com   # ou a URL da sua instância
+
+millionsend migrate plan --from resend --out plan.json
+# saída 2 quando há algo a aplicar
+millionsend migrate apply plan.json --yes
+```
+
+Ou pelo stdin, primeira linha origem, segunda linha destino:
+
+```sh
+printf '%s\n%s\n' "$RESEND_KEY" "$MS_KEY" | millionsend migrate plan --from resend --from-key-stdin --to-key-stdin --to-url https://api.sua-instancia
+```
+
+O progresso é impresso uma linha por passo (`✓`, `✗`, `⟳` com contadores
+`n/N`), acrescentado quando encadeado por pipe, reescrito no lugar num
+terminal.
+
+## `--json`
+
+Com `--json`, o stdout carrega apenas JSON — o plano em `migrate plan`, o
+relatório em `migrate apply` — e o progresso vai para o stderr, então a saída
+pode ser encadeada no `jq` ou salva como artefato. `--json` implica
+`--non-interactive`.
+
+```sh
+millionsend migrate plan --from resend --json | jq '.counts'
+```
+
+---
+
+Resend é uma marca registrada da Plus Five Five, Inc. O MillionSend não é afiliado nem endossado pelo Resend.

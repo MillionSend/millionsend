@@ -1,0 +1,282 @@
+{
+  "provider": "resend",
+  "takenAt": "2026-09-01T12:00:00.000Z",
+  "domains": [
+    {
+      "name": "example.com",
+      "region": "us-east-1",
+      "openTracking": true,
+      "clickTracking": true,
+      "trackingSubdomain": null,
+      "customReturnPath": null,
+      "status": "verified",
+      "records": [
+        {
+          "record": "SPF",
+          "name": "send",
+          "type": "MX",
+          "ttl": "Auto",
+          "status": "verified",
+          "value": "feedback-smtp.us-east-1.amazonses.com",
+          "priority": 10
+        },
+        {
+          "record": "SPF",
+          "name": "send",
+          "type": "TXT",
+          "ttl": "Auto",
+          "status": "verified",
+          "value": "v=spf1 include:amazonses.com ~all"
+        },
+        {
+          "record": "DKIM",
+          "name": "resend._domainkey",
+          "type": "TXT",
+          "ttl": "Auto",
+          "status": "verified",
+          "value": "p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC"
+        }
+      ]
+    },
+    {
+      "name": "updates.example.com",
+      "region": "eu-west-1",
+      "openTracking": false,
+      "clickTracking": true,
+      "trackingSubdomain": "track",
+      "customReturnPath": null,
+      "status": "verified",
+      "records": [
+        {
+          "record": "SPF",
+          "name": "bounces.updates",
+          "type": "MX",
+          "ttl": "Auto",
+          "status": "verified",
+          "value": "feedback-smtp.eu-west-1.amazonses.com",
+          "priority": 10
+        },
+        {
+          "record": "SPF",
+          "name": "bounces.updates",
+          "type": "TXT",
+          "ttl": "Auto",
+          "status": "verified",
+          "value": "v=spf1 include:amazonses.com ~all"
+        },
+        {
+          "record": "DKIM",
+          "name": "resend._domainkey.updates",
+          "type": "TXT",
+          "ttl": "Auto",
+          "status": "verified",
+          "value": "p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQD"
+        },
+        {
+          "record": "Tracking",
+          "name": "track.updates",
+          "type": "CNAME",
+          "ttl": "Auto",
+          "status": "verified",
+          "value": "track.resend.com"
+        }
+      ]
+    },
+    {
+      "name": "mail.example.org",
+      "region": "ap-south-1",
+      "openTracking": false,
+      "clickTracking": false,
+      "trackingSubdomain": null,
+      "customReturnPath": null,
+      "status": "not_started",
+      "records": []
+    }
+  ],
+  "apiKeys": [
+    { "name": "Production", "createdAt": "2023-04-08T00:11:13.110779+00:00" },
+    { "name": "Staging", "createdAt": "2024-01-15T09:30:00.000000+00:00" }
+  ],
+  "properties": [
+    { "key": "company", "type": "string" },
+    { "key": "seats", "type": "number", "fallbackValue": 1 }
+  ],
+  "topics": [
+    {
+      "id": "b6d24b8e-af0b-4c3c-be0c-359bbd97381e",
+      "name": "Product updates",
+      "description": "Feature announcements and release notes",
+      "defaultSubscription": "opt_in",
+      "visibility": "public"
+    },
+    {
+      "id": "0ba4a5f2-1a5e-4d63-9f1c-3b6d7e8f9a0b",
+      "name": "Beta program",
+      "description": null,
+      "defaultSubscription": "opt_out"
+    }
+  ],
+  "segments": [
+    {
+      "id": "78261eea-8f8b-4381-83c6-79fa7120f1cf",
+      "name": "Active Users",
+      "filter": {
+        "operator": "and",
+        "conditions": [{ "field": "email", "operator": "ends_with", "value": "@example.com" }]
+      },
+      "memberEmails": ["steve.wozniak@gmail.com", "grace.hopper@example.com"]
+    },
+    {
+      "id": "3e5a1d6c-7b2f-4c8e-9a1d-2f3b4c5d6e7f",
+      "name": "Enterprise",
+      "filter": {
+        "operator": "and",
+        "conditions": [{ "field": "plan_tier", "operator": "equals", "value": "enterprise" }]
+      },
+      "memberEmails": ["ada.lovelace@example.com"]
+    },
+    {
+      "id": "9c8b7a6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "name": "Imported",
+      "filter": null,
+      "memberEmails": []
+    }
+  ],
+  "contacts": [
+    {
+      "id": "e169aa45-1ecf-4183-9955-b1499d5701d3",
+      "email": "steve.wozniak@gmail.com",
+      "firstName": "Steve",
+      "lastName": "Wozniak",
+      "unsubscribed": false,
+      "createdAt": "2023-10-06T23:47:56.678+00:00"
+    },
+    {
+      "id": "1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d",
+      "email": "grace.hopper@example.com",
+      "firstName": "Grace",
+      "lastName": "Hopper",
+      "unsubscribed": false,
+      "createdAt": "2023-11-12T10:15:00.000+00:00"
+    },
+    {
+      "id": "2c3d4e5f-6071-4b8c-9d0e-1f2a3b4c5d6e",
+      "email": "ada.lovelace@example.com",
+      "firstName": "Ada",
+      "lastName": "Lovelace",
+      "unsubscribed": true,
+      "createdAt": "2024-02-29T08:00:00.000+00:00"
+    },
+    {
+      "id": "3d4e5f60-7182-4c9d-8e1f-2a3b4c5d6e7f",
+      "email": "alan.turing@example.com",
+      "firstName": null,
+      "lastName": null,
+      "unsubscribed": false,
+      "createdAt": "2024-06-23T12:00:00.000+00:00"
+    },
+    {
+      "id": "4e5f6071-8293-4d0e-9f2a-3b4c5d6e7f80",
+      "email": "linus@example.net",
+      "firstName": "Linus",
+      "lastName": null,
+      "unsubscribed": false,
+      "createdAt": "2025-01-01T00:00:00.000+00:00"
+    }
+  ],
+  "broadcasts": [
+    {
+      "id": "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794",
+      "name": "November announcements",
+      "from": "Acme <onboarding@example.com>",
+      "subject": "Hello World",
+      "replyTo": null,
+      "previewText": "Here are our announcements",
+      "html": "<p>Hello {{{contact.first_name|there}}}!</p><a href=\"{{{RESEND_UNSUBSCRIBE_URL}}}\">Unsubscribe</a>",
+      "text": "Hello {{{FIRST_NAME|there}}}!",
+      "status": "draft",
+      "segmentId": "78261eea-8f8b-4381-83c6-79fa7120f1cf",
+      "topicId": null,
+      "scheduledAt": null
+    },
+    {
+      "id": "5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d",
+      "name": "Beta invite",
+      "from": "Acme <hello@updates.example.com>",
+      "subject": "You are in, {{{contact.first_name}}}",
+      "replyTo": ["beta@example.com"],
+      "previewText": null,
+      "html": "<p>{{{contact.company}}} gets early access. {{{foo bar}}}</p>",
+      "text": null,
+      "status": "scheduled",
+      "segmentId": null,
+      "topicId": "0ba4a5f2-1a5e-4d63-9f1c-3b6d7e8f9a0b",
+      "scheduledAt": "2026-09-15T10:00:00.000Z"
+    },
+    {
+      "id": "6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e",
+      "name": "Launch recap",
+      "from": "Acme <onboarding@example.com>",
+      "subject": "What we shipped",
+      "replyTo": null,
+      "previewText": null,
+      "html": "<p>Thanks {{{contact.first_name|friend}}}.</p>",
+      "text": null,
+      "status": "sent",
+      "segmentId": null,
+      "topicId": null,
+      "scheduledAt": null
+    }
+  ],
+  "templates": [
+    {
+      "id": "7c8d9e0f-1a2b-4c3d-8e4f-5a6b7c8d9e0f",
+      "name": "Welcome",
+      "alias": "welcome",
+      "from": "Acme <onboarding@example.com>",
+      "subject": "Welcome, {{{contact.first_name|friend}}}",
+      "replyTo": ["support@example.com"],
+      "html": "<h1>Welcome {{{contact.first_name}}}</h1><p>{{{unsubscribe_url}}}</p>",
+      "text": null,
+      "variables": [{ "key": "first_name", "type": "string", "fallbackValue": "friend" }]
+    },
+    {
+      "id": "8d9e0f1a-2b3c-4d4e-9f5a-6b7c8d9e0f1a",
+      "name": "Receipt",
+      "alias": null,
+      "from": null,
+      "subject": "Your receipt",
+      "replyTo": null,
+      "html": "<p>Order {{{order_id}}}</p>",
+      "text": "Order {{{order_id}}}",
+      "variables": [{ "key": "order_id", "type": "string" }]
+    }
+  ],
+  "webhooks": [
+    {
+      "id": "479e3145-dd38-476b-932c-529ceb705947",
+      "endpoint": "https://webhook.example.com/handler",
+      "events": ["email.sent", "email.delivered", "email.bounced", "email.suppressed"],
+      "status": "enabled",
+      "signingSecret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
+    },
+    {
+      "id": "58af4256-ee49-487c-a43d-63adfb816a58",
+      "endpoint": "https://hooks.example.com/contacts",
+      "events": ["contact.created", "contact.updated"],
+      "status": "enabled",
+      "signingSecret": null
+    }
+  ],
+  "suppressions": [
+    { "email": "bounced@example.com", "origin": "bounce", "createdAt": "2024-03-01T00:00:00.000Z" },
+    {
+      "email": "complained@example.com",
+      "origin": "complaint",
+      "createdAt": "2024-04-01T00:00:00.000Z"
+    },
+    { "email": "blocked@example.com", "origin": "manual", "createdAt": "2024-05-01T00:00:00.000Z" }
+  ],
+  "metrics": { "emailsLast30Days": 41208 },
+  "enriched": false
+}

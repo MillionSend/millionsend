@@ -1,0 +1,36 @@
+[
+  {
+    "id": "e169aa45-1ecf-4183-9955-b1499d5701d3",
+    "name": "November announcements",
+    "audience_id": "78261eea-8f8b-4381-83c6-79fa7120f1cf",
+    "segment_id": "78261eea-8f8b-4381-83c6-79fa7120f1cf",
+    "from": "Acme <onboarding@resend.dev>",
+    "subject": "Hello World",
+    "reply_to": [],
+    "preview_text": "Here are our announcements",
+    "status": "draft",
+    "created_at": "2023-10-06 22:59:55.977+00",
+    "scheduled_at": null,
+    "sent_at": null,
+    "text": "Hello {{{FIRST_NAME|there}}}!",
+    "html": "<p>Hello {{{FIRST_NAME|there}}}!</p>",
+    "topic_id": "b6d24b8e-af0b-4c3c-be0c-359bbd97381e"
+  },
+  {
+    "id": "3c9a8b7d-6e5f-4d4c-8b3a-2f1e0d9c8b7a",
+    "name": "Launch day",
+    "audience_id": null,
+    "segment_id": null,
+    "from": "Acme <hello@example.com>",
+    "subject": "We launched",
+    "reply_to": ["support@example.com"],
+    "preview_text": null,
+    "status": "sent",
+    "created_at": "2024-06-01 09:00:00.000+00",
+    "scheduled_at": null,
+    "sent_at": "2024-06-01 10:00:00.000+00",
+    "text": "We launched today.",
+    "html": "<p>We launched today.</p>",
+    "topic_id": null
+  }
+]
