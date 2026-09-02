@@ -17,6 +17,7 @@ export async function generateMetadata(props: LayoutProps): Promise<Metadata> {
   const { lang } = await props.params;
   return {
     metadataBase: new URL(DOCS_ORIGIN),
+    icons: { icon: "/logo/millionsend-favicon.svg" },
     openGraph: { siteName: "MillionSend Docs", type: "website", images: "/og.png" },
     twitter: { card: "summary_large_image" },
     title: {
