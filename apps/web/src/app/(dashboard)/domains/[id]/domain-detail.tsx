@@ -432,6 +432,7 @@ export function DomainDetail({ id }: { id: string }) {
       name: string;
       value: string;
       status: "found" | "missing" | "mismatch" | "unknown";
+      inherited?: { name: string; policy: string } | undefined;
     }[]
   >([]);
   // Set when the Configuration tab sends the user to the tracking CNAME:
@@ -616,11 +617,11 @@ export function DomainDetail({ id }: { id: string }) {
   const provider = records.data?.provider ?? null;
   // Live DNS statuses keyed by record identity, from the persisted result so a
   // re-check doesn't blank the badges mid-flight.
-  const liveByKey = new Map(liveDns.map((r) => [`${r.type}\t${r.name}\t${r.value}`, r.status]));
-  const rows = ((records.data?.records ?? []) as DnsRecord[]).map((r) => ({
-    ...r,
-    live: liveByKey.get(`${r.type}\t${r.name}\t${r.value}`),
-  }));
+  const liveByKey = new Map(liveDns.map((r) => [`${r.type}\t${r.name}\t${r.value}`, r]));
+  const rows = ((records.data?.records ?? []) as DnsRecord[]).map((r) => {
+    const live = liveByKey.get(`${r.type}\t${r.name}\t${r.value}`);
+    return { ...r, live: live?.status, inherited: live?.inherited };
+  });
   // The DNS check only has a job while something is unverified: the domain
   // identity, or a branded-tracking CNAME that has not resolved yet. Once
   // everything is green there is nothing to re-read, so the header button

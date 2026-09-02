@@ -81,8 +81,38 @@ describe("computeDomainVerification", () => {
     expect(result.status).toBe("verified");
     // The checklist row recommends p=none but must not read a stricter
     // published policy as a mismatch.
-    expect(result.liveDns.find((r) => r.name === "_dmarc.d.com")?.status).toBe("found");
-    expect(result.dmarc).toEqual({ status: "found", policy: "quarantine" });
+    const row = result.liveDns.find((r) => r.name === "_dmarc.d.com");
+    expect(row?.status).toBe("found");
+    expect(row).not.toHaveProperty("inherited");
+    expect(result.dmarc).toEqual({ status: "found", policy: "quarantine", name: "_dmarc.d.com" });
+  });
+
+  it("a subdomain sender covered only by the apex DMARC reads found and names the inherited record", async () => {
+    const resolver: DnsResolver = {
+      resolveTxt: async (name) => {
+        if (name === "sel._domainkey.updates.d.com") return [["v=DKIM1; k=rsa; p=ABC"]];
+        if (name === "send.updates.d.com") return [["v=spf1 include:amazonses.com ~all"]];
+        if (name === "_dmarc.d.com") return [["v=DMARC1; p=quarantine; rua=mailto:r@d.com"]];
+        return []; // _dmarc.updates.d.com not published: receivers apply the apex record
+      },
+      resolveMx: async () => [{ priority: 10, exchange: "feedback-smtp.us-east-1.amazonses.com" }],
+      resolveCname: async () => [],
+    };
+    const result = await computeDomainVerification(
+      fakeSes({ dkimStatus: "SUCCESS", mailFromStatus: "SUCCESS", verifiedForSending: true }),
+      resolver,
+      { ...DOMAIN, name: "updates.d.com" },
+    );
+    expect(result.status).toBe("verified");
+    expect(result.liveDns.find((r) => r.name === "_dmarc.updates.d.com")).toEqual({
+      type: "TXT",
+      name: "_dmarc.updates.d.com",
+      value: '"v=DMARC1; p=none;"',
+      status: "found",
+      inherited: { name: "_dmarc.d.com", policy: "quarantine" },
+    });
+    expect(result.dnsRecords.find((r) => r.group === "dmarc")?.status).toBe("found");
+    expect(result.dmarc).toEqual({ status: "found", policy: "quarantine", name: "_dmarc.d.com" });
   });
 
   it("SPF removed after verification demotes to pending even while SES caches SUCCESS", async () => {
@@ -163,7 +193,10 @@ describe("computeDomainVerification", () => {
       dnsRecords,
     });
     expect(
-      verificationDbPatch({ dnsRecords, dmarc: { status: "found", policy: "reject" } }, now),
+      verificationDbPatch(
+        { dnsRecords, dmarc: { status: "found", policy: "reject", name: "_dmarc.d.com" } },
+        now,
+      ),
     ).toEqual({ dnsRecords, dmarcPolicy: "reject", dmarcCheckedAt: now });
     expect(verificationDbPatch({ dnsRecords, dmarc: { status: "missing" } }, now)).toEqual({
       dnsRecords,

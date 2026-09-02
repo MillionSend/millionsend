@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { CopyChip } from "@/components/copy-chip";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import {
   combineRecordStatus,
   type LiveDnsStatus,
@@ -35,6 +36,8 @@ export type DnsRecord = {
   status: "verified" | "pending" | "failed" | null;
   /** Live DNS verdict from the last Check DNS; absent until one runs. */
   live?: LiveDnsStatus | undefined;
+  /** Set when this name is empty but a parent record governs it (DMARC organizational-domain fallback). */
+  inherited?: { name: string; policy: string } | undefined;
 };
 
 // verified reads success; a record still pending at AWS or missing/wrong in our
@@ -50,11 +53,15 @@ const RECORD_STATUS_TONE: Record<RecordStatus, string> = {
  * The single source-of-truth Status badge: our live DNS lookup gated by AWS's
  * verification. Sized to its label (inline-block) — never stretched to the cell.
  */
-function RecordStatusBadge({ status }: { status: RecordStatus }) {
+function RecordStatusBadge({ status, note }: { status: RecordStatus; note?: string | undefined }) {
   const t = useTranslations("domains");
   return (
-    <span className={`ms-badge ${RECORD_STATUS_TONE[status]}`}>
+    <span
+      className={`ms-badge ${RECORD_STATUS_TONE[status]}`}
+      style={note ? { display: "inline-flex", alignItems: "center", gap: 4 } : undefined}
+    >
       {t(`detail.recordStatus.${status}`)}
+      {note ? <Tooltip text={note} /> : null}
     </span>
   );
 }
@@ -166,6 +173,14 @@ export function DnsRecordsTable({
                               live: record.live,
                               sesGate: sesGateFromRecordStatus(record.status),
                             })}
+                            note={
+                              record.inherited
+                                ? t("detail.inheritedDmarc", {
+                                    from: record.inherited.name,
+                                    policy: record.inherited.policy,
+                                  })
+                                : undefined
+                            }
                           />
                         </td>
                       ) : null}

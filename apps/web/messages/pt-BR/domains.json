@@ -159,6 +159,7 @@
       "pending": "Pendente",
       "verified": "Verificado"
     },
+    "inheritedDmarc": "Nenhum registro neste nome. Os destinatários recorrem a {from} (p={policy}), que já cobre este subdomínio. Adicionar um registro aqui sobrescreveria essa política.",
     "goToProvider": "Ir para {provider}",
     "moreActions": "Mais ações",
     "forwardInstructions": "Encaminhar instruções",

@@ -31,7 +31,14 @@ export interface TrackedDnsRecord {
 
 export interface DomainVerificationResult {
   status: DomainStatus;
-  liveDns: { type: string; name: string; value: string; status: LiveDnsStatus }[];
+  liveDns: {
+    type: string;
+    name: string;
+    value: string;
+    status: LiveDnsStatus;
+    /** The row's own name is empty but this parent record governs it (DMARC organizational-domain fallback). */
+    inherited?: { name: string; policy: DmarcPolicy };
+  }[];
   records: TrackedDnsRecord[];
   /** SES's raw cached verification, so a caller can surface it without a second GetEmailIdentity. */
   verification: DomainVerification;
@@ -87,17 +94,27 @@ export async function computeDomainVerification(
           : null,
   }));
 
-  // DMARC discovery rides the same pass: one extra TXT query per verification,
-  // never per send — send-time insights read the persisted snapshot instead.
-  const [live, dmarc] = await Promise.all([
-    checkDnsRecords(records, resolver),
+  // DMARC skips the exact-name check and rides RFC 7489 §6.6.3 discovery
+  // (send domain, then the organizational domain): a subdomain sender covered
+  // by the apex record reads found, since that is the policy receivers apply
+  // to it. One extra TXT query per verification, never per send — send-time
+  // insights read the persisted snapshot instead.
+  const checked = records.filter((record) => record.group !== "dmarc");
+  const [checkedLive, dmarc] = await Promise.all([
+    checkDnsRecords(checked, resolver),
     lookupDmarc(domain.name, registrableDomain(domain.name), resolver),
   ]);
+  const live = records.map((record) =>
+    record.group === "dmarc" ? dmarc.status : checkedLive[checked.indexOf(record)],
+  );
   const liveDns = records.map((record, i) => ({
     type: record.type,
     name: record.name,
     value: record.value,
     status: live[i] ?? "missing",
+    ...(record.group === "dmarc" && dmarc.status === "found" && dmarc.name !== record.name
+      ? { inherited: { name: dmarc.name, policy: dmarc.policy } }
+      : {}),
   }));
   const dnsRecords = records.map((record, i) => ({
     group: record.group,
@@ -133,7 +150,10 @@ export function verificationDbPatch(
       ? {}
       : { dnsRecords: result.dnsRecords }),
     ...(result.dmarc.status !== "unknown"
-      ? { dmarcPolicy: result.dmarc.policy ?? null, dmarcCheckedAt: now }
+      ? {
+          dmarcPolicy: result.dmarc.status === "found" ? result.dmarc.policy : null,
+          dmarcCheckedAt: now,
+        }
       : {}),
   };
 }

@@ -159,6 +159,7 @@
       "pending": "Pending",
       "verified": "Verified"
     },
+    "inheritedDmarc": "No record at this name. Receivers fall back to {from} (p={policy}), which already covers this subdomain. Adding a record here would override that policy.",
     "goToProvider": "Go to {provider}",
     "moreActions": "More actions",
     "forwardInstructions": "Forward instructions",

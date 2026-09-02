@@ -1110,6 +1110,20 @@ svg:focus {
   pointer-events: none;
   animation: ms-fade var(--ms-dur-fast) var(--ms-ease);
 }
+/* ⓘ inside a status pill (dns-records-table's inherited-record note): takes
+   the pill's tone instead of the field-label grey, sized down to the pill. */
+.ms-badge .ms-tooltip-trigger {
+  color: inherit;
+  opacity: 0.7;
+}
+.ms-badge .ms-tooltip-trigger:hover {
+  color: inherit;
+  opacity: 1;
+}
+.ms-badge .ms-tooltip-trigger svg {
+  width: 12px;
+  height: 12px;
+}
 
 /* Busy spinner (spinner.tsx) — currentColor stroke ring, composed inside
    buttons left of the label. Distinct from .ms-spinner (the warn-tinted

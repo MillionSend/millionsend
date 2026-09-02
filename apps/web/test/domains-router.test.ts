@@ -491,6 +491,28 @@ describe("domains.verify live DNS", () => {
     expect(liveDns.find((r) => r.name === "_dmarc.example.com")?.status).toBe("missing");
   });
 
+  it("reads a subdomain covered by the apex DMARC as Found and names the inherited record", async () => {
+    const teamId = await createTeam(db);
+    const { deps } = fakeSes({
+      dns: {
+        resolveTxt: async (name) =>
+          name === "_dmarc.example.com" ? [["v=DMARC1; p=quarantine;"]] : [],
+      },
+    });
+    const caller = callerFor(teamId, deps);
+    const { id } = await caller.domains.create({
+      name: "updates.example.com",
+      region: "us-east-1",
+    });
+    const { liveDns } = await caller.domains.verify({ id });
+    expect(liveDns.find((r) => r.name === "_dmarc.updates.example.com")).toMatchObject({
+      status: "found",
+      inherited: { name: "_dmarc.example.com", policy: "quarantine" },
+    });
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.dmarcPolicy).toBe("quarantine");
+  });
+
   it("marks a present-but-wrong value Mismatch", async () => {
     const { caller, id } = await verifiedCaller({
       resolveTxt: async (name) =>

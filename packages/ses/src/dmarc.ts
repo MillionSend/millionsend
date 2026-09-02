@@ -25,10 +25,10 @@ export function parseDmarcRecord(txt: string): { policy: DmarcPolicy } | null {
   return null;
 }
 
-export interface DmarcLookup {
-  status: "found" | "missing" | "unknown";
-  policy?: DmarcPolicy;
-}
+/** `name` is the `_dmarc.` label the record was found at: the send domain's, or the organizational domain's on fallback. */
+export type DmarcLookup =
+  | { status: "found"; policy: DmarcPolicy; name: string }
+  | { status: "missing" | "unknown" };
 
 /**
  * DMARC policy discovery (RFC 7489 §6.6.3): _dmarc at the send domain, falling
@@ -57,7 +57,7 @@ async function lookupOne(name: string, resolver: DnsResolver): Promise<DmarcLook
   // Long TXT values arrive chunked; the first valid v=DMARC1 answer wins.
   for (const chunks of rows) {
     const parsed = parseDmarcRecord(chunks.join(""));
-    if (parsed) return { status: "found", policy: parsed.policy };
+    if (parsed) return { status: "found", policy: parsed.policy, name };
   }
   return { status: "missing" };
 }

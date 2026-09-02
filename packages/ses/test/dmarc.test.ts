@@ -50,6 +50,7 @@ describe("lookupDmarc", () => {
     expect(await lookupDmarc("mail.d.com", "d.com", resolver)).toEqual({
       status: "found",
       policy: "reject",
+      name: "_dmarc.mail.d.com",
     });
   });
 
@@ -60,6 +61,7 @@ describe("lookupDmarc", () => {
     expect(await lookupDmarc("d.com", "d.com", resolver)).toEqual({
       status: "found",
       policy: "quarantine",
+      name: "_dmarc.d.com",
     });
   });
 
@@ -68,6 +70,7 @@ describe("lookupDmarc", () => {
     expect(await lookupDmarc("mail.d.com", "d.com", resolver)).toEqual({
       status: "found",
       policy: "none",
+      name: "_dmarc.d.com",
     });
   });
 

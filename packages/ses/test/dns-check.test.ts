@@ -70,28 +70,6 @@ describe("checkDnsRecords", () => {
     expect(out).toEqual(["unknown", "missing", "missing"]);
   });
 
-  it("accepts any valid DMARC record at a _dmarc name, not just the recommended value", async () => {
-    const resolver: DnsResolver = {
-      resolveTxt: async (name) =>
-        name === "_dmarc.strict.com"
-          ? [["v=DMARC1; p=quarantine; rua=mailto:d@strict.com"]]
-          : name === "_dmarc.junk.com"
-            ? [["not a dmarc record"]]
-            : [],
-      resolveMx: async () => [],
-      resolveCname: async () => [],
-    };
-    const [strict, junk] = await checkDnsRecords(
-      [
-        { type: "TXT", name: "_dmarc.strict.com", value: '"v=DMARC1; p=none;"' },
-        { type: "TXT", name: "_dmarc.junk.com", value: '"v=DMARC1; p=none;"' },
-      ],
-      resolver,
-    );
-    expect(strict).toBe("found");
-    expect(junk).toBe("mismatch");
-  });
-
   it("reads an unanswered name as missing", async () => {
     const [status] = await checkDnsRecords([{ type: "TXT", name: "a", value: '"x"' }], empty);
     expect(status).toBe("missing");
