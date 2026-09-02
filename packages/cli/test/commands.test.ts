@@ -111,6 +111,8 @@ function expectNoSecrets(...texts: string[]): void {
 }
 
 beforeAll(async () => {
+  // main() runs in-process with color mode auto: the host shell's FORCE_COLOR would paint every transcript.
+  delete process.env.FORCE_COLOR;
   [fake, api] = await Promise.all([
     startFakeResend(),
     startLiveApi({ isCloud: true, appBaseUrl: "https://app.example.test" }),
@@ -156,7 +158,9 @@ describe("millionsend migrate", () => {
       expect(stdout).toContain(
         "On Resend you sent 41,208 emails in the last 30 days (~1,374/day).",
       );
-      expect(stdout).toContain("Free allows 100/day; Pro (3,000/day, 20 domains) fits.");
+      expect(stdout.replace(/\n/g, " ")).toContain(
+        "Free allows 100/day; Pro (3,000/day, 20 domains) fits.",
+      );
       expect(stdout).toContain("https://app.example.test/settings/billing");
       expect(stdout).toContain("again right before cutover");
       expect(readFileSync(join(cwd, ".gitignore"), "utf8")).toBe("node_modules\n.millionsend/\n");
@@ -250,7 +254,7 @@ describe("millionsend migrate", () => {
       const before = readState();
       const { code, stdout } = await run(["migrate", "--from", "resend", "--yes"]);
       expect(code).toBe(0);
-      expect(stdout).toContain("= unchanged  topics/Product updates");
+      expect(stdout).toContain("topics\n  = Product updates");
       expect(readState()?.created).toEqual(before?.created);
       const report = readReport();
       expect(report.counts.topics).toMatchObject({ created: 0, unchanged: 2 });
@@ -268,7 +272,7 @@ describe("millionsend migrate", () => {
       const out = join(cwd, "plan.json");
       const changes = await run(["migrate", "plan", "--from", "resend", "--out", out]);
       expect(changes.code).toBe(2);
-      expect(changes.stdout).toContain("+ create     contacts (3)");
+      expect(changes.stdout).toContain("contacts (3)\n  + contacts  batch upsert");
       const plan = JSON.parse(readFileSync(out, "utf8")) as Plan;
       expect(plan.version).toBe(1);
       expect(plan.target.baseUrl).toBe(api.baseUrl);
@@ -331,7 +335,7 @@ describe("millionsend migrate", () => {
       expect(code).toBe(0);
       const report = JSON.parse(stdout) as Report;
       expect(report.counts.topics).toMatchObject({ created: 1, unchanged: 2 });
-      expect(stderr).toContain("✓ Topics 1/1");
+      expect(stderr).toMatch(/✓ Topics\s+1\/1/);
       expect(readState()?.created.topics).toHaveLength(3);
     },
     SLOW,
@@ -447,7 +451,7 @@ describe("millionsend migrate", () => {
       expect(result.stdout).toContain(
         `millionsend ${packageVersion} — Moves your Resend account into MillionSend.`,
       );
-      expect(result.stdout).toContain("+ create     contacts (3)");
+      expect(result.stdout).toContain("contacts (3)\n  + contacts  batch upsert");
       expect(result.stdout).toContain("Estimate: ~");
       expectNoSecrets(result.stdout, result.stderr);
       const version = await exec(process.execPath, [bundle, "--version"], cwd);
@@ -575,8 +579,9 @@ describe("migrate rollback", () => {
       });
       expect(code).toBe(0);
       expect(JSON.parse(stdout)).toEqual({ deleted: { contacts: 5 }, failures: [] });
+      // The plain header wraps at the layout width (80 here) with a hanging indent.
       expect(stderr).toContain(
-        "Deletes what an earlier run created on your MillionSend instance; nothing on Resend is touched.",
+        "— Deletes what an earlier run created on your MillionSend\n  instance; nothing on Resend is touched.\n",
       );
       expect(stderr).not.toContain("Reads only");
       expect(stderr).toContain(`${ids.slice(0, 3).join(", ")} … and 2 more`);

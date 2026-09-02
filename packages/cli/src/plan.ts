@@ -9,6 +9,7 @@ import type {
   TargetWebhook,
 } from "./model.js";
 import { estimateSourceRequests } from "./providers/index.js";
+import { bold, dim, note, ok, SYM, warn, wrapIndent } from "./theme.js";
 import {
   type BroadcastCreateInput,
   broadcastCreateInput,
@@ -354,7 +355,7 @@ export function buildPlan({
     for (const b of snapshot.broadcasts) {
       if (b.status === "sent" && !options.includeSent) {
         add("broadcasts", "skip", b.name, {
-          detail: "already sent; --include-sent imports it as a draft",
+          detail: "already sent; --include-sent imports sent broadcasts as drafts",
         });
         continue;
       }
@@ -401,7 +402,7 @@ export function buildPlan({
 
   if (has("api-keys")) {
     for (const k of snapshot.apiKeys) {
-      manual("api-keys", k.name, "create it by hand; Resend exposes only the name");
+      manual("api-keys", k.name, "create by hand; Resend exposes only the name");
     }
   }
 
@@ -477,7 +478,7 @@ export function capDomainCreates(plan: Plan, allowed: number): Plan {
           resource: "domains",
           action: "manual",
           key: item.key,
-          detail: `over the plan's domain limit; add it by hand after upgrading`,
+          detail: "over the plan's domain limit; add by hand after upgrading",
         },
       ];
     }
@@ -501,49 +502,112 @@ function webhookUpdate(
   return Object.keys(update).length > 0 ? update : null;
 }
 
-const SYMBOL: Record<PlanAction, string> = {
-  create: "+",
-  update: "~",
-  unchanged: "=",
-  manual: "!",
-  skip: "-",
-};
-const COLOR: Record<PlanAction, string> = {
-  create: "\x1b[32m",
-  update: "\x1b[33m",
-  unchanged: "\x1b[90m",
-  manual: "\x1b[35m",
-  skip: "\x1b[90m",
-};
-
-function renderItem(item: PlanItem, color: boolean): string {
-  const name =
-    item.count === undefined
-      ? `${item.resource}/${item.key}`
-      : `${item.resource} (${formatNumber(item.count)})`;
-  const detail =
-    item.detail === undefined
-      ? ""
-      : item.action === "update" && item.count === undefined
-        ? ` (${item.detail})`
-        : ` — ${item.detail}`;
-  const head = `${SYMBOL[item.action]} ${item.action.padEnd(9)}`;
-  return `  ${color ? `${COLOR[item.action]}${head}\x1b[39m` : head}  ${stripControl(`${name}${detail}`)}`;
+export interface PlanRow {
+  action: PlanAction;
+  /** The item's key, or "11 broadcasts" for a collapsed run. */
+  name: string;
+  detail?: string | undefined;
+  /** Keys of the items folded into this row, in plan order. */
+  keys?: string[] | undefined;
 }
 
-/** Terraform-style listing: legend, one line per item, totals, warnings, estimate. */
-export function renderPlan(plan: Plan, { color = false }: { color?: boolean } = {}): string {
+export interface PlanGroup {
+  resource: Resource;
+  /** "topics", or "contacts (721)" for a count item. */
+  label: string;
+  rows: PlanRow[];
+}
+
+const COLLAPSE_AT = 3;
+
+/**
+ * Items grouped by resource in apply order; a run of ≥3 items sharing action
+ * and detail folds into one row (a tail of sent broadcasts reads as one line).
+ * Creates and updates never fold: their names are what the user reviews
+ * before confirming. Presentation only — the plan's items are untouched.
+ */
+export function groupPlanItems(items: readonly PlanItem[]): PlanGroup[] {
+  const runKey = (i: PlanItem): string => `${i.action}\0${i.detail ?? ""}`;
+  const groups: PlanGroup[] = [];
+  for (const resource of RESOURCE_ORDER) {
+    const own = items.filter((i) => i.resource === resource);
+    if (own.length === 0) continue;
+    const sizes = new Map<string, number>();
+    for (const i of own) sizes.set(runKey(i), (sizes.get(runKey(i)) ?? 0) + 1);
+    const folded = new Set<string>();
+    const rows: PlanRow[] = [];
+    for (const item of own) {
+      const key = runKey(item);
+      const writes = item.action === "create" || item.action === "update";
+      if (writes || (sizes.get(key) ?? 0) < COLLAPSE_AT) {
+        rows.push({ action: item.action, name: item.key, detail: item.detail });
+      } else if (!folded.has(key)) {
+        folded.add(key);
+        const keys = own.filter((i) => runKey(i) === key).map((i) => i.key);
+        rows.push({
+          action: item.action,
+          name: `${formatNumber(keys.length)} ${resource}`,
+          detail: item.detail,
+          keys,
+        });
+      }
+    }
+    const count = own[0]?.count;
+    groups.push({
+      resource,
+      label: count === undefined ? resource : `${resource} (${formatNumber(count)})`,
+      rows,
+    });
+  }
+  return groups;
+}
+
+const ACTION_STYLE: Record<PlanAction, [symbol: string, paint: (s: string) => string]> = {
+  create: [SYM.create, ok],
+  update: [SYM.update, warn],
+  unchanged: [SYM.same, dim],
+  manual: [SYM.manual, note],
+  skip: [SYM.skip, dim],
+};
+
+const ACTIONS: readonly PlanAction[] = ["create", "update", "unchanged", "manual", "skip"];
+
+function renderRow(row: PlanRow): string[] {
+  const [symbol, paint] = ACTION_STYLE[row.action];
+  const head = `  ${paint(symbol)} ${stripControl(row.name)}`;
   const lines = [
-    "Resource actions are indicated with the following symbols:",
-    ...(["create", "update", "unchanged", "manual", "skip"] as const).map(
-      (a) => `  ${SYMBOL[a]} ${a}`,
+    row.detail === undefined
+      ? head
+      : wrapIndent(dim(stripControl(row.detail)), { indent: `${head}  `, hanging: "    " }),
+  ];
+  if (row.keys) lines.push(wrapIndent(dim(foldedKeysLine(row.keys)), { indent: "    " }));
+  return lines;
+}
+
+/** `name1, name2 … and N more` — the continuation under a collapsed row. */
+export const foldedKeysLine = (keys: readonly string[]): string =>
+  `${keys.slice(0, 2).map(stripControl).join(", ")} … and ${formatNumber(keys.length - 2)} more`;
+
+/** Legend, items grouped by resource, totals, warnings, estimate. */
+export function renderPlan(plan: Plan): string {
+  const c = plan.counts;
+  const n = (count: number): string => (count > 0 ? bold(formatNumber(count)) : "0");
+  const lines = [
+    dim(ACTIONS.map((a) => `${ACTION_STYLE[a][0]} ${a}`).join("   ")),
+    "",
+    ...groupPlanItems(plan.items).flatMap((g) => [g.label, ...g.rows.flatMap(renderRow)]),
+    "",
+    wrapIndent(
+      `Plan: ${n(c.create)} to create, ${n(c.update)} to update, ${n(c.unchanged)} unchanged, ${n(c.manual)} manual${c.skip > 0 ? `, ${n(c.skip)} skipped` : ""}.`,
+      { hanging: "  " },
     ),
-    "",
-    ...plan.items.map((item) => renderItem(item, color)),
-    "",
-    `Plan: ${plan.counts.create} to create, ${plan.counts.update} to update, ${plan.counts.unchanged} unchanged, ${plan.counts.manual} manual${plan.counts.skip > 0 ? `, ${plan.counts.skip} skipped` : ""}.`,
-    ...plan.warnings.map((w) => `warning: ${w}`),
-    `Estimate: ~${formatNumber(plan.estimate.requests)} requests · ${formatDuration(plan.estimate.seconds)} at ${plan.rps} req/s`,
+    ...plan.warnings.map((w) => wrapIndent(warn(`warning: ${w}`), { hanging: "  " })),
+    wrapIndent(
+      dim(
+        `Estimate: ~${formatNumber(plan.estimate.requests)} requests · ${formatDuration(plan.estimate.seconds)} at ${plan.rps} req/s`,
+      ),
+      { hanging: "  " },
+    ),
   ];
   return `${lines.join("\n")}\n`;
 }

@@ -4,6 +4,7 @@ import type { MillionSendTarget, WriteResult } from "../millionsend.js";
 import type { MigrateState, Resource } from "../model.js";
 import { migratePaths, readJson, STATE_DIR, writePrivateJson } from "../paths.js";
 import { connectTarget, printHeader, TARGET_RPS } from "../session.js";
+import { bold, dim, err, SYM } from "../theme.js";
 import { confirmPrompt } from "../tty-ui.js";
 import { capitalize, formatDuration, formatNumber, pluralize } from "../utils.js";
 
@@ -61,11 +62,11 @@ export async function rollback(ctx: Context): Promise<number> {
     const ids = state.created[resource] ?? [];
     requests += resource === "suppressions" ? Math.ceil(ids.length / 1000) : ids.length;
     out.write(
-      `  ${formatNumber(ids.length).padStart(8)}  ${RESOURCE_LABEL[resource]}${resource === "contacts" ? " (one request each)" : ""}\n`,
+      `  ${bold(formatNumber(ids.length).padStart(8))}  ${RESOURCE_LABEL[resource]}${resource === "contacts" ? " (one request each)" : ""}\n`,
     );
     const rest = ids.length - 3;
     out.write(
-      `            ${ids.slice(0, 3).join(", ")}${rest > 0 ? ` … and ${formatNumber(rest)} more` : ""}\n`,
+      `${dim(`            ${ids.slice(0, 3).join(", ")}${rest > 0 ? ` … and ${formatNumber(rest)} more` : ""}`)}\n`,
     );
   }
   out.write(`${capitalize(formatDuration(requests / TARGET_RPS))} at ${TARGET_RPS} req/s.\n\n`);
@@ -78,6 +79,13 @@ export async function rollback(ctx: Context): Promise<number> {
     }
   }
   state.failures = [];
+  ctx.progress.section(
+    pending.map((r) => RESOURCE_LABEL[r]),
+    pending.map((r) => {
+      const n = formatNumber(state.created[r]?.length ?? 0);
+      return `${n}/${n}`;
+    }),
+  );
   for (const resource of pending) {
     const ids = state.created[resource] ?? [];
     const remaining = new Set(ids);
@@ -125,7 +133,9 @@ export async function rollback(ctx: Context): Promise<number> {
     out.write(
       `\n${pluralize(state.failures.length, "delete")} failed; the ids stay in ${paths.state}:\n`,
     );
-    for (const f of state.failures) out.write(`  ✗ ${f.resource}/${f.key} — ${f.message}\n`);
+    for (const f of state.failures) {
+      out.write(`  ${err(SYM.err)} ${f.resource}/${f.key} — ${f.message}\n`);
+    }
     return 3;
   }
   out.write("\nRolled back. Rows this tool only updated were left as they are.\n");

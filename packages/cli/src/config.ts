@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { CLOUD_API_URL, TRADEMARK_NOTICE, VERSION } from "./meta.js";
 import { PROVIDERS, type ProviderId, RESOURCES, type Resource } from "./model.js";
 import { providers } from "./providers/index.js";
+import { COLOR_MODES, type ColorMode } from "./theme.js";
 
 export type Command = "migrate" | "plan" | "apply" | "status" | "rollback" | "help" | "version";
 
@@ -34,7 +35,7 @@ export interface Config {
   json: boolean;
   out: string | null;
   report: string | null;
-  color: boolean;
+  color: ColorMode;
   verbose: boolean;
   freshWebhookSecrets: boolean;
   includeSent: boolean;
@@ -75,6 +76,7 @@ const OPTIONS = {
   json: { type: "boolean" },
   out: { type: "string" },
   report: { type: "string" },
+  color: { type: "string" },
   "no-color": { type: "boolean" },
   verbose: { type: "boolean", short: "v" },
   "fresh-webhook-secrets": { type: "boolean" },
@@ -265,6 +267,14 @@ export function parseConfig(
     throw new ConfigError("--out only applies to `migrate plan`.");
   }
 
+  const color = values.color ?? (values["no-color"] === true ? "never" : "auto");
+  if (!(COLOR_MODES as readonly string[]).includes(color)) {
+    throw new ConfigError(`--color must be auto, always or never (got ${color}).`);
+  }
+  if (values["no-color"] === true && color !== "never") {
+    throw new ConfigError("Pass either --color or --no-color, not both.");
+  }
+
   return {
     command,
     planFile,
@@ -281,7 +291,7 @@ export function parseConfig(
     json,
     out: values.out ?? null,
     report: values.report ?? null,
-    color: values["no-color"] !== true && env.NO_COLOR === undefined,
+    color: color as ColorMode,
     verbose: values.verbose === true,
     freshWebhookSecrets: values["fresh-webhook-secrets"] === true,
     includeSent: values["include-sent"] === true,
@@ -307,7 +317,7 @@ function minimal(command: "help" | "version"): Config {
     json: false,
     out: null,
     report: null,
-    color: true,
+    color: "auto",
     verbose: false,
     freshWebhookSecrets: false,
     includeSent: false,
@@ -348,7 +358,8 @@ Options
   --non-interactive          never prompt; a missing input is exit 1 (automatic when stdin is not a terminal, and with --json)
   --json                     JSON on stdout, progress on stderr
   -v, --verbose              log every request: GET /contacts?limit=100 → 200 (143 ms)
-  --no-color                 no ANSI colors (NO_COLOR is honored too)
+  --color <mode>             auto (default: colors on a terminal, none when piped or NO_COLOR is set), always, never
+  --no-color                 same as --color never
   -h, --help                 this text
   -V, --version              print the version
 
@@ -360,6 +371,7 @@ Environment
   ${TARGET_KEY_ENV}        MillionSend API key (full access)
   ${TARGET_URL_ENV}       MillionSend API URL, same as --to-url
   NO_COLOR                   disable colors
+  FORCE_COLOR                colors even when piped, same as --color always
   DO_NOT_TRACK               honored, as a no-op: this tool sends no telemetry, never phones home and never checks for updates
 
 Files (mode 0600, never a key)

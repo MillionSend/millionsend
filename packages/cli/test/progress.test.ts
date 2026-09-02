@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { createContext } from "../src/context.js";
 import { countUp, createProgress } from "../src/progress.js";
+import { colorEnabled, setColorMode } from "../src/theme.js";
 import { formatDuration, formatNumber } from "../src/utils.js";
 
 function sink() {
@@ -19,7 +20,9 @@ function sink() {
 describe("createProgress (piped)", () => {
   it("appends a line every 1,000 units and on done", () => {
     const { chunks, stream } = sink();
-    const step = createProgress({ stream, tty: false }).step("Contacts");
+    const progress = createProgress({ stream, tty: false });
+    progress.section(["Contacts"]);
+    const step = progress.step("Contacts");
     step.update(400, 12847);
     step.update(999, 12847);
     step.update(1000, 12847);
@@ -39,11 +42,74 @@ describe("createProgress (piped)", () => {
   it("fail and a summary on done", () => {
     const { chunks, stream } = sink();
     const progress = createProgress({ stream, tty: false });
+    progress.section(["Domains", "Webhooks"]);
     progress.step("Domains").done("3 created, 1 unchanged");
     progress.step("Webhooks").fail("MillionSend answered 500");
     expect(chunks).toEqual([
-      "✓ Domains 3 created, 1 unchanged\n",
+      "✓ Domains  3 created, 1 unchanged\n",
       "✗ Webhooks — MillionSend answered 500\n",
+    ]);
+  });
+
+  it("counts sit in a 7-wide column after the section's longest label", () => {
+    const { chunks, stream } = sink();
+    const progress = createProgress({ stream, tty: false });
+    progress.section(["Contact properties", "Contacts", "MillionSend"]);
+    progress.step("Contacts").done("721");
+    progress.step("Contact properties").done("3");
+    progress.step("MillionSend").done("current state read");
+    expect(chunks).toEqual([
+      `✓ ${"Contacts".padEnd(18)}     721\n`,
+      `✓ Contact properties       3\n`,
+      `✓ ${"MillionSend".padEnd(18)} current state read\n`,
+    ]);
+  });
+
+  it("section values widen the count column so n/total counters share a right edge", () => {
+    const { chunks, stream } = sink();
+    const progress = createProgress({ stream, tty: false });
+    progress.section(["Topics", "Contacts"], ["5/5", "1,250/1,250"]);
+    const topics = progress.step("Topics");
+    topics.update(5, 5);
+    topics.done();
+    const contacts = progress.step("Contacts");
+    contacts.update(1250, 1250);
+    contacts.done();
+    expect(chunks).toEqual([
+      "✓ Topics           5/5\n",
+      "⟳ Contacts 1,250/1,250\n",
+      "✓ Contacts 1,250/1,250\n",
+    ]);
+    progress.section(["Topics"]);
+    progress.step("Topics").done("5");
+    expect(chunks.at(-1)).toBe("✓ Topics       5\n");
+  });
+
+  it("without a section, labels pad to a fixed 20", () => {
+    const { chunks, stream } = sink();
+    createProgress({ stream, tty: false }).step("Contacts").done("3");
+    expect(chunks).toEqual([`✓ ${"Contacts".padEnd(20)} ${"3".padStart(7)}\n`]);
+  });
+
+  it("colors only the marker; a zero count reads dim as a whole", () => {
+    const { chunks, stream } = sink();
+    setColorMode("always");
+    try {
+      const progress = createProgress({ stream, tty: false });
+      progress.section(["Contacts", "Templates"]);
+      progress.step("Contacts").done("721");
+      progress.step("Templates").done("0");
+      const failed = progress.step("Webhooks");
+      failed.note("resumed");
+      failed.fail("MillionSend answered 500");
+    } finally {
+      setColorMode("auto");
+    }
+    expect(chunks).toEqual([
+      "\x1b[32m✓\x1b[39m Contacts      721\n",
+      "\x1b[2m✓ Templates       0\x1b[22m\n",
+      "\x1b[35m!\x1b[39m resumed\n",
+      "\x1b[31m✗\x1b[39m Webhooks — MillionSend answered 500\n",
     ]);
   });
 });
@@ -51,7 +117,9 @@ describe("createProgress (piped)", () => {
 describe("createProgress (tty)", () => {
   it("rewrites the live line in place and keeps notes above it", () => {
     const { chunks, stream } = sink();
-    const step = createProgress({ stream, tty: true }).step("Contacts");
+    const progress = createProgress({ stream, tty: true });
+    progress.section(["Contacts"]);
+    const step = progress.step("Contacts");
     step.update(3200, 12847);
     step.note("resumed");
     step.done();
@@ -63,6 +131,28 @@ describe("createProgress (tty)", () => {
     );
   });
 
+  it("the live marker is cyan; the count column holds while it moves", () => {
+    const { chunks, stream } = sink();
+    setColorMode("always");
+    try {
+      const progress = createProgress({ stream, tty: true });
+      progress.section(["Contacts"]);
+      const step = progress.step("Contacts");
+      step.update(1, 12847);
+      step.update(12847, 12847);
+      step.done();
+    } finally {
+      setColorMode("auto");
+    }
+    expect(chunks).toEqual([
+      "\r\x1b[2K\x1b[36m⟳\x1b[39m Contacts",
+      "\r\x1b[2K\x1b[36m⟳\x1b[39m Contacts 1/12,847",
+      "\r\x1b[2K\x1b[36m⟳\x1b[39m Contacts 12,847/12,847",
+      "\r\x1b[2K",
+      "\x1b[32m✓\x1b[39m Contacts 12,847/12,847\n",
+    ]);
+  });
+
   it("writeAbove clears the live line, writes to the other stream, redraws", () => {
     const bytes: string[] = [];
     const tag = (name: string) => ({
@@ -72,6 +162,7 @@ describe("createProgress (tty)", () => {
       },
     });
     const progress = createProgress({ stream: tag("out") as never, tty: true });
+    progress.section(["Contacts"]);
     const step = progress.step("Contacts");
     step.update(3200, 12847);
     progress.writeAbove("warning: retry 2/5 in 1s — Resend 503\n", tag("err"));
@@ -100,21 +191,22 @@ describe("createProgress (tty)", () => {
       }) as typeof stream.write;
       return stream;
     };
-    const config = parseConfig(["migrate", "--from", "resend"], {}, true);
+    const config = parseConfig(["migrate", "--from", "resend", "--color", "never"], {}, true);
     const tty = createContext(config, {
       stdout: tag("out", true) as never,
       stderr: tag("err", false) as never,
       stdin: new PassThrough(),
     });
+    tty.progress.section(["Contacts"]);
     tty.progress.step("Contacts").update(1);
     tty.log.warn("careful");
     tty.rl.close();
     expect(bytes).toEqual([
       "out:\r\x1b[2K⟳ Contacts",
-      "out:\r\x1b[2K⟳ Contacts 1",
+      "out:\r\x1b[2K⟳ Contacts       1",
       "out:\r\x1b[2K",
       "err:warning: careful\n",
-      "out:⟳ Contacts 1",
+      "out:⟳ Contacts       1",
     ]);
 
     bytes.length = 0;
@@ -127,6 +219,35 @@ describe("createProgress (tty)", () => {
     piped.log.warn("careful");
     piped.rl.close();
     expect(bytes).toEqual(["err:warning: careful\n"]);
+  });
+
+  it("createContext keys auto color on the human stream: stderr under --json", () => {
+    const stream = (isTTY: boolean) => Object.assign(new PassThrough(), { isTTY });
+    const { NO_COLOR, FORCE_COLOR } = process.env;
+    delete process.env.NO_COLOR;
+    delete process.env.FORCE_COLOR;
+    try {
+      const keys = {
+        RESEND_API_KEY: "re_x",
+        MILLIONSEND_API_KEY: "ms_x",
+        MILLIONSEND_BASE_URL: "http://127.0.0.1:1",
+      };
+      const json = parseConfig(["migrate", "plan", "--from", "resend", "--json"], keys, true);
+      const plain = parseConfig(["migrate", "--from", "resend"], {}, true);
+      let ctx = createContext(json, { stdout: stream(true), stderr: stream(false) });
+      ctx.rl.close();
+      expect(colorEnabled()).toBe(false);
+      ctx = createContext(json, { stdout: stream(false), stderr: stream(true) });
+      ctx.rl.close();
+      expect(colorEnabled()).toBe(true);
+      ctx = createContext(plain, { stdout: stream(false), stderr: stream(true) });
+      ctx.rl.close();
+      expect(colorEnabled()).toBe(false);
+    } finally {
+      if (NO_COLOR !== undefined) process.env.NO_COLOR = NO_COLOR;
+      if (FORCE_COLOR !== undefined) process.env.FORCE_COLOR = FORCE_COLOR;
+      setColorMode("auto");
+    }
   });
 });
 
@@ -141,6 +262,17 @@ describe("countUp", () => {
       { stream, tty: false },
     );
     expect(chunks).toEqual(["12,847  contacts\n     7  segments\n"]);
+  });
+
+  it("bolds the number, never the noun", async () => {
+    const { chunks, stream } = sink();
+    setColorMode("always");
+    try {
+      await countUp([{ label: "contacts", value: 7 }], { stream, tty: false });
+    } finally {
+      setColorMode("auto");
+    }
+    expect(chunks).toEqual(["\x1b[1m7\x1b[22m  contacts\n"]);
   });
 
   it("animates on a TTY and ends on the exact numbers", async () => {

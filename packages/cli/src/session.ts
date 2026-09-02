@@ -7,9 +7,9 @@ import { type ProviderId, RESOURCES, type Resource, type TargetUsage } from "./m
 import type { Progress, StepHandle } from "./progress.js";
 import { type OnProgress, type Provider, providers, type Source } from "./providers/index.js";
 import { RESEND_BASE_URL_ENV } from "./providers/resend.js";
+import { dim, ok, SYM, wrapIndent } from "./theme.js";
 import {
   banner,
-  dim,
   pickBannerTier,
   secretPrompt,
   selectPrompt,
@@ -37,7 +37,7 @@ export function printHeader(ctx: Context, text: string): void {
   const { out } = ctx;
   const tier = pickBannerTier(out.columns ?? 0, out.isTTY === true);
   if (tier === "plain") {
-    out.write(`millionsend ${VERSION} — ${text}\n\n`);
+    out.write(`${wrapIndent(`millionsend ${VERSION} — ${text}`, { hanging: "  " })}\n\n`);
     return;
   }
   for (const line of banner(tier)) out.write(`${line}\n`);
@@ -99,7 +99,7 @@ export async function connectSource(ctx: Context, id: ProviderId): Promise<Sourc
     throw error;
   }
   const host = baseUrl === provider.baseUrl({}) ? "" : ` (${baseUrl})`;
-  ctx.out.write(`✓ ${provider.label} · connected${host}\n`);
+  ctx.out.write(`${ok(SYM.ok)} ${provider.label} ${dim("·")} connected${host}\n`);
   return { provider, source };
 }
 
@@ -143,8 +143,8 @@ export async function connectTarget(ctx: Context): Promise<TargetSession> {
   const usage = await target.probe();
   ctx.out.write(
     usage.cloud
-      ? `✓ MillionSend Cloud · plan ${capitalize(usage.plan ?? "unknown")}\n`
-      : `✓ MillionSend · ${baseUrl} (self-hosted)\n`,
+      ? `${ok(SYM.ok)} MillionSend Cloud ${dim("·")} plan ${capitalize(usage.plan ?? "unknown")}\n`
+      : `${ok(SYM.ok)} MillionSend ${dim("·")} ${baseUrl} (self-hosted)\n`,
   );
   return { target, usage, baseUrl };
 }

@@ -65,7 +65,7 @@ describe("parseConfig", () => {
       json: true,
       nonInteractive: true,
       verbose: true,
-      color: false,
+      color: "never",
       freshWebhookSecrets: true,
       includeSent: true,
       fresh: true,
@@ -177,10 +177,19 @@ describe("parseConfig", () => {
     expect(parseConfig(["migrate", "--from", "resend"], env, true).yes).toBe(false);
   });
 
-  it("NO_COLOR in the environment turns color off", () => {
-    expect(
-      parseConfig(["migrate", "--from", "resend"], { ...env, NO_COLOR: "1" }, true).color,
-    ).toBe(false);
+  it("--color takes auto, always or never; --no-color is never; the default is auto", () => {
+    const argv = ["migrate", "--from", "resend"];
+    expect(parseConfig(argv, env, true).color).toBe("auto");
+    for (const mode of ["auto", "always", "never"]) {
+      expect(parseConfig([...argv, "--color", mode], env, true).color).toBe(mode);
+    }
+    expect(parseConfig([...argv, "--no-color", "--color", "never"], env, true).color).toBe("never");
+    expect(() => parseConfig([...argv, "--color", "yes"], env, true)).toThrow(
+      "--color must be auto, always or never (got yes).",
+    );
+    expect(() => parseConfig([...argv, "--no-color", "--color", "always"], env, true)).toThrow(
+      "Pass either --color or --no-color, not both.",
+    );
   });
 });
 
@@ -196,6 +205,9 @@ describe("helpText", () => {
       "--fresh-webhook-secrets",
       "--include-sent",
       "--on-conflict",
+      "--color <mode>",
+      "--no-color                 same as --color never",
+      "FORCE_COLOR",
       "--fresh                    ignore resume progress; keeps what earlier runs created so rollback still works",
       "RESEND_API_KEY",
       "MILLIONSEND_API_KEY",

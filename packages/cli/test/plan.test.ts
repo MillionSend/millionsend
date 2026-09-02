@@ -1,15 +1,18 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RESOURCES, type Resource, type Snapshot, type TargetState } from "../src/model.js";
 import {
   buildPlan,
+  groupPlanItems,
   type PlanOptions,
   parsePlan,
   planHash,
   renderPlan,
   serializePlan,
 } from "../src/plan.js";
+import { setColorMode } from "../src/theme.js";
 import { TARGET_WEBHOOK_EVENTS } from "../src/translate.js";
+import { visibleLength } from "../src/tty-ui.js";
 
 const snapshot: Snapshot = JSON.parse(
   readFileSync(new URL("./fixtures/snapshot.json", import.meta.url), "utf8"),
@@ -86,48 +89,77 @@ const options = (overrides: Partial<PlanOptions> = {}): PlanOptions => ({
   ...overrides,
 });
 
-const GOLDEN = `Resource actions are indicated with the following symbols:
-  + create
-  ~ update
-  = unchanged
-  ! manual
-  - skip
+/** Wrapped at 80 columns, colors off. */
+const GOLDEN = `+ create   ~ update   = unchanged   ! manual   − skip
 
-  = unchanged  properties/company
-  + create     properties/seats — number
-  ~ update     topics/Product updates (description)
-  + create     topics/Beta program — opt_out
-  ~ update     segments/Active Users (filter)
-  + create     segments/Enterprise — 1 member
-  ! manual     segments/Enterprise — filter not translated (unsupported field "plan_tier"); 1 member still imported
-  + create     segments/Imported — 0 members
-  = unchanged  domains/example.com
-  + create     domains/updates.example.com — eu-west-1
-  ! manual     domains/updates.example.com — add DNS records (shown after apply)
-  ! manual     domains/mail.example.org — region ap-south-1 is not available (create it by hand in one of: us-east-1, eu-west-1, sa-east-1, ap-northeast-1)
-  ~ update     webhooks/https://webhook.example.com/handler (events)
-  ! manual     webhooks/https://webhook.example.com/handler — events not delivered here: email.suppressed
-  ! manual     webhooks/https://hooks.example.com/contacts — none of its events exist here; not created
-  ! manual     webhooks/https://hooks.example.com/contacts — events not delivered here: contact.created, contact.updated
-  ~ update     templates/welcome (name)
-  ! manual     templates/welcome — from Acme <onboarding@example.com> is not stored on templates; pass it when sending
-  ! manual     templates/welcome — reply_to support@example.com is not stored on templates; pass it when sending
-  ! manual     templates/welcome — variables first_name are not stored; merge fields resolve from contact properties
-  + create     templates/Receipt
-  ! manual     templates/Receipt — variables order_id are not stored; merge fields resolve from contact properties
-  + create     contacts (5) — batch upsert, 3 segment memberships
-  ~ update     enrichment (5) — properties and topic subscriptions, read per contact
-  + create     broadcasts/November announcements — draft
-  ! manual     broadcasts/Beta invite — from domain updates.example.com is not verified here — re-run apply after DNS verification
-  - skip       broadcasts/Launch recap — already sent; --include-sent imports it as a draft
-  + create     suppressions (3) — batch add with origin
-  ! manual     api-keys/Production — create it by hand; Resend exposes only the name
-  ! manual     api-keys/Staging — create it by hand; Resend exposes only the name
+properties
+  = company
+  + seats  number
+topics
+  ~ Product updates  description
+  + Beta program  opt_out
+segments
+  ~ Active Users  filter
+  + Enterprise  1 member
+  ! Enterprise  filter not translated (unsupported field "plan_tier"); 1 member
+    still imported
+  + Imported  0 members
+domains
+  = example.com
+  + updates.example.com  eu-west-1
+  ! updates.example.com  add DNS records (shown after apply)
+  ! mail.example.org  region ap-south-1 is not available (create it by hand in
+    one of: us-east-1, eu-west-1, sa-east-1, ap-northeast-1)
+webhooks
+  ~ https://webhook.example.com/handler  events
+  ! https://webhook.example.com/handler  events not delivered here:
+    email.suppressed
+  ! https://hooks.example.com/contacts  none of its events exist here; not
+    created
+  ! https://hooks.example.com/contacts  events not delivered here:
+    contact.created, contact.updated
+templates
+  ~ welcome  name
+  ! welcome  from Acme <onboarding@example.com> is not stored on templates; pass
+    it when sending
+  ! welcome  reply_to support@example.com is not stored on templates; pass it
+    when sending
+  ! welcome  variables first_name are not stored; merge fields resolve from
+    contact properties
+  + Receipt
+  ! Receipt  variables order_id are not stored; merge fields resolve from
+    contact properties
+contacts (5)
+  + contacts  batch upsert, 3 segment memberships
+enrichment (5)
+  ~ contacts  properties and topic subscriptions, read per contact
+broadcasts
+  + November announcements  draft
+  ! Beta invite  from domain updates.example.com is not verified here — re-run
+    apply after DNS verification
+  − Launch recap  already sent; --include-sent imports sent broadcasts as drafts
+suppressions (3)
+  + suppressions  batch add with origin
+api-keys
+  ! Production  create by hand; Resend exposes only the name
+  ! Staging  create by hand; Resend exposes only the name
 
 Plan: 9 to create, 5 to update, 2 unchanged, 13 manual, 1 skipped.
 warning: 1 domain to create; the Free plan allows 1 (1 already there)
 Estimate: ~64 requests · 3 s at 8 req/s
 `;
+
+const stdout = process.stdout as unknown as { columns?: number | undefined };
+const savedColumns = stdout.columns;
+
+beforeEach(() => {
+  setColorMode("never");
+  stdout.columns = 80;
+});
+afterEach(() => {
+  setColorMode("auto");
+  stdout.columns = savedColumns;
+});
 
 describe("buildPlan + renderPlan (golden)", () => {
   const plan = buildPlan({ snapshot, target: goldenTarget, options: options() });
@@ -504,7 +536,7 @@ describe("buildPlan diffs against existing rows", () => {
       ["skip", "Launch recap"],
     ]);
     expect(renderPlan(plan)).toContain(
-      "= unchanged  broadcasts/November announcements — matched by name; the draft's body is not compared",
+      "  = November announcements  matched by name; the draft's body is not compared",
     );
   });
 
@@ -526,7 +558,7 @@ describe("buildPlan diffs against existing rows", () => {
       options: options({ include: only("topics") }),
     });
     const text = renderPlan(plan);
-    expect(text).toContain("+ create     topics/News — opt_in");
+    expect(text).toContain("  + News  opt_in");
     expect(text).not.toContain("\x1b");
     expect(text).not.toContain("\x07");
     expect(text).not.toContain("\x00");
@@ -567,16 +599,103 @@ describe("planHash / serializePlan / parsePlan", () => {
   });
 });
 
-describe("renderPlan colours", () => {
-  it("wraps only the symbol and action when color is on", () => {
+describe("groupPlanItems", () => {
+  const launchRecap = snapshot.broadcasts.find((b) => b.status === "sent");
+  const sent = (name: string) =>
+    ({ ...launchRecap, id: name, name }) as (typeof snapshot.broadcasts)[number];
+
+  it("folds three or more items sharing action and detail into one row", () => {
     const plan = buildPlan({
+      snapshot: { ...snapshot, broadcasts: ["A", "B", "C", "D"].map(sent) },
+      target: emptyTarget,
+      options: options({ include: new Set<Resource>(["broadcasts", "api-keys"]) }),
+    });
+    expect(groupPlanItems(plan.items)).toEqual([
+      {
+        resource: "broadcasts",
+        label: "broadcasts",
+        rows: [
+          {
+            action: "skip",
+            name: "4 broadcasts",
+            detail: "already sent; --include-sent imports sent broadcasts as drafts",
+            keys: ["A", "B", "C", "D"],
+          },
+        ],
+      },
+      {
+        resource: "api-keys",
+        label: "api-keys",
+        rows: [
+          { action: "manual", name: "Production", detail: expect.any(String) },
+          { action: "manual", name: "Staging", detail: expect.any(String) },
+        ],
+      },
+    ]);
+    expect(renderPlan(plan)).toContain(
+      "broadcasts\n  − 4 broadcasts  already sent; --include-sent imports sent broadcasts as drafts\n    A, B … and 2 more\napi-keys\n",
+    );
+    expect(plan.counts.skip).toBe(4);
+  });
+
+  it("never folds creates or updates: every name is shown before the confirm", () => {
+    const topic = snapshot.topics[0];
+    if (topic === undefined) throw new Error("fixture has no topic");
+    const topics = ["Product updates", "Changelog", "Security notices"].map((name) => ({
+      ...topic,
+      id: name,
+      name,
+      defaultSubscription: "opt_in" as const,
+    }));
+    const plan = buildPlan({
+      snapshot: { ...snapshot, topics },
+      target: emptyTarget,
+      options: options({ include: new Set<Resource>(["topics"]) }),
+    });
+    expect(groupPlanItems(plan.items)).toEqual([
+      {
+        resource: "topics",
+        label: "topics",
+        rows: topics.map((t) => ({ action: "create", name: t.name, detail: "opt_in" })),
+      },
+    ]);
+    expect(renderPlan(plan)).toContain(
+      "topics\n  + Product updates  opt_in\n  + Changelog  opt_in\n  + Security notices  opt_in\n",
+    );
+  });
+});
+
+describe("renderPlan colours", () => {
+  const plan = () =>
+    buildPlan({
       snapshot,
       target: emptyTarget,
       options: options({ include: new Set<Resource>(["suppressions"]) }),
     });
-    const line = renderPlan(plan, { color: true })
-      .split("\n")
-      .find((l) => l.includes("suppressions (3)"));
-    expect(line).toBe("  \x1b[32m+ create   \x1b[39m  suppressions (3) — batch add with origin");
+
+  it("colors the symbol, dims the detail, bolds the non-zero totals", () => {
+    setColorMode("always");
+    const lines = renderPlan(plan()).split("\n");
+    expect(lines[0]).toBe("\x1b[2m+ create   ~ update   = unchanged   ! manual   − skip\x1b[22m");
+    expect(lines).toContain(
+      "  \x1b[32m+\x1b[39m suppressions  \x1b[2mbatch add with origin\x1b[22m",
+    );
+    expect(lines).toContain(
+      "Plan: \x1b[1m1\x1b[22m to create, 0 to update, 0 unchanged, 0 manual.",
+    );
+    expect(lines.at(-2)).toBe("\x1b[2mEstimate: ~41 requests · 1 s at 8 req/s\x1b[22m");
+  });
+
+  it("wraps on visible width, so color codes never count", () => {
+    setColorMode("always");
+    stdout.columns = 30;
+    const text = renderPlan(plan());
+    expect(text).toContain(
+      "  \x1b[32m+\x1b[39m suppressions  \x1b[2mbatch add\n    with origin\x1b[22m",
+    );
+    expect(text).toContain("Plan: \x1b[1m1\x1b[22m to create, 0 to\n  update,");
+    // The one-line legend is the only line never wrapped.
+    for (const line of text.split("\n").slice(1))
+      expect(visibleLength(line)).toBeLessThanOrEqual(30);
   });
 });

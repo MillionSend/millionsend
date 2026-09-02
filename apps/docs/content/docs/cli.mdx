@@ -78,7 +78,8 @@ millionsend --help | --version
 | `--non-interactive` | Never prompt; a missing input is exit 1. Automatic when stdin is not a terminal, and with `--json`. |
 | `--json` | JSON on stdout, progress on stderr. |
 | `-v`, `--verbose` | Log every request: `GET /contacts?limit=100 → 200 (143 ms)`. |
-| `--no-color` | No ANSI colors. `NO_COLOR` is honored too. |
+| `--color <mode>` | `auto` (default: colors on a terminal, none when piped or `NO_COLOR` is set), `always`, `never`. |
+| `--no-color` | Same as `--color never`. |
 | `-h`, `--help` / `-V`, `--version` | Help text / version. |
 
 Resource names for `--only` and `--skip`, in apply order: `domains`,
@@ -93,6 +94,7 @@ Resource names for `--only` and `--skip`, in apply order: `domains`,
 | `MILLIONSEND_API_KEY` | MillionSend API key, full access. |
 | `MILLIONSEND_BASE_URL` | MillionSend API URL, same as `--to-url`. |
 | `NO_COLOR` | Disable colors. |
+| `FORCE_COLOR` | Colors even when piped, same as `--color always`. |
 | `DO_NOT_TRACK` | Honored, as a no-op: the tool sends no telemetry, never phones home and never checks for updates. |
 
 Each key is resolved in this order: environment variable, then the `-stdin`

@@ -1,6 +1,7 @@
 import type { Config } from "./config.js";
 import { createLogger, type Logger } from "./log.js";
 import { createProgress, type Progress } from "./progress.js";
+import { setColorMode } from "./theme.js";
 import { type LineReader, lineReader } from "./tty-ui.js";
 
 export type OutStream = NodeJS.WritableStream & {
@@ -37,6 +38,7 @@ export function createContext(config: Config, io: Io = {}): Context {
   const stdout = io.stdout ?? process.stdout;
   const stderr = io.stderr ?? process.stderr;
   const out = config.json ? stderr : stdout;
+  setColorMode(config.color, out.isTTY === true);
   const progress = createProgress({ stream: out });
   // On a terminal a log line would land on the live progress row; route it
   // through the renderer so it is printed above that row. Piped, stderr is

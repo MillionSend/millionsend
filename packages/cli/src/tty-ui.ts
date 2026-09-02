@@ -1,4 +1,5 @@
 import { createInterface, emitKeypressEvents } from "node:readline";
+import { bone, dim, wrapIndent } from "./theme.js";
 import { stripControl, truncate } from "./utils.js";
 
 /** Structural subset of lineReader — the non-TTY fallback asker every prompt degrades to. */
@@ -104,12 +105,7 @@ export const visibleLength = (s: string): number => [...stripControl(s)].length;
 export const rowsFor = (lines: readonly string[], columns: number): number =>
   lines.reduce((sum, line) => sum + Math.max(1, Math.ceil(visibleLength(line) / columns)), 0);
 
-const colorOn = (): boolean => process.stdout.isTTY === true && process.env.NO_COLOR === undefined;
-
-/** Gray — secondary text. No-op when piped or NO_COLOR is set. */
-export const dim = (s: string): string => (colorOn() ? `\x1b[90m${s}\x1b[39m` : s);
-/** Bone-bright white — the selected row. */
-export const bone = (s: string): string => (colorOn() ? `\x1b[97m${s}\x1b[39m` : s);
+export { bone, dim } from "./theme.js";
 
 /**
  * Final hand-tuned banner art, stored verbatim — ▓ marks the M's stem accent,
@@ -387,7 +383,12 @@ async function multiSelectTty(label: string, options: MultiSelectOption[]): Prom
     () => eraseRows(height),
   );
   const labels = options.filter((o) => values.includes(o.value)).map((o) => o.label);
-  stdout.write(`${answerLine(label, labels.length > 0 ? labels.join(", ") : "none")}\n`);
+  // One choice per line: a comma list wraps mid-word past a handful of items.
+  stdout.write(
+    labels.length > 0
+      ? `${label}\n${labels.map((l) => wrapIndent(l, { indent: "  " })).join("\n")}\n`
+      : `${answerLine(label, "none")}\n`,
+  );
   return values;
 }
 
@@ -417,7 +418,7 @@ export async function secretPrompt(rl: Asker, { label }: { label: string }): Pro
     () => stdout.write("\r\x1b[2K"),
     stdout,
   );
-  stdout.write(`${label}: ${maskSecret(secret)}\n`);
+  stdout.write(`${label}: ${dim(maskSecret(secret))}\n`);
   return secret;
 }
 

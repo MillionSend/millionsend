@@ -34,8 +34,6 @@ export async function main(argv = process.argv.slice(2), io: Io = {}): Promise<n
     stdout.write(`${VERSION}\n`);
     return 0;
   }
-  // The color helpers read NO_COLOR at call time; --no-color joins them there.
-  if (!config.color) process.env.NO_COLOR = "1";
   const ctx = createContext(config, io);
   for (const warning of config.warnings) ctx.log.warn(warning);
   try {

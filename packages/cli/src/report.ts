@@ -5,6 +5,7 @@ import {
   type DnsRecord,
   type MigrateState,
   type Plan,
+  type PlanItem,
   type ProviderId,
   RESOURCES,
   type Resource,
@@ -13,7 +14,9 @@ import {
   type TargetUsage,
 } from "./model.js";
 import { type MigratePaths, writePrivate, writePrivateJson } from "./paths.js";
+import { foldedKeysLine, groupPlanItems } from "./plan.js";
 import { countUp } from "./progress.js";
+import { bold, dim, err, heading, info, note, SYM, shortId, wrapIndent } from "./theme.js";
 import { capitalize, formatNumber, pluralize, stripControlDeep } from "./utils.js";
 
 export interface Offer {
@@ -179,34 +182,53 @@ export function buildReport({
   };
 }
 
-/** Value last: a DKIM key is hundreds of characters and nothing should pad after it. */
-const DNS_COLUMNS: [string, (r: DnsRecord) => string][] = [
-  ["Type", (r) => r.type],
-  ["Name", (r) => r.name],
-  ["Priority", (r) => (r.priority === undefined ? "" : String(r.priority))],
-  ["Value", (r) => r.value],
-];
+/** One card per record: type and name, then the whole value on its own line (a DKIM key wraps as a block, never cut). */
+export function dnsCards(records: DnsRecord[]): string[] {
+  return records.flatMap((r, i) => [
+    ...(i > 0 ? [""] : []),
+    `  ${info(r.type)}  ${r.name}${r.priority === undefined ? "" : dim(`  priority ${r.priority}`)}`,
+    `    ${bold(r.value)}`,
+  ]);
+}
 
-/** Copy-ready, column-aligned; values are never shortened. */
-export function dnsTable(records: DnsRecord[]): string[] {
-  const rows = records.map((r) => DNS_COLUMNS.map(([, get]) => get(r)));
-  const widths = DNS_COLUMNS.map(([head], i) =>
-    Math.max(head.length, ...rows.map((row) => row[i]?.length ?? 0)),
+/** Two lines per pair: the name, then `shortened-source → full-target` (the target id is the thing to copy). */
+export function idRows(ids: IdMapping[]): string[] {
+  return ids.flatMap((m) => [
+    `  ${m.resource}/${m.name}`,
+    `    ${dim(shortId(m.sourceId))} → ${bold(m.targetId)}`,
+  ]);
+}
+
+/** Manual notes folded like the plan: a `resource/key` title is a manual plan item again. */
+function manualRows(
+  manual: Plan["manual"],
+): { title: string; detail: string; names?: string[] | undefined }[] {
+  const items: PlanItem[] = manual.map(({ title, detail }) => {
+    const slash = title.indexOf("/");
+    return {
+      resource: title.slice(0, slash) as Resource,
+      action: "manual",
+      key: title.slice(slash + 1),
+      detail,
+    };
+  });
+  return groupPlanItems(items).flatMap((g) =>
+    g.rows.map((row) => ({
+      title: row.keys === undefined ? `${g.resource}/${row.name}` : row.name,
+      detail: row.detail ?? "",
+      names: row.keys,
+    })),
   );
-  const line = (cells: string[]): string =>
-    cells
-      .map((cell, i) => cell.padEnd(widths[i] ?? 0))
-      .join("  ")
-      .trimEnd();
-  return [line(DNS_COLUMNS.map(([head]) => head)), ...rows.map(line)];
 }
 
-/** Column-aligned `resource/name  source-id → target-id` rows. */
-export function idTable(ids: IdMapping[]): string[] {
-  const names = ids.map((m) => `${m.resource}/${m.name}`);
-  const width = Math.max(...names.map((n) => n.length));
-  return ids.map((m, i) => `${names[i]?.padEnd(width)}  ${m.sourceId} → ${m.targetId}`);
-}
+/** Digit runs outside URLs in bold, so the counts stand out of a sentence. */
+const boldNumbers = (text: string): string =>
+  text
+    .split(" ")
+    .map((word) => (word.includes("://") ? word : word.replace(/\d[\d,.]*\d|\d/g, bold)))
+    .join(" ");
+
+const ITEM = { indent: "  ", hanging: "    " };
 
 const COUNT_LABEL: Partial<Record<Resource, string>> = { enrichment: "contacts enriched" };
 
@@ -239,36 +261,44 @@ export const SYNC_HINT = (source: ProviderId): string =>
 /** The numbers, the read-only assurance, secrets once, the checklist, the sync hint, then the plan offer. */
 export async function printSummary(out: OutStream, raw: Report): Promise<void> {
   const report = stripControlDeep(raw);
-  out.write("\n");
+  const line = (text: string, opts: { indent: string; hanging?: string } = ITEM): void => {
+    out.write(`${wrapIndent(text, opts)}\n`);
+  };
+  out.write(`\n${heading("Done")}\n\n`);
   await countUp(countRows(report.counts), { stream: out });
-  out.write(`\n${report.sourceLabel} was only read; nothing there was changed.\n`);
+  out.write(`\n${dim(`${report.sourceLabel} was only read; nothing there was changed.`)}\n`);
   if (report.freshWebhookSecrets.length > 0) {
     out.write("\nWebhook signing secrets, shown once (they are not saved anywhere):\n");
     for (const { endpoint, secret } of report.freshWebhookSecrets) {
-      out.write(`  ${endpoint}  ${secret}\n`);
+      out.write(`  ${endpoint}  ${bold(secret)}\n`);
     }
   }
   const { done, left } = report.checklist;
-  out.write(`\n${done.length} of ${done.length + left.length} steps done — left:\n`);
-  for (const item of left) out.write(`  [ ] ${item}\n`);
+  out.write(`\n${bold(String(done.length))} of ${done.length + left.length} steps done — left:\n`);
+  for (const item of left)
+    line(`${dim("[")} ${dim("]")} ${item}`, { indent: "  ", hanging: "      " });
   for (const { domain, records } of report.dns) {
     out.write(`\nDNS records for ${domain}:\n`);
-    for (const line of dnsTable(records)) out.write(`  ${line}\n`);
+    for (const card of dnsCards(records)) out.write(`${card}\n`);
   }
   if (report.ids.length > 0) {
-    out.write(`\nId map (${report.sourceLabel} id → id here):\n`);
-    for (const line of idTable(report.ids)) out.write(`  ${line}\n`);
+    out.write(`\nId map (${report.sourceLabel} → MillionSend; full pairs in migrate-report.md):\n`);
+    for (const row of idRows(report.ids)) out.write(`${row}\n`);
   }
   if (report.manual.length > 0) {
     out.write("\nManual notes:\n");
-    for (const { title, detail } of report.manual) out.write(`  ! ${title} — ${detail}\n`);
+    for (const { title, detail, names } of manualRows(report.manual)) {
+      line(`${note(SYM.manual)} ${title} — ${detail}`);
+      if (names !== undefined) line(dim(foldedKeysLine(names)), { indent: "    " });
+    }
   }
   if (report.failures.length > 0) {
     out.write("\nFailed:\n");
-    for (const f of report.failures) out.write(`  ✗ ${f.resource}/${f.key} — ${f.message}\n`);
+    for (const f of report.failures) line(`${err(SYM.err)} ${f.resource}/${f.key} — ${f.message}`);
   }
-  out.write(`\n${SYNC_HINT(report.source)}\n`);
-  if (report.offer !== null) out.write(`\n${report.offer.text.join(" ")}\n`);
+  out.write(`\n${dim(wrapIndent(SYNC_HINT(report.source)))}\n`);
+  if (report.offer !== null)
+    out.write(`\n${wrapIndent(boldNumbers(report.offer.text.join(" ")))}\n`);
 }
 
 export function renderReportMd(raw: Report): string {

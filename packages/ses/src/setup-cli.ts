@@ -6,9 +6,9 @@ import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 // @millionsend/setup and run under tsx from the repo root, and neither path
 // resolves package names. The prompt kit lives in the MIT package so the
 // AGPL wizard consumes it, never the reverse.
+import { bold, dim, err, info } from "../../cli/src/theme.js";
 import {
   banner,
-  dim,
   type LineReader,
   lineReader,
   pickBannerTier,
@@ -153,7 +153,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         envValue(state.envContent, "APP_BASE_URL") ||
         process.env.APP_BASE_URL ||
         "http://localhost:3000";
-      console.log("Plan:");
+      console.log(bold("Plan:"));
       const region = process.env.AWS_REGION ?? "us-east-1";
       for (const line of flowPlan(state, { appBaseUrl, region, cloud })) {
         console.log(`  · ${line}`);
@@ -553,13 +553,13 @@ async function storageStep(
   const client = createStorageClient(credentials);
   try {
     for (const bucket of [storageBucket, backupBucket]) {
-      console.log(`==> bucket ${bucket}: ${await ensureBucket(client, bucket)}`);
+      console.log(`${info("==>")} bucket ${bucket}: ${await ensureBucket(client, bucket)}`);
     }
   } catch (error) {
     // Connection failures surface as AggregateErrors with an empty message.
     const reason = (error as Error).message || (error as Error).name || String(error);
     console.error(
-      `Bucket setup failed: ${reason}\nCheck the endpoint and credentials, or create the buckets yourself and set the S3_* lines in .env by hand — storage step skipped.`,
+      `${err("Bucket setup failed:")} ${reason}\nCheck the endpoint and credentials, or create the buckets yourself and set the S3_* lines in .env by hand — storage step skipped.`,
     );
     return;
   }
@@ -618,7 +618,7 @@ async function resolveIdentity(rl: LineReader): Promise<string | null> {
       console.log(`${dim(`aws: ${identity.Arn ?? "?"} (account ${identity.Account})`)}\n`);
       return identity.Account;
     } catch (error) {
-      console.error(`Could not verify AWS credentials: ${(error as Error).message}`);
+      console.error(`${err("Could not verify AWS credentials:")} ${(error as Error).message}`);
       const action = authAction({
         identityOk: false,
         // Pipes never get the offer, so skip probing for the CLI there.
@@ -691,7 +691,7 @@ async function awsStep(
   const region = await chooseRegion(rl);
   if (region === null) return;
 
-  console.log("\nPlan:");
+  console.log(`\n${bold("Plan:")}`);
   const plan = eventsOnly ? eventsPlan : setupPlan;
   for (const line of plan({ region, appBaseUrl })) console.log(`  · ${line}`);
   if (!(await offer(rl, "\nProceed?", interactive))) return;
@@ -700,7 +700,7 @@ async function awsStep(
     region,
     accountId,
     appBaseUrl,
-    onStep: (line: string) => console.log(`==> ${line}`),
+    onStep: (line: string) => console.log(`${info("==>")} ${line}`),
   };
   let entries: Record<string, string>;
   try {
@@ -716,7 +716,7 @@ async function awsStep(
     }
   } catch (error) {
     console.error(
-      `AWS setup failed: ${(error as Error).message}\nFix that and re-run — resources it already created are adopted, not duplicated.`,
+      `${err("AWS setup failed:")} ${(error as Error).message}\nFix that and re-run — resources it already created are adopted, not duplicated.`,
     );
     return;
   }
@@ -808,13 +808,13 @@ async function launchStep(
   console.log(`
 $ ${command}`);
   if (!runInherit("docker", composeUpArgs(composeContent))) {
-    console.error("docker compose failed — fix the error above and re-run the setup.");
+    console.error(`${err("docker compose failed")} — fix the error above and re-run the setup.`);
     return 1;
   }
   const origin = httpsOrigin(appBaseUrl);
   console.log(
     `
-Running. Next steps:
+${bold("Running. Next steps:")}
   · ${appBaseUrl} — sign up (the first user becomes the owner)
   · SES sandbox account? Set the send rate to 1 in Settings → Instance
   · Verify a sending domain in the dashboard, then send${
@@ -848,7 +848,7 @@ async function teardownFlow(
   accountId: string,
   dryRun: boolean,
 ): Promise<number> {
-  console.log("\nTeardown deletes:");
+  console.log(`\n${bold("Teardown deletes:")}`);
   for (const line of teardownPlan(region)) console.log(`  · ${line}`);
   if (dryRun) {
     console.log("\n--dry-run: nothing was deleted.");
@@ -858,7 +858,7 @@ async function teardownFlow(
   await runTeardown(createSetupClients(region), {
     region,
     accountId,
-    onStep: (line) => console.log(`==> deleting ${line}`),
+    onStep: (line) => console.log(`${info("==>")} deleting ${line}`),
   });
   console.log("\nDone. Remove the AWS_* / SNS_TOPIC_ARNS / SES_CONFIGURATION_SET lines from .env.");
   return 0;

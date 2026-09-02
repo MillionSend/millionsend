@@ -1,4 +1,4 @@
-import { type ApplyOutcome, applyPlan, type Counts } from "../apply.js";
+import { type ApplyOutcome, applyPlan, type Counts, RESOURCE_LABEL } from "../apply.js";
 import type { Context } from "../context.js";
 import type { MillionSendTarget } from "../millionsend.js";
 import {
@@ -23,6 +23,7 @@ import {
   includeSet,
   printHeader,
 } from "../session.js";
+import { heading } from "../theme.js";
 import { confirmPrompt, multiSelectPrompt, selectPrompt } from "../tty-ui.js";
 import { formatNumber, pluralize } from "../utils.js";
 
@@ -102,7 +103,7 @@ async function pickResources(
     return option === null ? [] : [{ value: resource, ...option, checked: true }];
   });
   if (options.length === 0) return new Set();
-  const values = await multiSelectPrompt(ctx.rl, { label: "Resources to migrate", options });
+  const values = await multiSelectPrompt(ctx.rl, { label: "Resources", options });
   return new Set(values as Resource[]);
 }
 
@@ -152,6 +153,8 @@ export async function prepare(ctx: Context, providerId: ProviderId): Promise<Pre
   const { provider, source } = await connectSource(ctx, providerId);
   const { target, usage, baseUrl } = await connectTarget(ctx);
   const include = includeSet(config);
+  out.write(`\n${heading(`Reading ${label}`)}\n`);
+  ctx.progress.section([...[...include].map((r) => RESOURCE_LABEL[r]), "MillionSend"]);
   const snapshot = await source.readShallow({
     include,
     includeSent: config.includeSent,
@@ -177,7 +180,8 @@ export async function prepare(ctx: Context, providerId: ProviderId): Promise<Pre
       baseUrl,
     },
   });
-  out.write(`\n${renderPlan(plan, { color: config.color && out.isTTY === true })}`);
+  out.write(`\n${heading("Plan")}\n`);
+  out.write(renderPlan(plan));
   plan = await resolveDomainLimit(ctx, plan, targetState);
   return { provider, source, target, usage, baseUrl, snapshot, targetState, plan };
 }
@@ -273,7 +277,17 @@ export async function execute(ctx: Context, prepared: Prepared): Promise<number>
   const save = (s: MigrateState): void => writePrivateJson(paths.state, s);
   save(state);
   if (ensureGitignored(ctx.cwd)) out.write("Added .millionsend/ to .gitignore.\n");
-  out.write("\n");
+  out.write(`\n${heading("Applying")}\n`);
+  // Per-resource write totals, so the `n/total` counters share a right edge.
+  const totals = new Map<Resource, number>();
+  for (const i of plan.items) {
+    if (i.action === "create" || i.action === "update")
+      totals.set(i.resource, (totals.get(i.resource) ?? 0) + (i.count ?? 1));
+  }
+  ctx.progress.section(
+    [...totals.keys()].map((r) => RESOURCE_LABEL[r]),
+    [...totals.values()].map((n) => `${formatNumber(n)}/${formatNumber(n)}`),
+  );
   const outcome = await applyPlan({
     plan,
     snapshot: prepared.snapshot,

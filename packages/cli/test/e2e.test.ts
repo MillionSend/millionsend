@@ -76,6 +76,7 @@ function run(
     MILLIONSEND_BASE_URL: cloud.baseUrl,
   };
   delete env.NO_COLOR;
+  delete env.FORCE_COLOR;
   for (const [key, value] of Object.entries(options.env ?? {})) {
     if (value === undefined) delete env[key];
     else env[key] = value;
@@ -199,8 +200,8 @@ describe("millionsend (built bundle)", () => {
       expect(plan.version).toBe(1);
       expect(plan.target).toEqual({ baseUrl: cloud.baseUrl, cloud: true, plan: "free" });
       expect(plan.counts).toEqual({ create: 22, update: 2, unchanged: 1, manual: 13, skip: 3 });
-      expect(stderr).toContain(`✓ Contacts ${CONTACT_COUNT.toLocaleString("en-US")}`);
-      expect(stderr).toContain("✓ MillionSend current state read");
+      expect(stderr).toMatch(new RegExp(`✓ Contacts\\s+${CONTACT_COUNT.toLocaleString("en-US")}`));
+      expect(stderr).toMatch(/✓ MillionSend\s+current state read/);
 
       const item = (resource: string, key: string) =>
         plan.items.find((i) => i.resource === resource && i.key === key);
@@ -238,12 +239,10 @@ describe("millionsend (built bundle)", () => {
 
       const manual = plan.manual.map((m) => `${m.title} — ${m.detail}`);
       for (const name of API_KEY_NAMES)
-        expect(manual).toContain(
-          `api-keys/${name} — create it by hand; Resend exposes only the name`,
-        );
+        expect(manual).toContain(`api-keys/${name} — create by hand; Resend exposes only the name`);
       expect(manual).toContain("domains/news.example.com — add DNS records (shown after apply)");
       expect(manual).toContain(
-        "domains/updates.example.com — over the plan's domain limit; add it by hand after upgrading",
+        "domains/updates.example.com — over the plan's domain limit; add by hand after upgrading",
       );
       expect(manual).toContain(
         `webhooks/${WEBHOOK_ENDPOINTS[1]} — events not delivered here: contact.created, contact.updated`,
@@ -324,9 +323,8 @@ describe("millionsend (built bundle)", () => {
       expect(code).toBe(1);
       expect(stderr).toContain("Resend rejected the API key (401)");
       expect(stdout).toContain("Added .millionsend/ to .gitignore.");
-      expect(stdout).toContain(
-        `✓ Contacts ${CONTACT_COUNT.toLocaleString("en-US")}/${CONTACT_COUNT.toLocaleString("en-US")}`,
-      );
+      const n = CONTACT_COUNT.toLocaleString("en-US");
+      expect(stdout).toMatch(new RegExp(`✓ Contacts\\s+${n}/${n}`));
       const state = readState();
       expect(
         Object.fromEntries(Object.entries(state.created).map(([k, v]) => [k, v.length])),
@@ -382,14 +380,17 @@ describe("millionsend (built bundle)", () => {
       expect(stdout).toContain(
         "[ ] replace Resend topic and segment ids in your code (id map below)",
       );
-      expect(stdout).toContain("Id map (Resend id → id here):");
-      expect(stdout).toMatch(new RegExp(`topics/${TOPICS[0].name}\\s+\\S+ → [0-9a-f-]{36}`));
+      expect(stdout).toContain("Id map (Resend → MillionSend; full pairs in migrate-report.md):");
+      expect(stdout).toMatch(
+        new RegExp(`topics/${TOPICS[0].name}\\n    [0-9a-f]{8}… → [0-9a-f-]{36}`),
+      );
       expect(stdout).toContain("DNS records for news.example.com:");
-      expect(stdout).toMatch(/Type\s+Name\s+Priority\s+Value\n\s+TXT\s+/);
-      expect(stdout).toContain(
+      expect(stdout).toMatch(/\n {2}TXT {2}\S+\n {4}\S/);
+      // Prose wraps at the layout width (80 on a pipe).
+      expect(stdout.replace(/\n/g, " ")).toContain(
         "Run `millionsend migrate --from resend` again right before cutover to sync new contacts.",
       );
-      expect(stdout).toContain(
+      expect(stdout.replace(/\n/g, " ")).toContain(
         `On Resend you sent ${EMAILS_SENT_30D.toLocaleString("en-US")} emails in the last 30 days (~1,374/day). Free allows 100/day; Pro (3,000/day, 20 domains) fits. Upgrade: https://app.example.test/settings/billing`,
       );
       expect(stdout).not.toContain("Webhook signing secrets");
@@ -611,8 +612,11 @@ describe("millionsend (built bundle)", () => {
       ]);
       expect(stderr).toBe("");
       expect(code).toBe(0);
-      expect(stdout).toContain(`= unchanged  webhooks/${WEBHOOK_ENDPOINTS[0]}`);
-      expect(stdout).toContain("= unchanged  broadcasts/Welcome series #1");
+      expect(stdout).toContain(`webhooks\n  = ${WEBHOOK_ENDPOINTS[0]}`);
+      // Three unchanged drafts with one detail fold into a single row.
+      expect(stdout).toContain(
+        "  = 3 broadcasts  matched by name; the draft's body is not compared\n    Welcome series #1, Feature drop … and 1 more\n",
+      );
       expect(readState().created).toEqual(before.created);
       expect(await rows()).toEqual(rowsBefore);
       const report = readReport();

@@ -49,7 +49,7 @@ Audiences (deprecated in Resend) are skipped — segments cover them.
 - `--rps N` — requests per second against the source, 1..10 (default 8). Resend allows 10 per team, shared with your production sending.
 - `--on-conflict upsert|skip|error` — contacts that already exist on the target (default `upsert`).
 - `--include-sent`, `--fresh-webhook-secrets`, `--fresh` (ignore the state file).
-- `--yes`, `--non-interactive` (automatic when stdin is not a terminal), `--json` (JSON on stdout, progress on stderr), `--verbose`, `--no-color`.
+- `--yes`, `--non-interactive` (automatic when stdin is not a terminal), `--json` (JSON on stdout, progress on stderr), `--verbose`, `--color auto|always|never` (`--no-color` = `never`).
 
 Exit codes: 0 ok · 1 error · 2 plan has changes (`plan` only) · 3 partial, some items failed (details in the report).
 

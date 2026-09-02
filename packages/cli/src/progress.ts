@@ -1,3 +1,4 @@
+import { bold, column, dim, err, info, note as noteMark, ok, SYM, VALUE_WIDTH } from "./theme.js";
 import { formatNumber, sleep } from "./utils.js";
 
 export interface StepHandle {
@@ -21,6 +22,12 @@ export interface Progress {
   writeAbove(text: string, to?: { write(chunk: string): unknown }): void;
   /** Drops the live line without finishing the step — before a fatal error is printed. */
   clear(): void;
+  /**
+   * The step labels of the phase about to run: counts align under the longest
+   * of them, in a column as wide as the widest of `values` (the `n/total`
+   * strings when the totals are known ahead), 7 at least.
+   */
+  section(labels: readonly string[], values?: readonly string[]): void;
 }
 
 export interface ProgressOptions {
@@ -32,16 +39,31 @@ export interface ProgressOptions {
 const isTty = (stream: NodeJS.WritableStream): boolean =>
   (stream as { isTTY?: boolean }).isTTY === true;
 
+const longest = (labels: readonly string[]): number =>
+  Math.max(0, ...labels.map((l) => [...l].length));
+
+/** Without a declared section: wider than any resource label, so steps still line up. */
+const DEFAULT_PAD = 20;
+
+const ZERO = /^0(\/0)?$/;
+
 /**
  * One line per step: `⟳ Contacts 3,200/12,847` rewritten in place on a TTY,
  * appended on done/fail and every 1,000 units when piped. Markers: ✓ done,
- * ✗ failed, ⟳ running, ! note.
+ * ✗ failed, ⟳ running, ! note. Counts sit right-aligned in a column after the
+ * labels of the current section; a zero count reads dim as a whole.
  */
 export function createProgress({
   stream = process.stdout,
   tty = isTty(stream),
 }: ProgressOptions = {}): Progress {
   let live: string | null = null;
+  let pad = DEFAULT_PAD;
+  let valueWidth = VALUE_WIDTH;
+  const row = (mark: string, label: string, value: string): string =>
+    value === ""
+      ? `${mark} ${label}`
+      : `${mark} ${column([[label.padEnd(pad), value]], valueWidth)[0]}`;
   const writeAbove = (text: string, to: { write(chunk: string): unknown } = stream): void => {
     if (live !== null) stream.write("\r\x1b[2K");
     to.write(text);
@@ -55,6 +77,10 @@ export function createProgress({
       if (live !== null) stream.write("\r\x1b[2K");
       live = null;
     },
+    section(labels, values = []) {
+      pad = longest(labels);
+      valueWidth = Math.max(VALUE_WIDTH, longest(values));
+    },
     step(label) {
       let n = 0;
       let total: number | undefined;
@@ -62,10 +88,10 @@ export function createProgress({
       let finished = false;
       const counter = (): string => {
         if (n === 0 && total === undefined) return "";
-        return ` ${formatNumber(n)}${total === undefined ? "" : `/${formatNumber(total)}`}`;
+        return `${formatNumber(n)}${total === undefined ? "" : `/${formatNumber(total)}`}`;
       };
       const render = (): void => {
-        live = `⟳ ${label}${counter()}`;
+        live = row(info(SYM.live), label, counter());
         stream.write(`\r\x1b[2K${live}`);
       };
       const finish = (text: string): void => {
@@ -84,17 +110,19 @@ export function createProgress({
             render();
           } else if (Math.floor(n / 1000) > milestone) {
             milestone = Math.floor(n / 1000);
-            stream.write(`⟳ ${label}${counter()}\n`);
+            stream.write(`${row(info(SYM.live), label, counter())}\n`);
           }
         },
         done(summary) {
-          if (!finished) finish(`✓ ${label}${summary === undefined ? counter() : ` ${summary}`}`);
+          if (finished) return;
+          const value = summary ?? counter();
+          finish(ZERO.test(value) ? dim(row(SYM.ok, label, value)) : row(ok(SYM.ok), label, value));
         },
         fail(message) {
-          if (!finished) finish(`✗ ${label} — ${message}`);
+          if (!finished) finish(`${err(SYM.err)} ${label} — ${message}`);
         },
         note(text) {
-          writeLine(`! ${text}`);
+          writeLine(`${noteMark(SYM.note)} ${text}`);
         },
       };
     },
@@ -122,7 +150,9 @@ export async function countUp(
   const width = Math.max(...rows.map((row) => formatNumber(row.value).length));
   const frame = (t: number): string =>
     `${rows
-      .map((row) => `${formatNumber(Math.round(row.value * t)).padStart(width)}  ${row.label}`)
+      .map(
+        (row) => `${bold(formatNumber(Math.round(row.value * t)).padStart(width))}  ${row.label}`,
+      )
       .join("\n")}\n`;
   if (!tty) {
     stream.write(frame(1));
