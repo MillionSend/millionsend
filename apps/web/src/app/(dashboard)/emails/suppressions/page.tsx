@@ -17,8 +17,9 @@ import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { type BadgeStatus, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
+import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { useTRPC } from "@/lib/trpc";
-import { useUrlState } from "@/lib/url-state";
+import { oneOf, useUrlState } from "@/lib/url-state";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "../list-parts";
 
 const REASONS = ["hard_bounce", "complaint", "manual", "one_click_unsubscribe"] as const;
@@ -39,8 +40,6 @@ const REASON_DOT: Record<Reason, BadgeStatus> = {
   one_click_unsubscribe: "suppressed",
 };
 
-const RANGE_HOURS = { h24: 24, d7: 168, d30: 720 } as const;
-type RangeKey = keyof typeof RANGE_HOURS | "all";
 const RANGE_KEYS: RangeKey[] = ["all", "h24", "d7", "d30"];
 
 export default function SuppressionsPage() {
@@ -54,18 +53,11 @@ export default function SuppressionsPage() {
   const [search, setSearch] = useUrlState("q");
   const [reasonParam, setReason] = useUrlState("reason", "all");
   const [rangeParam, setRange] = useUrlState("range", "all");
-  const reason: Reason | "all" = (REASONS as readonly string[]).includes(reasonParam)
-    ? (reasonParam as Reason)
-    : "all";
-  const range: RangeKey = (RANGE_KEYS as readonly string[]).includes(rangeParam)
-    ? (rangeParam as RangeKey)
-    : "all";
+  const reason: Reason | "all" = oneOf(REASONS, reasonParam, "all");
+  const range: RangeKey = oneOf(RANGE_KEYS, rangeParam, "all");
   const [limit, setLimit] = useState(40);
   const deferredSearch = useDeferredValue(search.trim());
-  const since = useMemo(
-    () => (range === "all" ? undefined : new Date(Date.now() - RANGE_HOURS[range] * 3_600_000)),
-    [range],
-  );
+  const since = useMemo(() => rangeSince(range), [range]);
   const [addOpen, setAddOpen] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [removeTarget, setRemoveTarget] = useState<{ id: string; email: string | null } | null>(

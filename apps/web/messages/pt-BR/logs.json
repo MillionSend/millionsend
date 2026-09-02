@@ -5,14 +5,29 @@
     "path": "Caminho",
     "status": "Status",
     "when": "Quando",
-    "all": "Todos",
     "loadMore": "Carregar mais",
     "empty": "Nenhuma requisição ainda.",
     "emptyHint": "Chamadas à API com a sua chave aparecem aqui — <code>POST /emails</code> é uma boa primeira.",
-    "noMatch": "Nenhuma requisição corresponde a este filtro.",
-    "clearFilter": "Limpar filtro",
+    "noMatch": "Nenhuma requisição corresponde aos seus filtros.",
+    "clearFilter": "Limpar filtros",
     "loadError": "Não foi possível carregar os logs.",
-    "retry": "Tentar novamente"
+    "retry": "Tentar novamente",
+    "searchPlaceholder": "Buscar caminho…",
+    "allMethods": "Todos os métodos",
+    "source": "Origem",
+    "allSources": "Todas as origens",
+    "sources": {
+      "api_key": "Chave de API",
+      "mcp": "MCP"
+    },
+    "allStatuses": "Todos os status",
+    "range": {
+      "all": "Todo o período",
+      "h24": "Últimas 24 horas",
+      "d7": "Últimos 7 dias",
+      "d15": "Últimos 15 dias",
+      "d30": "Últimos 30 dias"
+    }
   },
   "detail": {
     "eyebrow": "Log",

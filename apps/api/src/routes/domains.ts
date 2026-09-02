@@ -92,10 +92,66 @@ const toWire = (row: DomainRow) => ({
 });
 
 /**
+ * The guardrails on tracking settings, shared by create (no stored row: every
+ * `current` value is off) and update (stored row + patch; `undefined` = field
+ * not sent). Returns the 422 message, or null when the request is allowed.
+ */
+function trackingSettingsError(
+  deps: Pick<ApiDeps, "appBaseUrl" | "trackingSubdomains" | "isCloud">,
+  input: {
+    open?: boolean | undefined;
+    click?: boolean | undefined;
+    subdomain?: string | null | undefined;
+  },
+  current: { open: boolean; click: boolean; subdomain: string | null; mailFromSubdomain: string },
+): string | null {
+  // Tracking is app-layer: open pixels, rewritten links, and the branded
+  // CNAME all point at APP_BASE_URL. A host recipients cannot reach makes
+  // the toggle meaningless, so enabling is refused — disabling is always
+  // allowed.
+  const enabling = input.open === true || input.click === true || Boolean(input.subdomain);
+  if (enabling && !deps.appBaseUrl) {
+    return "APP_BASE_URL is not set. Tracking URLs are served from it. Set it, restart, and try again.";
+  }
+  if (enabling && isLoopbackUrl(deps.appBaseUrl)) {
+    return "APP_BASE_URL is a loopback address recipients cannot reach, so tracking cannot be enabled";
+  }
+  // Clearing is always allowed; adopting one needs a deployment that can
+  // terminate TLS for the customer's own hostname.
+  if (input.subdomain && deps.trackingSubdomains === false) {
+    return "Branded tracking subdomains are not available on this deployment";
+  }
+  // The tracking CNAME and the MAIL FROM (return-path) record would collide
+  // on the same host, so they must be different labels.
+  if (input.subdomain && input.subdomain === current.mailFromSubdomain) {
+    return "The tracking subdomain must be different from the return-path subdomain";
+  }
+  // Cloud serves tracking only from the domain's own subdomain (the worker
+  // ships clean links without one), so a request that would leave either
+  // kind on with no subdomain is refused instead of persisted as
+  // enabled-but-unserved. Turning tracking off is always allowed.
+  const keepsSubdomain =
+    input.subdomain !== undefined ? Boolean(input.subdomain) : Boolean(current.subdomain);
+  const leavesTrackingOn = (input.open ?? current.open) || (input.click ?? current.click);
+  const enablingKind = input.open === true || input.click === true;
+  const clearingSubdomain = input.subdomain !== undefined && !input.subdomain;
+  if (
+    deps.isCloud &&
+    !keepsSubdomain &&
+    (enablingKind || (clearingSubdomain && leavesTrackingOn))
+  ) {
+    return deps.trackingSubdomains === false
+      ? "Tracking is served from the domain's own tracking subdomain, and this deployment cannot serve one, so tracking cannot be turned on."
+      : 'Tracking is served from the domain\'s own tracking subdomain, so it cannot be on without one. Pass tracking_subdomain (a label such as "links") in the same request — the response includes the CNAME record to add — or turn both tracking kinds off first.';
+  }
+  return null;
+}
+
+/**
  * The domain's DNS checklist in the SDK's record shape. `verification` null =
  * SES not asked (create response): every row reads not_started. DMARC is never
  * checked by SES, so it always reads not_started; the tracking CNAME reads
- * pending until a verify or the reverify sweep sees it resolve.
+ * pending until a verify or the reverify sweep sees it resolve, then verified.
  */
 function wireRecords(
   domain: DomainRow,
@@ -135,7 +191,11 @@ function wireRecords(
       type: "CNAME",
       ttl: "Auto",
       // The 72h clock is cleared the first time the CNAME is seen to resolve.
-      status: domain.trackingSubdomainSetAt ? "pending" : "verified",
+      status: !verification
+        ? "not_started"
+        : domain.trackingSubdomainSetAt
+          ? "pending"
+          : "verified",
       value: trackingCnameTarget(deps.appBaseUrl),
     });
   }
@@ -209,6 +269,20 @@ export function registerDomainRoutes(
           422,
         );
       }
+      // Checked before the SES identity exists: a refused tracking setting
+      // must not leave a half-created domain behind.
+      const trackingError = trackingSettingsError(
+        deps,
+        {
+          open: body.open_tracking,
+          click: body.click_tracking,
+          subdomain: body.tracking_subdomain,
+        },
+        { open: false, click: false, subdomain: null, mailFromSubdomain: body.custom_return_path },
+      );
+      if (trackingError) {
+        return c.json(errorBody(422, "validation_error", trackingError), 422);
+      }
       const [existing] = await db
         .select({ id: d.id })
         .from(d)
@@ -268,6 +342,11 @@ export function registerDomainRoutes(
             mailFromSubdomain: body.custom_return_path,
             dkimSelector: DKIM_SELECTOR,
             dkimPublicKey,
+            openTracking: body.open_tracking ?? false,
+            clickTracking: body.click_tracking ?? false,
+            trackingSubdomain: body.tracking_subdomain ?? null,
+            // Same 72h auto-unset clock a later adopt would arm.
+            trackingSubdomainSetAt: body.tracking_subdomain ? new Date() : null,
           })
           .returning();
       } catch (error) {
@@ -502,87 +581,22 @@ export function registerDomainRoutes(
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
 
-      // Tracking is app-layer: open pixels, rewritten links, and the branded
-      // CNAME all point at APP_BASE_URL. A host recipients cannot reach makes
-      // the toggle meaningless, so enabling is refused — disabling is always
-      // allowed.
-      const enabling =
-        body.open_tracking === true ||
-        body.click_tracking === true ||
-        Boolean(body.tracking_subdomain);
-      if (enabling && !deps.appBaseUrl) {
-        return c.json(
-          errorBody(
-            422,
-            "validation_error",
-            "APP_BASE_URL is not set. Tracking URLs are served from it. Set it, restart, and try again.",
-          ),
-          422,
-        );
-      }
-      if (enabling && isLoopbackUrl(deps.appBaseUrl)) {
-        return c.json(
-          errorBody(
-            422,
-            "validation_error",
-            "APP_BASE_URL is a loopback address recipients cannot reach, so tracking cannot be enabled",
-          ),
-          422,
-        );
-      }
-      // Clearing is always allowed; adopting one needs a deployment that can
-      // terminate TLS for the customer's own hostname.
-      if (body.tracking_subdomain && deps.trackingSubdomains === false) {
-        return c.json(
-          errorBody(
-            422,
-            "validation_error",
-            "Branded tracking subdomains are not available on this deployment",
-          ),
-          422,
-        );
-      }
-      // The tracking CNAME and the MAIL FROM (return-path) record would collide
-      // on the same host, so they must be different labels.
-      if (body.tracking_subdomain && body.tracking_subdomain === domain.mailFromSubdomain) {
-        return c.json(
-          errorBody(
-            422,
-            "validation_error",
-            "The tracking subdomain must be different from the return-path subdomain",
-          ),
-          422,
-        );
-      }
-
-      // Cloud serves tracking only from the domain's own subdomain (the worker
-      // ships clean links without one), so a request that would leave either
-      // kind on with no subdomain is refused instead of persisted as
-      // enabled-but-unserved. Turning tracking off is always allowed.
-      const keepsSubdomain =
-        body.tracking_subdomain !== undefined
-          ? Boolean(body.tracking_subdomain)
-          : Boolean(domain.trackingSubdomain);
-      const leavesTrackingOn =
-        (body.open_tracking ?? domain.openTracking) ||
-        (body.click_tracking ?? domain.clickTracking);
-      const enablingKind = body.open_tracking === true || body.click_tracking === true;
-      const clearingSubdomain = body.tracking_subdomain !== undefined && !body.tracking_subdomain;
-      if (
-        deps.isCloud &&
-        !keepsSubdomain &&
-        (enablingKind || (clearingSubdomain && leavesTrackingOn))
-      ) {
-        return c.json(
-          errorBody(
-            422,
-            "validation_error",
-            deps.trackingSubdomains === false
-              ? "Tracking is served from the domain's own tracking subdomain, and this deployment cannot serve one, so tracking cannot be turned on."
-              : 'Tracking is served from the domain\'s own tracking subdomain, so it cannot be on without one. Pass tracking_subdomain (a label such as "links") in the same request — the response includes the CNAME record to add — or turn both tracking kinds off first.',
-          ),
-          422,
-        );
+      const trackingError = trackingSettingsError(
+        deps,
+        {
+          open: body.open_tracking,
+          click: body.click_tracking,
+          subdomain: body.tracking_subdomain,
+        },
+        {
+          open: domain.openTracking,
+          click: domain.clickTracking,
+          subdomain: domain.trackingSubdomain,
+          mailFromSubdomain: domain.mailFromSubdomain,
+        },
+      );
+      if (trackingError) {
+        return c.json(errorBody(422, "validation_error", trackingError), 422);
       }
 
       const set: Partial<

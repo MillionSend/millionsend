@@ -27,3 +27,12 @@ export function useUrlState(name: string, defaultValue = ""): [string, (value: s
   );
   return [value, set];
 }
+
+/** URL params are untrusted; anything outside the allowed set reads as the fallback. */
+export function oneOf<T extends string, F extends string>(
+  allowed: readonly T[],
+  value: string,
+  fallback: F,
+): T | F {
+  return (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+}

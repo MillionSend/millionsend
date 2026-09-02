@@ -1,3 +1,4 @@
+import { generateApiKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -104,6 +105,79 @@ describe("logs.list", () => {
 
     const page2 = await caller(teamA).logs.list({ limit: 1, cursor: page1.nextCursor });
     expect(page2.items.map((r) => r.id)).toEqual([older]);
+  });
+});
+
+describe("logs.list filters", () => {
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+
+  async function seed() {
+    const teamA = await createTeam(db, "team-a");
+    const key = generateApiKey();
+    const [k] = await db
+      .insert(schema.apiKeys)
+      .values({
+        teamId: teamA,
+        name: "k",
+        tokenPrefix: key.tokenPrefix,
+        keyHash: key.keyHash,
+        last4: key.last4,
+      })
+      .returning({ id: schema.apiKeys.id });
+    const byKey = await insertRequest({
+      teamId: teamA,
+      method: "GET",
+      path: "/domains",
+      apiKeyId: k?.id,
+      createdAt: hoursAgo(1),
+    });
+    const mcpBatch = await insertRequest({
+      teamId: teamA,
+      path: "/contacts/batch",
+      createdAt: hoursAgo(72),
+    });
+    const underscore = await insertRequest({
+      teamId: teamA,
+      path: "/contacts/a_b",
+      statusCode: 404,
+      createdAt: hoursAgo(120),
+    });
+    const dash = await insertRequest({
+      teamId: teamA,
+      path: "/contacts/a-b",
+      createdAt: hoursAgo(240),
+    });
+    return { teamA, byKey, mcpBatch, underscore, dash };
+  }
+
+  it("narrows by method, source and time window", async () => {
+    const { teamA, byKey, mcpBatch, underscore, dash } = await seed();
+    const c = caller(teamA);
+    expect((await c.logs.list({ method: "GET" })).items.map((r) => r.id)).toEqual([byKey]);
+    expect((await c.logs.list({ source: "api_key" })).items.map((r) => r.id)).toEqual([byKey]);
+    expect((await c.logs.list({ source: "mcp" })).items.map((r) => r.id)).toEqual([
+      mcpBatch,
+      underscore,
+      dash,
+    ]);
+    expect((await c.logs.list({ since: hoursAgo(48) })).items.map((r) => r.id)).toEqual([byKey]);
+    // Filters compose with each other and with the status class.
+    expect(
+      (await c.logs.list({ source: "mcp", statusClass: "4xx" })).items.map((r) => r.id),
+    ).toEqual([underscore]);
+  });
+
+  it("searches the path as a literal substring, escaping LIKE wildcards", async () => {
+    const { teamA, mcpBatch, underscore, dash } = await seed();
+    const c = caller(teamA);
+    expect((await c.logs.list({ search: "contacts" })).items.map((r) => r.id)).toEqual([
+      mcpBatch,
+      underscore,
+      dash,
+    ]);
+    // An unescaped "_" would also match "a-b"; an unescaped "%" would match everything.
+    expect((await c.logs.list({ search: "a_b" })).items.map((r) => r.id)).toEqual([underscore]);
+    expect((await c.logs.list({ search: "a%b" })).items).toEqual([]);
   });
 });
 

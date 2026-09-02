@@ -16,9 +16,10 @@ import { StatusBadge, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatHoursMinutes } from "@/lib/format";
+import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
-import { useUrlState } from "@/lib/url-state";
+import { oneOf, useUrlState } from "@/lib/url-state";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "./list-parts";
 
 // Keep in enum order (packages/db schema.emailStatusEnum) — the router input
@@ -39,8 +40,6 @@ const STATUSES = [
 
 type EmailStatus = (typeof STATUSES)[number];
 
-const RANGE_HOURS = { h24: 24, d7: 168, d15: 360, d30: 720 } as const;
-type RangeKey = keyof typeof RANGE_HOURS | "all";
 const RANGE_KEYS: RangeKey[] = ["h24", "d7", "d15", "d30", "all"];
 
 /** ms until the daily quota resets (midnight UTC). */
@@ -61,18 +60,10 @@ export default function EmailsPage() {
   const [rangeParam, setRange] = useUrlState("range", "d15");
   const [apiKeyId, setApiKeyId] = useUrlState("key", "all");
   const [limit, setLimit] = useState(40);
-  // URL params are untrusted; unknown values fall back to the defaults.
-  const status: EmailStatus | "all" = (STATUSES as readonly string[]).includes(statusParam)
-    ? (statusParam as EmailStatus)
-    : "all";
-  const range: RangeKey = (RANGE_KEYS as readonly string[]).includes(rangeParam)
-    ? (rangeParam as RangeKey)
-    : "d15";
+  const status: EmailStatus | "all" = oneOf(STATUSES, statusParam, "all");
+  const range: RangeKey = oneOf(RANGE_KEYS, rangeParam, "d15");
   const deferredSearch = useDeferredValue(search.trim());
-  const since = useMemo(
-    () => (range === "all" ? undefined : new Date(Date.now() - RANGE_HOURS[range] * 3_600_000)),
-    [range],
-  );
+  const since = useMemo(() => rangeSince(range), [range]);
 
   const query = useInfiniteQuery(
     trpc.emails.list.infiniteQueryOptions(

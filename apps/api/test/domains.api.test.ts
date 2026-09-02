@@ -205,6 +205,66 @@ describe("POST /domains", () => {
     expect(body.region).toBe("sa-east-1");
   });
 
+  it("applies optional tracking settings at creation and returns the Tracking CNAME", async () => {
+    const app = makeApp({ ...fakeSes(), appBaseUrl: "https://app.example.dev" });
+    const res = await call(app, fullKey, "POST", "/domains", {
+      name: "tracked.example.com",
+      click_tracking: true,
+      tracking_subdomain: "links",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; records: unknown[] } & Record<string, unknown>;
+    expect(body).toMatchObject({
+      open_tracking: false,
+      click_tracking: true,
+      tracking_subdomain: "links",
+    });
+    // The CNAME rides the create response like DKIM does, not_started like them.
+    expect(body.records).toContainEqual(
+      expect.objectContaining({
+        record: "Tracking",
+        name: "links.tracked.example.com",
+        value: "app.example.dev",
+        status: "not_started",
+      }),
+    );
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, body.id));
+    expect(row).toMatchObject({
+      clickTracking: true,
+      openTracking: false,
+      trackingSubdomain: "links",
+    });
+    expect(row?.trackingSubdomainSetAt).toBeInstanceOf(Date);
+  });
+
+  it("cloud: refuses creating with tracking on and no subdomain before touching SES", async () => {
+    const key = await insertKey(await createTeam(db, "cloud-create-tracking"));
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, isCloud: true, appBaseUrl: "https://app.example.dev" });
+    const res = await call(app, key, "POST", "/domains", {
+      name: "untracked.example.com",
+      open_tracking: true,
+    });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { message: string }).message).toContain("tracking_subdomain");
+    expect(calls.filter((c) => c.name === "CreateEmailIdentityCommand")).toHaveLength(0);
+    const rows = await db
+      .select({ id: schema.domains.id })
+      .from(schema.domains)
+      .where(eq(schema.domains.name, "untracked.example.com"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("422s a tracking subdomain equal to the return path on create", async () => {
+    const app = makeApp({ ...fakeSes(), appBaseUrl: "https://app.example.dev" });
+    const res = await call(app, fullKey, "POST", "/domains", {
+      name: "collide.example.com",
+      custom_return_path: "send",
+      tracking_subdomain: "send",
+    });
+    expect(res.status).toBe(422);
+  });
+
   it("rejects an unsupported region and an uppercase name", async () => {
     const app = makeApp(fakeSes());
     const badRegion = await call(app, fullKey, "POST", "/domains", {

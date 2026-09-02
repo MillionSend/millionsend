@@ -175,7 +175,7 @@ and admins.
 | `create_webhook` | `webhooks:write` | **admin** Create a webhook endpoint; the response includes the signing secret. |
 | `update_webhook` | `webhooks:write` | **admin** Update a webhook's URL, events or status. |
 | `delete_webhook` | `webhooks:write` | **admin** Delete a webhook endpoint. |
-| `create_domain` | `domains:write` | **admin** Add a sending domain and get its DNS records. |
+| `create_domain` | `domains:write` | **admin** Add a sending domain and get its DNS records; optional tracking settings apply at creation. |
 | `update_domain` | `domains:write` | **admin** Change a domain's tracking settings; `tracking_subdomain` is what yields the Tracking CNAME (required on Cloud). |
 | `verify_domain` | `domains:write` | **admin** Re-check a domain's DNS and SES verification. |
 | `delete_domain` | `domains:write` | **admin** Remove a domain and its SES identity. |

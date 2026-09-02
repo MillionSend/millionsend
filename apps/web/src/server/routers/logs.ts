@@ -1,7 +1,8 @@
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gte, lt, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNotNull, isNull, lt, type SQL } from "drizzle-orm";
 import { z } from "zod";
+import { escapeLike } from "@/lib/sql";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
 
@@ -17,6 +18,11 @@ export const logsRouter = router({
     .input(
       z.object({
         statusClass: z.enum(["2xx", "4xx", "5xx"]).optional(),
+        search: z.string().trim().max(200).optional(),
+        method: z.enum(["GET", "POST", "PATCH", "DELETE"]).optional(),
+        // MCP callers authenticate without a key, so api_key_id is null for them.
+        source: z.enum(["api_key", "mcp"]).optional(),
+        since: z.coerce.date().optional(),
         cursor: cursorSchema.optional(),
         limit: z.number().int().min(1).max(50).default(25),
       }),
@@ -28,6 +34,11 @@ export const logsRouter = router({
         const [lo, hi] = STATUS_CLASS_RANGE[input.statusClass];
         filters.push(gte(t.statusCode, lo), lt(t.statusCode, hi));
       }
+      if (input.search) filters.push(ilike(t.path, `%${escapeLike(input.search)}%`));
+      if (input.method) filters.push(eq(t.method, input.method));
+      if (input.source)
+        filters.push(input.source === "mcp" ? isNull(t.apiKeyId) : isNotNull(t.apiKeyId));
+      if (input.since) filters.push(gte(t.createdAt, input.since));
       if (input.cursor) filters.push(beforeCursor(t, input.cursor));
       const rows = await ctx.db
         .select({

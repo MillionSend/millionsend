@@ -178,7 +178,7 @@ cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
 | `create_webhook` | `webhooks:write` | **admin** Cria um webhook; a resposta inclui o segredo de assinatura. |
 | `update_webhook` | `webhooks:write` | **admin** Atualiza URL, eventos ou status de um webhook. |
 | `delete_webhook` | `webhooks:write` | **admin** Exclui um webhook. |
-| `create_domain` | `domains:write` | **admin** Adiciona um domínio de envio e retorna os registros DNS. |
+| `create_domain` | `domains:write` | **admin** Adiciona um domínio de envio e retorna os registros DNS; configurações de rastreamento opcionais valem já na criação. |
 | `update_domain` | `domains:write` | **admin** Muda as configurações de rastreamento de um domínio; o `tracking_subdomain` é o que gera o CNAME de rastreamento (obrigatório no Cloud). |
 | `verify_domain` | `domains:write` | **admin** Reverifica o DNS e a verificação SES de um domínio. |
 | `delete_domain` | `domains:write` | **admin** Remove um domínio e a identidade SES dele. |

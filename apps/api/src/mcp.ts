@@ -883,7 +883,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       "domains:write",
       {
         description:
-          "Add a sending domain (region optional). Returns the DNS records to create; the domain sends once they verify. Open and click tracking start off — enable them with update_domain.",
+          "Add a sending domain (region optional). Returns the DNS records to create; the domain sends once they verify. Open and click tracking start off; pass open_tracking/click_tracking together with a tracking_subdomain to stand the domain up tracked in one call — its Tracking CNAME then comes back with the other records (same rules as update_domain).",
         inputSchema: createDomainRequestSchema,
       },
       (body) => api("POST", "/domains", body),

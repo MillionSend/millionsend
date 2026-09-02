@@ -37,7 +37,9 @@ Once verified, a domain's **Configuration** tab controls:
 - **TLS mode** — `opportunistic` (default) or `enforced`, applied via the
   domain's SES configuration set.
 
-Through the API and MCP, `update_domain` takes the same tracking settings.
+Through the API and MCP, `update_domain` takes the same tracking settings, and
+`create_domain` accepts them as optional extras so a tracked domain can be stood
+up in one call (a Resend-shaped call that omits them is unchanged).
 Tracking is served from the domain's own tracking subdomain: pass
 `tracking_subdomain` (a label such as `links`) and the response's `records[]`
 gains a Tracking CNAME whose status turns `verified` once it resolves. On

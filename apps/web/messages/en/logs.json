@@ -5,14 +5,29 @@
     "path": "Path",
     "status": "Status",
     "when": "When",
-    "all": "All",
     "loadMore": "Load more",
     "empty": "No requests yet.",
     "emptyHint": "Calls to the API with your key show up here — <code>POST /emails</code> is a good first one.",
-    "noMatch": "No requests match this filter.",
-    "clearFilter": "Clear filter",
+    "noMatch": "No requests match your filters.",
+    "clearFilter": "Clear filters",
     "loadError": "Couldn't load logs.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "searchPlaceholder": "Search path…",
+    "allMethods": "All methods",
+    "source": "Source",
+    "allSources": "All sources",
+    "sources": {
+      "api_key": "API key",
+      "mcp": "MCP"
+    },
+    "allStatuses": "All statuses",
+    "range": {
+      "all": "All time",
+      "h24": "Last 24 hours",
+      "d7": "Last 7 days",
+      "d15": "Last 15 days",
+      "d30": "Last 30 days"
+    }
   },
   "detail": {
     "eyebrow": "Log",
