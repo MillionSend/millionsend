@@ -10,6 +10,17 @@ paths = [
 ]
 
 [[allowlists]]
+description = "Deterministic fake API keys and webhook secrets for the CLI's fake Resend server, fixtures and unit tests"
+paths = [
+  '''packages/cli/test/commands\.test\.ts''',
+  '''packages/cli/test/http\.test\.ts''',
+  '''packages/cli/test/resend-source\.test\.ts''',
+  '''packages/cli/test/helpers/fake-resend\.ts''',
+  '''packages/cli/test/fixtures/snapshot\.json''',
+  '''packages/cli/test/fixtures/resend/webhooks\.json''',
+]
+
+[[allowlists]]
 description = "Static private key paired with the local SNS signature fixture"
 paths = ['''packages/ses/test/fixtures/sns-test-key\.pem''']
 

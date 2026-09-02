@@ -441,14 +441,17 @@ describe("millionsend migrate", () => {
       );
       expect(result.stderr).toBe("");
       expect(result.code).toBe(2);
+      const { version: packageVersion } = JSON.parse(
+        readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+      ) as { version: string };
       expect(result.stdout).toContain(
-        "millionsend 0.1.0 — Moves your Resend account into MillionSend.",
+        `millionsend ${packageVersion} — Moves your Resend account into MillionSend.`,
       );
       expect(result.stdout).toContain("+ create     contacts (3)");
       expect(result.stdout).toContain("Estimate: ~");
       expectNoSecrets(result.stdout, result.stderr);
       const version = await exec(process.execPath, [bundle, "--version"], cwd);
-      expect(version.stdout.trim()).toBe("0.1.0");
+      expect(version.stdout.trim()).toBe(packageVersion);
     },
     SLOW,
   );
