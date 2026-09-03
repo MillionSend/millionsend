@@ -1,3 +1,4 @@
+import { err, warn } from "./theme.js";
 import { stripControl } from "./utils.js";
 
 export type LogLevel = "error" | "warn" | "info" | "debug";
@@ -37,8 +38,8 @@ export function createLogger({
   };
   return {
     level,
-    error: (message) => write("error", "error: ", message),
-    warn: (message) => write("warn", "warning: ", message),
+    error: (message) => write("error", `${err("error:")} `, message),
+    warn: (message) => write("warn", `${warn("warning:")} `, message),
     info: (message) => write("info", "", message),
     debug: (message) => write("debug", "", message),
   };

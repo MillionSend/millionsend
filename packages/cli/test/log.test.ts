@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createLogger, redact } from "../src/log.js";
+import { setColorMode } from "../src/theme.js";
 
 describe("redact", () => {
   it("masks every key shape and Authorization values, leaves the rest", () => {
@@ -47,5 +48,23 @@ describe("createLogger", () => {
     log.warn("topics/News\x1b]52;c;cHduZWQ=\x07\x1b[2J\x07: rejected");
     expect(lines).toEqual(["warning: topics/News: rejected\n"]);
     expect(lines.join("")).not.toContain("\x1b");
+  });
+});
+
+describe("createLogger colors", () => {
+  it("colors only the level prefix when color is on, never the message", () => {
+    setColorMode("always");
+    try {
+      const lines: string[] = [];
+      const log = createLogger({ stream: { write: (c: string) => lines.push(c) } });
+      log.error("boom");
+      log.warn("careful");
+      expect(lines).toEqual([
+        "\x1b[31merror:\x1b[39m boom\n",
+        "\x1b[33mwarning:\x1b[39m careful\n",
+      ]);
+    } finally {
+      setColorMode("auto");
+    }
   });
 });
