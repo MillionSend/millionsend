@@ -74,7 +74,12 @@ export function DeliveredOdometer({ value, locale }: { value: number; locale: st
     };
     const target = Math.min(value, 10 ** CELLS - 1);
     const settle = () => {
-      set(target);
+      set(target, true);
+      // The last moving frame can leave a wheel filtered; a settled wheel is sharp.
+      for (const c of cells) {
+        c.strip.style.filter = "none";
+        c.lvl = 0;
+      }
       shown.current = target;
       units.cell.classList.toggle("lit", target > 0);
       root.setAttribute("aria-label", target.toLocaleString(locale));
@@ -85,7 +90,10 @@ export function DeliveredOdometer({ value, locale }: { value: number; locale: st
       return () => window.removeEventListener("resize", measure);
     }
 
-    const D = from === 0 ? CLIMB_MS : STEP_MS;
+    // The first climb scales with how many wheels move: a single digit given
+    // the full hero duration arrives early and then creeps, with the steel
+    // only landing at the end.
+    const D = from === 0 ? Math.min(CLIMB_MS, 500 + 250 * String(target).length) : STEP_MS;
     let t0: number | null = null;
     let raf = 0;
     const frame = (ts: number) => {
