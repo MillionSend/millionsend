@@ -293,6 +293,7 @@
     },
     "you": "you",
     "allTeams": "All teams",
+    "scopesCount": "{count, plural, one {# permission} other {# permissions}}",
     "revoke": "Revoke access",
     "revokeAllTeamsForbidden": "This grant also covers teams you do not administer. Only its holder can revoke it.",
     "revokeConfirm": {

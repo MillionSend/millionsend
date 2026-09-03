@@ -146,6 +146,7 @@ auto-hospedada não tem limites de plano.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciais OAuth do "Continuar com Google". O botão só aparece com ambas definidas. URL de callback: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha só aparece com isto definido e credenciais SES configuradas — deixe vazio para ocultá-la por completo. |
+| `ONBOARDING_EMAIL_FROM` | Remetente compartilhado do botão "Enviar e-mail" e do snippet do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Qualquer time pode enviar por ele, só para as caixas de entrada dos próprios membros. Deixe vazio para ocultar o botão; o snippet então pede o domínio do próprio time. |
 
 ### Armazenamento de objetos (uploads e backups)
 

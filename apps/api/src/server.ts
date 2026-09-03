@@ -44,6 +44,7 @@ const app = createApi({
   db: getDb(),
   keyring,
   isCloud: env.IS_CLOUD,
+  onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
   rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   revision: env.MILLIONSEND_REVISION,
   appBaseUrl: env.APP_BASE_URL,

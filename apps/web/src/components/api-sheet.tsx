@@ -28,21 +28,23 @@ import { CodeGlyph } from "@/components/icons/nav-icons";
 /* Snippets per SDK — the real published packages, shown with a placeholder
    key. Kept to the three calls people reach for from the Emails surface. */
 
-const LANG_META: Record<Lang, { label: string; hljs: HighlightLanguage; icon: { path: string } }> =
-  {
-    node: { label: "Node.js", hljs: "javascript", icon: siNodedotjs },
-    python: { label: "Python", hljs: "python", icon: siPython },
-    php: { label: "PHP", hljs: "php", icon: siPhp },
-    ruby: { label: "Ruby", hljs: "ruby", icon: siRuby },
-    go: { label: "Go", hljs: "go", icon: siGo },
-    rust: { label: "Rust", hljs: "rust", icon: siRust },
-    // Java's own mark is trademark-restricted; OpenJDK is the ecosystem icon.
-    java: { label: "Java", hljs: "java", icon: siOpenjdk },
-    dotnet: { label: ".NET", hljs: "csharp", icon: siDotnet },
-    elixir: { label: "Elixir", hljs: "elixir", icon: siElixir },
-  };
+export const LANG_META: Record<
+  Lang,
+  { label: string; hljs: HighlightLanguage; icon: { path: string } }
+> = {
+  node: { label: "Node.js", hljs: "javascript", icon: siNodedotjs },
+  python: { label: "Python", hljs: "python", icon: siPython },
+  php: { label: "PHP", hljs: "php", icon: siPhp },
+  ruby: { label: "Ruby", hljs: "ruby", icon: siRuby },
+  go: { label: "Go", hljs: "go", icon: siGo },
+  rust: { label: "Rust", hljs: "rust", icon: siRust },
+  // Java's own mark is trademark-restricted; OpenJDK is the ecosystem icon.
+  java: { label: "Java", hljs: "java", icon: siOpenjdk },
+  dotnet: { label: ".NET", hljs: "csharp", icon: siDotnet },
+  elixir: { label: "Elixir", hljs: "elixir", icon: siElixir },
+};
 
-function LangIcon({ path }: { path: string }) {
+export function LangIcon({ path }: { path: string }) {
   return (
     <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d={path} />
@@ -486,22 +488,8 @@ function LangTabs({
           type="button"
           role="tab"
           aria-selected={key === value}
+          className={key === value ? "ms-code-tab active" : "ms-code-tab"}
           onClick={() => onChange(key)}
-          style={{
-            border: 0,
-            borderRadius: 8,
-            padding: "5px 10px",
-            fontSize: 12.5,
-            cursor: "pointer",
-            background: key === value ? "var(--ms-panel-raised)" : "none",
-            color: key === value ? "var(--ms-bone)" : "var(--ms-muted)",
-            font: "inherit",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            flex: "none",
-            whiteSpace: "nowrap",
-          }}
         >
           <LangIcon path={LANG_META[key].icon.path} />
           {LANG_META[key].label}
@@ -542,6 +530,9 @@ function CodeBlock({ code, language }: { code: string; language: HighlightLangua
         lineHeight: 1.65,
         color: "var(--ms-bone)",
         overflowX: "auto",
+        // Shell one-liners run past the drawer; wrapping beats a scrollbar
+        // there, while SDK code keeps its indentation intact.
+        ...(language === "bash" ? { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } : {}),
       }}
     >
       <CodeHighlight code={code} language={language} />

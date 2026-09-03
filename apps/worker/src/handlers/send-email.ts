@@ -10,6 +10,7 @@ import {
   extractAddrSpec,
   findSuppressed,
   hashRecipient,
+  isOnboardingSender,
   isSubscribedToTopic,
   type Keyring,
   makeUnsubscribeToken,
@@ -54,6 +55,8 @@ export interface SendDeps {
   ses: SesSender;
   /** Deployment-wide SES configuration set, used when the domain has none. */
   defaultConfigurationSet?: string | undefined;
+  /** ONBOARDING_EMAIL_FROM: sends from it carry no team domain (see core isOnboardingSender). */
+  onboardingEmailFrom?: string | undefined;
   /**
    * Awaited right before the send claim, after every check that can still
    * skip or fail the email — a token spent on a row that never reaches SES
@@ -325,14 +328,17 @@ export async function sendEmail(
           )
       )[0]
     : undefined;
-  if (domain?.status !== "verified") {
+  // The shared onboarding sender is an identity of this instance's own SES
+  // account: no team domain, the default region and configuration set.
+  const platformSend = !email.domainId && isOnboardingSender(email.from, deps.onboardingEmailFrom);
+  if (!platformSend && domain?.status !== "verified") {
     // Terminal, not retried: a domain demoted or deleted after accept does
     // not come back on its own, and the row would otherwise ride the retry
     // and reconcile loops until its body is purged.
     await failQueuedEmail(db, email.id, "domain_not_verified");
     return "failed";
   }
-  const configurationSet = domain.sesConfigurationSet ?? deps.defaultConfigurationSet;
+  const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
 
   const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
   if (!bodyCiphertext || !bodyIv || !bodyWrappedDek || bodyKeyVersion === null) {
@@ -637,7 +643,9 @@ export async function sendEmail(
           sharedFallbackUsed,
           shippedUntracked,
         },
-        domainSnapshot: { dmarcPolicy: domain.dmarcPolicy, dmarcCheckedAt: domain.dmarcCheckedAt },
+        domainSnapshot: domain
+          ? { dmarcPolicy: domain.dmarcPolicy, dmarcCheckedAt: domain.dmarcCheckedAt }
+          : null,
         now: new Date(),
       });
       const bodySize = insights.checks.find((c) => c.id === "body_size")?.detail?.htmlSizeBytes;

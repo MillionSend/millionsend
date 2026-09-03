@@ -21,6 +21,7 @@ const VARIANTS = {
 } as const;
 
 export type BadgeStatus = keyof typeof VARIANTS;
+export type BadgeTone = (typeof VARIANTS)[BadgeStatus];
 
 // Dot hues live in tokens/colors.css (--ms-dot-*); statuses without an email
 // dot token borrow the family they read as: verified is a delivered-green,
@@ -43,10 +44,12 @@ const DOT_COLORS: Record<BadgeStatus, string> = {
   canceled: "var(--ms-dot-queued)",
 };
 
-/** 8px status dot; without a status it renders the ring that marks an unfiltered "all" option. */
-export function StatusDot({ status }: { status?: BadgeStatus }) {
-  return status ? (
-    <span className="ms-dot" style={{ background: DOT_COLORS[status] }} aria-hidden="true" />
+/** 8px status dot — by email status or any CSS color; with neither it renders
+ * the ring that marks an unfiltered "all" option. */
+export function StatusDot({ status, color }: { status?: BadgeStatus; color?: string }) {
+  const fill = status ? DOT_COLORS[status] : color;
+  return fill ? (
+    <span className="ms-dot" style={{ background: fill }} aria-hidden="true" />
   ) : (
     <span className="ms-dot ring" aria-hidden="true" />
   );

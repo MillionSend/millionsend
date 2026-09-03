@@ -10,6 +10,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { useTRPC } from "@/lib/trpc";
 
 export function ConnectedAppsView() {
@@ -75,7 +76,7 @@ export function ConnectedAppsView() {
                       name
                     )}
                   </td>
-                  <td>
+                  <td style={{ whiteSpace: "nowrap" }}>
                     {grant.userEmail ?? "—"}
                     {grant.own ? (
                       <span className="ms-badge ms-badge-neutral" style={{ marginLeft: 8 }}>
@@ -84,15 +85,15 @@ export function ConnectedAppsView() {
                     ) : null}
                   </td>
                   <td>
-                    <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       {grant.allTeams ? (
                         <span className="ms-badge ms-badge-neutral">{t("allTeams")}</span>
                       ) : null}
-                      {grant.scopes.map((scope) => (
-                        <span key={scope} className="ms-badge ms-badge-neutral ms-mono">
-                          {scope}
+                      <Tooltip inline text={grant.scopes.join("\n")}>
+                        <span className="ms-chip">
+                          {t("scopesCount", { count: grant.scopes.length })}
                         </span>
-                      ))}
+                      </Tooltip>
                     </span>
                   </td>
                   <td>{grant.grantedAt ? <RelativeTime date={grant.grantedAt} /> : "—"}</td>

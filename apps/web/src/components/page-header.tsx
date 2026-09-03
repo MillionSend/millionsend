@@ -1,5 +1,10 @@
-import Link from "next/link";
+"use client";
 
+import Link from "next/link";
+import { useTranslations } from "next-intl";
+import { useEffect } from "react";
+
+/** Page chrome: breadcrumb, display H1, actions — and the tab title ("Contacts · MillionSend"). */
 export function PageHeader({
   title,
   subtitle,
@@ -16,6 +21,13 @@ export function PageHeader({
   /** Identity mark beside the title block (e.g. the email's status tile). */
   leading?: React.ReactNode;
 }) {
+  const common = useTranslations("common");
+  const appName = common("appName");
+  // Dashboard pages are client-rendered behind the sign-in (noindex), so the
+  // H1 is the one place every screen already states its name.
+  useEffect(() => {
+    document.title = `${title} · ${appName}`;
+  }, [title, appName]);
   return (
     <header className="ms-page-header" style={{ marginBottom: 28 }}>
       {breadcrumb ? (

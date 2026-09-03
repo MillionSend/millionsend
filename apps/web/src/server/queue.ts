@@ -12,6 +12,12 @@ export function getQueue(): Promise<Queue> {
   return instance;
 }
 
+/** Enqueue an email.send job from the web tier (the onboarding send); mirrors the API's seam. */
+export async function enqueueEmailSend(emailId: string): Promise<void> {
+  const queue = await getQueue();
+  await queue.send("email.send", { emailId }, { dedupeKey: emailId });
+}
+
 /**
  * Enqueue a webhook.deliver job from the web tier (the worker owns the
  * matching seam in its server bootstrap). dedupeKey collapses a redelivery of

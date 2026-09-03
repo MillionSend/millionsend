@@ -52,7 +52,7 @@ export function formatDayTime(date: Date | string | number, locale: string): str
   }).format(new Date(date));
 }
 
-/** Exact local stamp for hover details ("Sep 2, 2026, 8:15:32 PM GMT-3"). */
+/** Exact local stamp for hover details ("Sep 2, 2026, 8:15:32 PM"). */
 export function formatDateTime(date: Date | string | number, locale: string): string {
   return new Intl.DateTimeFormat(locale, {
     year: "numeric",
@@ -61,7 +61,6 @@ export function formatDateTime(date: Date | string | number, locale: string): st
     hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
-    timeZoneName: "short",
   }).format(new Date(date));
 }
 

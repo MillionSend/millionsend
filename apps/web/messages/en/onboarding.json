@@ -10,7 +10,6 @@
   },
   "title": "Send your first email",
   "subtitle": "Follow the steps to send an email using the MillionSend API.",
-  "accountCreated": "Account created",
   "step1": {
     "title": "Add an API key",
     "body": "Keys authenticate every request. The full key is shown once, at creation.",
@@ -31,7 +30,12 @@
     "fromPlaceholder": "you@yourdomain.com",
     "keyComment": "real key on copy",
     "keyCommentReplace": "replace with your API key",
-    "keyCommentLocked": "your key, once created"
+    "keyCommentLocked": "your key, once created",
+    "sendCta": "Send email",
+    "sending": "Sending…",
+    "sentTo": "Sent to {to}. It shows up below the moment it lands.",
+    "sendError": "Could not send. Try again.",
+    "selfHostBase": "Self-hosted: point the SDKs at this instance with MILLIONSEND_BASE_URL={url}."
   },
   "step3": {
     "title": "Watch it arrive",
@@ -46,25 +50,31 @@
   },
   "explore": {
     "label": "Explore more",
+    "recommended": "Recommended",
     "domains": {
       "title": "Verify a domain",
       "body": "Send from your own address.",
-      "link": "Domains →"
+      "cta": "Add domain"
+    },
+    "mcp": {
+      "title": "Install MCP",
+      "body": "Connect your AI tools and agents to send email through MillionSend.",
+      "cta": "Install MCP"
     },
     "webhooks": {
       "title": "Set up webhooks",
       "body": "Delivery events, pushed to your endpoint as they happen.",
-      "link": "Webhooks →"
+      "cta": "Add webhook"
     },
     "team": {
       "title": "Invite your team",
       "body": "Members manage emails, domains, and webhooks.",
-      "link": "Team →"
+      "cta": "Invite members"
     },
     "migrate": {
       "title": "Migrate from Resend",
       "body": "One command moves contacts, segments, templates, webhooks and domains.",
-      "link": "Guide ↗"
+      "cta": "Read the guide"
     },
     "instance": "Send rate and email retention are instance settings — set them in <link>Settings</link>."
   },

@@ -6,8 +6,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
+import { CodeHighlight } from "@/components/code-highlight";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
 import { EmailStatusIcon, EventIconTile } from "@/components/email-status-icon";
@@ -15,6 +16,7 @@ import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { Switch } from "@/components/switch";
 import { Tooltip } from "@/components/tooltip";
 import {
   formatDayTime,
@@ -22,6 +24,7 @@ import {
   formatRelative,
   formatUtcTimestampMs,
 } from "@/lib/format";
+import { formatHtml } from "@/lib/html";
 import { BAND_TONE, checkGlyph, formatScoreTenths } from "@/lib/score-band";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
@@ -146,6 +149,31 @@ function StepRow({ index, text, last }: { index: number; text: string; last?: bo
       </span>
       <span style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.55 }}>{text}</span>
     </div>
+  );
+}
+
+/** The HTML tab's source: pretty-printed by default, highlighted either way. */
+function HtmlSource({ html, formatted }: { html: string; formatted: boolean }) {
+  // Bodies run to hundreds of KB: format and highlight once per toggle, not
+  // on every re-render of the page around them.
+  const code = useMemo(
+    () => <CodeHighlight code={formatted ? formatHtml(html) : html} language="xml" />,
+    [html, formatted],
+  );
+  return (
+    <pre
+      className="ms-mono ms-hl"
+      style={{
+        margin: 0,
+        padding: "16px 18px",
+        fontSize: 12,
+        lineHeight: 1.7,
+        color: "var(--ms-bone)",
+        overflowX: "auto",
+      }}
+    >
+      {code}
+    </pre>
   );
 }
 
@@ -552,6 +580,7 @@ export default function EmailDetailPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("preview");
+  const [htmlFormatted, setHtmlFormatted] = useState(true);
   const [drawer, setDrawer] = useState<"bounced" | "suppressed" | null>(null);
   // Identifies an occurrence group by its first event's id — type alone is
   // ambiguous now that each local day gets its own node per type.
@@ -1053,7 +1082,35 @@ export default function EmailDetailPage() {
             </button>
           ))}
           {currentContent ? (
-            <span style={{ marginLeft: "auto", padding: "0 6px" }}>
+            <span
+              style={{
+                marginLeft: "auto",
+                padding: "0 6px",
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+              }}
+            >
+              {tab === "html" ? (
+                <span
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 12,
+                    color: "var(--ms-muted)",
+                  }}
+                >
+                  {t("detail.formatted")}
+                  <Switch
+                    checked={htmlFormatted}
+                    disabled={false}
+                    onChange={setHtmlFormatted}
+                    ariaLabel={t("detail.formatted")}
+                  />
+                </span>
+              ) : null}
+              {/* Copies the source as sent, never the re-flowed view. */}
               <CopyGlyph value={currentContent} />
             </span>
           ) : null}
@@ -1148,19 +1205,7 @@ export default function EmailDetailPage() {
               ))}
             {tab === "html" &&
               (email.html ? (
-                <pre
-                  className="ms-mono"
-                  style={{
-                    margin: 0,
-                    padding: "16px 18px",
-                    fontSize: 12,
-                    lineHeight: 1.7,
-                    color: "var(--ms-bone)",
-                    overflowX: "auto",
-                  }}
-                >
-                  {email.html}
-                </pre>
+                <HtmlSource html={email.html} formatted={htmlFormatted} />
               ) : (
                 <p
                   style={{

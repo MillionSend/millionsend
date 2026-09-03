@@ -60,6 +60,7 @@
     "preview": "Preview",
     "plainText": "Plain text",
     "html": "HTML",
+    "formatted": "Formatted",
     "insights": "Insights",
     "bodyPurged": "Body purged after retention window.",
     "noHtml": "No HTML body.",

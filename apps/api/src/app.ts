@@ -33,6 +33,7 @@ import {
   scoreBand,
   segmentContactsWhere,
   segmentFilterSchema,
+  verifyOnboardingSender,
   verifySenderDomain,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -130,6 +131,8 @@ export interface ApiDeps {
   keyring: Keyring;
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
+  /** ONBOARDING_EMAIL_FROM: the shared first-email sender (core verifyOnboardingSender). */
+  onboardingEmailFrom?: string | undefined;
   /**
    * Hands an accepted email to the send queue. REQUIRED: accepting mail
    * without a producer would strand it in "queued" forever.
@@ -310,7 +313,7 @@ function findEmailInsights(
 }
 
 /** Maps a validated Resend-shaped send body to the shared accept payload. */
-function toAcceptPayload(body: SendEmailRequest, domainId: string): AcceptEmailPayload {
+function toAcceptPayload(body: SendEmailRequest, domainId: string | null): AcceptEmailPayload {
   // `content` is guaranteed by the schema's superRefine; the `?? ""` only
   // satisfies the optional wire type.
   const attachments = body.attachments?.map((a) => ({
@@ -2777,7 +2780,26 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       return c.json(errorBody(404, "not_found", "Topic not found"), 404);
     }
 
-    const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
+    // The shared onboarding sender needs no verified domain but may only
+    // reach the team's own inboxes; anything else is the verified-domain rule.
+    const onboarding = await verifyOnboardingSender(
+      deps.db,
+      auth.teamId,
+      body.from,
+      [...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])],
+      deps.onboardingEmailFrom,
+    );
+    if (onboarding && !onboarding.ok) {
+      return c.json(
+        errorBody(
+          422,
+          "validation_error",
+          "The onboarding sender can only send to your team's own members",
+        ),
+        422,
+      );
+    }
+    const domain = onboarding ?? (await verifySenderDomain(deps.db, auth.teamId, body.from));
     if (!domain.ok) {
       return c.json(
         errorBody(
@@ -2790,7 +2812,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         422,
       );
     }
-    if (keyForbidsSendingDomain(auth, domain.domainId)) {
+    // A domain-restricted key is confined to its domain, the shared sender included.
+    if (
+      domain.domainId === null
+        ? auth.domainId !== null
+        : keyForbidsSendingDomain(auth, domain.domainId)
+    ) {
       return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
     }
 
@@ -3565,6 +3592,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         allowedTopicArns: sns.allowedTopicArns,
       });
       if (!verdict.ok) {
+        // The reason and topic are the operator's only trace: this route is
+        // excluded from the request log, and SNS just retries silently.
+        console.warn(`ses/events: SNS message rejected (${verdict.reason}) from ${msg.TopicArn}`);
         return c.json(errorBody(403, "forbidden", "SNS message rejected"), 403);
       }
 

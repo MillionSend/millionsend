@@ -293,6 +293,7 @@
     },
     "you": "você",
     "allTeams": "Todos os times",
+    "scopesCount": "{count, plural, one {# permissão} other {# permissões}}",
     "revoke": "Revogar acesso",
     "revokeAllTeamsForbidden": "Esta autorização também cobre times que você não administra. Só quem a concedeu pode revogá-la.",
     "revokeConfirm": {

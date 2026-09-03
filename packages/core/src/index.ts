@@ -6,10 +6,13 @@ export {
   type AcceptEmailResult,
   acceptEmail,
   estimateAttachmentBytes,
+  isOnboardingSender,
   MAX_ATTACHMENT_BYTES,
+  type OnboardingSenderVerdict,
   QUOTA_BACKLOG_DAYS,
   type SenderDomainVerdict,
   senderDomain,
+  verifyOnboardingSender,
   verifySenderDomain,
 } from "./accept-email.js";
 export {

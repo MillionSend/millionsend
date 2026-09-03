@@ -106,6 +106,8 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       trackingSubdomainsSupported: trackingSubdomainsSupported(),
       // Why cloud domains without a tracking subdomain ship untracked links.
       trackingRequiresSubdomain: isCloudDeployment(),
+      // The shared first-email sender the onboarding snippet and button use; null hides the button.
+      onboardingSender: env.ONBOARDING_EMAIL_FROM ?? null,
     })),
 
     /** Env-side SES settings the setup page reports alongside awsReadiness. */

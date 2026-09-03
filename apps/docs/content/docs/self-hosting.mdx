@@ -142,6 +142,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials for "Continue with Google". The button appears only when both are set. Callback URL: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Same, for GitHub. Callback URL: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Sender for account emails (password reset), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery only appears when this is set and SES credentials are configured — leave unset to hide it entirely. |
+| `ONBOARDING_EMAIL_FROM` | Shared sender for the onboarding "Send email" button and snippet, as `Name <user@domain>` or a bare address on a domain verified in this SES account. Any team may send from it, but only to its own members' inboxes. Leave unset to hide the button; the snippet then asks for the team's own domain. |
 
 ### Object storage (uploads & backups)
 

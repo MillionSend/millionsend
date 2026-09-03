@@ -26,6 +26,48 @@ export type SenderDomainVerdict =
   | { ok: false; reason: "invalid_sender"; fromDomain: null }
   | { ok: false; reason: "unverified_domain"; fromDomain: string };
 
+/** True when `from` is the instance's shared onboarding sender (same addr-spec). */
+export function isOnboardingSender(from: string, onboardingFrom: string | undefined): boolean {
+  if (!onboardingFrom) return false;
+  const sender = parseSingleSender(from);
+  const platform = parseSingleSender(onboardingFrom);
+  return sender !== null && platform !== null && sender.address === platform.address;
+}
+
+export type OnboardingSenderVerdict =
+  | { ok: true; domainId: null; address: string }
+  | { ok: false; reason: "recipient_not_member" };
+
+/**
+ * The instance's shared onboarding sender (ONBOARDING_EMAIL_FROM): any team
+ * may send from it without a verified domain, but only to its own members'
+ * inboxes — so the first-email snippet runs as written and the shared
+ * address can never reach a stranger. Null when `from` is not that sender;
+ * callers then fall through to verifySenderDomain.
+ */
+export async function verifyOnboardingSender(
+  db: Db,
+  teamId: string,
+  from: string,
+  recipients: readonly string[],
+  onboardingFrom: string | undefined,
+): Promise<OnboardingSenderVerdict | null> {
+  if (!isOnboardingSender(from, onboardingFrom)) return null;
+  const members = await db
+    .select({ email: schema.user.email })
+    .from(schema.teamMembers)
+    .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
+    .where(eq(schema.teamMembers.teamId, teamId));
+  const allowed = new Set(members.map((m) => normalizeAddress(m.email)));
+  const strangers = recipients.some((r) => {
+    const address = extractAddrSpec(r);
+    return address === null || !allowed.has(normalizeAddress(address));
+  });
+  if (strangers) return { ok: false, reason: "recipient_not_member" };
+  // parseSingleSender succeeded inside isOnboardingSender.
+  return { ok: true, domainId: null, address: parseSingleSender(from)?.address ?? "" };
+}
+
 /**
  * Sender domain must be one of the team's verified domains — otherwise any
  * key could queue mail claiming any sender. Every accept surface (HTTP API,
@@ -81,8 +123,9 @@ export interface AcceptEmailPayload {
   headers?: Record<string, string> | undefined;
   attachments?: EmailAttachment[] | undefined;
   scheduledAt?: Date | undefined;
-  /** From verifySenderDomain — callers verify the sender before accepting. */
-  domainId: string;
+  /** From verifySenderDomain — callers verify the sender before accepting;
+   * null only for the shared onboarding sender (verifyOnboardingSender). */
+  domainId: string | null;
   /** Topic-scoped send; callers validate team ownership before accepting. */
   topicId?: string | undefined;
 }

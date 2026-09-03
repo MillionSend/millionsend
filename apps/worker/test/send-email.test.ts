@@ -151,6 +151,27 @@ it("sends a queued email: MIME, join key, status, event row", async () => {
   expect(usage?.sent).toBe(1);
 });
 
+it("sends from the shared onboarding sender without a team domain, on the instance defaults", async () => {
+  const platform = "MillionSend <onboarding@ms.example>";
+  const { ses, sends } = fakeSes("mid-onboarding");
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    defaultConfigurationSet: "instance-set",
+    onboardingEmailFrom: platform,
+  };
+  const emailId = await insertEmail({ domainId: null, from: platform });
+
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  expect(sends).toHaveLength(1);
+  expect(sends[0]?.configurationSetName).toBe("instance-set");
+  expect(sends[0]?.region).toBeUndefined();
+
+  // Without the instance sender configured, a domainless row is unsendable.
+  const orphan = await insertEmail({ domainId: null, from: platform });
+  expect(await sendEmail(db, { keyring, ses }, { emailId: orphan })).toBe("failed");
+});
+
 it("a broadcast send carries the RFC bulk-mail headers", async () => {
   const [topic] = await db
     .insert(schema.topics)

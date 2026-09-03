@@ -11,11 +11,13 @@ import php from "highlight.js/lib/languages/php";
 import python from "highlight.js/lib/languages/python";
 import ruby from "highlight.js/lib/languages/ruby";
 import rust from "highlight.js/lib/languages/rust";
+import xml from "highlight.js/lib/languages/xml";
 import { createLowlight } from "lowlight";
 import type { ReactNode } from "react";
 
-/** Only the grammars the SDK snippets need — registering all of hljs would
- *  drag every language into the client bundle. */
+/** Only the grammars the SDK snippets and the body viewers need (xml is
+ *  hljs's HTML grammar) — registering all of hljs would drag every language
+ *  into the client bundle. */
 const lowlight = createLowlight({
   bash,
   javascript,
@@ -28,6 +30,7 @@ const lowlight = createLowlight({
   java,
   csharp,
   elixir,
+  xml,
 });
 
 export type HighlightLanguage =
@@ -41,7 +44,8 @@ export type HighlightLanguage =
   | "rust"
   | "java"
   | "csharp"
-  | "elixir";
+  | "elixir"
+  | "xml";
 
 /** Structural subset of the hast tree lowlight returns. */
 interface HastNode {

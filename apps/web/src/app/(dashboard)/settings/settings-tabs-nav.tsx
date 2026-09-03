@@ -21,9 +21,11 @@ type TabKey = (typeof TABS)[number]["key"];
 
 export function SettingsTabsNav({
   showBilling,
+  showSes,
   showSmtp,
 }: {
   showBilling: boolean;
+  showSes: boolean;
   showSmtp: boolean;
 }) {
   const t = useTranslations("settings.tabs");
@@ -36,6 +38,7 @@ export function SettingsTabsNav({
   // tab is a missing route rather than a hidden link.
   const visible: Partial<Record<TabKey, boolean>> = {
     billing: showBilling,
+    ses: showSes,
     smtp: showSmtp,
     audit: role === "owner" || role === "admin",
   };

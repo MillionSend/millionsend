@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
+import { CodeHighlight } from "@/components/code-highlight";
 import { CopyChip } from "@/components/copy-chip";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
@@ -47,17 +48,18 @@ function JsonSection({ label, value, noBody }: { label: string; value: unknown; 
           </p>
         ) : (
           <pre
-            className="ms-mono"
+            className="ms-mono ms-hl"
             style={{
               margin: 0,
               padding: "14px 16px",
               fontSize: 12,
               lineHeight: 1.7,
               color: "var(--ms-bone)",
-              overflowX: "auto",
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
             }}
           >
-            {JSON.stringify(value, null, 2)}
+            <CodeHighlight code={JSON.stringify(value, null, 2)} language="json" />
           </pre>
         )}
       </div>

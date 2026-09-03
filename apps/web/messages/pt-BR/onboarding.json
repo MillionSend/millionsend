@@ -10,7 +10,6 @@
   },
   "title": "Envie seu primeiro e-mail",
   "subtitle": "Siga os passos para enviar um e-mail pela API do MillionSend.",
-  "accountCreated": "Conta criada",
   "step1": {
     "title": "Adicione uma chave de API",
     "body": "As chaves autenticam cada requisição. A chave completa aparece uma única vez, na criação.",
@@ -31,7 +30,12 @@
     "fromPlaceholder": "voce@seudominio.com.br",
     "keyComment": "chave real ao copiar",
     "keyCommentReplace": "substitua pela sua chave de API",
-    "keyCommentLocked": "sua chave, após a criação"
+    "keyCommentLocked": "sua chave, após a criação",
+    "sendCta": "Enviar e-mail",
+    "sending": "Enviando…",
+    "sentTo": "Enviado para {to}. Aparece abaixo assim que chegar.",
+    "sendError": "Não foi possível enviar. Tente de novo.",
+    "selfHostBase": "Self-host: aponte os SDKs para esta instância com MILLIONSEND_BASE_URL={url}."
   },
   "step3": {
     "title": "Veja chegar",
@@ -46,25 +50,31 @@
   },
   "explore": {
     "label": "Explore mais",
+    "recommended": "Recomendado",
     "domains": {
       "title": "Verifique um domínio",
       "body": "Envie do seu próprio endereço.",
-      "link": "Domínios →"
+      "cta": "Adicionar domínio"
+    },
+    "mcp": {
+      "title": "Instale o MCP",
+      "body": "Conecte suas ferramentas e agentes de IA para enviar e-mail pelo MillionSend.",
+      "cta": "Instalar MCP"
     },
     "webhooks": {
       "title": "Configure webhooks",
       "body": "Eventos de entrega, enviados ao seu endpoint assim que acontecem.",
-      "link": "Webhooks →"
+      "cta": "Adicionar webhook"
     },
     "team": {
       "title": "Convide seu time",
       "body": "Membros gerenciam e-mails, domínios e webhooks.",
-      "link": "Time →"
+      "cta": "Convidar membros"
     },
     "migrate": {
       "title": "Migre do Resend",
       "body": "Um comando move contatos, segmentos, templates, webhooks e domínios.",
-      "link": "Guia ↗"
+      "cta": "Ler o guia"
     },
     "instance": "Taxa de envio e retenção de e-mails são configurações da instância — defina em <link>Configurações</link>."
   },

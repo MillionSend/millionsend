@@ -601,7 +601,7 @@ export function DomainDetail({ id }: { id: string }) {
         >
           <Skeleton width={280} height="1lh" />
         </div>
-        {/* Records | Configuration tab bar (Configuration lands once verified). */}
+        {/* Records | Configuration tab bar. */}
         <div className="ms-tabs" style={{ marginTop: 26 }}>
           <Skeleton width={64} height={30} radius="var(--ms-r-input)" />
           <Skeleton width={96} height={30} radius="var(--ms-r-input)" />
@@ -796,28 +796,26 @@ export function DomainDetail({ id }: { id: string }) {
         </GradientBanner>
       ) : null}
 
-      {/* Configuration is SES-verified-only: an unverified domain can't send,
-          so its tracking/TLS settings have nothing to apply to yet. */}
-      {status === "verified" ? (
-        <div className="ms-tabs" style={{ marginTop: 26 }}>
-          <button
-            type="button"
-            className={tab === "records" ? "active" : ""}
-            onClick={() => setTab("records")}
-          >
-            {t("detail.tabs.records")}
-          </button>
-          <button
-            type="button"
-            className={tab === "configuration" ? "active" : ""}
-            onClick={() => setTab("configuration")}
-          >
-            {t("detail.tabs.configuration")}
-          </button>
-        </div>
-      ) : null}
+      {/* Tracking and TLS settings are stored regardless of status and apply
+          once the domain sends, so they can be set while DNS propagates. */}
+      <div className="ms-tabs" style={{ marginTop: 26 }}>
+        <button
+          type="button"
+          className={tab === "records" ? "active" : ""}
+          onClick={() => setTab("records")}
+        >
+          {t("detail.tabs.records")}
+        </button>
+        <button
+          type="button"
+          className={tab === "configuration" ? "active" : ""}
+          onClick={() => setTab("configuration")}
+        >
+          {t("detail.tabs.configuration")}
+        </button>
+      </div>
 
-      {status === "verified" && tab === "configuration" ? (
+      {tab === "configuration" ? (
         <div style={{ marginTop: 24 }}>
           <ConfigurationPanel
             id={id}
@@ -845,7 +843,7 @@ export function DomainDetail({ id }: { id: string }) {
           />
         </div>
       ) : (
-        <section style={{ marginTop: status === "verified" ? 24 : 26, maxWidth: 1000 }}>
+        <section style={{ marginTop: 24, maxWidth: 1000 }}>
           {status !== "verified" ? (
             <h2 className="ms-display" style={{ fontSize: 22, margin: 0, color: "var(--ms-bone)" }}>
               {provider
@@ -875,19 +873,18 @@ export function DomainDetail({ id }: { id: string }) {
                   domain={data.name}
                   showStatus
                   highlightGroup={highlightTracking ? "tracking" : null}
-                  forceGroups={status === "verified" ? ["tracking"] : []}
+                  forceGroups={["tracking"]}
                   groupExtras={{
                     // Same enable gesture as the Configuration tab, right on the
-                    // group header. Only meaningful once the domain can send.
-                    tracking:
-                      status === "verified" ? (
-                        <Switch
-                          checked={trackingToggle.masterChecked}
-                          disabled={trackingSwitchDisabled}
-                          onChange={trackingToggle.toggleMaster}
-                          ariaLabel={t("detail.tracking.enable")}
-                        />
-                      ) : null,
+                    // group header.
+                    tracking: (
+                      <Switch
+                        checked={trackingToggle.masterChecked}
+                        disabled={trackingSwitchDisabled}
+                        onChange={trackingToggle.toggleMaster}
+                        ariaLabel={t("detail.tracking.enable")}
+                      />
+                    ),
                   }}
                   emptyNotes={
                     // Cloud has no shared host, so an unconfigured group needs no

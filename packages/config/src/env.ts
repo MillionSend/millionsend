@@ -171,6 +171,13 @@ export const env = createEnv({
     // SES account. Unset disables password recovery entirely.
     AUTH_EMAIL_FROM: z.string().optional(),
 
+    // Shared first-email sender for the onboarding flow, as `Name <user@domain>`
+    // or a bare address on a domain verified in this instance's SES account.
+    // Any team may send from it — but only to its own members' inboxes — so
+    // the onboarding snippet runs before a domain is verified. Unset hides the
+    // "Send email" button and the snippet asks for the team's own domain.
+    ONBOARDING_EMAIL_FROM: z.string().optional(),
+
     // Dashboard session signing secret (`openssl rand -base64 32`).
     // Required only by the web process, which asserts it at boot.
     BETTER_AUTH_SECRET: z.string().min(32).optional(),
@@ -295,6 +302,9 @@ export function assertEnvConsistency(e: Env): void {
   }
   if (e.AUTH_EMAIL_FROM && parseEmailFrom(e.AUTH_EMAIL_FROM) === null) {
     throw new Error('AUTH_EMAIL_FROM must be "Name <user@domain>" or a bare email address');
+  }
+  if (e.ONBOARDING_EMAIL_FROM && parseEmailFrom(e.ONBOARDING_EMAIL_FROM) === null) {
+    throw new Error('ONBOARDING_EMAIL_FROM must be "Name <user@domain>" or a bare email address');
   }
   // Half a keypair would silently fall back to the default provider chain
   // everywhere AWS clients are built (SES, KMS) — reject it instead. A fully

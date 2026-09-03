@@ -1,5 +1,9 @@
 {
   "appName": "MillionSend",
+  "meta": {
+    "title": "MillionSend · A plataforma de e-mail open-source",
+    "description": "API de e-mail open-source compatível com a Resend, sobre AWS SES. Self-host grátis ou nuvem: 100 e-mails por dia grátis, sem cartão. Migre da Resend com duas variáveis de ambiente."
+  },
   "copy": "Copiar",
   "copied": "Copiado",
   "close": "Fechar",

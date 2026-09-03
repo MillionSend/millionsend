@@ -3,185 +3,37 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { LANG_META, LangIcon } from "@/components/api-sheet";
+import { CodeHighlight } from "@/components/code-highlight";
 import { CopyGlyph } from "@/components/copy-chip";
+import { DeliveredOdometer } from "@/components/delivered-odometer";
+import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { StatusBadge } from "@/components/status-badge";
 import { MIGRATE_DOCS_URL } from "@/lib/docs-links";
-import { jsSingleQuote, shellSingleQuote } from "@/lib/escape";
 import { formatDayTime, formatUtcTimestamp, maskApiKey } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
-
-/** Syntax-colored snippet token: k keyword, s string, w call, f comment. */
-type Seg = { text: string; color?: "k" | "s" | "w" | "f" };
-
-const SEG_COLORS = {
-  k: "var(--ms-muted)",
-  s: "var(--ms-info)",
-  w: "var(--ms-warn)",
-  f: "var(--ms-faint)",
-} as const;
-
-type SnippetParams = {
-  apiUrl: string;
-  from: string;
-  to: string;
-  subject: string;
-  html: string;
-  apiKey: string;
-  comment?: string;
-};
-
-function nodeSegs(p: SnippetParams): Seg[] {
-  return [
-    { text: "const", color: "k" },
-    { text: " res = " },
-    { text: "await", color: "k" },
-    { text: " " },
-    { text: "fetch", color: "w" },
-    { text: "(" },
-    { text: jsSingleQuote(`${p.apiUrl}/emails`), color: "s" },
-    { text: ", {\n  method: " },
-    { text: "'POST'", color: "s" },
-    { text: ",\n  headers: {\n    Authorization: " },
-    { text: jsSingleQuote(`Bearer ${p.apiKey}`), color: "s" },
-    { text: "," },
-    ...(p.comment ? [{ text: `  // ${p.comment}`, color: "f" as const }] : []),
-    { text: "\n    " },
-    { text: "'Content-Type'", color: "s" },
-    { text: ": " },
-    { text: "'application/json'", color: "s" },
-    { text: "\n  },\n  body: JSON." },
-    { text: "stringify", color: "w" },
-    { text: "({\n    from: " },
-    { text: jsSingleQuote(p.from), color: "s" },
-    { text: ",\n    to: " },
-    { text: jsSingleQuote(p.to), color: "s" },
-    { text: ",\n    subject: " },
-    { text: jsSingleQuote(p.subject), color: "s" },
-    { text: ",\n    html: " },
-    { text: jsSingleQuote(p.html), color: "s" },
-    { text: "\n  })\n});" },
-  ];
-}
-
-function curlSegs(p: SnippetParams): Seg[] {
-  const body = JSON.stringify({ from: p.from, to: p.to, subject: p.subject, html: p.html });
-  return [
-    // The comment lives on its own line so any selection of the command
-    // itself is valid shell — an inline comment after a trailing "\" breaks
-    // the continuation when copied.
-    ...(p.comment ? [{ text: `# ${p.comment}\n`, color: "f" as const }] : []),
-    { text: "curl", color: "w" },
-    { text: ` -X POST ${p.apiUrl}/emails \\\n  -H ` },
-    { text: shellSingleQuote(`Authorization: Bearer ${p.apiKey}`), color: "s" },
-    { text: " \\\n  -H " },
-    { text: "'Content-Type: application/json'", color: "s" },
-    { text: " \\\n  -d " },
-    { text: shellSingleQuote(body), color: "s" },
-  ];
-}
-
-function segsText(segs: Seg[]): string {
-  return segs.map((s) => s.text).join("");
-}
-
-function SnippetPre({ segs }: { segs: Seg[] }) {
-  return (
-    <pre
-      className="ms-mono"
-      style={{
-        margin: 0,
-        padding: "14px 16px",
-        fontSize: 13,
-        lineHeight: 1.7,
-        color: "var(--ms-bone)",
-        overflowX: "auto",
-      }}
-    >
-      {segs.map((seg, i) => (
-        <span
-          // biome-ignore lint/suspicious/noArrayIndexKey: static token list, position is identity
-          key={i}
-          style={seg.color ? { color: SEG_COLORS[seg.color] } : undefined}
-        >
-          {seg.text}
-        </span>
-      ))}
-    </pre>
-  );
-}
-
-/** The canvas's one theatrical moment: 74×100 digit boxes, last digit rolls in steel. */
-function OdometerBoxes({ value }: { value: number }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  // ponytail: 7 fixed boxes cap the display at 9,999,999; fine for a first-send flow.
-  const digits = String(Math.min(value, 9_999_999)).padStart(7, "0").split("").map(Number);
-  return (
-    <div className="ms-odometer ms-odo-boxes" style={{ gap: 8 }}>
-      {digits.map((digit, i) => {
-        const last = i === digits.length - 1;
-        return (
-          <span
-            // biome-ignore lint/suspicious/noArrayIndexKey: fixed 7 odometer positions, position is identity
-            key={i}
-            className="ms-odo-box"
-            style={{
-              width: 74,
-              height: 100,
-              background: "var(--ms-panel)",
-              border: `1px solid var(${last ? "--ms-line-strong" : "--ms-line"})`,
-              borderRadius: 12,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-            }}
-          >
-            <span className="ms-odo-col" style={{ fontSize: 60 }}>
-              <span
-                className="ms-odo-strip ms-digits"
-                style={{
-                  transform: mounted ? `translateY(-${digit}em)` : "translateY(0)",
-                  color: last && digit > 0 ? "var(--ms-steel)" : "var(--ms-muted)",
-                }}
-              >
-                {Array.from({ length: digit + 1 }, (_, n) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: the strip is the ordered digits 0..d — the index IS the digit
-                  <span key={n}>{n}</span>
-                ))}
-              </span>
-            </span>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
+import {
+  onboardingSnippet,
+  SNIPPET_HLJS,
+  SNIPPET_LABELS,
+  SNIPPET_LANGS,
+  type SnippetLang,
+  type SnippetParams,
+} from "./snippets";
 
 /** Statuses that can still progress to delivered (see emailStatusEnum). */
 const IN_FLIGHT_STATUSES = new Set(["queued_quota", "queued", "sent", "delivery_delayed"]);
 
-const stepCard: React.CSSProperties = {
-  flex: 1,
-  background: "var(--ms-panel)",
-  border: "1px solid var(--ms-line-strong)",
-  borderRadius: 14,
-  padding: 22,
-  marginBottom: 20,
-};
-
-const bankedCard: React.CSSProperties = {
-  flex: 1,
-  backgroundColor: "var(--ms-ground)",
-  backgroundImage: statusGlow("success", 15),
-  border: "1px solid var(--ms-success-border)",
-  borderRadius: 14,
-  padding: "16px 22px",
-  marginBottom: 20,
-};
+const EXPLORE = [
+  { key: "domains", href: "/domains", recommended: true },
+  { key: "mcp", href: "/settings/mcp" },
+  { key: "webhooks", href: "/webhooks" },
+  { key: "team", href: "/settings" },
+  { key: "migrate", href: MIGRATE_DOCS_URL, external: true },
+] as const;
 
 /** Left rail of a stepper row: marker (✓ or number) above the connector line. */
 function StepRail({
@@ -214,24 +66,90 @@ function StepRail({
   );
 }
 
+/** A stepper card: title with a ✓ once done, one-line body, then the step's content. */
+function StepCard({
+  title,
+  body,
+  done = false,
+  locked = false,
+  children,
+}: {
+  title: string;
+  body: string;
+  done?: boolean;
+  locked?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section
+      className="ms-card"
+      style={{
+        flex: 1,
+        padding: 22,
+        marginBottom: 20,
+        ...(done ? { backgroundImage: statusGlow("success", 12) } : {}),
+        ...(locked ? { opacity: 0.5 } : {}),
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: "var(--ms-bone)" }}>
+          {title}
+        </h2>
+        {done ? (
+          <span aria-hidden="true" style={{ color: "var(--ms-success)", fontSize: 14 }}>
+            ✓
+          </span>
+        ) : null}
+      </div>
+      <p style={{ margin: "4px 0 0", fontSize: 13.5, color: "var(--ms-muted)" }}>{body}</p>
+      {children}
+    </section>
+  );
+}
+
+/** Hairline row: a ✓ or status badge, the sentence, and its time at the right. */
+function StampRow({ children, at }: { children: React.ReactNode; at?: Date | string | undefined }) {
+  const locale = useLocale();
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: 12,
+        padding: "8px 2px",
+        borderBottom: "1px solid var(--ms-line)",
+        fontSize: 13.5,
+        color: "var(--ms-muted)",
+      }}
+    >
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>{children}</span>
+      {at ? (
+        <span style={{ fontSize: 11, color: "var(--ms-faint)" }} title={formatUtcTimestamp(at)}>
+          {formatDayTime(at, locale)}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function OnboardingSteps({
   userEmail,
-  accountCreatedAt,
   apiUrl,
   showInstanceHint,
 }: {
   userEmail: string;
-  accountCreatedAt: string;
   apiUrl: string;
   /** Instance settings exist only on self-host; cloud hides the pointer. */
   showInstanceHint: boolean;
 }) {
   const t = useTranslations("onboarding");
   const locale = useLocale();
+  const mailLocale = locale === "pt-BR" ? "pt-BR" : "en";
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const [tab, setTab] = useState<"node" | "curl">("node");
+  const [lang, setLang] = useState<SnippetLang>("node");
   const [token, setToken] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
 
@@ -247,6 +165,9 @@ export function OnboardingSteps({
   const sesReady = !showInstanceHint || awsQuery.data?.credentialsConfigured === true;
   // Extra leading step shifts the numbering below it.
   const marker = (step: number) => String(step + (sesReady ? 0 : 1)).padStart(2, "0");
+
+  const features = useQuery(trpc.system.features.queryOptions());
+  const sender = features.data?.onboardingSender ?? null;
 
   const keysQuery = useQuery(trpc.apiKeys.list.queryOptions());
   const keys = keysQuery.data ?? [];
@@ -264,12 +185,13 @@ export function OnboardingSteps({
     refetchInterval: (query) => (query.state.data?.items.length ? false : 5000),
   });
   const firstEmail = emailsQuery.data?.items[0];
+  const emailCount = emailsQuery.data?.total ?? 0;
 
+  // Keeps ticking while the page is open: the odometer rolls on every delivery.
   const metricsQuery = useQuery({
     ...trpc.metrics.window.queryOptions({}),
     enabled: firstEmail !== undefined,
-    // Keep counting until the first delivery lands.
-    refetchInterval: (query) => ((query.state.data?.allTimeDelivered ?? 0) > 0 ? false : 5000),
+    refetchInterval: 5000,
   });
   const deliveredCount = metricsQuery.data?.allTimeDelivered ?? 0;
 
@@ -300,6 +222,11 @@ export function OnboardingSteps({
       },
     }),
   );
+  const sendFirst = useMutation(
+    trpc.onboarding.sendFirstEmail.mutationOptions({
+      onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.emails.pathKey() }),
+    }),
+  );
 
   const maskedKey = token
     ? maskApiKey(token, token.slice(-4))
@@ -309,7 +236,8 @@ export function OnboardingSteps({
 
   const snippetBase = {
     apiUrl,
-    from: verifiedDomain ? `onboarding@${verifiedDomain}` : t("step2.fromPlaceholder"),
+    // The shared sender runs as written; otherwise the team's own domain.
+    from: sender ?? (verifiedDomain ? `onboarding@${verifiedDomain}` : t("step2.fromPlaceholder")),
     to: userEmail,
     subject: t("step2.subject"),
     html: t("step2.html"),
@@ -324,17 +252,149 @@ export function OnboardingSteps({
       : t("step2.keyCommentLocked");
   const displayParams: SnippetParams = { ...snippetBase, apiKey: maskedKey, comment };
   const copyParams: SnippetParams = token ? { ...snippetBase, apiKey: token } : displayParams;
-  const displaySegs = tab === "node" ? nodeSegs(displayParams) : curlSegs(displayParams);
-  const copyText = segsText(tab === "node" ? nodeSegs(copyParams) : curlSegs(copyParams));
+  const displayCode = onboardingSnippet(lang, displayParams);
+  const copyCode = onboardingSnippet(lang, copyParams);
 
-  if (keysQuery.isPending || (showInstanceHint && awsQuery.isPending)) return null;
+  // Everything the layout hinges on loads before anything paints, so a team
+  // past its first email never flashes the stepper it already finished.
+  const loading =
+    keysQuery.isPending ||
+    features.isPending ||
+    (showInstanceHint && awsQuery.isPending) ||
+    (hasKey && emailsQuery.isPending);
 
   const success = firstEmail !== undefined;
   const toDisplay = firstEmail?.to.join(", ") ?? userEmail;
   // detail is polled while in flight, so it is the fresher status source.
   const firstStatus = detail?.latestStatus ?? firstEmail?.latestStatus;
 
-  const snippetBox = (
+  const explore = (
+    <div style={{ marginTop: 56 }}>
+      <div className="ms-microlabel" style={{ marginBottom: 10 }}>
+        {t("explore.label")}
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 14,
+        }}
+      >
+        {EXPLORE.map((card) => (
+          <div
+            key={card.key}
+            className="ms-card"
+            style={{ display: "flex", flexDirection: "column" }}
+          >
+            <div style={{ padding: 18, flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ms-bone)" }}>
+                  {t(`explore.${card.key}.title`)}
+                </span>
+                {"recommended" in card ? (
+                  <span className="ms-badge ms-badge-success">{t("explore.recommended")}</span>
+                ) : null}
+              </div>
+              <p
+                style={{
+                  fontSize: 12.5,
+                  color: "var(--ms-muted)",
+                  margin: "4px 0 0",
+                  lineHeight: 1.5,
+                }}
+              >
+                {t(`explore.${card.key}.body`)}
+              </p>
+            </div>
+            <div style={{ borderTop: "1px solid var(--ms-line)", padding: "12px 18px" }}>
+              <Link
+                href={card.href}
+                className="ms-btn ms-btn-secondary"
+                {...("external" in card ? { target: "_blank", rel: "noreferrer" } : {})}
+              >
+                {t(`explore.${card.key}.cta`)}
+                {"external" in card ? " ↗" : ""}
+              </Link>
+            </div>
+          </div>
+        ))}
+      </div>
+      {showInstanceHint ? (
+        <p style={{ fontSize: 12.5, color: "var(--ms-muted)", margin: "14px 0 0" }}>
+          {t.rich("explore.instance", {
+            link: (chunks) => (
+              <Link href="/settings" style={{ color: "var(--ms-bone)" }}>
+                {chunks}
+              </Link>
+            ),
+          })}
+        </p>
+      ) : null}
+    </div>
+  );
+
+  if (loading) {
+    return (
+      <div>
+        <h1 className="ms-display" style={{ fontSize: "var(--ms-fs-h1)", margin: 0 }}>
+          {t("title")}
+        </h1>
+        <div style={{ marginTop: 32, display: "grid", gap: 20 }}>
+          <Skeleton width="100%" height={132} radius="var(--ms-r-card)" />
+          <Skeleton width="100%" height={320} radius="var(--ms-r-card)" />
+        </div>
+      </div>
+    );
+  }
+
+  const keyField = (
+    <div
+      style={{
+        marginTop: 14,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 12px",
+        background: "var(--ms-inset)",
+        border: "1px solid var(--ms-line-strong)",
+        borderRadius: 10,
+      }}
+    >
+      <span
+        className="ms-mono"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: 13,
+          color: "var(--ms-bone)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {token && revealed ? token : maskedKey}
+      </span>
+      {token ? (
+        <>
+          <button
+            type="button"
+            className="ms-btn ms-btn-ghost"
+            style={{ height: "auto", padding: "2px 6px", fontSize: 12 }}
+            onClick={() => setRevealed((v) => !v)}
+          >
+            {revealed ? t("step1.hide") : t("step1.show")}
+          </button>
+          <CopyGlyph value={token} />
+        </>
+      ) : (
+        <span style={{ fontSize: 12, color: "var(--ms-muted)", flex: "none" }}>
+          {t("step1.doneMeta")}
+        </span>
+      )}
+    </div>
+  );
+
+  const codePanel = (
     <div
       style={{
         background: "var(--ms-inset)",
@@ -345,38 +405,76 @@ export function OnboardingSteps({
       }}
     >
       <div
+        role="tablist"
+        aria-label={t("step2.title")}
+        className="ms-scroll-x"
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 2,
+          gap: 4,
           padding: "7px 8px",
           borderBottom: "1px solid var(--ms-line)",
-          flexWrap: "wrap",
+          overflowX: "auto",
         }}
       >
-        {(["node", "curl"] as const).map((lang) => (
+        {SNIPPET_LANGS.map((key) => (
           <button
-            key={lang}
+            key={key}
             type="button"
-            onClick={() => setTab(lang)}
-            style={{
-              border: 0,
-              cursor: "pointer",
-              fontSize: 12,
-              padding: "3px 9px",
-              borderRadius: 8,
-              background: tab === lang ? "var(--ms-panel-raised)" : "none",
-              color: tab === lang ? "var(--ms-bone)" : "var(--ms-muted)",
-            }}
+            role="tab"
+            aria-selected={key === lang}
+            className={key === lang ? "ms-code-tab active" : "ms-code-tab"}
+            onClick={() => setLang(key)}
           >
-            {lang === "node" ? "Node.js" : "cURL"}
+            {key !== "curl" ? <LangIcon path={LANG_META[key].icon.path} /> : null}
+            {SNIPPET_LABELS[key]}
           </button>
         ))}
-        <span style={{ marginLeft: "auto" }}>
-          <CopyGlyph value={copyText} />
+        <span style={{ marginLeft: "auto", padding: "0 4px", flex: "none" }}>
+          <CopyGlyph value={copyCode} />
         </span>
       </div>
-      <SnippetPre segs={displaySegs} />
+      <pre
+        className="ms-mono ms-hl"
+        style={{
+          margin: 0,
+          padding: "14px 16px",
+          fontSize: 13,
+          lineHeight: 1.7,
+          color: "var(--ms-bone)",
+          overflowX: "auto",
+        }}
+      >
+        <CodeHighlight code={displayCode} language={SNIPPET_HLJS[lang]} />
+      </pre>
+      {sender && hasKey ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "12px 14px",
+            borderTop: "1px solid var(--ms-line)",
+          }}
+        >
+          <button
+            type="button"
+            className="ms-btn ms-btn-primary"
+            disabled={sendFirst.isPending}
+            onClick={() => sendFirst.mutate({ locale: mailLocale })}
+          >
+            <BtnSpinner on={sendFirst.isPending} />
+            {sendFirst.isPending ? t("step2.sending") : t("step2.sendCta")}
+          </button>
+          {sendFirst.isSuccess ? (
+            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>
+              {t("step2.sentTo", { to: userEmail })}
+            </span>
+          ) : sendFirst.isError ? (
+            <span style={{ fontSize: 13, color: "var(--ms-danger)" }}>{t("step2.sendError")}</span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 
@@ -385,84 +483,33 @@ export function OnboardingSteps({
       <h1 className="ms-display" style={{ fontSize: "var(--ms-fs-h1)", margin: 0 }}>
         {t("title")}
       </h1>
+      <div style={{ fontSize: 14, color: "var(--ms-muted)", marginTop: 6 }}>{t("subtitle")}</div>
 
       {success ? (
         <>
-          <div
-            style={{
-              maxWidth: 860,
-              marginTop: 24,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "baseline",
-                padding: "8px 2px",
-                borderBottom: "1px solid var(--ms-line)",
-              }}
-            >
-              <span style={{ fontSize: 13.5, color: "var(--ms-muted)" }}>
-                <span style={{ color: "var(--ms-success)" }}>✓</span>
-                {"  "}
-                {t("success.keyAdded")}
-              </span>
-              {bankedKey ? (
-                <span
-                  style={{ fontSize: 11, color: "var(--ms-faint)" }}
-                  title={formatUtcTimestamp(bankedKey.createdAt)}
-                >
-                  {formatDayTime(bankedKey.createdAt, locale)}
-                </span>
-              ) : null}
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "baseline",
-                padding: "8px 2px",
-                borderBottom: "1px solid var(--ms-line)",
-              }}
-            >
+          <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 8 }}>
+            <StampRow at={bankedKey?.createdAt}>
+              <span style={{ color: "var(--ms-success)" }}>✓</span>
+              {t("success.keyAdded")}
+            </StampRow>
+            <StampRow at={firstEmail.createdAt}>
               {deliveredSeconds ? (
-                <span style={{ fontSize: 13.5, color: "var(--ms-muted)" }}>
+                <>
                   <span style={{ color: "var(--ms-success)" }}>✓</span>
-                  {"  "}
                   {t("success.emailDelivered", { to: toDisplay, seconds: deliveredSeconds })}
-                </span>
+                </>
               ) : (
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                    fontSize: 13.5,
-                    color: "var(--ms-muted)",
-                  }}
-                >
+                <>
                   {firstStatus ? <StatusBadge status={firstStatus} /> : null}
                   {t("success.emailPending", { to: toDisplay })}
-                </span>
+                </>
               )}
-              {firstEmail ? (
-                <span
-                  style={{ fontSize: 11, color: "var(--ms-faint)" }}
-                  title={formatUtcTimestamp(firstEmail.createdAt)}
-                >
-                  {formatDayTime(firstEmail.createdAt, locale)}
-                </span>
-              ) : null}
-            </div>
+            </StampRow>
           </div>
 
-          <div style={{ maxWidth: 860, textAlign: "center", marginTop: 64 }}>
-            <OdometerBoxes value={deliveredCount} />
-            <div style={{ fontSize: 15, color: "var(--ms-bone)", marginTop: 22 }}>
+          <div style={{ textAlign: "center", marginTop: 56 }}>
+            <DeliveredOdometer value={deliveredCount} locale={locale} />
+            <div style={{ fontSize: 15, color: "var(--ms-bone)", marginTop: 18 }}>
               {t("success.counting", { count: deliveredCount })}
             </div>
             {deliveredSeconds ? (
@@ -473,7 +520,8 @@ export function OnboardingSteps({
                 {t("success.deliveredIn", { seconds: deliveredSeconds })}
               </div>
             ) : null}
-            {detail ? (
+            {/* The first send's route only reads as a story while it is the only one. */}
+            {detail && emailCount <= 1 ? (
               <div
                 className="ms-mono"
                 style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 3 }}
@@ -482,172 +530,40 @@ export function OnboardingSteps({
               </div>
             ) : null}
           </div>
-
-          <div style={{ maxWidth: 860, marginTop: 56 }}>
-            <div className="ms-microlabel" style={{ marginBottom: 10 }}>
-              {t("explore.label")}
-            </div>
-            <div
-              className="ms-meta-grid"
-              style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}
-            >
-              {(
-                [
-                  { key: "domains", href: "/domains" },
-                  { key: "webhooks", href: "/webhooks" },
-                  { key: "team", href: "/settings" },
-                  { key: "migrate", href: MIGRATE_DOCS_URL, external: true },
-                ] as const
-              ).map((card) => (
-                <Link
-                  key={card.key}
-                  href={card.href}
-                  {...("external" in card ? { target: "_blank", rel: "noreferrer" } : {})}
-                  style={{
-                    textDecoration: "none",
-                    background: "var(--ms-panel)",
-                    border: "1px solid var(--ms-line)",
-                    borderRadius: 14,
-                    padding: 18,
-                  }}
-                >
-                  <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ms-bone)" }}>
-                    {t(`explore.${card.key}.title`)}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      color: "var(--ms-muted)",
-                      marginTop: 4,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {t(`explore.${card.key}.body`)}
-                  </div>
-                  <div style={{ fontSize: 13, color: "var(--ms-muted)", marginTop: 10 }}>
-                    {t(`explore.${card.key}.link`)}
-                  </div>
-                </Link>
-              ))}
-            </div>
-            {showInstanceHint ? (
-              <p style={{ fontSize: 12.5, color: "var(--ms-muted)", margin: "14px 0 0" }}>
-                {t.rich("explore.instance", {
-                  link: (chunks) => (
-                    <Link href="/settings" style={{ color: "var(--ms-bone)" }}>
-                      {chunks}
-                    </Link>
-                  ),
-                })}
-              </p>
-            ) : null}
-          </div>
         </>
       ) : (
-        <>
-          <div style={{ fontSize: 14, color: "var(--ms-muted)", marginTop: 6 }}>
-            {t("subtitle")}
-          </div>
-          <div style={{ marginTop: 32, maxWidth: 860, display: "flex", flexDirection: "column" }}>
-            {/* Account created — banked at render */}
+        <div style={{ marginTop: 32, display: "flex", flexDirection: "column" }}>
+          {!sesReady ? (
+            /* Leading step — connect AWS SES before anything can send */
             <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-              <StepRail marker="✓" color="var(--ms-success)" />
-              <div
-                style={{
-                  paddingBottom: 20,
-                  flex: 1,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                }}
-              >
-                <span style={{ fontSize: 14, color: "var(--ms-muted)" }}>
-                  {t("accountCreated")}
-                </span>
-                <span
-                  style={{ fontSize: 11, color: "var(--ms-faint)" }}
-                  title={formatUtcTimestamp(accountCreatedAt)}
+              <StepRail marker="01" color="var(--ms-bone)" />
+              <StepCard title={t("stepSes.title")} body={t("stepSes.body")}>
+                <Link
+                  href="/settings/ses"
+                  className="ms-btn ms-btn-primary"
+                  style={{ marginTop: 16 }}
                 >
-                  {formatDayTime(accountCreatedAt, locale)}
-                </span>
-              </div>
+                  {t("stepSes.cta")}
+                </Link>
+              </StepCard>
             </div>
+          ) : null}
 
-            {!sesReady ? (
-              /* Leading step — connect AWS SES before anything can send */
-              <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-                <StepRail marker="01" color="var(--ms-bone)" />
-                <div style={stepCard}>
-                  <div style={{ fontSize: 16, fontWeight: 600 }}>{t("stepSes.title")}</div>
-                  <div style={{ fontSize: 13.5, color: "var(--ms-muted)", marginTop: 4 }}>
-                    {t("stepSes.body")}
-                  </div>
-                  <Link
-                    href="/settings/ses"
-                    className="ms-btn ms-btn-primary"
-                    style={{ marginTop: 16 }}
-                  >
-                    {t("stepSes.cta")}
-                  </Link>
-                </div>
-              </div>
-            ) : null}
-
-            {/* Add an API key */}
-            <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-              <StepRail
-                marker={hasKey ? "✓" : marker(1)}
-                color={hasKey ? "var(--ms-success)" : "var(--ms-bone)"}
-              />
-              {hasKey && bankedKey ? (
-                <div style={bankedCard}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <span style={{ fontSize: 15, fontWeight: 600, color: "var(--ms-success)" }}>
-                      {t("step1.done")}
-                    </span>
-                    <span
-                      style={{ fontSize: 11, color: "var(--ms-muted)" }}
-                      title={formatUtcTimestamp(bankedKey.createdAt)}
-                    >
-                      {formatDayTime(bankedKey.createdAt, locale)}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
-                    <span
-                      className="ms-chip"
-                      style={{ background: "color-mix(in srgb, var(--ms-void) 30%, transparent)" }}
-                    >
-                      {token && revealed ? token : maskedKey}
-                      {token ? (
-                        <>
-                          <button
-                            type="button"
-                            style={{ width: "auto" }}
-                            onClick={() => setRevealed((v) => !v)}
-                          >
-                            {revealed ? t("step1.hide") : t("step1.show")}
-                          </button>
-                          <CopyGlyph value={token} />
-                        </>
-                      ) : null}
-                    </span>
-                    <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>
-                      {t("step1.doneMeta")}
-                    </span>
-                  </div>
-                </div>
+          {/* Add an API key */}
+          <div className="ms-step" style={{ display: "flex", gap: 18 }}>
+            <StepRail
+              marker={hasKey ? "✓" : marker(1)}
+              color={hasKey ? "var(--ms-success)" : "var(--ms-bone)"}
+            />
+            <StepCard
+              title={t("step1.title")}
+              body={hasKey ? t("step1.done") : t("step1.body")}
+              done={hasKey}
+            >
+              {hasKey ? (
+                keyField
               ) : (
-                <div style={stepCard}>
-                  <div style={{ fontSize: 16, fontWeight: 600 }}>{t("step1.title")}</div>
-                  <div style={{ fontSize: 13.5, color: "var(--ms-muted)", marginTop: 4 }}>
-                    {t("step1.body")}
-                  </div>
+                <>
                   {createKey.isError ? (
                     <div style={{ fontSize: 13, color: "var(--ms-danger)", marginTop: 10 }}>
                       {t("step1.error")}
@@ -663,46 +579,49 @@ export function OnboardingSteps({
                     <BtnSpinner on={createKey.isPending} />
                     {t("step1.cta")}
                   </button>
-                </div>
+                </>
               )}
-            </div>
+            </StepCard>
+          </div>
 
-            {/* Send an email */}
-            <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-              <StepRail marker={marker(2)} color={hasKey ? "var(--ms-bone)" : "var(--ms-faint)"} />
-              <div
-                style={{
-                  ...stepCard,
-                  ...(hasKey ? {} : { border: "1px solid var(--ms-line)", opacity: 0.5 }),
-                }}
-              >
-                <div style={{ fontSize: 16, fontWeight: 600 }}>{t("step2.title")}</div>
-                <div style={{ fontSize: 13.5, color: "var(--ms-muted)", marginTop: 4 }}>
-                  {hasKey ? t("step2.bodyReady") : t("step2.bodyLocked")}
-                </div>
-                {snippetBox}
-              </div>
-            </div>
-
-            {/* Watch it arrive */}
-            <div className="ms-step" style={{ display: "flex", gap: 18 }}>
-              <StepRail marker={marker(3)} color="var(--ms-faint)" line={false} />
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                <span
-                  style={{ fontSize: 14, color: hasKey ? "var(--ms-muted)" : "var(--ms-faint)" }}
+          {/* Send an email */}
+          <div className="ms-step" style={{ display: "flex", gap: 18 }}>
+            <StepRail marker={marker(2)} color={hasKey ? "var(--ms-bone)" : "var(--ms-faint)"} />
+            <StepCard
+              title={t("step2.title")}
+              body={hasKey ? t("step2.bodyReady") : t("step2.bodyLocked")}
+              locked={!hasKey}
+            >
+              {codePanel}
+              {showInstanceHint && lang !== "curl" ? (
+                <p
+                  className="ms-mono"
+                  style={{ margin: "10px 0 0", fontSize: 12, color: "var(--ms-muted)" }}
                 >
-                  {t("step3.title")}
+                  {t("step2.selfHostBase", { url: apiUrl })}
+                </p>
+              ) : null}
+            </StepCard>
+          </div>
+
+          {/* Watch it arrive */}
+          <div className="ms-step" style={{ display: "flex", gap: 18 }}>
+            <StepRail marker={marker(3)} color="var(--ms-faint)" line={false} />
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <span style={{ fontSize: 14, color: hasKey ? "var(--ms-muted)" : "var(--ms-faint)" }}>
+                {t("step3.title")}
+              </span>
+              {hasKey ? (
+                <span className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)" }}>
+                  {t("step3.waiting")}
                 </span>
-                {hasKey ? (
-                  <span className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)" }}>
-                    {t("step3.waiting")}
-                  </span>
-                ) : null}
-              </div>
+              ) : null}
             </div>
           </div>
-        </>
+        </div>
       )}
+
+      {explore}
     </div>
   );
 }

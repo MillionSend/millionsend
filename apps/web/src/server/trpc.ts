@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import superjson from "superjson";
 import { getAuth, SESSION_FRESH_AGE_SECONDS } from "./auth";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership, type TeamRole } from "./membership";
-import { getQueue } from "./queue";
+import { enqueueEmailSend, getQueue } from "./queue";
 
 export interface SessionUser {
   id: string;
@@ -37,6 +37,8 @@ export interface Context {
    * send still commits and the broadcasts.reconcile sweep picks it up.
    */
   enqueueBroadcastSend?: (broadcastId: string, opts?: { startAfter?: Date }) => Promise<void>;
+  /** Hands an accepted email to the send queue (the onboarding send). Absent in tests. */
+  enqueueEmailSend?: (emailId: string) => Promise<void>;
 }
 
 const enqueueBroadcastSend = async (
@@ -67,6 +69,7 @@ export async function createContext({ headers }: { headers: Headers }): Promise<
     teamId: membership?.teamId ?? null,
     role: membership?.role ?? null,
     enqueueBroadcastSend,
+    enqueueEmailSend,
     setActiveTeamCookie: (teamId) =>
       cookieStore.set(ACTIVE_TEAM_COOKIE, teamId, {
         httpOnly: true,

@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
-import { type BadgeStatus, StatusDot } from "@/components/status-badge";
+import { type BadgeTone, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
@@ -27,20 +27,21 @@ const SOURCES = ["api_key", "mcp"] as const;
 type Source = (typeof SOURCES)[number];
 const RANGE_KEYS: RangeKey[] = ["all", "h24", "d7", "d15", "d30"];
 
-// Filter dots borrow the email-status hues they read as: a 2xx is a delivery,
-// a 4xx a complaint, a 5xx a failure; verbs go from the quiet read to the
-// destructive delete.
-const STATUS_CLASS_DOT: Record<StatusClass, BadgeStatus> = {
-  "2xx": "delivered",
-  "4xx": "complained",
-  "5xx": "failed",
+// One tone per verb and status class colors both the filter dot and the row
+// pill: a 2xx reads as success, a 4xx warns, a 5xx fails; verbs go from the
+// quiet read to the destructive delete.
+const STATUS_CLASS_TONE: Record<StatusClass, BadgeTone> = {
+  "2xx": "success",
+  "4xx": "warn",
+  "5xx": "danger",
 };
-const METHOD_DOT: Record<Method, BadgeStatus> = {
-  GET: "opened",
-  POST: "delivered",
-  PATCH: "complained",
-  DELETE: "failed",
+const METHOD_TONE: Record<Method, BadgeTone> = {
+  GET: "info",
+  POST: "success",
+  PATCH: "warn",
+  DELETE: "danger",
 };
+const toneColor = (tone: BadgeTone) => `var(--ms-${tone})`;
 
 const COL = { method: "12%", source: "11%", status: "10%", when: "14%" } as const;
 
@@ -166,7 +167,7 @@ export default function LogsPage() {
             ...METHODS.map((m) => ({
               value: m,
               label: m,
-              adornment: <StatusDot status={METHOD_DOT[m]} />,
+              adornment: <StatusDot color={toneColor(METHOD_TONE[m])} />,
             })),
           ]}
         />
@@ -190,7 +191,7 @@ export default function LogsPage() {
             ...STATUS_CLASSES.map((s) => ({
               value: s,
               label: s,
-              adornment: <StatusDot status={STATUS_CLASS_DOT[s]} />,
+              adornment: <StatusDot color={toneColor(STATUS_CLASS_TONE[s])} />,
             })),
           ]}
         />
@@ -240,7 +241,11 @@ export default function LogsPage() {
                   onClick={() => router.push(`/logs/${row.id}`)}
                 >
                   <td>
-                    <span className="ms-chip">{row.method}</span>
+                    <span
+                      className={`ms-badge ms-badge-${METHOD_TONE[row.method as Method] ?? "neutral"} ms-mono`}
+                    >
+                      {row.method}
+                    </span>
                   </td>
                   <td
                     className="ms-mono"

@@ -100,7 +100,7 @@ export function McpView({ serverUrl }: { serverUrl: string }) {
   const snippet = clientSnippet(client, serverUrl);
 
   return (
-    <div style={{ maxWidth: 720, display: "grid", gap: 20 }}>
+    <div style={{ display: "grid", gap: 20 }}>
       <section className="ms-card" style={{ padding: 24 }}>
         <p style={{ margin: "0 0 4px", fontSize: 14, color: "var(--ms-bone)" }}>{t("intro")}</p>
         <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--ms-muted)" }}>
@@ -162,7 +162,7 @@ export function McpView({ serverUrl }: { serverUrl: string }) {
           <tbody>
             {MCP_TOOLS.map((tool) => (
               <tr key={tool.name}>
-                <td className="ms-mono" style={{ fontSize: 12.5 }}>
+                <td className="ms-mono" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>
                   {tool.name}
                   {tool.readOnly ? (
                     <span className="ms-badge ms-badge-neutral" style={{ marginLeft: 8 }}>

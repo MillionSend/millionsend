@@ -88,7 +88,8 @@ export function TeamSwitcher({
   );
   const createTeam = useMutation(
     trpc.team.createTeam.mutationOptions({
-      onSuccess: () => window.location.assign("/emails"),
+      // A new team starts at its first email, like the first team does.
+      onSuccess: () => window.location.assign("/onboarding"),
     }),
   );
 

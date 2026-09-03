@@ -18,6 +18,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { displayUrl } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
@@ -293,11 +294,18 @@ export function WebhooksView() {
                     </Link>
                   </td>
                   <td>
-                    <span className="ms-chip">
-                      {webhook.eventTypes === null || webhook.eventTypes.length === 0
-                        ? t("allEvents")
-                        : t("eventsCount", { count: webhook.eventTypes.length })}
-                    </span>
+                    {webhook.eventTypes === null || webhook.eventTypes.length === 0 ? (
+                      <span className="ms-chip">{t("allEvents")}</span>
+                    ) : (
+                      <Tooltip
+                        inline
+                        text={webhook.eventTypes.map((type) => t(`eventLabel.${type}`)).join("\n")}
+                      >
+                        <span className="ms-chip">
+                          {t("eventsCount", { count: webhook.eventTypes.length })}
+                        </span>
+                      </Tooltip>
+                    )}
                   </td>
                   <td>
                     <WebhookStatusBadge status={webhook.status} />

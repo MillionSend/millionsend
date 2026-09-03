@@ -30,7 +30,6 @@ export default async function OnboardingPage() {
       <main className="ms-main" style={{ flex: 1, minWidth: 0, padding: "34px 40px" }}>
         <OnboardingSteps
           userEmail={session.user.email}
-          accountCreatedAt={new Date(session.user.createdAt).toISOString()}
           apiUrl={apiBaseUrl()}
           showInstanceHint={!env.IS_CLOUD}
         />

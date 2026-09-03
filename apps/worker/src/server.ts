@@ -126,6 +126,7 @@ await queue.work("email.send", async (payload) => {
       keyring,
       ses,
       defaultConfigurationSet: env.SES_CONFIGURATION_SET,
+      onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
       throttle: () => bucket.take(),
       reschedule: (emailId, at) => enqueueSend(emailId, at),
       enqueueWebhookDelivery: enqueueWebhook,

@@ -206,10 +206,51 @@
 /* Cards — edge-lit lift off the void ground; the border sits a touch above
    --ms-line so the lifted edge reads clean without going full --ms-line-strong. */
 .ms-card {
+  position: relative;
   background: var(--ms-panel);
   border: 1px solid color-mix(in srgb, var(--ms-line-strong) 55%, var(--ms-line));
   border-radius: var(--ms-r-card);
   box-shadow: var(--ms-shadow-card);
+}
+/* Edge light: a bone glare on the top edge fading down the sides, drawn as a
+   1px ring over the border so any card background keeps working. A card that
+   clips its overflow loses the ring (it sits on the border box). */
+.ms-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(80% 60% at 50% 0, var(--ms-glow-edge), transparent 70%);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+/* Pill tabs on code panels (SDK sheets, the onboarding snippet). */
+.ms-code-tab {
+  border: 0;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  background: none;
+  color: var(--ms-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+}
+.ms-code-tab.active {
+  background: var(--ms-panel-raised);
+  color: var(--ms-bone);
 }
 /* Glowing card edge: a bright top border fading to the normal line down the
    sides, over the outer card shadow. Set --ms-card-bg to match a non-default
@@ -742,8 +783,7 @@ table.ms-table {
   display: block;
   transition:
     transform var(--ms-dur-digit) var(--ms-ease) var(--odo-d, 0ms),
-    color var(--ms-dur-base),
-    filter 90ms linear var(--odo-fd, 0ms);
+    color var(--ms-dur-base);
 }
 .ms-odometer .ms-odo-strip span {
   display: block;
@@ -751,6 +791,67 @@ table.ms-table {
 }
 .ms-newborn {
   color: var(--ms-steel);
+}
+/* Wheel odometer (the LP hero's mechanics, mirrored in millionsend-lp
+   site.css): masked cells, tabular 800 grotesque, the units cell lit steel
+   once the count is live. */
+.od {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--ms-font-sans);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  font-size: clamp(44px, 6vw, 88px);
+  letter-spacing: -0.01em;
+  color: var(--ms-bone);
+}
+.od-cell {
+  position: relative;
+  display: inline-block;
+  width: 0.62em;
+  height: 1.42em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent 15%,
+    #000 26%,
+    #000 74%,
+    transparent 85%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent 15%,
+    #000 26%,
+    #000 74%,
+    transparent 85%,
+    transparent 100%
+  );
+}
+.od-strip {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  will-change: transform, filter;
+}
+.od-strip span {
+  display: block;
+  height: 1em;
+  line-height: 1;
+  text-align: center;
+}
+.od-comma {
+  display: inline-block;
+  line-height: 1;
+  transform: translateY(0.08em);
+}
+.od-cell.lit .od-strip span {
+  color: var(--ms-steel);
+  text-shadow: 0 0 0.16em color-mix(in srgb, var(--ms-steel) 40%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {
   .ms-odometer .ms-odo-strip {
@@ -1398,18 +1499,6 @@ svg:focus {
     border-color: var(--ms-success);
   }
 
-  /* Onboarding odometer boxes shrink with the viewport (7 boxes at 320px). */
-  .ms-odo-boxes {
-    gap: clamp(3px, 1vw, 8px) !important;
-  }
-  .ms-odo-box {
-    width: clamp(32px, 11vw, 74px) !important;
-    height: clamp(46px, 15vw, 100px) !important;
-  }
-  .ms-odo-box .ms-odo-col {
-    font-size: clamp(28px, 9.5vw, 60px) !important;
-  }
-
   /* Command palette sits near the top edge and keeps its list on screen. */
   .ms-cmdk {
     top: 16px !important;
@@ -1573,6 +1662,13 @@ svg:focus {
 .ms-hl .hljs-property,
 .ms-hl .hljs-variable {
   color: color-mix(in srgb, var(--ms-info) 45%, var(--ms-bone));
+}
+/* Markup: the angle brackets recede, element names carry the hue. */
+.ms-hl .hljs-tag {
+  color: var(--ms-muted);
+}
+.ms-hl .hljs-tag .hljs-name {
+  color: var(--ms-info);
 }
 
 /* One-shot attention pulse for a section the user was just navigated to. */
