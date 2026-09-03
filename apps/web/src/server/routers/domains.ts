@@ -559,7 +559,12 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       // it goes only with the last of them.
       if (!(await isIdentitySharedByOtherDomains(ctx.db, domain))) {
         try {
-          if (domain.sesTenantAssociatedAt) {
+          // Detach whenever tenants are on, not only when the row is marked:
+          // the marker means the whole association (identity AND configuration
+          // set) succeeded, but the identity is attached as soon as its own
+          // association call returned — and SES refuses to delete an attached
+          // identity. A tenant or association that is not there is tolerated.
+          if (sesTenantsEnabled()) {
             await disassociateIdentity(deps.clientForRegion(domain.region), {
               tenantName: domain.teamId,
               region: domain.region,

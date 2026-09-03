@@ -268,6 +268,49 @@ describe("domains.create", () => {
     ]);
   });
 
+  it("with SES_TENANTS on, delete detaches an identity whose association never completed", async () => {
+    vi.stubEnv("SES_TENANTS", "true");
+    vi.stubEnv("SES_CONFIGURATION_SET", "millionsend");
+    const teamId = await createTeam(db, "tenant-partial");
+    const { deps, calls } = fakeSes();
+    // Identity association succeeds, configuration-set association fails: the
+    // identity is attached to the tenant while the row stays unmarked.
+    const inner = deps.clientForRegion("us-east-1");
+    const partial: DomainsSesDeps = {
+      ...deps,
+      clientForRegion: () => ({
+        async send(command) {
+          const input = (command as unknown as { input: { ResourceArn?: string } }).input;
+          if (
+            command.constructor.name === "CreateTenantResourceAssociationCommand" &&
+            input.ResourceArn?.includes(":configuration-set/")
+          ) {
+            throw Object.assign(new Error("no such set"), { name: "NotFoundException" });
+          }
+          return inner.send(command);
+        },
+      }),
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { id } = await callerFor(teamId, partial).domains.create({
+      name: "partial.example.com",
+      region: "us-east-1",
+    });
+    warn.mockRestore();
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.sesTenantAssociatedAt).toBeNull();
+
+    // SES refuses to delete an attached identity, so the delete detaches first
+    // even though nothing on the row says the identity is attached.
+    calls.length = 0;
+    await callerFor(teamId, partial).domains.delete({ id });
+    expect(calls.map((c) => c.name)).toEqual([
+      "GetTenantCommand",
+      "DeleteTenantResourceAssociationCommand",
+      "DeleteEmailIdentityCommand",
+    ]);
+  });
+
   it("in cloud, 409s a domain another team holds in the region and never adopts SES identities", async () => {
     vi.stubEnv("IS_CLOUD", "true");
     const teamA = await createTeam(db, "team-a");

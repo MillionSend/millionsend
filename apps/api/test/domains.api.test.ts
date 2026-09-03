@@ -284,6 +284,50 @@ describe("POST /domains", () => {
     ]);
   });
 
+  it("with SES tenants on, delete detaches an identity whose association never completed", async () => {
+    const t = await (async () => {
+      const id = await createTeam(db, "cloud-tenant-partial");
+      return { id, key: await insertKey(id) };
+    })();
+    const { client, calls } = fakeSes();
+    // Identity association succeeds, configuration-set association fails: the
+    // identity is attached to the tenant while the row stays unmarked.
+    const partial: SesIdentityClient = {
+      async send(command) {
+        const input = (command as unknown as { input: { ResourceArn?: string } }).input;
+        if (
+          command.constructor.name === "CreateTenantResourceAssociationCommand" &&
+          input.ResourceArn?.includes(":configuration-set/")
+        ) {
+          throw Object.assign(new Error("no such set"), { name: "NotFoundException" });
+        }
+        return client.send(command);
+      },
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const app = makeApp({
+      client: partial,
+      isCloud: true,
+      tenants: { configurationSet: "millionsend" },
+    });
+    const created = await call(app, t.key, "POST", "/domains", { name: "partial.example.com" });
+    expect(created.status).toBe(200);
+    warn.mockRestore();
+    const { id } = (await created.json()) as { id: string };
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.sesTenantAssociatedAt).toBeNull();
+
+    // SES refuses to delete an attached identity, so the delete detaches first
+    // even though nothing on the row says the identity is attached.
+    calls.length = 0;
+    expect((await call(app, t.key, "DELETE", `/domains/${id}`)).status).toBe(200);
+    expect(calls.map((c) => c.name)).toEqual([
+      "GetTenantCommand",
+      "DeleteTenantResourceAssociationCommand",
+      "DeleteEmailIdentityCommand",
+    ]);
+  });
+
   it("with SES tenants on, a failed association never fails the create and leaves the marker for the backfill", async () => {
     const t = await (async () => {
       const id = await createTeam(db, "cloud-tenant-fail");
