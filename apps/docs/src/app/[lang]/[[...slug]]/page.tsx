@@ -4,7 +4,9 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { OpenAPIPage } from "@/components/api-page";
 import { getMDXComponents } from "@/components/mdx";
+import { PageActions } from "@/components/page-actions";
 import { openapi } from "@/lib/openapi";
+import { pageActionLabels } from "@/lib/page-actions-copy";
 import { absoluteUrl, ogImagePath, pageAlternates } from "@/lib/site";
 import { source } from "@/lib/source";
 import { structuredData } from "@/lib/structured-data";
@@ -21,6 +23,7 @@ export default async function Page(props: PageParams) {
   const MDX = page.data.body;
   // "<" is escaped so no title or description can close the script element.
   const jsonLd = JSON.stringify(structuredData(page, lang)).replace(/</g, "\\u003c");
+  const markdownUrl = page.url === "/" ? "/index.md" : `${page.url}.md`;
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
@@ -28,6 +31,12 @@ export default async function Page(props: PageParams) {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
+      <PageActions
+        markdownUrl={markdownUrl}
+        markdownHref={absoluteUrl(markdownUrl)}
+        githubUrl={`https://github.com/MillionSend/millionsend/blob/main/apps/docs/content/docs/${page.path}`}
+        labels={pageActionLabels(lang)}
+      />
       <DocsBody>
         <MDX
           components={getMDXComponents({

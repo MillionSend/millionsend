@@ -8,6 +8,16 @@ request and response shapes. Migrating is a configuration change, not a
 rewrite. The account data — contacts, segments, topics, templates, webhooks,
 domains, suppressions — moves with one command.
 
+## Hand it to an agent
+
+The whole migration — inventory, account move, code changes, DNS, cutover —
+is written up as one prompt an agent can follow end to end, including the
+guardrails (Resend read-only, keys never in files, ask before applying).
+
+<CopyPrompt href="/prompts/migrate-from-resend.md" copied="Copied">Copy the migration prompt</CopyPrompt>
+
+Or point the agent at it: `https://docs.millionsend.com/prompts/migrate-from-resend.md`.
+
 ## 1. Move your account
 
 Create an `ms_` API key with full access under **API keys** (MillionSend

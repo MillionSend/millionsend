@@ -8,6 +8,17 @@ endpoints, mesmos formatos de requisição e resposta. Migrar é uma mudança de
 configuração, não uma reescrita. Os dados da conta — contatos, segmentos,
 tópicos, templates, webhooks, domínios, supressões — vêm com um comando.
 
+## Entregue a um agente
+
+A migração inteira — inventário, movimentação da conta, mudanças de código,
+DNS, virada — está escrita como um único prompt que um agente pode seguir de
+ponta a ponta, incluindo as salvaguardas (Resend somente leitura, chaves nunca
+em arquivos, perguntar antes de aplicar).
+
+<CopyPrompt href="/pt-BR/prompts/migrate-from-resend.md" copied="Copiado">Copiar o prompt de migração</CopyPrompt>
+
+Ou aponte o agente para ele: `https://docs.millionsend.com/pt-BR/prompts/migrate-from-resend.md`.
+
 ## 1. Mova sua conta
 
 Crie uma chave de API `ms_` com acesso total em **Chaves de API** (MillionSend
