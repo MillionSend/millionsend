@@ -193,9 +193,8 @@ const domain = (overrides: Partial<SourceDomain> = {}): SourceDomain => ({
 describe("domainCreateInput", () => {
   it("omits custom_return_path for the default send label", () => {
     expect(domainCreateInput(domain())).toEqual({
-      input: { name: "example.com", region: "us-east-1" },
+      input: { name: "example.com" },
       tracking: { open_tracking: true, click_tracking: false },
-      reason: null,
     });
   });
 
@@ -211,7 +210,6 @@ describe("domainCreateInput", () => {
     });
     expect(domainCreateInput(d).input).toEqual({
       name: "updates.example.com",
-      region: "us-east-1",
       custom_return_path: expected,
     });
   });
@@ -219,18 +217,15 @@ describe("domainCreateInput", () => {
   it("prefers an explicit customReturnPath and carries the tracking subdomain", () => {
     const d = domain({ customReturnPath: "mail", trackingSubdomain: "track" });
     expect(domainCreateInput(d)).toEqual({
-      input: { name: "example.com", region: "us-east-1", custom_return_path: "mail" },
+      input: { name: "example.com", custom_return_path: "mail" },
       tracking: { open_tracking: true, click_tracking: false, tracking_subdomain: "track" },
-      reason: null,
     });
   });
 
-  it("refuses an unknown region", () => {
-    const result = domainCreateInput(domain({ region: "ap-south-1" }));
-    expect(result.input).toBeNull();
-    expect(result.reason).toBe(
-      "region ap-south-1 is not available (create it by hand in one of: us-east-1, eu-west-1, sa-east-1, ap-northeast-1)",
-    );
+  it("never forwards the source region: the target provisions in the region it serves", () => {
+    expect(domainCreateInput(domain({ region: "ap-south-1" })).input).toEqual({
+      name: "example.com",
+    });
   });
 });
 

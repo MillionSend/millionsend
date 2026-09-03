@@ -18,10 +18,6 @@ export const TARGET_WEBHOOK_EVENTS = [
 ] as const;
 export type TargetWebhookEvent = (typeof TARGET_WEBHOOK_EVENTS)[number];
 
-/** Mirror of packages/ses/src/domain-identity.ts SES_REGIONS. */
-export const TARGET_REGIONS = ["us-east-1", "eu-west-1", "sa-east-1", "ap-northeast-1"] as const;
-export type TargetRegion = (typeof TARGET_REGIONS)[number];
-
 /** Mirror of apps/web/src/lib/merge-fields.ts MERGE_NAME_RE — the token grammar the send worker resolves. */
 const MERGE_NAME_RE = /^[A-Za-z0-9_]+$/;
 const TRIPLE_BRACE_RE = /\{\{\{([\s\S]*?)\}\}\}/g;
@@ -192,9 +188,13 @@ export function translateWebhookEvents(events: readonly string[]): {
   return { events: [...kept], dropped: [...dropped] };
 }
 
+/**
+ * No region: the target provisions every domain in the one SES region its
+ * instance serves, and DNS records are regenerated regardless (DKIM keys are
+ * per provider), so the Resend region has nothing to carry over.
+ */
 export interface DomainCreateInput {
   name: string;
-  region: TargetRegion;
   custom_return_path?: string;
 }
 
@@ -220,29 +220,20 @@ function returnPathLabel(domain: SourceDomain): string | null {
 }
 
 export function domainCreateInput(domain: SourceDomain): {
-  input: DomainCreateInput | null;
+  input: DomainCreateInput;
   tracking: DomainTrackingInput;
-  reason: string | null;
 } {
   const tracking: DomainTrackingInput = {
     open_tracking: domain.openTracking,
     click_tracking: domain.clickTracking,
     ...(domain.trackingSubdomain ? { tracking_subdomain: domain.trackingSubdomain } : {}),
   };
-  if (!(TARGET_REGIONS as readonly string[]).includes(domain.region)) {
-    return {
-      input: null,
-      tracking,
-      reason: `region ${domain.region} is not available (create it by hand in one of: ${TARGET_REGIONS.join(", ")})`,
-    };
-  }
   const label = returnPathLabel(domain);
   const input: DomainCreateInput = {
     name: domain.name,
-    region: domain.region as TargetRegion,
     ...(label && label !== "send" ? { custom_return_path: label } : {}),
   };
-  return { input, tracking, reason: null };
+  return { input, tracking };
 }
 
 export interface TemplateCreateInput {

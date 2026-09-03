@@ -404,16 +404,11 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
       ),
     deleteSegment: (segmentId: string) => write(() => id(api.delete(`/segments/${segmentId}`))),
 
-    createDomain: (input: {
-      name: string;
-      region?: string | undefined;
-      customReturnPath?: string | null | undefined;
-    }) =>
+    createDomain: (input: { name: string; customReturnPath?: string | null | undefined }) =>
       write(() =>
         withRecords(
           api.post<DomainWire>("/domains", {
             name: input.name,
-            region: input.region,
             custom_return_path: input.customReturnPath ?? undefined,
           }),
         ),

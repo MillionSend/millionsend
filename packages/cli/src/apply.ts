@@ -251,7 +251,6 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
     const { create, tracking } = item.payload as DomainPayload;
     const result = await target.createDomain({
       name: create.name,
-      region: create.region,
       customReturnPath: create.custom_return_path,
     });
     if (!result.ok) return result;

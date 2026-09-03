@@ -63,7 +63,7 @@ What it does:
 | Templates | Name, alias, subject, html, text. `from`, `reply_to` and `variables` cannot be stored — listed as manual steps. |
 | Webhooks | Endpoint and events. The signing secret is copied, so the receiver you already run keeps verifying (deliveries carry the `svix-*` headers). `--fresh-webhook-secrets` mints new ones. Events outside MillionSend's seven `email.*` types are dropped per webhook and listed. |
 | Suppressions | Bounces, complaints and manual entries, with their origin. |
-| Domains | Created with return path and tracking settings, in the Resend domain's region — which must be the one region your MillionSend instance serves (MillionSend Cloud: `sa-east-1`); a domain in any other region is rejected with a 422 and listed in the report for you to add in the dashboard. On MillionSend Cloud, tracking toggles only carry over together with a tracking subdomain; without one the report lists them for you to set up in the dashboard. DNS records must be added again — see step 3. |
+| Domains | Created with return path and tracking settings, in the one SES region your MillionSend instance serves (MillionSend Cloud: `sa-east-1`) — the Resend region does not carry over. On MillionSend Cloud, tracking toggles only carry over together with a tracking subdomain; without one the report lists them for you to set up in the dashboard. DNS records must be added again — see step 3. |
 | Broadcasts | Drafts and scheduled ones import as drafts. Sent ones are skipped unless `--include-sent`. |
 
 What cannot move: **API keys** (Resend exposes their names only — the report

@@ -106,10 +106,10 @@ segments
   + Imported  0 members
 domains
   = example.com
-  + updates.example.com  eu-west-1
+  + updates.example.com
   ! updates.example.com  add DNS records (shown after apply)
-  ! mail.example.org  region ap-south-1 is not available (create it by hand in
-    one of: us-east-1, eu-west-1, sa-east-1, ap-northeast-1)
+  + mail.example.org
+  ! mail.example.org  add DNS records (shown after apply)
 webhooks
   ~ https://webhook.example.com/handler  events
   ! https://webhook.example.com/handler  events not delivered here:
@@ -144,9 +144,9 @@ api-keys
   ! Production  create by hand; Resend exposes only the name
   ! Staging  create by hand; Resend exposes only the name
 
-Plan: 9 to create, 5 to update, 2 unchanged, 13 manual, 1 skipped.
-warning: 1 domain to create; the Free plan allows 1 (1 already there)
-Estimate: ~64 requests · 3 s at 8 req/s
+Plan: 10 to create, 5 to update, 2 unchanged, 13 manual, 1 skipped.
+warning: 2 domains to create; the Free plan allows 1 (1 already there)
+Estimate: ~65 requests · 3 s at 8 req/s
 `;
 
 const stdout = process.stdout as unknown as { columns?: number | undefined };
@@ -169,7 +169,7 @@ describe("buildPlan + renderPlan (golden)", () => {
   });
 
   it("counts, header and manual list agree with the items", () => {
-    expect(plan.counts).toEqual({ create: 9, update: 5, unchanged: 2, manual: 13, skip: 1 });
+    expect(plan.counts).toEqual({ create: 10, update: 5, unchanged: 2, manual: 13, skip: 1 });
     expect(plan).toMatchObject({
       version: 1,
       createdAt: "2026-09-01T12:00:00.000Z",
@@ -185,8 +185,8 @@ describe("buildPlan + renderPlan (golden)", () => {
   });
 
   it("estimates: spent + one read per contact per facet + writes; seconds count only what is ahead", () => {
-    // writes: 7 creates + 4 updates + contacts batch + suppressions batch + enrichment batch = 14
-    expect(plan.estimate).toEqual({ requests: 40 + 10 + 14, seconds: Math.ceil(10 / 8 + 14 / 10) });
+    // writes: 8 creates + 4 updates + contacts batch + suppressions batch + enrichment batch = 15
+    expect(plan.estimate).toEqual({ requests: 40 + 10 + 15, seconds: Math.ceil(10 / 8 + 15 / 10) });
     const topicsOnly = buildPlan({
       snapshot: { ...snapshot, properties: [] },
       target: goldenTarget,
@@ -194,8 +194,8 @@ describe("buildPlan + renderPlan (golden)", () => {
     });
     // One facet: 5 reads, one write fewer (the seats property is not created).
     expect(topicsOnly.estimate).toEqual({
-      requests: 40 + 5 + 13,
-      seconds: Math.ceil(5 / 8 + 13 / 10),
+      requests: 40 + 5 + 14,
+      seconds: Math.ceil(5 / 8 + 14 / 10),
     });
   });
 
@@ -223,7 +223,7 @@ describe("buildPlan + renderPlan (golden)", () => {
     });
     expect(byKey("segments", "Enterprise")?.payload).toEqual({ name: "Enterprise" });
     expect(byKey("domains", "updates.example.com")?.payload).toEqual({
-      create: { name: "updates.example.com", region: "eu-west-1", custom_return_path: "bounces" },
+      create: { name: "updates.example.com", custom_return_path: "bounces" },
       tracking: { open_tracking: false, click_tracking: true, tracking_subdomain: "track" },
     });
     expect(byKey("webhooks", "https://webhook.example.com/handler", "update")?.payload).toEqual({
@@ -485,11 +485,12 @@ describe("buildPlan diffs against existing rows", () => {
     expect(plan.items.map((i) => [i.action, i.key, i.detail])).toEqual([
       ["unchanged", "example.com", undefined],
       ["manual", "example.com", "add 3 DNS records"],
-      ["create", "updates.example.com", "eu-west-1"],
+      ["create", "updates.example.com", undefined],
       ["manual", "updates.example.com", "add DNS records (shown after apply)"],
-      ["manual", "mail.example.org", expect.stringContaining("region ap-south-1")],
+      ["create", "mail.example.org", undefined],
+      ["manual", "mail.example.org", "add DNS records (shown after apply)"],
     ]);
-    expect(plan.warnings).toEqual([]);
+    expect(plan.warnings).toEqual(["2 domains to create; the Pro plan allows 2 (1 already there)"]);
   });
 
   it("warns when creates exceed the domain limit; a self-hosted target never warns", () => {

@@ -221,7 +221,7 @@ describe("millionsend (built bundle)", () => {
       expect(item("domains", "news.example.com")).toMatchObject({
         action: "create",
         payload: {
-          create: { name: "news.example.com", region: "eu-west-1", custom_return_path: "mail" },
+          create: { name: "news.example.com", custom_return_path: "mail" },
         },
       });
       expect(item("segments", "Active Users")).toMatchObject({

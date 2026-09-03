@@ -174,9 +174,9 @@ for (const build of builds) {
     return r.json();
   };
   // Same seed as the e2e: a verified sender, an unrelated domain, a topic that differs.
-  await api("/domains", { name: "example.com", region: "us-east-1" });
+  await api("/domains", { name: "example.com" });
   await cloud.db.execute("update domains set status = 'verified'");
-  await api("/domains", { name: "legacy.example.net", region: "us-east-1" });
+  await api("/domains", { name: "legacy.example.net" });
   await api("/topics", {
     name: "Newsletter",
     description: "Old description",

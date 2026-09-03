@@ -222,14 +222,10 @@ export function buildPlan({
         }
         continue;
       }
-      const { input, tracking, reason } = domainCreateInput(d);
-      if (!input) {
-        manual("domains", d.name, reason ?? "cannot be created");
-        continue;
-      }
+      const { input, tracking } = domainCreateInput(d);
       creates += 1;
       const payload: DomainPayload = { create: input, tracking };
-      add("domains", "create", d.name, { payload, detail: input.region });
+      add("domains", "create", d.name, { payload });
       manual("domains", d.name, DNS_AFTER_APPLY);
     }
     const limit = target.usage.limits.domains;

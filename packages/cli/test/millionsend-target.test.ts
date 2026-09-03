@@ -200,7 +200,6 @@ describe("writers", () => {
     const created = ok(
       await target.createDomain({
         name: "acme.dev",
-        region: "us-east-1",
         customReturnPath: "mail",
       }),
     );
