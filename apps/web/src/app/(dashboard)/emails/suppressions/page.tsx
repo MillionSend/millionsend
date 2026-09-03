@@ -175,7 +175,7 @@ export default function SuppressionsPage() {
         <Select
           value={reason}
           onChange={setReason}
-          width={120}
+          width={160}
           ariaLabel={t("suppressions.origin")}
           options={[
             { value: "all", label: t("suppressions.allOrigins"), adornment: <StatusDot /> },
@@ -189,7 +189,7 @@ export default function SuppressionsPage() {
         <Select
           value={range}
           onChange={setRange}
-          width={110}
+          width={150}
           ariaLabel={t(`list.range.${range === "all" ? "all" : range}`)}
           options={RANGE_KEYS.map((key) => ({ value: key, label: t(`list.range.${key}`) }))}
         />

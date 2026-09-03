@@ -270,6 +270,7 @@ describe("settings.invitations email + resend", () => {
     const { caller, sent } = mailCaller("owner1", teamId, "owner");
     const created = await caller.settings.invitations.create({ email: "new@example.com" });
     expect(created.emailed).toBe(false);
+    expect(created.noSender).toBe(true);
     expect(sent).toHaveLength(0);
     await expect(caller.settings.invitations.resend({ id: created.id })).rejects.toMatchObject({
       code: "PRECONDITION_FAILED",
@@ -367,6 +368,7 @@ describe("settings.invitations send accounting", () => {
     const { caller, sent } = mailCaller("owner1", teamId, "owner", { failing: true });
     const created = await caller.settings.invitations.create({ email: "new@example.com" });
     expect(created.emailed).toBe(false);
+    expect(created.noSender).toBe(false);
     expect(created.acceptUrl).toContain("/invite/");
     expect(sent).toHaveLength(0);
     expect(error).toHaveBeenCalledTimes(1);

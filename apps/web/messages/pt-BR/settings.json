@@ -192,7 +192,8 @@
       "emailedBody": "Enviamos um e-mail para {email}. Você também pode compartilhar este link — ele funciona uma vez e expira em 3 dias.",
       "bodyTtl": "Compartilhe este link com {email}. Ele funciona uma vez e expira em 3 dias.",
       "noSender": "Esta instância não tem remetente de e-mail configurado, então o link é a única forma de entrar.",
-      "done": "Concluído"
+      "done": "Concluído",
+      "sendFailed": "Não foi possível enviar o e-mail do convite. Compartilhe o link."
     },
     "pending": {
       "title": "Convites pendentes",

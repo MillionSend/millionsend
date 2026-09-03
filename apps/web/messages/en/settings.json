@@ -192,7 +192,8 @@
       "emailedBody": "We emailed {email}. You can also share this link — it works once and expires in 3 days.",
       "bodyTtl": "Share this link with {email}. It works once and expires in 3 days.",
       "noSender": "This instance has no email sender configured, so the link is the only way in.",
-      "done": "Done"
+      "done": "Done",
+      "sendFailed": "The invitation email could not be sent. Share the link instead."
     },
     "pending": {
       "title": "Pending invitations",

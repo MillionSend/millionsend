@@ -189,14 +189,14 @@ export default function EmailsPage() {
         <Select
           value={range}
           onChange={setRange}
-          width={130}
+          width={160}
           ariaLabel={t(`list.range.${range}`)}
           options={RANGE_KEYS.map((key) => ({ value: key, label: t(`list.range.${key}`) }))}
         />
         <Select
           value={status}
           onChange={setStatus}
-          width={126}
+          width={156}
           ariaLabel={t("list.status")}
           options={[
             { value: "all", label: t("list.allStatuses"), adornment: <StatusDot /> },
@@ -210,7 +210,7 @@ export default function EmailsPage() {
         <Select
           value={apiKeyId}
           onChange={setApiKeyId}
-          width={126}
+          width={200}
           ariaLabel={t("list.allApiKeys")}
           options={[
             { value: "all", label: t("list.allApiKeys") },

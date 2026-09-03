@@ -1,5 +1,5 @@
 import { cancelTeamSubscription } from "@millionsend/billing";
-import { env, notificationsEmailFrom } from "@millionsend/config";
+import { env, isCloudDeployment, notificationsEmailFrom } from "@millionsend/config";
 import {
   createFixedWindowLimiter,
   DAY_MS,
@@ -477,8 +477,9 @@ export function createSettingsRouter(
               })
               .returning({ id: schema.teamInvitations.id });
             if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+            const senderConfigured = inviteEmailsEnabled();
             const emailed =
-              inviteEmailsEnabled() &&
+              senderConfigured &&
               (await emailInvite(ctx, { id: row.id, email: input.email, role: input.role }));
             if (emailed) {
               await ctx.db
@@ -497,6 +498,10 @@ export function createSettingsRouter(
               role: input.role,
               acceptUrl: inviteAcceptUrl(row.id),
               emailed,
+              // Only a self-host operator can act on a missing sender; on Cloud
+              // (and on a refused send anywhere) the dialog just says it could
+              // not be sent.
+              noSender: !senderConfigured && !isCloudDeployment(),
             };
           } catch (error) {
             if (isUniqueViolation(error)) {

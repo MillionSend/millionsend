@@ -44,6 +44,8 @@ const BULK_BATCH = 100;
 
 function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
   const t = useTranslations("audience");
+  // The table runs fixed layout: column shares hold and long cells truncate
+  // instead of pushing the trailing columns past the page edge.
   return (
     <thead>
       <tr>
@@ -52,7 +54,7 @@ function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
         <th style={{ width: "22%" }}>{t("contacts.segments")}</th>
         <th style={{ width: "15%" }}>{t("contacts.status")}</th>
         <th className="right">{t("contacts.added")}</th>
-        <th className="right" />
+        <th className="right" style={{ width: 40 }} />
       </tr>
     </thead>
   );
@@ -62,7 +64,7 @@ function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
 function ContactsSkeleton() {
   const widths = ["58%", "42%", "66%", "50%", "38%"];
   return (
-    <Table gutter={28}>
+    <Table gutter={28} style={{ tableLayout: "fixed" }}>
       <ContactsHead />
       <tbody>
         {widths.map((width, row) => (
@@ -573,7 +575,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
           value={status}
           onChange={setStatus}
           ariaLabel={t("filters.status")}
-          width={150}
+          width={156}
           options={[
             { value: "", label: t("filters.anyStatus") },
             { value: "subscribed", label: t("contacts.subscribed") },
@@ -623,7 +625,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
         )
       ) : (
         <>
-          <Table gutter={28}>
+          <Table gutter={28} style={{ tableLayout: "fixed" }}>
             <ContactsHead
               selectAll={
                 <input
@@ -681,13 +683,21 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                         <ContactAvatar email={row.email} name={name} size={24} />
                         <Link
                           className="ms-mono"
-                          style={{ fontSize: 13, flexShrink: 0 }}
+                          style={{
+                            fontSize: 13,
+                            flexShrink: 0,
+                            maxWidth: "100%",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
                           href={detailHref}
                           onClick={(event) => event.stopPropagation()}
                         >
                           {row.email}
                         </Link>
-                        {name ? (
+                        {/* A name that merely echoes the address (SES imports) adds no information. */}
+                        {name && name.toLowerCase() !== row.email.toLowerCase() ? (
                           <span
                             style={{
                               color: "var(--ms-muted)",
@@ -715,6 +725,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                           }}
                         >
                           <span
+                            title={row.segments[0]}
                             style={{
                               overflow: "hidden",
                               textOverflow: "ellipsis",

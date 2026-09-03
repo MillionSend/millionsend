@@ -1417,6 +1417,7 @@ summary:focus-visible,
   .ms-filter-row > :first-child {
     flex: 1 1 100% !important;
     min-width: 0 !important;
+    max-width: none !important;
   }
 
   /* Generic flex rows that may not fit a phone width. */

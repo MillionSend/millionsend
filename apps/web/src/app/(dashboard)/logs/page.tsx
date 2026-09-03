@@ -153,14 +153,14 @@ export default function LogsPage() {
         <Select
           value={range}
           onChange={setRange}
-          width={140}
+          width={160}
           ariaLabel={t(`list.range.${range}`)}
           options={RANGE_KEYS.map((key) => ({ value: key, label: t(`list.range.${key}`) }))}
         />
         <Select
           value={method}
           onChange={setMethod}
-          width={140}
+          width={168}
           ariaLabel={t("list.method")}
           options={[
             { value: "all", label: t("list.allMethods"), adornment: <StatusDot /> },
@@ -174,7 +174,7 @@ export default function LogsPage() {
         <Select
           value={source}
           onChange={setSource}
-          width={136}
+          width={160}
           ariaLabel={t("list.source")}
           options={[
             { value: "all", label: t("list.allSources") },
@@ -184,7 +184,7 @@ export default function LogsPage() {
         <Select
           value={statusClass}
           onChange={setStatusClass}
-          width={140}
+          width={156}
           ariaLabel={t("list.status")}
           options={[
             { value: "all", label: t("list.allStatuses"), adornment: <StatusDot /> },

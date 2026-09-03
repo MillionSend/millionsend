@@ -110,22 +110,27 @@ function TeamSection({ billing }: { billing: boolean }) {
     // the slug/plan line boxes match the loaded card exactly.
     return (
       <SectionCard title={t("team.title")}>
-        <div className="ms-kpi-row" style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
-          <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
-            {/* span, not label: there is no control to label yet. Metrics mirror .ms-field label. */}
-            <span
-              style={{
-                display: "block",
-                fontSize: "var(--ms-fs-label)",
-                color: "var(--ms-muted)",
-                marginBottom: 6,
-              }}
-            >
-              {t("team.name")}
-            </span>
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <Skeleton width={200} height={30} radius="var(--ms-r-input)" />
-              <Skeleton width={56} height={30} radius="var(--ms-r-input)" />
+        <div
+          className="ms-kpi-row"
+          style={{ display: "flex", gap: 40, flexWrap: "wrap", alignItems: "flex-start" }}
+        >
+          <div style={{ display: "grid", gap: 20, maxWidth: 420, alignContent: "start" }}>
+            <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
+              {/* span, not label: there is no control to label yet. Metrics mirror .ms-field label. */}
+              <span
+                style={{
+                  display: "block",
+                  fontSize: "var(--ms-fs-label)",
+                  color: "var(--ms-muted)",
+                  marginBottom: 6,
+                }}
+              >
+                {t("team.name")}
+              </span>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <Skeleton width={200} height={30} radius="var(--ms-r-input)" />
+                <Skeleton width={56} height={30} radius="var(--ms-r-input)" />
+              </div>
             </div>
           </div>
           {billing ? (
@@ -153,133 +158,142 @@ function TeamSection({ billing }: { billing: boolean }) {
   const name = draft ?? team.name;
   return (
     <SectionCard title={t("team.title")}>
-      {/* Name, logo and plan share one row; the row wraps into columns on narrow screens. */}
-      <div className="ms-kpi-row" style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            rename.mutate({ name });
-          }}
-        >
-          <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
-            <label htmlFor="settings-team-name">{t("team.name")}</label>
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <input
-                id="settings-team-name"
-                type="text"
-                className="ms-input"
-                style={{ flex: 1, maxWidth: 420 }}
-                required
-                maxLength={80}
-                disabled={rename.isPending}
-                value={name}
-                onChange={(e) => setDraft(e.target.value)}
-              />
-              <button type="submit" className="ms-btn ms-btn-secondary" disabled={rename.isPending}>
-                <BtnSpinner on={rename.isPending} />
-                {t("team.save")}
-              </button>
-              {rename.isSuccess && draft === null ? (
-                <span style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
-                  ✓ {t("team.saved")}
-                </span>
-              ) : null}
-            </div>
-          </div>
-          {rename.isError ? (
-            <p
-              style={{
-                margin: "8px 0 0",
-                color: "var(--ms-danger)",
-                fontSize: "var(--ms-fs-label)",
-              }}
-            >
-              {t("team.error")}
-            </p>
-          ) : null}
-        </form>
-        {team.logoUploadsEnabled && canManageLogo ? (
-          <div className="ms-field" style={{ maxWidth: 420 }}>
-            {/* span, not label: the controls are buttons, not a labelable input. Metrics mirror .ms-field label. */}
-            <span
-              style={{
-                display: "block",
-                fontSize: "var(--ms-fs-label)",
-                color: "var(--ms-muted)",
-                marginBottom: 6,
-              }}
-            >
-              {t("team.logo.label")}
-            </span>
-            <input
-              ref={logoInputRef}
-              type="file"
-              accept={TEAM_LOGO_ACCEPT}
-              style={{ display: "none" }}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                // Re-selecting the same file must fire change again.
-                event.target.value = "";
-                if (!file) return;
-                if (file.size > TEAM_LOGO_MAX_BYTES) {
-                  setLogoError(true);
-                  return;
-                }
-                void runLogoChange((teamId) => uploadTeamLogo(teamId, file));
-              }}
-            />
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <TeamLogo name={team.name} logoUrl={team.logoUrl} size={30} />
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                disabled={logoBusy || !teamList}
-                onClick={() => logoInputRef.current?.click()}
-              >
-                <BtnSpinner on={logoBusy} />
-                {team.logoUrl ? t("team.logo.replace") : t("team.logo.upload")}
-              </button>
-              {team.logoUrl ? (
+      {/* Name over logo on the left, plan beside them; the columns stack on narrow screens. */}
+      <div
+        className="ms-kpi-row"
+        style={{ display: "flex", gap: 40, flexWrap: "wrap", alignItems: "flex-start" }}
+      >
+        <div style={{ display: "grid", gap: 20, maxWidth: 420, alignContent: "start" }}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              rename.mutate({ name });
+            }}
+          >
+            <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
+              <label htmlFor="settings-team-name">{t("team.name")}</label>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <input
+                  id="settings-team-name"
+                  type="text"
+                  className="ms-input"
+                  style={{ flex: 1, maxWidth: 420 }}
+                  required
+                  maxLength={80}
+                  disabled={rename.isPending}
+                  value={name}
+                  onChange={(e) => setDraft(e.target.value)}
+                />
                 <button
-                  type="button"
+                  type="submit"
                   className="ms-btn ms-btn-secondary"
-                  disabled={logoBusy}
-                  onClick={async () => {
-                    const ok = await confirmDialog({
-                      title: t("team.logo.removeTitle"),
-                      message: t("team.logo.removeBody"),
-                      confirmLabel: t("team.logo.remove"),
-                      danger: true,
-                    });
-                    if (ok) void runLogoChange((teamId) => removeTeamLogo(teamId));
-                  }}
+                  disabled={rename.isPending}
                 >
-                  {t("team.logo.remove")}
+                  <BtnSpinner on={rename.isPending} />
+                  {t("team.save")}
                 </button>
-              ) : null}
+                {rename.isSuccess && draft === null ? (
+                  <span style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
+                    ✓ {t("team.saved")}
+                  </span>
+                ) : null}
+              </div>
             </div>
-            <p
-              style={{
-                margin: "6px 0 0",
-                color: "var(--ms-muted)",
-                fontSize: "var(--ms-fs-label)",
-              }}
-            >
-              {t("team.logo.hint")}
-            </p>
-            {logoError ? (
+            {rename.isError ? (
               <p
                 style={{
-                  margin: "6px 0 0",
+                  margin: "8px 0 0",
                   color: "var(--ms-danger)",
                   fontSize: "var(--ms-fs-label)",
                 }}
               >
-                {t("team.logo.error")}
+                {t("team.error")}
               </p>
             ) : null}
-          </div>
-        ) : null}
+          </form>
+          {team.logoUploadsEnabled && canManageLogo ? (
+            <div className="ms-field" style={{ maxWidth: 420 }}>
+              {/* span, not label: the controls are buttons, not a labelable input. Metrics mirror .ms-field label. */}
+              <span
+                style={{
+                  display: "block",
+                  fontSize: "var(--ms-fs-label)",
+                  color: "var(--ms-muted)",
+                  marginBottom: 6,
+                }}
+              >
+                {t("team.logo.label")}
+              </span>
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept={TEAM_LOGO_ACCEPT}
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  // Re-selecting the same file must fire change again.
+                  event.target.value = "";
+                  if (!file) return;
+                  if (file.size > TEAM_LOGO_MAX_BYTES) {
+                    setLogoError(true);
+                    return;
+                  }
+                  void runLogoChange((teamId) => uploadTeamLogo(teamId, file));
+                }}
+              />
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <TeamLogo name={team.name} logoUrl={team.logoUrl} size={30} />
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-secondary"
+                  disabled={logoBusy || !teamList}
+                  onClick={() => logoInputRef.current?.click()}
+                >
+                  <BtnSpinner on={logoBusy} />
+                  {team.logoUrl ? t("team.logo.replace") : t("team.logo.upload")}
+                </button>
+                {team.logoUrl ? (
+                  <button
+                    type="button"
+                    className="ms-btn ms-btn-secondary"
+                    disabled={logoBusy}
+                    onClick={async () => {
+                      const ok = await confirmDialog({
+                        title: t("team.logo.removeTitle"),
+                        message: t("team.logo.removeBody"),
+                        confirmLabel: t("team.logo.remove"),
+                        danger: true,
+                      });
+                      if (ok) void runLogoChange((teamId) => removeTeamLogo(teamId));
+                    }}
+                  >
+                    {t("team.logo.remove")}
+                  </button>
+                ) : null}
+              </div>
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  color: "var(--ms-muted)",
+                  fontSize: "var(--ms-fs-label)",
+                }}
+              >
+                {t("team.logo.hint")}
+              </p>
+              {logoError ? (
+                <p
+                  style={{
+                    margin: "6px 0 0",
+                    color: "var(--ms-danger)",
+                    fontSize: "var(--ms-fs-label)",
+                  }}
+                >
+                  {t("team.logo.error")}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
         {billing ? (
           <div className="ms-field">
             <span
@@ -355,7 +369,9 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
     >
       {create.data ? (
         <form
-          style={{ display: "grid", gap: 12, marginTop: 12 }}
+          // minmax(0, 1fr): the accept URL chip must ellipsize, not widen the
+          // grid past the dialog and drag the footer along.
+          style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, marginTop: 12 }}
           onSubmit={(event) => {
             event.preventDefault();
             close();
@@ -374,7 +390,11 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           <CopyChip value={create.data.acceptUrl} />
           {create.data.emailed ? null : (
             <p style={{ margin: 0, color: "var(--ms-warn)", fontSize: "var(--ms-fs-label)" }}>
-              {t("invitations.created.noSender")}
+              {t(
+                create.data.noSender
+                  ? "invitations.created.noSender"
+                  : "invitations.created.sendFailed",
+              )}
             </p>
           )}
           <ModalFooter>
