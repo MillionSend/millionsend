@@ -34,7 +34,13 @@ describe("buildAwsSetupScript", () => {
       includeEvents: true,
     });
     expect(script).toContain("aws sns create-topic --name millionsend-events");
+    expect(script).toContain("aws sqs create-queue --queue-name millionsend-events");
+    expect(script).toContain('--notification-endpoint "$QUEUE_ARN"');
     expect(script).toContain('--notification-endpoint "https://mail.example.com/ses/events"');
+    // Every policy placeholder became a shell splice.
+    expect(script).not.toMatch(/__(QUEUE|TOPIC|ACCOUNT)__/);
+    expect(script).toContain(`"arn:aws:iam::'"$ACCOUNT_ID"':user/millionsend"`);
+    expect(script).toContain('echo "SQS_QUEUE_URL=$QUEUE_URL"');
     expect(script).toContain(
       "aws sesv2 create-configuration-set --configuration-set-name millionsend",
     );
@@ -45,12 +51,24 @@ describe("buildAwsSetupScript", () => {
     expect(script).toContain('echo "SES_CONFIGURATION_SET=millionsend"');
   });
 
-  it("omits events for http or missing appBaseUrl", () => {
+  it("still provisions the queue for http or missing appBaseUrl, skipping only the push", () => {
     for (const appBaseUrl of ["http://mail.example.com", undefined]) {
       const script = buildAwsSetupScript({ region: "us-east-1", appBaseUrl, includeEvents: true });
-      expect(script).not.toContain("sns");
-      expect(script).not.toContain("SES_CONFIGURATION_SET");
+      expect(script).toContain("aws sqs create-queue --queue-name millionsend-events");
+      expect(script).toContain('echo "SQS_QUEUE_URL=$QUEUE_URL"');
+      expect(script).toContain('echo "SES_CONFIGURATION_SET=millionsend"');
+      expect(script).not.toContain("--protocol https");
     }
+  });
+
+  it("omits every events resource when includeEvents is off", () => {
+    const script = buildAwsSetupScript({
+      region: "us-east-1",
+      appBaseUrl: "https://mail.example.com",
+    });
+    expect(script).not.toContain("sns");
+    expect(script).not.toContain("sqs");
+    expect(script).not.toContain("SES_CONFIGURATION_SET");
   });
 
   it("never interpolates the raw appBaseUrl — only its sanitized origin", () => {

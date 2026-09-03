@@ -67,8 +67,8 @@ deliverability and pricing. A self-hosted deployment is two containers:
 Email bodies are encrypted at rest (AES-256-GCM envelope encryption) and
 purged after a retention window. Delivery events (bounces, complaints,
 deliveries) flow back from SES — on Cloud automatically; self-hosted through
-SNS, pushed to your host when it has a public HTTPS URL or long-polled from an
-SQS queue when it does not.
+SNS into an SQS queue the worker long-polls, plus a push to your host when it
+has a public HTTPS URL.
 
 ## Where to go next
 

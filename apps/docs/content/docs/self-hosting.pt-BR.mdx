@@ -123,7 +123,7 @@ auto-hospedada não tem limites de plano.
 | `AWS_REGION` | Região do SES (padrão `us-east-1`). |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Credenciais IAM com `ses:SendEmail` / `ses:SendRawEmail`. Omita para usar a cadeia padrão de credenciais da AWS (instance profile, SSO, …). |
 | `SNS_TOPIC_ARNS` | ARNs de tópicos SNS (separados por vírgula) autorizados a entregar eventos do SES. Sem definir, a ingestão de eventos fica desativada. |
-| `SQS_QUEUE_URL` | Fila SQS que o worker consome por long polling quando a implantação não tem URL HTTPS pública para o SNS. Deixe sem definir quando o SNS entrega direto em `https://<seu-host>/ses/events`. |
+| `SQS_QUEUE_URL` | Fila SQS que o worker consome por long polling para eventos do SES. O setup sempre a cria; mantenha definida mesmo quando o SNS também faz push em `https://<seu-host>/ses/events` (o app deduplica os dois). |
 | `SES_CONFIGURATION_SET` | Configuration set do SES aplicado a envios sem configuration set por domínio. Sem definir, envia sem (e sem eventos de entrega). |
 
 ### Opcionais
@@ -163,10 +163,9 @@ auto-hospedada não tem limites de plano.
 
 A etapa de AWS do `npx @millionsend/setup` cria tudo de que o MillionSend
 precisa na AWS — política IAM + usuário + chave de acesso, o tópico SNS de
-eventos e o configuration set do SES. Com um `APP_BASE_URL` HTTPS os eventos
-são enviados por push ao seu host; caso contrário o setup adiciona uma fila
-SQS (`millionsend-events`) que o worker consome por long polling, então
-eventos funcionam sem URL pública nenhuma.
+eventos, a fila SQS de eventos (`millionsend-events`) que o worker consome por
+long polling e o configuration set do SES. Um `APP_BASE_URL` HTTPS recebe
+adicionalmente os eventos por push; a fila funciona sem URL pública nenhuma.
 
 Rode onde houver Node 18+ e suas credenciais de admin da AWS — laptop ou
 servidor; o servidor do MillionSend nunca precisa de credenciais de admin.
@@ -195,12 +194,15 @@ que criam os mesmos recursos.
 
 ## Eventos do SES (bounces, reclamações e entregas)
 
-O CLI de setup sempre configura isto. Um `APP_BASE_URL` HTTPS público recebe
-uma assinatura SNS com push para o seu host; qualquer outro `APP_BASE_URL`
-recebe uma fila SQS (`millionsend-events`) que o worker consome por long
-polling — a URL dela vai para o `.env` como `SQS_QUEUE_URL`. Nos dois casos
-`SNS_TOPIC_ARNS` controla a ingestão: eventos só são aceitos de tópicos nessa
-lista.
+O CLI de setup sempre configura isto: uma fila SQS (`millionsend-events`) que o
+worker consome por long polling, com a URL no `.env` como `SQS_QUEUE_URL`. A
+fila segura os eventos durante reinícios e não precisa de acesso externo, por
+isso é o transporte que toda implantação recebe; um `APP_BASE_URL` HTTPS
+público recebe adicionalmente uma assinatura SNS com push para o seu host, e o
+app deduplica os dois. `SNS_TOPIC_ARNS` controla a ingestão nos dois casos:
+eventos só são aceitos de tópicos nessa lista. Mantenha `SQS_QUEUE_URL`
+definida mesmo depois de trocar para um `APP_BASE_URL` HTTPS — apagá-la deixa
+os eventos acumulando na fila.
 
 Equivalente manual: um tópico SNS standard (mesma região do SES) inscrito em
 `https://<seu-host>/ses/events` (ou em uma fila SQS cuja política permita o

@@ -4,6 +4,7 @@ import {
   SES_IAM_POLICY,
   SETUP_NAMES,
   snsTopicPolicy,
+  sqsQueuePolicy,
 } from "@millionsend/ses/setup-constants";
 
 export const CFN_DEPLOY_COMMAND =
@@ -26,6 +27,14 @@ const SNS_TOPIC_POLICY_SHELL = JSON.stringify(snsTopicPolicy("__TOPIC__", "__ACC
   .replace('"__TOPIC__"', '"\'"$TOPIC_ARN"\'"')
   .replace('"__ACCOUNT__"', '"\'"$ACCOUNT_ID"\'"');
 
+const SQS_QUEUE_POLICY_SHELL = JSON.stringify(
+  sqsQueuePolicy("__QUEUE__", "__TOPIC__", "__ACCOUNT__"),
+)
+  .replace(/"__QUEUE__"/g, '"\'"$QUEUE_ARN"\'"')
+  .replace('"__TOPIC__"', '"\'"$TOPIC_ARN"\'"')
+  // The account id sits inside the user ARN string, so the splice is inline.
+  .replace("__ACCOUNT__", "'\"$ACCOUNT_ID\"'");
+
 const EVENT_DESTINATION_SHELL = `{"Enabled":true,"MatchingEventTypes":${JSON.stringify(
   SES_EVENT_TYPES,
 )},"SnsDestination":{"TopicArn":"'"$TOPIC_ARN"'"}}`;
@@ -33,7 +42,8 @@ const EVENT_DESTINATION_SHELL = `{"Enabled":true,"MatchingEventTypes":${JSON.str
 /**
  * POSIX shell script an operator pastes into a terminal where the aws CLI has
  * admin credentials. Creates the IAM policy + user + access key and, when
- * includeEvents and appBaseUrl is a valid https URL, the SNS topic + SESv2
+ * includeEvents, the SNS topic, the SQS events queue the worker polls, the
+ * https push on top when appBaseUrl is a valid https URL, and the SESv2
  * configuration set — then prints the exact .env lines to paste.
  *
  * Only shell-safe inputs are interpolated: region is validated, appBaseUrl is
@@ -47,7 +57,8 @@ export function buildAwsSetupScript(opts: {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(opts.region)) {
     throw new Error(`invalid AWS region: ${opts.region}`);
   }
-  const origin = opts.includeEvents ? httpsOrigin(opts.appBaseUrl) : null;
+  const events = opts.includeEvents === true;
+  const origin = events ? httpsOrigin(opts.appBaseUrl) : null;
 
   const lines = [
     "#!/bin/sh",
@@ -74,7 +85,7 @@ export function buildAwsSetupScript(opts: {
     "SECRET_ACCESS_KEY=$(printf '%s' \"$KEY\" | cut -f2)",
   ];
 
-  if (origin) {
+  if (events) {
     lines.push(
       "",
       `echo "==> SNS topic ${SETUP_NAMES.topic}"`,
@@ -82,8 +93,26 @@ export function buildAwsSetupScript(opts: {
       `TOPIC_ARN=$(aws sns create-topic --name ${SETUP_NAMES.topic} --region "$REGION" --query TopicArn --output text) || exit 1`,
       'aws sns set-topic-attributes --topic-arn "$TOPIC_ARN" --attribute-name Policy \\',
       `  --attribute-value '${SNS_TOPIC_POLICY_SHELL}' --region "$REGION" || exit 1`,
-      'aws sns subscribe --topic-arn "$TOPIC_ARN" --protocol https \\',
-      `  --notification-endpoint "${origin}/ses/events" --region "$REGION" >/dev/null || exit 1`,
+      "",
+      `echo "==> SQS events queue ${SETUP_NAMES.queue} (the worker polls it)"`,
+      `QUEUE_URL=$(aws sqs create-queue --queue-name ${SETUP_NAMES.queue} --region "$REGION" --query QueueUrl --output text 2>/dev/null \\`,
+      `  || aws sqs get-queue-url --queue-name ${SETUP_NAMES.queue} --region "$REGION" --query QueueUrl --output text) || exit 1`,
+      'QUEUE_ARN=$(aws sqs get-queue-attributes --queue-url "$QUEUE_URL" --attribute-names QueueArn --region "$REGION" --query Attributes.QueueArn --output text) || exit 1',
+      `QUEUE_POLICY='${SQS_QUEUE_POLICY_SHELL}'`,
+      "# Attributes wants the policy as a JSON string, hence the escaped quotes.",
+      'aws sqs set-queue-attributes --queue-url "$QUEUE_URL" --region "$REGION" \\',
+      '  --attributes "{\\"Policy\\":\\"$(printf \'%s\' "$QUEUE_POLICY" | sed \'s/"/\\\\"/g\')\\"}" || exit 1',
+      'aws sns subscribe --topic-arn "$TOPIC_ARN" --protocol sqs \\',
+      '  --notification-endpoint "$QUEUE_ARN" --region "$REGION" >/dev/null || exit 1',
+    );
+    if (origin) {
+      lines.push(
+        "# Optional lower-latency push on top of the queue; the app dedupes the two.",
+        'aws sns subscribe --topic-arn "$TOPIC_ARN" --protocol https \\',
+        `  --notification-endpoint "${origin}/ses/events" --region "$REGION" >/dev/null || exit 1`,
+      );
+    }
+    lines.push(
       "",
       `echo "==> SES configuration set ${SETUP_NAMES.configurationSet}"`,
       `aws sesv2 create-configuration-set --configuration-set-name ${SETUP_NAMES.configurationSet} --region "$REGION" >/dev/null 2>&1 || true`,
@@ -103,12 +132,17 @@ export function buildAwsSetupScript(opts: {
     'echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID"',
     'echo "AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY"',
   );
-  if (origin) {
+  if (events) {
     lines.push(
       'echo "SNS_TOPIC_ARNS=$TOPIC_ARN"',
+      'echo "SQS_QUEUE_URL=$QUEUE_URL"',
       `echo "SES_CONFIGURATION_SET=${SETUP_NAMES.configurationSet}"`,
+    );
+  }
+  if (origin) {
+    lines.push(
       'echo ""',
-      'echo "# The event subscription confirms itself once the app runs with these values;"',
+      'echo "# The https subscription confirms itself once the app runs with these values;"',
       "echo \"# if it stays pending, use 'Request confirmation' on it in the SNS console.\"",
     );
   }

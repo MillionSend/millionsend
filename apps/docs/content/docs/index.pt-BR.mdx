@@ -71,8 +71,8 @@ contêineres:
 Os corpos dos emails são criptografados em repouso (criptografia de envelope
 AES-256-GCM) e expurgados após uma janela de retenção. Eventos de entrega
 (bounces, reclamações, entregas) voltam do SES — na Nuvem automaticamente;
-auto-hospedado via SNS, com push para o seu host quando ele tem uma URL HTTPS
-pública, ou long polling de uma fila SQS quando não tem.
+auto-hospedado via SNS para uma fila SQS que o worker consome por long polling,
+mais push para o seu host quando ele tem uma URL HTTPS pública.
 
 ## Próximos passos
 

@@ -1,6 +1,7 @@
 # MillionSend AWS setup as CloudFormation — same resources as the setup script
-# on /settings/ses: IAM policy + user + access key, SNS event topic, and the
-# SESv2 configuration set with an SNS event destination.
+# on /settings/ses: IAM policy + user + access key, SNS event topic, the SQS
+# events queue the worker polls, and the SESv2 configuration set with an SNS
+# event destination.
 #
 # Deploy:
 #   aws cloudformation deploy --template-file infra/millionsend-ses.cfn.yaml \
@@ -13,7 +14,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   MillionSend sending resources: IAM user + minimal SES policy, SNS event
-  topic, and SES configuration set. Outputs map 1:1 to .env keys.
+  topic, SQS events queue, and SES configuration set. Outputs map 1:1 to .env
+  keys.
 
 Parameters:
   AppBaseUrl:
@@ -22,8 +24,8 @@ Parameters:
     AllowedPattern: "^(https://.+)?$"
     Description: >-
       Public https base URL of the deployment (e.g. https://mail.example.com).
-      Leave empty to skip the event subscription; sends still work, but no
-      delivery/bounce events reach the app.
+      Optional: adds an https push subscription on top of the events queue the
+      worker polls either way.
 
 Conditions:
   HasAppBaseUrl: {"Fn::Not": [{"Fn::Equals": [{Ref: AppBaseUrl}, ""]}]}
@@ -89,8 +91,51 @@ Resources:
               StringEquals:
                 AWS:SourceAccount: {Ref: AWS::AccountId}
 
-  # Pending until the app confirms it — automatic once the app runs with
-  # SNS_TOPIC_ARNS set to this topic's ARN.
+  # The transport every deployment gets: the worker long-polls it, so events
+  # buffer through restarts and no inbound reachability is needed. Mirrors
+  # runEventsSetup in packages/ses/src/setup.ts.
+  EventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: millionsend-events
+
+  EventsQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - {Ref: EventsQueue}
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: {"Fn::GetAtt": [EventsQueue, Arn]}
+            Condition:
+              ArnEquals:
+                aws:SourceArn: {Ref: EventsTopic}
+          - Effect: Allow
+            Principal:
+              AWS: {"Fn::GetAtt": [SendUser, Arn]}
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource: {"Fn::GetAtt": [EventsQueue, Arn]}
+
+  # Same-account SNS→SQS needs no confirmation handshake.
+  EventsQueueSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: EventsQueuePolicy
+    Properties:
+      TopicArn: {Ref: EventsTopic}
+      Protocol: sqs
+      Endpoint: {"Fn::GetAtt": [EventsQueue, Arn]}
+
+  # Optional lower-latency push on top of the queue (the app dedupes the two
+  # on the SNS MessageId). Pending until the app confirms it — automatic once
+  # it runs with SNS_TOPIC_ARNS set to this topic's ARN.
   EventsSubscription:
     Type: AWS::SNS::Subscription
     Condition: HasAppBaseUrl
@@ -139,6 +184,9 @@ Outputs:
   SnsTopicArns:
     Description: SNS_TOPIC_ARNS
     Value: {Ref: EventsTopic}
+  SqsQueueUrl:
+    Description: SQS_QUEUE_URL
+    Value: {Ref: EventsQueue}
   SesConfigurationSet:
     Description: SES_CONFIGURATION_SET
     Value: {Ref: ConfigurationSet}

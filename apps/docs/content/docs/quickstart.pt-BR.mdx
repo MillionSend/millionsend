@@ -36,8 +36,8 @@ npx @millionsend/setup
 
 O assistente detecta o que já existe no diretório e oferece cada etapa: criar
 o `.env` com segredos gerados, provisionar os recursos da AWS (usuário IAM +
-política, tópico SNS de eventos, configuration set do SES — e uma fila SQS de
-eventos quando sua implantação não tem URL HTTPS pública), depois baixar o
+política, tópico SNS de eventos, fila SQS de eventos, configuration set do SES —
+mais uma assinatura de push quando sua implantação tem URL HTTPS pública), depois baixar o
 arquivo compose e subir a imagem pré-construída com `docker compose up -d`.
 Toda etapa pode ser pulada e é segura de repetir; `--dry-run` imprime o plano
 completo sem tocar em nada.

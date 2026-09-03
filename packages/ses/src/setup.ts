@@ -139,7 +139,7 @@ export function createSetupClients(region: string): SetupClients {
 export interface SetupInput {
   region: string;
   accountId: string;
-  /** An https URL gets events pushed to it; anything else gets an SQS queue the worker polls. */
+  /** Events always land in an SQS queue the worker polls; an https URL is pushed to as well. */
   appBaseUrl?: string | null | undefined;
   onStep?: ((line: string) => void) | undefined;
 }
@@ -148,7 +148,7 @@ export interface SetupResult {
   accessKeyId: string;
   secretAccessKey: string;
   topicArn: string | null;
-  /** null when events are delivered over https instead of a polled queue. */
+  /** The events queue every deployment polls; null only when events were skipped (topicArn null too). */
   queueUrl: string | null;
 }
 
@@ -156,9 +156,7 @@ export interface SetupResult {
 export function eventsPlan(input: Pick<SetupInput, "region" | "appBaseUrl">): string[] {
   const origin = httpsOrigin(input.appBaseUrl);
   return [
-    origin
-      ? `SNS topic ${SETUP_NAMES.topic} in ${input.region}, subscribed to ${origin}/ses/events`
-      : `SNS topic ${SETUP_NAMES.topic} in ${input.region}, delivering to SQS queue ${SETUP_NAMES.queue} (no public https URL — the worker polls it)`,
+    `SNS topic ${SETUP_NAMES.topic} in ${input.region}, delivering to SQS queue ${SETUP_NAMES.queue} (the worker polls it)${origin ? `, also subscribed to ${origin}/ses/events` : ""}`,
     `SES configuration set ${SETUP_NAMES.configurationSet} publishing ${SES_EVENT_TYPES.length} event types to the topic`,
   ];
 }
@@ -300,15 +298,16 @@ export async function runSetup(clients: SetupClients, input: SetupInput): Promis
 
 export interface EventsSetupResult {
   topicArn: string;
-  /** null when events are delivered over https instead of a polled queue. */
-  queueUrl: string | null;
+  /** The events queue every deployment polls. */
+  queueUrl: string;
 }
 
 /**
- * The events part alone: SNS topic, its delivery route (https subscription or
- * SQS queue), and the SES configuration set. Needs no IAM changes, so a
- * deployment that already has its access key can gain event ingestion without
- * minting another one.
+ * The events part alone: SNS topic, the SQS queue the worker polls, the
+ * optional https push, and the SES configuration set. Needs no IAM changes
+ * (the queue policy grants the send user its reads), so a deployment that
+ * already has its access key can gain event ingestion without minting another
+ * one.
  */
 export async function runEventsSetup(
   clients: SetupClients,
@@ -332,9 +331,47 @@ export async function runEventsSetup(
     }),
   );
 
-  let queueUrl: string | null = null;
+  // The queue is the transport every deployment gets: it buffers through
+  // restarts and deploys and needs no inbound reachability, so switching the
+  // base URL later can never silently orphan the events. A same-account
+  // SNS→SQS subscription needs no confirmation handshake.
+  step(`SQS events queue ${SETUP_NAMES.queue}`);
+  let queueUrl: string | undefined;
+  try {
+    const created = (await clients.sqs.send(
+      new CreateQueueCommand({ QueueName: SETUP_NAMES.queue }),
+    )) as CreateQueueCommandOutput;
+    queueUrl = created.QueueUrl;
+  } catch (error) {
+    // Attribute drift on an existing queue: adopt it instead of failing.
+    if (!["QueueNameExists", "QueueAlreadyExists"].includes(errorName(error))) throw error;
+    const existing = (await clients.sqs.send(
+      new GetQueueUrlCommand({ QueueName: SETUP_NAMES.queue }),
+    )) as GetQueueUrlCommandOutput;
+    queueUrl = existing.QueueUrl;
+  }
+  if (!queueUrl) throw new Error("CreateQueue returned no URL");
+  const attrs = (await clients.sqs.send(
+    new GetQueueAttributesCommand({ QueueUrl: queueUrl, AttributeNames: ["QueueArn"] }),
+  )) as GetQueueAttributesCommandOutput;
+  const queueArn = attrs.Attributes?.QueueArn;
+  if (!queueArn) throw new Error("GetQueueAttributes returned no QueueArn");
+  // Overwritten on every run, so re-runs heal a hand-edited policy.
+  await clients.sqs.send(
+    new SetQueueAttributesCommand({
+      QueueUrl: queueUrl,
+      Attributes: {
+        Policy: JSON.stringify(sqsQueuePolicy(queueArn, topicArn, input.accountId)),
+      },
+    }),
+  );
+  await clients.sns.send(
+    new SubscribeCommand({ TopicArn: topicArn, Protocol: "sqs", Endpoint: queueArn }),
+  );
   if (origin) {
-    // Re-subscribing the same endpoint returns the existing subscription.
+    // Lower-latency push on top of the queue; the app dedupes the two
+    // deliveries on the SNS MessageId. Re-subscribing the same endpoint
+    // returns the existing subscription.
     await clients.sns.send(
       new SubscribeCommand({
         TopicArn: topicArn,
@@ -342,44 +379,6 @@ export async function runEventsSetup(
         Endpoint: `${origin}/ses/events`,
       }),
     );
-  } else {
-    // No public https URL for SNS to push to — deliver into an SQS queue the
-    // worker long-polls instead. A same-account SNS→SQS subscription needs no
-    // confirmation handshake.
-    step(`SQS events queue ${SETUP_NAMES.queue}`);
-    let url: string | undefined;
-    try {
-      const created = (await clients.sqs.send(
-        new CreateQueueCommand({ QueueName: SETUP_NAMES.queue }),
-      )) as CreateQueueCommandOutput;
-      url = created.QueueUrl;
-    } catch (error) {
-      // Attribute drift on an existing queue: adopt it instead of failing.
-      if (!["QueueNameExists", "QueueAlreadyExists"].includes(errorName(error))) throw error;
-      const existing = (await clients.sqs.send(
-        new GetQueueUrlCommand({ QueueName: SETUP_NAMES.queue }),
-      )) as GetQueueUrlCommandOutput;
-      url = existing.QueueUrl;
-    }
-    if (!url) throw new Error("CreateQueue returned no URL");
-    const attrs = (await clients.sqs.send(
-      new GetQueueAttributesCommand({ QueueUrl: url, AttributeNames: ["QueueArn"] }),
-    )) as GetQueueAttributesCommandOutput;
-    const queueArn = attrs.Attributes?.QueueArn;
-    if (!queueArn) throw new Error("GetQueueAttributes returned no QueueArn");
-    // Overwritten on every run, so re-runs heal a hand-edited policy.
-    await clients.sqs.send(
-      new SetQueueAttributesCommand({
-        QueueUrl: url,
-        Attributes: {
-          Policy: JSON.stringify(sqsQueuePolicy(queueArn, topicArn, input.accountId)),
-        },
-      }),
-    );
-    await clients.sns.send(
-      new SubscribeCommand({ TopicArn: topicArn, Protocol: "sqs", Endpoint: queueArn }),
-    );
-    queueUrl = url;
   }
 
   step(`SES configuration set ${SETUP_NAMES.configurationSet}`);
@@ -414,7 +413,7 @@ export function teardownPlan(region: string): string[] {
   return [
     `SES configuration set ${SETUP_NAMES.configurationSet} (and its event destination)`,
     `SNS topic ${SETUP_NAMES.topic} in ${region} (and its subscriptions)`,
-    `SQS events queue ${SETUP_NAMES.queue}, if one was created`,
+    `SQS events queue ${SETUP_NAMES.queue}`,
     `ALL access keys of IAM user ${SETUP_NAMES.user} — a running server using them stops sending`,
     `IAM user ${SETUP_NAMES.user} and policy ${SETUP_NAMES.policy}`,
   ];

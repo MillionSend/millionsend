@@ -119,7 +119,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `AWS_REGION` | SES region (default `us-east-1`). |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | IAM credentials with `ses:SendEmail` / `ses:SendRawEmail`. Omit to use the default AWS credential chain (instance profile, SSO, …). |
 | `SNS_TOPIC_ARNS` | Comma-separated SNS topic ARNs allowed to deliver SES events. Unset disables event ingestion entirely. |
-| `SQS_QUEUE_URL` | SQS queue the worker long-polls for SES events when the deployment has no public HTTPS URL for SNS to push to. Leave unset when SNS delivers to `https://<your-host>/ses/events` directly. |
+| `SQS_QUEUE_URL` | SQS queue the worker long-polls for SES events. Setup always creates it; keep it set even when SNS also pushes to `https://<your-host>/ses/events` (the app dedupes the two). |
 | `SES_CONFIGURATION_SET` | SES configuration set applied to sends that have no per-domain configuration set. Unset sends without one (and without delivery events). |
 
 ### Optional
@@ -158,10 +158,10 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 ## AWS setup
 
 The AWS step of `npx @millionsend/setup` creates everything MillionSend needs
-in AWS — IAM policy + user + access key, the SNS event topic, and the SES
-configuration set. With an HTTPS `APP_BASE_URL` events are pushed to your
-host; otherwise setup adds an SQS queue (`millionsend-events`) that the worker
-long-polls, so events work without any public URL.
+in AWS — IAM policy + user + access key, the SNS event topic, the SQS events
+queue (`millionsend-events`) the worker long-polls, and the SES configuration
+set. An HTTPS `APP_BASE_URL` additionally gets events pushed to your host; the
+queue works without any public URL.
 
 Run it anywhere Node 18+ and your AWS admin credentials live — laptop or
 server; the MillionSend server never needs admin credentials. It verifies your
@@ -189,11 +189,14 @@ same resources.
 
 ## SES events (bounces, complaints, deliveries)
 
-The setup CLI always configures this. A public HTTPS `APP_BASE_URL` gets an
-SNS subscription pushing to your host; any other `APP_BASE_URL` gets an SQS
-queue (`millionsend-events`) that the worker long-polls — its URL lands in
-`.env` as `SQS_QUEUE_URL`. Either way `SNS_TOPIC_ARNS` gates ingestion: events
-are only accepted from topics on that allowlist.
+The setup CLI always configures this: an SQS queue (`millionsend-events`) that
+the worker long-polls, its URL in `.env` as `SQS_QUEUE_URL`. The queue buffers
+events through restarts and needs no inbound reachability, so it is the
+transport every deployment gets; a public HTTPS `APP_BASE_URL` additionally
+gets an SNS subscription pushing to your host, and the app dedupes the two.
+`SNS_TOPIC_ARNS` gates ingestion either way: events are only accepted from
+topics on that allowlist. Keep `SQS_QUEUE_URL` set even after switching to an
+https `APP_BASE_URL` — clearing it leaves events piling up in the queue.
 
 Manual equivalent: an SNS standard topic (same region as SES) subscribed to
 `https://<your-host>/ses/events` (or to an SQS queue whose policy lets the

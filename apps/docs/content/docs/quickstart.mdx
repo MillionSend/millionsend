@@ -34,8 +34,8 @@ npx @millionsend/setup
 
 The wizard detects what is already in the directory and offers each step:
 create `.env` with generated secrets, provision the AWS resources (IAM user +
-policy, SNS event topic, SES configuration set — and an SQS events queue when
-your deployment has no public HTTPS URL), then download the compose file and
+policy, SNS event topic, SQS events queue, SES configuration set — plus a push
+subscription when your deployment has a public HTTPS URL), then download the compose file and
 start the prebuilt image with `docker compose up -d`. Every step is skippable
 and safe to re-run; `--dry-run` prints the full plan and touches nothing.
 

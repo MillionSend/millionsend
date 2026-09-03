@@ -144,14 +144,14 @@ describe("setupPlan", () => {
 });
 
 describe("runSetup", () => {
-  it("creates policy, user, key, topic, subscription, and configuration set", async () => {
+  it("creates policy, user, key, topic, queue, both subscriptions, and configuration set", async () => {
     const { clients, calls } = fakeClients();
     const result = await runSetup(clients, input);
     expect(result).toEqual({
       accessKeyId: "AKIATEST",
       secretAccessKey: "secret123",
       topicArn: "arn:aws:sns:us-east-1:123456789012:millionsend-events",
-      queueUrl: null,
+      queueUrl: "https://sqs.us-east-1.amazonaws.com/123456789012/millionsend-events",
     });
     expect(calls.map((c) => c.constructor)).toEqual([
       CreatePolicyCommand,
@@ -160,19 +160,27 @@ describe("runSetup", () => {
       CreateAccessKeyCommand,
       CreateTopicCommand,
       SetTopicAttributesCommand,
+      CreateQueueCommand,
+      GetQueueAttributesCommand,
+      SetQueueAttributesCommand,
+      SubscribeCommand,
       SubscribeCommand,
       CreateConfigurationSetCommand,
       CreateConfigurationSetEventDestinationCommand,
     ]);
-    const subscribe = calls.find((c) => c instanceof SubscribeCommand) as SubscribeCommand;
-    expect(subscribe.input.Endpoint).toBe("https://mail.example.com/ses/events");
+    // The queue is always the transport; an https origin is pushed to as well.
+    const subscribes = calls.filter((c) => c instanceof SubscribeCommand) as SubscribeCommand[];
+    expect(subscribes.map((s) => [s.input.Protocol, s.input.Endpoint])).toEqual([
+      ["sqs", "arn:aws:sqs:us-east-1:123456789012:millionsend-events"],
+      ["https", "https://mail.example.com/ses/events"],
+    ]);
     const attach = calls.find(
       (c) => c instanceof AttachUserPolicyCommand,
     ) as AttachUserPolicyCommand;
     expect(attach.input.PolicyArn).toBe("arn:aws:iam::123456789012:policy/millionsend-ses");
   });
 
-  it("creates the SQS events queue instead of an https subscription without https", async () => {
+  it("still creates the SQS events queue and skips only the https push without https", async () => {
     const { clients, calls } = fakeClients();
     const result = await runSetup(clients, { ...input, appBaseUrl: null });
     expect(result.topicArn).toBe("arn:aws:sns:us-east-1:123456789012:millionsend-events");

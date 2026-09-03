@@ -121,10 +121,10 @@ Without Docker (Node 24+, pnpm 11, local Postgres): `pnpm install`, point
 <summary><b>AWS setup</b></summary>
 
 The AWS step of `npx @millionsend/setup` creates everything MillionSend needs in
-AWS — IAM policy + user + access key, the SNS event topic, and the SES
-configuration set. With an https `APP_BASE_URL` events are pushed to your host;
-otherwise setup adds an SQS queue the worker long-polls, so events work without
-any public URL.
+AWS — IAM policy + user + access key, the SNS event topic, the SQS events queue
+the worker long-polls, and the SES configuration set. An https `APP_BASE_URL`
+additionally gets events pushed to your host; the queue works without any public
+URL.
 
 Run it anywhere Node 18+ and your AWS admin credentials live — laptop or server; the
 MillionSend server never needs admin credentials. It verifies your AWS identity,
@@ -151,11 +151,14 @@ quick-create link and a pre-filled shell script that create the same resources.
 <details>
 <summary><b>SES events (bounces, complaints, deliveries)</b></summary>
 
-The setup CLI always configures this. A public https `APP_BASE_URL` gets an SNS
-subscription pushing to your host; any other `APP_BASE_URL` gets an SQS queue
-(`millionsend-events`) that the worker long-polls — its URL lands in `.env` as
-`SQS_QUEUE_URL`. Either way `SNS_TOPIC_ARNS` gates ingestion: events are only
-accepted from topics on that allowlist.
+The setup CLI always configures this: an SQS queue (`millionsend-events`) that
+the worker long-polls, its URL in `.env` as `SQS_QUEUE_URL`. The queue buffers
+events through restarts and needs no inbound reachability, so it is the transport
+every deployment gets; a public https `APP_BASE_URL` additionally gets an SNS
+subscription pushing to your host, and the app dedupes the two. `SNS_TOPIC_ARNS`
+gates ingestion either way: events are only accepted from topics on that
+allowlist. Keep `SQS_QUEUE_URL` set even after switching to an https
+`APP_BASE_URL` — clearing it leaves events piling up in the queue.
 
 Manual equivalent: an SNS standard topic (same region as SES) subscribed to
 `https://<your-host>/ses/events` (or to an SQS queue whose policy lets the topic

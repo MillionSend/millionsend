@@ -140,10 +140,10 @@ AWS_SECRET_ACCESS_KEY=
 # See SELF_HOSTING.md for the SNS setup checklist.
 SNS_TOPIC_ARNS=
 
-# SQS queue the worker long-polls for SES events when this deployment has no
-# public https URL for SNS to push to (setup creates it in that case). Only
-# messages from topics in SNS_TOPIC_ARNS are accepted. Leave unset when SNS
-# delivers to https://<your-host>/ses/events directly.
+# SQS queue the worker long-polls for SES events (setup always creates it; it
+# buffers through restarts and needs no inbound reachability). Only messages
+# from topics in SNS_TOPIC_ARNS are accepted. Keep it set even when SNS also
+# pushes to https://<your-host>/ses/events — the app dedupes the two.
 SQS_QUEUE_URL=
 
 # SES configuration set applied to sends that have no per-domain configuration
