@@ -103,6 +103,18 @@ it("validates NOTIFICATIONS_EMAIL_FROM like AUTH_EMAIL_FROM and falls back to it
   ).toBe("n@x.dev");
 });
 
+it("requires the Turnstile keys together", () => {
+  expect(() => assertEnvConsistency(fakeEnv({ TURNSTILE_SITE_KEY: "0x4AAA" }))).toThrow(
+    "TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY",
+  );
+  expect(() => assertEnvConsistency(fakeEnv({ TURNSTILE_SECRET_KEY: "0x4AAA" }))).toThrow(
+    "TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY",
+  );
+  expect(() =>
+    assertEnvConsistency(fakeEnv({ TURNSTILE_SITE_KEY: "0x4AAA", TURNSTILE_SECRET_KEY: "0x4BBB" })),
+  ).not.toThrow();
+});
+
 it("rejects an AUTH_EMAIL_FROM that does not parse, accepts both valid forms", () => {
   expect(() => assertEnvConsistency(fakeEnv({ AUTH_EMAIL_FROM: "not-an-email" }))).toThrow(
     "AUTH_EMAIL_FROM",

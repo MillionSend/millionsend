@@ -182,6 +182,12 @@ export const env = createEnv({
     // "Send email" button and the snippet asks for the team's own domain.
     ONBOARDING_EMAIL_FROM: z.string().optional(),
 
+    // Cloudflare Turnstile, both keys or neither: sign-in, sign-up, password
+    // reset and the onboarding send verify a token when set. Unset, every
+    // form works as before with no challenge.
+    TURNSTILE_SITE_KEY: z.string().optional(),
+    TURNSTILE_SECRET_KEY: z.string().optional(),
+
     // Sender for account notifications (quota and deliverability alerts to
     // team owners) and team invitation emails, same forms as AUTH_EMAIL_FROM,
     // which it falls back to.
@@ -326,6 +332,9 @@ export function assertEnvConsistency(e: Env): void {
   }
   if (e.ONBOARDING_EMAIL_FROM && parseEmailFrom(e.ONBOARDING_EMAIL_FROM) === null) {
     throw new Error('ONBOARDING_EMAIL_FROM must be "Name <user@domain>" or a bare email address');
+  }
+  if (Boolean(e.TURNSTILE_SITE_KEY) !== Boolean(e.TURNSTILE_SECRET_KEY)) {
+    throw new Error("TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY must be set together");
   }
   if (e.NOTIFICATIONS_EMAIL_FROM && parseEmailFrom(e.NOTIFICATIONS_EMAIL_FROM) === null) {
     throw new Error(

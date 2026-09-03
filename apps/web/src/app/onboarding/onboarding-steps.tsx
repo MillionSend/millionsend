@@ -11,6 +11,7 @@ import { DeliveredOdometer } from "@/components/delivered-odometer";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { StatusBadge } from "@/components/status-badge";
+import { useTurnstile } from "@/components/turnstile";
 import { MIGRATE_DOCS_URL } from "@/lib/docs-links";
 import { formatDayTime, formatUtcTimestamp, maskApiKey } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
@@ -137,11 +138,14 @@ export function OnboardingSteps({
   userEmail,
   apiUrl,
   showInstanceHint,
+  turnstileSiteKey,
 }: {
   userEmail: string;
   apiUrl: string;
   /** Instance settings exist only on self-host; cloud hides the pointer. */
   showInstanceHint: boolean;
+  /** Set when the instance verifies a Turnstile token on the send. */
+  turnstileSiteKey: string | null;
 }) {
   const t = useTranslations("onboarding");
   const locale = useLocale();
@@ -150,6 +154,8 @@ export function OnboardingSteps({
   const queryClient = useQueryClient();
 
   const [lang, setLang] = useState<SnippetLang>("node");
+  const turnstile = useTurnstile(turnstileSiteKey);
+  const [captchaFailed, setCaptchaFailed] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
 
@@ -461,15 +467,30 @@ export function OnboardingSteps({
             type="button"
             className="ms-btn ms-btn-primary"
             disabled={sendFirst.isPending}
-            onClick={() => sendFirst.mutate({ locale: mailLocale })}
+            onClick={async () => {
+              setCaptchaFailed(false);
+              try {
+                const token = await turnstile.getToken();
+                sendFirst.mutate({ locale: mailLocale, ...(token ? { captchaToken: token } : {}) });
+              } catch {
+                setCaptchaFailed(true);
+              }
+            }}
           >
             <BtnSpinner on={sendFirst.isPending} />
             {sendFirst.isPending ? t("step2.sending") : t("step2.sendCta")}
           </button>
+          {turnstile.slot}
           {sendFirst.isSuccess ? (
             <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>
               {t("step2.sentTo", { to: userEmail })}
             </span>
+          ) : captchaFailed || sendFirst.error?.data?.code === "FORBIDDEN" ? (
+            <span style={{ fontSize: 13, color: "var(--ms-danger)" }}>
+              {t("step2.captchaFailed")}
+            </span>
+          ) : sendFirst.error?.data?.code === "TOO_MANY_REQUESTS" ? (
+            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>{t("step2.sendLimited")}</span>
           ) : sendFirst.isError ? (
             <span style={{ fontSize: 13, color: "var(--ms-danger)" }}>{t("step2.sendError")}</span>
           ) : null}

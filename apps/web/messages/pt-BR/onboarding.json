@@ -35,7 +35,9 @@
     "sending": "Enviando…",
     "sentTo": "Enviado para {to}. Aparece abaixo assim que chegar.",
     "sendError": "Não foi possível enviar. Tente de novo.",
-    "selfHostBase": "Self-host: aponte os SDKs para esta instância com MILLIONSEND_BASE_URL={url}."
+    "selfHostBase": "Self-host: aponte os SDKs para esta instância com MILLIONSEND_BASE_URL={url}.",
+    "captchaFailed": "A verificação falhou. Tente de novo.",
+    "sendLimited": "Alguns e-mails de onboarding já saíram deste time. Tente de novo em uma hora."
   },
   "step3": {
     "title": "Veja chegar",

@@ -17,16 +17,12 @@ afterEach(async () => {
   await close();
 });
 
-function callerFor(
-  teamId: string,
-  role: "owner" | "admin" | "member" = "owner",
-  sessionCreatedAt = new Date(),
-) {
+function callerFor(teamId: string, role: "owner" | "admin" | "member" = "owner") {
   return createCaller({
     db,
     session: {
       user: { id: "u1", email: "u1@example.com", name: "u1" },
-      session: { id: "s1", createdAt: sessionCreatedAt },
+      session: { id: "s1", createdAt: new Date() },
     },
     teamId,
     role,
@@ -53,24 +49,6 @@ async function createDomain(
 }
 
 describe("apiKeys.create", () => {
-  it("requires a recently established session (step-up)", async () => {
-    const teamId = await createTeam(db, "team-a");
-    const stale = new Date(Date.now() - 16 * 60 * 1000);
-    await expect(
-      callerFor(teamId, "owner", stale).apiKeys.create({ name: "stale" }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-    // A context without the session row (never the case over HTTP) fails closed too.
-    await expect(
-      createCaller({
-        db,
-        session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
-        teamId,
-        role: "owner",
-      }).apiKeys.create({ name: "no-row" }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-    expect(await db.select().from(schema.apiKeys)).toHaveLength(0);
-  });
-
   it("forbids ordinary members from minting privileged API keys", async () => {
     const teamId = await createTeam(db, "team-a");
     await expect(

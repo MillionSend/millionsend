@@ -25,8 +25,8 @@ const config: NextConfig = {
   async headers() {
     const scriptPolicy =
       process.env.NODE_ENV === "development"
-        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-        : "script-src 'self' 'unsafe-inline'";
+        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com"
+        : "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com";
     const contentSecurityPolicy = [
       "default-src 'self'",
       scriptPolicy,
@@ -39,7 +39,8 @@ const config: NextConfig = {
       "connect-src 'self'",
       "media-src 'self'",
       "object-src 'none'",
-      "frame-src 'none'",
+      // Turnstile renders its challenge in a Cloudflare frame.
+      "frame-src https://challenges.cloudflare.com",
       "worker-src 'self' blob:",
       "manifest-src 'self'",
       "base-uri 'self'",

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
@@ -19,7 +18,6 @@ import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
-import { authClient } from "@/lib/auth-client";
 import { maskApiKey } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { useTeamRole } from "@/lib/use-team-role";
@@ -72,7 +70,6 @@ export function ApiKeysView() {
   const nav = useTranslations("nav");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const router = useRouter();
   const role = useTeamRole();
   const canExport = role === "owner" || role === "admin";
 
@@ -136,13 +133,6 @@ export function ApiKeysView() {
   const confirmRevoke = () => {
     if (!revokeTarget || revokeMutation.isPending) return;
     revokeMutation.mutate({ id: revokeTarget.id });
-  };
-  // Minting a key needs a recently established session; /login bounces an
-  // existing session straight back, so the re-auth starts with a sign-out.
-  const signInAgain = async () => {
-    await authClient.signOut();
-    router.push("/login?next=/api-keys");
-    router.refresh();
   };
   const createError = createMutation.error;
 
@@ -340,20 +330,7 @@ export function ApiKeysView() {
                   flexWrap: "wrap",
                 }}
               >
-                {createError.data?.code === "UNAUTHORIZED" ? (
-                  <>
-                    <span>{t("create.staleSession")}</span>
-                    <button
-                      type="button"
-                      className="ms-btn ms-btn-secondary"
-                      onClick={() => void signInAgain()}
-                    >
-                      {t("create.signInAgain")}
-                    </button>
-                  </>
-                ) : (
-                  createError.message
-                )}
+                {createError.message}
               </div>
             ) : null}
             <ModalFooter>

@@ -28,9 +28,7 @@
     "domain": "Domain",
     "domainAny": "Any domain",
     "submit": "Create key",
-    "permissionTooltip": "Full access can manage everything over the API — domains, contacts, broadcasts, keys.\n\nSending access can only send emails.",
-    "staleSession": "Your session is too old to create a key. Sign in again and retry.",
-    "signInAgain": "Sign in again"
+    "permissionTooltip": "Full access can manage everything over the API — domains, contacts, broadcasts, keys.\n\nSending access can only send emails."
   },
   "reveal": {
     "title": "API key created",

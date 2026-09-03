@@ -16,6 +16,7 @@ export default async function SignupPage() {
       mode="signup"
       providers={enabledSocialProviders()}
       legal={{ termsUrl: env.TERMS_URL ?? null, privacyUrl: env.PRIVACY_URL ?? null }}
+      turnstileSiteKey={env.TURNSTILE_SITE_KEY ?? null}
     />
   );
 }

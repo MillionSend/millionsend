@@ -32,6 +32,7 @@ export default async function OnboardingPage() {
           userEmail={session.user.email}
           apiUrl={apiBaseUrl()}
           showInstanceHint={!env.IS_CLOUD}
+          turnstileSiteKey={env.TURNSTILE_SITE_KEY ?? null}
         />
       </main>
     </AppShell>

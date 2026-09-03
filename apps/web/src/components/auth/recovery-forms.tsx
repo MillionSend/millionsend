@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { captchaHeaders, useTurnstile } from "@/components/turnstile";
 import { authClient } from "@/lib/auth-client";
 import styles from "./auth.module.css";
 import { StrengthMeter } from "./auth-form";
@@ -43,24 +44,43 @@ export function AuthScreen({ title, children }: { title: string; children: React
 export function ForgotPasswordForm({
   minutes,
   initialEmail = "",
+  turnstileSiteKey = null,
 }: {
   minutes: number;
   initialEmail?: string;
+  turnstileSiteKey?: string | null;
 }) {
   const t = useTranslations("auth.forgot");
   const [email, setEmail] = useState(initialEmail);
   const [pending, setPending] = useState(false);
   const [sent, setSent] = useState(false);
   const [rateLimited, setRateLimited] = useState(false);
+  const [captchaFailed, setCaptchaFailed] = useState(false);
+  const turnstile = useTurnstile(turnstileSiteKey);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setPending(true);
+    setCaptchaFailed(false);
+    let token: string | null;
+    try {
+      token = await turnstile.getToken();
+    } catch {
+      setCaptchaFailed(true);
+      setPending(false);
+      return;
+    }
     // redirectTo becomes the callbackURL better-auth's emailed link lands on.
     const { error } = await authClient.requestPasswordReset({
       email,
       redirectTo: "/reset-password",
+      fetchOptions: { headers: captchaHeaders(token) },
     });
+    if (error?.code === "VERIFICATION_FAILED" || error?.code === "MISSING_RESPONSE") {
+      setCaptchaFailed(true);
+      setPending(false);
+      return;
+    }
     setRateLimited(error?.status === 429);
     setSent(true);
   }
@@ -96,6 +116,8 @@ export function ForgotPasswordForm({
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
+            {captchaFailed ? <p className={styles.error}>{t("captcha")}</p> : null}
+            {turnstile.slot}
             <button
               type="submit"
               className={`ms-btn ms-btn-primary ${styles.button}`}

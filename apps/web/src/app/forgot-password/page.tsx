@@ -1,3 +1,4 @@
+import { env } from "@millionsend/config";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
@@ -20,7 +21,13 @@ export default async function ForgotPasswordPage({
   // input, so a cap is the only validation needed here.
   const raw = (await searchParams).email;
   const initialEmail = typeof raw === "string" ? raw.trim().slice(0, 254) : "";
-  return <ForgotPasswordForm minutes={RESET_TOKEN_TTL_MINUTES} initialEmail={initialEmail} />;
+  return (
+    <ForgotPasswordForm
+      minutes={RESET_TOKEN_TTL_MINUTES}
+      initialEmail={initialEmail}
+      turnstileSiteKey={env.TURNSTILE_SITE_KEY ?? null}
+    />
+  );
 }
 
 export async function generateMetadata(): Promise<Metadata> {

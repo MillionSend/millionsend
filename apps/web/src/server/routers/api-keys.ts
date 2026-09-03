@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit";
-import { adminProcedure, freshAdminProcedure, router, teamProcedure } from "../trpc";
+import { adminProcedure, router, teamProcedure } from "../trpc";
 
 export const apiKeysRouter = router({
   list: teamProcedure.query(async ({ ctx }) => {
@@ -28,7 +28,7 @@ export const apiKeysRouter = router({
     return rows;
   }),
 
-  create: freshAdminProcedure
+  create: adminProcedure
     .input(
       z.object({
         name: z.string().trim().min(1).max(80),

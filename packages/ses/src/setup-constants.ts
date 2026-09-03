@@ -245,6 +245,13 @@ AUTH_EMAIL_FROM=
 # unset to hide the button; the snippet then asks for the team's own domain.
 ONBOARDING_EMAIL_FROM=
 
+# Cloudflare Turnstile (https://dash.cloudflare.com → Turnstile), both keys or
+# neither. When set, sign-in, sign-up, password reset and the onboarding
+# "Send email" button verify a challenge token; an invisible or managed
+# widget works. Leave both unset to run without a captcha.
+TURNSTILE_SITE_KEY=
+TURNSTILE_SECRET_KEY=
+
 # Sender for account notifications to team owners (daily quota nearly or fully
 # used, bounce/complaint rates at risk or paused) and for team invitation
 # emails, same forms as AUTH_EMAIL_FROM. Leave unset to send them from

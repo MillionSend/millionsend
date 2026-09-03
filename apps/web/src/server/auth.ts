@@ -5,7 +5,7 @@ import { type Db, getDb, schema } from "@millionsend/db";
 import { type BetterAuthPlugin, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
-import { jwt } from "better-auth/plugins";
+import { captcha, jwt } from "better-auth/plugins";
 import { and, eq, ne, notExists } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { headers } from "next/headers";
@@ -22,13 +22,6 @@ import {
 export type Auth = ReturnType<typeof createAuth>;
 
 export { resolveBaseUrl };
-
-/**
- * How recently a session must have been established for step-up actions
- * (minting API keys, deleting the account). Better Auth applies it to its own
- * sensitive endpoints; freshProcedure applies it to tRPC.
- */
-export const SESSION_FRESH_AGE_SECONDS = 15 * 60;
 
 /**
  * Registration metadata rendered as links on the consent screen. RFC 7591
@@ -189,7 +182,10 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
       },
     }),
     session: {
-      freshAge: SESSION_FRESH_AGE_SECONDS,
+      // No step-up: a signed-in session may do everything its role allows,
+      // however old it is (Better Auth would otherwise re-prompt for
+      // password changes and account deletion).
+      freshAge: 0,
       additionalFields: {
         activeTeamId: { type: "string", required: false, input: false },
       },
@@ -203,6 +199,11 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
       },
     },
     plugins: [
+      // Turnstile on sign-in, sign-up and password reset when the instance
+      // opts in; the forms send the token in x-captcha-response.
+      ...(env.TURNSTILE_SECRET_KEY
+        ? [captcha({ provider: "cloudflare-turnstile", secretKey: env.TURNSTILE_SECRET_KEY })]
+        : []),
       // Issuer is the bare APP_BASE_URL (not .../api/auth) so RFC 8414
       // discovery resolves at /.well-known/oauth-authorization-server
       // (app/.well-known/oauth-authorization-server/route.ts).

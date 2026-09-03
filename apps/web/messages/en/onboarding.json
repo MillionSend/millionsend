@@ -35,7 +35,9 @@
     "sending": "Sending…",
     "sentTo": "Sent to {to}. It shows up below the moment it lands.",
     "sendError": "Could not send. Try again.",
-    "selfHostBase": "Self-hosted: point the SDKs at this instance with MILLIONSEND_BASE_URL={url}."
+    "selfHostBase": "Self-hosted: point the SDKs at this instance with MILLIONSEND_BASE_URL={url}.",
+    "captchaFailed": "Verification failed. Try again.",
+    "sendLimited": "A few onboarding emails already went out from this team. Try again in an hour."
   },
   "step3": {
     "title": "Watch it arrive",

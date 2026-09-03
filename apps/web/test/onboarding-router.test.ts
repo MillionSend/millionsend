@@ -55,6 +55,22 @@ describe("onboarding.sendFirstEmail", () => {
     expect(enqueued).toEqual([id]);
   });
 
+  it("caps onboarding sends per team and refuses a missing captcha token when Turnstile is on", async () => {
+    vi.stubEnv("ONBOARDING_EMAIL_FROM", "MillionSend <onboarding@ms.example>");
+    const teamId = await createTeam(db, "team-a");
+    const c = caller(teamId);
+    for (let i = 0; i < 5; i++) await c.onboarding.sendFirstEmail({ locale: "en" });
+    await expect(c.onboarding.sendFirstEmail({ locale: "en" })).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+    });
+
+    vi.stubEnv("TURNSTILE_SITE_KEY", "0x4AAA");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "0x4BBB");
+    await expect(
+      caller(await createTeam(db, "team-b")).onboarding.sendFirstEmail({ locale: "en" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
   it("is unavailable when no shared sender is configured", async () => {
     vi.stubEnv("ONBOARDING_EMAIL_FROM", "");
     const teamId = await createTeam(db, "team-a");

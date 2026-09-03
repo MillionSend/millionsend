@@ -17,6 +17,7 @@ export default async function LoginPage() {
       providers={enabledSocialProviders()}
       legal={{ termsUrl: env.TERMS_URL ?? null, privacyUrl: env.PRIVACY_URL ?? null }}
       forgotPassword={passwordRecoveryEnabled()}
+      turnstileSiteKey={env.TURNSTILE_SITE_KEY ?? null}
     />
   );
 }

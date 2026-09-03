@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
+import { captchaHeaders, useTurnstile } from "@/components/turnstile";
 import { authClient } from "@/lib/auth-client";
 import { safeNextPath } from "@/lib/nav";
 import { passwordStrength } from "@/lib/password-strength";
@@ -45,12 +46,15 @@ export function AuthForm({
   providers,
   legal,
   forgotPassword = false,
+  turnstileSiteKey = null,
 }: {
   mode: "login" | "signup";
   providers: SocialProviderFlags;
   legal: LegalLinks;
   /** Login only: render the "Forgot password?" link (instance can send the reset email). */
   forgotPassword?: boolean;
+  /** Set when the instance verifies a Turnstile token on the email form. */
+  turnstileSiteKey?: string | null;
 }) {
   const t = useTranslations(`auth.${mode}`);
   const tSocial = useTranslations("auth.social");
@@ -77,6 +81,7 @@ export function AuthForm({
   // so the common flow starts as a single field. Signup shows everything.
   const [passwordShown, setPasswordShown] = useState(mode === "signup");
   const passwordRef = useRef<HTMLInputElement>(null);
+  const turnstile = useTurnstile(turnstileSiteKey);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -87,14 +92,27 @@ export function AuthForm({
     }
     setPending("email");
     setErrorMessage(null);
+    let token: string | null;
+    try {
+      token = await turnstile.getToken();
+    } catch {
+      setErrorMessage(t("captcha"));
+      setPending(null);
+      return;
+    }
+    const fetchOptions = { headers: captchaHeaders(token) };
     const { data, error } =
       mode === "login"
-        ? await authClient.signIn.email({ email, password })
-        : await authClient.signUp.email({ name, email, password });
+        ? await authClient.signIn.email({ email, password, fetchOptions })
+        : await authClient.signUp.email({ name, email, password, fetchOptions });
     if (error) {
       // Signup shows server messages (e.g. the signup-disabled policy)
       // verbatim; login never echoes the server, only the catalog copy.
-      setErrorMessage((mode === "signup" && error.message) || t("error"));
+      setErrorMessage(
+        error.code === "VERIFICATION_FAILED" || error.code === "MISSING_RESPONSE"
+          ? t("captcha")
+          : (mode === "signup" && error.message) || t("error"),
+      );
       setPending(null);
       return;
     }
@@ -236,6 +254,7 @@ export function AuthForm({
             </div>
           ) : null}
           {errorMessage ? <p className={styles.error}>{errorMessage}</p> : null}
+          {turnstile.slot}
           <button
             type="submit"
             className={`ms-btn ms-btn-primary ${styles.button}`}
