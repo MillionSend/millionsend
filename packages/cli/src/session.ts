@@ -8,14 +8,7 @@ import type { Progress, StepHandle } from "./progress.js";
 import { type OnProgress, type Provider, providers, type Source } from "./providers/index.js";
 import { RESEND_BASE_URL_ENV } from "./providers/resend.js";
 import { dim, ok, SYM, wrapIndent } from "./theme.js";
-import {
-  banner,
-  pickBannerTier,
-  secretPrompt,
-  selectPrompt,
-  textPrompt,
-  wrapText,
-} from "./tty-ui.js";
+import { banner, pickBannerTier, secretPrompt, selectPrompt, textPrompt } from "./tty-ui.js";
 import { capitalize, formatNumber } from "./utils.js";
 
 /** MillionSend allows 600 requests per minute per key; batch endpoints keep the real rate far below. */
@@ -41,7 +34,7 @@ export function printHeader(ctx: Context, text: string): void {
     return;
   }
   for (const line of banner(tier)) out.write(`${line}\n`);
-  out.write(`\n${dim(wrapText(text, Math.min(out.columns ?? 80, 80) - 2))}\n\n`);
+  out.write(`\n${dim(wrapIndent(text))}\n\n`);
 }
 
 async function resolveKey(
