@@ -3,9 +3,13 @@
 import { useCallback, useEffect, useRef } from "react";
 
 const SCRIPT_URL = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+/* Global Turnstile calls once the API is usable: the supported "ready" signal
+   for a script added at runtime (turnstile.ready() throws for async tags). */
+const ONLOAD_CALLBACK = "__millionsendTurnstileLoaded";
+/* A token request that never settles must fail visibly, not hang the button. */
+const TOKEN_TIMEOUT_MS = 30_000;
 
 interface TurnstileApi {
-  ready(callback: () => void): void;
   render(
     container: HTMLElement,
     options: {
@@ -29,19 +33,17 @@ declare global {
 }
 
 let scriptLoading: Promise<TurnstileApi> | undefined;
-/** Loads the API once and resolves only when Turnstile reports itself ready. */
+/** Loads the API once and resolves when Turnstile calls back that it is usable. */
 function loadTurnstile(): Promise<TurnstileApi> {
   scriptLoading ??= new Promise((resolve, reject) => {
-    const settle = () => {
-      const api = window.turnstile;
-      if (!api) return reject(new Error("turnstile"));
-      api.ready(() => resolve(api));
+    if (window.turnstile) return resolve(window.turnstile);
+    (window as unknown as Record<string, unknown>)[ONLOAD_CALLBACK] = () => {
+      if (window.turnstile) resolve(window.turnstile);
+      else reject(new Error("turnstile"));
     };
-    if (window.turnstile) return settle();
     const script = document.createElement("script");
-    script.src = SCRIPT_URL;
+    script.src = `${SCRIPT_URL}&onload=${ONLOAD_CALLBACK}`;
     script.async = true;
-    script.onload = settle;
     script.onerror = () => reject(new Error("turnstile"));
     document.head.appendChild(script);
   });
@@ -93,7 +95,18 @@ export function useTurnstile(siteKey: string | null) {
     }
     const id = widgetId.current;
     return new Promise((resolve, reject) => {
-      pending.current = { resolve, reject: () => reject(new Error("turnstile")) };
+      const fail = () => reject(new Error("turnstile"));
+      const timer = window.setTimeout(fail, TOKEN_TIMEOUT_MS);
+      pending.current = {
+        resolve: (token) => {
+          window.clearTimeout(timer);
+          resolve(token);
+        },
+        reject: () => {
+          window.clearTimeout(timer);
+          fail();
+        },
+      };
       turnstile.reset(id);
       turnstile.execute(id);
     });

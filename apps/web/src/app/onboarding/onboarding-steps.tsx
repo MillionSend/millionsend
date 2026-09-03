@@ -156,6 +156,7 @@ export function OnboardingSteps({
   const [lang, setLang] = useState<SnippetLang>("node");
   const turnstile = useTurnstile(turnstileSiteKey);
   const [captchaFailed, setCaptchaFailed] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
 
@@ -466,19 +467,22 @@ export function OnboardingSteps({
           <button
             type="button"
             className="ms-btn ms-btn-primary"
-            disabled={sendFirst.isPending}
+            disabled={verifying || sendFirst.isPending}
             onClick={async () => {
               setCaptchaFailed(false);
+              setVerifying(true);
               try {
                 const token = await turnstile.getToken();
                 sendFirst.mutate({ locale: mailLocale, ...(token ? { captchaToken: token } : {}) });
               } catch {
                 setCaptchaFailed(true);
+              } finally {
+                setVerifying(false);
               }
             }}
           >
-            <BtnSpinner on={sendFirst.isPending} />
-            {sendFirst.isPending ? t("step2.sending") : t("step2.sendCta")}
+            <BtnSpinner on={verifying || sendFirst.isPending} />
+            {verifying || sendFirst.isPending ? t("step2.sending") : t("step2.sendCta")}
           </button>
           {turnstile.slot}
           {sendFirst.isSuccess ? (
