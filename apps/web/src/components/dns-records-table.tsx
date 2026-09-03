@@ -12,6 +12,7 @@ import {
   type RecordStatus,
   sesGateFromRecordStatus,
 } from "@/lib/dns-record-status";
+import { abbreviateDkim } from "@/lib/format";
 import { zoneRelativeName } from "@/lib/zone";
 
 const GROUPS = ["verification", "sending", "dmarc", "tracking"] as const;
@@ -37,6 +38,8 @@ export type DnsRecord = {
   status: "verified" | "pending" | "failed" | null;
   /** Live DNS verdict from the last Check DNS; absent until one runs. */
   live?: LiveDnsStatus | undefined;
+  /** On a live mismatch: what the name answered instead, one answer per line. */
+  found?: string | undefined;
   /** Set when this name is empty but a parent record governs it (DMARC organizational-domain fallback). */
   inherited?: { name: string; policy: string } | undefined;
 };
@@ -163,7 +166,12 @@ export function DnsRecordsTable({
                         <CopyChip value={name} title={record.name} />
                       </td>
                       <td style={{ paddingRight: 24 }}>
-                        <CopyChip value={record.value} />
+                        <CopyChip
+                          value={record.value}
+                          {...(record.group === "verification"
+                            ? { display: abbreviateDkim(record.value) }
+                            : {})}
+                        />
                       </td>
                       <td>{t("detail.ttlAuto")}</td>
                       <td>{record.priority ?? "—"}</td>
@@ -181,7 +189,14 @@ export function DnsRecordsTable({
                                     from: record.inherited.name,
                                     policy: record.inherited.policy,
                                   })
-                                : undefined
+                                : record.live === "mismatch" && record.found
+                                  ? t("detail.mismatchFound", {
+                                      found: record.found
+                                        .split("\n")
+                                        .map(abbreviateDkim)
+                                        .join("\n"),
+                                    })
+                                  : undefined
                             }
                           />
                         </td>

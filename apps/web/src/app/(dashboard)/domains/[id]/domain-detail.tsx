@@ -432,6 +432,7 @@ export function DomainDetail({ id }: { id: string }) {
       name: string;
       value: string;
       status: "found" | "missing" | "mismatch" | "unknown";
+      found?: string | undefined;
       inherited?: { name: string; policy: string } | undefined;
     }[]
   >([]);
@@ -620,7 +621,7 @@ export function DomainDetail({ id }: { id: string }) {
   const liveByKey = new Map(liveDns.map((r) => [`${r.type}\t${r.name}\t${r.value}`, r]));
   const rows = ((records.data?.records ?? []) as DnsRecord[]).map((r) => {
     const live = liveByKey.get(`${r.type}\t${r.name}\t${r.value}`);
-    return { ...r, live: live?.status, inherited: live?.inherited };
+    return { ...r, live: live?.status, found: live?.found, inherited: live?.inherited };
   });
   // The DNS check only has a job while something is unverified: the domain
   // identity, or a branded-tracking CNAME that has not resolved yet. Once

@@ -79,6 +79,19 @@ export function formatUtcMinute(date: Date | string | number): string {
   return `${new Date(date).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
+/**
+ * DKIM TXT value for display: every RSA-2048 public key opens with the same
+ * 44 characters of SPKI header and closes with the exponent's "IDAQAB", so an
+ * end-ellipsized chip shows two domains' keys as identical. Keep the tag, a
+ * slice from where keys actually differ, and the tail; the full value copies.
+ */
+export function abbreviateDkim(value: string): string {
+  const match = /p=([A-Za-z0-9+/=]{60,})/.exec(value);
+  if (!match?.[1]) return value;
+  const key = match[1];
+  return value.replace(key, `${key.slice(0, 4)}…${key.slice(44, 60)}…${key.slice(-6)}`);
+}
+
 /** Trims trailing zeros from a fixed-decimal rendering ("2.30" → "2.3"). */
 function trimFixed(value: number, decimals: number): string {
   return value.toFixed(decimals).replace(/\.?0+$/, "");

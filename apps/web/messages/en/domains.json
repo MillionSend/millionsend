@@ -159,6 +159,7 @@
       "pending": "Pending",
       "verified": "Verified"
     },
+    "mismatchFound": "DNS answers with:\n{found}",
     "inheritedDmarc": "No record at this name. Receivers fall back to <code>{from}</code> (<code>p={policy}</code>), which already covers this subdomain.",
     "goToProvider": "Go to {provider}",
     "moreActions": "More actions",

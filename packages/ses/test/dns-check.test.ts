@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { checkDnsRecords, type DnsResolver } from "../src/dns-check.js";
+import {
+  checkDnsRecords,
+  checkDnsRecordsDetailed,
+  type DnsResolver,
+  resolvePublicFirst,
+} from "../src/dns-check.js";
 
 const empty: DnsResolver = {
   resolveTxt: async () => [],
@@ -70,8 +75,51 @@ describe("checkDnsRecords", () => {
     expect(out).toEqual(["unknown", "missing", "missing"]);
   });
 
+  it("a mismatch carries what the name answered instead", async () => {
+    const resolver: DnsResolver = {
+      resolveTxt: async () => [["v=spf1 include:other ~all"], ["v=DKIM1; k=rsa; ", "p=OLD"]],
+      resolveMx: async () => [{ priority: 20, exchange: "mx.other.example." }],
+      resolveCname: async () => ["elsewhere.example."],
+    };
+    const [txt, mx, cname] = await checkDnsRecordsDetailed(
+      [
+        { type: "TXT", name: "a", value: '"v=DKIM1; k=rsa; p=NEW"' },
+        { type: "MX", name: "b", value: "feedback-smtp.us-east-1.amazonses.com", priority: 10 },
+        { type: "CNAME", name: "c", value: "app.example.com" },
+      ],
+      resolver,
+    );
+    expect(txt).toEqual({
+      status: "mismatch",
+      found: "v=spf1 include:other ~all\nv=DKIM1; k=rsa; p=OLD",
+    });
+    expect(mx).toEqual({ status: "mismatch", found: "20 mx.other.example" });
+    expect(cname).toEqual({ status: "mismatch", found: "elsewhere.example" });
+    // A hit never carries an answer list.
+    expect(
+      await checkDnsRecordsDetailed(
+        [{ type: "CNAME", name: "c", value: "elsewhere.example" }],
+        resolver,
+      ),
+    ).toEqual([{ status: "found" }]);
+  });
+
   it("reads an unanswered name as missing", async () => {
     const [status] = await checkDnsRecords([{ type: "TXT", name: "a", value: '"x"' }], empty);
     expect(status).toBe("missing");
+  });
+});
+
+describe("resolvePublicFirst", () => {
+  it("falls back to the system resolver only on inconclusive public failures", async () => {
+    const timeout = () => Promise.reject(Object.assign(new Error("timeout"), { code: "ETIMEOUT" }));
+    const nxdomain = () =>
+      Promise.reject(Object.assign(new Error("nxdomain"), { code: "ENOTFOUND" }));
+    const system = async () => ["from-system"];
+
+    expect(await resolvePublicFirst(async () => ["from-public"], system)).toEqual(["from-public"]);
+    expect(await resolvePublicFirst(timeout, system)).toEqual(["from-system"]);
+    // A conclusive "no such record" from the public resolver is the answer.
+    await expect(resolvePublicFirst(nxdomain, system)).rejects.toMatchObject({ code: "ENOTFOUND" });
   });
 });

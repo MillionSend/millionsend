@@ -2,6 +2,7 @@ import {
   resolveCname as dnsResolveCname,
   resolveMx as dnsResolveMx,
   resolveTxt as dnsResolveTxt,
+  Resolver,
 } from "node:dns/promises";
 import type { LiveDnsStatus } from "@millionsend/core/domain-status";
 
@@ -12,10 +13,49 @@ export interface DnsResolver {
   resolveCname(hostname: string): Promise<string[]>;
 }
 
+/* Public resolvers are asked first: the host's stub resolver may serve a
+   record's previous value for as long as it likes (some providers clamp
+   TTLs), and a check that keeps reporting a fixed record as wrong sends
+   people re-pasting a correct value. Cloudflare and Google answer for any
+   public zone and honour the zone's TTL. */
+const PUBLIC_DNS_SERVERS = ["1.1.1.1", "8.8.8.8", "1.0.0.1", "8.8.4.4"];
+const PUBLIC_DNS_TIMEOUT_MS = 2500;
+const publicResolver = new Resolver({ timeout: PUBLIC_DNS_TIMEOUT_MS, tries: 1 });
+publicResolver.setServers(PUBLIC_DNS_SERVERS);
+
+/**
+ * NXDOMAIN/NODATA from the public resolver is a conclusive answer and
+ * propagates; anything else (egress to port 53 blocked, timeout, SERVFAIL)
+ * falls back to the system resolver so a locked-down self-host still checks.
+ */
+export async function resolvePublicFirst<T>(
+  viaPublic: () => Promise<T>,
+  viaSystem: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await withTimeout(viaPublic(), PUBLIC_DNS_TIMEOUT_MS);
+  } catch (err) {
+    if (dnsErrorStatus(err) === "missing") throw err;
+    return viaSystem();
+  }
+}
+
 export const nodeDnsResolver: DnsResolver = {
-  resolveTxt: (name) => dnsResolveTxt(name),
-  resolveMx: (name) => dnsResolveMx(name),
-  resolveCname: (name) => dnsResolveCname(name),
+  resolveTxt: (name) =>
+    resolvePublicFirst(
+      () => publicResolver.resolveTxt(name),
+      () => dnsResolveTxt(name),
+    ),
+  resolveMx: (name) =>
+    resolvePublicFirst(
+      () => publicResolver.resolveMx(name),
+      () => dnsResolveMx(name),
+    ),
+  resolveCname: (name) =>
+    resolvePublicFirst(
+      () => publicResolver.resolveCname(name),
+      () => dnsResolveCname(name),
+    ),
 };
 
 export interface DnsCheckRecord {
@@ -61,39 +101,63 @@ const normTxt = (value: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-async function checkOne(record: DnsCheckRecord, resolver: DnsResolver): Promise<LiveDnsStatus> {
+/** A record's live verdict; on `mismatch`, what the name answered instead (one answer per line). */
+export interface LiveDnsCheck {
+  status: LiveDnsStatus;
+  found?: string;
+}
+
+const mismatch = (answers: string[]): LiveDnsCheck => ({
+  status: "mismatch",
+  found: answers.join("\n"),
+});
+
+async function checkOne(record: DnsCheckRecord, resolver: DnsResolver): Promise<LiveDnsCheck> {
   try {
     if (record.type === "MX") {
       const rows = await withTimeout(resolver.resolveMx(record.name), DNS_TIMEOUT_MS);
-      if (rows.length === 0) return "missing";
+      if (rows.length === 0) return { status: "missing" };
       const want = stripDot(record.value);
       const match = rows.some(
         (r) =>
           stripDot(r.exchange) === want &&
           (record.priority === undefined || r.priority === record.priority),
       );
-      return match ? "found" : "mismatch";
+      return match
+        ? { status: "found" }
+        : mismatch(rows.map((r) => `${r.priority} ${stripDot(r.exchange)}`));
     }
     if (record.type === "CNAME") {
       const rows = await withTimeout(resolver.resolveCname(record.name), DNS_TIMEOUT_MS);
-      if (rows.length === 0) return "missing";
+      if (rows.length === 0) return { status: "missing" };
       const want = stripDot(record.value);
-      return rows.some((r) => stripDot(r) === want) ? "found" : "mismatch";
+      return rows.some((r) => stripDot(r) === want)
+        ? { status: "found" }
+        : mismatch(rows.map(stripDot));
     }
     const rows = await withTimeout(resolver.resolveTxt(record.name), DNS_TIMEOUT_MS);
-    if (rows.length === 0) return "missing";
+    if (rows.length === 0) return { status: "missing" };
     const want = normTxt(record.value);
-    return rows.some((chunks) => normTxt(chunks.join("")) === want) ? "found" : "mismatch";
+    const answers = rows.map((chunks) => normTxt(chunks.join("")));
+    return answers.includes(want) ? { status: "found" } : mismatch(answers);
   } catch (err) {
     // Never throw: NXDOMAIN/NODATA read missing, anything else unknown.
-    return dnsErrorStatus(err);
+    return { status: dnsErrorStatus(err) };
   }
 }
 
-/** Resolve every expected record's live status in parallel, aligned to input order. */
-export function checkDnsRecords(
+/** Resolve every expected record in parallel, aligned to input order, with what a mismatch found. */
+export function checkDnsRecordsDetailed(
+  records: DnsCheckRecord[],
+  resolver: DnsResolver,
+): Promise<LiveDnsCheck[]> {
+  return Promise.all(records.map((record) => checkOne(record, resolver)));
+}
+
+/** Statuses only — the shape single-record callers (the tracking CNAME) read. */
+export async function checkDnsRecords(
   records: DnsCheckRecord[],
   resolver: DnsResolver,
 ): Promise<LiveDnsStatus[]> {
-  return Promise.all(records.map((record) => checkOne(record, resolver)));
+  return (await checkDnsRecordsDetailed(records, resolver)).map((check) => check.status);
 }

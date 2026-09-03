@@ -9,7 +9,7 @@ import {
 } from "@millionsend/core/domain-status";
 import { registrableDomain } from "@millionsend/core/org-domain";
 import { type DmarcLookup, type DmarcPolicy, lookupDmarc } from "./dmarc.js";
-import { checkDnsRecords, type DnsResolver } from "./dns-check.js";
+import { checkDnsRecordsDetailed, type DnsResolver } from "./dns-check.js";
 import {
   DKIM_SELECTOR,
   type DnsRecordGroup,
@@ -36,6 +36,8 @@ export interface DomainVerificationResult {
     name: string;
     value: string;
     status: LiveDnsStatus;
+    /** On `mismatch`: what the name answered instead, one answer per line. */
+    found?: string;
     /** The row's own name is empty but this parent record governs it (DMARC organizational-domain fallback). */
     inherited?: { name: string; policy: DmarcPolicy };
   }[];
@@ -101,17 +103,19 @@ export async function computeDomainVerification(
   // insights read the persisted snapshot instead.
   const checked = records.filter((record) => record.group !== "dmarc");
   const [checkedLive, dmarc] = await Promise.all([
-    checkDnsRecords(checked, resolver),
+    checkDnsRecordsDetailed(checked, resolver),
     lookupDmarc(domain.name, registrableDomain(domain.name), resolver),
   ]);
-  const live = records.map((record) =>
-    record.group === "dmarc" ? dmarc.status : checkedLive[checked.indexOf(record)],
+  const checks = records.map((record) =>
+    record.group === "dmarc" ? { status: dmarc.status } : checkedLive[checked.indexOf(record)],
   );
+  const live = checks.map((check) => check?.status);
   const liveDns = records.map((record, i) => ({
     type: record.type,
     name: record.name,
     value: record.value,
     status: live[i] ?? "missing",
+    ...(checks[i]?.found ? { found: checks[i].found } : {}),
     ...(record.group === "dmarc" && dmarc.status === "found" && dmarc.name !== record.name
       ? { inherited: { name: dmarc.name, policy: dmarc.policy } }
       : {}),

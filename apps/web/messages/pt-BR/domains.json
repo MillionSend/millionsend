@@ -159,6 +159,7 @@
       "pending": "Pendente",
       "verified": "Verificado"
     },
+    "mismatchFound": "O DNS responde com:\n{found}",
     "inheritedDmarc": "Nenhum registro neste nome. Os destinatários recorrem a <code>{from}</code> (<code>p={policy}</code>), que já cobre este subdomínio.",
     "goToProvider": "Ir para {provider}",
     "moreActions": "Mais ações",

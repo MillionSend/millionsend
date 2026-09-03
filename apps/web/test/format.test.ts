@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  abbreviateDkim,
   formatDayUtc,
   formatDurationShort,
   formatHoursMinutes,
@@ -54,5 +55,17 @@ describe("maskApiKey", () => {
 
   it("falls back to the whole prefix when the scheme is unrecognized", () => {
     expect(maskApiKey("legacy", "wxyz")).toBe("legacy••••••••wxyz");
+  });
+});
+
+describe("abbreviateDkim", () => {
+  it("keeps the tag, a distinguishing slice and the tail; leaves other values alone", () => {
+    const key = `MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA02w+k3GAoJB5AafV${"x".repeat(300)}IDAQAB`;
+    expect(abbreviateDkim(`"v=DKIM1; k=rsa; p=${key}"`)).toBe(
+      '"v=DKIM1; k=rsa; p=MIIB…02w+k3GAoJB5AafV…IDAQAB"',
+    );
+    expect(abbreviateDkim('"v=spf1 include:amazonses.com ~all"')).toBe(
+      '"v=spf1 include:amazonses.com ~all"',
+    );
   });
 });

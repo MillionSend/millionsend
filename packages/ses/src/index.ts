@@ -7,8 +7,10 @@ export {
 export { type DmarcLookup, type DmarcPolicy, lookupDmarc, parseDmarcRecord } from "./dmarc.js";
 export {
   checkDnsRecords,
+  checkDnsRecordsDetailed,
   type DnsCheckRecord,
   type DnsResolver,
+  type LiveDnsCheck,
   nodeDnsResolver,
 } from "./dns-check.js";
 export {
