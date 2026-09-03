@@ -908,6 +908,23 @@ table.ms-table {
 svg:focus {
   outline: none;
 }
+/* The same policy, globally: nothing ever shows the browser's default ring,
+   and every interactive control without a rule of its own (nav links, tabs,
+   table links, focusable spans) draws the steel ring on :focus-visible.
+   Component rules above and below win on specificity where they differ. */
+:focus {
+  outline: none;
+}
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+[tabindex="0"]:focus-visible {
+  outline: none;
+  box-shadow: var(--ms-focus-ring);
+}
 
 /* Status dot — leading adornment in select options and status rows.
    The ring variant marks the unfiltered "all" row: an empty circle where a
