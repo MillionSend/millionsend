@@ -1370,7 +1370,7 @@ summary:focus-visible,
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.72);
-    z-index: var(--ms-z-modal);
+    z-index: calc(var(--ms-z-modal) - 2);
     animation: ms-fade var(--ms-dur-base) var(--ms-ease);
   }
   .ms-sidebar {
@@ -1378,9 +1378,9 @@ summary:focus-visible,
     height: 100dvh !important;
     left: 0;
     top: 0;
-    /* One above the scrim; body-portaled modals mount later in the DOM and
-       still paint over both at the same z token. */
-    z-index: calc(var(--ms-z-modal) + 1);
+    /* Above the scrim and every popover, below the modal token: a dialog
+       opened from the drawer (create team) must paint over the drawer. */
+    z-index: calc(var(--ms-z-modal) - 1);
     transform: translateX(-104%);
     visibility: hidden;
     transition:
