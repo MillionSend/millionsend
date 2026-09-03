@@ -11,12 +11,6 @@ means changing two environment variables, not rewriting your integration.
   <img src=".github/screenshots/emails.png" alt="The MillionSend dashboard: the Emails page, with each send's delivery status" width="900">
 </p>
 
-## Status
-
-Early development — the monorepo is taking shape in the open (pnpm + Turborepo; Drizzle
-schema and typed environment config first, product surfaces next). Watch this repo or join
-the [Discussions](https://github.com/orgs/MillionSend/discussions) to follow along.
-
 ## Features
 
 | Feature | Status | Notes |
@@ -62,3 +56,7 @@ Code is licensed under [AGPL-3.0](LICENSE). SDKs ship separately under MIT
 
 The MillionSend name, wordmark, and logos are trademarks of the MillionSend project and are
 not licensed under the AGPL.
+
+## Community
+
+Questions, ideas and roadmap talk live in the [Discussions](https://github.com/orgs/MillionSend/discussions).
