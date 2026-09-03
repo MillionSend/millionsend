@@ -91,5 +91,7 @@
     "body": "O erro é do nosso lado. Recarregue, ou tente de novo em instantes.",
     "retry": "Tentar de novo",
     "cta": "Ir para o painel"
-  }
+  },
+  "confirmWord": "EXCLUIR",
+  "typeToConfirm": "Digite {word} para confirmar"
 }

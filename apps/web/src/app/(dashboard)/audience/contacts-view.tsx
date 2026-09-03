@@ -377,6 +377,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
         message: t("contacts.bulk.deleteBody", { count: selected.size }),
         confirmLabel: t("contacts.bulk.deleteConfirm"),
         danger: true,
+        typeToConfirm: true,
       });
       if (!ok) return;
       const ids = [...selected];

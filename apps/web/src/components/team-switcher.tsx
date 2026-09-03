@@ -13,12 +13,14 @@ import { useTRPC } from "@/lib/trpc";
 
 function PlanBadge({ plan }: { plan: string }) {
   const t = useTranslations("common");
+  const paid = plan !== "free";
   return (
     <span
       style={{
         fontSize: 11,
-        color: "var(--ms-muted)",
-        border: "1px solid var(--ms-line)",
+        color: paid ? "var(--ms-success)" : "var(--ms-muted)",
+        background: paid ? "var(--ms-success-bg)" : undefined,
+        border: `1px solid ${paid ? "var(--ms-success-border)" : "var(--ms-line)"}`,
         borderRadius: 999,
         padding: "1px 8px",
         flex: "none",

@@ -138,7 +138,6 @@
     "name": "Nome da equipe",
     "save": "Salvar",
     "saved": "Salvo",
-    "slug": "Slug",
     "plan": "Plano",
     "error": "Não foi possível salvar.",
     "logo": {
@@ -147,7 +146,9 @@
       "replace": "Trocar logo",
       "remove": "Remover",
       "hint": "PNG, JPEG ou WebP, de até 2 MB. Aparece onde sua equipe é exibida.",
-      "error": "Não foi possível atualizar a logo."
+      "error": "Não foi possível atualizar a logo.",
+      "removeTitle": "Remover logo",
+      "removeBody": "A equipe volta à inicial. Você pode enviar uma logo de novo quando quiser."
     }
   },
   "plans": {

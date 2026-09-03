@@ -6,7 +6,6 @@ import { useLocale, useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { StatBlock } from "@/components/stat-block";
 import { WarnCard } from "@/components/warn-card";
 import { formatDayTime } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
@@ -196,10 +195,14 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         </div>
 
         <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 22 }}>
-          <StatBlock
-            label={t("dailyLimit")}
-            value={dailyLimit === null ? "∞" : fmt.format(dailyLimit)}
-          />
+          <div>
+            <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
+              {t("dailyLimit")}
+            </div>
+            <div style={{ marginTop: 6, color: "var(--ms-bone)", fontSize: "var(--ms-fs-ui)" }}>
+              {dailyLimit === null ? t("unlimited") : fmt.format(dailyLimit)}
+            </div>
+          </div>
           {currentPeriodEnd && plan !== "free" ? (
             <div>
               <div className="ms-microlabel" style={{ fontSize: 10.5 }}>

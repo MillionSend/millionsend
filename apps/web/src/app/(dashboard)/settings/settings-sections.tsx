@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
@@ -28,21 +29,41 @@ const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 const LOCALE_OPTIONS: readonly AppLocale[] = ["en", "pt-BR"];
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionCard({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  /** Right-aligned control on the title row (the card's primary action). */
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section className="ms-card" style={{ padding: 24 }}>
-      <h2
-        className="ms-display"
-        style={{ fontSize: "var(--ms-fs-h2)", color: "var(--ms-bone)", margin: "0 0 18px" }}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          margin: "0 0 18px",
+        }}
       >
-        {title}
-      </h2>
+        <h2
+          className="ms-display"
+          style={{ fontSize: "var(--ms-fs-h2)", color: "var(--ms-bone)", margin: 0 }}
+        >
+          {title}
+        </h2>
+        {action}
+      </div>
       {children}
     </section>
   );
 }
 
-function TeamSection() {
+function TeamSection({ billing }: { billing: boolean }) {
   const t = useTranslations("settings");
   const trpc = useTRPC();
   const router = useRouter();
@@ -89,36 +110,41 @@ function TeamSection() {
     // the slug/plan line boxes match the loaded card exactly.
     return (
       <SectionCard title={t("team.title")}>
-        <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
-          {/* span, not label: there is no control to label yet. Metrics mirror .ms-field label. */}
-          <span
-            style={{
-              display: "block",
-              fontSize: "var(--ms-fs-label)",
-              color: "var(--ms-muted)",
-              marginBottom: 6,
-            }}
-          >
-            {t("team.name")}
-          </span>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <Skeleton width={200} height={30} radius="var(--ms-r-input)" />
-            <Skeleton width={56} height={30} radius="var(--ms-r-input)" />
-          </div>
-        </div>
-        <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 22 }}>
-          <div>
-            <div className="ms-microlabel">{t("team.slug")}</div>
-            <div className="ms-mono" style={{ marginTop: 4, display: "flex" }}>
-              <Skeleton width={80} height="1lh" />
+        <div className="ms-kpi-row" style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
+          <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
+            {/* span, not label: there is no control to label yet. Metrics mirror .ms-field label. */}
+            <span
+              style={{
+                display: "block",
+                fontSize: "var(--ms-fs-label)",
+                color: "var(--ms-muted)",
+                marginBottom: 6,
+              }}
+            >
+              {t("team.name")}
+            </span>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <Skeleton width={200} height={30} radius="var(--ms-r-input)" />
+              <Skeleton width={56} height={30} radius="var(--ms-r-input)" />
             </div>
           </div>
-          <div>
-            <div className="ms-microlabel">{t("team.plan")}</div>
-            <div style={{ marginTop: 4 }}>
-              <SkeletonBadge width={48} />
+          {billing ? (
+            <div className="ms-field">
+              <span
+                style={{
+                  display: "block",
+                  fontSize: "var(--ms-fs-label)",
+                  color: "var(--ms-muted)",
+                  marginBottom: 6,
+                }}
+              >
+                {t("team.plan")}
+              </span>
+              <div style={{ height: 30, display: "flex", alignItems: "center" }}>
+                <SkeletonBadge width={48} />
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
       </SectionCard>
     );
@@ -127,128 +153,157 @@ function TeamSection() {
   const name = draft ?? team.name;
   return (
     <SectionCard title={t("team.title")}>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          rename.mutate({ name });
-        }}
-      >
-        <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
-          <label htmlFor="settings-team-name">{t("team.name")}</label>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <input
-              id="settings-team-name"
-              type="text"
-              className="ms-input"
-              style={{ flex: 1, maxWidth: 420 }}
-              required
-              maxLength={80}
-              disabled={rename.isPending}
-              value={name}
-              onChange={(e) => setDraft(e.target.value)}
-            />
-            <button type="submit" className="ms-btn ms-btn-secondary" disabled={rename.isPending}>
-              <BtnSpinner on={rename.isPending} />
-              {t("team.save")}
-            </button>
-            {rename.isSuccess && draft === null ? (
-              <span style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
-                ✓ {t("team.saved")}
-              </span>
-            ) : null}
-          </div>
-        </div>
-        {rename.isError ? (
-          <p
-            style={{ margin: "8px 0 0", color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}
-          >
-            {t("team.error")}
-          </p>
-        ) : null}
-      </form>
-      {team.logoUploadsEnabled && canManageLogo ? (
-        <div className="ms-field" style={{ marginTop: 18 }}>
-          {/* span, not label: the controls are buttons, not a labelable input. Metrics mirror .ms-field label. */}
-          <span
-            style={{
-              display: "block",
-              fontSize: "var(--ms-fs-label)",
-              color: "var(--ms-muted)",
-              marginBottom: 6,
-            }}
-          >
-            {t("team.logo.label")}
-          </span>
-          <input
-            ref={logoInputRef}
-            type="file"
-            accept={TEAM_LOGO_ACCEPT}
-            style={{ display: "none" }}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              // Re-selecting the same file must fire change again.
-              event.target.value = "";
-              if (!file) return;
-              if (file.size > TEAM_LOGO_MAX_BYTES) {
-                setLogoError(true);
-                return;
-              }
-              void runLogoChange((teamId) => uploadTeamLogo(teamId, file));
-            }}
-          />
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <TeamLogo name={team.name} logoUrl={team.logoUrl} size={40} />
-            <button
-              type="button"
-              className="ms-btn ms-btn-secondary"
-              disabled={logoBusy || !teamList}
-              onClick={() => logoInputRef.current?.click()}
-            >
-              <BtnSpinner on={logoBusy} />
-              {team.logoUrl ? t("team.logo.replace") : t("team.logo.upload")}
-            </button>
-            {team.logoUrl ? (
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                disabled={logoBusy}
-                onClick={() => void runLogoChange((teamId) => removeTeamLogo(teamId))}
-              >
-                {t("team.logo.remove")}
+      {/* Name, logo and plan share one row; the row wraps into columns on narrow screens. */}
+      <div className="ms-kpi-row" style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            rename.mutate({ name });
+          }}
+        >
+          <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
+            <label htmlFor="settings-team-name">{t("team.name")}</label>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <input
+                id="settings-team-name"
+                type="text"
+                className="ms-input"
+                style={{ flex: 1, maxWidth: 420 }}
+                required
+                maxLength={80}
+                disabled={rename.isPending}
+                value={name}
+                onChange={(e) => setDraft(e.target.value)}
+              />
+              <button type="submit" className="ms-btn ms-btn-secondary" disabled={rename.isPending}>
+                <BtnSpinner on={rename.isPending} />
+                {t("team.save")}
               </button>
-            ) : null}
+              {rename.isSuccess && draft === null ? (
+                <span style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
+                  ✓ {t("team.saved")}
+                </span>
+              ) : null}
+            </div>
           </div>
-          <p
-            style={{ margin: "6px 0 0", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}
-          >
-            {t("team.logo.hint")}
-          </p>
-          {logoError ? (
+          {rename.isError ? (
             <p
               style={{
-                margin: "6px 0 0",
+                margin: "8px 0 0",
                 color: "var(--ms-danger)",
                 fontSize: "var(--ms-fs-label)",
               }}
             >
-              {t("team.logo.error")}
+              {t("team.error")}
             </p>
           ) : null}
-        </div>
-      ) : null}
-      <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 22 }}>
-        <div>
-          <div className="ms-microlabel">{t("team.slug")}</div>
-          <div className="ms-mono" style={{ marginTop: 4, color: "var(--ms-bone)" }}>
-            {team.slug}
+        </form>
+        {team.logoUploadsEnabled && canManageLogo ? (
+          <div className="ms-field" style={{ maxWidth: 420 }}>
+            {/* span, not label: the controls are buttons, not a labelable input. Metrics mirror .ms-field label. */}
+            <span
+              style={{
+                display: "block",
+                fontSize: "var(--ms-fs-label)",
+                color: "var(--ms-muted)",
+                marginBottom: 6,
+              }}
+            >
+              {t("team.logo.label")}
+            </span>
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept={TEAM_LOGO_ACCEPT}
+              style={{ display: "none" }}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                // Re-selecting the same file must fire change again.
+                event.target.value = "";
+                if (!file) return;
+                if (file.size > TEAM_LOGO_MAX_BYTES) {
+                  setLogoError(true);
+                  return;
+                }
+                void runLogoChange((teamId) => uploadTeamLogo(teamId, file));
+              }}
+            />
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <TeamLogo name={team.name} logoUrl={team.logoUrl} size={30} />
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                disabled={logoBusy || !teamList}
+                onClick={() => logoInputRef.current?.click()}
+              >
+                <BtnSpinner on={logoBusy} />
+                {team.logoUrl ? t("team.logo.replace") : t("team.logo.upload")}
+              </button>
+              {team.logoUrl ? (
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-secondary"
+                  disabled={logoBusy}
+                  onClick={async () => {
+                    const ok = await confirmDialog({
+                      title: t("team.logo.removeTitle"),
+                      message: t("team.logo.removeBody"),
+                      confirmLabel: t("team.logo.remove"),
+                      danger: true,
+                    });
+                    if (ok) void runLogoChange((teamId) => removeTeamLogo(teamId));
+                  }}
+                >
+                  {t("team.logo.remove")}
+                </button>
+              ) : null}
+            </div>
+            <p
+              style={{
+                margin: "6px 0 0",
+                color: "var(--ms-muted)",
+                fontSize: "var(--ms-fs-label)",
+              }}
+            >
+              {t("team.logo.hint")}
+            </p>
+            {logoError ? (
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  color: "var(--ms-danger)",
+                  fontSize: "var(--ms-fs-label)",
+                }}
+              >
+                {t("team.logo.error")}
+              </p>
+            ) : null}
           </div>
-        </div>
-        <div>
-          <div className="ms-microlabel">{t("team.plan")}</div>
-          <div style={{ marginTop: 4 }}>
-            <span className="ms-badge ms-badge-neutral">{t(`plans.${team.plan}`)}</span>
+        ) : null}
+        {billing ? (
+          <div className="ms-field">
+            <span
+              style={{
+                display: "block",
+                fontSize: "var(--ms-fs-label)",
+                color: "var(--ms-muted)",
+                marginBottom: 6,
+              }}
+            >
+              {t("team.plan")}
+            </span>
+            <div style={{ height: 30, display: "flex", alignItems: "center" }}>
+              {/* The pill is the way into billing; a paid plan reads as a success. */}
+              <Link
+                href="/settings/billing"
+                className={`ms-badge ${team.plan === "free" ? "ms-badge-neutral" : "ms-badge-success"}`}
+                style={{ textDecoration: "none" }}
+              >
+                {t(`plans.${team.plan}`)}
+              </Link>
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
     </SectionCard>
   );
@@ -542,9 +597,10 @@ function MembersSection() {
   }
 
   return (
-    <SectionCard title={t("members.title")}>
-      {canManage ? (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+    <SectionCard
+      title={t("members.title")}
+      action={
+        canManage ? (
           <button
             type="button"
             className="ms-btn ms-btn-primary"
@@ -552,8 +608,9 @@ function MembersSection() {
           >
             {t("invitations.invite.trigger")}
           </button>
-        </div>
-      ) : null}
+        ) : null
+      }
+    >
       <Table>
         <thead>
           <tr>
@@ -848,6 +905,7 @@ function DangerSection() {
       message: t("deleteTeamBody", { name: active.teamName }),
       confirmLabel: t("deleteTeam"),
       danger: true,
+      typeToConfirm: true,
     });
     if (ok) deleteTeam.mutate();
   }
@@ -858,6 +916,7 @@ function DangerSection() {
       message: t("deleteAccountBody"),
       confirmLabel: t("deleteAccount"),
       danger: true,
+      typeToConfirm: true,
     });
     if (!ok) return;
     setAccountBusy(true);
@@ -912,7 +971,7 @@ function DangerSection() {
 export function SettingsSections({ showInstance }: { showInstance: boolean }) {
   return (
     <div style={{ display: "grid", gap: 20 }}>
-      <TeamSection />
+      <TeamSection billing={!showInstance} />
       <MembersSection />
       {showInstance ? <InstanceSection /> : null}
       <LanguageSection />

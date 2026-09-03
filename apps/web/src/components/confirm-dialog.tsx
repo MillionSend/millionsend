@@ -12,6 +12,8 @@ export interface ConfirmDialogOptions {
   cancelLabel?: string;
   /** Destructive confirms render the primary action in the danger style. */
   danger?: boolean;
+  /** Irreversible confirms: the action unlocks only after typing the confirm word (DELETE). */
+  typeToConfirm?: boolean;
 }
 
 interface ConfirmRequest extends ConfirmDialogOptions {
@@ -39,6 +41,9 @@ export function confirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
 export function ConfirmDialogHost() {
   const common = useTranslations("common");
   const [request, setRequest] = useState<ConfirmRequest | null>(null);
+  const [typed, setTyped] = useState("");
+  const word = common("confirmWord");
+  const locked = Boolean(request?.typeToConfirm) && typed.trim() !== word;
 
   useEffect(() => {
     listener = (next) => {
@@ -54,8 +59,10 @@ export function ConfirmDialogHost() {
   }, []);
 
   function close(ok: boolean) {
+    if (ok && locked) return;
     request?.resolve(ok);
     setRequest(null);
+    setTyped("");
   }
 
   return (
@@ -83,6 +90,23 @@ export function ConfirmDialogHost() {
             </p>
           ))}
         </div>
+        {request?.typeToConfirm ? (
+          <div className="ms-field" style={{ marginTop: 14 }}>
+            <label htmlFor="confirm-word">{common("typeToConfirm", { word })}</label>
+            <input
+              id="confirm-word"
+              className="ms-input mono"
+              style={{ width: "100%" }}
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              // biome-ignore lint/a11y/noAutofocus: the word is the dialog's only input, and the pointer is already on it
+              autoFocus
+              value={typed}
+              onChange={(event) => setTyped(event.target.value)}
+            />
+          </div>
+        ) : null}
         <ModalFooter>
           <button type="button" className="ms-btn ms-btn-secondary" onClick={() => close(false)}>
             {request?.cancelLabel ?? common("cancel")} <span className="ms-keycap">Esc</span>
@@ -90,6 +114,7 @@ export function ConfirmDialogHost() {
           <button
             type="submit"
             className={request?.danger ? "ms-btn ms-btn-destructive" : "ms-btn ms-btn-primary"}
+            disabled={locked}
           >
             {request?.confirmLabel ?? common("confirm")} <ConfirmKeycap />
           </button>

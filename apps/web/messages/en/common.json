@@ -91,5 +91,7 @@
     "body": "The error is on our side. Reload, or try again in a moment.",
     "retry": "Try again",
     "cta": "Go to the dashboard"
-  }
+  },
+  "confirmWord": "DELETE",
+  "typeToConfirm": "Type {word} to confirm"
 }
