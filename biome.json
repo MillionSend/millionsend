@@ -33,6 +33,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["packages/cli/scripts/preview/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noControlCharactersInRegex": "off"
+          }
+        }
+      }
     }
   ],
   "javascript": {
