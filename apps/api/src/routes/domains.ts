@@ -57,6 +57,8 @@ export interface DomainsSesDeps {
   defaultRegion?: string | undefined;
   /** The AUTH_EMAIL_FROM sender; in cloud its domain is reserved for system mail. */
   authEmailFrom?: string | undefined;
+  /** The ONBOARDING_EMAIL_FROM sender; reserved in cloud the same way. */
+  onboardingEmailFrom?: string | undefined;
 }
 
 type DomainRow = typeof schema.domains.$inferSelect;
@@ -261,6 +263,7 @@ export function registerDomainRoutes(
         isReservedSenderDomain(body.name, {
           isCloud: deps.isCloud,
           authEmailFrom: ses.authEmailFrom,
+          onboardingEmailFrom: ses.onboardingEmailFrom,
           isOperator,
         })
       ) {

@@ -269,6 +269,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           isReservedSenderDomain(input.name, {
             isCloud,
             authEmailFrom: env.AUTH_EMAIL_FROM,
+            onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
             isOperator,
           })
         ) {

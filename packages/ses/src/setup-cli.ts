@@ -465,7 +465,7 @@ async function accountEmailStep(
   if (!wanted) {
     console.log(
       dim(
-        "Skipped — set AUTH_EMAIL_FROM in .env any time (its domain must be verified in the dashboard).",
+        "Skipped — set AUTH_EMAIL_FROM (and ONBOARDING_EMAIL_FROM for the onboarding Send email button) in .env any time; their domains must be verified in the dashboard.",
       ),
     );
     return;

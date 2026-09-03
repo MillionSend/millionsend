@@ -33,6 +33,10 @@ describe("isReservedSenderDomain", () => {
     expect(isReservedSenderDomain("app.millionsend.com", { isCloud: true })).toBe(true);
     expect(isReservedSenderDomain("mail.ms-ops.dev", { isCloud: true, authEmailFrom })).toBe(true);
     expect(isReservedSenderDomain("ms-ops.dev", { isCloud: true, authEmailFrom })).toBe(false);
+    const onboardingEmailFrom = "onboarding@hello.ms-ops.dev";
+    expect(isReservedSenderDomain("hello.ms-ops.dev", { isCloud: true, onboardingEmailFrom })).toBe(
+      true,
+    );
     // A self-hoster's own auth domain is typically one of their team domains.
     expect(isReservedSenderDomain("mail.ms-ops.dev", { isCloud: false, authEmailFrom })).toBe(
       false,
