@@ -1098,6 +1098,12 @@ svg:focus {
   cursor: pointer;
   transition: color var(--ms-dur-fast) var(--ms-ease);
 }
+.ms-tooltip-trigger.inline {
+  border-radius: 4px;
+  color: inherit;
+  cursor: inherit;
+  white-space: nowrap;
+}
 .ms-tooltip-trigger:hover {
   color: var(--ms-bone);
 }

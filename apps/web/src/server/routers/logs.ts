@@ -46,6 +46,7 @@ export const logsRouter = router({
           method: t.method,
           path: t.path,
           statusCode: t.statusCode,
+          apiKeyId: t.apiKeyId,
           createdAt: t.createdAt,
           cursorCreatedAt: createdAtCursorField(t),
         })

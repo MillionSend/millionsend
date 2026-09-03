@@ -9,7 +9,8 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
-import { Skeleton, SkeletonChip } from "@/components/skeleton";
+import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
+import { type BadgeStatus, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
@@ -26,13 +27,28 @@ const SOURCES = ["api_key", "mcp"] as const;
 type Source = (typeof SOURCES)[number];
 const RANGE_KEYS: RangeKey[] = ["all", "h24", "d7", "d15", "d30"];
 
-const COL = { method: "12%", status: "12%", when: "14%" } as const;
+// Filter dots borrow the email-status hues they read as: a 2xx is a delivery,
+// a 4xx a complaint, a 5xx a failure; verbs go from the quiet read to the
+// destructive delete.
+const STATUS_CLASS_DOT: Record<StatusClass, BadgeStatus> = {
+  "2xx": "delivered",
+  "4xx": "complained",
+  "5xx": "failed",
+};
+const METHOD_DOT: Record<Method, BadgeStatus> = {
+  GET: "opened",
+  POST: "delivered",
+  PATCH: "complained",
+  DELETE: "failed",
+};
+
+const COL = { method: "12%", source: "11%", status: "10%", when: "14%" } as const;
 
 /**
  * Ghost stand-in mirroring the loaded table: mono chip, mono path bar,
- * status bar, right-aligned time bar. No spinners on lists.
+ * source pill, status bar, right-aligned time bar. No spinners on lists.
  */
-function LogsSkeleton({ headers }: { headers: [string, string, string, string] }) {
+function LogsSkeleton({ headers }: { headers: [string, string, string, string, string] }) {
   const widths = ["58%", "42%", "66%", "50%", "38%", "62%", "46%", "54%"];
   return (
     <Table>
@@ -40,9 +56,10 @@ function LogsSkeleton({ headers }: { headers: [string, string, string, string] }
         <tr>
           <th style={{ width: COL.method }}>{headers[0]}</th>
           <th>{headers[1]}</th>
-          <th style={{ width: COL.status }}>{headers[2]}</th>
+          <th style={{ width: COL.source }}>{headers[2]}</th>
+          <th style={{ width: COL.status }}>{headers[3]}</th>
           <th className="right" style={{ width: COL.when }}>
-            {headers[3]}
+            {headers[4]}
           </th>
         </tr>
       </thead>
@@ -55,6 +72,9 @@ function LogsSkeleton({ headers }: { headers: [string, string, string, string] }
             </td>
             <td>
               <Skeleton width={width} height={13} />
+            </td>
+            <td>
+              <SkeletonBadge width={58} />
             </td>
             <td>
               <Skeleton width={28} height={13} />
@@ -112,9 +132,10 @@ export default function LogsPage() {
     ),
   );
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
-  const headers: [string, string, string, string] = [
+  const headers: [string, string, string, string, string] = [
     t("list.method"),
     t("list.path"),
+    t("list.source"),
     t("list.status"),
     t("list.when"),
   ];
@@ -131,24 +152,28 @@ export default function LogsPage() {
         <Select
           value={range}
           onChange={setRange}
-          width={130}
+          width={140}
           ariaLabel={t(`list.range.${range}`)}
           options={RANGE_KEYS.map((key) => ({ value: key, label: t(`list.range.${key}`) }))}
         />
         <Select
           value={method}
           onChange={setMethod}
-          width={118}
+          width={140}
           ariaLabel={t("list.method")}
           options={[
-            { value: "all", label: t("list.allMethods") },
-            ...METHODS.map((m) => ({ value: m, label: m })),
+            { value: "all", label: t("list.allMethods"), adornment: <StatusDot /> },
+            ...METHODS.map((m) => ({
+              value: m,
+              label: m,
+              adornment: <StatusDot status={METHOD_DOT[m]} />,
+            })),
           ]}
         />
         <Select
           value={source}
           onChange={setSource}
-          width={126}
+          width={136}
           ariaLabel={t("list.source")}
           options={[
             { value: "all", label: t("list.allSources") },
@@ -158,11 +183,15 @@ export default function LogsPage() {
         <Select
           value={statusClass}
           onChange={setStatusClass}
-          width={118}
+          width={140}
           ariaLabel={t("list.status")}
           options={[
-            { value: "all", label: t("list.allStatuses") },
-            ...STATUS_CLASSES.map((s) => ({ value: s, label: s })),
+            { value: "all", label: t("list.allStatuses"), adornment: <StatusDot /> },
+            ...STATUS_CLASSES.map((s) => ({
+              value: s,
+              label: s,
+              adornment: <StatusDot status={STATUS_CLASS_DOT[s]} />,
+            })),
           ]}
         />
       </div>
@@ -196,9 +225,10 @@ export default function LogsPage() {
               <tr>
                 <th style={{ width: COL.method }}>{headers[0]}</th>
                 <th>{headers[1]}</th>
-                <th style={{ width: COL.status }}>{headers[2]}</th>
+                <th style={{ width: COL.source }}>{headers[2]}</th>
+                <th style={{ width: COL.status }}>{headers[3]}</th>
                 <th className="right" style={{ width: COL.when }}>
-                  {headers[3]}
+                  {headers[4]}
                 </th>
               </tr>
             </thead>
@@ -215,7 +245,6 @@ export default function LogsPage() {
                   <td
                     className="ms-mono"
                     style={{
-                      fontSize: 13,
                       maxWidth: 420,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -225,6 +254,11 @@ export default function LogsPage() {
                     <Link href={`/logs/${row.id}`} onClick={(event) => event.stopPropagation()}>
                       {row.path}
                     </Link>
+                  </td>
+                  <td>
+                    <span className="ms-badge ms-badge-neutral">
+                      {t(`list.sources.${row.apiKeyId ? "api_key" : "mcp"}`)}
+                    </span>
                   </td>
                   <td className="ms-mono">
                     <span style={{ color: statusCodeColor(row.statusCode) }}>{row.statusCode}</span>

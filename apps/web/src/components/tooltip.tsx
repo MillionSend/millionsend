@@ -25,12 +25,24 @@ function CircleInfoGlyph() {
  * viewport horizontally). Opens on hover and focus; click/tap toggles it
  * pinned for touch, and Esc or an outside tap dismisses. The panel is wired
  * to the trigger via aria-describedby while visible.
+ *
+ * `inline` swaps the button for a focusable <span> that only opens on
+ * hover/focus — for passive content such as a time inside a clickable row,
+ * where a click must keep falling through to the row.
  */
-export function Tooltip({ text, children }: { text: React.ReactNode; children?: React.ReactNode }) {
+export function Tooltip({
+  text,
+  children,
+  inline = false,
+}: {
+  text: React.ReactNode;
+  children?: React.ReactNode;
+  inline?: boolean;
+}) {
   const t = useTranslations("common");
   const [hover, setHover] = useState(false);
   const [pinned, setPinned] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const open = hover || pinned;
@@ -72,22 +84,36 @@ export function Tooltip({ text, children }: { text: React.ReactNode; children?: 
   // moment it opened is accurate enough — no scroll/resize tracking.
   const rect = open ? triggerRef.current?.getBoundingClientRect() : undefined;
 
+  const setTrigger = (el: HTMLElement | null) => {
+    triggerRef.current = el;
+  };
+  const hoverProps = {
+    ...(open ? { "aria-describedby": panelId } : {}),
+    onMouseEnter: () => setHover(true),
+    onMouseLeave: () => setHover(false),
+    onFocus: () => setHover(true),
+    onBlur: () => setHover(false),
+  };
+
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="ms-tooltip-trigger"
-        aria-label={t("info")}
-        {...(open ? { "aria-describedby": panelId } : {})}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-        onFocus={() => setHover(true)}
-        onBlur={() => setHover(false)}
-        onClick={() => setPinned((v) => !v)}
-      >
-        {children ?? <CircleInfoGlyph />}
-      </button>
+      {inline ? (
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: focus is how keyboard users reach the stamp; a button here would swallow the row's click
+        <span ref={setTrigger} className="ms-tooltip-trigger inline" tabIndex={0} {...hoverProps}>
+          {children}
+        </span>
+      ) : (
+        <button
+          ref={setTrigger}
+          type="button"
+          className="ms-tooltip-trigger"
+          aria-label={t("info")}
+          {...hoverProps}
+          onClick={() => setPinned((v) => !v)}
+        >
+          {children ?? <CircleInfoGlyph />}
+        </button>
+      )}
       {open && rect
         ? createPortal(
             <div

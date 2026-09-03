@@ -31,7 +31,8 @@ accent per view. **Dark theme only.** All values live in `src/styles/` as
 - Data rendered as data: full addresses, real UUIDs, masked keys
   (`ms_••••••••abcd`), mono DNS values. Never truncate a value an engineer
   might paste — give it a copy button (`.ms-chip`) instead.
-- Timestamps compact and relative: "24min ago", "1h ago".
+- Timestamps compact and relative: "24min ago", "1h ago" — the exact local
+  stamp shows on hover (`RelativeTime`), never inline.
 - Keycaps are part of the copy: ⌘ ↵ in modal confirm buttons, Esc to cancel.
 - Every user-facing string lives in the i18n catalogs. No hardcoded copy.
 
@@ -63,9 +64,10 @@ fill, 1px line, 14px radius, 24px padding. Controls compact per the canvas
 overrides: `.ms-btn` 6px 12px, `.ms-input` 6px 10px / line-height 1.4,
 `.ms-btn-icon` an exact 30×30 square — everything lands ≈30px tall. Lists
 (`.ms-table`) run at 13px with 6px cell padding — ≈40px rows, so a page of
-contacts or emails fits a laptop viewport; "Load more" lives in the shared
-`ListFooter` at the right, beside the page-size chooser, and any secondary
-action under a table or section is right-aligned. Modals
+contacts or emails fits a laptop viewport; the shared `ListFooter` holds the
+page-size chooser and then "Load more" at the right, both drawn as secondary
+buttons, and any secondary action under a table or section is right-aligned.
+Modals
 are **centered in the viewport** (both axes), overlay `rgba(0,0,0,.72)`, no
 blur.
 

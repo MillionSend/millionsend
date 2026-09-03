@@ -41,6 +41,7 @@ export function Select({
   width,
   disabled = false,
   id,
+  button = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -50,6 +51,9 @@ export function Select({
   disabled?: boolean;
   /** Forwarded to the trigger so an ms-field <label htmlFor> can target it. */
   id?: string;
+  /** Trigger drawn as a secondary button instead of an input, for a chooser
+   * that sits in a row of buttons (the list footer's page size). */
+  button?: boolean;
 }) {
   const t = useTranslations("common.select");
   const [open, setOpen] = useState(false);
@@ -195,7 +199,7 @@ export function Select({
         ref={triggerRef}
         type="button"
         {...(id !== undefined ? { id } : {})}
-        className="ms-input"
+        className={button ? "ms-btn ms-btn-secondary" : "ms-input"}
         role="combobox"
         aria-label={ariaLabel}
         aria-expanded={open}

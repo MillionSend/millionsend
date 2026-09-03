@@ -52,6 +52,19 @@ export function formatDayTime(date: Date | string | number, locale: string): str
   }).format(new Date(date));
 }
 
+/** Exact local stamp for hover details ("Sep 2, 2026, 8:15:32 PM GMT-3"). */
+export function formatDateTime(date: Date | string | number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(date));
+}
+
 /** Ledger timestamp: UTC ISO-8601 to the second ("2026-08-13 14:02:11Z"). */
 export function formatUtcTimestamp(date: Date | string | number): string {
   return `${new Date(date).toISOString().slice(0, 19).replace("T", " ")}Z`;
