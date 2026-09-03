@@ -272,6 +272,16 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         // env is read per call (not at module load) so tests can stub the
         // deployment mode first.
         const isCloud = Boolean(env.IS_CLOUD);
+        // One region per deployment — the value the form reads as
+        // system.features.region. Configuration sets, SNS topics and tenants
+        // are regional, so an identity anywhere else would verify but never
+        // send or report events.
+        if (input.region !== env.AWS_REGION) {
+          throw new TRPCError({
+            code: "UNPROCESSABLE_CONTENT",
+            message: `Region ${input.region} is not available; this deployment serves ${env.AWS_REGION}`,
+          });
+        }
         const isOperator = isCloud && (await isOperatorTeam(ctx.db, ctx.teamId));
         if (
           isReservedSenderDomain(input.name, {

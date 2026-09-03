@@ -13,7 +13,6 @@ import {
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
   WEBHOOK_EVENT_TYPES,
 } from "@millionsend/core";
-import { SES_REGIONS } from "@millionsend/ses";
 
 /**
  * Wire-compatible with Resend's documented /emails surface
@@ -954,30 +953,43 @@ const OPEN_TRACKING_DESC =
 const TRACKING_SUBDOMAIN_DESC =
   'DNS label of the branded tracking host, e.g. "links" for links.<domain>. Setting it adds a Tracking CNAME to records[]; links are tracked through it once that CNAME resolves. Required on MillionSend Cloud to turn tracking on.';
 
-export const createDomainRequestSchema = z
-  .object({
-    name: z
-      .string()
-      .trim()
-      .refine((v) => HOSTNAME_RE.test(v), "must be a lowercase hostname"),
-    region: z.enum(SES_REGIONS).optional(),
-    custom_return_path: z
-      .string()
-      .trim()
-      .refine((v) => SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
-      .default("send"),
-    // Optional and additive: Resend's create has no tracking fields, so a
-    // Resend-shaped call that omits them behaves exactly as before.
-    open_tracking: z.boolean().optional().describe(OPEN_TRACKING_DESC),
-    click_tracking: z.boolean().optional().describe(CLICK_TRACKING_DESC),
-    tracking_subdomain: z
-      .string()
-      .trim()
-      .refine((v) => SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
-      .optional()
-      .describe(TRACKING_SUBDOMAIN_DESC),
-  })
-  .openapi("CreateDomainRequest");
+/**
+ * Built per deployment so `region` lists only what it serves: SES
+ * configuration sets, SNS topics and tenants are all regional, so an identity
+ * anywhere else would hand out DNS records but never send or report events.
+ * The narrowed enum is what MCP clients and the live /openapi.json read, and
+ * an unserved region fails validation (422) before any SES call.
+ */
+export const createDomainRequestSchema = (regions: readonly [string, ...string[]]) =>
+  z
+    .object({
+      name: z
+        .string()
+        .trim()
+        .refine((v) => HOSTNAME_RE.test(v), "must be a lowercase hostname"),
+      region: z
+        .enum(regions)
+        .optional()
+        .describe(
+          "SES region of the identity. Each deployment serves one region and rejects any other with 422; omit to use it.",
+        ),
+      custom_return_path: z
+        .string()
+        .trim()
+        .refine((v) => SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
+        .default("send"),
+      // Optional and additive: Resend's create has no tracking fields, so a
+      // Resend-shaped call that omits them behaves exactly as before.
+      open_tracking: z.boolean().optional().describe(OPEN_TRACKING_DESC),
+      click_tracking: z.boolean().optional().describe(CLICK_TRACKING_DESC),
+      tracking_subdomain: z
+        .string()
+        .trim()
+        .refine((v) => SUBDOMAIN_RE.test(v), "must be a lowercase DNS label")
+        .optional()
+        .describe(TRACKING_SUBDOMAIN_DESC),
+    })
+    .openapi("CreateDomainRequest");
 
 export const updateDomainRequestSchema = z
   .object({

@@ -56,7 +56,7 @@
     "nameError": "Enter a full domain like <code>updates.yourdomain.com</code> — lowercase, and with a dot.",
     "region": "Region",
     "recommended": "Recommended",
-    "regionHint": "Select a region close to your users for the best performance.",
+    "regionHint": "Domains are provisioned in the one SES region this deployment serves.",
     "advanced": "Advanced options",
     "returnPath": "Custom Return-Path",
     "returnPathHint": "Used for SPF authentication, DMARC alignment, and bounces. Avoid values that undermine credibility (e.g. <code>testing</code>) — they may be exposed to recipients.",

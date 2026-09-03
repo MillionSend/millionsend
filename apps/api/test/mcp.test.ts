@@ -132,7 +132,7 @@ beforeAll(async () => {
       clientForRegion: () => {
         throw new Error("SES is not exercised by these tests");
       },
-      defaultRegion: "us-east-1",
+      defaultRegion: "sa-east-1",
     },
   });
 });
@@ -232,6 +232,25 @@ describe("auth middleware", () => {
 });
 
 describe("tool listing", () => {
+  it("create_domain advertises and accepts only the region this deployment serves", async () => {
+    const client = await connect(await mintToken());
+    const tool = (await client.listTools()).tools.find((t) => t.name === "create_domain");
+    const schema = tool?.inputSchema as {
+      properties?: Record<string, { enum?: string[]; description?: string }>;
+    };
+    expect(schema.properties?.region?.enum).toEqual(["sa-east-1"]);
+    expect(tool?.description).toContain("must be sa-east-1");
+    // The SDK validates arguments against the narrowed schema before the tool
+    // runs, so the refusal names the served region and no REST call is made.
+    const refused = await client.callTool({
+      name: "create_domain",
+      arguments: { name: "far.example.com", region: "eu-west-1" },
+    });
+    expect(refused.isError).toBe(true);
+    expect((refused.content as Array<{ text: string }>)[0]?.text).toContain('expected "sa-east-1"');
+    await client.close();
+  });
+
   it("lists read-only tools first and hides tools outside the token's scopes", async () => {
     const full = await connect(await mintToken());
     const names = (await full.listTools()).tools.map((t) => t.name);

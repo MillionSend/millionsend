@@ -156,7 +156,7 @@ describe("POST /domains", () => {
   it("registers a BYODKIM SES identity and returns the DNS records", async () => {
     const { client, calls } = fakeSes();
     const app = makeApp({ client });
-    const body = await createDomain(app, "updates.example.com", { region: "eu-west-1" });
+    const body = await createDomain(app, "updates.example.com", { region: "sa-east-1" });
 
     expect(calls.map((c) => c.name)).toEqual([
       "CreateEmailIdentityCommand",
@@ -171,7 +171,7 @@ describe("POST /domains", () => {
     expect(row).toMatchObject({
       teamId,
       name: "updates.example.com",
-      region: "eu-west-1",
+      region: "sa-east-1",
       status: "pending",
       dkimSelector: "millionsend",
     });
@@ -179,7 +179,7 @@ describe("POST /domains", () => {
     expect(body).toMatchObject({
       name: "updates.example.com",
       status: "pending",
-      region: "eu-west-1",
+      region: "sa-east-1",
       // Both tracking kinds start off, as the Domains docs promise.
       open_tracking: false,
       click_tracking: false,
@@ -200,7 +200,7 @@ describe("POST /domains", () => {
       type: "MX",
       ttl: "Auto",
       status: "not_started",
-      value: "feedback-smtp.eu-west-1.amazonses.com",
+      value: "feedback-smtp.sa-east-1.amazonses.com",
       priority: 10,
     });
     // The response never carries private-key material.
@@ -338,8 +338,21 @@ describe("POST /domains", () => {
     expect(res.status).toBe(422);
   });
 
-  it("rejects an unsupported region and an uppercase name", async () => {
-    const app = makeApp(fakeSes());
+  it("rejects a region the deployment does not serve, an unknown region, and an uppercase name", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client });
+    // A real SES region, just not this deployment's: refused by name before
+    // any identity is created or DNS record handed out.
+    const unserved = await call(app, fullKey, "POST", "/domains", {
+      name: "r.example.com",
+      region: "eu-west-1",
+    });
+    expect(unserved.status).toBe(422);
+    expect(await unserved.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringContaining("sa-east-1"),
+    });
+    expect(calls).toHaveLength(0);
     const badRegion = await call(app, fullKey, "POST", "/domains", {
       name: "r.example.com",
       region: "us-west-2",
@@ -372,12 +385,12 @@ describe("POST /domains in cloud (shared AWS account)", () => {
     const app = makeApp({ client, isCloud: true });
     const first = await call(app, a.key, "POST", "/domains", {
       name: "victim.example.com",
-      region: "us-east-1",
+      region: "sa-east-1",
     });
     expect(first.status).toBe(200);
     const second = await call(app, b.key, "POST", "/domains", {
       name: "victim.example.com",
-      region: "us-east-1",
+      region: "sa-east-1",
     });
     expect(second.status).toBe(409);
     expect(calls.filter((c) => c.name === "CreateEmailIdentityCommand")).toHaveLength(1);

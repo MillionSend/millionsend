@@ -24,6 +24,17 @@ Dois sinais de verificação aparecem lado a lado:
 - **Checagem de DNS ao vivo** — o MillionSend resolve cada registro por conta
   própria e reporta Encontrado / Faltando / Divergente imediatamente.
 
+## Regiões
+
+Cada instalação provisiona identidades em uma única região do SES — a sua
+`AWS_REGION`; o MillionSend Cloud atende `sa-east-1` (São Paulo). O dashboard
+oferece só essa região, e o campo opcional `region` da API (inclusive na
+ferramenta MCP `create_domain`) só a aceita: omita o campo para usá-la, e
+qualquer outro valor é recusado com `422` informando a região atendida.
+Configuration sets, tópicos de eventos e tenants do SES são regionais, então um
+domínio em outra região receberia registros DNS, mas nunca enviaria nem
+reportaria eventos.
+
 ## Configuração por domínio
 
 Depois de verificado, a aba **Configuração** de um domínio controla:

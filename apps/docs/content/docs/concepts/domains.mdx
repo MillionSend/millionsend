@@ -24,6 +24,16 @@ Two verification signals are shown side by side:
 - **Live DNS check** — MillionSend resolves each record itself and reports
   Found / Missing / Mismatch immediately.
 
+## Regions
+
+Each deployment provisions identities in a single SES region — its
+`AWS_REGION`; MillionSend Cloud serves `sa-east-1` (São Paulo). The dashboard
+offers only that region, and the API's optional `region` field (the
+`create_domain` MCP tool included) accepts only it: omit the field to use it,
+and any other value is rejected with `422` naming the served region.
+Configuration sets, event topics and SES tenants are regional, so a domain
+anywhere else would hand out DNS records but never send or report events.
+
 ## Per-domain configuration
 
 Once verified, a domain's **Configuration** tab controls:

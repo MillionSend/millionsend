@@ -14,6 +14,8 @@ let close: () => Promise<void>;
 
 beforeEach(async () => {
   ({ db, close } = await createTestDb());
+  // Validation is skipped under vitest, so zod's AWS_REGION default never applies.
+  vi.stubEnv("AWS_REGION", "us-east-1");
 });
 
 afterEach(async () => {
@@ -114,6 +116,17 @@ describe("domains.create", () => {
       }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+  it("refuses a region other than the one the deployment serves, before touching SES", async () => {
+    const teamId = await createTeam(db);
+    const { deps, calls } = fakeSes();
+    await expect(
+      callerFor(teamId, deps).domains.create({ name: "far.example.com", region: "sa-east-1" }),
+    ).rejects.toMatchObject({
+      code: "UNPROCESSABLE_CONTENT",
+      message: "Region sa-east-1 is not available; this deployment serves us-east-1",
+    });
+    expect(calls).toHaveLength(0);
+  });
   it("uploads a BYODKIM key to SES and stores only the selector and public half", async () => {
     const teamId = await createTeam(db);
     const { deps, calls } = fakeSes();
@@ -122,7 +135,7 @@ describe("domains.create", () => {
     );
     const { id } = await callerFor(teamId, deps).domains.create({
       name: "updates.example.com",
-      region: "sa-east-1",
+      region: "us-east-1",
     });
 
     expect(calls.map((c) => c.name)).toEqual([
@@ -143,7 +156,7 @@ describe("domains.create", () => {
     expect(row).toMatchObject({
       teamId,
       name: "updates.example.com",
-      region: "sa-east-1",
+      region: "us-east-1",
       status: "pending",
       mailFromSubdomain: "send",
       dkimSelector: "millionsend",
@@ -300,7 +313,7 @@ describe("domains.create", () => {
 
     vi.stubEnv("IS_CLOUD", "true");
     for (const name of ["millionsend.com", "app.millionsend.com", "mail.ms-ops.dev"]) {
-      await expect(caller.domains.create({ name, region: "eu-west-1" })).rejects.toMatchObject({
+      await expect(caller.domains.create({ name, region: "us-east-1" })).rejects.toMatchObject({
         code: "BAD_REQUEST",
       });
     }
@@ -649,7 +662,7 @@ describe("domains.records", () => {
     const teamId = await createTeam(db);
     const { deps } = fakeSes();
     const caller = callerFor(teamId, deps);
-    const { id } = await caller.domains.create({ name: "example.com", region: "eu-west-1" });
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
     const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
 
     const { records, provider } = await caller.domains.records({ id });
@@ -668,7 +681,7 @@ describe("domains.records", () => {
       group: "sending",
       type: "MX",
       name: "send.example.com",
-      value: "feedback-smtp.eu-west-1.amazonses.com",
+      value: "feedback-smtp.us-east-1.amazonses.com",
       priority: 10,
       status: "pending",
     });
@@ -686,7 +699,7 @@ describe("domains.records", () => {
     const caller = callerFor(teamId, deps);
     const { id } = await caller.domains.create({
       name: "updates.example.com.br",
-      region: "sa-east-1",
+      region: "us-east-1",
     });
 
     const { records, provider } = await caller.domains.records({ id });
@@ -873,7 +886,7 @@ describe("domains.updateConfiguration", () => {
   it("surfaces the branded tracking CNAME once a subdomain is set", async () => {
     const teamId = await createTeam(db);
     const caller = callerFor(teamId, fakeSes().deps);
-    const { id } = await caller.domains.create({ name: "example.com", region: "eu-west-1" });
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
 
     expect((await caller.domains.records({ id })).records.some((r) => r.group === "tracking")).toBe(
       false,
@@ -902,7 +915,7 @@ describe("domains.updateConfiguration", () => {
   it("refuses to adopt a subdomain where the deployment cannot serve one", async () => {
     const teamId = await createTeam(db);
     const caller = callerFor(teamId, fakeSes().deps);
-    const { id } = await caller.domains.create({ name: "gated.example.com", region: "eu-west-1" });
+    const { id } = await caller.domains.create({ name: "gated.example.com", region: "us-east-1" });
 
     cloudWithoutTrackingSubdomains();
     await expect(
@@ -917,7 +930,7 @@ describe("domains.updateConfiguration", () => {
     const caller = callerFor(teamId, fakeSes().deps);
     const { id } = await caller.domains.create({
       name: "stranded.example.com",
-      region: "eu-west-1",
+      region: "us-east-1",
     });
     await caller.domains.updateConfiguration({ id, trackingSubdomain: "email" });
 

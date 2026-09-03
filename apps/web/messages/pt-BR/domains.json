@@ -56,7 +56,7 @@
     "nameError": "Insira um domínio completo como <code>updates.seudominio.com</code> — em minúsculas e com ponto.",
     "region": "Região",
     "recommended": "Recomendado",
-    "regionHint": "Selecione uma região próxima aos seus usuários para o melhor desempenho.",
+    "regionHint": "Os domínios são provisionados na única região do SES que esta instalação atende.",
     "advanced": "Opções avançadas",
     "returnPath": "Return-Path personalizado",
     "returnPathHint": "Usado para autenticação SPF, alinhamento DMARC e devoluções. Evite valores que minem a credibilidade (ex.: <code>testing</code>) — eles podem ficar visíveis aos destinatários.",

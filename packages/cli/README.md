@@ -25,7 +25,7 @@ Node 18 or newer; no dependencies.
 | Templates | Name, alias, subject, html, text. From, reply-to and variables cannot be stored — listed as manual steps. |
 | Webhooks | Endpoint and events. Signing secrets are copied so receivers keep verifying (`--fresh-webhook-secrets` mints new ones, shown once). Events outside MillionSend's `email.*` set are dropped per webhook and listed. |
 | Suppressions | Bounces, complaints and manual entries, with their origin. |
-| Domains | Created with region, return path and tracking settings. DNS records must be added again (DKIM keys are per provider); the report prints a copy-ready table. Both providers can stay verified side by side. |
+| Domains | Created with return path and tracking settings, in the Resend domain's region — which must be the one region your MillionSend instance serves (MillionSend Cloud: `sa-east-1`); a domain in any other region is rejected with a 422 and listed in the report for you to add in the dashboard. DNS records must be added again (DKIM keys are per provider); the report prints a copy-ready table. Both providers can stay verified side by side. |
 | Broadcasts | Drafts and scheduled ones import as drafts; sent ones are skipped unless `--include-sent`. |
 | API keys | Not recreated (the source only exposes names); the report lists them as a to-do. |
 

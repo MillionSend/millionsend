@@ -380,7 +380,7 @@ export const RESOURCE_SHEETS = {
       create: `curl -X POST "${API_BASE}/domains" \\
   ${AUTH} \\
   ${JSON_CT} \\
-  -d '{ "name": "yourdomain.com", "region": "us-east-1" }'`,
+  -d '{ "name": "yourdomain.com" }'`,
       verify: `curl -X POST "${API_BASE}/domains/${SAMPLE_ID}/verify" \\\n  ${AUTH}`,
     },
   },

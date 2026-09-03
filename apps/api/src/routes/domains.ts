@@ -31,7 +31,6 @@ import {
   provisionDomainTenant,
   SES_REGIONS,
   type SesIdentityClient,
-  type SesRegion,
   verificationDbPatch,
 } from "@millionsend/ses";
 import { and, asc, count, desc, eq } from "drizzle-orm";
@@ -56,7 +55,10 @@ export interface DomainsSesDeps {
   clientForRegion(region: string): SesIdentityClient;
   /** Live per-record DNS lookups; omitted falls back to node:dns/promises. */
   dns?: DnsResolver | undefined;
-  /** Region used when a create omits `region`; must be one of SES_REGIONS. */
+  /**
+   * The SES region this deployment serves (AWS_REGION): the only region a
+   * create accepts, and its default.
+   */
   defaultRegion?: string | undefined;
   /** The AUTH_EMAIL_FROM sender; in cloud its domain is reserved for system mail. */
   authEmailFrom?: string | undefined;
@@ -211,6 +213,16 @@ function wireRecords(
   return records;
 }
 
+/**
+ * The one SES region this deployment provisions identities in — the same
+ * value the dashboard form reads as system.features.region. The configuration
+ * set, SNS topics and tenants are regional, so a domain anywhere else would
+ * verify but never send or report events.
+ */
+export function servedRegion(ses: Pick<DomainsSesDeps, "defaultRegion">): string {
+  return ses.defaultRegion ?? "us-east-1";
+}
+
 export function registerDomainRoutes(
   app: OpenAPIHono<Env>,
   deps: ApiDeps,
@@ -224,11 +236,10 @@ export function registerDomainRoutes(
   const idParam = z.object({ id: z.uuid() });
   const d = schema.domains;
 
-  const defaultRegion: SesRegion = (SES_REGIONS as readonly string[]).includes(
-    ses.defaultRegion ?? "",
-  )
-    ? (ses.defaultRegion as SesRegion)
-    : "us-east-1";
+  const served = servedRegion(ses);
+  // Only the docs generator registers routes with no region configured; its
+  // published schema then lists every region a deployment may serve.
+  const createRequestSchema = createDomainRequestSchema(ses.defaultRegion ? [served] : SES_REGIONS);
 
   const findDomain = async (teamId: string, id: string): Promise<DomainRow | undefined> =>
     (
@@ -248,7 +259,7 @@ export function registerDomainRoutes(
       method: "post",
       path: "/domains",
       request: {
-        body: { content: { "application/json": { schema: createDomainRequestSchema } } },
+        body: { content: { "application/json": { schema: createRequestSchema } } },
       },
       responses: {
         200: {
@@ -264,7 +275,7 @@ export function registerDomainRoutes(
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const region = body.region ?? defaultRegion;
+      const region = body.region ?? served;
       const isOperator = deps.isCloud && (await isOperatorTeam(db, auth.teamId));
       if (
         isReservedSenderDomain(body.name, {
