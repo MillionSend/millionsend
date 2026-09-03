@@ -113,6 +113,13 @@
       "when": 1788292446604,
       "tag": "0015_templates_alias",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788405721602,
+      "tag": "0016_events_health_indexes",
+      "breakpoints": true
     }
   ]
 }

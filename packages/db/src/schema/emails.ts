@@ -116,6 +116,8 @@ export const emails = pgTable(
       .where(sql`${t.sesMessageId} is not null`),
     // Partial index drives the retention purge scan (rows whose body still exists).
     index("emails_body_unpurged_idx").on(t.createdAt).where(isNull(t.bodyPurgedAt)),
+    // Events-health window: sends in the last hours, without scanning the table.
+    index("emails_sent_at_idx").on(t.sentAt).where(isNotNull(t.sentAt)),
     // Accept counts a team's parked rows whenever its daily quota is exhausted.
     index("emails_team_quota_parked_idx")
       .on(t.teamId)
@@ -152,5 +154,7 @@ export const emailEvents = pgTable(
       .where(sql`${t.snsMessageId} is not null`),
     // Partial index drives the retention strip scan (rows whose provider payload still exists).
     index("email_events_data_unstripped_idx").on(t.occurredAt).where(isNotNull(t.data)),
+    // Events-health: SES-originated rows by arrival time, and their latest one.
+    index("email_events_sns_created_idx").on(t.createdAt).where(isNotNull(t.snsMessageId)),
   ],
 );

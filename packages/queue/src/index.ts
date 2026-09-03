@@ -74,6 +74,9 @@ export const CRON_JOBS = {
   // Every 15 min: re-check live DNS so a removed record demotes a verified
   // domain (blocking sends) without waiting for a page open.
   "domains.reverify": "*/15 * * * *",
+  // Every 15 min: warn when sends went out but no SES event came back — a
+  // broken event pipeline is otherwise silent (everything just reads "Sent").
+  "events.health": "*/15 * * * *",
   // Hourly (cloud only): drop never-verified domains past SES's 72h DKIM
   // search window, freeing the (name, region) slot an unverified add would
   // otherwise squat forever. Offset from the other hourly sweeps.

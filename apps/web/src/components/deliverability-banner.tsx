@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
+import { NoticeStrip } from "@/components/notice-strip";
 import { useTRPC } from "@/lib/trpc";
 
 /**
@@ -34,32 +34,12 @@ export function DeliverabilityBanner() {
     limit: pct.format(limit),
   });
 
-  const tone = paused
-    ? { color: "var(--ms-danger)", bg: "var(--ms-danger-bg)", border: "var(--ms-danger-border)" }
-    : { color: "var(--ms-warn)", bg: "var(--ms-warn-bg)", border: "var(--ms-warn-border)" };
-
   return (
-    <Link
+    <NoticeStrip
       href="/metrics"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "9px 14px",
-        marginBottom: 18,
-        borderRadius: "var(--ms-r-input)",
-        border: `1px solid ${tone.border}`,
-        background: tone.bg,
-        color: tone.color,
-        fontSize: 13,
-        lineHeight: 1.4,
-        textDecoration: "none",
-      }}
-    >
-      <span>{text}</span>
-      <span style={{ marginLeft: "auto", opacity: 0.8, whiteSpace: "nowrap" }}>
-        {t("banner.action")} →
-      </span>
-    </Link>
+      tone={paused ? "danger" : "warn"}
+      text={text}
+      action={t("banner.action")}
+    />
   );
 }

@@ -67,8 +67,8 @@
       "cliNote": "Execute em qualquer lugar com Node 18+ e as SUAS credenciais AWS de administrador — seu laptop ou o servidor. Ele cria tudo e imprime as linhas do <code>.env</code> para colar se o MillionSend rodar em outro lugar.",
       "cfnButton": "Criar a stack no CloudFormation",
       "scriptTitle": "Alternativa: cole este script",
-      "scriptNote": "Cole em um terminal onde o AWS CLI tenha credenciais de administrador. Ele cria o usuário IAM, a política, o tópico SNS e o conjunto de configuração, e então imprime as linhas do seu <code>.env</code>.",
-      "eventsSkipped": "<code>APP_BASE_URL</code> não é uma URL https pública, então a parte de ingestão de eventos ficou de fora. Defina-a e recarregue para incluí-la.",
+      "scriptNote": "Cole em um terminal onde o AWS CLI tenha credenciais de administrador. Ele cria o usuário IAM, a política, o tópico SNS, a fila SQS de eventos e o conjunto de configuração, e então imprime as linhas do seu <code>.env</code>.",
+      "eventsSkipped": "<code>APP_BASE_URL</code> não é uma URL https pública, então o script pula o push por https; os eventos continuam chegando pela fila SQS. Defina-a e recarregue para adicionar o push.",
       "cfnNote": "Um clique: abre a página de revisão do CloudFormation com o template hospedado — a mesma stack de <code>infra/millionsend-ses.cfn.yaml</code>. Prefere o terminal:",
       "manualTitle": "Manual: passos no console",
       "step1": "Crie uma política: console IAM → Policies → Create policy → JSON — cole este documento.",
@@ -119,7 +119,11 @@
     },
     "events": {
       "title": "Eventos",
-      "connected": "Eventos conectados."
+      "connected": "Eventos conectados.",
+      "unhealthy": "Os eventos de entrega não estão chegando: {sent, plural, one {# e-mail foi enviado} other {# e-mails foram enviados}} nas últimas 2 horas e o SES não reportou nada de volta. Verifique a assinatura SNS (ausente ou aguardando confirmação) ou a configuração da fila SQS.",
+      "bannerAction": "Abrir configurações do SES",
+      "lastEvent": "Último evento recebido",
+      "never": "nunca"
     }
   },
   "team": {

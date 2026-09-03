@@ -7,6 +7,7 @@ import {
   getInstanceSettings,
   postJson,
   purgeExpiredIdempotencyKeys,
+  sesEventsHealth,
 } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
 import { Queue } from "@millionsend/queue";
@@ -288,6 +289,15 @@ await queue.scheduleCrons({
       enqueue: (broadcastId) => enqueueBroadcast(broadcastId),
     });
     if (requeued > 0) console.log(`broadcasts.reconcile: requeued=${requeued}`);
+  },
+  "events.health": async () => {
+    // No topic allowlist = ingestion disabled on purpose; nothing to judge.
+    if (!env.SNS_TOPIC_ARNS?.length) return;
+    const health = await sesEventsHealth(db);
+    if (health.status !== "unhealthy") return;
+    console.warn(
+      `events.health: ${health.sentInWindow} email(s) sent in the last 2h but no SES event arrived (last one ${health.lastSesEventAt?.toISOString() ?? "never"}) — the SNS subscription is missing or pending confirmation, or SQS_QUEUE_URL is empty / the queue is not being read`,
+    );
   },
   "domains.reverify": async () => {
     const result = await reverifyDomains(db, { clientForRegion, resolver: nodeDnsResolver });

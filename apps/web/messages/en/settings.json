@@ -67,8 +67,8 @@
       "cliNote": "Run it anywhere Node 18+ and YOUR AWS admin credentials live — your laptop or the server. It creates everything and prints the <code>.env</code> lines to paste if MillionSend runs elsewhere.",
       "cfnButton": "Create the stack in CloudFormation",
       "scriptTitle": "Alternative: paste this script",
-      "scriptNote": "Paste into a terminal where the AWS CLI has admin credentials. It creates the IAM user, policy, SNS topic, and configuration set, then prints your <code>.env</code> lines.",
-      "eventsSkipped": "<code>APP_BASE_URL</code> is not a public https URL, so the event ingestion part is left out. Set it and reload to include it.",
+      "scriptNote": "Paste into a terminal where the AWS CLI has admin credentials. It creates the IAM user, policy, SNS topic, SQS events queue, and configuration set, then prints your <code>.env</code> lines.",
+      "eventsSkipped": "<code>APP_BASE_URL</code> is not a public https URL, so the script skips the https push; events still arrive through the SQS queue. Set it and reload to add the push.",
       "cfnNote": "One click: opens the CloudFormation review page with the hosted template — the same stack as <code>infra/millionsend-ses.cfn.yaml</code>. From a terminal instead:",
       "manualTitle": "Manual: console steps",
       "step1": "Create a policy: IAM console → Policies → Create policy → JSON — paste this document.",
@@ -119,7 +119,11 @@
     },
     "events": {
       "title": "Events",
-      "connected": "Events connected."
+      "connected": "Events connected.",
+      "unhealthy": "Delivery events are not arriving: {sent, plural, one {# email was} other {# emails were}} sent in the last 2 hours and SES reported nothing back. Check the SNS subscription (missing or pending confirmation) or the SQS queue setting.",
+      "bannerAction": "Open SES settings",
+      "lastEvent": "Last event received",
+      "never": "never"
     }
   },
   "team": {

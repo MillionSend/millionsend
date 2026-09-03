@@ -5,7 +5,7 @@ import {
   SES_MAX_SEND_RATE_DEFAULT,
   trackingSubdomainsSupported,
 } from "@millionsend/config";
-import { getInstanceSettings } from "@millionsend/core";
+import { getInstanceSettings, sesEventsHealth } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import {
   createSesAccountClient,
@@ -110,10 +110,30 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       onboardingSender: env.ONBOARDING_EMAIL_FROM ?? null,
     })),
 
+    /**
+     * Instance-wide SES event pipeline health for the dashboard banner; null =
+     * nothing to show this user (ingestion off on purpose, or a cloud tenant —
+     * only the operator can act on it there).
+     */
+    eventsHealth: teamProcedure.query(async ({ ctx }) => {
+      if (!env.SNS_TOPIC_ARNS?.length) return null;
+      if (isCloudDeployment() && !(await isInstanceOperator(ctx.db, ctx.session.user.id))) {
+        return null;
+      }
+      // The SES settings page does not exist on cloud, so the banner has
+      // nowhere to send the operator there.
+      return { ...(await sesEventsHealth(ctx.db)), settingsAvailable: !isCloudDeployment() };
+    }),
+
     /** Env-side SES settings the setup page reports alongside awsReadiness. */
     sesEnv: teamProcedure.query(async ({ ctx }) => {
       await assertInstanceVisible(ctx);
       return {
+        // Whether events actually arrive, not just whether the vars are set.
+        // Nothing to judge while ingestion is not configured at all.
+        eventsHealth: env.SNS_TOPIC_ARNS?.length
+          ? await sesEventsHealth(ctx.db)
+          : { status: "idle" as const, sentInWindow: 0, lastSesEventAt: null },
         snsTopicsConfigured: Boolean(env.SNS_TOPIC_ARNS?.length),
         configurationSetConfigured: Boolean(env.SES_CONFIGURATION_SET),
         maxSendRate: env.SES_MAX_SEND_RATE,

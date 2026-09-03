@@ -250,22 +250,67 @@ describe("system.instanceSettings", () => {
   });
 });
 
-describe("system.sesEnv", () => {
-  it("reports whether SNS topics and the configuration set are configured", async () => {
+describe("system.sesEnv / system.eventsHealth", () => {
+  let db: Db;
+  let close: () => Promise<void>;
+  beforeEach(async () => {
+    ({ db, close } = await createTestDb());
+    await db.insert(schema.user).values([
+      { id: "u1", name: "u1", email: "u1@example.com", createdAt: new Date(0) },
+      { id: "u2", name: "u2", email: "u2@example.com", createdAt: new Date(1) },
+    ]);
+  });
+  afterEach(() => close());
+
+  function dbCaller(role: "owner" | "admin" | "member", userId = "u1") {
+    return createCaller({
+      db,
+      session: { user: { id: userId, email: `${userId}@example.com`, name: userId } },
+      teamId: "team-1",
+      role,
+    });
+  }
+
+  it("reports whether SNS topics and the configuration set are configured, plus event health", async () => {
     vi.stubEnv("SNS_TOPIC_ARNS", "arn:aws:sns:us-east-1:123456789012:ms-events");
     vi.stubEnv("SES_CONFIGURATION_SET", "millionsend");
-    expect(await caller().system.sesEnv()).toMatchObject({
+    expect(await dbCaller("owner").system.sesEnv()).toMatchObject({
       snsTopicsConfigured: true,
       configurationSetConfigured: true,
+      eventsHealth: { status: "idle", sentInWindow: 0, lastSesEventAt: null },
     });
   });
 
-  it("reports unset SNS topics and configuration set", async () => {
+  it("reports unset SNS topics and configuration set without touching the db", async () => {
     vi.stubEnv("SNS_TOPIC_ARNS", "");
     vi.stubEnv("SES_CONFIGURATION_SET", "");
     expect(await caller().system.sesEnv()).toMatchObject({
       snsTopicsConfigured: false,
       configurationSetConfigured: false,
+      eventsHealth: { status: "idle" },
+    });
+  });
+
+  it("eventsHealth is null while ingestion is not configured", async () => {
+    vi.stubEnv("SNS_TOPIC_ARNS", "");
+    expect(await dbCaller("member").system.eventsHealth()).toBeNull();
+  });
+
+  it("eventsHealth reaches every self-host member, with the settings page to act on", async () => {
+    vi.stubEnv("SNS_TOPIC_ARNS", "arn:aws:sns:us-east-1:123456789012:ms-events");
+    expect(await dbCaller("member", "u2").system.eventsHealth()).toMatchObject({
+      status: "idle",
+      settingsAvailable: true,
+    });
+  });
+
+  it("eventsHealth on cloud: null for tenants, shown to the operator without a settings link", async () => {
+    vi.stubEnv("SNS_TOPIC_ARNS", "arn:aws:sns:us-east-1:123456789012:ms-events");
+    vi.stubEnv("IS_CLOUD", "true");
+    expect(await dbCaller("owner", "u2").system.eventsHealth()).toBeNull();
+    expect(await dbCaller("owner").system.eventsHealth()).toMatchObject({
+      status: "idle",
+      settingsAvailable: false,
     });
   });
 });

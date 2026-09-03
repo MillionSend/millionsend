@@ -7,9 +7,11 @@ import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
+import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
+import { WarnCard } from "@/components/warn-card";
 import { buildAwsSetupScript, CFN_DEPLOY_COMMAND, cfnQuickCreateUrl } from "@/lib/aws-setup-script";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { statusGlow } from "@/lib/status-glow";
@@ -376,8 +378,14 @@ export function SesSetupView() {
 
   const fmt = new Intl.NumberFormat(locale);
   const result = test.data;
-  const eventsOk = sesEnv.data.snsTopicsConfigured && sesEnv.data.configurationSetConfigured;
-  const eventsIncluded = httpsOrigin(sesEnv.data.appBaseUrl) !== null;
+  const eventsHealth = sesEnv.data.eventsHealth;
+  // Env vars set AND events actually arriving: a broken pipeline reads "Sent"
+  // forever with every variable in place.
+  const eventsOk =
+    sesEnv.data.snsTopicsConfigured &&
+    sesEnv.data.configurationSetConfigured &&
+    eventsHealth.status !== "unhealthy";
+  const pushIncluded = httpsOrigin(sesEnv.data.appBaseUrl) !== null;
   const setupScript = buildAwsSetupScript({
     region: readiness.data.region,
     appBaseUrl: sesEnv.data.appBaseUrl,
@@ -444,7 +452,7 @@ export function SesSetupView() {
               <p style={{ margin: "10px 0 14px", fontSize: 13, color: "var(--ms-muted)" }}>
                 {t.rich("setup.scriptNote", codeRichTags)}
               </p>
-              {eventsIncluded ? null : (
+              {pushIncluded ? null : (
                 <p style={{ margin: "0 0 14px", fontSize: 12.5, color: "var(--ms-warn)" }}>
                   {t.rich("setup.eventsSkipped", codeRichTags)}
                 </p>
@@ -658,11 +666,25 @@ export function SesSetupView() {
             onToggle={() => setEventsDetailsOpen((v) => !v)}
           />
         ) : null}
+        {eventsHealth.status === "unhealthy" ? (
+          <WarnCard>{t("events.unhealthy", { sent: eventsHealth.sentInWindow })}</WarnCard>
+        ) : null}
         {!eventsOk || eventsDetailsOpen ? (
           <section
             className="ms-card"
             style={{ ...stepCardStyle, padding: 24, marginTop: eventsOk ? 14 : 0 }}
           >
+            <CheckRow
+              ok={eventsHealth.status !== "unhealthy" && eventsHealth.lastSesEventAt !== null}
+              name={t("events.lastEvent")}
+              detail={
+                eventsHealth.lastSesEventAt ? (
+                  <RelativeTime date={eventsHealth.lastSesEventAt} />
+                ) : (
+                  t("events.never")
+                )
+              }
+            />
             <CheckRow
               ok={sesEnv.data.snsTopicsConfigured}
               name="SNS_TOPIC_ARNS"

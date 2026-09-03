@@ -1,0 +1,2 @@
+CREATE INDEX "email_events_sns_created_idx" ON "email_events" USING btree ("created_at") WHERE "email_events"."sns_message_id" is not null;--> statement-breakpoint
+CREATE INDEX "emails_sent_at_idx" ON "emails" USING btree ("sent_at") WHERE "emails"."sent_at" is not null;
