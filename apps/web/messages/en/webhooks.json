@@ -20,7 +20,8 @@
   "eventGroup": {
     "delivery": "Delivery",
     "engagement": "Engagement",
-    "problems": "Problems"
+    "problems": "Problems",
+    "account": "Account"
   },
   "eventLabel": {
     "email": {
@@ -31,6 +32,14 @@
       "clicked": "Link clicked",
       "bounced": "Email bounced",
       "complained": "Marked as spam"
+    },
+    "deliverability": {
+      "warning": "Deliverability at risk",
+      "paused": "Sending paused"
+    },
+    "quota": {
+      "warning": "Daily quota at 80%",
+      "reached": "Daily quota reached"
     }
   },
   "status": {

@@ -1,6 +1,11 @@
 import { SQSClient } from "@aws-sdk/client-sqs";
 import { createStripe, purgeStripeEvents, reconcileTeamPlan } from "@millionsend/billing";
-import { env, trackingCnameTarget, trackingSubdomainsSupported } from "@millionsend/config";
+import {
+  env,
+  sesTenantsEnabled,
+  trackingCnameTarget,
+  trackingSubdomainsSupported,
+} from "@millionsend/config";
 import {
   deriveTrackingKey,
   deriveUnsubscribeKey,
@@ -33,11 +38,15 @@ import {
   stripExpiredEventPayloads,
 } from "./handlers/cron.js";
 import { abandonWebhookDelivery, deliverWebhook } from "./handlers/deliver-webhook.js";
+import { sweepNotifications } from "./handlers/notify.js";
+import { runPlatformBreaker } from "./handlers/platform-breaker.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
 import { sendBroadcast } from "./handlers/send-broadcast.js";
 import { createTokenBucket, failQueuedEmail, sendEmail } from "./handlers/send-email.js";
+import { syncTenants } from "./handlers/tenants.js";
 import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
+import { createSystemMailer } from "./system-mail.js";
 
 if (!env.MASTER_ENCRYPTION_KEY) {
   // Required even when cloud wraps DEKs with KMS: tracking/unsubscribe token
@@ -69,6 +78,7 @@ const unsubscribe = env.APP_BASE_URL
   ? { secretKey: unsubscribeSecretKey, baseUrl: env.APP_BASE_URL }
   : undefined;
 const ses = createSesSender(env.AWS_REGION);
+const mailer = createSystemMailer();
 // SESv2 identity clients (GetEmailIdentity) for domain re-verification, cached
 // per region since identities live in the domain's region. Distinct from the
 // send client above (SendEmail); credentials fall back to the provider chain.
@@ -290,6 +300,20 @@ await queue.scheduleCrons({
     });
     if (requeued > 0) console.log(`broadcasts.reconcile: requeued=${requeued}`);
   },
+  "notifications.sweep": async () => {
+    const result = await sweepNotifications(db, {
+      isCloud: env.IS_CLOUD,
+      mailer,
+      enqueueWebhook: (deliveryId) => enqueueWebhook(deliveryId),
+      appBaseUrl: env.APP_BASE_URL,
+    });
+    if (result.sent > 0) console.log(`notifications.sweep: sent=${result.sent}`);
+  },
+  "platform.breaker": async () => {
+    // Without SES events there are no bounce/complaint counts to judge.
+    if (!env.SNS_TOPIC_ARNS?.length) return;
+    await runPlatformBreaker(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+  },
   "events.health": async () => {
     // No topic allowlist = ingestion disabled on purpose; nothing to judge.
     if (!env.SNS_TOPIC_ARNS?.length) return;
@@ -317,6 +341,16 @@ await queue.scheduleCrons({
       trackingCnameValue,
     });
     if (tracking.unset > 0) console.log(`domains.reap-tracking: unset=${tracking.unset}`);
+  },
+  "tenants.sync": async () => {
+    const result = await syncTenants(db, {
+      clientForRegion,
+      configurationSet: env.SES_CONFIGURATION_SET,
+      enabled: sesTenantsEnabled(),
+    });
+    if (result.associated > 0 || result.failed > 0) {
+      console.log(`tenants.sync: associated=${result.associated} failed=${result.failed}`);
+    }
   },
   "domains.reap": async () => {
     // Cloud-only: squatting is a cross-tenant problem. Self-host is one

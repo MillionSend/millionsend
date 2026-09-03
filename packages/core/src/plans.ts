@@ -29,6 +29,13 @@ export const PLAN_DAILY_LIMIT: Record<Plan, number | null> = {
   scale: null,
 };
 
+/**
+ * Sends keep passing this far past the daily limit before parking, so a day
+ * that ends right at the cap does not hold a customer's last few messages
+ * until midnight. The nominal limit stays what plans and the dashboard show.
+ */
+export const QUOTA_TOLERANCE = 0.1;
+
 /** Sender domains per team per plan; null = unlimited. Self-host ignores plans entirely. */
 export const PLAN_DOMAIN_LIMIT: Record<Plan, number | null> = {
   free: 3,

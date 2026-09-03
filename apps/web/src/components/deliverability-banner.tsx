@@ -32,6 +32,7 @@ export function DeliverabilityBanner() {
   const text = t(`banner.${data.status}.${reason.metric}`, {
     rate: pct.format(reason.rate),
     limit: pct.format(limit),
+    days: reason.windowDays,
   });
 
   return (

@@ -8,6 +8,7 @@ import {
   PutEmailIdentityMailFromAttributesCommand,
   SESv2Client,
 } from "@aws-sdk/client-sesv2";
+import type { TenantCommand } from "./tenants.js";
 
 /** SES regions offered for domain identities. */
 export const SES_REGIONS = ["us-east-1", "eu-west-1", "sa-east-1", "ap-northeast-1"] as const;
@@ -21,7 +22,8 @@ type IdentityCommand =
   | PutEmailIdentityDkimSigningAttributesCommand
   | PutEmailIdentityMailFromAttributesCommand
   | GetEmailIdentityCommand
-  | DeleteEmailIdentityCommand;
+  | DeleteEmailIdentityCommand
+  | TenantCommand;
 
 /**
  * Structural subset of SESv2Client so callers inject a fake in tests

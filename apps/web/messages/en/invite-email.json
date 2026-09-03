@@ -1,0 +1,13 @@
+{
+  "subject": "{inviter} invited you to {team} on MillionSend",
+  "body": "{inviter} invited you to join {team} on MillionSend as {role}.",
+  "roles": {
+    "member": "a member",
+    "admin": "an admin"
+  },
+  "button": "Accept invitation",
+  "linkFallback": "Or copy this link into your browser:",
+  "noAccount": "No MillionSend account yet? Create one with this same address ({email}) and the invitation will be waiting for you.",
+  "expiry": "This link works once and expires in {days} days.",
+  "ignore": "If you weren't expecting this, you can ignore this email."
+}

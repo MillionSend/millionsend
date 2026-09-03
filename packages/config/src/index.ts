@@ -4,10 +4,12 @@ export {
   type Env,
   env,
   isCloudDeployment,
+  notificationsEmailFrom,
   parseCommaList,
   parseEmailFrom,
   parseSnsTopicArns,
   SES_MAX_SEND_RATE_DEFAULT,
+  sesTenantsEnabled,
   trackingCnameTarget,
   trackingSubdomainsSupported,
 } from "./env.js";

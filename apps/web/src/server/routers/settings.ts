@@ -1,8 +1,12 @@
 import { cancelTeamSubscription } from "@millionsend/billing";
-import { env } from "@millionsend/config";
+import { env, notificationsEmailFrom } from "@millionsend/config";
 import {
+  createFixedWindowLimiter,
   DAY_MS,
   effectivePlan,
+  INVITE_EMAILS_PER_HOUR,
+  INVITE_MAX_SENDS,
+  INVITE_RESEND_COOLDOWN_MS,
   INVITE_TTL_MS,
   PLAN_DAILY_LIMIT,
   type Plan,
@@ -11,9 +15,15 @@ import {
   verifyInviteToken,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
-import { createSesv2Client, deleteDomainIdentity } from "@millionsend/ses";
+import {
+  createSesv2Client,
+  deleteDomainIdentity,
+  deleteTenant,
+  disassociateIdentity,
+  SES_REGIONS,
+} from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
-import { and, asc, count, desc, eq, gt, gte, isNull, ne } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { isHexColor } from "@/lib/hex-color";
@@ -21,9 +31,16 @@ import { isHttpUrl } from "@/lib/http-url";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { getStripe } from "../billing";
+import { activeLocale } from "../locale";
 import { smtpRelayOffered } from "../smtp";
 import { deletePublicObject, keyFromPublicUrl, uploadsEnabled } from "../storage";
-import { protectedProcedure, router, teamProcedure } from "../trpc";
+import {
+  awsCredentialsConfigured,
+  buildInvitationEmail,
+  defaultSystemMailDeps,
+  type SystemMailDeps,
+} from "../system-mail";
+import { protectedProcedure, publicProcedure, router, teamProcedure } from "../trpc";
 
 /**
  * The API enforces plan caps only when IS_CLOUD; self-host has no daily
@@ -47,23 +64,34 @@ function assertCanManageMembers(role: string): void {
  */
 export interface TeamDeletionDeps {
   cancelSubscription(db: Db, teamId: string): Promise<void>;
-  deleteSesIdentity(domain: { name: string; region: string }): Promise<void>;
+  /** `tenant` set = the identity is associated with the team's SES tenant and must be detached first. */
+  deleteSesIdentity(domain: {
+    name: string;
+    region: string;
+    tenant?: string | undefined;
+  }): Promise<void>;
+  /** Drops the team's SES tenant in one region; a tenant already gone is fine. */
+  deleteSesTenant(params: { tenantName: string; region: string }): Promise<void>;
   deleteLogo(logoUrl: string): Promise<void>;
 }
 
+// Identities live in the domain's region, which may differ from AWS_REGION.
+const sesClientFor = (region: string) =>
+  createSesv2Client({
+    region,
+    ...(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
+      ? { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY }
+      : {}),
+  });
+
 const defaultTeamDeletionDeps: TeamDeletionDeps = {
   cancelSubscription: (db, teamId) => cancelTeamSubscription({ stripe: getStripe(), db }, teamId),
-  // Identities live in the domain's region, which may differ from AWS_REGION.
-  deleteSesIdentity: ({ name, region }) =>
-    deleteDomainIdentity(
-      createSesv2Client({
-        region,
-        ...(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
-          ? { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY }
-          : {}),
-      }),
-      { domain: name },
-    ),
+  deleteSesIdentity: async ({ name, region, tenant }) => {
+    const client = sesClientFor(region);
+    if (tenant) await disassociateIdentity(client, { tenantName: tenant, region, identity: name });
+    await deleteDomainIdentity(client, { domain: name });
+  },
+  deleteSesTenant: ({ tenantName, region }) => deleteTenant(sesClientFor(region), { tenantName }),
   deleteLogo: async (logoUrl) => {
     const key = keyFromPublicUrl(logoUrl);
     if (key) await deletePublicObject(key);
@@ -137,6 +165,25 @@ function inviteAcceptUrl(inviteId: string): string {
   return `${resolveBaseUrl(env.APP_BASE_URL)}/invite/${signInviteToken(inviteId, requireAuthSecret())}`;
 }
 
+/** `h***@example.com`: enough for the invitee to recognise, useless to anyone else. */
+function maskEmail(email: string): string {
+  const at = email.indexOf("@");
+  return at <= 0 ? "***" : `${email[0]}***${email.slice(at)}`;
+}
+
+/** Invite emails need SES reach and a system sender; without both the link is the only credential. */
+function inviteEmailsEnabled(): boolean {
+  return awsCredentialsConfigured() && Boolean(notificationsEmailFrom());
+}
+
+// Invite spam guard shared by create and resend, keyed by team.
+const inviteEmailsLimited = createFixedWindowLimiter(INVITE_EMAILS_PER_HOUR, 3_600_000);
+
+const INVITE_HOURLY_LIMIT_ERROR = new TRPCError({
+  code: "TOO_MANY_REQUESTS",
+  message: "Too many invitations this hour. Try again later.",
+});
+
 /**
  * Hostname a self-hoster points their app's SMTP client at: an explicit
  * override, else the deployment's own APP_BASE_URL host (the relay runs
@@ -179,7 +226,42 @@ const nullableHexColor = z
   .nullable()
   .refine((v) => v === null || isHexColor(v), { message: "must be a #rrggbb hex color" });
 
-export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletionDeps) {
+export function createSettingsRouter(
+  deps: TeamDeletionDeps = defaultTeamDeletionDeps,
+  mail: SystemMailDeps = defaultSystemMailDeps,
+) {
+  /**
+   * Awaited, unlike the password reset: `emailed` and the per-invite send
+   * counters are shown to the operator, so they must reflect a send SES
+   * accepted. A failure is logged and reported as false — the dialog still
+   * shows the link, and nothing is charged against the invite.
+   */
+  async function emailInvite(
+    ctx: { db: Db; teamId: string; session: { user: { name: string } } },
+    invite: { id: string; email: string; role: "member" | "admin" },
+  ): Promise<boolean> {
+    const [team] = await ctx.db
+      .select({ name: schema.teams.name })
+      .from(schema.teams)
+      .where(eq(schema.teams.id, ctx.teamId));
+    const message = buildInvitationEmail({
+      to: invite.email,
+      inviterName: ctx.session.user.name,
+      teamName: team?.name ?? "",
+      role: invite.role,
+      url: inviteAcceptUrl(invite.id),
+      expiresInDays: Math.round(INVITE_TTL_MS / DAY_MS),
+      locale: await activeLocale(),
+    });
+    try {
+      await mail.send(message);
+      return true;
+    } catch (error) {
+      console.error("Invitation email failed to send", error);
+      return false;
+    }
+  }
+
   return router({
     team: router({
       get: teamProcedure.query(async ({ ctx }) => {
@@ -233,7 +315,11 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
             .where(eq(schema.teams.id, ctx.teamId));
           if (!team) throw new TRPCError({ code: "NOT_FOUND" });
           const domains = await tx
-            .select({ name: schema.domains.name, region: schema.domains.region })
+            .select({
+              name: schema.domains.name,
+              region: schema.domains.region,
+              sesTenantAssociatedAt: schema.domains.sesTenantAssociatedAt,
+            })
             .from(schema.domains)
             .where(eq(schema.domains.teamId, ctx.teamId));
           await revokeTeamGrants(tx, ctx.teamId);
@@ -243,9 +329,22 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
           return { domains, logoUrl: team.logoUrl, name: team.name };
         });
         await Promise.allSettled([
-          ...domains.map((domain) => deps.deleteSesIdentity(domain)),
+          ...domains.map((domain) =>
+            deps.deleteSesIdentity({
+              name: domain.name,
+              region: domain.region,
+              ...(domain.sesTenantAssociatedAt ? { tenant: ctx.teamId } : {}),
+            }),
+          ),
           ...(logoUrl ? [deps.deleteLogo(logoUrl)] : []),
         ]);
+        // Tenants are regional and outlive the domains that created them (a
+        // tenant created before a failed association, or in a region whose
+        // last domain was deleted earlier), so try every region; a missing
+        // tenant is tolerated.
+        await Promise.allSettled(
+          SES_REGIONS.map((region) => deps.deleteSesTenant({ tenantName: ctx.teamId, region })),
+        );
         await recordAudit(ctx, {
           action: "team.deleted",
           target: { type: "team", id: ctx.teamId },
@@ -343,6 +442,8 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
             role: schema.teamInvitations.role,
             expiresAt: schema.teamInvitations.expiresAt,
             createdAt: schema.teamInvitations.createdAt,
+            lastSentAt: schema.teamInvitations.lastSentAt,
+            sendCount: schema.teamInvitations.sendCount,
           })
           .from(schema.teamInvitations)
           .where(
@@ -363,6 +464,7 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
         )
         .mutation(async ({ ctx, input }) => {
           assertCanManageMembers(ctx.role);
+          if (inviteEmailsLimited(ctx.teamId)) throw INVITE_HOURLY_LIMIT_ERROR;
           try {
             const [row] = await ctx.db
               .insert(schema.teamInvitations)
@@ -375,16 +477,26 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
               })
               .returning({ id: schema.teamInvitations.id });
             if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+            const emailed =
+              inviteEmailsEnabled() &&
+              (await emailInvite(ctx, { id: row.id, email: input.email, role: input.role }));
+            if (emailed) {
+              await ctx.db
+                .update(schema.teamInvitations)
+                .set({ lastSentAt: new Date(), sendCount: 1 })
+                .where(eq(schema.teamInvitations.id, row.id));
+            }
             await recordAudit(ctx, {
               action: "member.invited",
               target: { type: "invitation", id: row.id },
-              metadata: { email: input.email, role: input.role },
+              metadata: { email: input.email, role: input.role, emailed },
             });
             return {
               id: row.id,
               email: input.email,
               role: input.role,
               acceptUrl: inviteAcceptUrl(row.id),
+              emailed,
             };
           } catch (error) {
             if (isUniqueViolation(error)) {
@@ -415,6 +527,154 @@ export function createSettingsRouter(deps: TeamDeletionDeps = defaultTeamDeletio
         });
         return { id: row.id };
       }),
+
+      /**
+       * Emails the invite again and renews its expiry. Throttled three ways:
+       * a per-invite cooldown, a lifetime send cap per invite (past it, revoke
+       * and re-invite), and the team's hourly invite-email budget.
+       */
+      resend: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+        assertCanManageMembers(ctx.role);
+        if (!inviteEmailsEnabled()) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "No email sender is configured; share the invitation link instead.",
+          });
+        }
+        const [invite] = await ctx.db
+          .select({
+            id: schema.teamInvitations.id,
+            email: schema.teamInvitations.email,
+            role: schema.teamInvitations.role,
+            lastSentAt: schema.teamInvitations.lastSentAt,
+            sendCount: schema.teamInvitations.sendCount,
+          })
+          .from(schema.teamInvitations)
+          .where(
+            and(
+              eq(schema.teamInvitations.id, input.id),
+              eq(schema.teamInvitations.teamId, ctx.teamId),
+              isNull(schema.teamInvitations.acceptedAt),
+            ),
+          );
+        if (!invite) throw new TRPCError({ code: "NOT_FOUND" });
+        if (invite.sendCount >= INVITE_MAX_SENDS) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: `This invitation was already sent ${INVITE_MAX_SENDS} times. Revoke it and invite again.`,
+          });
+        }
+        if (
+          invite.lastSentAt &&
+          Date.now() - invite.lastSentAt.getTime() < INVITE_RESEND_COOLDOWN_MS
+        ) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "This invitation was just sent. Wait a couple of minutes before resending.",
+          });
+        }
+        if (inviteEmailsLimited(ctx.teamId)) throw INVITE_HOURLY_LIMIT_ERROR;
+        const now = new Date();
+        // The cooldown and the cap live in the same conditional update as the
+        // counter bump, so two concurrent resends cannot both pass the pre-read.
+        const [renewed] = await ctx.db
+          .update(schema.teamInvitations)
+          .set({
+            expiresAt: new Date(now.getTime() + INVITE_TTL_MS),
+            lastSentAt: now,
+            sendCount: sql`${schema.teamInvitations.sendCount} + 1`,
+          })
+          .where(
+            and(
+              eq(schema.teamInvitations.id, invite.id),
+              isNull(schema.teamInvitations.acceptedAt),
+              lt(schema.teamInvitations.sendCount, INVITE_MAX_SENDS),
+              or(
+                isNull(schema.teamInvitations.lastSentAt),
+                lt(
+                  schema.teamInvitations.lastSentAt,
+                  new Date(now.getTime() - INVITE_RESEND_COOLDOWN_MS),
+                ),
+              ),
+            ),
+          )
+          .returning({ expiresAt: schema.teamInvitations.expiresAt });
+        if (!renewed) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "This invitation was just sent. Wait a couple of minutes before resending.",
+          });
+        }
+        const emailed = await emailInvite(ctx, {
+          id: invite.id,
+          email: invite.email,
+          role: invite.role === "admin" ? "admin" : "member",
+        });
+        if (!emailed) {
+          // Give the slot back: a send SES refused must not count against the
+          // cap or start a cooldown. The renewed expiry is harmless to keep.
+          await ctx.db
+            .update(schema.teamInvitations)
+            .set({ lastSentAt: invite.lastSentAt, sendCount: invite.sendCount })
+            .where(eq(schema.teamInvitations.id, invite.id));
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "The invitation email could not be sent. Try again in a moment.",
+          });
+        }
+        await recordAudit(ctx, {
+          action: "invitation.resent",
+          target: { type: "invitation", id: invite.id },
+          metadata: { email: invite.email },
+        });
+        return { id: invite.id, expiresAt: renewed.expiresAt };
+      }),
+
+      /**
+       * What the accept page shows before the visitor signs in: who invited
+       * them where, and whether the link is still good. The signed token is
+       * the credential, so no session is required.
+       */
+      preview: publicProcedure
+        .input(z.object({ token: z.string().min(1) }))
+        .query(async ({ ctx, input }) => {
+          const inviteId = verifyInviteToken(input.token, requireAuthSecret());
+          if (!inviteId)
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid invitation." });
+          const [row] = await ctx.db
+            .select({
+              email: schema.teamInvitations.email,
+              role: schema.teamInvitations.role,
+              expiresAt: schema.teamInvitations.expiresAt,
+              acceptedAt: schema.teamInvitations.acceptedAt,
+              teamName: schema.teams.name,
+              inviterName: schema.user.name,
+            })
+            .from(schema.teamInvitations)
+            .innerJoin(schema.teams, eq(schema.teams.id, schema.teamInvitations.teamId))
+            .leftJoin(schema.user, eq(schema.user.id, schema.teamInvitations.invitedByUserId))
+            .where(eq(schema.teamInvitations.id, inviteId));
+          if (!row) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid invitation." });
+          const state = row.acceptedAt
+            ? ("accepted" as const)
+            : row.expiresAt.getTime() <= Date.now()
+              ? ("expired" as const)
+              : ("valid" as const);
+          // On cloud the address is masked and never prefilled: sign-up needs
+          // no verification, so a leaked link plus the plain address would let
+          // anyone register as the invitee and take the seat. Self-host keeps
+          // the link as the credential by design, so the address shows.
+          const cloud = Boolean(env.IS_CLOUD);
+          return {
+            teamName: row.teamName,
+            inviterName: row.inviterName ?? null,
+            role: row.role,
+            email: cloud ? maskEmail(row.email) : row.email,
+            prefillEmail: cloud ? null : row.email,
+            expiresAt: row.expiresAt,
+            state,
+          };
+        }),
 
       /**
        * The authenticated caller joins the invite's team with its role. teamId

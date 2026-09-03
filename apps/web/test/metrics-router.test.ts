@@ -37,6 +37,7 @@ async function insertCounter(
     sent: number;
     delivered: number;
     bounced: number;
+    hardBounced: number;
     complained: number;
     opened: number;
     clicked: number;
@@ -62,6 +63,7 @@ describe("metrics.window", () => {
       sent: 9,
       delivered: 8,
       bounced: 1,
+      hardBounced: 0,
       complained: 0,
       opened: 0,
       clicked: 0,
@@ -73,6 +75,7 @@ describe("metrics.window", () => {
       sent: 0,
       delivered: 0,
       bounced: 0,
+      hardBounced: 0,
       complained: 0,
       opened: 0,
       clicked: 0,
@@ -82,6 +85,7 @@ describe("metrics.window", () => {
       sent: 14,
       delivered: 12,
       bounced: 1,
+      hardBounced: 0,
       complained: 1,
       opened: 0,
       clicked: 0,
@@ -136,6 +140,7 @@ describe("metrics.window", () => {
       sent: 2,
       delivered: 2,
       bounced: 0,
+      hardBounced: 0,
       complained: 0,
       opened: 0,
       clicked: 0,
@@ -161,16 +166,21 @@ describe("metrics.window", () => {
 });
 
 describe("metrics.health", () => {
-  it("pauses when the window bounce rate crosses the SES enforcement line", async () => {
+  it("pauses when the hard-bounce rate crosses the SES enforcement line", async () => {
     const teamId = await createTeam(db, "acme");
-    // 120/2000 = 6% > 5% pause line, above the 1000 volume floor.
-    await insertCounter(teamId, utcDay(0), { sent: 2000, bounced: 120 });
+    // 120/2000 = 6% > 5% pause line, over the floor and the minimum count.
+    await insertCounter(teamId, utcDay(0), { sent: 2000, bounced: 120, hardBounced: 120 });
 
     const result = await callerFor(teamId).metrics.health();
 
     expect(result.status).toBe("paused");
     expect(result.bounceRate).toBeCloseTo(0.06);
-    expect(result.reasons).toContainEqual({ metric: "bounce", rate: 0.06, tier: "paused" });
+    expect(result.reasons).toContainEqual({
+      metric: "bounce",
+      rate: 0.06,
+      tier: "paused",
+      windowDays: 2,
+    });
     expect(result.thresholds).toEqual({
       warnBounce: 0.04,
       warnComplaint: 0.0001,
@@ -181,7 +191,7 @@ describe("metrics.health", () => {
 
   it("stays ok below the volume floor regardless of rate", async () => {
     const teamId = await createTeam(db, "acme");
-    await insertCounter(teamId, utcDay(0), { sent: 100, bounced: 50 });
+    await insertCounter(teamId, utcDay(0), { sent: 99, bounced: 50, hardBounced: 50 });
 
     const result = await callerFor(teamId).metrics.health();
 

@@ -1,13 +1,10 @@
-import { escapeHtml } from "@/lib/html";
+import { EMAIL_WORDMARK_URL, escapeHtml } from "@millionsend/core/html";
 import en from "../../messages/en/onboarding-email.json";
 import ptBR from "../../messages/pt-BR/onboarding-email.json";
 
 const MESSAGES = { en, "pt-BR": ptBR } as const;
 export const MAIL_LOCALES = ["en", "pt-BR"] as const;
 export type MailLocale = (typeof MAIL_LOCALES)[number];
-
-/** Same hosted wordmark as the reset email (system-mail.ts): recipients' clients cannot fetch from private instances. */
-const EMAIL_WORDMARK_URL = "https://millionsend.com/email/wordmark.png";
 
 /**
  * The onboarding "Send email" body in the dashboard's locale: the first

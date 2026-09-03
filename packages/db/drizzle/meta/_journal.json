@@ -120,6 +120,48 @@
       "when": 1788405721602,
       "tag": "0016_events_health_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788440397538,
+      "tag": "0017_team_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788441030546,
+      "tag": "0018_invitation_resend",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788441575936,
+      "tag": "0019_region_breakers",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788452148787,
+      "tag": "0020_domain_tenant_association",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788454538819,
+      "tag": "0021_domain_tenant_config_set",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788454800345,
+      "tag": "0022_event_bounce_type",
+      "breakpoints": true
     }
   ]
 }

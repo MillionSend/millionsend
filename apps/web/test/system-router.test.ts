@@ -291,6 +291,31 @@ describe("system.sesEnv / system.eventsHealth", () => {
     });
   });
 
+  it("platformBreakers: null while nothing is paused, rows for self-host members, operator-only on cloud", async () => {
+    expect(await dbCaller("member", "u2").system.platformBreakers()).toBeNull();
+    await db.insert(schema.regionBreakers).values({
+      region: "sa-east-1",
+      paused: true,
+      reason: {
+        metric: "complaint",
+        rate: 0.0009,
+        limit: 0.001,
+        windowHours: 24,
+        sent: 5000,
+        events: 5,
+      },
+      pausedAt: new Date(),
+    });
+    expect(await dbCaller("member", "u2").system.platformBreakers()).toMatchObject([
+      { region: "sa-east-1", reason: { metric: "complaint" } },
+    ]);
+    vi.stubEnv("IS_CLOUD", "true");
+    expect(await dbCaller("owner", "u2").system.platformBreakers()).toBeNull();
+    expect(await dbCaller("owner").system.platformBreakers()).toMatchObject([
+      { region: "sa-east-1" },
+    ]);
+  });
+
   it("eventsHealth is null while ingestion is not configured", async () => {
     vi.stubEnv("SNS_TOPIC_ARNS", "");
     expect(await dbCaller("member").system.eventsHealth()).toBeNull();

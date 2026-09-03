@@ -28,6 +28,7 @@ import {
   PAUSE_COMPLAINT_RATE,
   parseScheduledAt,
   recordContactActivity,
+  regionPause,
   releaseIdempotent,
   SCHEDULED_AT_FORMS,
   scoreBand,
@@ -262,22 +263,19 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
  * body, or null when sending may proceed.
  */
 async function sendingPausedError(
-  deps: Pick<ApiDeps, "db" | "isCloud">,
+  deps: Pick<ApiDeps, "db">,
   auth: ApiKeyAuth,
 ): Promise<ReturnType<typeof errorBody> | null> {
-  const health = await fetchDeliverabilityHealth(
-    deps.db,
-    auth.teamId,
-    deps.isCloud ? { plan: auth.plan } : {},
-  );
+  const health = await fetchDeliverabilityHealth(deps.db, auth.teamId);
   const paused = health.reasons.find((r) => r.tier === "paused");
   if (!paused) return null;
   const limit = paused.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
+  const metric = paused.metric === "bounce" ? "hard bounce" : "complaint";
   const pct = (r: number) => `${(r * 100).toFixed(2)}%`;
   return errorBody(
     403,
     "sending_paused",
-    `Sending is paused: your ${paused.metric} rate of ${pct(paused.rate)} over the last ${health.windowDays} days is at or above the ${pct(limit)} limit. Lower it before sending again.`,
+    `Sending is paused: your ${metric} rate of ${pct(paused.rate)} over the last ${paused.windowDays} days is at or above the ${pct(limit)} limit. Lower it before sending again.`,
   );
 }
 
@@ -2133,6 +2131,18 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return fail(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE);
     }
+    // Platform breaker: the account-wide rate in this SES region is near
+    // SES's review line, so broadcasts wait; /emails is deliberately not
+    // gated by it.
+    const regionHold = await regionPause(db, domain.region);
+    if (regionHold) {
+      const metric = regionHold.reason?.metric === "bounce" ? "hard-bounce" : "complaint";
+      return fail(
+        403,
+        "broadcasts_paused",
+        `Broadcast sending is paused in ${domain.region} while the platform's ${metric} rate recovers. Transactional email is unaffected. Try again later.`,
+      );
+    }
     // Schema-validated, so parseScheduledAt always resolves (the ?? only
     // satisfies the type); relative forms ("in 2 days") resolve against now.
     const scheduledAt =
@@ -3435,13 +3445,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
 
   app.openapi(deliverabilityRoute, async (c) => {
     const auth = c.get("auth");
-    // Plan flows like sendingPausedError: cloud enforces plan floors,
-    // self-host uses the defaults.
-    const score = await fetchAccountScore(
-      deps.db,
-      auth.teamId,
-      deps.isCloud ? { plan: auth.plan } : {},
-    );
+    const score = await fetchAccountScore(deps.db, auth.teamId);
     const tenths = (v: number | null) => (v === null ? null : v / 10);
     return c.json(
       {

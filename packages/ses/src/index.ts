@@ -84,3 +84,12 @@ export {
   type VerifyResult,
   verifySnsMessage,
 } from "./sns-verify.js";
+export {
+  associateTenantResources,
+  deleteTenant,
+  disassociateIdentity,
+  ensureTenant,
+  provisionDomainTenant,
+  type SesTenantClient,
+  type TenantCommand,
+} from "./tenants.js";

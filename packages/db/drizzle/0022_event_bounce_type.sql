@@ -1,0 +1,1 @@
+ALTER TABLE "email_events" ADD COLUMN "bounce_type" text;

@@ -54,6 +54,16 @@ Resources:
               - ses:SendRawEmail
               - ses:GetAccount
             Resource: "*"
+          # Per-team SES tenants (SES_TENANTS); tenant ARNs have no documented
+          # resource-level scope.
+          - Effect: Allow
+            Action:
+              - ses:CreateTenant
+              - ses:GetTenant
+              - ses:DeleteTenant
+              - ses:CreateTenantResourceAssociation
+              - ses:DeleteTenantResourceAssociation
+            Resource: "*"
 
   SendUser:
     Type: AWS::IAM::User

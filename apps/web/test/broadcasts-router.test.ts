@@ -379,7 +379,7 @@ describe("broadcasts.send deliverability guard", () => {
   it("blocks the send when the window complaint rate is over the pause line", async () => {
     const teamId = await createTeam(db, "team-a");
     const { id } = await seedDraft(teamId);
-    // 3/2000 = 0.15% > 0.1% pause line, and 2000 > the 1000 volume floor.
+    // 3/2000 = 0.15% > 0.1% pause line, 3 complaints = the minimum count.
     await seedWindowCounter(teamId, { sent: 2000, complained: 3 });
 
     const enqueued: string[] = [];
@@ -396,13 +396,59 @@ describe("broadcasts.send deliverability guard", () => {
     expect((await broadcastRow(id))?.status).toBe("draft");
   });
 
-  it("does not pause a tiny sample below the volume floor at the same rate", async () => {
+  it("does not pause on a pause-line rate without the minimum complaint count", async () => {
     const teamId = await createTeam(db, "team-a");
     const { id } = await seedDraft(teamId);
-    // 3/500 = 0.6% (well over the rate line) but 500 < the 1000 volume floor.
-    await seedWindowCounter(teamId, { sent: 500, complained: 3 });
+    // 2/2000 = exactly 0.1%, but 2 < 3 complaints.
+    await seedWindowCounter(teamId, { sent: 2000, complained: 2 });
 
     await callerFor(teamId).broadcasts.send({ id });
+    expect((await broadcastRow(id))?.status).toBe("scheduled");
+  });
+
+  it("does not pause a tiny sample below the volume floor", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { id } = await seedDraft(teamId);
+    // 3/50 = 6% with enough complaints, but 50 < the 100-send floor.
+    await seedWindowCounter(teamId, { sent: 50, complained: 3 });
+
+    await callerFor(teamId).broadcasts.send({ id });
+    expect((await broadcastRow(id))?.status).toBe("scheduled");
+  });
+});
+
+describe("broadcasts.send platform breaker", () => {
+  it("refuses a send while the sender domain's region is held, naming the region", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const { id } = await seedDraft(teamId);
+    await db.insert(schema.regionBreakers).values({
+      region: "us-east-1",
+      paused: true,
+      reason: {
+        metric: "bounce",
+        rate: 0.041,
+        limit: 0.05,
+        windowHours: 24,
+        sent: 2000,
+        events: 82,
+      },
+      pausedAt: new Date(),
+    });
+    const enqueued: string[] = [];
+    const caller = callerFor(teamId, {
+      enqueueBroadcastSend: async (broadcastId) => {
+        enqueued.push(broadcastId);
+      },
+    });
+    await expect(caller.broadcasts.send({ id })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("us-east-1"),
+    });
+    expect(enqueued).toEqual([]);
+    expect((await broadcastRow(id))?.status).toBe("draft");
+
+    await db.delete(schema.regionBreakers);
+    await caller.broadcasts.send({ id });
     expect((await broadcastRow(id))?.status).toBe("scheduled");
   });
 });

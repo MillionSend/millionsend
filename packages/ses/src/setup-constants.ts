@@ -55,6 +55,19 @@ export const SES_IAM_POLICY = {
       Action: ["ses:SendEmail", "ses:SendRawEmail", "ses:GetAccount"],
       Resource: "*",
     },
+    // Per-team SES tenants (SES_TENANTS). Tenant ARNs have no documented
+    // resource-level scope, so the actions stay account-wide.
+    {
+      Effect: "Allow",
+      Action: [
+        "ses:CreateTenant",
+        "ses:GetTenant",
+        "ses:DeleteTenant",
+        "ses:CreateTenantResourceAssociation",
+        "ses:DeleteTenantResourceAssociation",
+      ],
+      Resource: "*",
+    },
   ],
 } as const;
 
@@ -151,6 +164,11 @@ SQS_QUEUE_URL=
 # reach MillionSend. Unset sends without a configuration set.
 SES_CONFIGURATION_SET=
 
+# One SES tenant per team, so SES tracks bounce/complaint reputation per
+# customer instead of per account and can pause one sender without pausing
+# the rest. Defaults to IS_CLOUD; the IAM policy needs the ses:*Tenant* actions.
+SES_TENANTS=
+
 # --- Optional ---
 
 # The first user can always register; after that, signup stays closed unless
@@ -226,6 +244,13 @@ AUTH_EMAIL_FROM=
 # account. Any team may send from it, only to its own members' inboxes. Leave
 # unset to hide the button; the snippet then asks for the team's own domain.
 ONBOARDING_EMAIL_FROM=
+
+# Sender for account notifications to team owners (daily quota nearly or fully
+# used, bounce/complaint rates at risk or paused) and for team invitation
+# emails, same forms as AUTH_EMAIL_FROM. Leave unset to send them from
+# AUTH_EMAIL_FROM; with neither set, only the webhook events go out and
+# invitations are link-only.
+NOTIFICATIONS_EMAIL_FROM=
 
 # Reverse proxies whose forwarded-client-IP headers (X-Forwarded-For,
 # CF-Connecting-IP) are trusted, comma-separated. Default: loopback only,

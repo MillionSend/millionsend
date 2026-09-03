@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { DAY_MS, EnvKeyring, generateApiKey, PLAN_DAILY_LIMIT, utcDay } from "@millionsend/core";
+import {
+  DAY_MS,
+  EnvKeyring,
+  generateApiKey,
+  PLAN_DAILY_LIMIT,
+  QUOTA_TOLERANCE,
+  utcDay,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -96,10 +103,11 @@ it("a quota-parked email is NOT enqueued — the midnight drain owns it", async 
   if (limit === null) throw new Error("free plan is expected to have a daily cap");
   await db
     .insert(schema.usageCounters)
-    .values({ teamId, day: today, accepted: limit })
+    // The cap tolerates 10% overage before parking; burn the ceiling.
+    .values({ teamId, day: today, accepted: Math.floor(limit * (1 + QUOTA_TOLERANCE)) })
     .onConflictDoUpdate({
       target: [schema.usageCounters.teamId, schema.usageCounters.day],
-      set: { accepted: limit },
+      set: { accepted: Math.floor(limit * (1 + QUOTA_TOLERANCE)) },
     });
   const res = await post(base);
   expect(res.status).toBe(200);

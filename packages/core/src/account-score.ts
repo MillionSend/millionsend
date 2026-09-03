@@ -4,13 +4,8 @@ import type { Db } from "@millionsend/db";
 // thresholds below.
 import * as schema from "@millionsend/db/schema";
 import { and, eq, gte, isNotNull, or, sql } from "drizzle-orm";
-import {
-  type DeliverabilityStatus,
-  fetchDeliverabilityHealth,
-  GUARDRAIL_WINDOW_DAYS,
-} from "./deliverability.js";
+import { type DeliverabilityStatus, fetchDeliverabilityHealth } from "./deliverability.js";
 import { SCORE_VERSION, type ScoreBand, scoreBand } from "./email-insights.js";
-import type { Plan } from "./plans.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /** Trailing window, in UTC calendar days, the account score is computed over. */
@@ -32,7 +27,7 @@ export interface AccountScoreInput {
   sent: number;
   complained: number;
   hardBounced: number;
-  /** Current 7-day guardrail standing — the score must never contradict it. */
+  /** Current guardrail standing — the score must never contradict it. */
   guardrailStatus: DeliverabilityStatus;
 }
 
@@ -134,7 +129,7 @@ export function computeAccountScore(input: AccountScoreInput): AccountScore {
 export async function fetchAccountScore(
   db: Db,
   teamId: string,
-  opts?: { now?: Date; plan?: Plan },
+  opts?: { now?: Date },
 ): Promise<AccountScore> {
   const now = (opts?.now ?? new Date()).getTime();
   const since = utcDay(now - (ACCOUNT_SCORE_WINDOW_DAYS - 1) * DAY_MS);
@@ -172,11 +167,7 @@ export async function fetchAccountScore(
     )
     .where(and(eq(e.teamId, teamId), gte(e.createdAt, createdFloor), gte(e.sentAt, sinceTs)));
 
-  const health = await fetchDeliverabilityHealth(db, teamId, {
-    windowDays: GUARDRAIL_WINDOW_DAYS,
-    ...(opts?.now ? { now: opts.now } : {}),
-    ...(opts?.plan ? { plan: opts.plan } : {}),
-  });
+  const health = await fetchDeliverabilityHealth(db, teamId, opts?.now ? { now: opts.now } : {});
 
   return computeAccountScore({
     contentWeightedTenths: Number(content?.weighted ?? 0),

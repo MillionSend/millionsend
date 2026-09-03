@@ -1,12 +1,4 @@
-/** Escape a string for safe interpolation into HTML text or a "-quoted attribute. */
-export function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+export { escapeHtml } from "@millionsend/core/html";
 
 /** Inverse of escapeHtml: decode the five entities it emits. Ampersand last so
  * `&amp;lt;` decodes to the literal `&lt;`, not `<`. */

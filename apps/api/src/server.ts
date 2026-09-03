@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { env, trackingSubdomainsSupported } from "@millionsend/config";
+import { env, sesTenantsEnabled, trackingSubdomainsSupported } from "@millionsend/config";
 import { getDb } from "@millionsend/db";
 import { Queue } from "@millionsend/queue";
 import {
@@ -55,6 +55,8 @@ const app = createApi({
     defaultRegion: env.AWS_REGION,
     authEmailFrom: env.AUTH_EMAIL_FROM,
     onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
+    notificationsEmailFrom: env.NOTIFICATIONS_EMAIL_FROM,
+    ...(sesTenantsEnabled() ? { tenants: { configurationSet: env.SES_CONFIGURATION_SET } } : {}),
   },
   enqueueEmailSend: async (emailId, opts) => {
     await queue.send(

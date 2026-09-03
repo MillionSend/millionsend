@@ -37,6 +37,10 @@ describe("isReservedSenderDomain", () => {
     expect(isReservedSenderDomain("hello.ms-ops.dev", { isCloud: true, onboardingEmailFrom })).toBe(
       true,
     );
+    const notificationsEmailFrom = "alerts@notify.ms-ops.dev";
+    expect(
+      isReservedSenderDomain("notify.ms-ops.dev", { isCloud: true, notificationsEmailFrom }),
+    ).toBe(true);
     // A self-hoster's own auth domain is typically one of their team domains.
     expect(isReservedSenderDomain("mail.ms-ops.dev", { isCloud: false, authEmailFrom })).toBe(
       false,

@@ -122,7 +122,10 @@ Without Docker (Node 24+, pnpm 11, local Postgres): `pnpm install`, point
 
 The AWS step of `npx @millionsend/setup` creates everything MillionSend needs in
 AWS — IAM policy + user + access key, the SNS event topic, the SQS events queue
-the worker long-polls, and the SES configuration set. An https `APP_BASE_URL`
+the worker long-polls, and the SES configuration set. The policy also carries the
+`ses:*Tenant*` actions behind `SES_TENANTS` (one SES tenant per team); a
+deployment set up before those existed re-runs the wizard, or updates the
+`millionsend-ses` policy, before enabling the flag. An https `APP_BASE_URL`
 additionally gets events pushed to your host; the queue works without any public
 URL.
 

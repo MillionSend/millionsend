@@ -3,6 +3,7 @@ import {
   broadcastSendSpacingMs,
   buildUnsubscribeHeaders,
   encryptEmailBody,
+  escapeHtml,
   fetchDeliverabilityHealth,
   fetchEffectivePlan,
   findSuppressed,
@@ -11,6 +12,7 @@ import {
   makeUnsubscribeToken,
   PLAN_DAILY_LIMIT,
   parseSingleSender,
+  regionPause,
   reserveDailyQuota,
   segmentContactsWhere,
   substituteUnsubscribeUrl,
@@ -43,6 +45,9 @@ export interface BroadcastDeps {
 
 export type BroadcastOutcome = "sent" | "skipped" | "deferred";
 
+/** How long a fan-out waits before re-checking a held region. */
+const REGION_HOLD_RETRY_MS = 15 * 60 * 1000;
+
 // Resend's broadcast merge syntax: {{{NAME}}} or {{{NAME|fallback}}}. NAME is a
 // builtin (FIRST_NAME/LAST_NAME/EMAIL) or a custom-property key; a name with no
 // matching value falls back (or resolves to "") so no raw token reaches an inbox.
@@ -52,15 +57,6 @@ const MERGE_TOKEN = /\{\{\{([A-Za-z0-9_]+)(?:\|([^{}]*))?\}\}\}/g;
 // from an imported property is a phishing primitive, not personalization).
 const URL_ATTRIBUTE_OPEN = /(?:href|src)\s*=\s*["']?$/i;
 const LINK_SCHEME = /^(?:https?:\/\/|mailto:)/i;
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
 
 export interface MergeContact {
   email: string;
@@ -161,11 +157,21 @@ export async function sendBroadcast(
   }
   const fromDomain = sender.domain;
   const [domain] = await db
-    .select({ id: schema.domains.id, status: schema.domains.status })
+    .select({
+      id: schema.domains.id,
+      status: schema.domains.status,
+      region: schema.domains.region,
+    })
     .from(schema.domains)
     .where(and(eq(schema.domains.teamId, broadcast.teamId), eq(schema.domains.name, fromDomain)));
   if (domain?.status !== "verified") {
     throw new Error(`broadcast ${broadcast.id}: sender domain ${fromDomain} is not verified`);
+  }
+  // Platform breaker: a broadcast scheduled before its region was held waits
+  // it out like a not-yet-due one; the reconcile sweep keeps it alive.
+  if (await regionPause(db, domain.region)) {
+    await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));
+    return "deferred";
   }
 
   const [claimed] = await db
@@ -206,11 +212,7 @@ export async function sendBroadcast(
   // degraded since) is throttled here, not hard-halted — the initiation guards
   // (tRPC + API) are what block NEW paused sends; the fan-out's only job is to
   // avoid the burst. Evaluated once so the whole campaign shares one drip base.
-  const health = await fetchDeliverabilityHealth(
-    db,
-    broadcast.teamId,
-    deps.isCloud ? { plan } : {},
-  );
+  const health = await fetchDeliverabilityHealth(db, broadcast.teamId);
   const spacingMs = broadcastSendSpacingMs(health.status);
   const startMs = Date.now();
   let emitted = 0;

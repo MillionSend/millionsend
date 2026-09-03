@@ -154,6 +154,7 @@ export async function processSesEvent(
         type: eventType,
         occurredAt: new Date(event.occurredAt),
         snsMessageId: opts.snsMessageId ?? null,
+        bounceType: event.eventType === "Bounce" ? (event.bounce?.bounceType ?? null) : null,
         data: event.data,
       })
       .onConflictDoNothing()

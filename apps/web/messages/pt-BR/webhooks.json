@@ -20,7 +20,8 @@
   "eventGroup": {
     "delivery": "Entrega",
     "engagement": "Engajamento",
-    "problems": "Problemas"
+    "problems": "Problemas",
+    "account": "Conta"
   },
   "eventLabel": {
     "email": {
@@ -31,6 +32,14 @@
       "clicked": "Link clicado",
       "bounced": "Email rejeitado",
       "complained": "Marcado como spam"
+    },
+    "deliverability": {
+      "warning": "Entregabilidade em risco",
+      "paused": "Envios pausados"
+    },
+    "quota": {
+      "warning": "Cota diária em 80%",
+      "reached": "Cota diária atingida"
     }
   },
   "status": {

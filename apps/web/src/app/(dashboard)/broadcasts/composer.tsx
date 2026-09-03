@@ -332,10 +332,15 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const closeGuard = useCallback(() => setGuardOpen(false), []);
 
   const saveError = createMutation.isError || updateMutation.isError;
+  // Server guards (deliverability pause, region breaker, unverified sender)
+  // already carry a localized, specific message; only unknown failures get
+  // the generic copy.
   const sendErrorMessage = sendMutation.isError
     ? sendMutation.error.message.includes("APP_BASE_URL")
       ? t("guard.appBaseUrl")
-      : t("guard.sendError")
+      : sendMutation.error.data?.code === "PRECONDITION_FAILED"
+        ? sendMutation.error.message
+        : t("guard.sendError")
     : null;
 
   return (

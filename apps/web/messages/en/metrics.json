@@ -11,9 +11,9 @@
     "allTimeDelivered": "Emails delivered — all-time"
   },
   "bounce": {
-    "title": "Bounce rate",
+    "title": "Hard-bounce rate",
     "risk": "RISK 4%",
-    "bounced": "Bounced"
+    "bounced": "Hard bounced"
   },
   "complaint": {
     "title": "Complaint rate",

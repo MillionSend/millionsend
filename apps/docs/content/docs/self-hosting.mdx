@@ -121,6 +121,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `SNS_TOPIC_ARNS` | Comma-separated SNS topic ARNs allowed to deliver SES events. Unset disables event ingestion entirely. |
 | `SQS_QUEUE_URL` | SQS queue the worker long-polls for SES events. Setup always creates it; keep it set even when SNS also pushes to `https://<your-host>/ses/events` (the app dedupes the two). |
 | `SES_CONFIGURATION_SET` | SES configuration set applied to sends that have no per-domain configuration set. Unset sends without one (and without delivery events). |
+| `SES_TENANTS` | One SES tenant per team, so SES tracks bounce/complaint reputation per customer and can pause one sender without the rest. Defaults to `IS_CLOUD`; needs the `ses:*Tenant*` IAM actions. |
 
 ### Optional
 
@@ -143,6 +144,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Same, for GitHub. Callback URL: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Sender for account emails (password reset), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery only appears when this is set and SES credentials are configured — leave unset to hide it entirely. |
 | `ONBOARDING_EMAIL_FROM` | Shared sender for the onboarding "Send email" button and snippet, as `Name <user@domain>` or a bare address on a domain verified in this SES account. Any team may send from it, but only to its own members' inboxes. Leave unset to hide the button; the snippet then asks for the team's own domain. |
+| `NOTIFICATIONS_EMAIL_FROM` | Sender for account notifications to team owners (daily quota nearly or fully used, bounce/complaint rates at risk or paused) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. |
 
 ### Object storage (uploads & backups)
 
@@ -219,6 +221,29 @@ hostname must route that one path to the API (the [nginx
 section](#production-nginx--tls) does), or the confirmation POST lands on the
 dashboard, 404s, and the subscription stays pending with every bounce and
 delivery lost.
+
+## SES tenants (per-team reputation)
+
+With `SES_TENANTS=true` (the default on Cloud) every team gets its own SES
+tenant, named by the team id, in each region it has a domain in. A domain's
+identity and the shared `SES_CONFIGURATION_SET` are associated with the
+tenant when the domain is created, and every send from it names the tenant, so
+SES keeps bounce and complaint metrics — and its own sending pause — per
+customer instead of per account. Domains that predate the flag, or whose
+association failed, are picked up by the hourly `tenants.sync` job. The IAM
+policy the wizard and the CloudFormation template install includes the
+`ses:CreateTenant`, `ses:GetTenant`, `ses:DeleteTenant`,
+`ses:CreateTenantResourceAssociation` and `ses:DeleteTenantResourceAssociation`
+actions; an existing deployment re-runs the wizard (or updates the
+`millionsend-ses` policy) before turning the flag on.
+
+To update the policy in place, publish the JSON the SES settings page shows as a
+new default version:
+
+```bash
+aws iam create-policy-version --policy-arn arn:aws:iam::<account-id>:policy/millionsend-ses \
+  --policy-document file://millionsend-ses.json --set-as-default
+```
 
 ## SMTP relay
 

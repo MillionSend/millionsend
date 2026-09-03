@@ -12,7 +12,7 @@ import {
   verifyOnboardingSender,
 } from "../src/accept-email.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
-import { PLAN_DAILY_LIMIT } from "../src/plans.js";
+import { PLAN_DAILY_LIMIT, QUOTA_TOLERANCE } from "../src/plans.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
 let db: Db;
@@ -142,9 +142,10 @@ describe("acceptEmail", () => {
 
   it("parks over-quota mail until the backlog cap, then refuses", async () => {
     const limit = PLAN_DAILY_LIMIT.free as number;
+    // Sends pass through up to the tolerance ceiling before parking starts.
     await db
       .update(schema.usageCounters)
-      .set({ accepted: limit })
+      .set({ accepted: Math.floor(limit * (1 + QUOTA_TOLERANCE)) })
       .where(eq(schema.usageCounters.teamId, teamId));
     const parkedBefore = (
       await db

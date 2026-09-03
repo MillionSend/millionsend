@@ -20,6 +20,15 @@ entregas por endpoint.
 | `email.opened` | O pixel de rastreamento foi carregado (exige rastreamento de aberturas no [domínio](/pt-BR/concepts/domains)). |
 | `email.clicked` | Um link reescrito foi clicado (exige rastreamento de cliques). |
 
+Eventos de conta não carregam email; `data` descreve a situação do time:
+
+| Evento | Disparado quando | `data` |
+| --- | --- | --- |
+| `deliverability.warning` | A taxa de hard bounce ou de reclamação do time cruzou a linha de risco (uma vez por episódio). | `{ metric, rate, limit, window_days, dashboard_url }` |
+| `deliverability.paused` | A taxa cruzou a linha de pausa; novos envios são recusados até se recuperar. | igual ao anterior |
+| `quota.warning` | 80% da cota diária de hoje foi usada (uma vez por dia UTC, só na nuvem). | `{ used, limit, resets_at, dashboard_url }` |
+| `quota.reached` | A cota de hoje foi usada; os envios passam até 10% a mais e depois estacionam até a meia-noite UTC. | igual ao anterior |
+
 ## Assinaturas (Standard Webhooks)
 
 As entregas são assinadas seguindo a especificação

@@ -17,6 +17,7 @@ import {
   computeDomainVerification,
   type DnsResolver,
   deleteDomainIdentity,
+  disassociateIdentity,
   getDomainVerification,
   type SesIdentityClient,
   verificationDbPatch,
@@ -493,7 +494,13 @@ export async function reapUnverifiedDomains(
   for (const { id } of stale) {
     try {
       const [domain] = await db
-        .select({ id: d.id, teamId: d.teamId, name: d.name, region: d.region })
+        .select({
+          id: d.id,
+          teamId: d.teamId,
+          name: d.name,
+          region: d.region,
+          sesTenantAssociatedAt: d.sesTenantAssociatedAt,
+        })
         .from(d)
         .where(and(eq(d.id, id), isNull(d.verifiedAt)));
       if (!domain) continue;
@@ -507,6 +514,13 @@ export async function reapUnverifiedDomains(
             domain: domain.name,
           });
           if (live.dkimStatus === "SUCCESS") continue;
+          if (domain.sesTenantAssociatedAt) {
+            await disassociateIdentity(deps.clientForRegion(domain.region), {
+              tenantName: domain.teamId,
+              region: domain.region,
+              identity: domain.name,
+            });
+          }
           await deleteDomainIdentity(deps.clientForRegion(domain.region), {
             domain: domain.name,
           });

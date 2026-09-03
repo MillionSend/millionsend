@@ -1,0 +1,1 @@
+ALTER TABLE "domains" ADD COLUMN "ses_tenant_config_set" text;

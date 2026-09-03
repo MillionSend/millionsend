@@ -61,6 +61,12 @@ function fakeSes(state: FakeSesState = {}) {
           },
         };
       }
+      if (name === "CreateTenantCommand" || name === "GetTenantCommand") {
+        const tenantName = (command as unknown as { input: { TenantName: string } }).input
+          .TenantName;
+        const arn = `arn:aws:ses:us-east-1:123456789012:tenant/${tenantName}`;
+        return name === "CreateTenantCommand" ? { TenantArn: arn } : { Tenant: { TenantArn: arn } };
+      }
       return {};
     },
   };
@@ -212,6 +218,41 @@ describe("domains.create", () => {
       region: "us-east-1",
     });
     expect(other.id).toBeTruthy();
+  });
+
+  it("with SES_TENANTS on, creates the team's tenant, associates identity + configuration set, and detaches on delete", async () => {
+    vi.stubEnv("SES_TENANTS", "true");
+    vi.stubEnv("SES_CONFIGURATION_SET", "millionsend");
+    const teamId = await createTeam(db, "tenant-team");
+    const { deps, calls } = fakeSes();
+    const { id } = await callerFor(teamId, deps).domains.create({
+      name: "tenant.example.com",
+      region: "us-east-1",
+    });
+    expect(calls.map((c) => c.name)).toEqual([
+      "CreateEmailIdentityCommand",
+      "PutEmailIdentityMailFromAttributesCommand",
+      "CreateTenantCommand",
+      "CreateTenantResourceAssociationCommand",
+      "CreateTenantResourceAssociationCommand",
+    ]);
+    expect(calls[2]?.input).toEqual({ TenantName: teamId });
+    expect(calls.slice(3).map((c) => c.input.ResourceArn)).toEqual([
+      "arn:aws:ses:us-east-1:123456789012:identity/tenant.example.com",
+      "arn:aws:ses:us-east-1:123456789012:configuration-set/millionsend",
+    ]);
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.sesTenantAssociatedAt).toBeInstanceOf(Date);
+    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+    expect(team?.sesTenantName).toBe(teamId);
+
+    calls.length = 0;
+    await callerFor(teamId, deps).domains.delete({ id });
+    expect(calls.map((c) => c.name)).toEqual([
+      "GetTenantCommand",
+      "DeleteTenantResourceAssociationCommand",
+      "DeleteEmailIdentityCommand",
+    ]);
   });
 
   it("in cloud, 409s a domain another team holds in the region and never adopts SES identities", async () => {

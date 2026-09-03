@@ -143,6 +143,10 @@ export const emailEvents = pgTable(
     // dedupe cannot cover post-completion redeliveries, so the SNS MessageId
     // is recorded here and enforced unique. Null for worker-originated events.
     snsMessageId: text("sns_message_id"),
+    // SES bounce class ("Permanent" | "Transient" | "Undetermined") kept as a
+    // column: the payload retention purge nulls `data`, and the platform
+    // breaker's 7-day hard-bounce count must outlive it.
+    bounceType: text("bounce_type"),
     // Raw provider payload subset (bounce diagnostics, click URL, user agent...).
     data: jsonb("data").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

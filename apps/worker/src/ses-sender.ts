@@ -32,7 +32,7 @@ export function createSesSender(defaultRegion: string): SesSender {
     return client;
   };
   return {
-    async sendRaw({ raw, emailId, configurationSetName, region, to, cc, bcc }) {
+    async sendRaw({ raw, emailId, configurationSetName, region, to, cc, bcc, tenantName }) {
       const ToAddresses = toAddrSpecs(to);
       if (!ToAddresses) throw new Error("no envelope recipients; refusing to send");
       const CcAddresses = toAddrSpecs(cc);
@@ -47,6 +47,7 @@ export function createSesSender(defaultRegion: string): SesSender {
           },
           EmailTags: [{ Name: "millionsend_email_id", Value: emailId }],
           ...(configurationSetName ? { ConfigurationSetName: configurationSetName } : {}),
+          ...(tenantName ? { TenantName: tenantName } : {}),
         }),
       );
       if (!out.MessageId) {

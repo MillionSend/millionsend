@@ -2,6 +2,7 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import { trackingCnameTarget } from "@millionsend/config";
 import {
   apiRequestActor,
+  associateDomainTenant,
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
@@ -22,10 +23,12 @@ import {
   type DnsResolver,
   type DomainVerification,
   deleteDomainIdentity,
+  disassociateIdentity,
   dnsRecordsForDomain,
   generateDkimKeyPair,
   getDomainVerification,
   nodeDnsResolver,
+  provisionDomainTenant,
   SES_REGIONS,
   type SesIdentityClient,
   type SesRegion,
@@ -59,6 +62,10 @@ export interface DomainsSesDeps {
   authEmailFrom?: string | undefined;
   /** The ONBOARDING_EMAIL_FROM sender; reserved in cloud the same way. */
   onboardingEmailFrom?: string | undefined;
+  /** The NOTIFICATIONS_EMAIL_FROM sender; reserved in cloud the same way. */
+  notificationsEmailFrom?: string | undefined;
+  /** Present = one SES tenant per team (SES_TENANTS); the shared configuration set to associate. */
+  tenants?: { configurationSet?: string | undefined } | undefined;
 }
 
 type DomainRow = typeof schema.domains.$inferSelect;
@@ -264,6 +271,7 @@ export function registerDomainRoutes(
           isCloud: deps.isCloud,
           authEmailFrom: ses.authEmailFrom,
           onboardingEmailFrom: ses.onboardingEmailFrom,
+          notificationsEmailFrom: ses.notificationsEmailFrom,
           isOperator,
         })
       ) {
@@ -362,6 +370,23 @@ export function registerDomainRoutes(
         throw error;
       }
       if (!row) throw new Error("domain insert returned no row");
+      if (ses.tenants) {
+        const configurationSet = ses.tenants.configurationSet;
+        await associateDomainTenant(db, {
+          domainId: row.id,
+          teamId: auth.teamId,
+          name: row.name,
+          region,
+          configurationSet,
+          provision: () =>
+            provisionDomainTenant(ses.clientForRegion(region), {
+              teamId: auth.teamId,
+              region,
+              domain: row.name,
+              configurationSet,
+            }),
+        });
+      }
       await recordAudit(db, {
         teamId: auth.teamId,
         actor: apiRequestActor(auth),
@@ -676,6 +701,13 @@ export function registerDomainRoutes(
       // it goes only with the last of them.
       if (!(await isIdentitySharedByOtherDomains(db, domain))) {
         try {
+          if (domain.sesTenantAssociatedAt) {
+            await disassociateIdentity(ses.clientForRegion(domain.region), {
+              tenantName: domain.teamId,
+              region: domain.region,
+              identity: domain.name,
+            });
+          }
           await deleteDomainIdentity(ses.clientForRegion(domain.region), { domain: domain.name });
         } catch (error) {
           // An identity already gone from SES must not block removing the row.

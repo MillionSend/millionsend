@@ -1,17 +1,22 @@
 {
   "banner": {
     "warning": {
-      "bounce": "Your bounce rate ({rate}) is approaching the limit. New broadcasts are being sent at a reduced rate until it recovers.",
-      "complaint": "Your complaint rate ({rate}) is approaching the limit. New broadcasts are being sent at a reduced rate until it recovers."
+      "bounce": "Your hard-bounce rate ({rate}) over the last {days} days is approaching the limit. New broadcasts are being sent at a reduced rate until it recovers.",
+      "complaint": "Your complaint rate ({rate}) over the last {days} days is approaching the limit. New broadcasts are being sent at a reduced rate until it recovers."
     },
     "paused": {
-      "bounce": "Broadcasts are paused: your bounce rate ({rate}) is above the {limit} limit.",
-      "complaint": "Broadcasts are paused: your complaint rate ({rate}) is above the {limit} limit."
+      "bounce": "Broadcasts are paused: your hard-bounce rate ({rate}) over the last {days} days is above the {limit} limit.",
+      "complaint": "Broadcasts are paused: your complaint rate ({rate}) over the last {days} days is above the {limit} limit."
     },
     "action": "Open metrics"
   },
   "sendGuard": {
-    "bounce": "Broadcasts are paused: your bounce rate is {rate}, above the {limit} limit. Clear it before sending.",
-    "complaint": "Broadcasts are paused: your complaint rate is {rate}, above the {limit} limit. Clear it before sending."
+    "bounce": "Broadcasts are paused: your hard-bounce rate is {rate} over the last {days} days, above the {limit} limit. Clear it before sending.",
+    "complaint": "Broadcasts are paused: your complaint rate is {rate} over the last {days} days, above the {limit} limit. Clear it before sending.",
+    "regionPaused": "Broadcasts are paused in {region} while the platform's {metric} rate recovers. Transactional email is unaffected. Try again later."
+  },
+  "metric": {
+    "bounce": "hard-bounce",
+    "complaint": "complaint"
   }
 }

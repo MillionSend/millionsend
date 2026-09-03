@@ -90,11 +90,15 @@ export {
   fetchDeliverabilityHealth,
   GUARDRAIL_WINDOW_DAYS,
   MIN_GUARDRAIL_VOLUME,
+  MIN_PAUSE_COMPLAINTS,
+  MIN_PAUSE_HARD_BOUNCES,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
+  PAUSE_WINDOW_DAYS,
   THROTTLED_BROADCAST_RATE_PER_SECOND,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
+  type WindowCounts,
 } from "./deliverability.js";
 export {
   createFixedWindowLimiter,
@@ -132,6 +136,7 @@ export {
 export { type EmailInsightsRow, fetchEmailInsights } from "./email-insights-lookup.js";
 export { ERASED_TOMBSTONE, type EraseRecipientResult, eraseRecipient } from "./erase-recipient.js";
 export { type SesEventsHealth, sesEventsHealth } from "./events-health.js";
+export { EMAIL_WORDMARK_URL, escapeHtml } from "./html.js";
 export {
   beginIdempotent,
   completeIdempotent,
@@ -139,8 +144,10 @@ export {
   purgeExpiredIdempotencyKeys,
   releaseIdempotent,
 } from "./idempotency.js";
+export { findInstanceOperator, isInstanceOperator } from "./instance-operator.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export { ANCHOR_HREF, type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
+export { claimNotification, clearNotifications, listTeamOwners } from "./notifications.js";
 export {
   ADMIN_MCP_SCOPES,
   ALL_TEAMS_GRANT,
@@ -157,7 +164,23 @@ export {
   PLAN_DOMAIN_LIMIT,
   PLAN_GRACE_DAYS,
   type Plan,
+  QUOTA_TOLERANCE,
 } from "./plans.js";
+export {
+  applyRegionBreakers,
+  BREAKER_BOUNCE_RATE,
+  BREAKER_COMPLAINT_RATE,
+  BREAKER_MIN_SENT,
+  BREAKER_WINDOWS_HOURS,
+  evaluateRegionBreakers,
+  type PausedRegion,
+  pausedRegions,
+  type RegionContributor,
+  type RegionDecision,
+  type RegionWindowCounts,
+  regionPause,
+  regionWindowCounts,
+} from "./platform-breaker.js";
 export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
 export {
@@ -169,6 +192,7 @@ export {
   segmentWhere,
 } from "./segment-filter.js";
 export { formatMailbox, type Mailbox, parseMailbox, parseSingleSender } from "./sender-address.js";
+export { associateDomainTenant, markDomainTenantAssociated } from "./ses-tenant.js";
 export {
   isBlockedIp,
   type PostFailureCode,
@@ -186,7 +210,14 @@ export {
   normalizeAddress,
   suppressionHashesFor,
 } from "./suppressions.js";
-export { INVITE_TTL_MS, signInviteToken, verifyInviteToken } from "./team-invitations.js";
+export {
+  INVITE_EMAILS_PER_HOUR,
+  INVITE_MAX_SENDS,
+  INVITE_RESEND_COOLDOWN_MS,
+  INVITE_TTL_MS,
+  signInviteToken,
+  verifyInviteToken,
+} from "./team-invitations.js";
 export { fetchEffectivePlan } from "./team-plan.js";
 export { findTopicOptOuts, isSubscribedToTopic } from "./topics.js";
 export {
@@ -211,6 +242,7 @@ export {
   buildWebhookPayload,
   decryptWebhookSecret,
   encryptWebhookSecret,
+  enqueueTeamWebhookDeliveries,
   enqueueWebhookDeliveries,
   generateWebhookSecret,
   isWebhookEventType,

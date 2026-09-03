@@ -59,7 +59,10 @@ deliberadas e explícitas:
 - Broadcasts suportam `canceled`, um status fora da união do Resend, e o
   envio de broadcast, `POST /emails` e `POST /emails/batch` podem retornar
   `403 sending_paused` quando sua taxa de bounce ou reclamação cruza os
-  limites de enforcement do SES.
+  limites de enforcement do SES. Só o envio de broadcast também pode retornar
+  `403 broadcasts_paused` enquanto a taxa agregada da plataforma na região SES
+  do remetente se recupera; é por região, não afeta e-mail transacional e
+  libera sozinho.
 - `POST /emails` e `POST /emails/batch` retornam `429 daily_quota_exceeded`
   quando a cota diária de envio acabou e a fila de espera está cheia — tente
   de novo depois da virada do dia em UTC.

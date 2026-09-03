@@ -9,7 +9,12 @@ const read = (relative: string) =>
 const policyActions = new Set<string>(SES_IAM_POLICY.Statement.flatMap((s) => [...s.Action]));
 
 // The runtime SES modules — every command they construct needs an allow.
-const RUNTIME_MODULES = ["../src/domain-identity.ts", "../src/send.ts", "../src/account.ts"];
+const RUNTIME_MODULES = [
+  "../src/domain-identity.ts",
+  "../src/send.ts",
+  "../src/account.ts",
+  "../src/tenants.ts",
+];
 
 /** CloudFormation's camelCase event names → SESv2's SCREAMING_SNAKE enum. */
 const cfnEventToSes = (name: string) => name.replace(/([A-Z])/g, "_$1").toUpperCase();

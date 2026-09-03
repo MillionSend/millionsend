@@ -1,17 +1,22 @@
 {
   "banner": {
     "warning": {
-      "bounce": "Sua taxa de rejeição ({rate}) está se aproximando do limite. Novas transmissões estão sendo enviadas em ritmo reduzido até que ela se recupere.",
-      "complaint": "Sua taxa de reclamação ({rate}) está se aproximando do limite. Novas transmissões estão sendo enviadas em ritmo reduzido até que ela se recupere."
+      "bounce": "Sua taxa de bounce permanente ({rate}) nos últimos {days} dias está se aproximando do limite. Novas transmissões estão sendo enviadas em ritmo reduzido até que ela se recupere.",
+      "complaint": "Sua taxa de reclamação ({rate}) nos últimos {days} dias está se aproximando do limite. Novas transmissões estão sendo enviadas em ritmo reduzido até que ela se recupere."
     },
     "paused": {
-      "bounce": "As transmissões estão pausadas: sua taxa de rejeição ({rate}) está acima do limite de {limit}.",
-      "complaint": "As transmissões estão pausadas: sua taxa de reclamação ({rate}) está acima do limite de {limit}."
+      "bounce": "As transmissões estão pausadas: sua taxa de bounce permanente ({rate}) nos últimos {days} dias está acima do limite de {limit}.",
+      "complaint": "As transmissões estão pausadas: sua taxa de reclamação ({rate}) nos últimos {days} dias está acima do limite de {limit}."
     },
     "action": "Abrir métricas"
   },
   "sendGuard": {
-    "bounce": "As transmissões estão pausadas: sua taxa de rejeição é {rate}, acima do limite de {limit}. Resolva antes de enviar.",
-    "complaint": "As transmissões estão pausadas: sua taxa de reclamação é {rate}, acima do limite de {limit}. Resolva antes de enviar."
+    "bounce": "As transmissões estão pausadas: sua taxa de bounce permanente é {rate} nos últimos {days} dias, acima do limite de {limit}. Resolva antes de enviar.",
+    "complaint": "As transmissões estão pausadas: sua taxa de reclamação é {rate} nos últimos {days} dias, acima do limite de {limit}. Resolva antes de enviar.",
+    "regionPaused": "As transmissões estão pausadas em {region} enquanto a taxa de {metric} da plataforma se recupera. E-mails transacionais não são afetados. Tente de novo mais tarde."
+  },
+  "metric": {
+    "bounce": "bounce permanente",
+    "complaint": "reclamação"
   }
 }

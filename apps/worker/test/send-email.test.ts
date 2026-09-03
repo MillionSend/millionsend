@@ -54,6 +54,7 @@ interface FakeSend {
   emailId: string;
   configurationSetName?: string | undefined;
   region?: string | undefined;
+  tenantName?: string | undefined;
 }
 
 function fakeSes(messageId = "fake-mid"): { ses: SesSender; sends: FakeSend[] } {
@@ -129,6 +130,8 @@ it("sends a queued email: MIME, join key, status, event row", async () => {
   expect(sends[0]?.configurationSetName).toBe("ms-config-set");
   expect(sends[0]?.region).toBe("us-east-1");
   expect(sends[0]?.emailId).toBe(emailId);
+  // The suite's domain is not tenant-associated, so no TenantName rides along.
+  expect(sends[0]?.tenantName).toBeUndefined();
 
   // Transactional mail carries none of the bulk-class headers.
   for (const h of ["List-Id", "List-Unsubscribe", "Precedence", "Auto-Submitted"]) {
@@ -1182,4 +1185,72 @@ it("a body sealed for one row refuses to open on another: copied columns fail th
 
   expect(await sendEmail(db, { keyring, ses }, { emailId: idA })).toBe("sent");
   expect(sends[0]?.raw.toString()).toContain("for A");
+});
+
+it("names the team's SES tenant only once the domain's resources are associated", async () => {
+  const [tenantDomain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "tenant.dev",
+      region: "sa-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+      sesTenantAssociatedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  if (!tenantDomain) throw new Error("domain insert failed");
+  await db.update(schema.teams).set({ sesTenantName: teamId }).where(eq(schema.teams.id, teamId));
+
+  const { ses, sends } = fakeSes("mid-tenant");
+  const emailId = await insertEmail({ domainId: tenantDomain.id, from: "Acme <a@tenant.dev>" });
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  expect(sends[0]?.tenantName).toBe(teamId);
+  expect(sends[0]?.region).toBe("sa-east-1");
+
+  // Same team, but the suite's original domain is unassociated: SES would reject
+  // a tenant send for it, so the tenant stays off the wire.
+  const plain = fakeSes("mid-plain");
+  const plainId = await insertEmail();
+  expect(await sendEmail(db, { keyring, ses: plain.ses }, { emailId: plainId })).toBe("sent");
+  expect(plain.sends[0]?.tenantName).toBeUndefined();
+});
+
+it("drops the tenant when the send's configuration set is not the one associated", async () => {
+  const [drifted] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "drift.dev",
+      region: "sa-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+      sesTenantAssociatedAt: new Date(),
+      sesTenantConfigSet: "old-set",
+    })
+    .returning({ id: schema.domains.id });
+  if (!drifted) throw new Error("domain insert failed");
+  await db.update(schema.teams).set({ sesTenantName: teamId }).where(eq(schema.teams.id, teamId));
+  const { ses, sends } = fakeSes("mid-drift");
+  const emailId = await insertEmail({ domainId: drifted.id, from: "Acme <a@drift.dev>" });
+  expect(
+    await sendEmail(db, { keyring, ses, defaultConfigurationSet: "millionsend" }, { emailId }),
+  ).toBe("sent");
+  expect(sends[0]?.configurationSetName).toBe("millionsend");
+  expect(sends[0]?.tenantName).toBeUndefined();
+  // Once the association matches the set in force, the tenant rides along.
+  await db
+    .update(schema.domains)
+    .set({ sesTenantConfigSet: "millionsend" })
+    .where(eq(schema.domains.id, drifted.id));
+  const again = fakeSes("mid-drift-2");
+  const secondId = await insertEmail({ domainId: drifted.id, from: "Acme <a@drift.dev>" });
+  expect(
+    await sendEmail(
+      db,
+      { keyring, ses: again.ses, defaultConfigurationSet: "millionsend" },
+      { emailId: secondId },
+    ),
+  ).toBe("sent");
+  expect(again.sends[0]?.tenantName).toBe(teamId);
 });

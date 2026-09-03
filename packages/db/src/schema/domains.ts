@@ -54,6 +54,15 @@ export const domains = pgTable(
     openTracking: boolean("open_tracking").notNull().default(false),
     tlsMode: tlsModeEnum("tls_mode").notNull().default("opportunistic"),
     sesConfigurationSet: text("ses_configuration_set"),
+    // Stamped once the identity (and shared configuration set) are associated
+    // with the team's SES tenant; sends carry TenantName only after that, since
+    // SES rejects a tenant send whose resources are not associated. NULL = the
+    // hourly tenants.sync backfill still has to do it.
+    sesTenantAssociatedAt: timestamp("ses_tenant_associated_at", { withTimezone: true }),
+    // The configuration set associated alongside the identity (NULL = none was).
+    // A send names TenantName only while this matches the set it will use;
+    // tenants.sync re-associates rows whose value drifted from the env.
+    sesTenantConfigSet: text("ses_tenant_config_set"),
     // Per-record snapshot persisted by every verification pass so send-time
     // insights never do live DNS.
     dnsRecords: jsonb("dns_records").$type<DomainDnsRecord[]>(),

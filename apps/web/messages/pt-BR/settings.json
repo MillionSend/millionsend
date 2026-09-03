@@ -124,6 +124,13 @@
       "bannerAction": "Abrir configurações do SES",
       "lastEvent": "Último evento recebido",
       "never": "nunca"
+    },
+    "breaker": {
+      "paused": "As transmissões estão pausadas em {region}: a taxa de {metric} da plataforma está em {rate}%, perto da linha de revisão do SES para a conta inteira. E-mails transacionais continuam; as transmissões voltam sozinhas quando a taxa se recuperar.",
+      "metric": {
+        "bounce": "bounce permanente",
+        "complaint": "reclamação"
+      }
     }
   },
   "team": {
@@ -180,17 +187,21 @@
     },
     "created": {
       "title": "Link do convite",
-      "body": "Compartilhe este link com {email}. Ele funciona uma vez e expira em 7 dias.",
-      "done": "Concluído",
-      "bodyTtl": "Compartilhe este link com {email}. Ele funciona uma vez e expira em 3 dias."
+      "sentTitle": "Convite enviado",
+      "emailedBody": "Enviamos um e-mail para {email}. Você também pode compartilhar este link — ele funciona uma vez e expira em 3 dias.",
+      "bodyTtl": "Compartilhe este link com {email}. Ele funciona uma vez e expira em 3 dias.",
+      "noSender": "Esta instância não tem remetente de e-mail configurado, então o link é a única forma de entrar.",
+      "done": "Concluído"
     },
     "pending": {
       "title": "Convites pendentes",
       "email": "E-mail",
-      "link": "Link",
-      "copy": "Copiar link",
+      "expires": "Expira",
+      "expired": "Expirado",
+      "resend": "Reenviar",
       "revoke": "Revogar",
       "actions": "Ações",
+      "resendError": "Não foi possível reenviar: {reason}",
       "pageOf": "Página 1 – {pages} de {total} convites"
     },
     "accept": {
@@ -202,7 +213,12 @@
       "body": "Aceitar este convite como {email}?",
       "submit": "Aceitar convite",
       "invalid": "Este convite não é mais válido.",
-      "emailMismatch": "Este convite foi enviado para outro endereço de e-mail. Entre com a conta convidada para aceitá-lo."
+      "emailMismatch": "Este convite foi enviado para outro endereço de e-mail. Entre com a conta convidada para aceitá-lo.",
+      "invitedBy": "{inviter} convidou você para entrar em {team} como {role}.",
+      "invitedByUnknown": "Você foi convidado para entrar em {team} como {role}.",
+      "forEmail": "Este convite é para {email}.",
+      "expired": "Este convite expirou. Peça a um proprietário da equipe para enviar um novo.",
+      "accepted": "Este convite já foi usado."
     }
   },
   "instance": {
@@ -344,6 +360,7 @@
       "member.role_changed": "Alterou função de membro",
       "member.left": "Saiu da equipe",
       "invitation.revoked": "Revogou convite",
+      "invitation.resent": "Reenviou convite",
       "team.created": "Criou equipe",
       "team.deleted": "Excluiu equipe",
       "instance.settings_updated": "Atualizou configurações da instância",

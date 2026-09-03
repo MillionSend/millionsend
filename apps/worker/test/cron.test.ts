@@ -1,4 +1,4 @@
-import { DAY_MS, PLAN_DAILY_LIMIT, utcDay } from "@millionsend/core";
+import { DAY_MS, PLAN_DAILY_LIMIT, QUOTA_TOLERANCE, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -30,6 +30,8 @@ const today = () => utcDay();
 
 const FREE_LIMIT = PLAN_DAILY_LIMIT.free;
 if (FREE_LIMIT === null) throw new Error("free plan is expected to have a daily cap");
+// Sends pass this far over the nominal cap before parking.
+const FREE_CEILING = Math.floor(FREE_LIMIT * (1 + QUOTA_TOLERANCE));
 
 async function insertParked(createdAt: Date, subject = "parked"): Promise<string> {
   const [row] = await db
@@ -56,9 +58,11 @@ async function statusOf(emailId: string): Promise<string> {
 }
 
 it("drain reserves against the NEW day's cap — parking is not a quota bypass", async () => {
-  // Free cap is 100; today's counter already holds 99 → only ONE parked
-  // email may drain, oldest first.
-  await db.insert(schema.usageCounters).values({ teamId, day: today(), accepted: FREE_LIMIT - 1 });
+  // Free ceiling is 110 (100 + tolerance); today's counter already holds 109
+  // → only ONE parked email may drain, oldest first.
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: today(), accepted: FREE_CEILING - 1 });
   const oldest = await insertParked(new Date("2026-08-13T01:00:00Z"));
   const middle = await insertParked(new Date("2026-08-13T02:00:00Z"));
   const newest = await insertParked(new Date("2026-08-13T03:00:00Z"));
@@ -80,7 +84,7 @@ it("drain reserves against the NEW day's cap — parking is not a quota bypass",
     .select()
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, teamId));
-  expect(counter?.accepted).toBe(FREE_LIMIT);
+  expect(counter?.accepted).toBe(FREE_CEILING);
 });
 
 it("self-host drain (no caps) releases everything", async () => {

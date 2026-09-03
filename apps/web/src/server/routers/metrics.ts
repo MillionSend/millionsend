@@ -1,9 +1,7 @@
-import { env } from "@millionsend/config";
 import {
   DAY_MS,
   fetchAccountScore,
   fetchDeliverabilityHealth,
-  fetchEffectivePlan,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   utcDay,
@@ -20,6 +18,7 @@ const COUNTS = {
   sent: 0,
   delivered: 0,
   bounced: 0,
+  hardBounced: 0,
   complained: 0,
   opened: 0,
   clicked: 0,
@@ -43,6 +42,7 @@ export const metricsRouter = router({
             sent: c.sent,
             delivered: c.delivered,
             bounced: c.bounced,
+            hardBounced: c.hardBounced,
             complained: c.complained,
             opened: c.opened,
             clicked: c.clicked,
@@ -72,6 +72,7 @@ export const metricsRouter = router({
           sent: acc.sent + d.sent,
           delivered: acc.delivered + d.delivered,
           bounced: acc.bounced + d.bounced,
+          hardBounced: acc.hardBounced + d.hardBounced,
           complained: acc.complained + d.complained,
           opened: acc.opened + d.opened,
           clicked: acc.clicked + d.clicked,
@@ -89,8 +90,7 @@ export const metricsRouter = router({
    * chart reads.
    */
   health: teamProcedure.query(async ({ ctx }) => {
-    const plan = env.IS_CLOUD ? await fetchEffectivePlan(ctx.db, ctx.teamId) : null;
-    const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId, plan ? { plan } : {});
+    const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId);
     return {
       ...health,
       thresholds: {
@@ -103,8 +103,5 @@ export const metricsRouter = router({
   }),
 
   /** Rolling 30-day account score (content + outcome sub-scores). */
-  accountScore: teamProcedure.query(async ({ ctx }) => {
-    const plan = env.IS_CLOUD ? await fetchEffectivePlan(ctx.db, ctx.teamId) : null;
-    return fetchAccountScore(ctx.db, ctx.teamId, plan ? { plan } : {});
-  }),
+  accountScore: teamProcedure.query(({ ctx }) => fetchAccountScore(ctx.db, ctx.teamId)),
 });

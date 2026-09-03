@@ -1,9 +1,11 @@
-import { env } from "@millionsend/config";
+import { env, notificationsEmailFrom } from "@millionsend/config";
+import { EMAIL_WORDMARK_URL, escapeHtml } from "@millionsend/core/html";
 import { type Db, schema } from "@millionsend/db";
 import { createSesSendClient, type SimpleEmail, sendSimpleEmail } from "@millionsend/ses";
 import { and, eq, gt, like, ne } from "drizzle-orm";
-import { escapeHtml } from "@/lib/html";
+import enInvite from "../../messages/en/invite-email.json";
 import en from "../../messages/en/reset-email.json";
+import ptBRInvite from "../../messages/pt-BR/invite-email.json";
 import ptBR from "../../messages/pt-BR/reset-email.json";
 
 export const RESET_TOKEN_TTL_MINUTES = 30;
@@ -12,7 +14,8 @@ export const RESET_TOKEN_TTL_MINUTES = 30;
 export const RESET_EMAIL_THROTTLE_MS = 2 * 60 * 1000;
 
 const MESSAGES = { en, "pt-BR": ptBR } as const;
-type MailLocale = keyof typeof MESSAGES;
+const INVITE_MESSAGES = { en: enInvite, "pt-BR": ptBRInvite } as const;
+export type MailLocale = keyof typeof MESSAGES;
 
 /**
  * Honest "this process can reach SES": explicit keys, or the operator's
@@ -53,16 +56,18 @@ function pickLocale(request: Request | undefined): MailLocale {
   return "en";
 }
 
-/**
- * Hosted by the MillionSend product site rather than the instance: most
- * self-hosted deployments sit on private or loopback hosts that recipients'
- * mail clients cannot fetch from. The alt text covers image-blocking clients.
- */
-const EMAIL_WORDMARK_URL = "https://millionsend.com/email/wordmark.png";
-
 const MUTED = 'style="font-size:13px;line-height:1.5;color:#52525b;margin:24px 0 0"';
 
 /** Exported for tests; interpolates and escapes, so strings stay in JSON. */
+/**
+ * Fills `{key}` placeholders. A replacer function, not a replacement string:
+ * user-controlled values such as names may contain `$'` / `$$`, which
+ * String.replace would otherwise interpret. Every occurrence is filled.
+ */
+function fill(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match);
+}
+
 export function buildResetEmail(input: {
   to: string;
   name: string;
@@ -70,8 +75,8 @@ export function buildResetEmail(input: {
   locale: MailLocale;
 }): SimpleEmail {
   const m = MESSAGES[input.locale];
-  const greeting = m.greeting.replace("{name}", input.name);
-  const expiry = m.expiry.replace("{minutes}", String(RESET_TOKEN_TTL_MINUTES));
+  const greeting = fill(m.greeting, { name: input.name });
+  const expiry = fill(m.expiry, { minutes: String(RESET_TOKEN_TTL_MINUTES) });
   const url = escapeHtml(input.url);
   const html = `<div style="background:#f4f4f5;padding:32px 16px;font-family:-apple-system,'Segoe UI',Roboto,sans-serif">
   <div style="max-width:440px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px">
@@ -87,12 +92,52 @@ export function buildResetEmail(input: {
   return { from: env.AUTH_EMAIL_FROM ?? "", to: input.to, subject: m.subject, html, text };
 }
 
+/**
+ * Exported for tests. The inviter's dashboard locale picks the language: the
+ * invitee's own is unknown until they sign in, and teammates usually share one.
+ */
+export function buildInvitationEmail(input: {
+  to: string;
+  inviterName: string;
+  teamName: string;
+  role: "member" | "admin";
+  url: string;
+  expiresInDays: number;
+  locale: MailLocale;
+}): SimpleEmail {
+  const m = INVITE_MESSAGES[input.locale];
+  const values = {
+    inviter: input.inviterName,
+    team: input.teamName,
+    role: m.roles[input.role],
+    days: String(input.expiresInDays),
+    email: input.to,
+  };
+  const subject = fill(m.subject, values);
+  const body = fill(m.body, values);
+  const expiry = fill(m.expiry, values);
+  const noAccount = fill(m.noAccount, values);
+  const url = escapeHtml(input.url);
+  const html = `<div style="background:#f4f4f5;padding:32px 16px;font-family:-apple-system,'Segoe UI',Roboto,sans-serif">
+  <div style="max-width:440px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px">
+    <img src="${EMAIL_WORDMARK_URL}" width="174" height="24" alt="MillionSend" style="display:block;height:24px;width:auto;margin:0 0 24px;border:0">
+    <p style="font-size:14px;line-height:1.5;color:#18181b;margin:0 0 24px">${escapeHtml(body)}</p>
+    <a href="${url}" style="display:inline-block;background:#18181b;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;padding:12px 20px">${m.button}</a>
+    <p ${MUTED}>${m.linkFallback}<br><a href="${url}" style="color:#18181b;word-break:break-all">${url}</a></p>
+    <p ${MUTED}>${escapeHtml(noAccount)}</p>
+    <p ${MUTED}>${escapeHtml(expiry)} ${m.ignore}</p>
+  </div>
+</div>`;
+  const text = `${body}\n\n${input.url}\n\n${noAccount}\n\n${expiry} ${m.ignore}\n`;
+  return { from: notificationsEmailFrom() ?? "", to: input.to, subject, html, text };
+}
+
 /** SES seam so tests capture sends instead of stubbing the AWS SDK. */
 export interface SystemMailDeps {
   send(message: SimpleEmail): Promise<void>;
 }
 
-const defaultDeps: SystemMailDeps = {
+export const defaultSystemMailDeps: SystemMailDeps = {
   // Client per send, like defaultSesDeps in routers/system.ts: resets are
   // rare, so there is nothing worth caching.
   send: (message) =>
@@ -120,7 +165,7 @@ export async function sendPasswordResetEmail(
   db: Db,
   data: { user: { id: string; email: string; name: string }; url: string; token: string },
   request: Request | undefined,
-  deps: SystemMailDeps = defaultDeps,
+  deps: SystemMailDeps = defaultSystemMailDeps,
 ): Promise<void> {
   try {
     if (!env.AUTH_EMAIL_FROM) return;

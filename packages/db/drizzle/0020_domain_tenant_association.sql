@@ -1,0 +1,1 @@
+ALTER TABLE "domains" ADD COLUMN "ses_tenant_associated_at" timestamp with time zone;

@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { assertEnvConsistency, type Env } from "../src/env.js";
+import {
+  assertEnvConsistency,
+  type Env,
+  notificationsEmailFrom,
+  sesTenantsEnabled,
+} from "../src/env.js";
 
 // Only the fields the cross-field rules read; the zod schema is not under test.
 function fakeEnv(overrides: Record<string, string | boolean>): Env {
@@ -84,6 +89,20 @@ it("rejects half an AWS keypair, accepts a full pair or none", () => {
   ).not.toThrow();
 });
 
+it("validates NOTIFICATIONS_EMAIL_FROM like AUTH_EMAIL_FROM and falls back to it", () => {
+  expect(() => assertEnvConsistency(fakeEnv({ NOTIFICATIONS_EMAIL_FROM: "not-an-email" }))).toThrow(
+    "NOTIFICATIONS_EMAIL_FROM",
+  );
+  expect(notificationsEmailFrom(fakeEnv({ AUTH_EMAIL_FROM: "a@mail.example.com" }))).toBe(
+    "a@mail.example.com",
+  );
+  expect(
+    notificationsEmailFrom(
+      fakeEnv({ AUTH_EMAIL_FROM: "a@mail.example.com", NOTIFICATIONS_EMAIL_FROM: "n@x.dev" }),
+    ),
+  ).toBe("n@x.dev");
+});
+
 it("rejects an AUTH_EMAIL_FROM that does not parse, accepts both valid forms", () => {
   expect(() => assertEnvConsistency(fakeEnv({ AUTH_EMAIL_FROM: "not-an-email" }))).toThrow(
     "AUTH_EMAIL_FROM",
@@ -114,4 +133,14 @@ it("refuses a KMS key outside cloud mode", () => {
   expect(() => assertEnvConsistency(fakeEnv({ KMS_KEY_ID: "kms" }))).toThrow(
     "KMS_KEY_ID is set but IS_CLOUD is false",
   );
+});
+
+it("sesTenantsEnabled follows IS_CLOUD unless SES_TENANTS says otherwise", () => {
+  expect(sesTenantsEnabled(fakeEnv({}))).toBe(false);
+  expect(sesTenantsEnabled(fakeEnv({ IS_CLOUD: true }))).toBe(true);
+  expect(sesTenantsEnabled(fakeEnv({ IS_CLOUD: true, SES_TENANTS: "false" }))).toBe(false);
+  expect(sesTenantsEnabled(fakeEnv({ SES_TENANTS: "true" }))).toBe(true);
+  // SKIP_ENV_VALIDATION leaves raw strings behind; "1" and "" must still read right.
+  expect(sesTenantsEnabled(fakeEnv({ SES_TENANTS: "1" }))).toBe(true);
+  expect(sesTenantsEnabled(fakeEnv({ IS_CLOUD: true, SES_TENANTS: "" }))).toBe(true);
 });

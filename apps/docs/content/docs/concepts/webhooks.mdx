@@ -20,6 +20,15 @@ delivery log.
 | `email.opened` | The tracking pixel was loaded (requires open tracking on the [domain](/concepts/domains)). |
 | `email.clicked` | A rewritten link was clicked (requires click tracking). |
 
+Team-level events carry no email; `data` describes the team's standing instead:
+
+| Event | Fired when | `data` |
+| --- | --- | --- |
+| `deliverability.warning` | The team's hard-bounce or complaint rate crossed the risk line (once per episode). | `{ metric, rate, limit, window_days, dashboard_url }` |
+| `deliverability.paused` | The rate crossed the pause line; new sends are refused until it recovers. | same as above |
+| `quota.warning` | 80% of today's daily cap is used (once per UTC day, cloud only). | `{ used, limit, resets_at, dashboard_url }` |
+| `quota.reached` | Today's cap is used; sends pass up to 10% more, then park until midnight UTC. | same as above |
+
 ## Signatures (Standard Webhooks)
 
 Deliveries are signed following the

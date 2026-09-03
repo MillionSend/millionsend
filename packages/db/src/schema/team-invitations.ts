@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { teamMemberRoleEnum, user } from "./auth.js";
 import { teams } from "./teams.js";
 
@@ -23,6 +23,9 @@ export const teamInvitations = pgTable(
     invitedByUserId: text("invited_by_user_id").references(() => user.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    // Resend throttling: null/0 when the invite was created without a sender.
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+    sendCount: integer("send_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

@@ -47,6 +47,8 @@ export interface SesSender {
     configurationSetName?: string;
     /** SES region the sending identity is verified in; sender default when absent. */
     region?: string;
+    /** The team's SES tenant; only set once the domain's resources are associated with it. */
+    tenantName?: string;
   }): Promise<{ messageId: string }>;
 }
 
@@ -321,13 +323,19 @@ export async function sendEmail(
             trackingSubdomainSetAt: schema.domains.trackingSubdomainSetAt,
             dmarcPolicy: schema.domains.dmarcPolicy,
             dmarcCheckedAt: schema.domains.dmarcCheckedAt,
+            sesTenantAssociatedAt: schema.domains.sesTenantAssociatedAt,
+            sesTenantConfigSet: schema.domains.sesTenantConfigSet,
+            sesTenantName: schema.teams.sesTenantName,
           })
           .from(schema.domains)
+          .innerJoin(schema.teams, eq(schema.teams.id, schema.domains.teamId))
           .where(
             and(eq(schema.domains.id, email.domainId), eq(schema.domains.teamId, email.teamId)),
           )
       )[0]
     : undefined;
+  // SES rejects a tenant send whose identity or configuration set is not
+  // associated, so the tenant rides along only once the row is marked.
   // The shared onboarding sender is an identity of this instance's own SES
   // account: no team domain, the default region and configuration set.
   const platformSend = !email.domainId && isOnboardingSender(email.from, deps.onboardingEmailFrom);
@@ -339,6 +347,14 @@ export async function sendEmail(
     return "failed";
   }
   const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
+  // TenantName rides only when the set this send names is the one associated
+  // with the tenant: SES rejects a tenant send referencing an unassociated set.
+  const tenantName =
+    domain?.sesTenantAssociatedAt &&
+    domain.sesTenantName &&
+    (domain.sesTenantConfigSet ?? null) === (configurationSet ?? null)
+      ? domain.sesTenantName
+      : undefined;
 
   const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
   if (!bodyCiphertext || !bodyIv || !bodyWrappedDek || bodyKeyVersion === null) {
@@ -569,6 +585,7 @@ export async function sendEmail(
       bcc: email.bcc,
       ...(configurationSet ? { configurationSetName: configurationSet } : {}),
       ...(domain?.region ? { region: domain.region } : {}),
+      ...(tenantName ? { tenantName } : {}),
     }));
   } catch (err) {
     // sendRaw threw ⇒ the SDK exhausted its own retries without an accept.

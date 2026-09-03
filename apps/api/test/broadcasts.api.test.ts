@@ -363,6 +363,72 @@ describe("broadcasts API deliverability guardrail", () => {
   });
 });
 
+describe("broadcasts API platform breaker", () => {
+  let enqueued: string[];
+  let held: ReturnType<typeof createApi>;
+  const call = (token: string, path: string, body: unknown) =>
+    held.request(path, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  beforeAll(async () => {
+    enqueued = [];
+    held = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: true,
+      enqueueEmailSend: async () => {},
+      enqueueBroadcastSend: async (id) => {
+        enqueued.push(id);
+      },
+      appBaseUrl: "https://app.example.test",
+    });
+    await db.insert(schema.regionBreakers).values({
+      region: "us-east-1",
+      paused: true,
+      reason: {
+        metric: "complaint",
+        rate: 0.0009,
+        limit: 0.001,
+        windowHours: 24,
+        sent: 5000,
+        events: 5,
+      },
+      pausedAt: new Date(),
+    });
+  });
+  afterAll(async () => {
+    await db.delete(schema.regionBreakers);
+  });
+
+  it("403s broadcasts_paused in a held region, leaving the draft; transactional /emails still flows", async () => {
+    const { token, broadcastId } = await makeSendableTeam("bc-region-held");
+    const res = await call(token, `/broadcasts/${broadcastId}/send`, {});
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({
+      statusCode: 403,
+      name: "broadcasts_paused",
+      message: expect.stringContaining("us-east-1"),
+    });
+    const [row] = await db
+      .select({ status: schema.broadcasts.status })
+      .from(schema.broadcasts)
+      .where(eq(schema.broadcasts.id, broadcastId));
+    expect(row?.status).toBe("draft");
+    expect(enqueued).toEqual([]);
+
+    const email = await call(token, "/emails", {
+      from: "Acme <hi@acme.dev>",
+      to: ["someone@example.com"],
+      subject: "receipt",
+      html: "<p>thanks</p>",
+    });
+    expect(email.status).toBe(200);
+  });
+});
+
 describe("broadcasts send-on-create", () => {
   let enq: { id: string; startAfter: Date | undefined }[];
   let sendApp: ReturnType<typeof createApi>;

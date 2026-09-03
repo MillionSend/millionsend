@@ -34,7 +34,8 @@ export const DOMAIN_CREATE_LIMIT_PER_HOUR = 10;
 /**
  * Whether `name` (or a subdomain of it) may not be registered as a sender
  * identity: public mailbox providers everywhere, plus in cloud the platform
- * domain and the operator's AUTH_EMAIL_FROM / ONBOARDING_EMAIL_FROM domains —
+ * domain and the operator's AUTH_EMAIL_FROM / ONBOARDING_EMAIL_FROM /
+ * NOTIFICATIONS_EMAIL_FROM domains —
  * SES identities are account-wide, so a tenant registering them would take
  * over system mail.
  */
@@ -44,6 +45,7 @@ export function isReservedSenderDomain(
     isCloud: boolean;
     authEmailFrom?: string | null | undefined;
     onboardingEmailFrom?: string | null | undefined;
+    notificationsEmailFrom?: string | null | undefined;
     isOperator?: boolean;
   },
 ): boolean {
@@ -54,7 +56,11 @@ export function isReservedSenderDomain(
   // would take over account-wide system mail.
   if (opts.isCloud && !opts.isOperator) {
     reserved.push(PLATFORM_DOMAIN);
-    for (const sender of [opts.authEmailFrom, opts.onboardingEmailFrom]) {
+    for (const sender of [
+      opts.authEmailFrom,
+      opts.onboardingEmailFrom,
+      opts.notificationsEmailFrom,
+    ]) {
       const domain = sender ? parseSingleSender(sender)?.domain : null;
       if (domain) reserved.push(domain);
     }

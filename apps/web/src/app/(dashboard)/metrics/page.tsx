@@ -44,7 +44,7 @@ const CHART_SERIES = [
 ] as const;
 
 type Bar = { day: string; height: number; dayLabel: string; detail: string };
-type DayCounts = { day: string; sent: number; bounced: number; complained: number };
+type DayCounts = { day: string; sent: number; hardBounced: number; complained: number };
 type EngagementDay = { day: string; delivered: number; opened: number; clicked: number };
 
 function rateBars(
@@ -553,15 +553,15 @@ export default function MetricsPage() {
             <RateCard
               label={t("bounce.title")}
               headline={
-                data.totals.sent > 0 ? pct1.format(data.totals.bounced / data.totals.sent) : "—"
+                data.totals.sent > 0 ? pct1.format(data.totals.hardBounced / data.totals.sent) : "—"
               }
               risk={{ label: t("bounce.risk"), lineTop: BOUNCE.lineTop }}
               color="var(--ms-danger)"
-              bars={rateBars(data.days, (d) => d.bounced, BOUNCE, pct2, fmt, locale)}
+              bars={rateBars(data.days, (d) => d.hardBounced, BOUNCE, pct2, fmt, locale)}
               rowLabel={t("bounce.bounced")}
-              rowCount={fmt.format(data.totals.bounced)}
+              rowCount={fmt.format(data.totals.hardBounced)}
               rowPct={
-                data.totals.sent > 0 ? pct2.format(data.totals.bounced / data.totals.sent) : "—"
+                data.totals.sent > 0 ? pct2.format(data.totals.hardBounced / data.totals.sent) : "—"
               }
             />
             <RateCard

@@ -2,6 +2,12 @@ import { createHmac, hkdfSync, timingSafeEqual } from "node:crypto";
 
 /** Pending invites expire after this window; accept must happen before it. */
 export const INVITE_TTL_MS = 72 * 60 * 60 * 1000;
+/** Invite emails (create + resend) one team may trigger per hour. */
+export const INVITE_EMAILS_PER_HOUR = 20;
+/** Minimum gap between two emails for the same invitation. */
+export const INVITE_RESEND_COOLDOWN_MS = 2 * 60 * 1000;
+/** Emails one invitation may ever trigger; past it, revoke and re-invite. */
+export const INVITE_MAX_SENDS = 5;
 
 const HKDF_INFO = "team-invitation";
 

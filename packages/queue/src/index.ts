@@ -74,9 +74,16 @@ export const CRON_JOBS = {
   // Every 15 min: re-check live DNS so a removed record demotes a verified
   // domain (blocking sends) without waiting for a page open.
   "domains.reverify": "*/15 * * * *",
+  // Every 10 min: quota and deliverability notifications to team owners.
+  "notifications.sweep": "*/10 * * * *",
+  // Every 15 min: per-region platform breaker on the account-wide bounce/complaint rates.
+  "platform.breaker": "*/15 * * * *",
   // Every 15 min: warn when sends went out but no SES event came back — a
   // broken event pipeline is otherwise silent (everything just reads "Sent").
   "events.health": "*/15 * * * *",
+  // Hourly: associate domains with their team's SES tenant where the create-time
+  // association is missing (pre-tenant rows, or a failed AWS call).
+  "tenants.sync": "17 * * * *",
   // Hourly (cloud only): drop never-verified domains past SES's 72h DKIM
   // search window, freeing the (name, region) slot an unverified add would
   // otherwise squat forever. Offset from the other hourly sweeps.

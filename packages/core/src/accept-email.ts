@@ -22,7 +22,7 @@ export function senderDomain(from: string): string | null {
 }
 
 export type SenderDomainVerdict =
-  | { ok: true; domainId: string; fromDomain: string; address: string }
+  | { ok: true; domainId: string; region: string; fromDomain: string; address: string }
   | { ok: false; reason: "invalid_sender"; fromDomain: null }
   | { ok: false; reason: "unverified_domain"; fromDomain: string };
 
@@ -84,13 +84,19 @@ export async function verifySenderDomain(
   const sender = parseSingleSender(from);
   if (!sender) return { ok: false, reason: "invalid_sender", fromDomain: null };
   const [domain] = await db
-    .select({ id: schema.domains.id, status: schema.domains.status })
+    .select({ id: schema.domains.id, status: schema.domains.status, region: schema.domains.region })
     .from(schema.domains)
     .where(and(eq(schema.domains.teamId, teamId), eq(schema.domains.name, sender.domain)));
   if (domain?.status !== "verified") {
     return { ok: false, reason: "unverified_domain", fromDomain: sender.domain };
   }
-  return { ok: true, domainId: domain.id, fromDomain: sender.domain, address: sender.address };
+  return {
+    ok: true,
+    domainId: domain.id,
+    region: domain.region,
+    fromDomain: sender.domain,
+    address: sender.address,
+  };
 }
 
 export interface AcceptEmailDeps {

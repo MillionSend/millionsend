@@ -351,8 +351,9 @@ it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", 
     { email: "q2@example.com" },
     { email: "q3@example.com" },
   ]);
-  // Free plan cap is 100/day; 98 already accepted → headroom for 2 of 3.
-  await db.insert(schema.usageCounters).values({ teamId: qTeamId, day: utcDay(), accepted: 98 });
+  // Free plan cap is 100/day plus 10% tolerance (110); 108 already accepted
+  // → headroom for 2 of 3.
+  await db.insert(schema.usageCounters).values({ teamId: qTeamId, day: utcDay(), accepted: 108 });
   const broadcastId = await insertBroadcast({
     teamId: qTeamId,
     from: "Acme <hi@quota.dev>",
@@ -374,7 +375,7 @@ it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", 
     .select()
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, qTeamId));
-  expect(counter?.accepted).toBe(100);
+  expect(counter?.accepted).toBe(110);
 });
 
 async function seedThrottleTeam(
@@ -395,10 +396,11 @@ async function seedThrottleTeam(
 }
 
 it("throttles the fan-out drip when the team is over the risk line", async () => {
-  // 90/2000 = 4.5% bounce: over WARN (4%), under PAUSE (5%), volume >= floor.
+  // 90/2000 = 4.5% hard bounces: over WARN (4%), under PAUSE (5%), volume >= floor.
   const { broadcastId } = await seedThrottleTeam("bc-throttle", {
     sent: 2000,
     bounced: 90,
+    hardBounced: 90,
   });
   const { deps, startAfters } = makeDeps();
 
@@ -860,4 +862,24 @@ it("applyMergeFields only lets web/mail URLs open an href or src; anything else 
   expect(applyMergeFields('href="{{{evil}}}"', contact, { html: false })).toBe(
     'href="javascript:alert(1)"',
   );
+});
+
+it("defers the fan-out while the sender domain's region is held by the platform breaker", async () => {
+  await db.insert(schema.regionBreakers).values({ region: "us-east-1", paused: true });
+  const broadcastId = await insertBroadcast();
+  const rescheduled: Date[] = [];
+  const { deps, enqueued } = makeDeps({
+    reschedule: async (_id, at) => {
+      rescheduled.push(at);
+    },
+  });
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("deferred");
+  expect(rescheduled).toHaveLength(1);
+  expect(enqueued).toEqual([]);
+  const [row] = await db
+    .select({ status: schema.broadcasts.status })
+    .from(schema.broadcasts)
+    .where(eq(schema.broadcasts.id, broadcastId));
+  expect(row?.status).toBe("scheduled");
+  await db.delete(schema.regionBreakers);
 });

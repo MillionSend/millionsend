@@ -11,9 +11,9 @@
     "allTimeDelivered": "E-mails entregues — total histórico"
   },
   "bounce": {
-    "title": "Taxa de rejeição",
+    "title": "Taxa de bounce permanente",
     "risk": "RISCO 4%",
-    "bounced": "Rejeitados"
+    "bounced": "Bounces permanentes"
   },
   "complaint": {
     "title": "Taxa de reclamação",

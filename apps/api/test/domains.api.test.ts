@@ -11,7 +11,7 @@ import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type ApiDeps, createApi } from "../src/app.js";
 
 let db: Db;
@@ -50,6 +50,12 @@ function fakeSes(state: FakeSesState = {}) {
           },
         };
       }
+      if (name === "CreateTenantCommand" || name === "GetTenantCommand") {
+        const tenantName = (command as unknown as { input: { TenantName: string } }).input
+          .TenantName;
+        const arn = `arn:aws:ses:sa-east-1:123456789012:tenant/${tenantName}`;
+        return name === "CreateTenantCommand" ? { TenantArn: arn } : { Tenant: { TenantArn: arn } };
+      }
       return {};
     },
   };
@@ -73,6 +79,7 @@ function makeApp(opts: {
   trackingSubdomains?: boolean | undefined;
   isCloud?: boolean;
   authEmailFrom?: string;
+  tenants?: { configurationSet?: string | undefined };
 }) {
   const deps: ApiDeps = {
     db,
@@ -86,6 +93,7 @@ function makeApp(opts: {
       dns: opts.dns ?? fakeDns(),
       defaultRegion: "sa-east-1",
       authEmailFrom: opts.authEmailFrom,
+      tenants: opts.tenants,
     },
   };
   return createApi(deps);
@@ -235,6 +243,71 @@ describe("POST /domains", () => {
       trackingSubdomain: "links",
     });
     expect(row?.trackingSubdomainSetAt).toBeInstanceOf(Date);
+  });
+
+  it("with SES tenants on, creates the team's tenant and associates the identity and configuration set", async () => {
+    const t = await (async () => {
+      const id = await createTeam(db, "cloud-tenant-team");
+      return { id, key: await insertKey(id) };
+    })();
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, isCloud: true, tenants: { configurationSet: "millionsend" } });
+    const created = await call(app, t.key, "POST", "/domains", { name: "tenant.example.com" });
+    expect(created.status).toBe(200);
+    const { id } = (await created.json()) as { id: string };
+
+    expect(calls.map((c) => c.name)).toEqual([
+      "CreateEmailIdentityCommand",
+      "PutEmailIdentityMailFromAttributesCommand",
+      "CreateTenantCommand",
+      "CreateTenantResourceAssociationCommand",
+      "CreateTenantResourceAssociationCommand",
+    ]);
+    expect(calls[2]?.input).toEqual({ TenantName: t.id });
+    expect(calls.slice(3).map((c) => c.input.ResourceArn)).toEqual([
+      "arn:aws:ses:sa-east-1:123456789012:identity/tenant.example.com",
+      "arn:aws:ses:sa-east-1:123456789012:configuration-set/millionsend",
+    ]);
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.sesTenantAssociatedAt).toBeInstanceOf(Date);
+    expect(row?.sesTenantConfigSet).toBe("millionsend");
+    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.id));
+    expect(team?.sesTenantName).toBe(t.id);
+
+    // Deleting detaches the identity from the tenant before dropping it.
+    calls.length = 0;
+    expect((await call(app, t.key, "DELETE", `/domains/${id}`)).status).toBe(200);
+    expect(calls.map((c) => c.name)).toEqual([
+      "GetTenantCommand",
+      "DeleteTenantResourceAssociationCommand",
+      "DeleteEmailIdentityCommand",
+    ]);
+  });
+
+  it("with SES tenants on, a failed association never fails the create and leaves the marker for the backfill", async () => {
+    const t = await (async () => {
+      const id = await createTeam(db, "cloud-tenant-fail");
+      return { id, key: await insertKey(id) };
+    })();
+    const { client, calls } = fakeSes();
+    const throwing: SesIdentityClient = {
+      async send(command) {
+        if (command.constructor.name === "CreateTenantCommand") {
+          throw Object.assign(new Error("throttled"), { name: "TooManyRequestsException" });
+        }
+        return client.send(command);
+      },
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const app = makeApp({ client: throwing, isCloud: true, tenants: {} });
+    const created = await call(app, t.key, "POST", "/domains", { name: "later.example.com" });
+    expect(created.status).toBe(200);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    const { id } = (await created.json()) as { id: string };
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.sesTenantAssociatedAt).toBeNull();
+    expect(calls.filter((c) => c.name.includes("Tenant"))).toHaveLength(0);
   });
 
   it("cloud: refuses creating with tracking on and no subdomain before touching SES", async () => {

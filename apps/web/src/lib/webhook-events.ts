@@ -12,12 +12,16 @@ export const WEBHOOK_EVENT_TYPES = [
   "email.complained",
   "email.opened",
   "email.clicked",
+  "deliverability.warning",
+  "deliverability.paused",
+  "quota.warning",
+  "quota.reached",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 
 /** Lifecycle buckets for the event picker; labels resolve via webhooks.eventGroup.*. */
-export const WEBHOOK_EVENT_GROUPS = ["delivery", "engagement", "problems"] as const;
+export const WEBHOOK_EVENT_GROUPS = ["delivery", "engagement", "problems", "account"] as const;
 export type WebhookEventGroup = (typeof WEBHOOK_EVENT_GROUPS)[number];
 
 /**
@@ -37,6 +41,10 @@ export const WEBHOOK_EVENT_META: Record<
   "email.clicked": { group: "engagement", dot: "var(--ms-dot-clicked)" },
   "email.bounced": { group: "problems", dot: "var(--ms-dot-bounced)" },
   "email.complained": { group: "problems", dot: "var(--ms-dot-complained)" },
+  "deliverability.warning": { group: "account", dot: "var(--ms-dot-account)" },
+  "deliverability.paused": { group: "account", dot: "var(--ms-dot-account)" },
+  "quota.warning": { group: "account", dot: "var(--ms-dot-account)" },
+  "quota.reached": { group: "account", dot: "var(--ms-dot-account)" },
 };
 
 /** "whsec_••••••••abcd" — scheme plus last 4, nothing recoverable. */

@@ -5,7 +5,7 @@ import {
   SES_MAX_SEND_RATE_DEFAULT,
   trackingSubdomainsSupported,
 } from "@millionsend/config";
-import { getInstanceSettings, sesEventsHealth } from "@millionsend/core";
+import { getInstanceSettings, pausedRegions, sesEventsHealth } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import {
   createSesAccountClient,
@@ -123,6 +123,19 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       // The SES settings page does not exist on cloud, so the banner has
       // nowhere to send the operator there.
       return { ...(await sesEventsHealth(ctx.db)), settingsAvailable: !isCloudDeployment() };
+    }),
+
+    /**
+     * Regions where the platform breaker holds broadcasts, for the dashboard
+     * banner; null when none are paused or the caller may not see instance
+     * facts (cloud tenants — only the operator can act on it there).
+     */
+    platformBreakers: teamProcedure.query(async ({ ctx }) => {
+      if (isCloudDeployment() && !(await isInstanceOperator(ctx.db, ctx.session.user.id))) {
+        return null;
+      }
+      const paused = await pausedRegions(ctx.db);
+      return paused.length > 0 ? paused : null;
     }),
 
     /** Env-side SES settings the setup page reports alongside awsReadiness. */

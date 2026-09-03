@@ -114,14 +114,15 @@ describe("not-fully-verified domain send gate", () => {
 
 describe("send edge cases", () => {
   it("parks the 101st email of the day as queued_quota but still accepts it", async () => {
-    // Free plan cap is 100/day; burn it, then send one more.
+    // Free plan cap is 100/day and sends pass up to 10% over it; burn the
+    // tolerant ceiling, then send one more.
     for (let i = 0; i < 4; i++) {
       const res = await post({ ...validBody, to: [`bulk${i}@example.com`] });
       expect(res.status).toBe(200);
     }
     await db
       .update(schema.usageCounters)
-      .set({ accepted: 100 })
+      .set({ accepted: 110 })
       .where(eq(schema.usageCounters.teamId, teamId));
     const res = await post({ ...validBody, to: ["overflow@example.com"] });
     expect(res.status).toBe(200);
@@ -932,10 +933,10 @@ describe("template sends are refused, not silently stripped", () => {
 
 describe("quota backlog cap", () => {
   it("429s daily_quota_exceeded once the parked backlog is full, on single and batch sends", async () => {
-    // Free plan: 100/day, backlog capped at 3 days' worth.
+    // Free plan: 100/day (+10% tolerance), backlog capped at 3 days' worth.
     await db
       .update(schema.usageCounters)
-      .set({ accepted: 100 })
+      .set({ accepted: 110 })
       .where(eq(schema.usageCounters.teamId, teamId));
     const parked = await db
       .select({ id: schema.emails.id })
@@ -1001,14 +1002,15 @@ describe("deliverability guardrail on transactional sends", () => {
       keyHash: key.keyHash,
       last4: key.last4,
     });
-    // 10% bounce over 200 sends: past the free plan's 100-send floor, under
-    // the self-host default of 1000.
+    // 10% hard bounces over 200 sends: past the 100-send floor and the
+    // 10-hard-bounce minimum.
     await db.insert(schema.usageCounters).values({
       teamId: pausedTeam,
       day: utcDay(),
       accepted: 200,
       sent: 200,
       bounced: 20,
+      hardBounced: 20,
       complained: 0,
     });
   });
@@ -1034,9 +1036,44 @@ describe("deliverability guardrail on transactional sends", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("uses the default floor on self-host, where plans do not apply", async () => {
+  it("applies the same rule on self-host — plans play no part", async () => {
     const selfHost = createApi({ db, keyring, isCloud: false, enqueueEmailSend: async () => {} });
-    expect((await send(selfHost, "/emails", body)).status).toBe(200);
+    expect((await send(selfHost, "/emails", body)).status).toBe(403);
+  });
+
+  it("never pauses on transient bounces alone", async () => {
+    const teamId = await createTeam(db, "transient-team");
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "transient.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const key = generateApiKey();
+    await db.insert(schema.apiKeys).values({
+      teamId,
+      name: "t",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    // Same 10% bounce rate as the paused team, but none of them permanent.
+    await db.insert(schema.usageCounters).values({
+      teamId,
+      day: utcDay(),
+      accepted: 200,
+      sent: 200,
+      bounced: 20,
+      hardBounced: 0,
+      complained: 0,
+    });
+    const res = await app.request("/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${key.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...body, from: "T <a@transient.dev>" }),
+    });
+    expect(res.status).toBe(200);
   });
 });
 

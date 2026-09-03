@@ -135,6 +135,10 @@ export const env = createEnv({
     // per-domain set recorded; without it SES publishes no events.
     SES_CONFIGURATION_SET: z.string().optional(),
 
+    // One SES tenant per team (reputation + suppression isolation at SES).
+    // Unset follows IS_CLOUD; see sesTenantsEnabled().
+    SES_TENANTS: z.enum(["true", "false", "1", "0"]).optional(),
+
     // Messages/second ceiling for THE ONE worker process: the bucket is
     // in-memory, so running N worker replicas multiplies the real SES rate
     // by N. Until the bucket is shared (Postgres-backed), scale the worker
@@ -177,6 +181,11 @@ export const env = createEnv({
     // the onboarding snippet runs before a domain is verified. Unset hides the
     // "Send email" button and the snippet asks for the team's own domain.
     ONBOARDING_EMAIL_FROM: z.string().optional(),
+
+    // Sender for account notifications (quota and deliverability alerts to
+    // team owners) and team invitation emails, same forms as AUTH_EMAIL_FROM,
+    // which it falls back to.
+    NOTIFICATIONS_EMAIL_FROM: z.string().optional(),
 
     // Dashboard session signing secret (`openssl rand -base64 32`).
     // Required only by the web process, which asserts it at boot.
@@ -258,6 +267,18 @@ export function isCloudDeployment(e: Env = env): boolean {
   return envFlag(e.IS_CLOUD);
 }
 
+/** Whether teams get their own SES tenant: explicit SES_TENANTS wins, else the cloud default. */
+export function sesTenantsEnabled(e: Env = env): boolean {
+  const flag = e.SES_TENANTS as unknown;
+  if (flag === undefined || flag === "") return isCloudDeployment(e);
+  return envFlag(flag);
+}
+
+/** The sender for account notifications; undefined when no system sender is configured. */
+export function notificationsEmailFrom(e: Env = env): string | undefined {
+  return e.NOTIFICATIONS_EMAIL_FROM ?? e.AUTH_EMAIL_FROM;
+}
+
 /**
  * Whether a domain's branded tracking subdomain — a customer CNAME pointing
  * at this app — can actually be served here.
@@ -305,6 +326,11 @@ export function assertEnvConsistency(e: Env): void {
   }
   if (e.ONBOARDING_EMAIL_FROM && parseEmailFrom(e.ONBOARDING_EMAIL_FROM) === null) {
     throw new Error('ONBOARDING_EMAIL_FROM must be "Name <user@domain>" or a bare email address');
+  }
+  if (e.NOTIFICATIONS_EMAIL_FROM && parseEmailFrom(e.NOTIFICATIONS_EMAIL_FROM) === null) {
+    throw new Error(
+      'NOTIFICATIONS_EMAIL_FROM must be "Name <user@domain>" or a bare email address',
+    );
   }
   // Half a keypair would silently fall back to the default provider chain
   // everywhere AWS clients are built (SES, KMS) — reject it instead. A fully

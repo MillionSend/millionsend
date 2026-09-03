@@ -124,6 +124,13 @@
       "bannerAction": "Open SES settings",
       "lastEvent": "Last event received",
       "never": "never"
+    },
+    "breaker": {
+      "paused": "Broadcasts are paused in {region}: the platform's {metric} rate is {rate}%, near SES's review line for the whole account. Transactional email continues; broadcasts resume on their own once the rate recovers.",
+      "metric": {
+        "bounce": "hard-bounce",
+        "complaint": "complaint"
+      }
     }
   },
   "team": {
@@ -180,17 +187,21 @@
     },
     "created": {
       "title": "Invitation link",
-      "body": "Share this link with {email}. It works once and expires in 7 days.",
-      "done": "Done",
-      "bodyTtl": "Share this link with {email}. It works once and expires in 3 days."
+      "sentTitle": "Invitation sent",
+      "emailedBody": "We emailed {email}. You can also share this link — it works once and expires in 3 days.",
+      "bodyTtl": "Share this link with {email}. It works once and expires in 3 days.",
+      "noSender": "This instance has no email sender configured, so the link is the only way in.",
+      "done": "Done"
     },
     "pending": {
       "title": "Pending invitations",
       "email": "Email",
-      "link": "Link",
-      "copy": "Copy link",
+      "expires": "Expires",
+      "expired": "Expired",
+      "resend": "Resend",
       "revoke": "Revoke",
       "actions": "Actions",
+      "resendError": "Could not resend: {reason}",
       "pageOf": "Page 1 – {pages} of {total} invitations"
     },
     "accept": {
@@ -202,7 +213,12 @@
       "body": "Accept this invitation as {email}?",
       "submit": "Accept invitation",
       "invalid": "This invitation is no longer valid.",
-      "emailMismatch": "This invitation was sent to a different email address. Sign in with the invited account to accept it."
+      "emailMismatch": "This invitation was sent to a different email address. Sign in with the invited account to accept it.",
+      "invitedBy": "{inviter} invited you to join {team} as {role}.",
+      "invitedByUnknown": "You have been invited to join {team} as {role}.",
+      "forEmail": "This invitation is for {email}.",
+      "expired": "This invitation has expired. Ask a team owner to send a new one.",
+      "accepted": "This invitation has already been used."
     }
   },
   "instance": {
@@ -344,6 +360,7 @@
       "member.role_changed": "Changed member role",
       "member.left": "Left the team",
       "invitation.revoked": "Revoked invitation",
+      "invitation.resent": "Resent invitation",
       "team.created": "Created team",
       "team.deleted": "Deleted team",
       "instance.settings_updated": "Updated instance settings",

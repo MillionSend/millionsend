@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -9,6 +9,8 @@ import { BtnSpinner } from "@/components/spinner";
 import { authClient } from "@/lib/auth-client";
 import { useTRPC } from "@/lib/trpc";
 
+const muted = { margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" } as const;
+
 export default function AcceptInvitePage() {
   const t = useTranslations("settings");
   const params = useParams<{ token: string }>();
@@ -16,6 +18,8 @@ export default function AcceptInvitePage() {
   const router = useRouter();
   const trpc = useTRPC();
   const { data: session, isPending } = authClient.useSession();
+  // The signed token is the credential, so the preview needs no session.
+  const preview = useQuery(trpc.settings.invitations.preview.queryOptions({ token }));
 
   const accept = useMutation(
     trpc.settings.invitations.accept.mutationOptions({
@@ -25,6 +29,8 @@ export default function AcceptInvitePage() {
 
   // The signed-out visitor routes through sign-in/up and back to this page.
   const next = `/invite/${encodeURIComponent(token)}`;
+  const invite = preview.data;
+  const role = invite ? t(`members.roles.${invite.role}`) : "";
 
   return (
     <AuthShell>
@@ -32,15 +38,33 @@ export default function AcceptInvitePage() {
         <h1 className="ms-display" style={{ fontSize: "var(--ms-fs-h2)", margin: 0 }}>
           {t("invitations.accept.title")}
         </h1>
-        {isPending ? (
-          <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-            {t("invitations.accept.loading")}
+        {invite ? (
+          <p style={{ ...muted, color: "var(--ms-bone)" }}>
+            {invite.inviterName
+              ? t("invitations.accept.invitedBy", {
+                  inviter: invite.inviterName,
+                  team: invite.teamName,
+                  role,
+                })
+              : t("invitations.accept.invitedByUnknown", { team: invite.teamName, role })}
           </p>
+        ) : null}
+        {preview.isError || invite?.state === "expired" || invite?.state === "accepted" ? (
+          <p style={{ ...muted, color: "var(--ms-danger)" }}>
+            {invite?.state === "expired"
+              ? t("invitations.accept.expired")
+              : invite?.state === "accepted"
+                ? t("invitations.accept.accepted")
+                : t("invitations.accept.invalid")}
+          </p>
+        ) : isPending || preview.isPending ? (
+          <p style={muted}>{t("invitations.accept.loading")}</p>
         ) : !session ? (
           <>
-            <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-              {t("invitations.accept.signInPrompt")}
-            </p>
+            <p style={muted}>{t("invitations.accept.signInPrompt")}</p>
+            {invite ? (
+              <p style={muted}>{t("invitations.accept.forEmail", { email: invite.email })}</p>
+            ) : null}
             <div style={{ display: "flex", gap: 10 }}>
               <Link
                 className="ms-btn ms-btn-primary"
@@ -50,23 +74,23 @@ export default function AcceptInvitePage() {
               </Link>
               <Link
                 className="ms-btn ms-btn-secondary"
-                href={`/signup?next=${encodeURIComponent(next)}`}
+                href={`/signup?next=${encodeURIComponent(next)}${
+                  invite?.prefillEmail ? `&email=${encodeURIComponent(invite.prefillEmail)}` : ""
+                }`}
               >
                 {t("invitations.accept.signUp")}
               </Link>
             </div>
           </>
         ) : accept.isError ? (
-          <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-ui)" }}>
+          <p style={{ ...muted, color: "var(--ms-danger)" }}>
             {accept.error.data?.code === "FORBIDDEN"
               ? t("invitations.accept.emailMismatch")
               : t("invitations.accept.invalid")}
           </p>
         ) : (
           <>
-            <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-              {t("invitations.accept.body", { email: session.user.email })}
-            </p>
+            <p style={muted}>{t("invitations.accept.body", { email: session.user.email })}</p>
             <button
               type="button"
               className="ms-btn ms-btn-primary"

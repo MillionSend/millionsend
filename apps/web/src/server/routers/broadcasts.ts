@@ -2,25 +2,25 @@ import { env } from "@millionsend/config";
 import {
   DAY_MS,
   fetchDeliverabilityHealth,
-  fetchEffectivePlan,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   parseSingleSender,
+  regionPause,
   verifySenderDomain,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { cookies } from "next/headers";
 import { createTranslator } from "next-intl";
 import { z } from "zod";
 import { mailyDocumentSchema } from "@/lib/email-doc";
 import enDeliverability from "../../../messages/en/deliverability.json";
 import ptBRDeliverability from "../../../messages/pt-BR/deliverability.json";
-import { type AppLocale, DEFAULT_LOCALE, LOCALE_COOKIE, LOCALES } from "../../i18n/request";
+import type { AppLocale } from "../../i18n/request";
 import { resolveEditorSave } from "../email-content";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
+import { activeLocale } from "../locale";
 import { router, teamProcedure } from "../trpc";
 import { assertSegment, savedSegmentPredicate } from "./segments";
 import { assertTopic, topicMembershipSql } from "./topics";
@@ -33,45 +33,54 @@ const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
 };
 
 /**
- * Request locale for a server-thrown message. Outside an HTTP request (tests,
- * background jobs) `cookies()` throws — fall back to the default locale.
- */
-async function activeLocale(): Promise<AppLocale> {
-  try {
-    const value = (await cookies()).get(LOCALE_COOKIE)?.value;
-    return (LOCALES as readonly string[]).includes(value ?? "")
-      ? (value as AppLocale)
-      : DEFAULT_LOCALE;
-  } catch {
-    return DEFAULT_LOCALE;
-  }
-}
-
-/**
  * PRECONDITION_FAILED when the team's trailing-window rates crossed a SES
  * enforcement line (fetchDeliverabilityHealth === "paused"); null otherwise.
  * "warning" never blocks. The message names the offending metric, its rate,
  * and the limit it passed, in the caller's locale.
  */
+async function sendGuardTranslator() {
+  const locale = await activeLocale();
+  return {
+    t: createTranslator({
+      locale,
+      messages: { deliverability: DELIVERABILITY_MESSAGES[locale] },
+      namespace: "deliverability",
+    }),
+    pct: new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 2 }),
+  };
+}
+
 async function deliverabilityGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | null> {
-  const plan = env.IS_CLOUD ? await fetchEffectivePlan(ctx.db, ctx.teamId) : null;
-  const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId, plan ? { plan } : {});
+  const health = await fetchDeliverabilityHealth(ctx.db, ctx.teamId);
   const reason =
     health.status === "paused" ? health.reasons.find((r) => r.tier === "paused") : null;
   if (!reason) return null;
-  const locale = await activeLocale();
-  const t = createTranslator({
-    locale,
-    messages: { deliverability: DELIVERABILITY_MESSAGES[locale] },
-    namespace: "deliverability",
-  });
-  const pct = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 2 });
+  const { t, pct } = await sendGuardTranslator();
   const limit = reason.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
   return new TRPCError({
     code: "PRECONDITION_FAILED",
     message: t(`sendGuard.${reason.metric}`, {
       rate: pct.format(reason.rate),
       limit: pct.format(limit),
+      days: reason.windowDays,
+    }),
+  });
+}
+
+/**
+ * PRECONDITION_FAILED while the platform breaker holds broadcasts in the
+ * sender domain's SES region (the account-wide rate is near SES's review
+ * line); transactional mail is not affected, so only broadcasts check this.
+ */
+async function regionGuard(db: Db, region: string): Promise<TRPCError | null> {
+  const pause = await regionPause(db, region);
+  if (!pause) return null;
+  const { t } = await sendGuardTranslator();
+  return new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message: t("sendGuard.regionPaused", {
+      region,
+      metric: t(`metric.${pause.reason?.metric ?? "complaint"}`),
     }),
   });
 }
@@ -354,7 +363,8 @@ export const broadcastsRouter = router({
       // Deliverability pause is enforced here, before anything is committed or
       // enqueued: a paused account must not schedule a new fan-out. "warning"
       // does not block.
-      const guardError = await deliverabilityGuard(ctx);
+      const guardError =
+        (await deliverabilityGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
       if (guardError) throw guardError;
       const scheduledAt = input.scheduledAt ?? new Date();
       // Same horizon as the API: a body must not sit out the retention purge.

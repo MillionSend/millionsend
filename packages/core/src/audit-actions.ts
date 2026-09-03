@@ -14,6 +14,7 @@ export const AUDIT_ACTIONS = [
   "member.role_changed",
   "member.left",
   "invitation.revoked",
+  "invitation.resent",
   "team.created",
   "team.deleted",
   "instance.settings_updated",

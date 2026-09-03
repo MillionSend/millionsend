@@ -25,6 +25,11 @@ export const WEBHOOK_EVENT_TYPES = [
   "email.complained",
   "email.opened",
   "email.clicked",
+  // Team-level standing events: no email in the payload.
+  "deliverability.warning",
+  "deliverability.paused",
+  "quota.warning",
+  "quota.reached",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -209,6 +214,48 @@ export async function enqueueWebhookDeliveries(
     enqueue: (deliveryId: string) => Promise<void>;
   },
 ): Promise<void> {
+  await insertDeliveries(db, {
+    teamId: params.teamId,
+    emailId: params.email.emailId,
+    type: params.type,
+    payload: buildWebhookPayload(params.type, params.email, params.occurredAt, params.extras),
+    enqueue: params.enqueue,
+  });
+}
+
+/**
+ * Fan a team-level event (quota, deliverability standing) out the same way;
+ * the payload carries no email, so `data` is whatever the event is about.
+ */
+export async function enqueueTeamWebhookDeliveries(
+  db: Db,
+  params: {
+    teamId: string;
+    type: WebhookEventType;
+    occurredAt: Date;
+    data: Record<string, unknown>;
+    enqueue: (deliveryId: string) => Promise<void>;
+  },
+): Promise<void> {
+  await insertDeliveries(db, {
+    teamId: params.teamId,
+    emailId: null,
+    type: params.type,
+    payload: { type: params.type, created_at: params.occurredAt.toISOString(), data: params.data },
+    enqueue: params.enqueue,
+  });
+}
+
+async function insertDeliveries(
+  db: Db,
+  params: {
+    teamId: string;
+    emailId: string | null;
+    type: WebhookEventType;
+    payload: WebhookPayload;
+    enqueue: (deliveryId: string) => Promise<void>;
+  },
+): Promise<void> {
   const endpoints = await db
     .select({ id: schema.webhookEndpoints.id, events: schema.webhookEndpoints.events })
     .from(schema.webhookEndpoints)
@@ -219,18 +266,15 @@ export async function enqueueWebhookDeliveries(
       ),
     );
   const matching = endpoints.filter((e) => e.events === null || e.events.includes(params.type));
-  if (matching.length === 0) return;
-
-  const payload = buildWebhookPayload(params.type, params.email, params.occurredAt, params.extras);
   for (const endpoint of matching) {
     const [row] = await db
       .insert(schema.webhookDeliveries)
       .values({
         endpointId: endpoint.id,
-        emailId: params.email.emailId,
+        emailId: params.emailId,
         messageId: `msg_${randomUUID()}`,
         eventType: params.type,
-        payload: payload as unknown as Record<string, unknown>,
+        payload: params.payload as unknown as Record<string, unknown>,
       })
       .returning({ id: schema.webhookDeliveries.id });
     if (row) await params.enqueue(row.id);

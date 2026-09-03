@@ -1,6 +1,7 @@
 import { DAY_MS, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import { SES_REGIONS } from "@millionsend/ses";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -228,7 +229,12 @@ describe("settings.team.delete", () => {
       .where(eq(schema.teams.id, teamId));
     const [domain] = await db
       .insert(schema.domains)
-      .values({ teamId, name: "acme.test", region: "us-east-1" })
+      .values({
+        teamId,
+        name: "acme.test",
+        region: "us-east-1",
+        sesTenantAssociatedAt: new Date(),
+      })
       .returning({ id: schema.domains.id });
     if (!domain) throw new Error("domain insert failed");
     // RESTRICT links that would block a bare cascade.
@@ -262,9 +268,12 @@ describe("settings.team.delete", () => {
       cancelSubscription: async (_db, id) => {
         calls.push(`stripe:${id}`);
       },
-      deleteSesIdentity: async ({ name, region }) => {
-        calls.push(`ses:${region}:${name}`);
+      deleteSesIdentity: async ({ name, region, tenant }) => {
+        calls.push(`ses:${region}:${name}${tenant ? `:tenant=${tenant}` : ""}`);
         throw new Error("already gone");
+      },
+      deleteSesTenant: async ({ tenantName, region }) => {
+        calls.push(`tenant:${region}:${tenantName}`);
       },
       deleteLogo: async (url) => {
         calls.push(`logo:${url}`);
@@ -280,8 +289,10 @@ describe("settings.team.delete", () => {
 
     expect(calls).toEqual([
       `stripe:${teamId}`,
-      "ses:us-east-1:acme.test",
+      `ses:us-east-1:acme.test:tenant=${teamId}`,
       "logo:https://cdn/logo.png",
+      // Tenants outlive the domains that created them: every region is tried.
+      ...SES_REGIONS.map((region) => `tenant:${region}:${teamId}`),
     ]);
     expect(await db.select().from(schema.teams)).toHaveLength(1);
     expect(await db.select().from(schema.teamMembers)).toEqual([]);

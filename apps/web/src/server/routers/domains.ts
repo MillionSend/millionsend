@@ -1,6 +1,12 @@
 import { resolveNs as dnsResolveNs } from "node:dns/promises";
-import { env, trackingCnameTarget, trackingSubdomainsSupported } from "@millionsend/config";
 import {
+  env,
+  sesTenantsEnabled,
+  trackingCnameTarget,
+  trackingSubdomainsSupported,
+} from "@millionsend/config";
+import {
+  associateDomainTenant,
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
@@ -20,10 +26,12 @@ import {
   DKIM_SELECTOR,
   type DnsResolver,
   deleteDomainIdentity,
+  disassociateIdentity,
   dnsRecordsForDomain,
   generateDkimKeyPair,
   getDomainVerification,
   nodeDnsResolver,
+  provisionDomainTenant,
   type SesIdentityClient,
   verificationDbPatch,
 } from "@millionsend/ses";
@@ -270,6 +278,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
             isCloud,
             authEmailFrom: env.AUTH_EMAIL_FROM,
             onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
+            notificationsEmailFrom: env.NOTIFICATIONS_EMAIL_FROM,
             isOperator,
           })
         ) {
@@ -357,6 +366,23 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           throw error;
         }
         if (!created) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        if (sesTenantsEnabled()) {
+          const { id } = created;
+          await associateDomainTenant(ctx.db, {
+            domainId: id,
+            teamId: ctx.teamId,
+            name: input.name,
+            region: input.region,
+            configurationSet: env.SES_CONFIGURATION_SET,
+            provision: () =>
+              provisionDomainTenant(deps.clientForRegion(input.region), {
+                teamId: ctx.teamId,
+                region: input.region,
+                domain: input.name,
+                configurationSet: env.SES_CONFIGURATION_SET,
+              }),
+          });
+        }
         await recordAudit(ctx, {
           action: "domain.created",
           target: { type: "domain", id: created.id },
@@ -523,6 +549,13 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       // it goes only with the last of them.
       if (!(await isIdentitySharedByOtherDomains(ctx.db, domain))) {
         try {
+          if (domain.sesTenantAssociatedAt) {
+            await disassociateIdentity(deps.clientForRegion(domain.region), {
+              tenantName: domain.teamId,
+              region: domain.region,
+              identity: domain.name,
+            });
+          }
           await deleteDomainIdentity(deps.clientForRegion(domain.region), { domain: domain.name });
         } catch (error) {
           // An identity already gone from SES must not block removing the row.

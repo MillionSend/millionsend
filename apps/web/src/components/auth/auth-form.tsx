@@ -66,7 +66,8 @@ export function AuthForm({
   const socialFailed = params.get("error") !== null;
 
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  // An invite link carries the invited address; signup starts from it.
+  const [email, setEmail] = useState(mode === "signup" ? (params.get("email") ?? "") : "");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(
     socialFailed ? tSocial("error") : null,

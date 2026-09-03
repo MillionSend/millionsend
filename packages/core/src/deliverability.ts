@@ -4,7 +4,7 @@ import type { Db } from "@millionsend/db";
 // module's thresholds. The type-only Db import above is erased.
 import * as schema from "@millionsend/db/schema";
 import { and, eq, gte, sql } from "drizzle-orm";
-import type { Plan } from "./plans.js";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -13,10 +13,12 @@ import { DAY_MS, utcDay } from "./utc-day.js";
  * here — thresholds must never be re-hardcoded at a call site or they drift.
  *
  * Two tiers:
- * - WARN_* are the product "RISK" lines shown on the rate cards. Banner only,
- *   never blocks a send.
- * - PAUSE_* mirror SES's own enforcement thresholds; crossing one blocks new
- *   broadcast sends before SES pauses the whole account.
+ * - WARN_* are the product "RISK" lines shown on the rate cards. Banner and a
+ *   reduced broadcast rate, never a block.
+ * - PAUSE_* mirror SES's own review lines; crossing one blocks new sends
+ *   before SES pauses the whole account.
+ * Bounce rates count hard (permanent) bounces only, as SES does: greylisting
+ * and full mailboxes are not a reputation signal.
  */
 export const WARN_BOUNCE_RATE = 0.04;
 export const WARN_COMPLAINT_RATE = 0.0001;
@@ -24,23 +26,29 @@ export const PAUSE_BOUNCE_RATE = 0.05;
 export const PAUSE_COMPLAINT_RATE = 0.001;
 
 /**
- * Below this many sends in the window the guardrail is always "ok" regardless
- * of rate: a handful of bounces in a tiny sample must never pause an account.
+ * Below this many sends in a window no tier fires regardless of rate: a
+ * handful of bounces in a tiny sample must never pause an account.
  */
-export const MIN_GUARDRAIL_VOLUME = 1000;
+export const MIN_GUARDRAIL_VOLUME = 100;
 
 /**
- * Plan-scaled floor for cloud teams: a free team caps at 700 sends/week, so
- * the default floor would never let the guardrail engage for it.
+ * The pause tier also needs this many events in its window. With the floor
+ * at 100 sends a rate alone would let one complaint pause a team; the count
+ * is what makes a small sample's rate mean something.
  */
-export const MIN_GUARDRAIL_VOLUME_BY_PLAN: Record<Plan, number> = {
-  free: 100,
-  pro: MIN_GUARDRAIL_VOLUME,
-  scale: MIN_GUARDRAIL_VOLUME,
-};
+export const MIN_PAUSE_COMPLAINTS = 3;
+export const MIN_PAUSE_HARD_BOUNCES = 10;
 
-/** Trailing window, in UTC calendar days, that rates are computed over. */
+/** Trailing window, in UTC calendar days, the warning tier and the displayed rates use. */
 export const GUARDRAIL_WINDOW_DAYS = 7;
+
+/**
+ * Window the pause tier is judged on: today and yesterday. usage_counters is
+ * keyed by UTC day, so this is the honest "last 24 hours" — a one-day window
+ * would hold five minutes of data just after midnight. A team that fixes its
+ * list recovers in a day instead of waiting out the warning window.
+ */
+export const PAUSE_WINDOW_DAYS = 2;
 
 /**
  * Reduced per-second fan-out rate for a team in the "tolerance" band (warning
@@ -56,9 +64,19 @@ export interface DeliverabilityReason {
   metric: "bounce" | "complaint";
   rate: number;
   tier: "warning" | "paused";
+  /** Window the rate was measured over, so messages can name it truthfully. */
+  windowDays: number;
+}
+
+/** Counts summed over one window. Hard bounces only: transient ones never count. */
+export interface WindowCounts {
+  sent: number;
+  hardBounced: number;
+  complained: number;
 }
 
 export interface DeliverabilityEvaluation {
+  /** Hard-bounce rate over the warning window. */
   bounceRate: number;
   complaintRate: number;
   status: DeliverabilityStatus;
@@ -66,8 +84,10 @@ export interface DeliverabilityEvaluation {
 }
 
 export interface DeliverabilityHealth extends DeliverabilityEvaluation {
+  /** Sends in the warning window (the denominator of the displayed rates). */
   sent: number;
   windowDays: number;
+  pause: WindowCounts & { windowDays: number };
 }
 
 /**
@@ -80,36 +100,50 @@ export function broadcastSendSpacingMs(status: DeliverabilityStatus): number {
   return status === "ok" ? 0 : Math.ceil(1000 / THROTTLED_BROADCAST_RATE_PER_SECOND);
 }
 
-function tierFor(rate: number, warn: number, pause: number): "warning" | "paused" | null {
-  if (rate >= pause) return "paused";
-  if (rate >= warn) return "warning";
-  return null;
-}
+const rateOf = (events: number, sent: number): number => (sent > 0 ? events / sent : 0);
 
 /**
- * Pure guardrail decision from a window's counts. Rates are always computed
- * for display, but no tier fires below `minVolume` (MIN_GUARDRAIL_VOLUME by
- * default). `sent` is the successfully sent count (the denominator every
- * rate divides by); zero sends yields zero rates, never NaN.
+ * Pure guardrail decision. The pause tier reads the short window: rate at or
+ * over the pause line AND at least MIN_PAUSE_* events. The warning tier reads
+ * the long window: rate at or over the warning line. Neither fires under
+ * `minVolume` sends in its own window. The rates returned for display are the
+ * long window's; zero sends yields zero rates, never NaN.
  */
 export function evaluateDeliverability(
-  counts: { sent: number; bounced: number; complained: number },
+  windows: { warn: WindowCounts; pause: WindowCounts },
   minVolume: number = MIN_GUARDRAIL_VOLUME,
 ): DeliverabilityEvaluation {
-  const { sent, bounced, complained } = counts;
-  const bounceRate = sent > 0 ? bounced / sent : 0;
-  const complaintRate = sent > 0 ? complained / sent : 0;
-
-  if (sent < minVolume) {
-    return { bounceRate, complaintRate, status: "ok", reasons: [] };
-  }
-
+  const { warn, pause } = windows;
   const reasons: DeliverabilityReason[] = [];
-  const bounceTier = tierFor(bounceRate, WARN_BOUNCE_RATE, PAUSE_BOUNCE_RATE);
-  if (bounceTier) reasons.push({ metric: "bounce", rate: bounceRate, tier: bounceTier });
-  const complaintTier = tierFor(complaintRate, WARN_COMPLAINT_RATE, PAUSE_COMPLAINT_RATE);
-  if (complaintTier)
-    reasons.push({ metric: "complaint", rate: complaintRate, tier: complaintTier });
+  const judge = (
+    metric: DeliverabilityReason["metric"],
+    lines: { warn: number; pause: number; minPauseEvents: number },
+  ) => {
+    const events = metric === "bounce" ? "hardBounced" : "complained";
+    const pauseRate = rateOf(pause[events], pause.sent);
+    if (
+      pause.sent >= minVolume &&
+      pauseRate >= lines.pause &&
+      pause[events] >= lines.minPauseEvents
+    ) {
+      reasons.push({ metric, rate: pauseRate, tier: "paused", windowDays: PAUSE_WINDOW_DAYS });
+      return;
+    }
+    const warnRate = rateOf(warn[events], warn.sent);
+    if (warn.sent >= minVolume && warnRate >= lines.warn) {
+      reasons.push({ metric, rate: warnRate, tier: "warning", windowDays: GUARDRAIL_WINDOW_DAYS });
+    }
+  };
+  judge("bounce", {
+    warn: WARN_BOUNCE_RATE,
+    pause: PAUSE_BOUNCE_RATE,
+    minPauseEvents: MIN_PAUSE_HARD_BOUNCES,
+  });
+  judge("complaint", {
+    warn: WARN_COMPLAINT_RATE,
+    pause: PAUSE_COMPLAINT_RATE,
+    minPauseEvents: MIN_PAUSE_COMPLAINTS,
+  });
 
   const status: DeliverabilityStatus = reasons.some((r) => r.tier === "paused")
     ? "paused"
@@ -117,42 +151,64 @@ export function evaluateDeliverability(
       ? "warning"
       : "ok";
 
-  return { bounceRate, complaintRate, status, reasons };
+  return {
+    bounceRate: rateOf(warn.hardBounced, warn.sent),
+    complaintRate: rateOf(warn.complained, warn.sent),
+    status,
+    reasons,
+  };
 }
 
 /**
- * A team's current deliverability standing over the trailing window. Sums
- * usage_counters using the successful SES send count as the denominator,
- * with the window's lower bound derived from utcDay so rows join on the exact
+ * A team's current deliverability standing. Sums usage_counters over both
+ * windows in one round-trip (the pause window is the recent slice of the
+ * warning window), using the successful SES send count as the denominator,
+ * with the windows' lower bounds derived from utcDay so rows join on the exact
  * same UTC-day key production writes.
  */
 export async function fetchDeliverabilityHealth(
   db: Db,
   teamId: string,
-  /** `plan` lowers the volume floor for cloud plans; omit on self-host. */
-  opts?: { now?: Date; windowDays?: number; plan?: Plan },
+  opts?: { now?: Date },
 ): Promise<DeliverabilityHealth> {
-  const windowDays = opts?.windowDays ?? GUARDRAIL_WINDOW_DAYS;
   const now = (opts?.now ?? new Date()).getTime();
-  const since = utcDay(now - (windowDays - 1) * DAY_MS);
+  const sinceWarn = utcDay(now - (GUARDRAIL_WINDOW_DAYS - 1) * DAY_MS);
+  const sincePause = utcDay(now - (PAUSE_WINDOW_DAYS - 1) * DAY_MS);
 
   const c = schema.usageCounters;
   // ::bigint — a busy sender's window sum can overflow int4. The driver
   // returns bigint as a string; Number() is exact up to 2^53.
+  const total = (col: AnyPgColumn) => sql<string>`coalesce(sum(${col}), 0)::bigint`;
+  const recent = (col: AnyPgColumn) =>
+    sql<string>`coalesce(sum(case when ${c.day} >= ${sincePause} then ${col} else 0 end), 0)::bigint`;
   const [row] = await db
     .select({
-      sent: sql<string>`coalesce(sum(${c.sent}), 0)::bigint`,
-      bounced: sql<string>`coalesce(sum(${c.bounced}), 0)::bigint`,
-      complained: sql<string>`coalesce(sum(${c.complained}), 0)::bigint`,
+      sent: total(c.sent),
+      hardBounced: total(c.hardBounced),
+      complained: total(c.complained),
+      pauseSent: recent(c.sent),
+      pauseHardBounced: recent(c.hardBounced),
+      pauseComplained: recent(c.complained),
     })
     .from(c)
-    .where(and(eq(c.teamId, teamId), gte(c.day, since)));
+    .where(and(eq(c.teamId, teamId), gte(c.day, sinceWarn)));
 
-  const sent = Number(row?.sent ?? 0);
-  const evaluation = evaluateDeliverability(
-    { sent, bounced: Number(row?.bounced ?? 0), complained: Number(row?.complained ?? 0) },
-    opts?.plan ? MIN_GUARDRAIL_VOLUME_BY_PLAN[opts.plan] : MIN_GUARDRAIL_VOLUME,
-  );
+  const n = (v: string | undefined) => Number(v ?? 0);
+  const warn = {
+    sent: n(row?.sent),
+    hardBounced: n(row?.hardBounced),
+    complained: n(row?.complained),
+  };
+  const pause = {
+    sent: n(row?.pauseSent),
+    hardBounced: n(row?.pauseHardBounced),
+    complained: n(row?.pauseComplained),
+  };
 
-  return { ...evaluation, sent, windowDays };
+  return {
+    ...evaluateDeliverability({ warn, pause }),
+    sent: warn.sent,
+    windowDays: GUARDRAIL_WINDOW_DAYS,
+    pause: { ...pause, windowDays: PAUSE_WINDOW_DAYS },
+  };
 }

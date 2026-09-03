@@ -60,6 +60,10 @@ esteja configurada — veja
   SES, novos envios de broadcast são bloqueados com um erro
   `403 sending_paused` — contendo o estrago antes que o SES pause o envio por
   completo.
+- Se a taxa agregada de bounce ou reclamação da plataforma na região SES do seu
+  remetente se aproxima da linha de revisão do SES, envios de broadcast nessa
+  região são recusados com `403 broadcasts_paused` até a taxa se recuperar. O
+  e-mail transacional continua saindo, e a pausa libera sozinha.
 
 Veja a [referência da API](/pt-BR/api-reference) para todos os endpoints de
 broadcast.

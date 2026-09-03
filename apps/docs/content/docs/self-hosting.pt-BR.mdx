@@ -125,6 +125,7 @@ auto-hospedada não tem limites de plano.
 | `SNS_TOPIC_ARNS` | ARNs de tópicos SNS (separados por vírgula) autorizados a entregar eventos do SES. Sem definir, a ingestão de eventos fica desativada. |
 | `SQS_QUEUE_URL` | Fila SQS que o worker consome por long polling para eventos do SES. O setup sempre a cria; mantenha definida mesmo quando o SNS também faz push em `https://<seu-host>/ses/events` (o app deduplica os dois). |
 | `SES_CONFIGURATION_SET` | Configuration set do SES aplicado a envios sem configuration set por domínio. Sem definir, envia sem (e sem eventos de entrega). |
+| `SES_TENANTS` | Um tenant do SES por equipe, para o SES medir a reputação de bounces/reclamações por cliente e pausar um remetente sem pausar os demais. Padrão = `IS_CLOUD`; exige as ações IAM `ses:*Tenant*`. |
 
 ### Opcionais
 
@@ -147,6 +148,7 @@ auto-hospedada não tem limites de plano.
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha só aparece com isto definido e credenciais SES configuradas — deixe vazio para ocultá-la por completo. |
 | `ONBOARDING_EMAIL_FROM` | Remetente compartilhado do botão "Enviar e-mail" e do snippet do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Qualquer time pode enviar por ele, só para as caixas de entrada dos próprios membros. Deixe vazio para ocultar o botão; o snippet então pede o domínio do próprio time. |
+| `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos donos do time (cota diária quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para o time, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. |
 
 ### Armazenamento de objetos (uploads e backups)
 
@@ -227,6 +229,29 @@ hostname do painel precisa encaminhar esse único caminho para a API (a [seção
 de nginx](#produção-nginx--tls) faz isso), ou o POST de confirmação cai no
 painel, recebe 404, e a assinatura fica pendente com todo bounce e entrega
 perdidos.
+
+## Tenants do SES (reputação por equipe)
+
+Com `SES_TENANTS=true` (padrão no Cloud) cada equipe ganha o próprio tenant do
+SES, nomeado pelo id da equipe, em cada região onde tem um domínio. A identidade
+do domínio e o `SES_CONFIGURATION_SET` compartilhado são associados ao tenant na
+criação do domínio, e todo envio a partir dele nomeia o tenant, então o SES
+mantém as métricas de bounce e reclamação — e a própria pausa de envio — por
+cliente, não por conta. Domínios anteriores à flag, ou cuja associação falhou,
+são tratados pelo job `tenants.sync` de hora em hora. A política IAM que o
+assistente e o template do CloudFormation instalam inclui as ações
+`ses:CreateTenant`, `ses:GetTenant`, `ses:DeleteTenant`,
+`ses:CreateTenantResourceAssociation` e `ses:DeleteTenantResourceAssociation`;
+uma implantação existente roda o assistente de novo (ou atualiza a política
+`millionsend-ses`) antes de ligar a flag.
+
+Para atualizar a política sem recriar nada, publique o JSON que a página de
+configurações do SES mostra como nova versão padrão:
+
+```bash
+aws iam create-policy-version --policy-arn arn:aws:iam::<account-id>:policy/millionsend-ses \
+  --policy-document file://millionsend-ses.json --set-as-default
+```
 
 ## Relay SMTP
 

@@ -55,6 +55,7 @@
   --ms-dot-clicked: #a08fd8;
   --ms-dot-bounced: #e0897d; /* salmon — soft fail, vs. the harder failed red */
   --ms-dot-complained: #d9ae5f;
+  --ms-dot-account: #8fb3d9; /* team-level standing events */
   --ms-dot-suppressed: #67655f;
   --ms-dot-failed: #cf5546;
 }
@@ -110,6 +111,7 @@
   --ms-dot-clicked: #7a63c2;
   --ms-dot-bounced: #c4685a;
   --ms-dot-complained: #b8862f;
+  --ms-dot-account: #4f7aa8;
   --ms-dot-suppressed: #a5a39a;
   --ms-dot-failed: #c0392b;
   --ms-focus-ring: 0 0 0 2px rgba(89, 97, 107, 0.28);

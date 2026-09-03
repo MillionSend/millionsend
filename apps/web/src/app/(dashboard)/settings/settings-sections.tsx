@@ -8,6 +8,7 @@ import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
+import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -291,7 +292,11 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
       open={open}
       onClose={close}
       onConfirm={confirm}
-      title={create.data ? t("invitations.created.title") : t("invitations.invite.title")}
+      title={
+        create.data
+          ? t(create.data.emailed ? "invitations.created.sentTitle" : "invitations.created.title")
+          : t("invitations.invite.title")
+      }
     >
       {create.data ? (
         <form
@@ -302,9 +307,21 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           }}
         >
           <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-            {t("invitations.created.bodyTtl", { email: create.data.email })}
+            {t(
+              create.data.emailed
+                ? "invitations.created.emailedBody"
+                : "invitations.created.bodyTtl",
+              {
+                email: create.data.email,
+              },
+            )}
           </p>
           <CopyChip value={create.data.acceptUrl} />
+          {create.data.emailed ? null : (
+            <p style={{ margin: 0, color: "var(--ms-warn)", fontSize: "var(--ms-fs-label)" }}>
+              {t("invitations.created.noSender")}
+            </p>
+          )}
           <ModalFooter>
             <button type="submit" className="ms-btn ms-btn-primary">
               {t("invitations.created.done")} <ConfirmKeycap />
@@ -377,13 +394,23 @@ function PendingInvitations() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { data: invitations } = useQuery(trpc.settings.invitations.list.queryOptions());
+  const [error, setError] = useState<string | null>(null);
+  const refresh = () => queryClient.invalidateQueries(trpc.settings.invitations.list.queryFilter());
   const revoke = useMutation(
-    trpc.settings.invitations.revoke.mutationOptions({
-      onSuccess: () => queryClient.invalidateQueries(trpc.settings.invitations.list.queryFilter()),
+    trpc.settings.invitations.revoke.mutationOptions({ onSuccess: refresh }),
+  );
+  const resend = useMutation(
+    trpc.settings.invitations.resend.mutationOptions({
+      onSuccess: () => {
+        setError(null);
+        refresh();
+      },
+      onError: (e) => setError(e.message),
     }),
   );
 
   if (!invitations || invitations.length === 0) return null;
+  const busy = revoke.isPending || resend.isPending;
 
   return (
     <div style={{ marginTop: 20 }}>
@@ -395,6 +422,7 @@ function PendingInvitations() {
           <tr>
             <th>{t("invitations.pending.email")}</th>
             <th>{t("members.role")}</th>
+            <th>{t("invitations.pending.expires")}</th>
             <th className="right" aria-label={t("invitations.pending.actions")} />
           </tr>
         </thead>
@@ -403,11 +431,27 @@ function PendingInvitations() {
             <tr key={invite.id}>
               <td className="ms-mono">{invite.email}</td>
               <td>{t(`members.roles.${invite.role}`)}</td>
-              <td className="right">
+              <td>
+                {new Date(invite.expiresAt).getTime() <= Date.now() ? (
+                  <span className="ms-badge ms-badge-warn">{t("invitations.pending.expired")}</span>
+                ) : (
+                  <RelativeTime date={invite.expiresAt} />
+                )}
+              </td>
+              <td className="right" style={{ whiteSpace: "nowrap" }}>
                 <button
                   type="button"
                   className="ms-btn ms-btn-secondary"
-                  disabled={revoke.isPending}
+                  disabled={busy}
+                  style={{ marginRight: 8 }}
+                  onClick={() => resend.mutate({ id: invite.id })}
+                >
+                  {t("invitations.pending.resend")}
+                </button>
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-secondary"
+                  disabled={busy}
                   onClick={() => revoke.mutate({ id: invite.id })}
                 >
                   {t("invitations.pending.revoke")}
@@ -417,6 +461,11 @@ function PendingInvitations() {
           ))}
         </tbody>
       </Table>
+      {error ? (
+        <p style={{ margin: "8px 0 0", color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
+          {t("invitations.pending.resendError", { reason: error })}
+        </p>
+      ) : null}
       <ListFooter
         left={t("invitations.pending.pageOf", { pages: 1, total: invitations.length })}
         singlePage
@@ -460,6 +509,12 @@ function MembersSection() {
     }),
   );
   const busy = updateRole.isPending || remove.isPending || leave.isPending;
+
+  // The server refuses both; hiding the button avoids offering a dead end.
+  const cannotLeave =
+    !members ||
+    members.length === 1 ||
+    (role === "owner" && members.filter((m) => m.role === "owner").length === 1);
 
   // Admins never touch the owner role, in either direction.
   const roleOptions = (["owner", "admin", "member"] as const)
@@ -549,14 +604,16 @@ function MembersSection() {
                   </td>
                   <td className="right">
                     {m.self ? (
-                      <button
-                        type="button"
-                        className="ms-btn ms-btn-secondary"
-                        disabled={busy}
-                        onClick={() => void confirmLeave()}
-                      >
-                        {t("members.leave")}
-                      </button>
+                      cannotLeave ? null : (
+                        <button
+                          type="button"
+                          className="ms-btn ms-btn-secondary"
+                          disabled={busy}
+                          onClick={() => void confirmLeave()}
+                        >
+                          {t("members.leave")}
+                        </button>
+                      )
                     ) : editable ? (
                       <button
                         type="button"
