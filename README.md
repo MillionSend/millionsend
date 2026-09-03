@@ -7,6 +7,10 @@
 Self-host on your own AWS SES, or use the hosted cloud. Resend-compatible API — migrating
 means changing two environment variables, not rewriting your integration.
 
+<p align="center">
+  <img src=".github/screenshots/emails.png" alt="The MillionSend dashboard: the Emails page, with each send's delivery status" width="900">
+</p>
+
 ## Status
 
 Early development — the monorepo is taking shape in the open (pnpm + Turborepo; Drizzle
