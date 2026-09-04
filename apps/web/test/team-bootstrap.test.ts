@@ -1,3 +1,4 @@
+import { PLAN_TEAM_LIMIT } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTestDb } from "@millionsend/test-utils";
@@ -5,7 +6,6 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getActiveMembership } from "@/server/membership";
 import { createCaller } from "@/server/routers";
-import { MAX_OWNED_TEAMS_CLOUD } from "@/server/routers/team-bootstrap";
 import type { Context } from "@/server/trpc";
 
 let db: Db;
@@ -83,7 +83,7 @@ describe("team.createTeam", () => {
     await insertUser("u2", "u2@example.com");
     const theirs = await callerFor("u2").team.createTeam({ name: "Theirs" });
     await db.insert(schema.teamMembers).values({ teamId: theirs.teamId, userId: "u1" });
-    for (let i = 0; i < MAX_OWNED_TEAMS_CLOUD; i++) {
+    for (let i = 0; i < PLAN_TEAM_LIMIT.free; i++) {
       await callerFor("u1").team.createTeam({ name: `Team ${i}` });
     }
     await expect(callerFor("u1").team.createTeam({ name: "One more" })).rejects.toMatchObject({
@@ -91,6 +91,32 @@ describe("team.createTeam", () => {
     });
     vi.stubEnv("IS_CLOUD", "");
     await expect(callerFor("u1").team.createTeam({ name: "Self-host" })).resolves.toBeTruthy();
+  });
+
+  it("owning a paid team raises the cap; being a member of one does not", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    await insertUser("u1", "u1@example.com");
+    await insertUser("u2", "u2@example.com");
+    // u1 is a member of u2's Scale team: no effect on u1's own cap.
+    const theirs = await callerFor("u2").team.createTeam({ name: "Theirs" });
+    await db.update(schema.teams).set({ plan: "scale" }).where(eq(schema.teams.id, theirs.teamId));
+    await db.insert(schema.teamMembers).values({ teamId: theirs.teamId, userId: "u1" });
+    const first = await callerFor("u1").team.createTeam({ name: "Mine" });
+    for (let i = 1; i < PLAN_TEAM_LIMIT.free; i++) {
+      await callerFor("u1").team.createTeam({ name: `Team ${i}` });
+    }
+    await expect(callerFor("u1").team.createTeam({ name: "One more" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    // One of u1's own teams goes Pro: room for more.
+    await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, first.teamId));
+    for (let i = PLAN_TEAM_LIMIT.free; i < PLAN_TEAM_LIMIT.pro; i++) {
+      await callerFor("u1").team.createTeam({ name: `Team ${i}` });
+    }
+    await expect(callerFor("u1").team.createTeam({ name: "Past pro" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    vi.stubEnv("IS_CLOUD", "");
   });
 
   it("selects the new team via the cookie setter", async () => {

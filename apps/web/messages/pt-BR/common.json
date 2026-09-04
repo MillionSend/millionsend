@@ -25,7 +25,7 @@
     "nameLabel": "Nome do time",
     "submit": "Criar",
     "error": "Falha ao criar o time. Tente de novo.",
-    "limit": "Você já é proprietário do número máximo de times."
+    "limit": "Você já é proprietário do número máximo de times para o seu plano."
   },
   "select": {
     "searchPlaceholder": "Buscar…",

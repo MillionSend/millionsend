@@ -36,6 +36,18 @@ export const PLAN_DAILY_LIMIT: Record<Plan, number | null> = {
  */
 export const QUOTA_TOLERANCE = 0.1;
 
+/**
+ * Teams a user may own on Cloud, by the best effective plan among the teams
+ * they already own: a paying owner gets room for more teams without buying
+ * each one up. Membership in someone else's paid team does not count.
+ * Self-host has no cap.
+ */
+export const PLAN_TEAM_LIMIT: Record<Plan, number> = {
+  free: 3,
+  pro: 10,
+  scale: 15,
+};
+
 /** Sender domains per team per plan; null = unlimited. Self-host ignores plans entirely. */
 export const PLAN_DOMAIN_LIMIT: Record<Plan, number | null> = {
   free: 3,

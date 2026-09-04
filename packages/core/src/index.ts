@@ -163,6 +163,7 @@ export {
   PLAN_DAILY_LIMIT,
   PLAN_DOMAIN_LIMIT,
   PLAN_GRACE_DAYS,
+  PLAN_TEAM_LIMIT,
   type Plan,
   QUOTA_TOLERANCE,
 } from "./plans.js";
@@ -218,7 +219,7 @@ export {
   signInviteToken,
   verifyInviteToken,
 } from "./team-invitations.js";
-export { fetchEffectivePlan } from "./team-plan.js";
+export { fetchBestOwnedPlan, fetchEffectivePlan } from "./team-plan.js";
 export { findTopicOptOuts, isSubscribedToTopic } from "./topics.js";
 export {
   deriveTrackingKey,

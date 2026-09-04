@@ -25,7 +25,7 @@
     "nameLabel": "Team name",
     "submit": "Create",
     "error": "Could not create the team. Try again.",
-    "limit": "You already own the maximum number of teams."
+    "limit": "You already own the maximum number of teams for your plan."
   },
   "select": {
     "searchPlaceholder": "Search…",

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { env } from "@millionsend/config";
-import { ALL_TEAMS_GRANT } from "@millionsend/core";
+import { ALL_TEAMS_GRANT, fetchBestOwnedPlan, PLAN_TEAM_LIMIT } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
@@ -10,12 +10,6 @@ import { slugify } from "@/lib/slug";
 import { recordAudit } from "../audit";
 import { listMemberships } from "../membership";
 import { type AuthSession, type Context, protectedProcedure, router } from "../trpc";
-
-/**
- * Cloud only: every team is a free sending quota, so one signup must not be
- * able to multiply it. Invitations into other people's teams do not count.
- */
-export const MAX_OWNED_TEAMS_CLOUD = 3;
 
 /**
  * Records the active-team selection in both places that read it: the cookie
@@ -89,8 +83,13 @@ export const teamBootstrapRouter = router({
     .input(z.object({ name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
       if (env.IS_CLOUD) {
-        const memberships = await listMemberships(ctx.db, ctx.session.user.id);
-        if (memberships.filter((m) => m.role === "owner").length >= MAX_OWNED_TEAMS_CLOUD) {
+        const userId = ctx.session.user.id;
+        const [memberships, bestPlan] = await Promise.all([
+          listMemberships(ctx.db, userId),
+          fetchBestOwnedPlan(ctx.db, userId),
+        ]);
+        const owned = memberships.filter((m) => m.role === "owner").length;
+        if (owned >= PLAN_TEAM_LIMIT[bestPlan]) {
           throw new TRPCError({ code: "FORBIDDEN", message: "Team limit reached." });
         }
       }
