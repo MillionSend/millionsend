@@ -132,6 +132,23 @@ export function maskApiKey(tokenPrefix: string, last4: string): string {
  * Copy affordances must still copy the full URL; pass this only as the
  * visible text.
  */
+/** The bare address inside a From header value: `Acme <a@acme.dev>` → `a@acme.dev`. */
+export function addrSpec(from: string): string {
+  const inner = /<([^>]+)>/.exec(from);
+  return (inner?.[1] ?? from).trim();
+}
+
+/** The domain part of an address, lowercased; "" when there is none. */
+export function mailDomain(address: string): string {
+  const at = address.lastIndexOf("@");
+  return at < 0
+    ? ""
+    : address
+        .slice(at + 1)
+        .trim()
+        .toLowerCase();
+}
+
 export function displayUrl(url: string): string {
   return url.replace(/^https?:\/\//, "");
 }

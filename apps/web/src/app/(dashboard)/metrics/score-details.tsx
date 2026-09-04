@@ -398,9 +398,10 @@ export function ScoreDetailsDrawer({ open, onClose }: { open: boolean; onClose: 
             return (
               <div
                 style={{
-                  display: "flex",
+                  display: "grid",
+                  gridTemplateColumns: "auto 1fr",
+                  gap: "10px 14px",
                   alignItems: "center",
-                  gap: 14,
                   padding: "12px 14px",
                   border: "1px solid var(--ms-line-strong)",
                   borderRadius: 12,
@@ -413,7 +414,7 @@ export function ScoreDetailsDrawer({ open, onClose }: { open: boolean; onClose: 
                 >
                   +{points(best.liftTenths)}
                 </span>
-                <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ minWidth: 0 }}>
                   <span style={{ color: "var(--ms-bone)" }}>
                     {insights(`check.${best.id}.advice`)}
                   </span>
@@ -431,18 +432,20 @@ export function ScoreDetailsDrawer({ open, onClose }: { open: boolean; onClose: 
                     })}
                   </span>
                 </span>
-                <CopyButton
-                  value={t("agentPrompt", {
-                    score: points(data.scoreTenths),
-                    title: insights(`check.${best.id}.title`),
-                    emails: best.emails,
-                    recipients: fmt.format(best.recipients),
-                    points: points(best.penaltyTenths),
-                    description: insights(`check.${best.id}.description`),
-                    advice: insights(`check.${best.id}.advice`),
-                  })}
-                  label={common("copy")}
-                />
+                <span style={{ gridColumn: "2", justifySelf: "start" }}>
+                  <CopyButton
+                    value={t("agentPrompt", {
+                      score: points(data.scoreTenths),
+                      title: insights(`check.${best.id}.title`),
+                      emails: best.emails,
+                      recipients: fmt.format(best.recipients),
+                      points: points(best.penaltyTenths),
+                      description: insights(`check.${best.id}.description`),
+                      advice: insights(`check.${best.id}.advice`),
+                    })}
+                    label={common("copy")}
+                  />
+                </span>
               </div>
             );
           })()}

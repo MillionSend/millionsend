@@ -100,7 +100,8 @@
     "cancelBody": "\"{name}\" não será enviada.",
     "cancelConfirm": "Cancelar envio",
     "keep": "Manter",
-    "error": "Não foi possível carregar a transmissão."
+    "error": "Não foi possível carregar a transmissão.",
+    "emails": "E-mails"
   },
   "apiSheet": {
     "title": "API de Transmissões",

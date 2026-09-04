@@ -209,43 +209,41 @@ export default function BroadcastsPage() {
                       style={{ width: 40 }}
                       onClick={(event) => event.stopPropagation()}
                     >
-                      <PopoverMenu
-                        ariaLabel={t("list.menu")}
-                        items={
-                          status === "draft"
-                            ? [
-                                {
-                                  label: t("list.edit"),
-                                  onSelect: () => router.push(`/broadcasts/${row.id}/edit`),
-                                },
-                                null,
-                                {
-                                  label: t("list.delete"),
-                                  danger: true,
-                                  onSelect: () => setDeleteTarget({ id: row.id, name: label }),
-                                },
-                              ]
-                            : status === "scheduled"
+                      {/* The row itself opens the broadcast; a menu with only "View" would repeat it. */}
+                      {status === "draft" || status === "scheduled" ? (
+                        <PopoverMenu
+                          ariaLabel={t("list.menu")}
+                          items={
+                            status === "draft"
                               ? [
                                   {
-                                    label: t("list.view"),
-                                    onSelect: () => router.push(`/broadcasts/${row.id}`),
+                                    label: t("list.edit"),
+                                    onSelect: () => router.push(`/broadcasts/${row.id}/edit`),
                                   },
                                   null,
                                   {
-                                    label: t("list.cancel"),
+                                    label: t("list.delete"),
                                     danger: true,
-                                    onSelect: () => setCancelTarget({ id: row.id, name: label }),
+                                    onSelect: () => setDeleteTarget({ id: row.id, name: label }),
                                   },
                                 ]
-                              : [
-                                  {
-                                    label: t("list.view"),
-                                    onSelect: () => router.push(`/broadcasts/${row.id}`),
-                                  },
-                                ]
-                        }
-                      />
+                              : status === "scheduled"
+                                ? [
+                                    {
+                                      label: t("list.view"),
+                                      onSelect: () => router.push(`/broadcasts/${row.id}`),
+                                    },
+                                    null,
+                                    {
+                                      label: t("list.cancel"),
+                                      danger: true,
+                                      onSelect: () => setCancelTarget({ id: row.id, name: label }),
+                                    },
+                                  ]
+                                : []
+                          }
+                        />
+                      ) : null}
                     </td>
                   </tr>
                 );

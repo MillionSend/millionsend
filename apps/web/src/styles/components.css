@@ -1476,16 +1476,37 @@ summary:focus-visible,
     padding: 16px !important;
   }
 
-  /* Page header stacks title over actions only when cramped. */
-  .ms-page-header {
+  /* Page header: the title keeps the first line to itself; the actions take
+     the next line at full width, and a button that does not fit beside its
+     neighbours drops to a line of its own. */
+  .ms-page-row {
     flex-wrap: wrap;
-    row-gap: 12px;
+    row-gap: 14px;
   }
-  .ms-page-header > div:first-child {
+  .ms-page-title {
+    flex: 1 1 auto;
     min-width: 0;
   }
-  .ms-page-header h1 {
-    overflow-wrap: anywhere;
+  .ms-page-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+  .ms-page-actions > * {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .ms-page-actions > .ms-btn-icon,
+  .ms-page-actions > .ms-menu-trigger-bare {
+    flex: 0 0 auto;
+  }
+
+  /* Lists scroll sideways rather than folding a cell onto four lines
+     (white-space inherits into every cell). */
+  .ms-table {
+    white-space: nowrap;
+  }
+  .ms-table td > span {
+    flex-wrap: nowrap !important;
   }
 
   /* Filter rows wrap; the search field takes the full first line. */
@@ -1496,6 +1517,12 @@ summary:focus-visible,
     flex: 1 1 100% !important;
     min-width: 0 !important;
     max-width: none !important;
+  }
+  /* Each select takes a full line too; a fixed 160px pill on a phone is a
+     clipped label. The root carries an inline width, hence the override. */
+  .ms-filter-row > div {
+    flex: 1 1 100%;
+    width: 100% !important;
   }
 
   /* Generic flex rows that may not fit a phone width. */

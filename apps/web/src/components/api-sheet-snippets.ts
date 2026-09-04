@@ -1,6 +1,6 @@
 /* Per-SDK snippets for the resource API sheets. Each snippet mirrors the real
    published SDK surface in sdks/millionsend-<lang> — only the resources every
-   SDK implements (contacts, segments, topics, broadcasts) get an entry here;
+   SDK implements (contacts, segments, topics, broadcasts, webhooks) get an entry here;
    the rest stay curl-only in api-sheet.tsx. Client setup follows the emails
    sheet's convention: placeholder key in the first section, reused after. */
 
@@ -639,5 +639,138 @@ var broadcasts = await ms.BroadcastListAsync(new ListOptions { Limit = 20 });`,
   "${ID}",
   scheduled_at: "in 1 hour"
 )`,
+  },
+};
+
+export const WEBHOOKS_SNIPPETS: ResourceSnippets<"list" | "create" | "update"> = {
+  node: {
+    list: `import { MillionSend } from "millionsend";
+
+const ms = new MillionSend("ms_xxxxxxxxx");
+
+const { data, error } = await ms.webhooks.list({ limit: 20 });`,
+    create: `await ms.webhooks.create({
+  endpoint: "https://example.com/webhooks/millionsend",
+  events: ["email.delivered", "email.bounced"],
+});`,
+    update: `await ms.webhooks.update("${ID}", {
+  status: "disabled",
+});`,
+  },
+  python: {
+    list: `import millionsend
+
+millionsend.api_key = "ms_xxxxxxxxx"
+
+webhooks = millionsend.Webhooks.list(limit=20)`,
+    create: `millionsend.Webhooks.create({
+    "endpoint": "https://example.com/webhooks/millionsend",
+    "events": ["email.delivered", "email.bounced"],
+})`,
+    update: `millionsend.Webhooks.update({
+    "webhook_id": "${ID}",
+    "status": "disabled",
+})`,
+  },
+  php: {
+    list: `$ms = MillionSend\\MillionSend::client('ms_xxxxxxxxx');
+
+$webhooks = $ms->webhooks->list(['limit' => 20]);`,
+    create: `$ms->webhooks->create([
+    'endpoint' => 'https://example.com/webhooks/millionsend',
+    'events' => ['email.delivered', 'email.bounced'],
+]);`,
+    update: `$ms->webhooks->update('${ID}', [
+    'status' => 'disabled',
+]);`,
+  },
+  ruby: {
+    list: `Millionsend.api_key = "ms_xxxxxxxxx"
+
+webhooks = Millionsend::Webhooks.list(limit: 20)`,
+    create: `Millionsend::Webhooks.create(
+  endpoint: "https://example.com/webhooks/millionsend",
+  events: ["email.delivered", "email.bounced"]
+)`,
+    update: `Millionsend::Webhooks.update(
+  "${ID}",
+  status: "disabled"
+)`,
+  },
+  go: {
+    list: `client := millionsend.NewClient("ms_xxxxxxxxx")
+
+webhooks, err := client.Webhooks.List(&millionsend.ListOptions{Limit: 20})`,
+    create: `webhook, err := client.Webhooks.Create(&millionsend.CreateWebhookRequest{
+    Endpoint: "https://example.com/webhooks/millionsend",
+    Events:   []string{"email.delivered", "email.bounced"},
+})`,
+    update: `updated, err := client.Webhooks.Update(
+    "${ID}",
+    &millionsend.UpdateWebhookRequest{Status: "disabled"},
+)`,
+  },
+  rust: {
+    list: `let ms = MillionSend::new("ms_xxxxxxxxx");
+
+let webhooks = ms
+    .webhooks
+    .list(Some(&ListOptions {
+        limit: Some(20),
+        ..Default::default()
+    }))
+    .await?;`,
+    create: `ms.webhooks
+    .create(&CreateWebhookOptions {
+        endpoint: "https://example.com/webhooks/millionsend".into(),
+        events: vec!["email.delivered".into(), "email.bounced".into()],
+        signing_secret: None,
+    })
+    .await?;`,
+    update: `ms.webhooks
+    .update("${ID}", &UpdateWebhookOptions {
+        status: Some(WebhookStatus::Disabled),
+        ..Default::default()
+    })
+    .await?;`,
+  },
+  java: {
+    list: `MillionSend ms = new MillionSend("ms_xxxxxxxxx");
+
+ListResponse<Webhook> webhooks = ms.webhooks().list(
+    ListOptions.builder().limit(20).build()
+);`,
+    create: `ms.webhooks().create(CreateWebhookOptions.builder()
+    .endpoint("https://example.com/webhooks/millionsend")
+    .events(WebhookEvent.EMAIL_DELIVERED, WebhookEvent.EMAIL_BOUNCED)
+    .build());`,
+    update: `ms.webhooks().update(
+    "${ID}",
+    UpdateWebhookOptions.builder().status("disabled").build()
+);`,
+  },
+  dotnet: {
+    list: `var ms = new MillionSendClient("ms_xxxxxxxxx");
+
+var webhooks = await ms.WebhookListAsync(new ListOptions { Limit = 20 });`,
+    create: `await ms.WebhookCreateAsync(new WebhookCreateOptions
+{
+    Endpoint = "https://example.com/webhooks/millionsend",
+    Events = new List<string> { "email.delivered", "email.bounced" },
+});`,
+    update: `await ms.WebhookUpdateAsync(
+    Guid.Parse("${ID}"),
+    new WebhookUpdateOptions { Status = WebhookStatus.Disabled }
+);`,
+  },
+  elixir: {
+    list: `client = MillionSend.client(api_key: "ms_xxxxxxxxx")
+
+{:ok, webhooks} = MillionSend.Webhooks.list(client, limit: 20)`,
+    create: `MillionSend.Webhooks.create(client, %{
+  endpoint: "https://example.com/webhooks/millionsend",
+  events: ["email.delivered", "email.bounced"]
+})`,
+    update: `MillionSend.Webhooks.update(client, "${ID}", %{status: "disabled"})`,
   },
 };

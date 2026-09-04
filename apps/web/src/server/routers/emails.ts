@@ -1,10 +1,9 @@
 import {
   decryptEmailBody,
   type EmailBody,
-  type EmailCheckResult,
+  emailInsightsView,
   fetchEmailInsights,
   hashRecipient,
-  scoreBand,
   utcDay,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
@@ -80,6 +79,7 @@ export const emailsRouter = router({
         search: z.string().trim().max(200).optional(),
         apiKeyId: z.uuid().optional(),
         domainId: z.uuid().optional(),
+        broadcastId: z.uuid().optional(),
         since: z.coerce.date().optional(),
         cursor: cursorSchema.optional(),
         limit: z.number().int().min(1).max(50).default(25),
@@ -97,6 +97,7 @@ export const emailsRouter = router({
       }
       if (input.apiKeyId) filters.push(eq(t.apiKeyId, input.apiKeyId));
       if (input.domainId) filters.push(eq(t.domainId, input.domainId));
+      if (input.broadcastId) filters.push(eq(t.broadcastId, input.broadcastId));
       if (input.since) filters.push(gte(t.createdAt, input.since));
       // Total counts the filter scope, not the page — the cursor is excluded.
       const [totalRow] = await ctx.db
@@ -213,16 +214,7 @@ export const emailsRouter = router({
       emailId: email.id,
       broadcastId: email.broadcastId,
     });
-    const insights = insightsRow
-      ? {
-          scoreTenths: insightsRow.scoreTenths,
-          band: scoreBand(insightsRow.scoreTenths),
-          marketing: insightsRow.marketing,
-          htmlSizeBytes: insightsRow.htmlSizeBytes,
-          computedAt: insightsRow.computedAt,
-          checks: insightsRow.checks as EmailCheckResult[],
-        }
-      : null;
+    const insights = emailInsightsView(insightsRow);
 
     let apiKeyName: string | null = null;
     if (email.apiKeyId) {

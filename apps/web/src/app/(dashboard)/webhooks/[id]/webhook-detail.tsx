@@ -143,7 +143,10 @@ function DeliveryExpanded({ id }: { id: string }) {
             background: "var(--ms-ground)",
             border: "1px solid var(--ms-line)",
             borderRadius: 8,
-            overflowX: "auto",
+            // A long diagnostic string wraps here rather than widening the
+            // whole deliveries table into a horizontal scroll.
+            whiteSpace: "pre-wrap",
+            overflowWrap: "anywhere",
           }}
         >
           {JSON.stringify(data.payload, null, 2)}

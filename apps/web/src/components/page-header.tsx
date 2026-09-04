@@ -45,6 +45,7 @@ export function PageHeader({
         </div>
       ) : null}
       <div
+        className="ms-page-row"
         style={{
           display: "flex",
           alignItems: subtitle ? "flex-end" : "center",
@@ -57,7 +58,7 @@ export function PageHeader({
             {leading}
           </span>
         ) : null}
-        <div style={leading ? { flex: 1, minWidth: 0 } : undefined}>
+        <div className="ms-page-title" style={leading ? { flex: 1, minWidth: 0 } : undefined}>
           <h1
             className="ms-display"
             style={{
@@ -78,7 +79,12 @@ export function PageHeader({
           ) : null}
         </div>
         {actions ? (
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>{actions}</div>
+          <div
+            className="ms-page-actions"
+            style={{ display: "flex", gap: 10, alignItems: "center" }}
+          >
+            {actions}
+          </div>
         ) : null}
       </div>
     </header>

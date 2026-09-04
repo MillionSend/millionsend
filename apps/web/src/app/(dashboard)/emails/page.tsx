@@ -6,14 +6,12 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useMemo, useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
-import { EmailStatusIcon } from "@/components/email-status-icon";
+import { EmailsTable } from "@/components/emails-table";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { PageHeader } from "@/components/page-header";
-import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
-import { StatusBadge, StatusDot } from "@/components/status-badge";
-import { Table } from "@/components/table";
+import { StatusDot } from "@/components/status-badge";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatHoursMinutes } from "@/lib/format";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
@@ -52,7 +50,7 @@ export default function EmailsPage() {
   const common = useTranslations("common");
   const locale = useLocale();
   const trpc = useTRPC();
-  const router = useRouter();
+  const _router = useRouter();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 
   const [search, setSearch] = useUrlState("q");
@@ -269,48 +267,7 @@ export default function EmailsPage() {
         )
       ) : (
         <>
-          <Table>
-            <thead>
-              <tr>
-                <th style={{ width: "34%" }}>{t("list.to")}</th>
-                <th style={{ width: "15%" }}>{t("list.status")}</th>
-                <th>{t("list.subject")}</th>
-                <th className="right" style={{ width: "13%" }}>
-                  {t("list.sent")}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((row) => (
-                <tr
-                  key={row.id}
-                  className="hoverable"
-                  onClick={() => router.push(`/emails/${row.id}`)}
-                >
-                  <td className="ms-mono">
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                      <EmailStatusIcon status={row.latestStatus} />
-                      <Link href={`/emails/${row.id}`} onClick={(event) => event.stopPropagation()}>
-                        {row.to[0] ?? row.subject}
-                      </Link>
-                    </span>
-                    {row.to.length > 1 ? (
-                      <span style={{ color: "var(--ms-muted)", marginLeft: 8 }}>
-                        +{row.to.length - 1}
-                      </span>
-                    ) : null}
-                  </td>
-                  <td>
-                    <StatusBadge status={row.latestStatus} />
-                  </td>
-                  <td>{row.subject}</td>
-                  <td className="right">
-                    <RelativeTime date={row.createdAt} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+          <EmailsTable rows={items} />
           <ListFooter
             left={t("list.pageOf", {
               pages: query.data?.pages.length ?? 1,

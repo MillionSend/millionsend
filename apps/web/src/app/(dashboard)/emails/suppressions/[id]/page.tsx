@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyGlyph } from "@/components/copy-chip";
 import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -62,7 +63,6 @@ function SuppressionDetailSkeleton() {
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
           borderBottom: "1px solid var(--ms-line)",
-          maxWidth: 860,
         }}
       >
         <div>
@@ -172,7 +172,15 @@ export default function SuppressionDetailPage() {
               type="button"
               className="ms-btn ms-btn-destructive"
               disabled={removeMutation.isPending}
-              onClick={() => removeMutation.mutate({ id: row.id })}
+              onClick={async () => {
+                const ok = await confirmDialog({
+                  title: t("suppressions.removeDialog.title"),
+                  message: t("suppressions.removeDialog.body", { email: row.email ?? "" }),
+                  confirmLabel: t("suppressions.remove"),
+                  danger: true,
+                });
+                if (ok) removeMutation.mutate({ id: row.id });
+              }}
             >
               <BtnSpinner on={removeMutation.isPending} />
               {t("suppressions.remove")}
@@ -190,7 +198,6 @@ export default function SuppressionDetailPage() {
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
           borderBottom: "1px solid var(--ms-line)",
-          maxWidth: 860,
         }}
       >
         <div>
@@ -229,7 +236,6 @@ export default function SuppressionDetailPage() {
               border: "1px solid var(--ms-line)",
               borderRadius: 10,
               padding: "14px 16px",
-              maxWidth: 860,
             }}
           >
             <pre
@@ -252,7 +258,7 @@ export default function SuppressionDetailPage() {
       ) : null}
 
       {guidanceKey ? (
-        <div style={{ maxWidth: 860 }}>
+        <div>
           <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>
             {t("bouncedDrawer.whatToDo")}
           </div>
@@ -261,7 +267,7 @@ export default function SuppressionDetailPage() {
       ) : null}
 
       {row.reason === "hard_bounce" ? (
-        <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 12, maxWidth: 860 }}>
+        <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 12 }}>
           {t("suppressions.detail.removeNote")}
         </div>
       ) : null}

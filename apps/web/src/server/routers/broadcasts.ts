@@ -1,6 +1,8 @@
 import { env } from "@millionsend/config";
 import {
   DAY_MS,
+  emailInsightsView,
+  fetchBroadcastInsights,
   fetchDeliverabilityHealth,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
@@ -214,6 +216,7 @@ export const broadcastsRouter = router({
       topicName: topic?.name ?? null,
       segmentName: segment?.name ?? null,
       stats: stats ?? { total: 0, delivered: 0, bounced: 0, complained: 0 },
+      insights: emailInsightsView(await fetchBroadcastInsights(ctx.db, ctx.teamId, row.id)),
     };
   }),
 

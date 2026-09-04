@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 function CloseGlyph({ onClose }: { onClose: () => void }) {
   const t = useTranslations("common");
@@ -56,6 +57,7 @@ export function Modal({
   useEffect(() => {
     if (open) ref.current?.focus();
   }, [open]);
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open) return;

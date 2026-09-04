@@ -1,35 +1,31 @@
 "use client";
 
-import type { EmailCheckResult, ScoreBand } from "@millionsend/core";
 import { parseSmtpDiagnostic, resolveBounceGuidance } from "@millionsend/core/bounce-guidance";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
-import { CodeHighlight } from "@/components/code-highlight";
-import { CopyButton, CopyChip, CopyGlyph } from "@/components/copy-chip";
+import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
+import { EmailContentPanel } from "@/components/email-content-panel";
 import { EmailStatusIcon, EventIconTile } from "@/components/email-status-icon";
 import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
-import { Switch } from "@/components/switch";
 import { Tooltip } from "@/components/tooltip";
-import { type EmailScheme, emulateEmailScheme } from "@/lib/email-preview";
 import {
+  addrSpec,
   formatDayTime,
   formatDurationShort,
   formatRelative,
   formatUtcTimestampMs,
+  mailDomain,
 } from "@/lib/format";
-import { formatHtml } from "@/lib/html";
-import { BAND_TONE, checkGlyph, formatScoreTenths } from "@/lib/score-band";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
-import { useTheme } from "@/lib/use-theme";
 
 type EventType =
   | "queued"
@@ -154,28 +150,64 @@ function StepRow({ index, text, last }: { index: number; text: string; last?: bo
   );
 }
 
-/** The HTML tab's source: pretty-printed by default, highlighted either way. */
-function HtmlSource({ html, formatted }: { html: string; formatted: boolean }) {
-  // Bodies run to hundreds of KB: format and highlight once per toggle, not
-  // on every re-render of the page around them.
-  const code = useMemo(
-    () => <CodeHighlight code={formatted ? formatHtml(html) : html} language="xml" />,
-    [html, formatted],
-  );
+/**
+ * Apple's relay only accepts senders registered in the developer portal, so
+ * the fix is a form there: the exact steps, plus the domain and address of
+ * this message ready to paste.
+ */
+function ApplePrivateRelaySteps({ from }: { from: string }) {
+  const t = useTranslations("emails.bouncedDrawer.apple");
+  const address = addrSpec(from);
+  const domain = mailDomain(address);
   return (
-    <pre
-      className="ms-mono ms-hl"
-      style={{
-        margin: 0,
-        padding: "16px 18px",
-        fontSize: 12,
-        lineHeight: 1.7,
-        color: "var(--ms-bone)",
-        overflowX: "auto",
-      }}
-    >
-      {code}
-    </pre>
+    <div style={{ marginTop: 20 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ms-bone)" }}>{t("title")}</div>
+      <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.55 }}>
+        {t.rich("intro", {
+          link: (chunks) => (
+            <a
+              className="ms-link"
+              href="https://developer.apple.com/account/resources/services/list"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {chunks} ↗
+            </a>
+          ),
+        })}
+      </p>
+      <ol style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 13, color: "var(--ms-muted)" }}>
+        {(["one", "two", "three", "four"] as const).map((step) => (
+          <li key={step} style={{ lineHeight: 1.7 }}>
+            {t(`steps.${step}`)}
+          </li>
+        ))}
+      </ol>
+      {domain ? (
+        <>
+          <div className="ms-microlabel" style={{ margin: "16px 0 6px" }}>
+            {t("domains")}
+          </div>
+          <CopyChip value={domain} />
+        </>
+      ) : null}
+      <div className="ms-microlabel" style={{ margin: "16px 0 6px" }}>
+        {t("addresses")}
+      </div>
+      <CopyChip value={address} />
+      <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--ms-faint)", lineHeight: 1.5 }}>
+        {t("hint")}
+      </p>
+      <a
+        className="ms-link"
+        href="https://developer.apple.com/help/account/configure-app-capabilities/configure-private-email-relay-service"
+        target="_blank"
+        rel="noreferrer"
+        style={{ display: "inline-block", marginTop: 14, fontSize: 13 }}
+      >
+        {t("article")} ↗
+      </a>
+    </div>
   );
 }
 
@@ -206,248 +238,6 @@ function CodeBlock({ value }: { value: string }) {
       <span style={{ position: "absolute", top: 10, right: 12 }}>
         <CopyGlyph value={value} />
       </span>
-    </div>
-  );
-}
-
-const TAB_KEYS = ["preview", "text", "html", "insights"] as const;
-type Tab = (typeof TAB_KEYS)[number];
-
-interface EmailInsights {
-  scoreTenths: number;
-  band: ScoreBand;
-  marketing: boolean;
-  htmlSizeBytes: number | null;
-  computedAt: Date;
-  checks: EmailCheckResult[];
-}
-
-function InsightsSection({
-  insights,
-  email,
-}: {
-  insights: EmailInsights;
-  email: { id: string; subject: string };
-}) {
-  const t = useTranslations("emails");
-  const common = useTranslations("common");
-  const locale = useLocale();
-  const [openCheckId, setOpenCheckId] = useState<string | null>(null);
-  const [naOpen, setNaOpen] = useState(false);
-
-  const { checks } = insights;
-  const groups = [
-    {
-      key: "attention",
-      rows: checks.filter(
-        (c) => c.status === "fail" && (c.severity === "critical" || c.severity === "major"),
-      ),
-    },
-    {
-      key: "improvements",
-      rows: checks.filter(
-        (c) => c.status === "fail" && (c.severity === "minor" || c.severity === "info"),
-      ),
-    },
-    {
-      key: "great",
-      rows: checks.filter((c) => c.status === "pass" || c.status === "passed_by_design"),
-    },
-    { key: "notChecked", rows: checks.filter((c) => c.status === "unknown") },
-  ] as const;
-  const notApplicable = checks.filter((c) => c.status === "not_applicable");
-  const openCheck = openCheckId ? checks.find((c) => c.id === openCheckId) : undefined;
-
-  /** Mono data line under a check — hostnames, sizes, policies; never URLs. */
-  function detailLine(check: EmailCheckResult): string | null {
-    const d = check.detail;
-    if (!d) return null;
-    switch (check.id) {
-      case "body_size":
-        return typeof d.htmlSizeBytes === "number"
-          ? t("insights.kb", { kb: Math.round(d.htmlSizeBytes / 1024) })
-          : null;
-      case "dmarc_record":
-        return typeof d.policy === "string" ? `p=${d.policy}` : null;
-      case "link_domains_match":
-        return Array.isArray(d.linkDomains) ? d.linkDomains.join(", ") : null;
-      case "no_shorteners":
-        return Array.isArray(d.shorteners) ? d.shorteners.join(", ") : null;
-      case "images_offsite":
-        return Array.isArray(d.imageDomains) ? d.imageDomains.join(", ") : null;
-      default:
-        return null;
-    }
-  }
-
-  function checkRow(check: EmailCheckResult, greyed = false) {
-    const { glyph, color } = checkGlyph(check);
-    return (
-      <button
-        key={check.id}
-        type="button"
-        onClick={() => setOpenCheckId(check.id)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          width: "100%",
-          background: "none",
-          border: 0,
-          borderBottom: "1px solid var(--ms-line)",
-          padding: "9px 2px",
-          font: "inherit",
-          color: greyed ? "var(--ms-faint)" : "var(--ms-bone)",
-          cursor: "pointer",
-          textAlign: "left",
-        }}
-      >
-        <span aria-hidden="true" style={{ color, width: 14, flex: "none", fontSize: 12 }}>
-          {glyph}
-        </span>
-        <span style={{ fontSize: 13.5 }}>{t(`insights.check.${check.id}.title`)}</span>
-        {check.status === "passed_by_design" ? (
-          <span className="ms-chip" style={{ fontSize: 10.5, padding: "1px 7px" }}>
-            {t("insights.byDesign")}
-          </span>
-        ) : null}
-        <span aria-hidden="true" style={{ marginLeft: "auto", color: "var(--ms-faint)" }}>
-          ›
-        </span>
-      </button>
-    );
-  }
-
-  return (
-    <div style={{ padding: "20px 18px" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-        <span className="ms-digits" style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1 }}>
-          {formatScoreTenths(insights.scoreTenths, locale)}
-        </span>
-        <span className="ms-digits" style={{ fontSize: 15, color: "var(--ms-muted)" }}>
-          {t("insights.outOfTen")}
-        </span>
-        <span className={`ms-badge ms-badge-${BAND_TONE[insights.band]}`}>
-          {common(`band.${insights.band}`)}
-        </span>
-      </div>
-      <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 6 }}>
-        {t("insights.reportFrom", { date: formatDayTime(insights.computedAt, locale) })}
-      </div>
-
-      {groups.map((group) =>
-        group.rows.length === 0 ? null : (
-          <div key={group.key} style={{ marginTop: 20 }}>
-            <div className="ms-microlabel">{t(`insights.groups.${group.key}`)}</div>
-            {group.key === "notChecked" ? (
-              <div style={{ fontSize: 12.5, color: "var(--ms-faint)", marginTop: 3 }}>
-                {t("insights.notCheckedWhy")}
-              </div>
-            ) : null}
-            <div style={{ marginTop: 4 }}>{group.rows.map((check) => checkRow(check))}</div>
-          </div>
-        ),
-      )}
-
-      {notApplicable.length > 0 ? (
-        <div style={{ marginTop: 20 }}>
-          <button
-            type="button"
-            className="ms-microlabel"
-            onClick={() => setNaOpen((v) => !v)}
-            style={{
-              background: "none",
-              border: 0,
-              padding: 0,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            {t("insights.notApplicableToggle", { count: notApplicable.length })}
-            <span aria-hidden="true">{naOpen ? "▾" : "›"}</span>
-          </button>
-          {naOpen ? (
-            <div style={{ marginTop: 4 }}>
-              {notApplicable.map((check) => checkRow(check, true))}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <Drawer
-        open={openCheck !== undefined}
-        onClose={() => setOpenCheckId(null)}
-        title={openCheck ? t(`insights.check.${openCheck.id}.title`) : ""}
-      >
-        {openCheck ? (
-          <>
-            <p style={{ fontSize: 13.5, color: "var(--ms-muted)", lineHeight: 1.6, marginTop: 16 }}>
-              {t(`insights.check.${openCheck.id}.description`)}
-            </p>
-            {openCheck.status === "passed_by_design" ? (
-              <p style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.6 }}>
-                {t("insights.byDesignNote")}
-              </p>
-            ) : null}
-            {openCheck.status === "unknown" ? (
-              <p style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.6 }}>
-                {t("insights.notCheckedWhy")}
-              </p>
-            ) : null}
-            <div className="ms-microlabel" style={{ margin: "18px 0 6px" }}>
-              {t("insights.adviceLabel")}
-            </div>
-            <p style={{ margin: 0, fontSize: 13.5, color: "var(--ms-bone)", lineHeight: 1.6 }}>
-              {t(`insights.check.${openCheck.id}.advice`)}
-            </p>
-            {detailLine(openCheck) ? (
-              <>
-                <div className="ms-microlabel" style={{ margin: "18px 0 6px" }}>
-                  {t("insights.detailLabel")}
-                </div>
-                <div
-                  className="ms-mono"
-                  style={{ fontSize: 12.5, color: "var(--ms-bone)", overflowWrap: "anywhere" }}
-                >
-                  {detailLine(openCheck)}
-                </div>
-              </>
-            ) : null}
-            {openCheck.status === "fail" ? (
-              <>
-                <div className="ms-microlabel" style={{ margin: "18px 0 6px" }}>
-                  {t("insights.handoffLabel")}
-                </div>
-                <p
-                  style={{
-                    margin: "0 0 10px",
-                    fontSize: 13,
-                    color: "var(--ms-muted)",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {t("insights.handoffHint")}
-                </p>
-                <CopyButton
-                  value={t("insights.agentPrompt", {
-                    subject: email.subject,
-                    id: email.id,
-                    title: t(`insights.check.${openCheck.id}.title`),
-                    description: t(`insights.check.${openCheck.id}.description`),
-                    advice: t(`insights.check.${openCheck.id}.advice`),
-                    detail: detailLine(openCheck)
-                      ? `\n${t("insights.detailLabel")}: ${detailLine(openCheck)}`
-                      : "",
-                  })}
-                  label={t("insights.copyForAgent")}
-                />
-              </>
-            ) : null}
-          </>
-        ) : null}
-      </Drawer>
     </div>
   );
 }
@@ -617,13 +407,6 @@ export default function EmailDetailPage() {
   const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<Tab>("preview");
-  // The preview as a light or dark mail client would show it. It follows the
-  // dashboard's theme until the reader picks one here.
-  const theme = useTheme();
-  const [schemeOverride, setScheme] = useState<EmailScheme | null>(null);
-  const scheme: EmailScheme = schemeOverride ?? (theme === "dark" ? "dark" : "light");
-  const [htmlFormatted, setHtmlFormatted] = useState(true);
   const [drawer, setDrawer] = useState<"bounced" | "suppressed" | null>(null);
   // Identifies an occurrence group by its first event's id — type alone is
   // ambiguous now that each local day gets its own node per type.
@@ -748,20 +531,6 @@ export default function EmailDetailPage() {
     if (type === "suppressed") return t("detail.suppressedLine");
     return null;
   }
-
-  const tabContent: Record<Tab, string | null> = {
-    preview: email.html,
-    text: email.text,
-    html: email.html,
-    insights: null,
-  };
-  const currentContent = tabContent[tab];
-  const tabLabels: Record<Tab, string> = {
-    preview: t("detail.preview"),
-    text: t("detail.plainText"),
-    html: t("detail.html"),
-    insights: t("detail.insights"),
-  };
 
   return (
     <>
@@ -1090,196 +859,17 @@ export default function EmailDetailPage() {
         )}
       </div>
 
-      <div
-        style={{
-          marginTop: 26,
-          background: "var(--ms-panel)",
-          border: "1px solid var(--ms-line)",
-          borderRadius: 14,
-          overflow: "hidden",
-        }}
-      >
-        {/* The tab bar outlives the body purge: insights are content-derived
-            metadata and deliberately survive it, so the purge message replaces
-            only the preview/text/html panels. */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "10px 12px",
-            borderBottom: "1px solid var(--ms-line)",
+      <div style={{ marginTop: 26 }}>
+        <EmailContentPanel
+          email={{
+            id: email.id,
+            subject: email.subject,
+            html: email.html,
+            text: email.text,
+            insights: email.insights,
+            bodyPurgedAt: email.bodyPurgedAt,
           }}
-        >
-          {TAB_KEYS.map((key) => (
-            <button
-              key={key}
-              type="button"
-              style={{
-                fontSize: 13,
-                padding: "5px 11px",
-                borderRadius: 8,
-                border: 0,
-                cursor: "pointer",
-                background: tab === key ? "var(--ms-panel-raised)" : "none",
-                color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
-                font: "inherit",
-              }}
-              onClick={() => setTab(key)}
-            >
-              {tabLabels[key]}
-            </button>
-          ))}
-          {currentContent ? (
-            <span
-              style={{
-                marginLeft: "auto",
-                padding: "0 6px",
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-              }}
-            >
-              {tab === "preview" && email.html ? (
-                <span style={{ display: "flex", gap: 2 }}>
-                  {(["light", "dark"] as const).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      className={scheme === option ? "ms-code-tab active" : "ms-code-tab"}
-                      aria-pressed={scheme === option}
-                      onClick={() => setScheme(option)}
-                    >
-                      {t(option === "light" ? "detail.previewLight" : "detail.previewDark")}
-                    </button>
-                  ))}
-                </span>
-              ) : null}
-              {tab === "html" ? (
-                <span
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    fontSize: 12,
-                    color: "var(--ms-muted)",
-                  }}
-                >
-                  {t("detail.formatted")}
-                  <Switch
-                    checked={htmlFormatted}
-                    disabled={false}
-                    onChange={setHtmlFormatted}
-                    ariaLabel={t("detail.formatted")}
-                  />
-                </span>
-              ) : null}
-              {/* Copies the source as sent, never the re-flowed view. */}
-              <CopyGlyph value={currentContent} />
-            </span>
-          ) : null}
-        </div>
-        {tab === "insights" ? (
-          email.insights ? (
-            <InsightsSection
-              insights={email.insights}
-              email={{ id: email.id, subject: email.subject }}
-            />
-          ) : (
-            <div style={{ padding: "16px 18px" }}>
-              <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-                {t("insights.empty")}
-              </p>
-              <p style={{ margin: "6px 0 0", color: "var(--ms-faint)", fontSize: 13 }}>
-                {t("insights.emptyHint")}
-              </p>
-            </div>
-          )
-        ) : email.bodyPurgedAt ? (
-          <p
-            style={{
-              margin: 0,
-              padding: "16px 18px",
-              color: "var(--ms-muted)",
-              fontSize: "var(--ms-fs-ui)",
-            }}
-          >
-            {t("detail.bodyPurged")}
-          </p>
-        ) : (
-          <>
-            {tab === "preview" &&
-              (email.html ? (
-                // Edge to edge: the message lays itself out inside the frame,
-                // as it would in a mail client.
-                <iframe
-                  title={t("detail.preview")}
-                  sandbox=""
-                  srcDoc={emulateEmailScheme(email.html, scheme)}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    height: 640,
-                    border: 0,
-                    borderRadius: "0 0 12px 12px",
-                    background: scheme === "dark" ? "#111113" : "#ffffff",
-                  }}
-                />
-              ) : (
-                <p
-                  style={{
-                    margin: 0,
-                    padding: "16px 18px",
-                    color: "var(--ms-muted)",
-                    fontSize: "var(--ms-fs-ui)",
-                  }}
-                >
-                  {t("detail.noHtml")}
-                </p>
-              ))}
-            {tab === "text" &&
-              (email.text ? (
-                <pre
-                  style={{
-                    whiteSpace: "pre-wrap",
-                    margin: 0,
-                    padding: "16px 18px",
-                    fontFamily: "var(--ms-font-sans)",
-                    fontSize: "var(--ms-fs-ui)",
-                    lineHeight: 1.7,
-                  }}
-                >
-                  {email.text}
-                </pre>
-              ) : (
-                <p
-                  style={{
-                    margin: 0,
-                    padding: "16px 18px",
-                    color: "var(--ms-muted)",
-                    fontSize: "var(--ms-fs-ui)",
-                  }}
-                >
-                  {t("detail.noText")}
-                </p>
-              ))}
-            {tab === "html" &&
-              (email.html ? (
-                <HtmlSource html={email.html} formatted={htmlFormatted} />
-              ) : (
-                <p
-                  style={{
-                    margin: 0,
-                    padding: "16px 18px",
-                    color: "var(--ms-muted)",
-                    fontSize: "var(--ms-fs-ui)",
-                  }}
-                >
-                  {t("detail.noHtml")}
-                </p>
-              ))}
-          </>
-        )}
+        />
       </div>
 
       <Drawer
@@ -1315,6 +905,9 @@ export default function EmailDetailPage() {
           {t("bouncedDrawer.whatToDo")}
         </div>
         <GuidanceBlock guidanceKey={bounceGuidance.key} />
+        {bounceGuidance.key === "provider.apple" ? (
+          <ApplePrivateRelaySteps from={email.from} />
+        ) : null}
         {recipient ? (
           <>
             <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>

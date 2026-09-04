@@ -1,11 +1,12 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { PreviewSchemePills } from "@/components/preview-scheme-pills";
 import type { TONE_COLOR } from "@/components/status-tile";
-import { DARK_CLIENT_SIM } from "@/lib/email-preview";
+import { emulateEmailScheme } from "@/lib/email-preview";
 import { escapeHtml } from "@/lib/html";
 import { MERGE_TOKEN_RE } from "@/lib/merge-fields";
-import { useTheme } from "@/lib/use-theme";
+import { usePreviewScheme } from "@/lib/use-preview-scheme";
 
 // Stand-in values so every merge pill reads as real content in the preview
 // rather than a raw {{{TOKEN}}}. UNSUBSCRIBE_URL becomes a dead "#" — the
@@ -68,9 +69,9 @@ export function StatusPill({ status }: { status: BroadcastStatus }) {
 
 /**
  * Sandboxed render of broadcast HTML; scripts never run. Every merge token is
- * shown as a sample value so the preview reads like a real send. When the app
- * theme is dark, the preview simulates a dark-mode client instead of always
- * showing the light rendering.
+ * shown as a sample value so the preview reads like a real send. The frame
+ * runs edge to edge like the email detail's, with the same light/dark client
+ * pills, following the dashboard's theme until the author picks one.
  */
 export function ContentPreview({
   html,
@@ -81,27 +82,29 @@ export function ContentPreview({
   title: string;
   samples?: Record<string, string>;
 }) {
-  const dark = useTheme() === "dark";
+  const [scheme, setScheme] = usePreviewScheme();
   return (
-    <div
-      style={{
-        background: "var(--ms-inset)",
-        padding: 28,
-        display: "flex",
-        justifyContent: "center",
-      }}
-    >
+    <div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          padding: "8px 12px",
+          borderBottom: "1px solid var(--ms-line)",
+        }}
+      >
+        <PreviewSchemePills scheme={scheme} onChange={setScheme} />
+      </div>
       <iframe
         title={title}
         sandbox=""
-        srcDoc={fillMergeSamples(html, samples) + (dark ? DARK_CLIENT_SIM : "")}
+        srcDoc={emulateEmailScheme(fillMergeSamples(html, samples), scheme)}
         style={{
-          width: 560,
-          maxWidth: "100%",
-          height: 480,
+          display: "block",
+          width: "100%",
+          height: 560,
           border: 0,
-          borderRadius: 8,
-          background: dark ? "#111113" : "#ffffff",
+          background: scheme === "dark" ? "#111113" : "#ffffff",
         }}
       />
     </div>

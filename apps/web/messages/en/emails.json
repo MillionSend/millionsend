@@ -206,7 +206,21 @@
     "code": "Code",
     "smtpResponse": "SMTP response",
     "whatToDo": "What to do",
-    "copyReady": "Copy-ready"
+    "copyReady": "Copy-ready",
+    "apple": {
+      "title": "Add to Apple Developer Portal",
+      "intro": "In the <link>Apple Developer Portal</link>, go to:",
+      "steps": {
+        "one": "Certificates, Identifiers & Profiles",
+        "two": "Services",
+        "three": "Sign in with Apple for Email Communication",
+        "four": "Email Sources"
+      },
+      "domains": "Domains and subdomains",
+      "addresses": "Email addresses",
+      "hint": "Register every domain and subdomain you send from, and every From address, exactly as used. Relay addresses only accept mail from registered senders.",
+      "article": "How to stop bounces to @privaterelay.appleid.com recipients"
+    }
   },
   "occurrencesDrawer": {
     "title": "{label} — {count, plural, one {# event} other {# events}}",
@@ -271,6 +285,10 @@
       "added": "Added",
       "details": "Details",
       "removeNote": "Removing an address that bounced permanently will likely bounce again — remove it only after the mailbox is fixed."
+    },
+    "removeDialog": {
+      "title": "Remove email address",
+      "body": "{email} can receive email again. A hard-bounced address usually bounces again."
     }
   },
   "apiSheet": {

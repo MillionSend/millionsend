@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
-import { EmailStatusIcon } from "@/components/email-status-icon";
+import { ContactAvatar } from "@/components/contact-avatar";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
@@ -150,7 +150,6 @@ export default function SuppressionsPage() {
         {...(subtitle ? { subtitle } : {})}
         actions={
           <>
-            <ApiDocsButton />
             <button
               type="button"
               className="ms-btn ms-btn-primary"
@@ -159,6 +158,7 @@ export default function SuppressionsPage() {
               <PlusGlyph size={14} />
               {t("suppressions.add")}
             </button>
+            <ApiDocsButton />
           </>
         }
       />
@@ -238,7 +238,7 @@ export default function SuppressionsPage() {
                 <tr key={row.id}>
                   <td className="ms-mono">
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                      <EmailStatusIcon status={REASON_DOT[row.reason]} />
+                      <ContactAvatar email={row.email ?? ""} size={28} />
                       {row.email ? (
                         <Link href={`/emails/suppressions/${row.id}`}>{row.email}</Link>
                       ) : (

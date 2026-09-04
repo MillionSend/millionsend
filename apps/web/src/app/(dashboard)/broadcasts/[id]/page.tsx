@@ -1,11 +1,13 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
+import { EmailContentPanel } from "@/components/email-content-panel";
+import { EmailsTable } from "@/components/emails-table";
 import { LoadError } from "@/components/load-error";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -15,7 +17,8 @@ import { BtnSpinner } from "@/components/spinner";
 import { StatBlock } from "@/components/stat-block";
 import { formatDayTime, formatUtcTimestamp } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
-import { type BroadcastStatus, ContentPreview, StatusPill } from "../parts";
+import { ListFooter } from "../../emails/list-parts";
+import { type BroadcastStatus, StatusPill } from "../parts";
 
 function Microlabel({ children }: { children: React.ReactNode }) {
   return (
@@ -210,49 +213,34 @@ export default function BroadcastDetailPage() {
       </div>
 
       <div className="ms-microlabel">{t("detail.content")}</div>
-      <div
-        style={{
-          marginTop: 12,
-          background: "var(--ms-panel)",
-          border: "1px solid var(--ms-line)",
-          borderRadius: 14,
-          overflow: "hidden",
-        }}
-      >
+      <div style={{ marginTop: 12 }}>
         {broadcast ? (
-          broadcast.html ? (
-            <ContentPreview html={broadcast.html} title={t("detail.content")} />
-          ) : broadcast.text ? (
-            <pre
-              style={{
-                whiteSpace: "pre-wrap",
-                margin: 0,
-                padding: "16px 18px",
-                fontFamily: "var(--ms-font-sans)",
-                fontSize: "var(--ms-fs-ui)",
-                lineHeight: 1.7,
-              }}
-            >
-              {broadcast.text}
-            </pre>
-          ) : (
-            <p
-              style={{
-                margin: 0,
-                padding: "16px 18px",
-                color: "var(--ms-muted)",
-                fontSize: "var(--ms-fs-ui)",
-              }}
-            >
-              {t("detail.noContent")}
-            </p>
-          )
+          <EmailContentPanel
+            email={{
+              id: broadcast.id,
+              subject: broadcast.subject,
+              html: broadcast.html,
+              text: broadcast.text,
+              insights: broadcast.insights,
+            }}
+          />
         ) : (
-          <div style={{ padding: 28, display: "flex", justifyContent: "center" }}>
+          <div
+            style={{
+              background: "var(--ms-panel)",
+              border: "1px solid var(--ms-line)",
+              borderRadius: 14,
+              padding: 28,
+              display: "flex",
+              justifyContent: "center",
+            }}
+          >
             <Skeleton width={560} height={480} radius={8} />
           </div>
         )}
       </div>
+
+      <BroadcastEmails broadcastId={id} />
 
       <Modal
         open={cancelOpen}
@@ -285,5 +273,47 @@ export default function BroadcastDetailPage() {
         </form>
       </Modal>
     </>
+  );
+}
+
+/** The broadcast's own sends, the emails list scoped to it, newest first. */
+function BroadcastEmails({ broadcastId }: { broadcastId: string }) {
+  const t = useTranslations("broadcasts");
+  const emails = useTranslations("emails");
+  const locale = useLocale();
+  const trpc = useTRPC();
+  const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
+  const query = useInfiniteQuery(
+    trpc.emails.list.infiniteQueryOptions(
+      { limit: 25, broadcastId },
+      { getNextPageParam: (page) => page.nextCursor },
+    ),
+  );
+  const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const total = query.data?.pages[0]?.total ?? 0;
+  if (!query.isSuccess || items.length === 0) return null;
+  return (
+    <div style={{ marginTop: 26 }}>
+      <div className="ms-microlabel" style={{ marginBottom: 12 }}>
+        {t("detail.emails")}
+      </div>
+      <EmailsTable rows={items} />
+      <ListFooter
+        left={emails("list.pageOf", {
+          pages: query.data.pages.length,
+          total: nf.format(total),
+        })}
+        singlePage={!query.hasNextPage && query.data.pages.length === 1}
+        loadMore={
+          query.hasNextPage
+            ? {
+                label: emails("list.loadMore"),
+                onClick: () => query.fetchNextPage(),
+                loading: query.isFetchingNextPage,
+              }
+            : undefined
+        }
+      />
+    </div>
   );
 }

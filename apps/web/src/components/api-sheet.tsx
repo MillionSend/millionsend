@@ -20,6 +20,7 @@ import {
   type Lang,
   SEGMENTS_SNIPPETS,
   TOPICS_SNIPPETS,
+  WEBHOOKS_SNIPPETS,
 } from "@/components/api-sheet-snippets";
 import { CodeHighlight, type HighlightLanguage } from "@/components/code-highlight";
 import { Drawer } from "@/components/drawer";
@@ -399,20 +400,7 @@ export const RESOURCE_SHEETS = {
   webhooks: {
     ns: "webhooks",
     sections: ["list", "create", "update"],
-    curl: {
-      list: `curl "${API_BASE}/webhooks?limit=20" \\\n  ${AUTH}`,
-      create: `curl -X POST "${API_BASE}/webhooks" \\
-  ${AUTH} \\
-  ${JSON_CT} \\
-  -d '{
-    "endpoint": "https://example.com/webhooks/millionsend",
-    "events": ["email.delivered", "email.bounced"]
-  }'`,
-      update: `curl -X PATCH "${API_BASE}/webhooks/${SAMPLE_ID}" \\
-  ${AUTH} \\
-  ${JSON_CT} \\
-  -d '{ "status": "disabled" }'`,
-    },
+    sdk: WEBHOOKS_SNIPPETS,
   },
 } satisfies Record<string, ResourceSheet>;
 

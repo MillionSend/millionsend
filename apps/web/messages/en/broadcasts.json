@@ -100,7 +100,8 @@
     "cancelBody": "\"{name}\" will not be sent.",
     "cancelConfirm": "Cancel send",
     "keep": "Keep it",
-    "error": "Couldn't load the broadcast."
+    "error": "Couldn't load the broadcast.",
+    "emails": "Emails"
   },
   "apiSheet": {
     "title": "Broadcasts API",

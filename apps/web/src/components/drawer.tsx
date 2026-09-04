@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 /**
  * Right-side remediation drawer: dim overlay, 440px panel on --ms-panel with
@@ -20,6 +21,7 @@ export function Drawer({
   children: React.ReactNode;
 }) {
   const common = useTranslations("common");
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
@@ -62,6 +64,7 @@ export function Drawer({
           padding: 24,
           boxSizing: "border-box",
           overflowY: "auto",
+          overscrollBehavior: "contain",
           animation: "ms-fade var(--ms-dur-drawer) var(--ms-ease)",
         }}
       >

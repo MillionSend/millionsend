@@ -206,7 +206,21 @@
     "code": "Código",
     "smtpResponse": "Resposta SMTP",
     "whatToDo": "O que fazer",
-    "copyReady": "Pronto para copiar"
+    "copyReady": "Pronto para copiar",
+    "apple": {
+      "title": "Adicionar no Apple Developer Portal",
+      "intro": "No <link>Apple Developer Portal</link>, vá em:",
+      "steps": {
+        "one": "Certificates, Identifiers & Profiles",
+        "two": "Services",
+        "three": "Sign in with Apple for Email Communication",
+        "four": "Email Sources"
+      },
+      "domains": "Domínios e subdomínios",
+      "addresses": "Endereços de e-mail",
+      "hint": "Registre todo domínio e subdomínio de envio, e todo endereço De, exatamente como usados. Endereços do relay só aceitam remetentes registrados.",
+      "article": "Como parar os bounces para destinatários @privaterelay.appleid.com"
+    }
   },
   "occurrencesDrawer": {
     "title": "{label} — {count, plural, one {# evento} other {# eventos}}",
@@ -271,6 +285,10 @@
       "added": "Adicionado",
       "details": "Detalhes",
       "removeNote": "Remover um endereço que devolveu permanentemente provavelmente devolverá de novo — remova apenas depois que a caixa postal for corrigida."
+    },
+    "removeDialog": {
+      "title": "Remover endereço de e-mail",
+      "body": "{email} volta a poder receber e-mails. Um endereço que devolveu permanentemente costuma devolver de novo."
     }
   },
   "apiSheet": {
