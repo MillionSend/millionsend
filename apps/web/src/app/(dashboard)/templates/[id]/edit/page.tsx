@@ -1,9 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { LoadError } from "@/components/load-error";
 import { useTRPC } from "@/lib/trpc";
 import { EditorSkeleton, TemplateEditor } from "../../editor";
 
@@ -17,14 +17,14 @@ export default function EditTemplatePage() {
 
   if (query.isError) {
     return (
-      <>
-        <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-          {t("editor.notFound")}
-        </p>
-        <Link href="/templates" style={{ fontSize: "var(--ms-fs-ui)" }}>
-          ← {t("list.title")}
-        </Link>
-      </>
+      <LoadError
+        error={query.error}
+        headline={t("editor.error")}
+        notFoundHeadline={t("editor.notFound")}
+        onRetry={() => query.refetch()}
+        backHref="/templates"
+        backLabel={t("list.title")}
+      />
     );
   }
   if (!template) return <EditorSkeleton />;

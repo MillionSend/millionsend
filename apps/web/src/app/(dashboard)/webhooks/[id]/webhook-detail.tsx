@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { Fragment, useCallback, useState } from "react";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
+import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -251,15 +252,14 @@ export function WebhookDetail({ id }: { id: string }) {
 
   if (webhook.isError) {
     return (
-      <div
-        className="ms-card"
-        style={{ padding: 24, display: "flex", gap: 14, alignItems: "center" }}
-      >
-        <p style={{ margin: 0, fontSize: "var(--ms-fs-ui)" }}>{t("detail.error")}</p>
-        <button type="button" className="ms-btn ms-btn-secondary" onClick={() => webhook.refetch()}>
-          {t("detail.retry")}
-        </button>
-      </div>
+      <LoadError
+        error={webhook.error}
+        headline={t("detail.error")}
+        notFoundHeadline={t("detail.notFound")}
+        onRetry={() => webhook.refetch()}
+        backHref="/webhooks"
+        backLabel={nav("webhooks")}
+      />
     );
   }
 

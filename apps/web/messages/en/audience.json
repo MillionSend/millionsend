@@ -194,7 +194,8 @@
       "resubscribed": "Resubscribed",
       "segment_added": "Added to segment {name}",
       "segment_removed": "Removed from segment {name}"
-    }
+    },
+    "error": "Couldn't load the contact."
   },
   "topics": {
     "title": "Audience",
@@ -252,7 +253,8 @@
       "subscriptionFilter": "Subscription",
       "empty": "No contacts in this topic yet.",
       "noMatch": "No contacts match the filter.",
-      "clearFilter": "Clear filter"
+      "clearFilter": "Clear filter",
+      "error": "Couldn't load the topic."
     },
     "apiSheet": {
       "title": "Topics API",
@@ -354,7 +356,8 @@
       "filterTitle": "Filter",
       "saveFilter": "Save changes",
       "manualTitle": "Membership",
-      "manualBody": "This is a manual segment: contacts are added and removed individually via the API, not matched by a filter."
+      "manualBody": "This is a manual segment: contacts are added and removed individually via the API, not matched by a filter.",
+      "notFound": "Segment not found."
     }
   }
 }

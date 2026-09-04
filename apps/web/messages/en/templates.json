@@ -36,7 +36,8 @@
     "save": "Save",
     "saveAndClose": "Save & close",
     "saved": "Saved",
-    "saveError": "Couldn't save the template."
+    "saveError": "Couldn't save the template.",
+    "error": "Couldn't load the template."
   },
   "picker": {
     "label": "Start from a template",

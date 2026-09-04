@@ -1209,6 +1209,52 @@ summary:focus-visible,
 .ms-empty-cta {
   margin-top: 24px;
 }
+/* State card — a failed load or a filtered-empty list: the empty state's
+   centered column without the tile. The glyph is a danger ring for our own
+   errors and a neutral one for a record that is simply gone. */
+.ms-state {
+  padding: 36px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.ms-state-glyph {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin-bottom: 14px;
+  font: 600 15px var(--ms-font-mono);
+  color: var(--ms-danger);
+  background: var(--ms-danger-bg);
+  border: 1px solid var(--ms-danger-border);
+}
+.ms-state-glyph.neutral {
+  color: var(--ms-muted);
+  background: var(--ms-inset);
+  border-color: var(--ms-line-strong);
+}
+.ms-state-headline {
+  margin: 0;
+  color: var(--ms-bone);
+  font: 600 15px var(--ms-font-sans);
+}
+.ms-state-body {
+  margin: 6px 0 0;
+  max-width: 420px;
+  color: var(--ms-muted);
+  font-size: var(--ms-fs-label);
+  line-height: 1.5;
+}
+.ms-state-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 18px;
+}
 @keyframes ms-empty-float {
   0%,
   100% {

@@ -12,7 +12,7 @@ import { useTRPC } from "@/lib/trpc";
 export function EventsHealthBanner() {
   const t = useTranslations("settings.ses");
   const trpc = useTRPC();
-  const { data } = useQuery(trpc.system.eventsHealth.queryOptions());
+  const { data } = useQuery(trpc.system.eventsHealth.queryOptions(undefined, { retry: false }));
   if (data?.status !== "unhealthy") return null;
   return (
     <NoticeStrip

@@ -5,10 +5,23 @@ import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { useState } from "react";
 import superjson from "superjson";
 import { TRPCProvider } from "@/lib/trpc";
+import { trpcErrorCode } from "@/lib/trpc-error";
 import type { AppRouter } from "@/server/routers";
 
+// Answers that will not change on a retry: a record that is gone, or one the
+// caller may not see. Everything else keeps react-query's default three tries.
+const FINAL_CODES = new Set(["NOT_FOUND", "FORBIDDEN", "UNAUTHORIZED", "BAD_REQUEST"]);
+
 function makeQueryClient() {
-  return new QueryClient({ defaultOptions: { queries: { staleTime: 30_000 } } });
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 30_000,
+        retry: (failureCount, error) =>
+          !FINAL_CODES.has(trpcErrorCode(error) ?? "") && failureCount < 3,
+      },
+    },
+  });
 }
 
 let browserQueryClient: QueryClient | undefined;

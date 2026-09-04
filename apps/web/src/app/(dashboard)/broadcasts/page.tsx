@@ -152,6 +152,7 @@ export default function BroadcastsPage() {
         <BroadcastsSkeleton />
       ) : query.isError ? (
         <StateCard
+          tone="error"
           headline={t("list.loadError")}
           actionLabel={t("list.retry")}
           onAction={() => query.refetch()}

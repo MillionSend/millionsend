@@ -10,6 +10,7 @@ import {
   DnsRecordsTable,
   DnsRecordsTableSkeleton,
 } from "@/components/dns-records-table";
+import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -529,15 +530,14 @@ export function DomainDetail({ id }: { id: string }) {
 
   if (domain.isError) {
     return (
-      <div
-        className="ms-card"
-        style={{ padding: 24, display: "flex", gap: 14, alignItems: "center" }}
-      >
-        <p style={{ margin: 0, fontSize: "var(--ms-fs-ui)" }}>{t("detail.error")}</p>
-        <button type="button" className="ms-btn ms-btn-secondary" onClick={() => domain.refetch()}>
-          {t("detail.retry")}
-        </button>
-      </div>
+      <LoadError
+        error={domain.error}
+        headline={t("detail.error")}
+        notFoundHeadline={t("detail.notFound")}
+        onRetry={() => domain.refetch()}
+        backHref="/domains"
+        backLabel={t("list.title")}
+      />
     );
   }
   if (!domain.isSuccess || !status) {

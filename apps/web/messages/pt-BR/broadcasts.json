@@ -99,7 +99,8 @@
     "cancelTitle": "Cancelar envio",
     "cancelBody": "\"{name}\" não será enviada.",
     "cancelConfirm": "Cancelar envio",
-    "keep": "Manter"
+    "keep": "Manter",
+    "error": "Não foi possível carregar a transmissão."
   },
   "apiSheet": {
     "title": "API de Transmissões",

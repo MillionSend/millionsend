@@ -93,5 +93,11 @@
     "cta": "Ir para o painel"
   },
   "confirmWord": "EXCLUIR",
-  "typeToConfirm": "Digite {word} para confirmar"
+  "typeToConfirm": "Digite {word} para confirmar",
+  "loadError": {
+    "gone": "Não existe mais, ou pertence a outra equipe.",
+    "ours": "O erro é do nosso lado. Tente de novo em instantes.",
+    "retry": "Tentar novamente",
+    "back": "Voltar para {to}"
+  }
 }

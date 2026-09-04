@@ -192,7 +192,8 @@
       "cancel": "Cancelar",
       "change": "Alterar subdomínio",
       "add": "Adicionar um subdomínio personalizado"
-    }
+    },
+    "notFound": "Domínio não encontrado."
   },
   "awsCredentialsWarning": "As credenciais da AWS não estão configuradas — a criação de domínios vai falhar a menos que a cadeia padrão de credenciais da AWS esteja disponível. Defina <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code> — veja <code>SELF_HOSTING.md</code>.",
   "awsCredentialsCta": "Abrir configuração do SES",

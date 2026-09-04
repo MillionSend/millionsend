@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CopyChip } from "@/components/copy-chip";
+import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
@@ -92,14 +93,14 @@ export function TopicDetail({ id }: { id: string }) {
 
   if (query.isError) {
     return (
-      <>
-        <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-          {t("detail.notFound")}
-        </p>
-        <Link href="/audience/topics" style={{ fontSize: "var(--ms-fs-ui)" }}>
-          ← {tabs("topics")}
-        </Link>
-      </>
+      <LoadError
+        error={query.error}
+        headline={t("detail.error")}
+        notFoundHeadline={t("detail.notFound")}
+        onRetry={() => query.refetch()}
+        backHref="/audience/topics"
+        backLabel={tabs("topics")}
+      />
     );
   }
 
@@ -267,6 +268,7 @@ export function TopicDetail({ id }: { id: string }) {
           <ContactsSkeleton />
         ) : contacts.isError ? (
           <StateCard
+            tone="error"
             headline={tAud("contacts.loadError")}
             actionLabel={tAud("contacts.retry")}
             onAction={() => contacts.refetch()}

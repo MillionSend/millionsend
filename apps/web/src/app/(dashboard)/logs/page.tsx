@@ -201,6 +201,7 @@ export default function LogsPage() {
         <LogsSkeleton headers={headers} />
       ) : query.isError ? (
         <StateCard
+          tone="error"
           headline={t("list.loadError")}
           actionLabel={t("list.retry")}
           onAction={() => query.refetch()}

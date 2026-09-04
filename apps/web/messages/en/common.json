@@ -93,5 +93,11 @@
     "cta": "Go to the dashboard"
   },
   "confirmWord": "DELETE",
-  "typeToConfirm": "Type {word} to confirm"
+  "typeToConfirm": "Type {word} to confirm",
+  "loadError": {
+    "gone": "It no longer exists, or it belongs to another team.",
+    "ours": "The error is on our side. Try again in a moment.",
+    "retry": "Try again",
+    "back": "Back to {to}"
+  }
 }

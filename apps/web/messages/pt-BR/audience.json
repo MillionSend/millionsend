@@ -194,7 +194,8 @@
       "resubscribed": "Reinscrito",
       "segment_added": "Adicionado ao segmento {name}",
       "segment_removed": "Removido do segmento {name}"
-    }
+    },
+    "error": "Não foi possível carregar o contato."
   },
   "topics": {
     "title": "Audiência",
@@ -252,7 +253,8 @@
       "subscriptionFilter": "Inscrição",
       "empty": "Nenhum contato neste tópico ainda.",
       "noMatch": "Nenhum contato corresponde ao filtro.",
-      "clearFilter": "Limpar filtro"
+      "clearFilter": "Limpar filtro",
+      "error": "Não foi possível carregar o tópico."
     },
     "apiSheet": {
       "title": "API de Tópicos",
@@ -354,7 +356,8 @@
       "filterTitle": "Filtro",
       "saveFilter": "Salvar alterações",
       "manualTitle": "Composição",
-      "manualBody": "Este é um segmento manual: contatos são adicionados e removidos individualmente pela API, não correspondidos por um filtro."
+      "manualBody": "Este é um segmento manual: contatos são adicionados e removidos individualmente pela API, não correspondidos por um filtro.",
+      "notFound": "Segmento não encontrado."
     }
   }
 }

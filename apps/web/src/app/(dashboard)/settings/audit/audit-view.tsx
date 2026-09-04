@@ -80,6 +80,7 @@ export function AuditView() {
     }
     return (
       <StateCard
+        tone="error"
         headline={t("loadError")}
         actionLabel={t("retry")}
         onAction={() => query.refetch()}

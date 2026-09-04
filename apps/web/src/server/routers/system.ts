@@ -121,8 +121,15 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
         return null;
       }
       // The SES settings page does not exist on cloud, so the banner has
-      // nowhere to send the operator there.
-      return { ...(await sesEventsHealth(ctx.db)), settingsAvailable: !isCloudDeployment() };
+      // nowhere to send the operator there. The probe is advisory: a failure
+      // is logged for the operator and the banner stays quiet, instead of a
+      // 500 on every page of the app.
+      try {
+        return { ...(await sesEventsHealth(ctx.db)), settingsAvailable: !isCloudDeployment() };
+      } catch (error) {
+        console.error("SES events health probe failed", error);
+        return null;
+      }
     }),
 
     /**

@@ -202,6 +202,7 @@ export default function SuppressionsPage() {
         />
       ) : query.isError ? (
         <StateCard
+          tone="error"
           headline={t("suppressions.loadError")}
           actionLabel={t("suppressions.retry")}
           onAction={() => query.refetch()}

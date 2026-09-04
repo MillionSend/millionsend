@@ -9,6 +9,7 @@ import { ChipMultiSelect } from "@/components/chip-multi-select";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { CopyChip } from "@/components/copy-chip";
+import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -118,14 +119,14 @@ export default function ContactDetailPage() {
 
   if (query.isError) {
     return (
-      <>
-        <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-          {t("detail.notFound")}
-        </p>
-        <Link href="/audience" style={{ fontSize: "var(--ms-fs-ui)" }}>
-          ← {t("list.title")}
-        </Link>
-      </>
+      <LoadError
+        error={query.error}
+        headline={t("detail.error")}
+        notFoundHeadline={t("detail.notFound")}
+        onRetry={() => query.refetch()}
+        backHref="/audience"
+        backLabel={t("list.title")}
+      />
     );
   }
 

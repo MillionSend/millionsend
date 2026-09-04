@@ -103,7 +103,8 @@
     "noResponse": "No response recorded.",
     "prev": "Previous",
     "next": "Next",
-    "pageOf": "{from}–{to} of {total}"
+    "pageOf": "{from}–{to} of {total}",
+    "notFound": "Webhook not found."
   },
   "deliveryTable": {
     "event": "Event",

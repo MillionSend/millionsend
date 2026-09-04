@@ -121,33 +121,29 @@ export function StateCard({
   detail,
   actionLabel,
   onAction,
+  tone,
 }: {
   headline: string;
   detail?: string;
   actionLabel: string;
   onAction: () => void;
+  /** `error` marks a failed load (glyph); a filtered-empty list stays plain. */
+  tone?: "error";
 }) {
   return (
-    <div
-      style={{
-        border: "1px solid var(--ms-line)",
-        borderRadius: 16,
-        padding: 22,
-        textAlign: "center",
-      }}
-    >
-      <div style={{ fontSize: 14.5, fontWeight: 600 }}>{headline}</div>
-      {detail ? (
-        <div style={{ fontSize: 13, color: "var(--ms-muted)", marginTop: 3 }}>{detail}</div>
+    <div className="ms-card ms-state">
+      {tone === "error" ? (
+        <span className="ms-state-glyph" aria-hidden="true">
+          !
+        </span>
       ) : null}
-      <button
-        type="button"
-        className="ms-btn ms-btn-secondary"
-        style={{ marginTop: 12 }}
-        onClick={onAction}
-      >
-        {actionLabel}
-      </button>
+      <p className="ms-state-headline">{headline}</p>
+      {detail ? <p className="ms-state-body">{detail}</p> : null}
+      <div className="ms-state-actions">
+        <button type="button" className="ms-btn ms-btn-secondary" onClick={onAction}>
+          {actionLabel}
+        </button>
+      </div>
     </div>
   );
 }

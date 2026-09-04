@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
+import { LoadError } from "@/components/load-error";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -53,14 +54,14 @@ export default function BroadcastDetailPage() {
 
   if (query.isError) {
     return (
-      <>
-        <p style={{ color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-          {t("detail.notFound")}
-        </p>
-        <Link href="/broadcasts" style={{ fontSize: "var(--ms-fs-ui)" }}>
-          ← {t("list.title")}
-        </Link>
-      </>
+      <LoadError
+        error={query.error}
+        headline={t("detail.error")}
+        notFoundHeadline={t("detail.notFound")}
+        onRetry={() => query.refetch()}
+        backHref="/broadcasts"
+        backLabel={t("list.title")}
+      />
     );
   }
 

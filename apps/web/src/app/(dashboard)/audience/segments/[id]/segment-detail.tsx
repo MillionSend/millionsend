@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
+import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -94,15 +95,14 @@ export function SegmentDetail({ id }: { id: string }) {
 
   if (query.isError) {
     return (
-      <div
-        className="ms-card"
-        style={{ padding: 24, display: "flex", gap: 14, alignItems: "center" }}
-      >
-        <p style={{ margin: 0, fontSize: "var(--ms-fs-ui)" }}>{t("detail.error")}</p>
-        <button type="button" className="ms-btn ms-btn-secondary" onClick={() => query.refetch()}>
-          {t("retry")}
-        </button>
-      </div>
+      <LoadError
+        error={query.error}
+        headline={t("detail.error")}
+        notFoundHeadline={t("detail.notFound")}
+        onRetry={() => query.refetch()}
+        backHref="/audience/segments"
+        backLabel={tabs("segments")}
+      />
     );
   }
 

@@ -600,6 +600,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
         <ContactsSkeleton />
       ) : query.isError ? (
         <StateCard
+          tone="error"
           headline={t("contacts.loadError")}
           actionLabel={t("contacts.retry")}
           onAction={() => query.refetch()}

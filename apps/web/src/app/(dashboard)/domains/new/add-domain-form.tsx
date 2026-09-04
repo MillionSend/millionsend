@@ -19,6 +19,7 @@ import { isAwsCredentialError } from "@/lib/aws-errors";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { trpcErrorCode } from "@/lib/trpc-error";
 import { AwsCredentialsBanner } from "../aws-credentials-banner";
 import { DOMAIN_REGIONS, type DomainRegion, regionFlag } from "../regions";
 import { TrackingSetup } from "../tracking-setup";
@@ -44,7 +45,7 @@ const CREATE_ERROR_KEYS = {
 function createErrorKey(
   error: unknown,
 ): (typeof CREATE_ERROR_KEYS)[keyof typeof CREATE_ERROR_KEYS] | null {
-  const code = (error as { data?: { code?: string } } | null)?.data?.code;
+  const code = trpcErrorCode(error);
   return code && code in CREATE_ERROR_KEYS
     ? CREATE_ERROR_KEYS[code as keyof typeof CREATE_ERROR_KEYS]
     : null;
