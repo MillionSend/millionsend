@@ -1,12 +1,13 @@
 import { useTranslations } from "next-intl";
 
-// Variant per status follows the design canvas exactly: sent reads as success
-// (accepted for delivery), complained warns, delayed stays neutral, and
-// suppressed is a danger — future sends are blocked.
+// Variant per status: sent is accepted for delivery, not an outcome, so it
+// stays neutral like the envelope tile until delivery reports back; complained
+// warns, delayed stays neutral, and suppressed is a danger — future sends are
+// blocked.
 const VARIANTS = {
   delivered: "success",
   verified: "success",
-  sent: "success",
+  sent: "neutral",
   opened: "info",
   clicked: "info",
   queued: "neutral",

@@ -2,6 +2,7 @@
 export const AUDIT_ACTIONS = [
   "api_key.created",
   "api_key.revoked",
+  "api_key.renamed",
   "domain.created",
   "domain.verified",
   "domain.deleted",

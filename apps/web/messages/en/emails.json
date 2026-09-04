@@ -31,7 +31,8 @@
       "reached": "Today's {limit}-email limit reached.",
       "queued": "{count} emails queued — they'll send in {duration}.",
       "upgrade": "Upgrade to Pro for 3,000/day →"
-    }
+    },
+    "allDomains": "All domains"
   },
   "detail": {
     "breadcrumb": "Email details",
@@ -190,7 +191,11 @@
         "description": "Sending from a no-reply address with a Reply-To header set, so replies still reach a real mailbox.",
         "advice": "Keep a Reply-To on every send from a no-reply address."
       }
-    }
+    },
+    "handoffLabel": "Hand it to your agent",
+    "handoffHint": "A ready-made instruction with the check, the reason and the fix.",
+    "copyForAgent": "Copy instructions",
+    "agentPrompt": "In our MillionSend integration, the email \"{subject}\" (id {id}) fails the deliverability check \"{title}\".\n\n{description}\n\nWhat to do: {advice}{detail}\n\nFind the code or template that sends this email and apply the fix. Keep the change minimal and explain what you changed."
   },
   "bouncedDrawer": {
     "title": "Bounced details",

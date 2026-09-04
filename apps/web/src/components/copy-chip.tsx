@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
-function useCopy(value: string) {
+export function useCopy(value: string) {
   const t = useTranslations("common");
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -86,6 +86,18 @@ export function CopyChip({
         <CopyMark copied={copied} size={12} />
       </button>
     </span>
+  );
+}
+
+/** Secondary button that copies `value`; the label reads "Copied" for a moment after. */
+export function CopyButton({ value, label }: { value: string; label: string }) {
+  const t = useTranslations("common");
+  const { copied, copy } = useCopy(value);
+  return (
+    <button type="button" className="ms-btn ms-btn-secondary" onClick={copy}>
+      <CopyMark copied={copied} size={12} />
+      {copied ? t("copied") : label}
+    </button>
   );
 }
 

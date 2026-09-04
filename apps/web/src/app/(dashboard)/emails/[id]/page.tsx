@@ -9,7 +9,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
 import { CodeHighlight } from "@/components/code-highlight";
-import { CopyChip, CopyGlyph } from "@/components/copy-chip";
+import { CopyButton, CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
 import { EmailStatusIcon, EventIconTile } from "@/components/email-status-icon";
 import { GuidanceBlock } from "@/components/guidance-block";
@@ -220,7 +220,13 @@ interface EmailInsights {
   checks: EmailCheckResult[];
 }
 
-function InsightsSection({ insights }: { insights: EmailInsights }) {
+function InsightsSection({
+  insights,
+  email,
+}: {
+  insights: EmailInsights;
+  email: { id: string; subject: string };
+}) {
   const t = useTranslations("emails");
   const common = useTranslations("common");
   const locale = useLocale();
@@ -407,6 +413,36 @@ function InsightsSection({ insights }: { insights: EmailInsights }) {
                 </div>
               </>
             ) : null}
+            {openCheck.status === "fail" ? (
+              <>
+                <div className="ms-microlabel" style={{ margin: "18px 0 6px" }}>
+                  {t("insights.handoffLabel")}
+                </div>
+                <p
+                  style={{
+                    margin: "0 0 10px",
+                    fontSize: 13,
+                    color: "var(--ms-muted)",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {t("insights.handoffHint")}
+                </p>
+                <CopyButton
+                  value={t("insights.agentPrompt", {
+                    subject: email.subject,
+                    id: email.id,
+                    title: t(`insights.check.${openCheck.id}.title`),
+                    description: t(`insights.check.${openCheck.id}.description`),
+                    advice: t(`insights.check.${openCheck.id}.advice`),
+                    detail: detailLine(openCheck)
+                      ? `\n${t("insights.detailLabel")}: ${detailLine(openCheck)}`
+                      : "",
+                  })}
+                  label={t("insights.copyForAgent")}
+                />
+              </>
+            ) : null}
           </>
         ) : null}
       </Drawer>
@@ -449,7 +485,7 @@ function EmailDetailSkeleton() {
         className="ms-meta-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: "repeat(3, 1fr)",
           gap: "22px 28px",
           padding: "22px 0",
           borderTop: "1px solid var(--ms-line)",
@@ -762,7 +798,7 @@ export default function EmailDetailPage() {
         className="ms-meta-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: "repeat(3, 1fr)",
           gap: "22px 28px",
           padding: "22px 0",
           borderTop: "1px solid var(--ms-line)",
@@ -773,32 +809,17 @@ export default function EmailDetailPage() {
           {email.from}
         </Meta>
         <Meta label={t("detail.subject")}>{email.subject}</Meta>
+        {email.replyTo?.length ? (
+          <Meta label={t("detail.replyTo")} mono>
+            {email.replyTo.join(", ")}
+          </Meta>
+        ) : null}
         <div>
           <Microlabel>{t("detail.id")}</Microlabel>
           <div style={{ marginTop: 4 }}>
             <CopyChip value={email.id} />
           </div>
         </div>
-        {email.to.length > 1 ? (
-          <Meta label={t("detail.to")} mono>
-            {email.to.join(", ")}
-          </Meta>
-        ) : null}
-        {email.cc?.length ? (
-          <Meta label={t("detail.cc")} mono>
-            {email.cc.join(", ")}
-          </Meta>
-        ) : null}
-        {email.bcc?.length ? (
-          <Meta label={t("detail.bcc")} mono>
-            {email.bcc.join(", ")}
-          </Meta>
-        ) : null}
-        {email.replyTo?.length ? (
-          <Meta label={t("detail.replyTo")} mono>
-            {email.replyTo.join(", ")}
-          </Meta>
-        ) : null}
         {email.tags && Object.keys(email.tags).length > 0 ? (
           <div>
             <Microlabel>{t("detail.tags")}</Microlabel>
@@ -814,6 +835,21 @@ export default function EmailDetailPage() {
         {email.apiKeyName ? (
           <Meta label={t("detail.apiKey")} mono>
             {email.apiKeyName}
+          </Meta>
+        ) : null}
+        {email.to.length > 1 ? (
+          <Meta label={t("detail.to")} mono>
+            {email.to.join(", ")}
+          </Meta>
+        ) : null}
+        {email.cc?.length ? (
+          <Meta label={t("detail.cc")} mono>
+            {email.cc.join(", ")}
+          </Meta>
+        ) : null}
+        {email.bcc?.length ? (
+          <Meta label={t("detail.bcc")} mono>
+            {email.bcc.join(", ")}
           </Meta>
         ) : null}
       </div>
@@ -1117,7 +1153,10 @@ export default function EmailDetailPage() {
         </div>
         {tab === "insights" ? (
           email.insights ? (
-            <InsightsSection insights={email.insights} />
+            <InsightsSection
+              insights={email.insights}
+              email={{ id: email.id, subject: email.subject }}
+            />
           ) : (
             <div style={{ padding: "16px 18px" }}>
               <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
@@ -1143,28 +1182,21 @@ export default function EmailDetailPage() {
           <>
             {tab === "preview" &&
               (email.html ? (
-                <div
+                // Edge to edge: the message lays itself out inside the frame,
+                // as it would in a mail client.
+                <iframe
+                  title={t("detail.preview")}
+                  sandbox=""
+                  srcDoc={email.html}
                   style={{
-                    background: "var(--ms-inset)",
-                    padding: 28,
-                    display: "flex",
-                    justifyContent: "center",
+                    display: "block",
+                    width: "100%",
+                    height: 640,
+                    border: 0,
+                    borderRadius: "0 0 12px 12px",
+                    background: "#ffffff",
                   }}
-                >
-                  <iframe
-                    title={t("detail.preview")}
-                    sandbox=""
-                    srcDoc={email.html}
-                    style={{
-                      width: 560,
-                      maxWidth: "100%",
-                      height: 480,
-                      border: 0,
-                      borderRadius: 8,
-                      background: "#ffffff",
-                    }}
-                  />
-                </div>
+                />
               ) : (
                 <p
                   style={{

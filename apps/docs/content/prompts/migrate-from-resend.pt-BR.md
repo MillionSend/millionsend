@@ -55,6 +55,7 @@ Escolha uma das duas opções, com o usuário:
    ```
    Confirme que a versão instalada do SDK lê `RESEND_BASE_URL` (ou a opção de URL base do construtor) e substitua qualquer `https://api.resend.com` fixo no código.
 2. **Troque para o SDK do MillionSend** da linguagem (npm `millionsend`, PyPI `millionsend`, Go `github.com/millionsend/millionsend-go`, Packagist `millionsend/millionsend`, RubyGems `millionsend`, Maven `com.millionsend:millionsend`, NuGet `MillionSend`, Hex `millionsend`). Cada um espelha a superfície do SDK do Resend: troque o import e o nome da classe e passe a URL base pela opção correspondente (`baseUrl`, `base_url`, `BaseURL`, ...). Detalhes por linguagem: https://docs.millionsend.com/pt-BR/sdks.md.
+   PHP: `MillionSend::client()` devolve um `Client` que mantém o `HttpClient` privado. Para uma requisição sem método no SDK, construa o `HttpClient` você mesmo com os mesmos argumentos que a factory passa (leia `MillionSend::client()` no pacote): mesmo pacote, mesmo comportamento, um nível abaixo.
 
 Então resolva o que o relatório lista:
 

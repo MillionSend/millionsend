@@ -79,6 +79,7 @@ export const emailsRouter = router({
         status: emailStatus.optional(),
         search: z.string().trim().max(200).optional(),
         apiKeyId: z.uuid().optional(),
+        domainId: z.uuid().optional(),
         since: z.coerce.date().optional(),
         cursor: cursorSchema.optional(),
         limit: z.number().int().min(1).max(50).default(25),
@@ -95,6 +96,7 @@ export const emailsRouter = router({
         filters.push(or(ilike(t.subject, pattern), sql`${t.to}::text ilike ${pattern}`));
       }
       if (input.apiKeyId) filters.push(eq(t.apiKeyId, input.apiKeyId));
+      if (input.domainId) filters.push(eq(t.domainId, input.domainId));
       if (input.since) filters.push(gte(t.createdAt, input.since));
       // Total counts the filter scope, not the page — the cursor is excluded.
       const [totalRow] = await ctx.db

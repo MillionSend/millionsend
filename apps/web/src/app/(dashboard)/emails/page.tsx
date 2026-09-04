@@ -59,6 +59,7 @@ export default function EmailsPage() {
   const [statusParam, setStatus] = useUrlState("status", "all");
   const [rangeParam, setRange] = useUrlState("range", "d15");
   const [apiKeyId, setApiKeyId] = useUrlState("key", "all");
+  const [domainId, setDomainId] = useUrlState("domain", "all");
   const [limit, setLimit] = useState(40);
   const status: EmailStatus | "all" = oneOf(STATUSES, statusParam, "all");
   const range: RangeKey = oneOf(RANGE_KEYS, rangeParam, "d15");
@@ -72,6 +73,7 @@ export default function EmailsPage() {
         ...(status !== "all" ? { status } : {}),
         ...(deferredSearch ? { search: deferredSearch } : {}),
         ...(apiKeyId !== "all" ? { apiKeyId } : {}),
+        ...(domainId !== "all" ? { domainId } : {}),
         ...(since ? { since } : {}),
       },
       { getNextPageParam: (page) => page.nextCursor },
@@ -80,6 +82,7 @@ export default function EmailsPage() {
   const stats = useQuery(trpc.emails.stats.queryOptions());
   const usage = useQuery(trpc.settings.usage.recent.queryOptions({}));
   const apiKeys = useQuery(trpc.apiKeys.list.queryOptions());
+  const domains = useQuery(trpc.domains.list.queryOptions());
   const teamList = useQuery(trpc.team.list.queryOptions());
   const role = teamList.data?.teams.find((m) => m.teamId === teamList.data?.activeTeamId)?.role;
   const canExport = role === "owner" || role === "admin";
@@ -91,7 +94,11 @@ export default function EmailsPage() {
     usage.data?.today.limit != null && usage.data.today.accepted >= usage.data.today.limit;
 
   const hasFilters =
-    deferredSearch !== "" || status !== "all" || apiKeyId !== "all" || range !== "all";
+    deferredSearch !== "" ||
+    status !== "all" ||
+    apiKeyId !== "all" ||
+    domainId !== "all" ||
+    range !== "all";
   // A team that has never sent gets the onboarding empty state even under the
   // default 15-day window; anything else filtered to zero gets "clear filters".
   const neverSent =
@@ -104,6 +111,7 @@ export default function EmailsPage() {
     setSearch("");
     setStatus("all");
     setApiKeyId("all");
+    setDomainId("all");
     setRange("all");
   }
 
@@ -111,6 +119,7 @@ export default function EmailsPage() {
   if (deferredSearch) exportParams.set("search", deferredSearch);
   if (status !== "all") exportParams.set("status", status);
   if (apiKeyId !== "all") exportParams.set("apiKeyId", apiKeyId);
+  if (domainId !== "all") exportParams.set("domainId", domainId);
   if (since) exportParams.set("since", since.toISOString());
   const exportQuery = exportParams.toString();
 
@@ -217,6 +226,19 @@ export default function EmailsPage() {
             ...(apiKeys.data ?? []).map((key) => ({ value: key.id, label: key.name })),
           ]}
         />
+        {/* One domain gives the filter nothing to choose between. */}
+        {(domains.data ?? []).length > 1 ? (
+          <Select
+            value={domainId}
+            onChange={setDomainId}
+            width={200}
+            ariaLabel={t("list.allDomains")}
+            options={[
+              { value: "all", label: t("list.allDomains") },
+              ...(domains.data ?? []).map((domain) => ({ value: domain.id, label: domain.name })),
+            ]}
+          />
+        ) : null}
       </div>
 
       {query.isPending ? (

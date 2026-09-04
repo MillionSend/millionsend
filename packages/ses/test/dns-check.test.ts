@@ -3,6 +3,8 @@ import {
   checkDnsRecords,
   checkDnsRecordsDetailed,
   type DnsResolver,
+  parseMxData,
+  parseTxtData,
   resolvePublicFirst,
 } from "../src/dns-check.js";
 
@@ -121,5 +123,17 @@ describe("resolvePublicFirst", () => {
     expect(await resolvePublicFirst(timeout, system)).toEqual(["from-system"]);
     // A conclusive "no such record" from the public resolver is the answer.
     await expect(resolvePublicFirst(nxdomain, system)).rejects.toMatchObject({ code: "ENOTFOUND" });
+  });
+});
+
+describe("DoH answer parsing", () => {
+  it("rejoins split TXT strings, unescapes quotes, and reads MX priority/exchange", () => {
+    expect(parseTxtData('"v=DKIM1; k=rsa; " "p=MIIB"')).toEqual(["v=DKIM1; k=rsa; ", "p=MIIB"]);
+    expect(parseTxtData('"a \\"quoted\\" bit"')).toEqual(['a "quoted" bit']);
+    expect(parseTxtData("bare")).toEqual(["bare"]);
+    expect(parseMxData("10 feedback-smtp.sa-east-1.amazonses.com.")).toEqual({
+      priority: 10,
+      exchange: "feedback-smtp.sa-east-1.amazonses.com",
+    });
   });
 });

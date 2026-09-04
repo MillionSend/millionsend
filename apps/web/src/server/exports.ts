@@ -116,7 +116,7 @@ interface EmailExportRow {
 export function emailRowsForExport(
   db: Db,
   teamId: string,
-  filters: { status?: string; search?: string; apiKeyId?: string; since?: Date },
+  filters: { status?: string; search?: string; apiKeyId?: string; domainId?: string; since?: Date },
 ): Promise<EmailExportRow[]> {
   const t = schema.emails;
   const conds: SQL[] = [eq(t.teamId, teamId)];
@@ -128,6 +128,7 @@ export function emailRowsForExport(
     if (match) conds.push(match);
   }
   if (filters.apiKeyId) conds.push(eq(t.apiKeyId, filters.apiKeyId));
+  if (filters.domainId) conds.push(eq(t.domainId, filters.domainId));
   if (filters.since) conds.push(gte(t.createdAt, filters.since));
   return db
     .select({
@@ -245,12 +246,14 @@ export async function buildExport(
       const status = params.get("status") ?? undefined;
       const search = params.get("search") ?? undefined;
       const apiKeyId = params.get("apiKeyId") ?? undefined;
+      const domainId = params.get("domainId") ?? undefined;
       const sinceRaw = params.get("since");
       const since = sinceRaw ? new Date(sinceRaw) : undefined;
       const rows = await emailRowsForExport(db, teamId, {
         ...(status ? { status } : {}),
         ...(search ? { search } : {}),
         ...(apiKeyId ? { apiKeyId } : {}),
+        ...(domainId ? { domainId } : {}),
         ...(since && !Number.isNaN(since.getTime()) ? { since } : {}),
       });
       return { filename: "emails.csv", csv: toCsv(rows, emailColumns, { bom: true }) };

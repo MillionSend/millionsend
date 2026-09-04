@@ -114,4 +114,27 @@ export const apiKeysRouter = router({
     await recordAudit(ctx, { action: "api_key.revoked", target: { type: "api_key", id: row.id } });
     return { id: row.id };
   }),
+
+  rename: adminProcedure
+    .input(z.object({ id: z.uuid(), name: z.string().trim().min(1).max(80) }))
+    .mutation(async ({ ctx, input }) => {
+      const [row] = await ctx.db
+        .update(schema.apiKeys)
+        .set({ name: input.name })
+        .where(
+          and(
+            eq(schema.apiKeys.id, input.id),
+            eq(schema.apiKeys.teamId, ctx.teamId),
+            isNull(schema.apiKeys.revokedAt),
+          ),
+        )
+        .returning({ id: schema.apiKeys.id });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await recordAudit(ctx, {
+        action: "api_key.renamed",
+        target: { type: "api_key", id: row.id },
+        metadata: { name: input.name },
+      });
+      return { id: row.id, name: input.name };
+    }),
 });

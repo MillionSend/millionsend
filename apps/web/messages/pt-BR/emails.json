@@ -31,7 +31,8 @@
       "reached": "Limite diário de {limit} e-mails atingido.",
       "queued": "{count} e-mails na fila — serão enviados em {duration}.",
       "upgrade": "Faça upgrade para o Pro: 3.000/dia →"
-    }
+    },
+    "allDomains": "Todos os domínios"
   },
   "detail": {
     "breadcrumb": "Detalhes do e-mail",
@@ -190,7 +191,11 @@
         "description": "Envio de um endereço no-reply com o cabeçalho Reply-To definido, para que respostas ainda cheguem a uma caixa real.",
         "advice": "Mantenha um Reply-To em todo envio de endereço no-reply."
       }
-    }
+    },
+    "handoffLabel": "Entregue ao seu agente",
+    "handoffHint": "Uma instrução pronta com a verificação, o motivo e a correção.",
+    "copyForAgent": "Copiar instruções",
+    "agentPrompt": "Na nossa integração com o MillionSend, o e-mail \"{subject}\" (id {id}) falha na verificação de entregabilidade \"{title}\".\n\n{description}\n\nO que fazer: {advice}{detail}\n\nEncontre o código ou template que envia este e-mail e aplique a correção. Mantenha a mudança mínima e explique o que mudou."
   },
   "bouncedDrawer": {
     "title": "Detalhes do bounce",

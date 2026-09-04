@@ -86,6 +86,8 @@ export function ApiKeysView() {
   const [domainId, setDomainId] = useState("");
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<{ id: string; name: string } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null);
+  const [renameName, setRenameName] = useState("");
 
   const invalidateList = () =>
     queryClient.invalidateQueries({ queryKey: trpc.apiKeys.list.queryKey() });
@@ -106,6 +108,14 @@ export function ApiKeysView() {
       },
     }),
   );
+  const renameMutation = useMutation(
+    trpc.apiKeys.rename.mutationOptions({
+      onSuccess: () => {
+        setRenameTarget(null);
+        invalidateList();
+      },
+    }),
+  );
 
   // Stable identities: Modal's focus effect depends on onClose, and a fresh
   // arrow per render would re-run it on every keystroke, stealing focus from
@@ -120,6 +130,7 @@ export function ApiKeysView() {
     resetCreate();
   }, [resetCreate]);
   const closeRevoke = useCallback(() => setRevokeTarget(null), []);
+  const closeRename = useCallback(() => setRenameTarget(null), []);
 
   // Shared by the form submit and Modal's ⌘↵ onConfirm — one guard for both.
   const confirmCreate = () => {
@@ -133,6 +144,16 @@ export function ApiKeysView() {
   const confirmRevoke = () => {
     if (!revokeTarget || revokeMutation.isPending) return;
     revokeMutation.mutate({ id: revokeTarget.id });
+  };
+  const confirmRename = () => {
+    if (!renameTarget || renameMutation.isPending) return;
+    const name = renameName.trim();
+    if (name.length === 0) return;
+    if (name === renameTarget.name) {
+      closeRename();
+      return;
+    }
+    renameMutation.mutate({ id: renameTarget.id, name });
   };
   const createError = createMutation.error;
 
@@ -221,6 +242,14 @@ export function ApiKeysView() {
                     <PopoverMenu
                       ariaLabel={t("table.menu")}
                       items={[
+                        {
+                          label: t("rename"),
+                          onSelect: () => {
+                            setRenameName(key.name);
+                            setRenameTarget({ id: key.id, name: key.name });
+                          },
+                        },
+                        null,
                         {
                           label: t("revoke"),
                           danger: true,
@@ -378,6 +407,49 @@ export function ApiKeysView() {
               >
                 <BtnSpinner on={revokeMutation.isPending} />
                 {t("revokeConfirm.confirm")} <ConfirmKeycap />
+              </button>
+            </ModalFooter>
+          </form>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={renameTarget !== null}
+        onClose={closeRename}
+        onConfirm={confirmRename}
+        title={t("renameDialog.title")}
+      >
+        {renameTarget ? (
+          <form
+            style={{ display: "grid", gap: 14, marginTop: 12 }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              confirmRename();
+            }}
+          >
+            <div className="ms-field">
+              <label htmlFor="api-key-rename">{t("renameDialog.name")}</label>
+              <input
+                id="api-key-rename"
+                className="ms-input"
+                style={{ width: "100%" }}
+                value={renameName}
+                maxLength={80}
+                disabled={renameMutation.isPending}
+                onChange={(event) => setRenameName(event.target.value)}
+              />
+            </div>
+            <ModalFooter>
+              <button type="button" className="ms-btn ms-btn-secondary" onClick={closeRename}>
+                {common("cancel")} <span className="ms-keycap">Esc</span>
+              </button>
+              <button
+                type="submit"
+                className="ms-btn ms-btn-primary"
+                disabled={renameMutation.isPending || renameName.trim().length === 0}
+              >
+                <BtnSpinner on={renameMutation.isPending} />
+                {t("renameDialog.submit")} <ConfirmKeycap />
               </button>
             </ModalFooter>
           </form>

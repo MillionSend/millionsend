@@ -2,7 +2,6 @@ import {
   resolveCname as dnsResolveCname,
   resolveMx as dnsResolveMx,
   resolveTxt as dnsResolveTxt,
-  Resolver,
 } from "node:dns/promises";
 import type { LiveDnsStatus } from "@millionsend/core/domain-status";
 
@@ -13,20 +12,68 @@ export interface DnsResolver {
   resolveCname(hostname: string): Promise<string[]>;
 }
 
-/* Public resolvers are asked first: the host's stub resolver may serve a
-   record's previous value for as long as it likes (some providers clamp
-   TTLs), and a check that keeps reporting a fixed record as wrong sends
-   people re-pasting a correct value. Cloudflare and Google answer for any
-   public zone and honour the zone's TTL. */
-const PUBLIC_DNS_SERVERS = ["1.1.1.1", "8.8.8.8", "1.0.0.1", "8.8.4.4"];
-const PUBLIC_DNS_TIMEOUT_MS = 2500;
-const publicResolver = new Resolver({ timeout: PUBLIC_DNS_TIMEOUT_MS, tries: 1 });
-publicResolver.setServers(PUBLIC_DNS_SERVERS);
+/* Public resolvers are asked first, over DNS-over-HTTPS: the host's stub
+   resolver may serve a record's previous value — or a cached absence — for
+   as long as it likes (some providers clamp TTLs), and a check that keeps
+   reporting a fixed record as wrong sends people re-pasting a correct value.
+   HTTPS rather than UDP port 53 because a VPS drops and rate-limits UDP
+   often enough that a one-shot lookup read present records as missing; the
+   HTTPS path is the one every AWS call already takes. Both endpoints are
+   asked at once and the first answer wins. */
+const DOH_ENDPOINTS = ["https://cloudflare-dns.com/dns-query", "https://dns.google/resolve"];
+const DOH_TIMEOUT_MS = 2500;
+/* The public round's budget: one DoH timeout plus slack for the body. */
+const PUBLIC_DNS_TIMEOUT_MS = 3000;
+const RR_TYPE = { TXT: 16, MX: 15, CNAME: 5 } as const;
+type RrType = keyof typeof RR_TYPE;
+
+const dnsError = (code: "ENOTFOUND" | "ENODATA") => Object.assign(new Error(code), { code });
+
+/** One DoH query. NXDOMAIN/NODATA throw the node:dns codes so every consumer classifies them alike. */
+async function dohQuery(endpoint: string, name: string, type: RrType): Promise<string[]> {
+  const res = await fetch(`${endpoint}?name=${encodeURIComponent(name)}&type=${type}`, {
+    headers: { accept: "application/dns-json" },
+    signal: AbortSignal.timeout(DOH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`doh ${res.status}`);
+  const body = (await res.json()) as { Status: number; Answer?: { type: number; data: string }[] };
+  if (body.Status === 3) throw dnsError("ENOTFOUND");
+  if (body.Status !== 0) throw new Error(`doh rcode ${body.Status}`);
+  // A CNAME chain rides along in Answer; keep only the type that was asked for.
+  const data = (body.Answer ?? []).filter((a) => a.type === RR_TYPE[type]).map((a) => a.data);
+  if (data.length === 0) throw dnsError("ENODATA");
+  return data;
+}
+
+async function dohResolve(name: string, type: RrType): Promise<string[]> {
+  try {
+    return await Promise.any(DOH_ENDPOINTS.map((endpoint) => dohQuery(endpoint, name, type)));
+  } catch (err) {
+    // Every endpoint failed: a conclusive absence from any of them is the
+    // verdict; otherwise the first failure carries on as inconclusive.
+    const errors = err instanceof AggregateError ? err.errors : [err];
+    throw errors.find((e) => dnsErrorStatus(e) === "missing") ?? errors[0];
+  }
+}
+
+/** TXT wire form in DoH JSON: quoted strings, a long record split into several ("abc" "def"). */
+export function parseTxtData(data: string): string[] {
+  const chunks = [...data.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) =>
+    (m[1] ?? "").replace(/\\(.)/g, "$1"),
+  );
+  return chunks.length > 0 ? chunks : [data];
+}
+
+/** MX wire form: "10 mail.example.com." */
+export function parseMxData(data: string): { priority: number; exchange: string } {
+  const [priority, exchange = ""] = data.trim().split(/\s+/);
+  return { priority: Number(priority), exchange: exchange.replace(/\.$/, "") };
+}
 
 /**
- * NXDOMAIN/NODATA from the public resolver is a conclusive answer and
- * propagates; anything else (egress to port 53 blocked, timeout, SERVFAIL)
- * falls back to the system resolver so a locked-down self-host still checks.
+ * NXDOMAIN/NODATA from the public resolvers is a conclusive answer and
+ * propagates; anything else (egress blocked, timeout, SERVFAIL) falls back to
+ * the system resolver so a locked-down self-host still checks.
  */
 export async function resolvePublicFirst<T>(
   viaPublic: () => Promise<T>,
@@ -43,17 +90,17 @@ export async function resolvePublicFirst<T>(
 export const nodeDnsResolver: DnsResolver = {
   resolveTxt: (name) =>
     resolvePublicFirst(
-      () => publicResolver.resolveTxt(name),
+      () => dohResolve(name, "TXT").then((rows) => rows.map(parseTxtData)),
       () => dnsResolveTxt(name),
     ),
   resolveMx: (name) =>
     resolvePublicFirst(
-      () => publicResolver.resolveMx(name),
+      () => dohResolve(name, "MX").then((rows) => rows.map(parseMxData)),
       () => dnsResolveMx(name),
     ),
   resolveCname: (name) =>
     resolvePublicFirst(
-      () => publicResolver.resolveCname(name),
+      () => dohResolve(name, "CNAME").then((rows) => rows.map((r) => r.replace(/\.$/, ""))),
       () => dnsResolveCname(name),
     ),
 };
@@ -66,7 +113,8 @@ export interface DnsCheckRecord {
 }
 
 // A stalled resolver must not hang the whole check; a timeout reads as unknown.
-export const DNS_TIMEOUT_MS = 5000;
+// Covers the public round plus the system fallback behind it.
+export const DNS_TIMEOUT_MS = 6000;
 
 export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([

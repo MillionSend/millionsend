@@ -13,6 +13,7 @@
   },
   "neverUsed": "Nunca",
   "pageOf": "Página 1 – {pages} de {total} chaves de API",
+  "rename": "Renomear",
   "revoke": "Revogar",
   "scope": {
     "full": "Acesso total",
@@ -45,5 +46,10 @@
     "list": "Listar chaves de API",
     "create": "Criar chave de API",
     "revoke": "Revogar chave de API"
+  },
+  "renameDialog": {
+    "title": "Renomear chave de API",
+    "name": "Nome",
+    "submit": "Salvar"
   }
 }

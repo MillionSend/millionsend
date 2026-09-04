@@ -13,6 +13,7 @@
   },
   "neverUsed": "Never",
   "pageOf": "Page 1 – {pages} of {total} API keys",
+  "rename": "Rename",
   "revoke": "Revoke",
   "scope": {
     "full": "Full access",
@@ -45,5 +46,10 @@
     "list": "List API keys",
     "create": "Create API key",
     "revoke": "Revoke API key"
+  },
+  "renameDialog": {
+    "title": "Rename API key",
+    "name": "Name",
+    "submit": "Save"
   }
 }

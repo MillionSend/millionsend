@@ -352,6 +352,7 @@
     "actions": {
       "api_key.created": "Created API key",
       "api_key.revoked": "Revoked API key",
+      "api_key.renamed": "Renamed API key",
       "domain.created": "Added domain",
       "domain.verified": "Verified domain",
       "domain.deleted": "Deleted domain",

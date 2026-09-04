@@ -17,7 +17,7 @@ import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
-import { BtnSpinner } from "@/components/spinner";
+import { BtnSpinner, Spinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
@@ -59,7 +59,7 @@ export function DomainsView() {
   const router = useRouter();
   const domains = useQuery(trpc.domains.list.queryOptions());
   const role = useTeamRole();
-  const canExport = role === "owner" || role === "admin";
+  const canManage = role === "owner" || role === "admin";
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [confirmText, setConfirmText] = useState("");
@@ -68,6 +68,17 @@ export function DomainsView() {
       onSuccess: () => {
         setDeleteTarget(null);
         setConfirmText("");
+        domains.refetch();
+      },
+    }),
+  );
+  // Check DNS from the row: the same verify pass as the detail header, the
+  // badge swapped for a spinner while it runs.
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const verifyMutation = useMutation(
+    trpc.domains.verify.mutationOptions({
+      onSettled: () => {
+        setCheckingId(null);
         domains.refetch();
       },
     }),
@@ -144,7 +155,7 @@ export function DomainsView() {
         {...(summary ? { subtitle: summary } : {})}
         actions={
           <>
-            {canExport ? <ExportCsvLink href="/export/domains" /> : null}
+            {canManage ? <ExportCsvLink href="/export/domains" /> : null}
             <Link href="/domains/new" className="ms-btn ms-btn-primary">
               <PlusGlyph size={14} />
               {t("list.addDomain")}
@@ -258,7 +269,11 @@ export function DomainsView() {
                           <Link href={`/domains/${domain.id}`}>{domain.name}</Link>
                         </td>
                         <td>
-                          <DomainStatusBadge status={domain.status as DomainStatus} />
+                          {checkingId === domain.id ? (
+                            <Spinner />
+                          ) : (
+                            <DomainStatusBadge status={domain.status as DomainStatus} />
+                          )}
                         </td>
                         <td style={{ color: "var(--ms-muted)" }}>
                           <RegionLabel region={domain.region} />
@@ -280,6 +295,17 @@ export function DomainsView() {
                                   label: t("list.rowDetails"),
                                   onSelect: () => router.push(`/domains/${domain.id}`),
                                 },
+                                ...(domain.status !== "verified" && canManage
+                                  ? [
+                                      {
+                                        label: t("detail.checkDns"),
+                                        onSelect: () => {
+                                          setCheckingId(domain.id);
+                                          verifyMutation.mutate({ id: domain.id });
+                                        },
+                                      },
+                                    ]
+                                  : []),
                                 null,
                                 {
                                   label: t("detail.deleteDomain"),

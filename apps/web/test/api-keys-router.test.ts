@@ -203,3 +203,18 @@ describe("apiKeys.revoke", () => {
     await expect(caller.apiKeys.revoke({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
+
+describe("apiKeys.rename", () => {
+  it("renames an active key (trimmed) and refuses a revoked one", async () => {
+    const teamId = await createTeam(db);
+    const { id } = await callerFor(teamId).apiKeys.create({ name: "old" });
+    await expect(callerFor(teamId).apiKeys.rename({ id, name: " new " })).resolves.toMatchObject({
+      name: "new",
+    });
+    expect((await keyRow(id)).name).toBe("new");
+    await callerFor(teamId).apiKeys.revoke({ id });
+    await expect(callerFor(teamId).apiKeys.rename({ id, name: "again" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+});
