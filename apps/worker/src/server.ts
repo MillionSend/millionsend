@@ -148,9 +148,19 @@ const enqueueSend = async (
  * second), so a single lane moves about one email a second while the rate
  * bucket sits full. Sixteen lanes saturate a 14/s bucket with room to spare;
  * the bucket, not this number, is what SES sees. The db pool (packages/db) is
- * sized for them.
+ * sized for them. Each lane fetches two jobs at a time so a backlog is pulled
+ * continuously instead of one job per polling interval.
  */
 const SEND_CONCURRENCY = 16;
+const SEND_BATCH = 2;
+
+/**
+ * SES event lanes. A burst of sends comes back as the same burst of delivery
+ * events within a minute; each is a short transaction, so four lanes pulling
+ * ten at a time keep the Sent → Delivered flip close to real time.
+ */
+const EVENT_CONCURRENCY = 4;
+const EVENT_BATCH = 10;
 
 const enqueueWebhook = async (deliveryId: string, startAfter?: Date): Promise<void> => {
   await queue.send(
@@ -180,7 +190,7 @@ await queue.work(
       payload,
     );
   },
-  { concurrency: SEND_CONCURRENCY },
+  { concurrency: SEND_CONCURRENCY, batchSize: SEND_BATCH },
 );
 
 // Retries exhausted: the row must not stay "queued" for the reconcile sweep
@@ -213,12 +223,16 @@ await queue.work("broadcast.send", async (payload) => {
   );
 });
 
-await queue.work("ses.event", async (payload) => {
-  await processSesEvent(db, payload.event, {
-    snsMessageId: payload.snsMessageId,
-    enqueueWebhookDelivery: enqueueWebhook,
-  });
-});
+await queue.work(
+  "ses.event",
+  async (payload) => {
+    await processSesEvent(db, payload.event, {
+      snsMessageId: payload.snsMessageId,
+      enqueueWebhookDelivery: enqueueWebhook,
+    });
+  },
+  { concurrency: EVENT_CONCURRENCY, batchSize: EVENT_BATCH },
+);
 
 // SES events over SQS for deployments without a public https URL. The topic
 // allowlist gates it exactly like the https endpoint — a queue URL without
@@ -266,8 +280,10 @@ await queue.work(
     );
   },
   // Receivers are tenant-controlled and can stall for the full timeout;
-  // several workers keep one slow endpoint from serializing every tenant.
-  { concurrency: 8 },
+  // several workers keep one slow endpoint from serializing every tenant, and
+  // one job per fetch keeps a stalled receiver from holding a second delivery
+  // hostage, so a faster poll stands in for batching here.
+  { concurrency: 8, pollingIntervalSeconds: 1 },
 );
 
 await queue.workDeadLetter("webhook.deliver", async ({ deliveryId }) => {

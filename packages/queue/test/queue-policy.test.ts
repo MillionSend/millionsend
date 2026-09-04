@@ -9,6 +9,7 @@ const sent: {
   name: string;
   opts: { singletonKey?: string; deadLetter?: string; priority?: number };
 }[] = [];
+const workers: { name: string; opts: Record<string, unknown> }[] = [];
 
 vi.mock("pg-boss", () => ({
   PgBoss: class {
@@ -29,12 +30,17 @@ vi.mock("pg-boss", () => ({
       sent.push({ name, opts });
       return "job-1";
     }
+    async work(name: string, opts: Record<string, unknown>): Promise<string> {
+      workers.push({ name, opts });
+      return "worker-1";
+    }
   },
 }));
 
 beforeEach(() => {
   queues.clear();
   sent.length = 0;
+  workers.length = 0;
 });
 
 it("creates job queues with the dedupe-enforcing policy", async () => {
@@ -69,4 +75,28 @@ it("forwards a job priority so transactional sends fetch ahead of bulk ones", as
   await queue.send("email.send", { emailId: "tx" }, { dedupeKey: "tx", priority: 1 });
   await queue.send("email.send", { emailId: "bulk" }, { dedupeKey: "bulk" });
   expect(sent.map((s) => s.opts.priority)).toEqual([1, undefined]);
+});
+
+it("fetches bursty queues continuously: a batch above one turns burst mode on, a batch of one leaves it off", async () => {
+  const queue = await Queue.start("postgres://unused");
+  await queue.work("ses.event", async () => {}, { batchSize: 10, concurrency: 4 });
+  await queue.work("webhook.deliver", async () => {}, {
+    concurrency: 8,
+    pollingIntervalSeconds: 1,
+  });
+  expect(workers).toEqual([
+    {
+      name: "ses.event",
+      opts: { batchSize: 10, localConcurrency: 4, burstWhenBatchFull: true },
+    },
+    {
+      name: "webhook.deliver",
+      opts: {
+        batchSize: 1,
+        localConcurrency: 8,
+        burstWhenBatchFull: false,
+        pollingIntervalSeconds: 1,
+      },
+    },
+  ]);
 });

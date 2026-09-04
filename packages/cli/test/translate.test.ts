@@ -152,16 +152,17 @@ describe("translateWebhookEvents", () => {
         "email.sent",
         "email.suppressed",
         "email.sent",
-        "contact.created",
+        "domain.created",
         "email.clicked",
+        "contact.created",
       ]),
     ).toEqual({
-      events: ["email.sent", "email.clicked"],
-      dropped: ["email.suppressed", "contact.created"],
+      events: ["email.sent", "email.clicked", "contact.created"],
+      dropped: ["email.suppressed", "domain.created"],
     });
   });
 
-  it("accepts all seven", () => {
+  it("accepts every event the target emits", () => {
     const all = [
       "email.sent",
       "email.delivered",
@@ -170,6 +171,9 @@ describe("translateWebhookEvents", () => {
       "email.complained",
       "email.opened",
       "email.clicked",
+      "contact.created",
+      "contact.updated",
+      "contact.deleted",
     ];
     expect(translateWebhookEvents(all)).toEqual({ events: all, dropped: [] });
   });

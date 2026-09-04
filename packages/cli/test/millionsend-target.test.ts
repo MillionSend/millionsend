@@ -262,7 +262,7 @@ describe("writers", () => {
     expect(
       await target.createWebhook({
         endpoint: "https://hooks.example.test/c",
-        events: ["contact.created"],
+        events: ["domain.created"],
       }),
     ).toMatchObject({ ok: false, status: 422 });
   });

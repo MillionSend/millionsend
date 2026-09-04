@@ -23,7 +23,7 @@ Node 18 or newer; no dependencies.
 | Contacts | Upserted by email through the batch endpoint; `unsubscribed` and topic opt-outs are preserved, never re-subscribed. A second pass adds properties and topic subscriptions when the account uses them. |
 | Segments, topics, properties | Matched by name / name / key: created when missing, updated when different, left alone when equal. Segment memberships follow the contacts. |
 | Templates | Name, alias, subject, html, text. From, reply-to and variables cannot be stored — listed as manual steps. |
-| Webhooks | Endpoint and events. Signing secrets are copied so receivers keep verifying (`--fresh-webhook-secrets` mints new ones, shown once). Events outside MillionSend's `email.*` set are dropped per webhook and listed. |
+| Webhooks | Endpoint and events. Signing secrets are copied so receivers keep verifying (`--fresh-webhook-secrets` mints new ones, shown once). Events MillionSend also emits carry over (`email.*`, `contact.created`, `contact.updated`, `contact.deleted`); the rest are dropped per webhook and listed. |
 | Suppressions | Bounces, complaints and manual entries, with their origin. |
 | Domains | Created with return path and tracking settings, in the one SES region your MillionSend instance serves (MillionSend Cloud: `sa-east-1`) — the Resend region does not carry over. DNS records must be added again (DKIM keys are per provider); the report prints a copy-ready table. Both providers can stay verified side by side. |
 | Broadcasts | Drafts and scheduled ones import as drafts; sent ones are skipped unless `--include-sent`. |

@@ -178,16 +178,31 @@ export class Queue {
    * `concurrency` spawns that many independent pg-boss workers for the queue
    * in this process, so one slow job (a stalling webhook receiver) cannot
    * serialize everyone else's. It is not a rate limit.
+   *
+   * A worker sleeps `pollingIntervalSeconds` (pg-boss default 2) between
+   * fetches unless the last fetch came back full, and a batch of one never
+   * counts as full: at batchSize 1 each worker moves at most one job every
+   * two seconds however long the backlog. Queues that see bursts fetch a
+   * `batchSize` above one, which turns on continuous fetching while the
+   * backlog lasts; the handler still runs the batch one job at a time.
    */
   async work<N extends JobName>(
     name: N,
     handler: (payload: JobPayloads[N]) => Promise<void>,
-    opts: { batchSize?: number; concurrency?: number } = {},
+    opts: { batchSize?: number; concurrency?: number; pollingIntervalSeconds?: number } = {},
   ): Promise<void> {
     await this.#ensureQueue(name, JOB_QUEUE_POLICY);
+    const batchSize = opts.batchSize ?? 1;
     await this.#boss.work<JobPayloads[N]>(
       name,
-      { batchSize: opts.batchSize ?? 1, localConcurrency: opts.concurrency ?? 1 },
+      {
+        batchSize,
+        localConcurrency: opts.concurrency ?? 1,
+        burstWhenBatchFull: batchSize > 1,
+        ...(opts.pollingIntervalSeconds !== undefined
+          ? { pollingIntervalSeconds: opts.pollingIntervalSeconds }
+          : {}),
+      },
       async (jobs: { data: JobPayloads[N] }[]) => {
         for (const job of jobs) {
           await handler(job.data);

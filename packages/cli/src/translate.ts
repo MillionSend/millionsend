@@ -7,6 +7,11 @@ import type { SourceBroadcast, SourceDomain, SourceTemplate } from "./model.js";
  */
 
 /** Mirror of packages/core/src/webhooks.ts WEBHOOK_EVENT_TYPES. */
+/**
+ * Resend webhook event names MillionSend also emits, so a subscription carries
+ * over as-is. Resend's other names (domain.*, email.suppressed, …) have no
+ * counterpart here and are dropped per webhook, listed in the plan.
+ */
 export const TARGET_WEBHOOK_EVENTS = [
   "email.sent",
   "email.delivered",
@@ -15,6 +20,9 @@ export const TARGET_WEBHOOK_EVENTS = [
   "email.complained",
   "email.opened",
   "email.clicked",
+  "contact.created",
+  "contact.updated",
+  "contact.deleted",
 ] as const;
 export type TargetWebhookEvent = (typeof TARGET_WEBHOOK_EVENTS)[number];
 

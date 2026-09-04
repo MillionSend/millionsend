@@ -188,9 +188,13 @@ export function Sidebar({
       </div>
       <TeamSwitcher teamName={teamName} teamLogoUrl={teamLogoUrl} />
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: delegated close-drawer hook; links stay the interactive elements and keyboard activation bubbles the same click */}
+      {/* The list scrolls, and a scroll container clips its children's
+          focus ring at its own edges. Side padding pulled back by the same
+          margin keeps the ring inside the scrollable box without moving the
+          items. */}
       <nav
         className="ms-nav"
-        style={{ marginTop: 10, minHeight: 0, overflowY: "auto" }}
+        style={{ minHeight: 0, overflowY: "auto", padding: 3, margin: "7px -3px -3px" }}
         onClick={
           onNavigate
             ? (event) => {

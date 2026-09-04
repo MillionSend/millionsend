@@ -114,10 +114,7 @@ webhooks
   ~ https://webhook.example.com/handler  events
   ! https://webhook.example.com/handler  events not delivered here:
     email.suppressed
-  ! https://hooks.example.com/contacts  none of its events exist here; not
-    created
-  ! https://hooks.example.com/contacts  events not delivered here:
-    contact.created, contact.updated
+  + https://hooks.example.com/contacts  2 events, fresh secret
 templates
   ~ welcome  name
   ! welcome  from Acme <onboarding@example.com> is not stored on templates; pass
@@ -144,9 +141,9 @@ api-keys
   ! Production  create by hand; Resend exposes only the name
   ! Staging  create by hand; Resend exposes only the name
 
-Plan: 10 to create, 5 to update, 2 unchanged, 13 manual, 1 skipped.
+Plan: 11 to create, 5 to update, 2 unchanged, 11 manual, 1 skipped.
 warning: 2 domains to create; the Free plan allows 1 (1 already there)
-Estimate: ~65 requests · 3 s at 8 req/s
+Estimate: ~66 requests · 3 s at 8 req/s
 `;
 
 const stdout = process.stdout as unknown as { columns?: number | undefined };
@@ -169,7 +166,7 @@ describe("buildPlan + renderPlan (golden)", () => {
   });
 
   it("counts, header and manual list agree with the items", () => {
-    expect(plan.counts).toEqual({ create: 10, update: 5, unchanged: 2, manual: 13, skip: 1 });
+    expect(plan.counts).toEqual({ create: 11, update: 5, unchanged: 2, manual: 11, skip: 1 });
     expect(plan).toMatchObject({
       version: 1,
       createdAt: "2026-09-01T12:00:00.000Z",
@@ -177,7 +174,7 @@ describe("buildPlan + renderPlan (golden)", () => {
       target: { baseUrl: "https://api.millionsend.com", cloud: true, plan: "free" },
       rps: 8,
     });
-    expect(plan.manual).toHaveLength(13);
+    expect(plan.manual).toHaveLength(11);
     expect(plan.manual[0]).toEqual({
       title: "segments/Enterprise",
       detail: 'filter not translated (unsupported field "plan_tier"); 1 member still imported',
@@ -185,8 +182,8 @@ describe("buildPlan + renderPlan (golden)", () => {
   });
 
   it("estimates: spent + one read per contact per facet + writes; seconds count only what is ahead", () => {
-    // writes: 8 creates + 4 updates + contacts batch + suppressions batch + enrichment batch = 15
-    expect(plan.estimate).toEqual({ requests: 40 + 10 + 15, seconds: Math.ceil(10 / 8 + 15 / 10) });
+    // writes: 9 creates + 4 updates + contacts batch + suppressions batch + enrichment batch = 16
+    expect(plan.estimate).toEqual({ requests: 40 + 10 + 16, seconds: Math.ceil(10 / 8 + 16 / 10) });
     const topicsOnly = buildPlan({
       snapshot: { ...snapshot, properties: [] },
       target: goldenTarget,
@@ -194,8 +191,8 @@ describe("buildPlan + renderPlan (golden)", () => {
     });
     // One facet: 5 reads, one write fewer (the seats property is not created).
     expect(topicsOnly.estimate).toEqual({
-      requests: 40 + 5 + 14,
-      seconds: Math.ceil(5 / 8 + 14 / 10),
+      requests: 40 + 5 + 15,
+      seconds: Math.ceil(5 / 8 + 15 / 10),
     });
   });
 

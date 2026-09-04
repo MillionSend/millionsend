@@ -199,7 +199,7 @@ describe("millionsend (built bundle)", () => {
       const plan = JSON.parse(stdout) as Plan;
       expect(plan.version).toBe(1);
       expect(plan.target).toEqual({ baseUrl: cloud.baseUrl, cloud: true, plan: "free" });
-      expect(plan.counts).toEqual({ create: 22, update: 2, unchanged: 1, manual: 13, skip: 3 });
+      expect(plan.counts).toEqual({ create: 22, update: 2, unchanged: 1, manual: 12, skip: 3 });
       expect(stderr).toMatch(new RegExp(`✓ Contacts\\s+${CONTACT_COUNT.toLocaleString("en-US")}`));
       expect(stderr).toMatch(/✓ MillionSend\s+current state read/);
 
@@ -234,7 +234,10 @@ describe("millionsend (built bundle)", () => {
       });
       expect(item("broadcasts", "Launch day")?.action).toBe("skip");
       expect(item("webhooks", WEBHOOK_ENDPOINTS[1])).toMatchObject({
-        payload: { events: ["email.opened", "email.clicked"], signingSecret: "copy" },
+        payload: {
+          events: ["email.opened", "email.clicked", "contact.created", "contact.updated"],
+          signingSecret: "copy",
+        },
       });
 
       const manual = plan.manual.map((m) => `${m.title} — ${m.detail}`);
@@ -244,9 +247,7 @@ describe("millionsend (built bundle)", () => {
       expect(manual).toContain(
         "domains/updates.example.com — over the plan's domain limit; add by hand after upgrading",
       );
-      expect(manual).toContain(
-        `webhooks/${WEBHOOK_ENDPOINTS[1]} — events not delivered here: contact.created, contact.updated`,
-      );
+      expect(manual.filter((m) => m.startsWith(`webhooks/${WEBHOOK_ENDPOINTS[1]}`))).toEqual([]);
       expect(manual).toContain(
         "broadcasts/Spring sale — merge tags left as-is: {{{contact.address.city|your city}}}",
       );
@@ -509,7 +510,7 @@ describe("millionsend (built bundle)", () => {
         .where(eq(schema.segmentMembers.contactId, overlapping?.id ?? ""));
       expect(overlap?.n).toBe(2);
 
-      // Webhooks keep Resend's signing secret; events outside our set are dropped.
+      // Webhooks keep Resend's signing secret and every event MillionSend emits.
       for (const id of state.created.webhooks ?? []) {
         const hook = await api<{ endpoint: string; events: string[]; signing_secret: string }>(
           cloud,
@@ -518,7 +519,14 @@ describe("millionsend (built bundle)", () => {
         const n = WEBHOOK_ENDPOINTS.indexOf(hook.endpoint as (typeof WEBHOOK_ENDPOINTS)[number]);
         expect(n).toBeGreaterThanOrEqual(0);
         expect(hook.signing_secret).toBe(WEBHOOK_SECRETS[n]);
-        if (n === 1) expect(hook.events).toEqual(["email.opened", "email.clicked"]);
+        if (n === 1) {
+          expect(hook.events).toEqual([
+            "email.opened",
+            "email.clicked",
+            "contact.created",
+            "contact.updated",
+          ]);
+        }
       }
 
       // Suppressions carry their origin.
