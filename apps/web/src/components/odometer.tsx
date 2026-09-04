@@ -19,11 +19,26 @@ const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)"
  * far it travels — the LP hero's mechanic. prefers-reduced-motion zeroes
  * the transition in CSS and skips the blur, so it degrades to a plain
  * number. The last digit is steel — the view's single lit element
- * (DESIGN.md rule 1).
+ * (DESIGN.md rule 1) — but only once the roll has landed: like the LP hero
+ * lighting its cell after the climb, a digit still in motion wears the
+ * same bone as the rest, and the steel fades in over the base duration.
  */
 export function Odometer({ formatted }: { formatted: string }) {
   const [armed, setArmed] = useState(false);
-  useEffect(() => setArmed(true), []);
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    setArmed(true);
+    if (reducedMotion()) {
+      setSettled(true);
+      return;
+    }
+    const digits = formatted.replace(/\D/g, "").length;
+    const landed = window.setTimeout(
+      () => setSettled(true),
+      Math.max(0, digits - 1) * STAGGER_MS + DIGIT_MS,
+    );
+    return () => window.clearTimeout(landed);
+  }, [formatted]);
   // useId carries punctuation React reserves; url(#…) wants a plain token.
   const filterId = useId().replace(/\W/g, "");
 
@@ -50,7 +65,7 @@ export function Odometer({ formatted }: { formatted: string }) {
             digit={armed ? Number(cell.ch) : 0}
             delayMs={digitPosition++ * STAGGER_MS}
             filterId={filterId}
-            lit={cell === lastDigit}
+            lit={settled && cell === lastDigit}
           />
         );
       })}
