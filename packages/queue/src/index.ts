@@ -210,6 +210,16 @@ export class Queue {
     }
   }
 
+  /**
+   * Runs a cron job ahead of its schedule. Cron queues use the standard
+   * policy, so a run already queued is not collapsed; every cron handler is
+   * idempotent, so an extra run only costs a query.
+   */
+  async runCronNow(name: CronJobName): Promise<void> {
+    await this.#ensureQueue(name);
+    await this.#boss.send(name, {});
+  }
+
   async stop(): Promise<void> {
     await this.#boss.stop({ graceful: true });
   }

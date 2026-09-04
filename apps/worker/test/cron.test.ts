@@ -58,7 +58,7 @@ async function statusOf(emailId: string): Promise<string> {
 }
 
 it("drain reserves against the NEW day's cap — parking is not a quota bypass", async () => {
-  // Free ceiling is 110 (100 + tolerance); today's counter already holds 109
+  // Free ceiling is 150 (100 + tolerance); today's counter already holds one less
   // → only ONE parked email may drain, oldest first.
   await db
     .insert(schema.usageCounters)

@@ -105,8 +105,31 @@ it("quota reached fires once, on top of the earlier warning", async () => {
     expect.stringContaining("80%"),
     expect.stringContaining("quota reached"),
   ]);
-  expect(sends[1]?.text).toContain("10% more");
+  // 105 accepted against a 150 ceiling: the mail states the real headroom.
+  expect(sends[1]?.text).toContain("45 more still go out today");
+  expect(sends[1]?.text).toContain("50% past the quota");
   expect((await deliveries()).map((d) => d.type)).toEqual(["quota.warning", "quota.reached"]);
+  expect(await sweepNotifications(db, deps())).toEqual({ sent: 0 });
+});
+
+it("quota paused fires once when the ceiling is reached, after warning and reached", async () => {
+  await counters({ accepted: 80 });
+  await sweepNotifications(db, deps());
+  await counters({ accepted: 100 });
+  await sweepNotifications(db, deps());
+  await counters({ accepted: 150 });
+  expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
+  expect(sends.map((s) => s.subject)).toEqual([
+    expect.stringContaining("80%"),
+    expect.stringContaining("quota reached"),
+    expect.stringContaining("sending paused until the quota resets"),
+  ]);
+  expect(sends[2]?.text).toContain("50% past its 100 quota");
+  expect((await deliveries()).map((d) => d.type)).toEqual([
+    "quota.warning",
+    "quota.reached",
+    "quota.paused",
+  ]);
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 0 });
 });
 

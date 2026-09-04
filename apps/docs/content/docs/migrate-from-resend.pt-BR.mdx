@@ -88,6 +88,17 @@ RESEND_BASE_URL=https://api.millionsend.com
 
 Auto-hospedado, use a origem da API da sua instância.
 
+Dois detalhes que diferem do que uma integração com o Resend pode assumir:
+
+- `PATCH /contacts/{id}/topics` recebe um array JSON puro de entradas
+  `{ "id": "<topic-id>", "subscription": "opt_in" | "opt_out" }`, não um objeto
+  em volta dele; `GET /contacts/{id}/topics` lê de volta a escolha efetiva por
+  tópico.
+- Não existe `POST /contacts/imports` (CSV). Contatos em massa vão por
+  `POST /contacts/batch?on_conflict=upsert` em JSON, até 1.000 por chamada, com
+  `x-batch-validation: permissive` para manter as linhas válidas quando algumas
+  falham.
+
 Prefere clientes de primeira parte? Os [SDKs do MillionSend](/pt-BR/sdks)
 cobrem nove linguagens com a mesma superfície:
 

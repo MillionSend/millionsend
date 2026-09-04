@@ -16,6 +16,7 @@ export const WEBHOOK_EVENT_TYPES = [
   "deliverability.paused",
   "quota.warning",
   "quota.reached",
+  "quota.paused",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -45,6 +46,7 @@ export const WEBHOOK_EVENT_META: Record<
   "deliverability.paused": { group: "account", dot: "var(--ms-dot-account)" },
   "quota.warning": { group: "account", dot: "var(--ms-dot-account)" },
   "quota.reached": { group: "account", dot: "var(--ms-dot-account)" },
+  "quota.paused": { group: "account", dot: "var(--ms-dot-account)" },
 };
 
 /** "whsec_••••••••abcd" — scheme plus last 4, nothing recoverable. */

@@ -65,8 +65,19 @@ remaining deltas are deliberate and loud:
 - `DELETE /emails/{id}` exists (Resend has no email deletion).
 - Custom `headers` are allowlisted: any `X-*` name (except `X-SES-*` and
   `X-MillionSend-*`) plus `In-Reply-To`, `References`, `Importance`,
-  `Priority`, `Comments`, `Keywords` and `Organization`; anything else is a
-  `422`.
+  `Priority`, `Comments`, `Keywords`, `Organization`, and the one-click
+  unsubscribe pair — `List-Unsubscribe` (one or more `<https://…>` or
+  `<mailto:…>` targets) with `List-Unsubscribe-Post`
+  (`List-Unsubscribe=One-Click`); anything else is a `422`. The two must come
+  together, and `List-Unsubscribe` needs an `https` target. On a send with a
+  `topic_id`, a pair you supply replaces the generated one: one-click requests
+  then reach your endpoint, MillionSend records no opt-out for them, and an
+  `{{{UNSUBSCRIBE_URL}}}` placeholder in the body still resolves to
+  MillionSend's page.
+- A send whose every `to` recipient is on the suppression list or opted out of
+  the `topic_id` is refused with `422 all_recipients_suppressed` (message
+  `All recipients are suppressed`); recipients dropped from a send that still
+  has someone left are simply omitted.
 - `to`, `cc` and `bcc` together cannot exceed 50 recipients, and each address
   must be a single mailbox — a display name containing `@` is rejected, and
   accepted addresses read back in canonical `Name <user@host>` form.

@@ -351,9 +351,9 @@ it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", 
     { email: "q2@example.com" },
     { email: "q3@example.com" },
   ]);
-  // Free plan cap is 100/day plus 10% tolerance (110); 108 already accepted
+  // Free plan cap is 100/day plus 50% tolerance (150); 148 already accepted
   // → headroom for 2 of 3.
-  await db.insert(schema.usageCounters).values({ teamId: qTeamId, day: utcDay(), accepted: 108 });
+  await db.insert(schema.usageCounters).values({ teamId: qTeamId, day: utcDay(), accepted: 148 });
   const broadcastId = await insertBroadcast({
     teamId: qTeamId,
     from: "Acme <hi@quota.dev>",
@@ -375,7 +375,7 @@ it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", 
     .select()
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, qTeamId));
-  expect(counter?.accepted).toBe(110);
+  expect(counter?.accepted).toBe(150);
 });
 
 async function seedThrottleTeam(

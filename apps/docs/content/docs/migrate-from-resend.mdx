@@ -86,6 +86,16 @@ RESEND_BASE_URL=https://api.millionsend.com
 
 Self-hosted, use your instance's API origin instead.
 
+Two details that differ from what a Resend integration may assume:
+
+- `PATCH /contacts/{id}/topics` takes a bare JSON array of
+  `{ "id": "<topic-id>", "subscription": "opt_in" | "opt_out" }` entries, not an
+  object wrapping it; `GET /contacts/{id}/topics` reads them back with the
+  effective choice per topic.
+- There is no `POST /contacts/imports` (CSV). Bulk contacts go through
+  `POST /contacts/batch?on_conflict=upsert` as JSON, up to 1,000 per call, with
+  `x-batch-validation: permissive` to keep the valid rows when some fail.
+
 Prefer first-party clients? The [MillionSend SDKs](/sdks) cover nine
 languages with the same surface:
 

@@ -30,6 +30,7 @@ export const WEBHOOK_EVENT_TYPES = [
   "deliverability.paused",
   "quota.warning",
   "quota.reached",
+  "quota.paused",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

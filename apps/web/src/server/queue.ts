@@ -8,7 +8,12 @@ let instance: Promise<Queue> | undefined;
  * queue connection — pg-boss only starts on the first enqueue.
  */
 export function getQueue(): Promise<Queue> {
-  instance ??= Queue.start(env.DATABASE_URL);
+  // A rejected start is dropped so the next caller retries instead of
+  // inheriting one transient failure for the life of the process.
+  instance ??= Queue.start(env.DATABASE_URL).catch((err: unknown) => {
+    instance = undefined;
+    throw err;
+  });
   return instance;
 }
 

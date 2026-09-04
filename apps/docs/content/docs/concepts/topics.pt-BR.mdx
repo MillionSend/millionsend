@@ -27,6 +27,10 @@ criação:
 ## API
 
 `POST/GET/DELETE /topics` e `GET /topics/{id}` gerenciam tópicos; as escolhas
-de um contato são gravadas com `PATCH /contacts/{id}/topics`, passando
-entradas como `{ "id": "<topic-id>", "subscription": "opt_in" }`. Veja a
+de um contato são gravadas com `PATCH /contacts/{id}/topics`, passando um array
+puro de entradas como `{ "id": "<topic-id>", "subscription": "opt_in" }`, e
+lidas de volta com `GET /contacts/{id}/topics`, que lista cada tópico com a
+`subscription` efetiva do contato e um campo `explicit` (false quando é o padrão
+do tópico). Um envio com `topic_id` em que todos os destinatários de `to`
+optaram por sair é recusado com `422 all_recipients_suppressed`. Veja a
 [referência da API](/pt-BR/api-reference).

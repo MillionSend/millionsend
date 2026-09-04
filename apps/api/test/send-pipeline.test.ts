@@ -103,7 +103,7 @@ it("a quota-parked email is NOT enqueued — the midnight drain owns it", async 
   if (limit === null) throw new Error("free plan is expected to have a daily cap");
   await db
     .insert(schema.usageCounters)
-    // The cap tolerates 10% overage before parking; burn the ceiling.
+    // The cap tolerates 50% overage before parking; burn the ceiling.
     .values({ teamId, day: today, accepted: Math.floor(limit * (1 + QUOTA_TOLERANCE)) })
     .onConflictDoUpdate({
       target: [schema.usageCounters.teamId, schema.usageCounters.day],

@@ -39,7 +39,8 @@
     },
     "quota": {
       "warning": "Cota diária em 80%",
-      "reached": "Cota diária atingida"
+      "reached": "Cota diária atingida",
+      "paused": "Teto da cota diária: envios na fila"
     }
   },
   "status": {

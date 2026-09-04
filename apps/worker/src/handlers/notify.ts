@@ -11,6 +11,7 @@ import {
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   PLAN_DAILY_LIMIT,
+  QUOTA_TOLERANCE,
   utcDay,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
@@ -22,6 +23,7 @@ import {
   deliverabilityPausedMail,
   deliverabilityWarningMail,
   type MailContent,
+  quotaPausedMail,
   quotaReachedMail,
   quotaWarningMail,
 } from "../notifications/templates.js";
@@ -67,7 +69,12 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
 
   const notify = async (
     teamId: string,
-    type: "quota.warning" | "quota.reached" | "deliverability.warning" | "deliverability.paused",
+    type:
+      | "quota.warning"
+      | "quota.reached"
+      | "quota.paused"
+      | "deliverability.warning"
+      | "deliverability.paused",
     data: Record<string, unknown>,
     mail: MailContent,
   ) => {
@@ -112,22 +119,37 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
     for (const row of rows) {
       const limit = PLAN_DAILY_LIMIT[effectivePlan(row.plan, row.currentPeriodEnd, now)];
       if (limit === null) continue;
+      // The ceiling is where reserveDailyQuota starts parking: reaching it
+      // means new sends now wait for the reset (or a higher plan).
+      const ceiling = Math.floor(limit * (1 + QUOTA_TOLERANCE));
       const kind =
-        row.accepted >= limit
-          ? "quota.reached"
-          : row.accepted >= Math.ceil(limit * QUOTA_WARNING_RATIO)
-            ? "quota.warning"
-            : null;
+        row.accepted >= ceiling
+          ? "quota.paused"
+          : row.accepted >= limit
+            ? "quota.reached"
+            : row.accepted >= Math.ceil(limit * QUOTA_WARNING_RATIO)
+              ? "quota.warning"
+              : null;
       if (!kind) continue;
       if (!(await claimNotification(db, { teamId: row.teamId, kind, periodKey: today }))) continue;
       const resetsAt = nextUtcDayStart(now.getTime());
       const url = `${base}/settings/billing`;
-      const input = { team: row.name, used: row.accepted, limit, resetsAt, url };
+      const input = { team: row.name, used: row.accepted, limit, ceiling, resetsAt, url };
       await notify(
         row.teamId,
         kind,
-        { used: row.accepted, limit, resets_at: resetsAt.toISOString(), dashboard_url: url },
-        kind === "quota.reached" ? quotaReachedMail(input) : quotaWarningMail(input),
+        {
+          used: row.accepted,
+          limit,
+          ceiling,
+          resets_at: resetsAt.toISOString(),
+          dashboard_url: url,
+        },
+        kind === "quota.paused"
+          ? quotaPausedMail(input)
+          : kind === "quota.reached"
+            ? quotaReachedMail(input)
+            : quotaWarningMail(input),
       );
     }
   }

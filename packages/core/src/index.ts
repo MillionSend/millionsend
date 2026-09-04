@@ -170,6 +170,7 @@ export {
   PLAN_TEAM_LIMIT,
   type Plan,
   QUOTA_TOLERANCE,
+  raisesDailyLimit,
 } from "./plans.js";
 export {
   applyRegionBreakers,

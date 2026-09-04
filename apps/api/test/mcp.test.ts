@@ -262,6 +262,7 @@ describe("tool listing", () => {
       "get_usage",
       "list_contacts",
       "get_contact",
+      "get_contact_topics",
       "list_segments",
       "get_segment",
       "list_topics",
@@ -325,6 +326,7 @@ describe("tool listing", () => {
     expect((await readOnly.listTools()).tools.map((t) => t.name)).toEqual([
       "list_contacts",
       "get_contact",
+      "get_contact_topics",
       "list_segments",
       "get_segment",
       "list_topics",

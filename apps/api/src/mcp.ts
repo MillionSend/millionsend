@@ -495,6 +495,17 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     ({ id }) => api("GET", `/contacts/${enc(id)}`),
   );
   tool(
+    "get_contact_topics",
+    "audience:read",
+    {
+      description:
+        "List every topic of the team with the contact's effective subscription (their explicit choice, else the topic's default) and whether it was explicit.",
+      inputSchema: z.object({ id: idOrEmail }),
+      readOnly: true,
+    },
+    ({ id }) => api("GET", `/contacts/${enc(id)}/topics`),
+  );
+  tool(
     "list_segments",
     "audience:read",
     {

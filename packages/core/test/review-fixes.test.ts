@@ -182,13 +182,13 @@ describe("quota release", () => {
       reserved: true,
       acceptedToday: 100,
     });
-    expect(await reserveDailyQuota(db, { teamId: t, count: 10, limit: 100, day })).toEqual({
+    expect(await reserveDailyQuota(db, { teamId: t, count: 50, limit: 100, day })).toEqual({
       reserved: true,
-      acceptedToday: 110,
+      acceptedToday: 150,
     });
     expect(await reserveDailyQuota(db, { teamId: t, count: 1, limit: 100, day })).toEqual({
       reserved: false,
-      acceptedToday: 110,
+      acceptedToday: 150,
     });
   });
 });

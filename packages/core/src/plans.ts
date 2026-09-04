@@ -31,10 +31,18 @@ export const PLAN_DAILY_LIMIT: Record<Plan, number | null> = {
 
 /**
  * Sends keep passing this far past the daily limit before parking, so a day
- * that ends right at the cap does not hold a customer's last few messages
- * until midnight. The nominal limit stays what plans and the dashboard show.
+ * that runs past the cap does not hold a customer's messages until midnight.
+ * The nominal limit stays what plans and the dashboard show; owners hear
+ * about it at 80% of the limit, at the limit, and when parking begins.
  */
-export const QUOTA_TOLERANCE = 0.1;
+export const QUOTA_TOLERANCE = 0.5;
+
+/** Whether moving between plans lifts the daily send cap (unlimited counts as higher). */
+export function raisesDailyLimit(from: Plan, to: Plan): boolean {
+  const a = PLAN_DAILY_LIMIT[from];
+  const b = PLAN_DAILY_LIMIT[to];
+  return a !== null && (b === null || b > a);
+}
 
 /**
  * Teams a user may own on Cloud, by the best effective plan among the teams

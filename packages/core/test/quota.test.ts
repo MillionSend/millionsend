@@ -24,14 +24,14 @@ describe("reserveDailyQuota", () => {
   });
 
   it("rejects the reservation that would cross the tolerant ceiling, leaving the counter intact", async () => {
-    // 10% past the nominal limit still passes; the request that would cross
+    // 50% past the nominal limit still passes; the request that would cross
     // the ceiling is refused without touching the counter.
-    const over = await reserveDailyQuota(db, { teamId, count: 11, limit: 100, day: DAY });
+    const over = await reserveDailyQuota(db, { teamId, count: 51, limit: 100, day: DAY });
     expect(over).toEqual({ reserved: false, acceptedToday: 100 });
-    const within = await reserveDailyQuota(db, { teamId, count: 10, limit: 100, day: DAY });
-    expect(within).toEqual({ reserved: true, acceptedToday: 110 });
+    const within = await reserveDailyQuota(db, { teamId, count: 50, limit: 100, day: DAY });
+    expect(within).toEqual({ reserved: true, acceptedToday: 150 });
     const past = await reserveDailyQuota(db, { teamId, count: 1, limit: 100, day: DAY });
-    expect(past).toEqual({ reserved: false, acceptedToday: 110 });
+    expect(past).toEqual({ reserved: false, acceptedToday: 150 });
   });
 
   it("rejects a first-of-day reservation larger than the limit without creating drift", async () => {

@@ -26,8 +26,9 @@ Eventos de conta não carregam email; `data` descreve a situação do time:
 | --- | --- | --- |
 | `deliverability.warning` | A taxa de hard bounce ou de reclamação do time cruzou a linha de risco (uma vez por episódio). | `{ metric, rate, limit, window_days, dashboard_url }` |
 | `deliverability.paused` | A taxa cruzou a linha de pausa; novos envios são recusados até se recuperar. | igual ao anterior |
-| `quota.warning` | 80% da cota diária de hoje foi usada (uma vez por dia UTC, só na nuvem). | `{ used, limit, resets_at, dashboard_url }` |
-| `quota.reached` | A cota de hoje foi usada; os envios passam até 10% a mais e depois estacionam até a meia-noite UTC. | igual ao anterior |
+| `quota.warning` | 80% da cota diária de hoje foi usada (uma vez por dia UTC, só na nuvem). | `{ used, limit, ceiling, resets_at, dashboard_url }` — `ceiling` é onde os envios começam a estacionar |
+| `quota.reached` | A cota de hoje foi usada; os envios passam até 50% a mais e depois estacionam até a meia-noite UTC. | igual ao anterior |
+| `quota.paused` | 50% além da cota: novos envios ficam estacionados até a meia-noite UTC, ou até um upgrade de plano liberá-los (uma vez por dia UTC, só na nuvem). | igual ao anterior |
 
 ## Assinaturas (Standard Webhooks)
 

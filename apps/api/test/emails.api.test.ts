@@ -114,7 +114,7 @@ describe("not-fully-verified domain send gate", () => {
 
 describe("send edge cases", () => {
   it("parks the 101st email of the day as queued_quota but still accepts it", async () => {
-    // Free plan cap is 100/day and sends pass up to 10% over it; burn the
+    // Free plan cap is 100/day and sends pass up to 50% over it; burn the
     // tolerant ceiling, then send one more.
     for (let i = 0; i < 4; i++) {
       const res = await post({ ...validBody, to: [`bulk${i}@example.com`] });
@@ -122,7 +122,7 @@ describe("send edge cases", () => {
     }
     await db
       .update(schema.usageCounters)
-      .set({ accepted: 110 })
+      .set({ accepted: 150 })
       .where(eq(schema.usageCounters.teamId, teamId));
     const res = await post({ ...validBody, to: ["overflow@example.com"] });
     expect(res.status).toBe(200);
@@ -143,7 +143,10 @@ describe("send edge cases", () => {
     });
     const res = await post({ ...validBody, to: ["dead@example.com"] });
     expect(res.status).toBe(422);
-    expect(await res.json()).toMatchObject({ name: "validation_error" });
+    expect(await res.json()).toMatchObject({
+      name: "all_recipients_suppressed",
+      message: "All recipients are suppressed",
+    });
   });
 
   it("replays an idempotent send and conflicts on payload drift", async () => {
@@ -737,7 +740,6 @@ describe("attachments and custom headers", () => {
     for (const name of [
       "From",
       "bCC",
-      "list-UNSUBSCRIBE",
       "List-Id",
       "Content-Type",
       "X-SES-SOURCE-ARN",
@@ -763,6 +765,34 @@ describe("attachments and custom headers", () => {
       headers: { "In-Reply-To": "<abc@example.com>", "X-Priority": "1" },
     });
     expect(ok.status).toBe(200);
+  });
+
+  it("accepts the one-click unsubscribe pair only with https/mailto targets and the RFC 8058 value", async () => {
+    const ok = await post({
+      ...validBody,
+      to: ["own-unsubscribe@example.com"],
+      headers: {
+        "list-unsubscribe": "<https://api.example.com/unsubscribe/abc>, <mailto:unsub@example.com>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
+    });
+    expect(ok.status).toBe(200);
+    const post_ = { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" };
+    for (const [headers, message] of [
+      [{ "List-Unsubscribe": "<http://api.example.com/u/abc>", ...post_ }, /https/],
+      [{ "List-Unsubscribe": "https://api.example.com/u/abc", ...post_ }, /https/],
+      [{ "List-Unsubscribe": "<mailto:unsub@example.com>", ...post_ }, /https/],
+      [
+        { "List-Unsubscribe": "<https://api.example.com/u/abc>", "List-Unsubscribe-Post": "yes" },
+        /One-Click/,
+      ],
+      [{ "List-Unsubscribe": "<https://api.example.com/u/abc>" }, /together/],
+      [post_, /together/],
+    ] as const) {
+      const res = await post({ ...validBody, headers });
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({ message: expect.stringMatching(message) });
+    }
   });
 
   it("rejects control characters in subject, filename and content_type", async () => {
@@ -933,10 +963,10 @@ describe("template sends are refused, not silently stripped", () => {
 
 describe("quota backlog cap", () => {
   it("429s daily_quota_exceeded once the parked backlog is full, on single and batch sends", async () => {
-    // Free plan: 100/day (+10% tolerance), backlog capped at 3 days' worth.
+    // Free plan: 100/day (+50% tolerance), backlog capped at 3 days' worth.
     await db
       .update(schema.usageCounters)
-      .set({ accepted: 110 })
+      .set({ accepted: 150 })
       .where(eq(schema.usageCounters.teamId, teamId));
     const parked = await db
       .select({ id: schema.emails.id })

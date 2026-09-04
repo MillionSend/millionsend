@@ -191,18 +191,19 @@ export async function startFakeResend(
     }
     const rows = data[collection] as Row[];
     if (id === undefined) {
-      const segmentId = url.searchParams.get("segment_id");
-      let listed = rows;
-      if (head === "contacts" && segmentId !== null) {
-        const members = new Set(data.segments.find((s) => s.id === segmentId)?.member_ids ?? []);
-        listed = rows.filter((row) => members.has(row.id));
-      }
+      // Like Resend, GET /contacts ignores segment_id: the whole list comes back.
       const view = LIST_VIEW[head] ?? ((row: Row) => row);
-      return { status: 200, body: page(listed.map(view), url.searchParams) };
+      return { status: 200, body: page(rows.map(view), url.searchParams) };
     }
     const row = rows.find((candidate) => candidate.id === id);
     if (row === undefined)
       return { status: 404, body: { name: "not_found", message: `${head} ${id} not found` } };
+    if (head === "segments" && sub === "contacts") {
+      const members = new Set((row as { member_ids?: string[] }).member_ids ?? []);
+      const view = LIST_VIEW.contacts ?? ((r: Row) => r);
+      const listed = (data.contacts as Row[]).filter((c) => members.has(c.id)).map(view);
+      return { status: 200, body: page(listed, url.searchParams) };
+    }
     if (head === "contacts" && sub === "topics") {
       const topics = ((row as FakeContact).topics ?? []) as Row[];
       return { status: 200, body: page(topics, url.searchParams) };

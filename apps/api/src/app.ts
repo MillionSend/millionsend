@@ -91,6 +91,7 @@ import {
   type ListQuery,
   listBroadcastsResponseSchema,
   listContactsResponseSchema,
+  listContactTopicsResponseSchema,
   listEmailsResponseSchema,
   listQuerySchema,
   listSegmentsResponseSchema,
@@ -248,7 +249,7 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
     case "all_suppressed":
       return {
         status: 422 as const,
-        body: errorBody(422, "validation_error", "All recipients are suppressed"),
+        body: errorBody(422, "all_recipients_suppressed", "All recipients are suppressed"),
       };
   }
 }
@@ -1293,6 +1294,55 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const row = await deleteContactOp(auth.teamId, c.req.valid("param").id);
       if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       return c.json({ object: "contact" as const, contact: row.id, deleted: true as const }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/contacts/{id}/topics",
+      request: { params: idParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: listContactTopicsResponseSchema } },
+          description:
+            "Every topic of the team with the contact's effective subscription and whether it was chosen explicitly",
+        },
+        404: jsonErr("Not found"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const contact = await findContact(auth.teamId, c.req.valid("param").id);
+      if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      const s = schema.contactTopicSubscriptions;
+      const rows = await db
+        .select({
+          id: schema.topics.id,
+          name: schema.topics.name,
+          description: schema.topics.description,
+          defaultSubscribed: schema.topics.defaultSubscribed,
+          subscribed: s.subscribed,
+        })
+        .from(schema.topics)
+        .leftJoin(s, and(eq(s.topicId, schema.topics.id), eq(s.contactId, contact.id)))
+        .where(eq(schema.topics.teamId, auth.teamId))
+        .orderBy(asc(schema.topics.createdAt), asc(schema.topics.id));
+      return c.json(
+        {
+          object: "list" as const,
+          data: rows.map((r) => ({
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            subscription:
+              (r.subscribed ?? r.defaultSubscribed) ? ("opt_in" as const) : ("opt_out" as const),
+            explicit: r.subscribed !== null,
+          })),
+          has_more: false as const,
+        },
+        200,
+      );
     },
   );
 
@@ -2991,7 +3041,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       for (const r of optedOut) suppressed.add(r);
     }
     if (body.to.every((r) => suppressed.has(r))) {
-      return { status: 422, name: "validation_error", message: "All recipients are suppressed" };
+      return {
+        status: 422,
+        name: "all_recipients_suppressed",
+        message: "All recipients are suppressed",
+      };
     }
     return { payload: toAcceptPayload(body, domain.domainId) };
   };

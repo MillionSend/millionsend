@@ -39,7 +39,8 @@
     },
     "quota": {
       "warning": "Daily quota at 80%",
-      "reached": "Daily quota reached"
+      "reached": "Daily quota reached",
+      "paused": "Daily quota ceiling: sends queued"
     }
   },
   "status": {

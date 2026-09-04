@@ -32,6 +32,10 @@ async function post(path: string, body: unknown) {
   });
 }
 
+async function get(path: string) {
+  return app.request(path, { headers: { authorization: `Bearer ${token}` } });
+}
+
 const base = { from: "Acme <a@acme.dev>", subject: "s", text: "t" };
 
 async function emailRow(id: string) {
@@ -143,11 +147,34 @@ describe("topic opt-out suppression at accept", () => {
     expect(enqueued).toContain(id);
   });
 
+  it("GET /contacts/{id}/topics lists every topic with the effective choice and whether it was explicit", async () => {
+    const res = await get(`/contacts/${encodeURIComponent(OPTED_OUT)}/topics`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      object: string;
+      has_more: boolean;
+      data: Array<{ id: string; name: string; subscription: string; explicit: boolean }>;
+    };
+    expect(body).toMatchObject({ object: "list", has_more: false });
+    const byId = new Map(body.data.map((t) => [t.id, t]));
+    // Explicitly opted out of the opt-in topic; the opt-out topic falls to its default.
+    expect(byId.get(optInTopicId)).toMatchObject({ subscription: "opt_out", explicit: true });
+    expect(byId.get(optOutTopicId)).toMatchObject({ subscription: "opt_out", explicit: false });
+    const member = (await (await get(`/contacts/${encodeURIComponent(MEMBER)}/topics`)).json()) as {
+      data: Array<{ id: string; subscription: string; explicit: boolean }>;
+    };
+    expect(member.data.find((t) => t.id === optInTopicId)).toMatchObject({
+      subscription: "opt_in",
+      explicit: false,
+    });
+    expect((await get("/contacts/nobody@example.com/topics")).status).toBe(404);
+  });
+
   it("422s when every `to` recipient explicitly opted out", async () => {
     const res = await post("/emails", { ...base, to: [OPTED_OUT], topic_id: optInTopicId });
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({
-      name: "validation_error",
+      name: "all_recipients_suppressed",
       message: "All recipients are suppressed",
     });
   });
@@ -201,7 +228,7 @@ describe("topic opt-out suppression at accept", () => {
     ]);
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({
-      name: "validation_error",
+      name: "all_recipients_suppressed",
       message: expect.stringMatching(/emails\.1: All recipients are suppressed/),
     });
     expect(enqueued.length).toBe(before);

@@ -11,8 +11,9 @@ Stripe key. This page is for operating a hosted deployment.
 
 Flat monthly tiers. The plan sets the team's daily send cap; emails over the
 cap are parked and drained after the UTC midnight reset. Sends keep passing up
-to 10% past the cap before parking, so a day that ends right at the cap does
-not hold the last few messages.
+to 50% past the cap before parking, so a busy day is not cut off at the cap.
+Owners are emailed at 80% of the cap, at the cap, and when parking begins; a
+plan upgrade releases parked mail within minutes.
 
 | Plan | Daily cap | Stripe lookup key |
 | --- | --- | --- |

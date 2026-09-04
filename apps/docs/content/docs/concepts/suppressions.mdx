@@ -24,7 +24,9 @@ automatically. Suppressions are per team.
 
 - **Transactional sends** (`POST /emails`, SMTP relay): suppressed recipients
   are stripped from `to`/`cc`/`bcc`. If *every* `to` recipient is suppressed,
-  the send is rejected with `422 All recipients are suppressed`.
+  the send is rejected with `422 all_recipients_suppressed` (message
+  `All recipients are suppressed`). Recipients opted out of the send's
+  `topic_id` count as suppressed for this rule.
 - **Broadcasts**: suppressed contacts are skipped during fan-out.
 
 ## Reviewing and removing

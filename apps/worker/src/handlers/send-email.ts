@@ -264,6 +264,10 @@ async function parkForSesQuota(db: Db, email: { id: string; teamId: string }): P
   console.warn(`email.send: SES 24h quota reached, parked ${email.id}`);
 }
 
+/** Header names are case-insensitive; the caller's map keeps whatever casing it sent. */
+const hasListUnsubscribe = (headers: Record<string, string> | null | undefined): boolean =>
+  Object.keys(headers ?? {}).some((k) => k.toLowerCase() === "list-unsubscribe");
+
 /**
  * SES errors that no retry can fix: the message itself (MessageRejected,
  * BadRequest) or the sending identity/account is refused. Throttling,
@@ -536,9 +540,11 @@ export async function sendEmail(
         }),
       ),
     );
-  } else if (topicUnsubscribeToken && deps.unsubscribe) {
+  } else if (topicUnsubscribeToken && deps.unsubscribe && !hasListUnsubscribe(email.headers)) {
     // Topic sends carry the same RFC 8058 one-click headers as broadcasts so
-    // the recipient can opt out of the topic without a global unsubscribe.
+    // the recipient can opt out of the topic without a global unsubscribe. A
+    // sender who supplied its own pair (validated at accept) keeps it: its
+    // footer link and the header then point at the same place.
     Object.assign(
       headers,
       buildUnsubscribeHeaders(deps.unsubscribe.baseUrl, topicUnsubscribeToken),

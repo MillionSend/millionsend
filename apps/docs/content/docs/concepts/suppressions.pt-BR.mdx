@@ -26,7 +26,9 @@ automaticamente. Supressões são por time.
 - **Envios transacionais** (`POST /emails`, relay SMTP): destinatários
   suprimidos são removidos de `to`/`cc`/`bcc`. Se *todos* os destinatários em
   `to` estiverem suprimidos, o envio é rejeitado com
-  `422 All recipients are suppressed`.
+  `422 all_recipients_suppressed` (mensagem `All recipients are suppressed`).
+  Destinatários que optaram por sair do `topic_id` do envio contam como
+  suprimidos para essa regra.
 - **Broadcasts**: contatos suprimidos são pulados durante o fan-out.
 
 ## Revisando e removendo

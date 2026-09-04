@@ -26,8 +26,9 @@ Team-level events carry no email; `data` describes the team's standing instead:
 | --- | --- | --- |
 | `deliverability.warning` | The team's hard-bounce or complaint rate crossed the risk line (once per episode). | `{ metric, rate, limit, window_days, dashboard_url }` |
 | `deliverability.paused` | The rate crossed the pause line; new sends are refused until it recovers. | same as above |
-| `quota.warning` | 80% of today's daily cap is used (once per UTC day, cloud only). | `{ used, limit, resets_at, dashboard_url }` |
-| `quota.reached` | Today's cap is used; sends pass up to 10% more, then park until midnight UTC. | same as above |
+| `quota.warning` | 80% of today's daily cap is used (once per UTC day, cloud only). | `{ used, limit, ceiling, resets_at, dashboard_url }` — `ceiling` is where parking begins |
+| `quota.reached` | Today's cap is used; sends pass up to 50% more, then park until midnight UTC. | same as above |
+| `quota.paused` | 50% past the cap: new sends are parked until midnight UTC, or until a plan upgrade releases them (once per UTC day, cloud only). | same as above |
 
 ## Signatures (Standard Webhooks)
 

@@ -26,6 +26,10 @@ creation:
 ## API
 
 `POST/GET/DELETE /topics` and `GET /topics/{id}` manage topics; a contact's
-choices are written with `PATCH /contacts/{id}/topics`, passing entries like
-`{ "id": "<topic-id>", "subscription": "opt_in" }`. See the
+choices are written with `PATCH /contacts/{id}/topics`, passing a bare array of
+entries like `{ "id": "<topic-id>", "subscription": "opt_in" }`, and read back
+with `GET /contacts/{id}/topics`, which lists every topic with the contact's
+effective `subscription` and an `explicit` flag (false when it is the topic's
+default). A send with a `topic_id` whose every `to` recipient is opted out is
+refused with `422 all_recipients_suppressed`. See the
 [API reference](/api-reference).

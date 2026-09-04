@@ -217,7 +217,7 @@ describe("topic-scoped sends (topicId)", () => {
       topicId,
     });
     expect(sent.data).toBeNull();
-    expect(sent.error?.name).toBe("validation_error");
+    expect(sent.error?.name).toBe("all_recipients_suppressed");
     expect(sent.error?.statusCode).toBe(422);
   });
 

@@ -254,6 +254,37 @@ it("a topic send to a contact substitutes both unsubscribe tokens and carries RF
   expect(lowerMime).not.toContain("list-id:");
 });
 
+it("a topic send keeps a caller-supplied one-click unsubscribe pair instead of the generated one", async () => {
+  const [topic] = await db
+    .insert(schema.topics)
+    .values({ teamId, name: "Own opt-out", defaultSubscribed: true })
+    .returning({ id: schema.topics.id });
+  if (!topic) throw new Error("topic insert failed");
+  await insertContact("own-optout@example.com");
+  const { ses, sends } = fakeSes("mid-own-unsub");
+  const emailId = await insertEmail({
+    topicId: topic.id,
+    to: ["own-optout@example.com"],
+    headers: {
+      "List-Unsubscribe": "<https://api.acme.dev/unsubscribe/abc>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
+  });
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    unsubscribe: { secretKey: randomBytes(32), baseUrl: "https://app.example.com" },
+  };
+
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+  const lowerMime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "")
+    .replace(/\r\n[ \t]/g, "")
+    .toLowerCase();
+  expect(lowerMime).toContain("list-unsubscribe: <https://api.acme.dev/unsubscribe/abc>");
+  expect(lowerMime).not.toContain("app.example.com/unsubscribe/");
+  expect(lowerMime).toContain("list-unsubscribe-post: list-unsubscribe=one-click");
+});
+
 it("a topic send to a non-contact strips the placeholder tokens and carries no unsubscribe headers", async () => {
   const [topic] = await db
     .insert(schema.topics)

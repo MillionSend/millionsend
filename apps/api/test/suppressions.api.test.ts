@@ -446,7 +446,7 @@ describe("send integration", () => {
     const refused = await send(["Blocked@example.com"]);
     expect(refused.status).toBe(422);
     expect(await refused.json()).toMatchObject({
-      name: "validation_error",
+      name: "all_recipients_suppressed",
       message: expect.stringMatching(/suppressed/),
     });
 

@@ -384,7 +384,9 @@ export function createResendSource(http: Http, log: Logger): Source {
           onProgress,
           async (item) => {
             const { body } = await get<WireSegment>(path("segments", item.id));
-            const members = await listAll<WireContact>("/contacts", { segment_id: item.id });
+            // GET /contacts ignores segment_id on Resend (the full list comes back
+            // for every segment); membership lives on the segment's own list.
+            const members = await listAll<WireContact>(`/segments/${item.id}/contacts`, {});
             return {
               id: item.id,
               name: body.name ?? item.name,

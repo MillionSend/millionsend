@@ -10,6 +10,7 @@ export const MCP_TOOLS: { name: string; scope: McpScope; readOnly?: boolean }[] 
   { name: "get_usage", scope: "emails:read", readOnly: true },
   { name: "list_contacts", scope: "audience:read", readOnly: true },
   { name: "get_contact", scope: "audience:read", readOnly: true },
+  { name: "get_contact_topics", scope: "audience:read", readOnly: true },
   { name: "list_segments", scope: "audience:read", readOnly: true },
   { name: "get_segment", scope: "audience:read", readOnly: true },
   { name: "list_topics", scope: "audience:read", readOnly: true },

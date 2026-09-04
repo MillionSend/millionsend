@@ -1,9 +1,10 @@
 import { handleWebhook, isLiveKey } from "@millionsend/billing";
 import { env } from "@millionsend/config";
-import { recordAudit } from "@millionsend/core";
+import { effectivePlan, raisesDailyLimit, recordAudit } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
 import { getStripe } from "@/server/billing";
+import { getQueue } from "@/server/queue";
 
 /**
  * Stripe webhook endpoint. Unauthenticated by design: the raw body is
@@ -34,6 +35,26 @@ export async function POST(request: Request) {
         target: { type: "team", id: after.id },
         metadata: { eventType: event.type, plan: after.plan, planStatus: after.planStatus },
       });
+      // Mail parked over the old cap would otherwise wait for the next
+      // scheduled drain; a paying upgrade should release it at once. The cap
+      // that parked it is the effective one (a lapsed period counts as free),
+      // so the comparison uses that. Best-effort: the plan is already
+      // committed, and the scheduled drain releases the mail regardless.
+      if (
+        raisesDailyLimit(
+          effectivePlan(before.plan, before.currentPeriodEnd),
+          effectivePlan(after.plan, after.currentPeriodEnd),
+        )
+      ) {
+        try {
+          await (await getQueue()).runCronNow("quota.drain");
+        } catch (err) {
+          console.error(
+            "billing webhook: quota.drain kick failed; the scheduled drain will release the mail",
+            err,
+          );
+        }
+      }
     }
   }
   return new Response(null, { status });
@@ -59,7 +80,12 @@ function parseEvent(rawBody: string): { type: string; customerId: string } | nul
 
 async function planOf(db: Db, customerId: string) {
   const [team] = await db
-    .select({ id: schema.teams.id, plan: schema.teams.plan, planStatus: schema.teams.planStatus })
+    .select({
+      id: schema.teams.id,
+      plan: schema.teams.plan,
+      planStatus: schema.teams.planStatus,
+      currentPeriodEnd: schema.teams.currentPeriodEnd,
+    })
     .from(schema.teams)
     .where(eq(schema.teams.stripeCustomerId, customerId));
   return team ?? null;

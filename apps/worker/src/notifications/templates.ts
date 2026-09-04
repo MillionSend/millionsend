@@ -1,4 +1,4 @@
-import { EMAIL_WORDMARK_URL, escapeHtml } from "@millionsend/core";
+import { EMAIL_WORDMARK_URL, escapeHtml, QUOTA_TOLERANCE } from "@millionsend/core";
 
 export interface MailContent {
   subject: string;
@@ -35,6 +35,8 @@ function layout(input: {
 }
 
 const percent = (rate: number) => `${(rate * 100).toFixed(2)}%`;
+const tolerance = `${Math.round(QUOTA_TOLERANCE * 100)}%`;
+const resetTime = (at: Date) => `${at.toISOString().slice(11, 16)} UTC`;
 const metricName = (metric: "bounce" | "complaint") =>
   metric === "bounce" ? "hard-bounce rate" : "complaint rate";
 
@@ -49,7 +51,7 @@ export function quotaWarningMail(input: {
     subject: `${input.team}: 80% of today's sending quota used`,
     paragraphs: [
       `${input.team} has used ${input.used} of its ${input.limit} emails for today.`,
-      `Sends keep going out until 10% past the quota; after that they queue until the quota resets at ${input.resetsAt.toISOString().slice(11, 16)} UTC.`,
+      `Sends keep going out until ${tolerance} past the quota; after that they queue until the quota resets at ${resetTime(input.resetsAt)}. A higher plan raises the daily quota immediately.`,
     ],
     button: { label: "Review your plan", url: input.url },
     footnote: "You get this once per day when a team you own nears its quota.",
@@ -60,17 +62,37 @@ export function quotaReachedMail(input: {
   team: string;
   used: number;
   limit: number;
+  ceiling: number;
   resetsAt: Date;
   url: string;
 }): MailContent {
+  const headroom = Math.max(0, input.ceiling - input.used);
   return layout({
     subject: `${input.team}: today's sending quota reached`,
     paragraphs: [
       `${input.team} has used its ${input.limit} emails for today (${input.used} accepted).`,
-      `Up to 10% more still go out today; anything past that is queued and sent after the quota resets at ${input.resetsAt.toISOString().slice(11, 16)} UTC. A higher plan raises the daily quota immediately.`,
+      `${headroom} more still go out today (sends pass until ${tolerance} past the quota); anything past that is queued and sent after the quota resets at ${resetTime(input.resetsAt)}. A higher plan raises the daily quota immediately and releases queued mail within minutes.`,
     ],
     button: { label: "Review your plan", url: input.url },
     footnote: "You get this once per day when a team you own reaches its quota.",
+  });
+}
+
+export function quotaPausedMail(input: {
+  team: string;
+  used: number;
+  limit: number;
+  resetsAt: Date;
+  url: string;
+}): MailContent {
+  return layout({
+    subject: `${input.team}: sending paused until the quota resets`,
+    paragraphs: [
+      `${input.team} has used ${input.used} emails today, ${tolerance} past its ${input.limit} quota, so new sends are queued instead of sent.`,
+      `Queued mail goes out after the quota resets at ${resetTime(input.resetsAt)}. A higher plan raises the daily quota immediately and releases the queue within minutes.`,
+    ],
+    button: { label: "Review your plan", url: input.url },
+    footnote: "You get this once per day when a team you own passes the ceiling of its quota.",
   });
 }
 
