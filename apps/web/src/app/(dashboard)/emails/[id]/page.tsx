@@ -29,6 +29,7 @@ import { formatHtml } from "@/lib/html";
 import { BAND_TONE, checkGlyph, formatScoreTenths } from "@/lib/score-band";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { useTheme } from "@/lib/use-theme";
 
 type EventType =
   | "queued"
@@ -617,9 +618,11 @@ export default function EmailDetailPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("preview");
-  // The preview as a light or dark mail client would show it; light is what
-  // most clients default to, so the toggle starts there.
-  const [scheme, setScheme] = useState<EmailScheme>("light");
+  // The preview as a light or dark mail client would show it. It follows the
+  // dashboard's theme until the reader picks one here.
+  const theme = useTheme();
+  const [schemeOverride, setScheme] = useState<EmailScheme | null>(null);
+  const scheme: EmailScheme = schemeOverride ?? (theme === "dark" ? "dark" : "light");
   const [htmlFormatted, setHtmlFormatted] = useState(true);
   const [drawer, setDrawer] = useState<"bounced" | "suppressed" | null>(null);
   // Identifies an occurrence group by its first event's id — type alone is
