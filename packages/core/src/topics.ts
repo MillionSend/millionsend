@@ -38,12 +38,12 @@ export async function findTopicOptOuts(
   const c = schema.contacts;
   const addrByRecipient = new Map(recipients.map((r) => [r, extractAddrSpec(r).toLowerCase()]));
   const contacts = await db
-    .select({ id: c.id, email: c.email })
+    .select({ id: c.id, email: c.email, unsubscribed: c.unsubscribed })
     .from(c)
     .where(
       and(eq(c.teamId, teamId), inArray(sql`lower(${c.email})`, [...addrByRecipient.values()])),
     );
-  const contactIdByAddr = new Map(contacts.map((row) => [row.email.toLowerCase(), row.id]));
+  const contactByAddr = new Map(contacts.map((row) => [row.email.toLowerCase(), row]));
 
   const overrides = new Map<string, boolean>();
   if (contacts.length > 0) {
@@ -63,11 +63,15 @@ export async function findTopicOptOuts(
     for (const row of rows) overrides.set(row.contactId, row.subscribed);
   }
 
+  // A globally unsubscribed contact is out of every topic, whatever their
+  // per-topic rows say: the global flag is the wider choice.
   const optedOut = new Set<string>();
   for (const [recipient, addr] of addrByRecipient) {
-    const contactId = contactIdByAddr.get(addr);
-    const override = contactId ? overrides.get(contactId) : undefined;
-    if (!isSubscribedToTopic(override, topic.defaultSubscribed)) optedOut.add(recipient);
+    const contact = contactByAddr.get(addr);
+    const override = contact ? overrides.get(contact.id) : undefined;
+    if (contact?.unsubscribed || !isSubscribedToTopic(override, topic.defaultSubscribed)) {
+      optedOut.add(recipient);
+    }
   }
   return optedOut;
 }

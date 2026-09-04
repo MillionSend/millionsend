@@ -7,13 +7,18 @@ import {
   acceptEmail,
   authenticateApiKey,
   beginIdempotent,
+  buildUnsubscribeUrl,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   type ContactActivityRow,
+  type ContactEventContext,
+  type ContactSnapshot,
   canonicalBodyHash,
   clearUnsubscribeSuppression,
   completeIdempotent,
   DAY_MS,
   decryptEmailBody,
+  emitContactEvents,
+  emitSuppressionEvents,
   eraseRecipient,
   estimateAttachmentBytes,
   extractTokenPrefix,
@@ -24,6 +29,7 @@ import {
   findTopicOptOuts,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
+  makeUnsubscribeToken,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   parseScheduledAt,
@@ -79,6 +85,7 @@ import {
   cancelBroadcastResponseSchema,
   cancelEmailResponseSchema,
   contactIdResponseSchema,
+  contactPreferencesLinkResponseSchema,
   createBroadcastRequestSchema,
   createContactRequestSchema,
   createSegmentRequestSchema,
@@ -150,6 +157,18 @@ export interface ApiDeps {
   enqueueBroadcastSend?:
     | ((broadcastId: string, opts?: { startAfter?: Date }) => Promise<void>)
     | undefined;
+  /**
+   * Hands a webhook delivery row to the delivery queue, for the contact and
+   * suppression events the API publishes. Optional: without it the rows still
+   * land and the webhooks.reconcile sweep sends them within fifteen minutes.
+   */
+  enqueueWebhookDelivery?: ((deliveryId: string) => Promise<void>) | undefined;
+  /**
+   * The key the hosted unsubscribe page verifies tokens with (core
+   * deriveUnsubscribeKey over MASTER_ENCRYPTION_KEY). With appBaseUrl it lets
+   * POST /contacts/{id}/preferences-link mint links; omitted → that route 422s.
+   */
+  unsubscribeSecretKey?: Buffer | undefined;
   /** SES event ingestion; omitted → the endpoint does not exist (404). */
   sns?: SnsIngestDeps | undefined;
   /** SES identity management; omitted → the /domains routes do not exist (404). */
@@ -586,7 +605,8 @@ function contactListItem(r: typeof schema.contacts.$inferSelect) {
  * legacy /audiences/{id}/contacts aliases registered below, which run the
  * same operations (audiences are a pure alias of segments in resend v6).
  */
-function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
+function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
+  const db = deps.db;
   const jsonErr = (description: string) => ({
     content: { "application/json": { schema: errorSchema } },
     description,
@@ -611,6 +631,22 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
 
   const findContact = async (teamId: string, idOrEmail: string) =>
     (await db.select().from(t).where(teamContactWhere(teamId, idOrEmail)))[0];
+
+  // Contact and suppression changes made through the API publish with this
+  // provenance; the enqueue is optional, the reconcile sweep covers its absence.
+  const contactEvents: ContactEventContext = {
+    source: "api",
+    enqueue: deps.enqueueWebhookDelivery,
+  };
+  const contactSnapshotColumns = {
+    id: t.id,
+    email: t.email,
+    firstName: t.firstName,
+    lastName: t.lastName,
+    unsubscribed: t.unsubscribed,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+  };
 
   const contactDetailWire = (
     contact: typeof schema.contacts.$inferSelect,
@@ -878,12 +914,13 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
               .returning({ id: t.id, email: t.email });
             for (const c of created) idByKey.set(c.email.toLowerCase(), c.id);
           }
+          const updatedSnapshots: ContactSnapshot[] = [];
           for (const { row, found } of updates) {
             // A batch never re-subscribes anyone: unsubscribed:false on an
             // opted-out contact is ignored, and the retained one-click
             // suppression stays. Re-subscribing is the explicit PATCH.
             const unsubscribe = row.unsubscribed === true && !found.unsubscribed;
-            await tx
+            const [snapshot] = await tx
               .update(t)
               .set({
                 updatedAt: new Date(),
@@ -894,7 +931,9 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
                   ? { properties: sql`${t.properties} || ${JSON.stringify(row.properties)}::jsonb` }
                   : {}),
               })
-              .where(and(eq(t.id, found.id), eq(t.teamId, teamId)));
+              .where(and(eq(t.id, found.id), eq(t.teamId, teamId)))
+              .returning(contactSnapshotColumns);
+            if (snapshot) updatedSnapshots.push(snapshot);
             idByKey.set(row.key, found.id);
           }
           const writtenRows = [...inserts, ...updates.map((u) => u.row)].map((row) => {
@@ -948,7 +987,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
                 set: { subscribed: sql`excluded.subscribed`, updatedAt: new Date() },
               });
           }
-          return { writtenRows, added, prior };
+          return { writtenRows, added, prior, updatedSnapshots };
         });
 
         const activity: ContactActivityRow[] = [];
@@ -990,7 +1029,15 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
             data: { segmentId: a.segmentId, name: segmentNames.get(a.segmentId) ?? null },
           });
         }
-        await recordContactActivity(db, activity);
+        await recordContactActivity(db, activity, contactEvents);
+        await emitContactEvents(db, {
+          teamId,
+          events: written.updatedSnapshots.map((contact) => ({
+            type: "contact.updated" as const,
+            contact,
+          })),
+          ctx: contactEvents,
+        });
         return results;
       } catch (err) {
         if (attempt < 2 && (isUniqueViolation(err) || isForeignKeyViolation(err))) continue;
@@ -1048,17 +1095,35 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
         ...(properties !== undefined ? { properties } : {}),
       })
       .where(teamContactWhere(teamId, idOrEmail))
-      .returning({ id: t.id, email: t.email });
+      .returning(contactSnapshotColumns);
     // Only this explicit re-subscribe lifts the retained one-click opt-out;
     // creating or importing the address again leaves it in place.
     if (row && body.unsubscribed === false) {
-      await clearUnsubscribeSuppression(db, teamId, row.email);
+      const dropped = await clearUnsubscribeSuppression(db, teamId, row.email);
+      await emitSuppressionEvents(db, {
+        teamId,
+        type: "suppression.removed",
+        rows: dropped,
+        source: contactEvents.source,
+        enqueue: contactEvents.enqueue,
+      });
     }
     if (row && before && before.unsubscribed !== body.unsubscribed) {
-      await recordContactActivity(db, {
+      await recordContactActivity(
+        db,
+        {
+          teamId,
+          contactId: row.id,
+          type: body.unsubscribed ? "unsubscribed" : "resubscribed",
+        },
+        contactEvents,
+      );
+    }
+    if (row) {
+      await emitContactEvents(db, {
         teamId,
-        contactId: row.id,
-        type: body.unsubscribed ? "unsubscribed" : "resubscribed",
+        events: [{ type: "contact.updated", contact: row }],
+        ctx: contactEvents,
       });
     }
     return row;
@@ -1069,11 +1134,19 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       await db
         .delete(t)
         .where(teamContactWhere(teamId, idOrEmail))
-        .returning({ id: t.id, email: t.email })
+        .returning(contactSnapshotColumns)
     )[0];
-    // Deleting a contact is an erasure: the address must not survive in
-    // email history, event payloads or API logs.
-    if (row) await eraseRecipient(db, teamId, row.email);
+    if (row) {
+      // Deleting a contact is an erasure: the address must not survive in
+      // email history, event payloads or API logs; the deleted event already
+      // carries the tombstone.
+      await emitContactEvents(db, {
+        teamId,
+        events: [{ type: "contact.deleted", contact: row }],
+        ctx: contactEvents,
+      });
+      await eraseRecipient(db, teamId, row.email);
+    }
     return row;
   };
 
@@ -1138,8 +1211,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const rows = await db
         .delete(t)
         .where(and(eq(t.teamId, auth.teamId), match))
-        .returning({ id: t.id, email: t.email });
-      // Deleting a contact is an erasure, one address at a time like the single delete.
+        .returning(contactSnapshotColumns);
+      // Deleting a contact is an erasure, one address at a time like the
+      // single delete.
+      await emitContactEvents(db, {
+        teamId: auth.teamId,
+        events: rows.map((contact) => ({ type: "contact.deleted" as const, contact })),
+        ctx: contactEvents,
+      });
       for (const row of rows) await eraseRecipient(db, auth.teamId, row.email);
       return c.json(
         {
@@ -1351,6 +1430,49 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
 
   app.openapi(
     createRoute({
+      method: "post",
+      path: "/contacts/{id}/preferences-link",
+      summary: "Mint a preference-center link for a contact",
+      description:
+        "MillionSend extension. Returns the contact's hosted preferences URL, the same page the " +
+        "unsubscribe links in their emails open, so a product settings screen can deep-link into " +
+        "it. The page lists the team's public topics and carries the global unsubscribe. The link " +
+        "is a signed, contact-scoped capability with no expiry: anyone holding it can change that " +
+        "contact's preferences, so hand it only to the contact.",
+      request: { params: idParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: contactPreferencesLinkResponseSchema } },
+          description: "The contact's preference page URL",
+        },
+        404: jsonErr("Not found"),
+        422: jsonErr("APP_BASE_URL or the encryption key is not configured"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      if (!deps.appBaseUrl || !deps.unsubscribeSecretKey) {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            "APP_BASE_URL and MASTER_ENCRYPTION_KEY must be set to mint preference links",
+          ),
+          422,
+        );
+      }
+      const contact = await findContact(auth.teamId, c.req.valid("param").id);
+      if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
+      const url = buildUnsubscribeUrl(
+        deps.appBaseUrl,
+        makeUnsubscribeToken({ contactId: contact.id, secretKey: deps.unsubscribeSecretKey }),
+      );
+      return c.json({ object: "preferences_link" as const, contact: contact.id, url }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
       method: "get",
       path: "/contacts/{id}/topics",
       request: { params: idParam },
@@ -1374,6 +1496,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
           name: schema.topics.name,
           description: schema.topics.description,
           defaultSubscribed: schema.topics.defaultSubscribed,
+          visibility: schema.topics.visibility,
           subscribed: s.subscribed,
         })
         .from(schema.topics)
@@ -1390,6 +1513,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
             subscription:
               (r.subscribed ?? r.defaultSubscribed) ? ("opt_in" as const) : ("opt_out" as const),
             explicit: r.subscribed !== null,
+            visibility: r.visibility,
           })),
           has_more: false as const,
         },
@@ -1480,7 +1604,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
         }
         prior.set(e.id, next);
       }
-      await recordContactActivity(db, changed);
+      await recordContactActivity(db, changed, contactEvents);
       return c.json({ id: contact.id }, 200);
     },
   );
@@ -2805,7 +2929,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   // Legacy audiences aliases (contacts nested under /audiences/{id}) are
   // registered by registerContactRootRoutes and share the contacts policy.
   app.use("/audiences/*", requireApiKey, enforceRateLimit, requireFullAccess);
-  registerContactRootRoutes(app, deps.db);
+  registerContactRootRoutes(app, deps);
 
   app.use("/contact-properties", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/contact-properties/*", requireApiKey, enforceRateLimit, requireFullAccess);
@@ -2837,7 +2961,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
 
   app.use("/suppressions", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/suppressions/*", requireApiKey, enforceRateLimit, requireFullAccess);
-  registerSuppressionRoutes(app, deps.db);
+  registerSuppressionRoutes(app, deps.db, { enqueue: deps.enqueueWebhookDelivery });
 
   app.use("/templates", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/templates/*", requireApiKey, enforceRateLimit, requireFullAccess);
@@ -3087,7 +3211,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // up front too, so an all-suppressed item fails at validation instead of
     // leaving earlier items accepted.
     const recipients = [...new Set([...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])])];
-    const suppressed = await findSuppressed(deps.db, auth.teamId, recipients);
+    const suppressed = await findSuppressed(deps.db, auth.teamId, recipients, {
+      transactional: body.topic_id == null,
+    });
     if (body.topic_id != null) {
       const optedOut = await findTopicOptOuts(deps.db, auth.teamId, body.topic_id, recipients);
       for (const r of optedOut) suppressed.add(r);

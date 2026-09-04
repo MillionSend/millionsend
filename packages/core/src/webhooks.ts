@@ -1,7 +1,8 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import {
   decryptPayload,
   type EncryptedBody,
@@ -31,6 +32,18 @@ export const WEBHOOK_EVENT_TYPES = [
   "quota.warning",
   "quota.reached",
   "quota.paused",
+  // Audience events: `data` is the contact in Resend's contact.* shape plus
+  // `source` (api, dashboard, hosted_page, one_click); the topic pair adds
+  // topic_id and topic_name. Resend emits only created/updated/deleted.
+  "contact.created",
+  "contact.updated",
+  "contact.deleted",
+  "contact.unsubscribed",
+  "contact.resubscribed",
+  "contact.topic_opt_in",
+  "contact.topic_opt_out",
+  "suppression.added",
+  "suppression.removed",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -81,15 +94,23 @@ export interface WebhookSignatureHeaders {
   "svix-signature": string;
 }
 
-/** @param timestamp unix seconds (Standard Webhooks wire format). */
+/**
+ * @param secret one secret, or several (current first) during a rotation's
+ * overlap: each signs, and the candidates travel space-delimited in
+ * `webhook-signature`, the spec's zero-downtime rotation.
+ * @param timestamp unix seconds (Standard Webhooks wire format).
+ */
 export function signWebhook(
-  secret: string,
+  secret: string | readonly string[],
   params: { msgId: string; timestamp: number; payload: string },
 ): WebhookSignatureHeaders {
+  const secrets = typeof secret === "string" ? [secret] : secret;
+  if (secrets.length === 0) throw new Error("no webhook secret to sign with");
   const signedContent = `${params.msgId}.${params.timestamp}.${params.payload}`;
-  const hmac = createHmac("sha256", secretKey(secret)).update(signedContent).digest("base64");
   const timestamp = String(params.timestamp);
-  const signature = `v1,${hmac}`;
+  const signature = secrets
+    .map((s) => `v1,${createHmac("sha256", secretKey(s)).update(signedContent).digest("base64")}`)
+    .join(" ");
   return {
     "webhook-id": params.msgId,
     "webhook-timestamp": timestamp,
@@ -198,6 +219,109 @@ export async function decryptWebhookSecret(
 }
 
 /**
+ * Overlap after a rotation during which the outgoing secret keeps signing:
+ * long enough to roll every receiver, short enough that a leaked old secret
+ * stops mattering within days.
+ */
+export const WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS = 24;
+export const WEBHOOK_ROTATION_MAX_OVERLAP_HOURS = 72;
+
+type WebhookEndpointRow = typeof schema.webhookEndpoints.$inferSelect;
+type CurrentSecretColumns = Pick<
+  WebhookEndpointRow,
+  "secretCiphertext" | "secretIv" | "secretWrappedDek" | "secretKeyVersion"
+>;
+type PreviousSecretColumns = Pick<
+  WebhookEndpointRow,
+  | "prevSecretCiphertext"
+  | "prevSecretIv"
+  | "prevSecretWrappedDek"
+  | "prevSecretKeyVersion"
+  | "prevSecretExpiresAt"
+>;
+
+/** When the outgoing secret stops signing after a rotation, or null for "at once". */
+export function rotationOverlapEnd(hours: number, now = new Date()): Date | null {
+  return hours > 0 ? new Date(now.getTime() + hours * 3_600_000) : null;
+}
+
+/**
+ * SET clause for a rotation: the new secret takes the current slot and the
+ * outgoing one moves to the previous slot until `expiresAt` (null drops it at
+ * once). The previous columns reference the row's own current columns rather
+ * than a value read beforehand: Postgres evaluates SET against the pre-update
+ * row under its lock, so two rotations racing each other chain (the second's
+ * previous is the first's new) instead of both copying one stale snapshot. A
+ * rotation inside an open window replaces the previous secret, so at most two
+ * ever sign.
+ */
+export function rotatedWebhookSecretColumns(
+  next: { encrypted: EncryptedBody; last4: string },
+  expiresAt: Date | null,
+): PgUpdateSetSource<typeof schema.webhookEndpoints> {
+  const w = schema.webhookEndpoints;
+  return {
+    secretCiphertext: next.encrypted.ciphertext,
+    secretIv: next.encrypted.iv,
+    secretWrappedDek: next.encrypted.wrappedDek,
+    secretKeyVersion: next.encrypted.keyVersion,
+    secretLast4: next.last4,
+    prevSecretCiphertext: expiresAt ? sql`${w.secretCiphertext}` : null,
+    prevSecretIv: expiresAt ? sql`${w.secretIv}` : null,
+    prevSecretWrappedDek: expiresAt ? sql`${w.secretWrappedDek}` : null,
+    prevSecretKeyVersion: expiresAt ? sql`${w.secretKeyVersion}` : null,
+    prevSecretExpiresAt: expiresAt,
+  };
+}
+
+/**
+ * The secrets a delivery signs with, current first. During a rotation's
+ * overlap the previous secret signs too, so the header carries two candidates
+ * and a receiver holding either one verifies.
+ */
+export async function decryptWebhookSigningSecrets(
+  endpoint: CurrentSecretColumns & PreviousSecretColumns & { id: string; teamId: string },
+  keyring: Keyring,
+  now = new Date(),
+): Promise<string[]> {
+  const owner = { teamId: endpoint.teamId, rowId: endpoint.id };
+  const secrets = [
+    await decryptWebhookSecret(
+      {
+        ciphertext: endpoint.secretCiphertext,
+        iv: endpoint.secretIv,
+        wrappedDek: endpoint.secretWrappedDek,
+        keyVersion: endpoint.secretKeyVersion,
+      },
+      keyring,
+      owner,
+    ),
+  ];
+  if (
+    endpoint.prevSecretCiphertext &&
+    endpoint.prevSecretIv &&
+    endpoint.prevSecretWrappedDek &&
+    endpoint.prevSecretKeyVersion !== null &&
+    endpoint.prevSecretExpiresAt &&
+    endpoint.prevSecretExpiresAt > now
+  ) {
+    secrets.push(
+      await decryptWebhookSecret(
+        {
+          ciphertext: endpoint.prevSecretCiphertext,
+          iv: endpoint.prevSecretIv,
+          wrappedDek: endpoint.prevSecretWrappedDek,
+          keyVersion: endpoint.prevSecretKeyVersion,
+        },
+        keyring,
+        owner,
+      ),
+    );
+  }
+  return secrets;
+}
+
+/**
  * Fan an email event out to the owning team's enabled endpoints: one
  * delivery row + one job per matching endpoint. Callers invoke this exactly
  * once per event fact (the SNS dedupe / send claim already gate that), so no
@@ -238,13 +362,67 @@ export async function enqueueTeamWebhookDeliveries(
     enqueue: (deliveryId: string) => Promise<void>;
   },
 ): Promise<void> {
-  await insertDeliveries(db, {
+  await enqueueTeamWebhookEvents(db, {
     teamId: params.teamId,
-    emailId: null,
-    type: params.type,
-    payload: { type: params.type, created_at: params.occurredAt.toISOString(), data: params.data },
+    events: [{ type: params.type, occurredAt: params.occurredAt, data: params.data }],
     enqueue: params.enqueue,
   });
+}
+
+export interface TeamWebhookEvent {
+  type: WebhookEventType;
+  occurredAt: Date;
+  data: Record<string, unknown>;
+}
+
+/**
+ * Several team-level events at once (a batch import creates hundreds of
+ * contacts): the endpoints are read once and every matching delivery row
+ * lands in one insert.
+ */
+export async function enqueueTeamWebhookEvents(
+  db: Db,
+  params: {
+    teamId: string;
+    events: readonly TeamWebhookEvent[];
+    enqueue: (deliveryId: string) => Promise<void>;
+  },
+): Promise<void> {
+  if (params.events.length === 0) return;
+  const endpoints = await enabledEndpoints(db, params.teamId);
+  const values = params.events.flatMap((event) =>
+    endpoints
+      .filter((e) => e.events === null || e.events.includes(event.type))
+      .map((endpoint) => ({
+        endpointId: endpoint.id,
+        emailId: null,
+        messageId: `msg_${randomUUID()}`,
+        eventType: event.type,
+        payload: {
+          type: event.type,
+          created_at: event.occurredAt.toISOString(),
+          data: event.data,
+        } as Record<string, unknown>,
+      })),
+  );
+  if (values.length === 0) return;
+  const rows = await db
+    .insert(schema.webhookDeliveries)
+    .values(values)
+    .returning({ id: schema.webhookDeliveries.id });
+  for (const row of rows) await params.enqueue(row.id);
+}
+
+function enabledEndpoints(db: Db, teamId: string) {
+  return db
+    .select({ id: schema.webhookEndpoints.id, events: schema.webhookEndpoints.events })
+    .from(schema.webhookEndpoints)
+    .where(
+      and(
+        eq(schema.webhookEndpoints.teamId, teamId),
+        eq(schema.webhookEndpoints.status, "enabled"),
+      ),
+    );
 }
 
 async function insertDeliveries(
@@ -257,15 +435,7 @@ async function insertDeliveries(
     enqueue: (deliveryId: string) => Promise<void>;
   },
 ): Promise<void> {
-  const endpoints = await db
-    .select({ id: schema.webhookEndpoints.id, events: schema.webhookEndpoints.events })
-    .from(schema.webhookEndpoints)
-    .where(
-      and(
-        eq(schema.webhookEndpoints.teamId, params.teamId),
-        eq(schema.webhookEndpoints.status, "enabled"),
-      ),
-    );
+  const endpoints = await enabledEndpoints(db, params.teamId);
   const matching = endpoints.filter((e) => e.events === null || e.events.includes(params.type));
   for (const endpoint of matching) {
     const [row] = await db

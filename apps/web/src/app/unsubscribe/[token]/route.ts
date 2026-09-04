@@ -1,7 +1,13 @@
-import { hashRecipient, recordContactActivity } from "@millionsend/core";
+import {
+  type ContactEventContext,
+  emitSuppressionEvents,
+  hashRecipient,
+  recordContactActivity,
+} from "@millionsend/core";
 import { getDb, schema } from "@millionsend/db";
 import { eq, sql } from "drizzle-orm";
 import { appBaseUrl } from "@/lib/api-base-url";
+import { enqueueWebhookDelivery } from "@/server/queue";
 import { postUnsubscribeLocation, preferenceTopics, targetForToken } from "../lookup";
 
 /**
@@ -35,6 +41,13 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
 
   const body = await request.text().catch(() => "");
   const form = new URLSearchParams(body);
+  // An RFC 8058 header post and the confirm page's forms land here alike; the
+  // published events say which one it was.
+  const oneClick = form.get("List-Unsubscribe") === "One-Click";
+  const events: ContactEventContext = {
+    source: oneClick ? "one_click" : "hosted_page",
+    enqueue: enqueueWebhookDelivery,
+  };
 
   // Preferences save from the confirm page: every listed topic gets an
   // explicit override (checked = subscribed). The listed set is recomputed
@@ -70,6 +83,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
             type: checked.has(topic.id) ? ("topic_opt_in" as const) : ("topic_opt_out" as const),
             data: { topicId: topic.id, name: topic.name },
           })),
+        events,
       );
     }
     return Response.redirect(
@@ -91,12 +105,16 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
       });
     // alreadyDone guards the timeline: scanner re-hits must not duplicate the event.
     if (!target.alreadyDone) {
-      await recordContactActivity(db, {
-        teamId: target.teamId,
-        contactId: target.contactId,
-        type: "topic_opt_out",
-        data: { topicId: target.topic.id, name: target.topic.name },
-      });
+      await recordContactActivity(
+        db,
+        {
+          teamId: target.teamId,
+          contactId: target.contactId,
+          type: "topic_opt_out",
+          data: { topicId: target.topic.id, name: target.topic.name },
+        },
+        events,
+      );
     }
   } else {
     await db
@@ -112,7 +130,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
     // The contact flag is mutable and dies with the row; the suppression is
     // the retained opt-out record that outlives delete/re-import and API
     // re-subscribes. Repeats hit the (team, hash) unique index and no-op.
-    await db
+    const [suppression] = await db
       .insert(schema.suppressions)
       .values({
         teamId: target.teamId,
@@ -120,18 +138,37 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
         emailHash: hashRecipient(target.email),
         reason: "one_click_unsubscribe",
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({
+        id: schema.suppressions.id,
+        email: schema.suppressions.email,
+        reason: schema.suppressions.reason,
+        createdAt: schema.suppressions.createdAt,
+      });
+    if (suppression) {
+      await emitSuppressionEvents(db, {
+        teamId: target.teamId,
+        type: "suppression.added",
+        rows: [suppression],
+        source: events.source,
+        enqueue: events.enqueue,
+      });
+    }
     // alreadyDone guards the timeline: scanner re-hits must not duplicate the event.
     if (!target.alreadyDone) {
-      await recordContactActivity(db, {
-        teamId: target.teamId,
-        contactId: target.contactId,
-        type: "unsubscribed",
-      });
+      await recordContactActivity(
+        db,
+        {
+          teamId: target.teamId,
+          contactId: target.contactId,
+          type: "unsubscribed",
+        },
+        events,
+      );
     }
   }
 
-  if (form.get("List-Unsubscribe") === "One-Click") {
+  if (oneClick) {
     return new Response(null, { status: 200 });
   }
   return Response.redirect(postUnsubscribeLocation(token, target.customization.redirectUrl), 303);

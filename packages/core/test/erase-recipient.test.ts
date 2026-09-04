@@ -145,3 +145,44 @@ it("tombstones every copy of the address for the team, keeps the suppression has
     suppressions: 0,
   });
 });
+
+it("drops the contact's name from contact event payloads along with the address", async () => {
+  const address = "carla@example.com";
+  const [endpoint] = await db
+    .insert(schema.webhookEndpoints)
+    .values({
+      teamId,
+      url: "https://example.com/hooks/erase",
+      secretCiphertext: Buffer.alloc(1),
+      secretIv: Buffer.alloc(1),
+      secretWrappedDek: Buffer.alloc(1),
+      secretKeyVersion: 1,
+      secretLast4: "abcd",
+    })
+    .returning({ id: schema.webhookEndpoints.id });
+  if (!endpoint) throw new Error("endpoint insert failed");
+  const [delivery] = await db
+    .insert(schema.webhookDeliveries)
+    .values({
+      endpointId: endpoint.id,
+      messageId: "msg_erase_contact",
+      eventType: "contact.created",
+      payload: {
+        type: "contact.created",
+        data: { id: "c1", email: address, first_name: "Carla", last_name: "Souza", source: "api" },
+      },
+    })
+    .returning({ id: schema.webhookDeliveries.id });
+  if (!delivery) throw new Error("delivery insert failed");
+
+  await eraseRecipient(db, teamId, address);
+
+  const [after] = await db
+    .select({ payload: schema.webhookDeliveries.payload })
+    .from(schema.webhookDeliveries)
+    .where(eq(schema.webhookDeliveries.id, delivery.id));
+  expect(after?.payload).toEqual({
+    type: "contact.created",
+    data: { id: "c1", email: "[erased]", source: "api" },
+  });
+});

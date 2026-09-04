@@ -136,3 +136,30 @@ describe("secret at rest", () => {
     expect(await decryptWebhookSecret(encrypted, keyring)).toBe(secret);
   });
 });
+
+describe("rotation", () => {
+  it("signs with every secret, current first, so a receiver holding either verifies", () => {
+    const current = generateWebhookSecret();
+    const previous = generateWebhookSecret();
+    const params = { msgId: "msg_rot", timestamp: 1_700_000_000, payload: '{"a":1}' };
+    const headers = signWebhook([current, previous], params);
+    const candidates = headers["webhook-signature"].split(" ");
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0]).toBe(signWebhook(current, params)["webhook-signature"]);
+    expect(headers["svix-signature"]).toBe(headers["webhook-signature"]);
+    const verify = (secret: string) =>
+      verifyWebhookSignature(
+        secret,
+        {
+          id: params.msgId,
+          timestamp: String(params.timestamp),
+          signature: headers["webhook-signature"],
+        },
+        params.payload,
+        { now: new Date(params.timestamp * 1000) },
+      );
+    expect(verify(current)).toBe(true);
+    expect(verify(previous)).toBe(true);
+    expect(verify(generateWebhookSecret())).toBe(false);
+  });
+});

@@ -358,6 +358,7 @@
       "domain.deleted": "Deleted domain",
       "webhook.created": "Created webhook",
       "webhook.updated": "Updated webhook",
+      "webhook.secret_rotated": "Rotated webhook signing secret",
       "webhook.deleted": "Deleted webhook",
       "member.invited": "Invited member",
       "member.joined": "Joined the team",

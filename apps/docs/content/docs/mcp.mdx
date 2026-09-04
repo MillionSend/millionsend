@@ -166,6 +166,7 @@ and admins.
 | `update_contact_topics` | `audience:write` | Set a contact's per-topic subscriptions. |
 | `delete_contact` | `audience:write` | Delete a contact. |
 | `delete_contacts` | `audience:write` | Delete up to 1,000 contacts by ids or emails. |
+| `create_contact_preferences_link` | `audience:write` | Mint a contact's preference-center URL. |
 | `add_contact_to_segment` | `audience:write` | Add a contact to a manual segment. |
 | `remove_contact_from_segment` | `audience:write` | Remove a contact from a manual segment. |
 | `create_segment` | `audience:write` | Create a segment — filtered, or manual without a filter. |
@@ -190,6 +191,7 @@ and admins.
 | `delete_template` | `templates:write` | Delete a template; broadcasts keep their own copy. |
 | `create_webhook` | `webhooks:write` | **admin** Create a webhook endpoint; the response includes the signing secret. |
 | `update_webhook` | `webhooks:write` | **admin** Update a webhook's URL, events or status. |
+| `rotate_webhook_secret` | `webhooks:write` | **admin** Rotate a webhook's signing secret with an overlap window. |
 | `delete_webhook` | `webhooks:write` | **admin** Delete a webhook endpoint. |
 | `create_api_key` | `api-keys:write` | **admin** Create an API key; the token is returned only in this response. |
 | `revoke_api_key` | `api-keys:write` | **admin** Revoke an API key. |

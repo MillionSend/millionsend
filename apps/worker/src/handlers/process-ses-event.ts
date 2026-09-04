@@ -1,9 +1,11 @@
 import {
   applyStatusCas,
   type EmailStatus,
+  emitSuppressionEvents,
   enqueueWebhookDeliveries,
   hashRecipient,
   isWebhookEventType,
+  type SuppressionEventRow,
   utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -228,8 +230,9 @@ export async function processSesEvent(
             }))
           : []
     ).filter((s) => ownRecipients.has(hashRecipient(s.email)));
+    const suppressedRows: SuppressionEventRow[] = [];
     for (const s of toSuppress) {
-      await txDb
+      const [inserted] = await txDb
         .insert(schema.suppressions)
         .values({
           teamId: email.teamId,
@@ -238,7 +241,26 @@ export async function processSesEvent(
           reason: s.reason,
           sourceEmailId: email.id,
         })
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        .returning({
+          id: schema.suppressions.id,
+          email: schema.suppressions.email,
+          reason: schema.suppressions.reason,
+          createdAt: schema.suppressions.createdAt,
+        });
+      if (inserted) suppressedRows.push(inserted);
+    }
+    // New suppressions publish like the email event: rows join this
+    // transaction, the queue sends happen after commit.
+    if (opts.enqueueWebhookDelivery && suppressedRows.length > 0) {
+      await emitSuppressionEvents(txDb, {
+        teamId: email.teamId,
+        type: "suppression.added",
+        rows: suppressedRows,
+        enqueue: async (deliveryId) => {
+          deliveryIds.push(deliveryId);
+        },
+      });
     }
     return true;
   });

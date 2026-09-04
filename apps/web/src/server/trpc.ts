@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import superjson from "superjson";
 import { getAuth } from "./auth";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership, type TeamRole } from "./membership";
-import { enqueueEmailSend, getQueue } from "./queue";
+import { enqueueEmailSend, enqueueWebhookDelivery, getQueue } from "./queue";
 
 export interface SessionUser {
   id: string;
@@ -39,6 +39,12 @@ export interface Context {
   enqueueBroadcastSend?: (broadcastId: string, opts?: { startAfter?: Date }) => Promise<void>;
   /** Hands an accepted email to the send queue (the onboarding send). Absent in tests. */
   enqueueEmailSend?: (emailId: string) => Promise<void>;
+  /**
+   * Hands a webhook delivery row to the delivery queue, for the contact and
+   * suppression events the routers publish. Absent in tests; the
+   * webhooks.reconcile sweep sends rows nobody enqueued.
+   */
+  enqueueWebhookDelivery?: (deliveryId: string) => Promise<void>;
 }
 
 const enqueueBroadcastSend = async (
@@ -70,6 +76,7 @@ export async function createContext({ headers }: { headers: Headers }): Promise<
     role: membership?.role ?? null,
     enqueueBroadcastSend,
     enqueueEmailSend,
+    enqueueWebhookDelivery,
     setActiveTeamCookie: (teamId) =>
       cookieStore.set(ACTIVE_TEAM_COOKIE, teamId, {
         httpOnly: true,

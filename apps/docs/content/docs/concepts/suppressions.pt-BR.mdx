@@ -12,10 +12,12 @@ teve hard bounce ou marcou você como spam.
 - **Hard bounce** — o servidor de destino rejeitou o endereço
   permanentemente.
 - **Reclamação** — o destinatário marcou uma mensagem como spam.
-- **Descadastro** — o destinatário usou o link de descadastro em um clique de
-  um broadcast. Além de marcar o contato, a saída fica registrada aqui para
-  sobreviver à exclusão e à reimportação do contato; só um
-  `PATCH /contacts/{id}` explícito com `unsubscribed: false` a remove.
+- **Descadastro** — o destinatário saiu de todo e-mail de marketing, pelo
+  header de um clique ou pela página de preferências hospedada. Além de marcar
+  o contato, a saída fica registrada aqui para sobreviver à exclusão e à
+  reimportação do contato; só um `PATCH /contacts/{id}` explícito com
+  `unsubscribed: false` a remove. Diferente das outras origens, cobre apenas
+  e-mail de marketing (veja abaixo).
 - **Manual** — você adicionou o endereço, no painel ou pela API.
 
 Bounces e reclamações chegam como eventos do SES e suprimem o endereço
@@ -23,13 +25,23 @@ automaticamente. Supressões são por time.
 
 ## O que a supressão faz
 
-- **Envios transacionais** (`POST /emails`, relay SMTP): destinatários
-  suprimidos são removidos de `to`/`cc`/`bcc`. Se *todos* os destinatários em
-  `to` estiverem suprimidos, o envio é rejeitado com
-  `422 all_recipients_suppressed` (mensagem `All recipients are suppressed`).
-  Destinatários que optaram por sair do `topic_id` do envio contam como
-  suprimidos para essa regra.
-- **Broadcasts**: contatos suprimidos são pulados durante o fan-out.
+- **Envios transacionais** (`POST /emails` e o relay SMTP, sem `topic_id`):
+  destinatários suprimidos por bounce, reclamação ou entrada manual são
+  removidos de `to`/`cc`/`bcc`. Se *todos* os destinatários em `to` estiverem
+  suprimidos, o envio é rejeitado com `422 all_recipients_suppressed`
+  (mensagem `All recipients are suppressed`). Uma entrada de **descadastro**
+  não se aplica aqui: quem saiu do marketing continua recebendo redefinições
+  de senha, recibos e outras mensagens da conta — o mesmo significado que o
+  Resend dá a `unsubscribed` ("descadastrado de todos os Broadcasts").
+- **Envios com tópico** (`POST /emails` com `topic_id`) e **broadcasts**: toda
+  entrada se aplica, descadastros incluídos, mais a saída do destinatário
+  daquele tópico; broadcasts pulam esses contatos no fan-out.
+
+Uma lista importada com `origin: "unsubscribe"` bloqueia, portanto, apenas
+envios com tópico e broadcasts. Importe com `manual` para bloquear todo envio.
+
+Toda mudança na lista publica um evento de webhook `suppression.added` ou
+`suppression.removed` — veja [Webhooks](/pt-BR/concepts/webhooks#tipos-de-evento).
 
 ## Revisando e removendo
 

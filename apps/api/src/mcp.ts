@@ -47,6 +47,7 @@ import {
   createWebhookRequestSchema,
   listQuerySchema,
   listSuppressionsQuerySchema,
+  rotateWebhookSecretRequestSchema,
   sendBroadcastRequestSchema,
   sendEmailRequestSchema,
   updateBroadcastRequestSchema,
@@ -565,7 +566,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     "audience:read",
     {
       description:
-        "List suppressed addresses — bounces, complaints, manual blocks and unsubscribes that every send skips — oldest first, with cursor pagination. Pass origin to see one kind. Addresses erased for GDPR/LGPD are hidden here and reachable by id only.",
+        "List suppressed addresses — bounces, complaints and manual blocks that every send skips, plus unsubscribes that block topic sends and broadcasts only — oldest first, with cursor pagination. Pass origin to see one kind. Addresses erased for GDPR/LGPD are hidden here and reachable by id only.",
       inputSchema: listSuppressionsQuerySchema,
       readOnly: true,
     },
@@ -812,6 +813,16 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     (body) => api("POST", "/contacts/batch/remove", body),
   );
   tool(
+    "create_contact_preferences_link",
+    "audience:write",
+    {
+      description:
+        "Mint the hosted preference-center URL for a contact (by id or email): the page their unsubscribe links open, listing the team's public topics with a global unsubscribe. The link never expires and lets its holder change that contact's preferences, so hand it only to the contact.",
+      inputSchema: z.object({ id: z.string().min(1).describe("Contact id or email address") }),
+    },
+    ({ id }) => api("POST", `/contacts/${enc(id)}/preferences-link`, {}),
+  );
+  tool(
     "add_contact_to_segment",
     "audience:write",
     {
@@ -936,7 +947,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     "audience:write",
     {
       description:
-        "Block up to 1000 addresses in one call so no send reaches them. origin (default manual) is recorded on rows this call creates: bounce or complaint keep an import's history, unsubscribe keeps a migrated opt-out list's reason. An address already suppressed keeps its origin and reports its existing id.",
+        "Block up to 1000 addresses in one call. origin (default manual) is recorded on rows this call creates: bounce, complaint and manual block every send; unsubscribe (a migrated opt-out list) blocks topic sends and broadcasts only, so topic-less POST /emails still delivers. An address already suppressed keeps its origin and reports its existing id.",
       inputSchema: batchAddSuppressionsRequestSchema,
     },
     (body) => api("POST", "/suppressions/batch/add", body),
@@ -1070,6 +1081,19 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       }),
     },
     ({ id, ...body }) => api("PATCH", `/webhooks/${enc(id)}`, body),
+  );
+  tool(
+    "rotate_webhook_secret",
+    "webhooks:write",
+    {
+      description:
+        "Rotate a webhook's signing secret. Returns the new whsec_ secret; the previous one keeps signing alongside it for overlap_hours (default 24, up to 72) so the receiver can switch without a gap. Pass signing_secret to bring your own.",
+      inputSchema: rotateWebhookSecretRequestSchema.extend({
+        id: z.uuid().describe("Webhook id from list_webhooks"),
+      }),
+      admin: true,
+    },
+    ({ id, ...body }) => api("POST", `/webhooks/${enc(id)}/rotate`, body),
   );
   tool(
     "delete_webhook",

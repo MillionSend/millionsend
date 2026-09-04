@@ -30,6 +30,23 @@ Team-level events carry no email; `data` describes the team's standing instead:
 | `quota.reached` | Today's cap is used; sends pass up to 50% more, then park until midnight UTC. | same as above |
 | `quota.paused` | 50% past the cap: new sends are parked until midnight UTC, or until a plan upgrade releases them (once per UTC day, cloud only). | same as above |
 
+Audience events fire when a contact or the suppression list changes, whoever
+changed it. `data` carries the contact in Resend's shape — `id`, `email`,
+`first_name`, `last_name`, `unsubscribed`, `created_at`, `updated_at` — plus
+`source`: `api`, `dashboard`, `hosted_page` (the preference center) or
+`one_click` (an RFC 8058 header post). Resend emits only `contact.created`,
+`contact.updated` and `contact.deleted`; the rest are MillionSend extensions.
+
+| Event | Fired when | Extra `data` |
+| --- | --- | --- |
+| `contact.created` | A contact was added: API, batch, CSV import or dashboard. | |
+| `contact.updated` | Name, properties or the unsubscribed flag changed through the API or the dashboard. | |
+| `contact.deleted` | A contact was deleted. Deleting is an erasure, so `email` reads `[erased]`; key on `id`. | |
+| `contact.unsubscribed` | The contact opted out of all marketing email. | |
+| `contact.resubscribed` | An explicit re-subscribe (`unsubscribed: false`). | |
+| `contact.topic_opt_in` / `contact.topic_opt_out` | The contact's effective subscription to a topic flipped. | `topic_id`, `topic_name` |
+| `suppression.added` / `suppression.removed` | An address joined or left the [suppression list](/concepts/suppressions). Bounce and complaint rows come from SES, with `source: null`. | `data` is `{ id, email, origin, source, created_at }` |
+
 ## Signatures (Standard Webhooks)
 
 Deliveries are signed following the
@@ -50,8 +67,10 @@ The same three values are also sent as `svix-id`, `svix-timestamp` and
 signature, two header names: a handler written for either family verifies
 without changes.
 
-The signed content is `{webhook-id}.{webhook-timestamp}.{raw body}`. Verify
-with any Standard Webhooks library, e.g. in Node:
+The signed content is `{webhook-id}.{webhook-timestamp}.{raw body}`. During a
+[secret rotation](#rotating-the-secret) the header carries two space-separated
+`v1,…` candidates, new secret first; a verifier accepts if any of them matches,
+which every Standard Webhooks library does. Verify with one, e.g. in Node:
 
 ```ts
 import { Webhook } from "standardwebhooks";
@@ -91,8 +110,26 @@ curl -X POST "https://api.millionsend.com/webhooks" \
 ```
 
 The secret is returned on create and on `GET /webhooks/{id}`, never in list
-rows, and cannot be changed afterwards — delete and re-create the endpoint to
-rotate it.
+rows.
+
+## Rotating the secret
+
+`POST /webhooks/{id}/rotate` (or **Rotate secret** in the dashboard) mints a
+new secret, or takes the one in `signing_secret`, and returns it. For
+`overlap_hours` (default 24, up to 72) the previous secret keeps signing too:
+every delivery in that window carries both signatures, so a receiver holding
+either one verifies. Switch the receiver at any point in the window; after it
+only the new secret signs. `0` drops the old secret at once, for a leaked one.
+`GET /webhooks/{id}` reports the window's end as `previous_secret_expires_at`,
+and a second rotation inside the window replaces the previous secret.
+
+```sh
+curl -X POST "https://api.millionsend.com/webhooks/{id}/rotate" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "overlap_hours": 24 }'
+# → { "object": "webhook", "id": "...", "signing_secret": "whsec_...", "previous_secret_expires_at": "..." }
+```
 
 ## Delivery and retries
 

@@ -1170,3 +1170,41 @@ describe("openapi", () => {
     );
   });
 });
+
+describe("a recipient's own unsubscribe and transactional mail", () => {
+  it("lets topic-less sends through, single and batch alike, while topic sends stay blocked", async () => {
+    const optedOut = "opted-out@example.com";
+    await db.insert(schema.suppressions).values({
+      teamId,
+      email: optedOut,
+      emailHash: hashRecipient(optedOut),
+      reason: "one_click_unsubscribe",
+    });
+    const [topic] = await db
+      .insert(schema.topics)
+      .values({ teamId, name: "Promos", defaultSubscribed: true })
+      .returning({ id: schema.topics.id });
+    if (!topic) throw new Error("topic insert failed");
+    const item = { ...validBody, to: [optedOut] };
+
+    expect((await post(item)).status).toBe(200);
+    const batch = await app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify([item]),
+    });
+    expect(batch.status).toBe(200);
+
+    const topical = await post({ ...item, topic_id: topic.id });
+    expect(topical.status).toBe(422);
+    expect(((await topical.json()) as { message: string }).message).toBe(
+      "All recipients are suppressed",
+    );
+    const topicalBatch = await app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify([{ ...item, topic_id: topic.id }]),
+    });
+    expect(topicalBatch.status).toBe(422);
+  });
+});

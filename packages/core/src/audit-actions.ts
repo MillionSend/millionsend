@@ -8,6 +8,7 @@ export const AUDIT_ACTIONS = [
   "domain.deleted",
   "webhook.created",
   "webhook.updated",
+  "webhook.secret_rotated",
   "webhook.deleted",
   "member.invited",
   "member.joined",

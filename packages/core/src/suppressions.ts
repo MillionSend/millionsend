@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { sha256Hex } from "./hash.js";
 import { parseMailbox } from "./sender-address.js";
 
@@ -50,11 +50,35 @@ export function suppressionHashesFor(email: string): string[] {
   return [...new Set([hashRecipient(email), legacyHashRecipient(email)])];
 }
 
-/** Returns the subset of `recipients` that are suppressed for this team. */
+/**
+ * Wire vocabulary for a suppression's reason: `bounce`, `complaint` and
+ * `manual` match Resend's origin enum; `unsubscribe` is a documented superset
+ * value (the retained RFC 8058 one-click opt-out) Resend has no equivalent for.
+ */
+export const SUPPRESSION_ORIGIN_BY_REASON = {
+  hard_bounce: "bounce",
+  complaint: "complaint",
+  manual: "manual",
+  one_click_unsubscribe: "unsubscribe",
+} as const;
+
+export type SuppressionReason = keyof typeof SUPPRESSION_ORIGIN_BY_REASON;
+export type SuppressionOrigin = (typeof SUPPRESSION_ORIGIN_BY_REASON)[SuppressionReason];
+
+/**
+ * Returns the subset of `recipients` that are suppressed for this team.
+ *
+ * `transactional` marks a send with no topic and no broadcast. A recipient's
+ * own unsubscribe (the retained one-click opt-out) covers marketing mail
+ * only, the way Resend's `unsubscribed` means "from all Broadcasts", so those
+ * rows do not block it: password resets and receipts still arrive. Bounces,
+ * complaints and manual blocks apply to every send.
+ */
 export async function findSuppressed(
   db: Db,
   teamId: string,
   recipients: readonly string[],
+  opts: { transactional?: boolean } = {},
 ): Promise<Set<string>> {
   if (recipients.length === 0) return new Set();
   const t = schema.suppressions;
@@ -62,7 +86,13 @@ export async function findSuppressed(
   const rows = await db
     .select({ emailHash: t.emailHash })
     .from(t)
-    .where(and(eq(t.teamId, teamId), inArray(t.emailHash, [...hashesByRecipient.values()].flat())));
+    .where(
+      and(
+        eq(t.teamId, teamId),
+        inArray(t.emailHash, [...hashesByRecipient.values()].flat()),
+        opts.transactional ? ne(t.reason, "one_click_unsubscribe") : undefined,
+      ),
+    );
   const suppressedHashes = new Set(rows.map((r) => r.emailHash));
   const suppressed = new Set<string>();
   for (const [recipient, hashes] of hashesByRecipient) {
@@ -81,9 +111,9 @@ export async function clearUnsubscribeSuppression(
   db: Db,
   teamId: string,
   email: string,
-): Promise<void> {
+): Promise<{ id: string; email: string | null; reason: SuppressionReason; createdAt: Date }[]> {
   const t = schema.suppressions;
-  await db
+  return db
     .delete(t)
     .where(
       and(
@@ -91,5 +121,6 @@ export async function clearUnsubscribeSuppression(
         eq(t.reason, "one_click_unsubscribe"),
         inArray(t.emailHash, suppressionHashesFor(email)),
       ),
-    );
+    )
+    .returning({ id: t.id, email: t.email, reason: t.reason, createdAt: t.createdAt });
 }

@@ -1,13 +1,17 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { env } from "@millionsend/config";
 import {
-  decryptWebhookSecret,
+  decryptWebhookSigningSecrets,
   encryptWebhookSecret,
   generateWebhookSecret,
   postFailureCode,
   postJson,
+  rotatedWebhookSecretColumns,
+  rotationOverlapEnd,
   signWebhook,
   WEBHOOK_EVENT_TYPES,
+  WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
+  WEBHOOK_ROTATION_MAX_OVERLAP_HOURS,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -217,6 +221,7 @@ export const webhooksRouter = router({
         status: t.status,
         createdAt: t.createdAt,
         secretLast4: t.secretLast4,
+        prevSecretExpiresAt: t.prevSecretExpiresAt,
       })
       .from(t)
       .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)));
@@ -230,6 +235,11 @@ export const webhooksRouter = router({
       status: row.status,
       createdAt: row.createdAt,
       secretLast4: row.secretLast4,
+      // Set while a rotation's overlap is open: deliveries carry both signatures.
+      previousSecretExpiresAt:
+        row.prevSecretExpiresAt && row.prevSecretExpiresAt > new Date()
+          ? row.prevSecretExpiresAt
+          : null,
     };
   }),
 
@@ -271,6 +281,42 @@ export const webhooksRouter = router({
         metadata: set,
       });
       return { id: row.id, enabled: toEnabled(row.status) };
+    }),
+
+  /**
+   * Mints a new signing secret. The outgoing one keeps signing for
+   * overlapHours so the receiver can switch without a gap; the new plaintext
+   * exists only in this response.
+   */
+  rotateSecret: adminProcedure
+    .input(
+      z.object({
+        id: z.uuid(),
+        overlapHours: z.number().int().min(0).max(WEBHOOK_ROTATION_MAX_OVERLAP_HOURS).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const t = schema.webhookEndpoints;
+      const secret = generateWebhookSecret();
+      const encrypted = await encryptWebhookSecret(secret, getKeyring(), {
+        teamId: ctx.teamId,
+        rowId: input.id,
+      });
+      const expiresAt = rotationOverlapEnd(
+        input.overlapHours ?? WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
+      );
+      const [row] = await ctx.db
+        .update(t)
+        .set(rotatedWebhookSecretColumns({ encrypted, last4: secret.slice(-4) }, expiresAt))
+        .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
+        .returning({ id: t.id, url: t.url });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await recordAudit(ctx, {
+        action: "webhook.secret_rotated",
+        target: { type: "webhook", id: row.id },
+        metadata: { url: row.url, previousSecretExpiresAt: expiresAt?.toISOString() ?? null },
+      });
+      return { id: row.id, secret, previousSecretExpiresAt: expiresAt };
     }),
 
   delete: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
@@ -329,18 +375,9 @@ export const webhooksRouter = router({
         .from(schema.webhookEndpoints)
         .where(eq(schema.webhookEndpoints.id, input.id));
       if (!endpoint) throw new TRPCError({ code: "NOT_FOUND" });
-      const secret = await decryptWebhookSecret(
-        {
-          ciphertext: endpoint.secretCiphertext,
-          iv: endpoint.secretIv,
-          wrappedDek: endpoint.secretWrappedDek,
-          keyVersion: endpoint.secretKeyVersion,
-        },
-        getKeyring(),
-        { teamId: endpoint.teamId, rowId: endpoint.id },
-      );
+      const secrets = await decryptWebhookSigningSecrets(endpoint, getKeyring());
       const payloadJson = JSON.stringify(payload);
-      const headers = signWebhook(secret, {
+      const headers = signWebhook(secrets, {
         msgId: messageId,
         timestamp: Math.floor(Date.now() / 1000),
         payload: payloadJson,

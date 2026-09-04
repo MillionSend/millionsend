@@ -162,6 +162,13 @@
       "when": 1788454800345,
       "tag": "0022_event_bounce_type",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788550754183,
+      "tag": "0023_webhook_secret_rotation",
+      "breakpoints": true
     }
   ]
 }

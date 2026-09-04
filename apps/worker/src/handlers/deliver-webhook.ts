@@ -1,5 +1,5 @@
 import {
-  decryptWebhookSecret,
+  decryptWebhookSigningSecrets,
   type Keyring,
   type PostJsonResult,
   signWebhook,
@@ -143,19 +143,10 @@ async function attemptDelivery(
   endpoint: typeof schema.webhookEndpoints.$inferSelect,
   now: Date,
 ): Promise<DeliverOutcome> {
-  const secret = await decryptWebhookSecret(
-    {
-      ciphertext: endpoint.secretCiphertext,
-      iv: endpoint.secretIv,
-      wrappedDek: endpoint.secretWrappedDek,
-      keyVersion: endpoint.secretKeyVersion,
-    },
-    deps.keyring,
-    { teamId: endpoint.teamId, rowId: endpoint.id },
-  );
+  const secrets = await decryptWebhookSigningSecrets(endpoint, deps.keyring, now);
 
   const body = JSON.stringify(delivery.payload);
-  const headers = signWebhook(secret, {
+  const headers = signWebhook(secrets, {
     msgId: delivery.messageId,
     timestamp: Math.floor(now.getTime() / 1000),
     payload: body,

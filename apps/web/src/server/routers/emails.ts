@@ -2,6 +2,7 @@ import {
   decryptEmailBody,
   type EmailBody,
   emailInsightsView,
+  emitSuppressionEvents,
   fetchEmailInsights,
   hashRecipient,
   utcDay,
@@ -357,8 +358,17 @@ export const emailsRouter = router({
           .insert(t)
           .values({ teamId: ctx.teamId, email: input.email, emailHash, reason: input.reason })
           .onConflictDoNothing()
-          .returning({ id: t.id });
-        if (row) return { id: row.id };
+          .returning({ id: t.id, email: t.email, reason: t.reason, createdAt: t.createdAt });
+        if (row) {
+          await emitSuppressionEvents(ctx.db, {
+            teamId: ctx.teamId,
+            type: "suppression.added",
+            rows: [row],
+            source: "dashboard",
+            enqueue: ctx.enqueueWebhookDelivery,
+          });
+          return { id: row.id };
+        }
         // Already suppressed (any reason) — adding is idempotent.
         const [existing] = await ctx.db
           .select({ id: t.id })
@@ -375,8 +385,15 @@ export const emailsRouter = router({
       const [row] = await ctx.db
         .delete(t)
         .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
-        .returning({ id: t.id });
+        .returning({ id: t.id, email: t.email, reason: t.reason, createdAt: t.createdAt });
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await emitSuppressionEvents(ctx.db, {
+        teamId: ctx.teamId,
+        type: "suppression.removed",
+        rows: [row],
+        source: "dashboard",
+        enqueue: ctx.enqueueWebhookDelivery,
+      });
       return { id: row.id };
     }),
   }),

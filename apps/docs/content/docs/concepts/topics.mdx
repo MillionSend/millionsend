@@ -19,9 +19,10 @@ creation:
   effective subscription for that topic is "subscribed" (their explicit choice
   if they made one, the topic default otherwise), and always excludes globally
   unsubscribed contacts.
-- **The hosted unsubscribe page** lists the team's topics, so a recipient can
-  opt out of one category while staying subscribed to the rest — or
-  unsubscribe from everything.
+- **The hosted unsubscribe page** lists the team's public topics, so a
+  recipient can opt out of one category while staying subscribed to the rest —
+  or unsubscribe from all marketing email. Transactional sends without a
+  `topic_id` are unaffected by either choice.
 
 ## API
 

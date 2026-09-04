@@ -1,5 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey, signWebhook, verifyWebhookSignature } from "@millionsend/core";
+import {
+  decryptWebhookSigningSecrets,
+  EnvKeyring,
+  generateApiKey,
+  signWebhook,
+  verifyWebhookSignature,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -172,7 +178,7 @@ describe("POST /webhooks", () => {
   it("422s http endpoints, unknown events, and empty events", async () => {
     for (const body of [
       { endpoint: "http://example.com/hooks", events: ["email.sent"] },
-      { endpoint: "https://example.com/hooks", events: ["contact.created"] },
+      { endpoint: "https://example.com/hooks", events: ["domain.created"] },
       { endpoint: "https://example.com/hooks", events: [] },
       { endpoint: "https://example.com/hooks" },
     ]) {
@@ -199,6 +205,7 @@ describe("GET /webhooks and GET /webhooks/{id}", () => {
       events: ["email.opened"],
       created_at: expect.any(String),
       signing_secret: created.signing_secret,
+      previous_secret_expires_at: null,
     });
 
     const list = await call(fullKey, "GET", "/webhooks?limit=100");
@@ -362,5 +369,118 @@ describe("permission confinement", () => {
       expect(res.status, `${method} ${path}`).toBe(403);
       expect(await res.json()).toMatchObject({ statusCode: 403, name: "restricted_api_key" });
     }
+  });
+});
+
+describe("POST /webhooks/{id}/rotate", () => {
+  async function endpointRow(id: string) {
+    const [row] = await db
+      .select()
+      .from(schema.webhookEndpoints)
+      .where(eq(schema.webhookEndpoints.id, id));
+    if (!row) throw new Error("endpoint row missing");
+    return row;
+  }
+
+  it("mints a new secret, keeps the old one signing through the overlap, and reports the window", async () => {
+    const created = await createWebhook({
+      endpoint: "https://example.com/hooks/rotate",
+      events: ["email.sent"],
+    });
+    const res = await call(fullKey, "POST", `/webhooks/${created.id}/rotate`, {});
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      signing_secret: string;
+      previous_secret_expires_at: string | null;
+    };
+    expect(body.signing_secret).not.toBe(created.signing_secret);
+    expect(body.signing_secret.startsWith("whsec_")).toBe(true);
+    const until = new Date(body.previous_secret_expires_at ?? 0).getTime() - Date.now();
+    expect(until).toBeGreaterThan(23 * 3_600_000);
+    expect(until).toBeLessThanOrEqual(24 * 3_600_000);
+
+    const secrets = await decryptWebhookSigningSecrets(await endpointRow(created.id), keyring);
+    expect(secrets).toEqual([body.signing_secret, created.signing_secret]);
+    const params = { msgId: "msg_r", timestamp: Math.floor(Date.now() / 1000), payload: "{}" };
+    const headers = signWebhook(secrets, params);
+    for (const secret of [body.signing_secret, created.signing_secret]) {
+      expect(
+        verifyWebhookSignature(
+          secret,
+          {
+            id: params.msgId,
+            timestamp: headers["webhook-timestamp"],
+            signature: headers["webhook-signature"],
+          },
+          params.payload,
+        ),
+      ).toBe(true);
+    }
+
+    const got = (await (await call(fullKey, "GET", `/webhooks/${created.id}`)).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(got.signing_secret).toBe(body.signing_secret);
+    expect(got.previous_secret_expires_at).toBe(body.previous_secret_expires_at);
+
+    // Past the window only the current secret signs.
+    const past = new Date(Date.now() + 25 * 3_600_000);
+    expect(
+      await decryptWebhookSigningSecrets(await endpointRow(created.id), keyring, past),
+    ).toEqual([body.signing_secret]);
+  });
+
+  it("chains two racing rotations instead of both copying the same outgoing secret", async () => {
+    const created = await createWebhook({
+      endpoint: "https://example.com/hooks/rotate-race",
+      events: ["email.sent"],
+    });
+    const [a, b] = (await Promise.all([
+      call(fullKey, "POST", `/webhooks/${created.id}/rotate`, {}),
+      call(fullKey, "POST", `/webhooks/${created.id}/rotate`, {}),
+    ]).then((rs) => Promise.all(rs.map((r) => r.json())))) as { signing_secret: string }[];
+    const secrets = await decryptWebhookSigningSecrets(await endpointRow(created.id), keyring);
+    // Whichever landed second is current and the other is previous; both
+    // minted secrets sign, and the original one is gone.
+    expect([...secrets].sort()).toEqual([a?.signing_secret, b?.signing_secret].sort());
+    expect(secrets).not.toContain(created.signing_secret);
+  });
+
+  it("takes a caller-supplied secret and a zero overlap; 422s bad input; 404s foreign ids", async () => {
+    const created = await createWebhook({
+      endpoint: "https://example.com/hooks/rotate-byo",
+      events: ["email.sent"],
+    });
+    const mine = `whsec_${randomBytes(32).toString("base64")}`;
+    const res = await call(fullKey, "POST", `/webhooks/${created.id}/rotate`, {
+      signing_secret: mine,
+      overlap_hours: 0,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      object: "webhook",
+      id: created.id,
+      signing_secret: mine,
+      previous_secret_expires_at: null,
+    });
+    expect(await decryptWebhookSigningSecrets(await endpointRow(created.id), keyring)).toEqual([
+      mine,
+    ]);
+    const got = (await (await call(fullKey, "GET", `/webhooks/${created.id}`)).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(got.previous_secret_expires_at).toBeNull();
+
+    for (const body of [{ signing_secret: "whsec_short" }, { overlap_hours: 100 }]) {
+      expect((await call(fullKey, "POST", `/webhooks/${created.id}/rotate`, body)).status).toBe(
+        422,
+      );
+    }
+    expect((await call(otherTeamKey, "POST", `/webhooks/${created.id}/rotate`, {})).status).toBe(
+      404,
+    );
+    expect((await call(sendKey, "POST", `/webhooks/${created.id}/rotate`, {})).status).toBe(403);
   });
 });

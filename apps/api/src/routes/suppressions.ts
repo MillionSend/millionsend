@@ -1,9 +1,11 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   ERASED_TOMBSTONE,
+  emitSuppressionEvents,
   extractAddrSpec,
   hashRecipient,
   normalizeAddress,
+  type SuppressionEventRow,
   suppressionHashesFor,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -30,7 +32,11 @@ import {
 const ERASED_ROWS_NOTE =
   "Rows whose address was erased (GDPR/LGPD) keep blocking sends but are hidden from the list and from lookups by email; they are reachable by id only.";
 
-export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
+export function registerSuppressionRoutes(
+  app: OpenAPIHono<Env>,
+  db: Db,
+  events: { enqueue?: ((deliveryId: string) => Promise<void>) | undefined } = {},
+): void {
   const jsonErr = (description: string) => ({
     content: { "application/json": { schema: errorSchema } },
     description,
@@ -72,7 +78,7 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
     teamId: string,
     emails: string[],
     reason: SuppressionReason,
-  ): Promise<string[]> => {
+  ): Promise<{ ids: string[]; created: SuppressionEventRow[] }> => {
     const entries = [...new Set(emails.map((e) => normalizeAddress(extractAddrSpec(e))))].map(
       (address) => ({ address, hashes: suppressionHashesFor(address) }),
     );
@@ -90,6 +96,7 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
       );
     const idByHash = new Map(existing.map((r) => [r.emailHash, r.id]));
     const missing = entries.filter((e) => !e.hashes.some((h) => idByHash.has(h)));
+    const created: SuppressionEventRow[] = [];
     if (missing.length > 0) {
       // A concurrent insert of the same address is absorbed by the no-op
       // conflict update, which still returns the surviving row's id.
@@ -107,13 +114,43 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
           target: [s.teamId, s.emailHash],
           set: { emailHash: sql`excluded.email_hash` },
         })
-        .returning({ id: s.id, emailHash: s.emailHash });
-      for (const r of inserted) idByHash.set(r.emailHash, r.id);
+        .returning({
+          id: s.id,
+          emailHash: s.emailHash,
+          email: s.email,
+          reason: s.reason,
+          createdAt: s.createdAt,
+          // A row this statement inserted has xmax 0; one it reached through
+          // the conflict update does not. Only the former are new to the list.
+          inserted: sql<boolean>`(xmax = 0)`,
+        });
+      for (const { inserted: isNew, ...r } of inserted) {
+        if (isNew) created.push(r);
+        idByHash.set(r.emailHash, r.id);
+      }
     }
-    return entries.map((e) => {
+    const ids = entries.map((e) => {
       const id = e.hashes.map((h) => idByHash.get(h)).find((v) => v !== undefined);
       if (!id) throw new Error("suppression upsert returned no row");
       return id;
+    });
+    await emitSuppressionEvents(db, {
+      teamId,
+      type: "suppression.added",
+      rows: created,
+      source: "api",
+      enqueue: events.enqueue,
+    });
+    return { ids, created };
+  };
+
+  const removed = async (teamId: string, rows: SuppressionEventRow[]) => {
+    await emitSuppressionEvents(db, {
+      teamId,
+      type: "suppression.removed",
+      rows,
+      source: "api",
+      enqueue: events.enqueue,
     });
   };
 
@@ -136,7 +173,7 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const ids = await ensureSuppressed(
+      const { ids } = await ensureSuppressed(
         auth.teamId,
         body.emails,
         reasonByOrigin[body.origin ?? "manual"],
@@ -178,7 +215,8 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const rows = await db
         .delete(s)
         .where(and(eq(s.teamId, auth.teamId), match))
-        .returning({ id: s.id });
+        .returning({ id: s.id, email: s.email, reason: s.reason, createdAt: s.createdAt });
+      await removed(auth.teamId, rows);
       return c.json(
         {
           data: rows.map((r) => ({
@@ -211,7 +249,9 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const [id] = await ensureSuppressed(
+      const {
+        ids: [id],
+      } = await ensureSuppressed(
         auth.teamId,
         [body.email],
         reasonByOrigin[body.origin ?? "manual"],
@@ -315,8 +355,9 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
       const [row] = await db
         .delete(s)
         .where(byIdOrEmail(auth.teamId, c.req.valid("param").id))
-        .returning({ id: s.id });
+        .returning({ id: s.id, email: s.email, reason: s.reason, createdAt: s.createdAt });
       if (!row) return c.json(errorBody(404, "not_found", "Suppression not found"), 404);
+      await removed(auth.teamId, [row]);
       return c.json({ object: "suppression" as const, id: row.id, deleted: true as const }, 200);
     },
   );

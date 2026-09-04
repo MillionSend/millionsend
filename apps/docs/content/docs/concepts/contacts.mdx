@@ -30,7 +30,24 @@ Contacts are managed via `POST/GET/PATCH/DELETE /contacts` and
 path segment accepts either the contact UUID or its email address; email
 matching is case-insensitive.
 
-Topic subscriptions are set per contact with `PATCH /contacts/{id}/topics`.
+Topic subscriptions are set per contact with `PATCH /contacts/{id}/topics`,
+and `GET /contacts/{id}/topics` reads them back with defaults applied: each
+topic's effective `subscription`, whether it was chosen explicitly, and its
+`visibility` (the hosted page shows public topics only).
+
+`POST /contacts/{id}/preferences-link` mints the contact's preference-center
+URL — `{ "object": "preferences_link", "contact": "<uuid>", "url": "..." }` —
+the same page the unsubscribe links in their emails open, so a settings screen
+in your product can deep-link into it. The link has no expiry and lets its
+holder change that contact's preferences, including the global unsubscribe, so
+hand it only to the contact. Also available as the
+`create_contact_preferences_link` MCP tool.
+
+Every change to a contact publishes a
+[webhook event](/concepts/webhooks#event-types): `contact.created`,
+`contact.updated`, `contact.deleted`, `contact.unsubscribed`,
+`contact.resubscribed`, `contact.topic_opt_in` and `contact.topic_opt_out`,
+each with the `source` that made the change.
 
 ## Bulk delete
 
@@ -110,4 +127,6 @@ views — back to CSV.
 Broadcast emails carry RFC 8058 one-click `List-Unsubscribe` headers and a
 hosted unsubscribe page. A recipient can unsubscribe globally or opt out of
 individual [topics](/concepts/topics). Global unsubscribes set
-`unsubscribed: true` on the contact.
+`unsubscribed: true` on the contact and stop topic sends and broadcasts;
+transactional sends without a `topic_id` still arrive — see
+[Suppressions](/concepts/suppressions#what-suppression-does).

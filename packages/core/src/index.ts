@@ -58,6 +58,19 @@ export {
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
 export { type ContactActivityRow, recordContactActivity } from "./contact-activities.js";
 export {
+  type ContactEvent,
+  type ContactEventContext,
+  type ContactEventSource,
+  type ContactSnapshot,
+  contactEventData,
+  emitActivityEvents,
+  emitContactEvents,
+  emitSuppressionEvents,
+  loadContactSnapshots,
+  type SuppressionEventRow,
+  webhookEventForActivity,
+} from "./contact-events.js";
+export {
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
@@ -219,6 +232,9 @@ export {
   findSuppressed,
   hashRecipient,
   normalizeAddress,
+  SUPPRESSION_ORIGIN_BY_REASON,
+  type SuppressionOrigin,
+  type SuppressionReason,
   suppressionHashesFor,
 } from "./suppressions.js";
 export {
@@ -252,17 +268,24 @@ export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
 export {
   buildWebhookPayload,
   decryptWebhookSecret,
+  decryptWebhookSigningSecrets,
   encryptWebhookSecret,
   enqueueTeamWebhookDeliveries,
+  enqueueTeamWebhookEvents,
   enqueueWebhookDeliveries,
   generateWebhookSecret,
   isWebhookEventType,
   parseWebhookSecret,
+  rotatedWebhookSecretColumns,
+  rotationOverlapEnd,
   signWebhook,
+  type TeamWebhookEvent,
   verifyWebhookSignature,
   WEBHOOK_EVENT_TYPES,
   WEBHOOK_MAX_ATTEMPTS,
   WEBHOOK_RETRY_SCHEDULE_MS,
+  WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
+  WEBHOOK_ROTATION_MAX_OVERLAP_HOURS,
   type WebhookEmailFacts,
   type WebhookEventType,
   type WebhookPayload,

@@ -168,6 +168,7 @@ cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
 | `update_contact_topics` | `audience:write` | Define as inscrições por tópico de um contato. |
 | `delete_contact` | `audience:write` | Exclui um contato. |
 | `delete_contacts` | `audience:write` | Exclui até 1.000 contatos por ids ou e-mails. |
+| `create_contact_preferences_link` | `audience:write` | Gera a URL da central de preferências de um contato. |
 | `add_contact_to_segment` | `audience:write` | Adiciona um contato a um segmento manual. |
 | `remove_contact_from_segment` | `audience:write` | Remove um contato de um segmento manual. |
 | `create_segment` | `audience:write` | Cria um segmento — com filtro, ou manual sem um. |
@@ -192,6 +193,7 @@ cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
 | `delete_template` | `templates:write` | Exclui um template; os broadcasts mantêm a própria cópia. |
 | `create_webhook` | `webhooks:write` | **admin** Cria um webhook; a resposta inclui o segredo de assinatura. |
 | `update_webhook` | `webhooks:write` | **admin** Atualiza URL, eventos ou status de um webhook. |
+| `rotate_webhook_secret` | `webhooks:write` | **admin** Rotaciona o segredo de assinatura de um webhook com janela de sobreposição. |
 | `delete_webhook` | `webhooks:write` | **admin** Exclui um webhook. |
 | `create_api_key` | `api-keys:write` | **admin** Cria uma chave de API; o token só vem nesta resposta. |
 | `revoke_api_key` | `api-keys:write` | **admin** Revoga uma chave de API. |

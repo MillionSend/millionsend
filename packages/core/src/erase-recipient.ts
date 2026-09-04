@@ -68,10 +68,14 @@ export async function eraseRecipient(
   const d = schema.webhookDeliveries;
   const wh = schema.webhookEndpoints;
   const teamEndpoints = db.select({ id: wh.id }).from(wh).where(eq(wh.teamId, teamId));
+  // Contact events carry the name beside the address; a name alone is still
+  // personal data, so it leaves with the address.
+  const contactPayload = sql`lower(${d.payload}->'data'->>'email') = ${addr}`;
+  const withoutNames = sql`case when ${contactPayload} then ${d.payload} #- '{data,first_name}' #- '{data,last_name}' else ${d.payload} end`;
   const deliveries = await db
     .update(d)
     .set({
-      payload: scrubJson(d.payload),
+      payload: sql`regexp_replace((${withoutNames})::text, ${json}, ${jsonTombstone}, 'gi')::jsonb`,
       lastResponseBody: sql`regexp_replace(${d.lastResponseBody}, ${plain}, ${ERASED_TOMBSTONE}, 'gi')`,
     })
     .where(

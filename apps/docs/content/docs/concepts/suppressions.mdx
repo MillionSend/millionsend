@@ -11,10 +11,12 @@ marked you as spam.
 
 - **Hard bounce** — the receiving server permanently rejected the address.
 - **Complaint** — the recipient marked a message as spam.
-- **Unsubscribe** — the recipient used the one-click unsubscribe link of a
-  broadcast. Besides flagging the contact, the opt-out is retained here so it
-  survives deleting and re-importing the contact; only an explicit
-  `PATCH /contacts/{id}` with `unsubscribed: false` clears it.
+- **Unsubscribe** — the recipient opted out of all marketing email, through
+  the one-click header or the hosted preference page. Besides flagging the
+  contact, the opt-out is retained here so it survives deleting and
+  re-importing the contact; only an explicit `PATCH /contacts/{id}` with
+  `unsubscribed: false` clears it. Unlike the other origins it covers
+  marketing mail only (see below).
 - **Manual** — you added the address, in the dashboard or via the API.
 
 Bounces and complaints arrive as SES events and suppress the address
@@ -22,12 +24,23 @@ automatically. Suppressions are per team.
 
 ## What suppression does
 
-- **Transactional sends** (`POST /emails`, SMTP relay): suppressed recipients
-  are stripped from `to`/`cc`/`bcc`. If *every* `to` recipient is suppressed,
-  the send is rejected with `422 all_recipients_suppressed` (message
-  `All recipients are suppressed`). Recipients opted out of the send's
-  `topic_id` count as suppressed for this rule.
-- **Broadcasts**: suppressed contacts are skipped during fan-out.
+- **Transactional sends** (`POST /emails` and the SMTP relay, without a
+  `topic_id`): recipients suppressed for a bounce, a complaint or a manual
+  entry are stripped from `to`/`cc`/`bcc`. If *every* `to` recipient is
+  suppressed, the send is rejected with `422 all_recipients_suppressed`
+  (message `All recipients are suppressed`). An **unsubscribe** entry does not
+  apply here: someone who opted out of marketing still receives password
+  resets, receipts and other account mail — the same meaning Resend gives
+  `unsubscribed` ("unsubscribed from all Broadcasts").
+- **Topic sends** (`POST /emails` with a `topic_id`) and **broadcasts**: every
+  entry applies, unsubscribes included, plus the recipient's opt-out of that
+  topic; broadcasts skip such contacts during fan-out.
+
+A list imported with `origin: "unsubscribe"` therefore blocks topic sends and
+broadcasts only. Import with `manual` to block every send.
+
+Every change to the list publishes a `suppression.added` or
+`suppression.removed` [webhook event](/concepts/webhooks#event-types).
 
 ## Reviewing and removing
 

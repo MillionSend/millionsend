@@ -7,7 +7,7 @@
   "save": "Save preferences",
   "saved": "Your email preferences have been updated.",
   "done": "You're unsubscribed.",
-  "doneDetail": "You won't receive these emails anymore.",
+  "doneDetail": "You won't receive marketing emails anymore. Messages about your account, like receipts and password resets, still arrive.",
   "doneDetailTopic": "You won't receive {topic} emails anymore.",
   "invalid": "This link is not valid."
 }

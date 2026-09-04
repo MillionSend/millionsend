@@ -195,7 +195,9 @@ export async function acceptEmail(
   ];
   // Read through the caller's transaction when one is supplied: a batch holds
   // the connection open, so a read on deps.db would deadlock a single-conn pool.
-  const suppressed = await findSuppressed(opts.tx ?? deps.db, auth.teamId, allRecipients);
+  const suppressed = await findSuppressed(opts.tx ?? deps.db, auth.teamId, allRecipients, {
+    transactional: !payload.topicId,
+  });
   // Topic opt-outs drop exactly like suppression hits: strip the recipient,
   // keep sending to the rest, refuse only when no `to` remains.
   if (payload.topicId) {

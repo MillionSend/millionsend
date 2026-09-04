@@ -30,6 +30,24 @@ Eventos de conta não carregam email; `data` descreve a situação do time:
 | `quota.reached` | A cota de hoje foi usada; os envios passam até 50% a mais e depois estacionam até a meia-noite UTC. | igual ao anterior |
 | `quota.paused` | 50% além da cota: novos envios ficam estacionados até a meia-noite UTC, ou até um upgrade de plano liberá-los (uma vez por dia UTC, só na nuvem). | igual ao anterior |
 
+Eventos de audiência disparam quando um contato ou a lista de supressão muda,
+seja quem for que mudou. `data` traz o contato no formato do Resend — `id`,
+`email`, `first_name`, `last_name`, `unsubscribed`, `created_at`, `updated_at`
+— mais `source`: `api`, `dashboard`, `hosted_page` (a central de preferências)
+ou `one_click` (um POST de header RFC 8058). O Resend emite apenas
+`contact.created`, `contact.updated` e `contact.deleted`; os demais são
+extensões do MillionSend.
+
+| Evento | Disparado quando | `data` extra |
+| --- | --- | --- |
+| `contact.created` | Um contato foi adicionado: API, lote, importação CSV ou painel. | |
+| `contact.updated` | Nome, propriedades ou o flag de descadastro mudaram pela API ou pelo painel. | |
+| `contact.deleted` | Um contato foi excluído. Excluir é um apagamento, então `email` vem como `[erased]`; use o `id`. | |
+| `contact.unsubscribed` | O contato saiu de todo e-mail de marketing. | |
+| `contact.resubscribed` | Uma reinscrição explícita (`unsubscribed: false`). | |
+| `contact.topic_opt_in` / `contact.topic_opt_out` | A inscrição efetiva do contato em um tópico mudou. | `topic_id`, `topic_name` |
+| `suppression.added` / `suppression.removed` | Um endereço entrou ou saiu da [lista de supressão](/pt-BR/concepts/suppressions). Linhas de bounce e reclamação vêm do SES, com `source: null`. | `data` é `{ id, email, origin, source, created_at }` |
+
 ## Assinaturas (Standard Webhooks)
 
 As entregas são assinadas seguindo a especificação
@@ -92,8 +110,26 @@ curl -X POST "https://api.millionsend.com/webhooks" \
 ```
 
 O segredo é retornado na criação e em `GET /webhooks/{id}`, nunca nas linhas
-da listagem, e não pode ser alterado depois — apague e recrie o endpoint para
-rotacioná-lo.
+da listagem.
+
+## Rotacionando o segredo
+
+`POST /webhooks/{id}/rotate` (ou **Rotacionar segredo** no painel) gera um
+novo segredo, ou usa o de `signing_secret`, e o retorna. Durante
+`overlap_hours` (padrão 24, até 72) o segredo anterior continua assinando:
+toda entrega nessa janela leva as duas assinaturas, separadas por espaço em
+`webhook-signature`, então um receptor com qualquer um dos dois verifica.
+Troque o receptor em qualquer momento da janela; depois dela só o novo
+assina. `0` descarta o antigo na hora, para um segredo vazado.
+`GET /webhooks/{id}` informa o fim da janela em `previous_secret_expires_at`,
+e uma segunda rotação dentro da janela substitui o segredo anterior.
+
+```sh
+curl -X POST "https://api.millionsend.com/webhooks/{id}/rotate" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "overlap_hours": 24 }'
+```
 
 ## Entrega e novas tentativas
 

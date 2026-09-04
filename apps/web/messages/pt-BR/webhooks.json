@@ -21,7 +21,8 @@
     "delivery": "Entrega",
     "engagement": "Engajamento",
     "problems": "Problemas",
-    "account": "Conta"
+    "account": "Conta",
+    "audience": "Audiência"
   },
   "eventLabel": {
     "email": {
@@ -41,6 +42,19 @@
       "warning": "Cota diária em 80%",
       "reached": "Cota diária atingida",
       "paused": "Teto da cota diária: envios na fila"
+    },
+    "contact": {
+      "created": "Contato criado",
+      "updated": "Contato atualizado",
+      "deleted": "Contato excluído",
+      "unsubscribed": "Contato descadastrado",
+      "resubscribed": "Contato reinscrito",
+      "topic_opt_in": "Entrada em tópico",
+      "topic_opt_out": "Saída de tópico"
+    },
+    "suppression": {
+      "added": "Endereço suprimido",
+      "removed": "Supressão removida"
     }
   },
   "status": {
@@ -51,6 +65,8 @@
   "enable": "Ativar",
   "disable": "Desativar",
   "delete": "Excluir",
+  "edit": "Editar…",
+  "rotateSecret": "Rotacionar segredo…",
   "create": {
     "title": "Adicionar webhook",
     "url": "URL do endpoint",
@@ -69,6 +85,20 @@
     "secretLabel": "Segredo de assinatura",
     "warning": "Este segredo de assinatura é exibido uma única vez. Guarde-o agora.",
     "done": "Concluir"
+  },
+  "editDialog": {
+    "title": "Editar webhook",
+    "submit": "Salvar alterações"
+  },
+  "rotate": {
+    "title": "Rotacionar segredo de assinatura",
+    "body": "Um novo segredo é gerado agora. Durante a sobreposição escolhida, as entregas para <code>{url}</code> levam duas assinaturas, então o receptor continua verificando com o segredo antigo até você trocá-lo. Depois disso, só o novo assina.",
+    "overlap": "Sobreposição",
+    "overlapHours": "{count, plural, =0 {Sem sobreposição} one {# hora} other {# horas}}",
+    "confirm": "Rotacionar segredo",
+    "revealTitle": "Segredo rotacionado",
+    "previousUntil": "O segredo anterior também assina até {date}.",
+    "previousDropped": "O segredo anterior deixou de assinar."
   },
   "deleteConfirm": {
     "title": "Excluir webhook",
@@ -105,7 +135,8 @@
     "prev": "Anterior",
     "next": "Próxima",
     "pageOf": "{from}–{to} de {total}",
-    "notFound": "Webhook não encontrado."
+    "notFound": "Webhook não encontrado.",
+    "previousSecret": "O segredo anterior também assina até {date}"
   },
   "deliveryTable": {
     "event": "Evento",

@@ -32,7 +32,24 @@ segmento de caminho `{id}` aceita tanto o UUID do contato quanto seu endereço
 de email; a comparação de email não diferencia maiúsculas.
 
 As inscrições em tópicos são definidas por contato com
-`PATCH /contacts/{id}/topics`.
+`PATCH /contacts/{id}/topics`, e `GET /contacts/{id}/topics` as lê de volta com
+os padrões aplicados: a `subscription` efetiva de cada tópico, se foi escolhida
+explicitamente e sua `visibility` (a página hospedada mostra só tópicos
+públicos).
+
+`POST /contacts/{id}/preferences-link` gera a URL da central de preferências
+do contato — `{ "object": "preferences_link", "contact": "<uuid>", "url": "..." }`
+— a mesma página que os links de descadastro dos e-mails abrem, para que uma
+tela de configurações do seu produto leve direto até ela. O link não expira e
+permite a quem o tiver alterar as preferências daquele contato, inclusive o
+descadastro global, então entregue-o apenas ao contato. Também disponível como
+a ferramenta MCP `create_contact_preferences_link`.
+
+Toda mudança em um contato publica um
+[evento de webhook](/pt-BR/concepts/webhooks#tipos-de-evento):
+`contact.created`, `contact.updated`, `contact.deleted`,
+`contact.unsubscribed`, `contact.resubscribed`, `contact.topic_opt_in` e
+`contact.topic_opt_out`, cada um com o `source` que fez a mudança.
 
 ## Exclusão em massa
 
@@ -112,4 +129,6 @@ de volta para CSV.
 Emails de broadcast levam headers `List-Unsubscribe` de um clique (RFC 8058)
 e uma página de descadastro hospedada. Um destinatário pode se descadastrar
 globalmente ou sair de [tópicos](/pt-BR/concepts/topics) individuais.
-Descadastros globais definem `unsubscribed: true` no contato.
+Descadastros globais definem `unsubscribed: true` no contato e param envios
+com tópico e broadcasts; envios transacionais sem `topic_id` continuam
+chegando — veja [Supressões](/pt-BR/concepts/suppressions#o-que-a-supressão-faz).

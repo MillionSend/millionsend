@@ -12,6 +12,8 @@ import {
   SEGMENT_FILTER_MAX_CONDITIONS,
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
   WEBHOOK_EVENT_TYPES,
+  WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
+  WEBHOOK_ROTATION_MAX_OVERLAP_HOURS,
 } from "@millionsend/core";
 
 /**
@@ -1188,8 +1190,46 @@ export const createWebhookResponseSchema = z
   .openapi("CreateWebhookResponse");
 
 export const getWebhookResponseSchema = webhookListItemSchema
-  .extend({ object: z.literal("webhook"), signing_secret: z.string() })
+  .extend({
+    object: z.literal("webhook"),
+    signing_secret: z.string(),
+    previous_secret_expires_at: z
+      .string()
+      .nullable()
+      .describe(
+        "While set, deliveries are also signed with the secret this one replaced (a rotation's overlap window)",
+      ),
+  })
   .openapi("GetWebhookResponse");
+
+export const rotateWebhookSecretRequestSchema = z
+  .object({
+    signing_secret: z
+      .string()
+      .optional()
+      .describe(
+        "New secret to sign with: whsec_ followed by base64 of 24-64 bytes. Omit to mint one.",
+      ),
+    overlap_hours: z
+      .number()
+      .int()
+      .min(0)
+      .max(WEBHOOK_ROTATION_MAX_OVERLAP_HOURS)
+      .optional()
+      .describe(
+        `Hours the previous secret keeps signing alongside the new one (default ${WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS}, max ${WEBHOOK_ROTATION_MAX_OVERLAP_HOURS}). Every delivery in the window carries both signatures, so a receiver holding either verifies; 0 drops the old secret at once.`,
+      ),
+  })
+  .openapi("RotateWebhookSecretRequest");
+
+export const rotateWebhookSecretResponseSchema = z
+  .object({
+    object: z.literal("webhook"),
+    id: z.uuid(),
+    signing_secret: z.string(),
+    previous_secret_expires_at: z.string().nullable(),
+  })
+  .openapi("RotateWebhookSecretResponse");
 
 export const listWebhooksResponseSchema = z
   .object({
@@ -1251,6 +1291,14 @@ export const updateContactTopicsResponseSchema = z
   .object({ id: z.uuid() })
   .openapi("UpdateContactTopicsResponse");
 
+export const contactPreferencesLinkResponseSchema = z
+  .object({
+    object: z.literal("preferences_link"),
+    contact: z.uuid(),
+    url: z.url().describe("The contact's hosted preference page; no expiry, treat as a secret"),
+  })
+  .openapi("ContactPreferencesLinkResponse");
+
 export const listContactTopicsResponseSchema = z
   .object({
     object: z.literal("list"),
@@ -1267,6 +1315,9 @@ export const listContactTopicsResponseSchema = z
           .describe(
             "True when the contact or the API chose this; false when it is the topic's default",
           ),
+        visibility: z
+          .enum(["public", "private"])
+          .describe("The hosted preference page lists public topics only"),
       }),
     ),
     has_more: z.literal(false),
@@ -1280,15 +1331,11 @@ export const listContactTopicsResponseSchema = z
  * 8058 one-click opt-out) that Resend has no equivalent for.
  */
 
-export const SUPPRESSION_ORIGIN_BY_REASON = {
-  hard_bounce: "bounce",
-  complaint: "complaint",
-  manual: "manual",
-  one_click_unsubscribe: "unsubscribe",
-} as const;
-
-export type SuppressionReason = keyof typeof SUPPRESSION_ORIGIN_BY_REASON;
-export type SuppressionOrigin = (typeof SUPPRESSION_ORIGIN_BY_REASON)[SuppressionReason];
+export {
+  SUPPRESSION_ORIGIN_BY_REASON,
+  type SuppressionOrigin,
+  type SuppressionReason,
+} from "@millionsend/core";
 
 const suppressionOriginSchema = z.enum(["bounce", "complaint", "manual", "unsubscribe"]);
 

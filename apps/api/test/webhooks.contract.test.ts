@@ -76,6 +76,7 @@ describe("official resend SDK: webhooks", () => {
       endpoint: "https://example.com/hooks/contract",
       events: ["email.sent", "email.delivered"],
       signing_secret: signingSecret,
+      previous_secret_expires_at: null,
     });
   });
 
@@ -186,7 +187,7 @@ describe("official resend SDK: webhooks", () => {
   it("422s events outside the emitted union", async () => {
     const bad = await resend.webhooks.create({
       endpoint: "https://example.com/hooks/bad",
-      events: ["contact.created"],
+      events: ["domain.created"],
     });
     expect(bad.data).toBeNull();
     expect(bad.error?.statusCode).toBe(422);

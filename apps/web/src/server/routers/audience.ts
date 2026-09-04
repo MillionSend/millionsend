@@ -2,7 +2,10 @@ import {
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
+  type ContactEventContext,
   clearUnsubscribeSuppression,
+  emitContactEvents,
+  emitSuppressionEvents,
   eraseRecipient,
   recordContactActivity,
   resultRows,
@@ -66,6 +69,21 @@ async function assertContacts(
   if ((row?.count ?? 0) !== unique.length) throw new TRPCError({ code: "NOT_FOUND" });
   return unique;
 }
+
+/** Dashboard-made changes publish with this provenance; the enqueue is absent in tests. */
+const dashboardEvents = (ctx: {
+  enqueueWebhookDelivery?: ((deliveryId: string) => Promise<void>) | undefined;
+}): ContactEventContext => ({ source: "dashboard", enqueue: ctx.enqueueWebhookDelivery });
+
+const contactSnapshotColumns = {
+  id: schema.contacts.id,
+  email: schema.contacts.email,
+  firstName: schema.contacts.firstName,
+  lastName: schema.contacts.lastName,
+  unsubscribed: schema.contacts.unsubscribed,
+  createdAt: schema.contacts.createdAt,
+  updatedAt: schema.contacts.updatedAt,
+};
 
 export const audienceRouter = router({
   contacts: router({
@@ -279,11 +297,15 @@ export const audienceRouter = router({
           .returning({ id: t.id });
         // Conflict = the team already has this address (case-insensitive).
         if (!row) throw new TRPCError({ code: "CONFLICT" });
-        await recordContactActivity(ctx.db, {
-          teamId: ctx.teamId,
-          contactId: row.id,
-          type: "contact_created",
-        });
+        await recordContactActivity(
+          ctx.db,
+          {
+            teamId: ctx.teamId,
+            contactId: row.id,
+            type: "contact_created",
+          },
+          dashboardEvents(ctx),
+        );
         return { id: row.id };
       }),
 
@@ -344,6 +366,7 @@ export const audienceRouter = router({
             contactId: r.id,
             type: "contact_created" as const,
           })),
+          dashboardEvents(ctx),
         );
         return { created: inserted.length, skipped: skipped + valid.length - inserted.length };
       }),
@@ -386,20 +409,36 @@ export const audienceRouter = router({
             updatedAt: new Date(),
           })
           .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
-          .returning({ id: t.id, email: t.email, unsubscribed: t.unsubscribed });
+          .returning(contactSnapshotColumns);
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
         // Only this explicit re-subscribe lifts the retained one-click opt-out;
         // add/addMany of the same address leave it in place.
         if (input.unsubscribed === false) {
-          await clearUnsubscribeSuppression(ctx.db, ctx.teamId, row.email);
-        }
-        if (before && before.unsubscribed !== row.unsubscribed) {
-          await recordContactActivity(ctx.db, {
+          const dropped = await clearUnsubscribeSuppression(ctx.db, ctx.teamId, row.email);
+          await emitSuppressionEvents(ctx.db, {
             teamId: ctx.teamId,
-            contactId: row.id,
-            type: row.unsubscribed ? "unsubscribed" : "resubscribed",
+            type: "suppression.removed",
+            rows: dropped,
+            source: "dashboard",
+            enqueue: ctx.enqueueWebhookDelivery,
           });
         }
+        if (before && before.unsubscribed !== row.unsubscribed) {
+          await recordContactActivity(
+            ctx.db,
+            {
+              teamId: ctx.teamId,
+              contactId: row.id,
+              type: row.unsubscribed ? "unsubscribed" : "resubscribed",
+            },
+            dashboardEvents(ctx),
+          );
+        }
+        await emitContactEvents(ctx.db, {
+          teamId: ctx.teamId,
+          events: [{ type: "contact.updated", contact: row }],
+          ctx: dashboardEvents(ctx),
+        });
         return row;
       }),
 
@@ -410,8 +449,13 @@ export const audienceRouter = router({
       const [row] = await ctx.db
         .delete(t)
         .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
-        .returning({ id: t.id, email: t.email });
+        .returning(contactSnapshotColumns);
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await emitContactEvents(ctx.db, {
+        teamId: ctx.teamId,
+        events: [{ type: "contact.deleted", contact: row }],
+        ctx: dashboardEvents(ctx),
+      });
       await eraseRecipient(ctx.db, ctx.teamId, row.email);
       return { id: row.id };
     }),
@@ -445,6 +489,7 @@ export const audienceRouter = router({
             type: "segment_added" as const,
             data: { segmentId: row.segmentId, name: names.get(row.segmentId) ?? null },
           })),
+          dashboardEvents(ctx),
         );
         return { added: inserted.length };
       }),
@@ -468,6 +513,7 @@ export const audienceRouter = router({
             type: "segment_removed" as const,
             data: { segmentId: segment.id, name: segment.name },
           })),
+          dashboardEvents(ctx),
         );
         return { removed: removed.length };
       }),
@@ -526,7 +572,7 @@ export const audienceRouter = router({
               data: { topicId: topic.id, name: topic.name },
             })),
         );
-        await recordContactActivity(ctx.db, changed);
+        await recordContactActivity(ctx.db, changed, dashboardEvents(ctx));
         return { optedIn: changed.length };
       }),
 
@@ -542,7 +588,12 @@ export const audienceRouter = router({
         const deleted = await ctx.db
           .delete(t)
           .where(and(inArray(t.id, contactIds), eq(t.teamId, ctx.teamId)))
-          .returning({ id: t.id, email: t.email });
+          .returning(contactSnapshotColumns);
+        await emitContactEvents(ctx.db, {
+          teamId: ctx.teamId,
+          events: deleted.map((contact) => ({ type: "contact.deleted" as const, contact })),
+          ctx: dashboardEvents(ctx),
+        });
         // ponytail: one cross-table scan per address; fold the batch into one
         // regex alternation if bulk deletes get slow.
         for (const row of deleted) await eraseRecipient(ctx.db, ctx.teamId, row.email);
@@ -603,12 +654,16 @@ export const audienceRouter = router({
           .onConflictDoNothing()
           .returning({ contactId: m.contactId });
         if (added) {
-          await recordContactActivity(ctx.db, {
-            teamId: ctx.teamId,
-            contactId: input.contactId,
-            type: "segment_added",
-            data: { segmentId: segment.id, name: segment.name },
-          });
+          await recordContactActivity(
+            ctx.db,
+            {
+              teamId: ctx.teamId,
+              contactId: input.contactId,
+              type: "segment_added",
+              data: { segmentId: segment.id, name: segment.name },
+            },
+            dashboardEvents(ctx),
+          );
         }
         return { added: added !== undefined };
       }),
@@ -625,12 +680,16 @@ export const audienceRouter = router({
           .where(and(eq(m.segmentId, input.segmentId), eq(m.contactId, input.contactId)))
           .returning({ segmentId: m.segmentId });
         if (removed) {
-          await recordContactActivity(ctx.db, {
-            teamId: ctx.teamId,
-            contactId: input.contactId,
-            type: "segment_removed",
-            data: { segmentId: segment.id, name: segment.name },
-          });
+          await recordContactActivity(
+            ctx.db,
+            {
+              teamId: ctx.teamId,
+              contactId: input.contactId,
+              type: "segment_removed",
+              data: { segmentId: segment.id, name: segment.name },
+            },
+            dashboardEvents(ctx),
+          );
         }
         return { removed: removed !== undefined };
       }),
@@ -678,12 +737,16 @@ export const audienceRouter = router({
             set: { subscribed: input.subscribed, updatedAt: new Date() },
           });
         if ((prior?.subscribed ?? topic.defaultSubscribed) !== input.subscribed) {
-          await recordContactActivity(ctx.db, {
-            teamId: ctx.teamId,
-            contactId: input.contactId,
-            type: input.subscribed ? "topic_opt_in" : "topic_opt_out",
-            data: { topicId: topic.id, name: topic.name },
-          });
+          await recordContactActivity(
+            ctx.db,
+            {
+              teamId: ctx.teamId,
+              contactId: input.contactId,
+              type: input.subscribed ? "topic_opt_in" : "topic_opt_out",
+              data: { topicId: topic.id, name: topic.name },
+            },
+            dashboardEvents(ctx),
+          );
         }
         return { subscribed: input.subscribed };
       }),
@@ -701,7 +764,12 @@ export const audienceRouter = router({
       const deleted = await ctx.db
         .delete(t)
         .where(and(eq(t.teamId, ctx.teamId), sql`lower(${t.email}) = ${input.email.toLowerCase()}`))
-        .returning({ id: t.id });
+        .returning(contactSnapshotColumns);
+      await emitContactEvents(ctx.db, {
+        teamId: ctx.teamId,
+        events: deleted.map((contact) => ({ type: "contact.deleted" as const, contact })),
+        ctx: dashboardEvents(ctx),
+      });
       const erased = await eraseRecipient(ctx.db, ctx.teamId, input.email);
       return { contact: deleted.length > 0, ...erased };
     }),

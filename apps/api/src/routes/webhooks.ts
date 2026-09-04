@@ -6,6 +6,9 @@ import {
   generateWebhookSecret,
   type Keyring,
   parseWebhookSecret,
+  rotatedWebhookSecretColumns,
+  rotationOverlapEnd,
+  WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -19,6 +22,8 @@ import {
   listQuerySchema,
   listWebhooksResponseSchema,
   removeWebhookResponseSchema,
+  rotateWebhookSecretRequestSchema,
+  rotateWebhookSecretResponseSchema,
   updateWebhookRequestSchema,
   webhookIdResponseSchema,
 } from "../schemas.js";
@@ -177,7 +182,81 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
         keyring,
         { teamId: row.teamId, rowId: row.id },
       );
-      return c.json({ ...wire(row), object: "webhook" as const, signing_secret: secret }, 200);
+      return c.json(
+        {
+          ...wire(row),
+          object: "webhook" as const,
+          signing_secret: secret,
+          previous_secret_expires_at:
+            row.prevSecretExpiresAt && row.prevSecretExpiresAt > new Date()
+              ? row.prevSecretExpiresAt.toISOString()
+              : null,
+        },
+        200,
+      );
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/webhooks/{id}/rotate",
+      summary: "Rotate a webhook's signing secret",
+      description:
+        "MillionSend extension. Mints a new signing secret (or takes the one in signing_secret) and " +
+        "returns it. For overlap_hours the previous secret keeps signing too: every delivery in that " +
+        "window carries both signatures, space-separated in webhook-signature, so the receiver can " +
+        "switch at any point without a gap. A second rotation inside the window replaces the previous secret.",
+      request: {
+        params: idParam,
+        body: { content: { "application/json": { schema: rotateWebhookSecretRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: rotateWebhookSecretResponseSchema } },
+          description: "The new secret and when the previous one stops signing",
+        },
+        404: jsonErr("Not found"),
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const { id } = c.req.valid("param");
+      const body = c.req.valid("json");
+      if (body.signing_secret !== undefined && parseWebhookSecret(body.signing_secret) === null) {
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            "signing_secret must be whsec_ followed by base64 of 24-64 bytes",
+          ),
+          422,
+        );
+      }
+      const secret = body.signing_secret ?? generateWebhookSecret();
+      const encrypted = await encryptWebhookSecret(secret, keyring, {
+        teamId: auth.teamId,
+        rowId: id,
+      });
+      const expiresAt = rotationOverlapEnd(
+        body.overlap_hours ?? WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
+      );
+      const [row] = await db
+        .update(w)
+        .set(rotatedWebhookSecretColumns({ encrypted, last4: secret.slice(-4) }, expiresAt))
+        .where(and(eq(w.id, id), eq(w.teamId, auth.teamId)))
+        .returning({ id: w.id });
+      if (!row) return c.json(errorBody(404, "not_found", "Webhook not found"), 404);
+      return c.json(
+        {
+          object: "webhook" as const,
+          id: row.id,
+          signing_secret: secret,
+          previous_secret_expires_at: expiresAt?.toISOString() ?? null,
+        },
+        200,
+      );
     },
   );
 

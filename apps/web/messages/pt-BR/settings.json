@@ -358,6 +358,7 @@
       "domain.deleted": "Excluiu domínio",
       "webhook.created": "Criou webhook",
       "webhook.updated": "Atualizou webhook",
+      "webhook.secret_rotated": "Rotacionou o segredo de assinatura do webhook",
       "webhook.deleted": "Excluiu webhook",
       "member.invited": "Convidou membro",
       "member.joined": "Entrou na equipe",

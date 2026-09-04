@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useCallback, useState } from "react";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
@@ -21,6 +21,7 @@ import { displayUrl } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { maskWebhookSecret, WEBHOOK_EVENT_META, type WebhookEventType } from "@/lib/webhook-events";
 import { ListFooter, PAGE_SIZES } from "../../emails/list-parts";
+import { type EditableWebhook, WebhookEditModal, WebhookRotateModal } from "../webhook-dialogs";
 import { DeliveryStatusBadge, WebhookStatusBadge } from "../webhook-status-badge";
 
 function DeliveriesTableHead() {
@@ -182,11 +183,16 @@ export function WebhookDetail({ id }: { id: string }) {
   const t = useTranslations("webhooks");
   const common = useTranslations("common");
   const nav = useTranslations("nav");
+  const locale = useLocale();
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
   const [page, setPage] = useState(0);
+  // Snapshot taken on click, so a background refetch while the dialog is open
+  // cannot re-prefill over what the user has typed.
+  const [editTarget, setEditTarget] = useState<EditableWebhook | null>(null);
+  const [rotating, setRotating] = useState(false);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -232,6 +238,8 @@ export function WebhookDetail({ id }: { id: string }) {
 
   // Stable identity: Modal-style focus/keyboard effects depend on onClose.
   const closeDelete = useCallback(() => setConfirmingDelete(false), []);
+  const closeEdit = useCallback(() => setEditTarget(null), []);
+  const closeRotate = useCallback(() => setRotating(false), []);
 
   // Shared by the form's onSubmit and the modal's ⌘↵ onConfirm, with the same
   // guard as the primary button's disabled state.
@@ -369,6 +377,18 @@ export function WebhookDetail({ id }: { id: string }) {
               ariaLabel={t("detail.moreActions")}
               items={[
                 {
+                  label: t("edit"),
+                  onSelect: () =>
+                    setEditTarget({
+                      id,
+                      url: data.url,
+                      description: data.description,
+                      eventTypes: data.eventTypes,
+                    }),
+                },
+                { label: t("rotateSecret"), onSelect: () => setRotating(true) },
+                null,
+                {
                   label: data.enabled ? t("disable") : t("enable"),
                   onSelect: () => void toggleEnabled(data),
                 },
@@ -401,6 +421,16 @@ export function WebhookDetail({ id }: { id: string }) {
         </MetaItem>
         <MetaItem label={t("detail.signingSecret")}>
           <span className="ms-mono">{maskWebhookSecret(data.secretLast4)}</span>
+          {data.previousSecretExpiresAt ? (
+            <div style={{ marginTop: 4, color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
+              {t("detail.previousSecret", {
+                date: new Intl.DateTimeFormat(locale, {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }).format(new Date(data.previousSecretExpiresAt)),
+              })}
+            </div>
+          ) : null}
         </MetaItem>
         {/* The chip list is the one tall cell: it spans both rows so Status
             and Created stay under URL and Secret instead of below it. */}
@@ -588,6 +618,9 @@ export function WebhookDetail({ id }: { id: string }) {
           </ModalFooter>
         </form>
       </Modal>
+
+      <WebhookEditModal webhook={editTarget} onClose={closeEdit} />
+      <WebhookRotateModal webhook={rotating ? { id, url: data.url } : null} onClose={closeRotate} />
     </>
   );
 }

@@ -285,3 +285,34 @@ describe("webhooks.deliveries.list", () => {
     expect(page.items[0]).not.toHaveProperty("payload");
   });
 });
+
+describe("webhooks.rotateSecret", () => {
+  it("mints a new secret, keeps the old one signing through the overlap, and is admin-only", async () => {
+    const teamId = await createTeam(db, "team-rotate");
+    const caller = callerFor(teamId);
+    const created = await caller.webhooks.create({ url: "https://example.com/rotate" });
+
+    const rotated = await caller.webhooks.rotateSecret({ id: created.id, overlapHours: 24 });
+    expect(rotated.secret).not.toBe(created.secret);
+    expect(rotated.secret.startsWith("whsec_")).toBe(true);
+    expect(rotated.previousSecretExpiresAt).not.toBeNull();
+
+    const row = await endpointRow(created.id);
+    expect(row.secretLast4).toBe(rotated.secret.slice(-4));
+    expect(row.prevSecretCiphertext).not.toBeNull();
+    expect(row.prevSecretExpiresAt).toEqual(rotated.previousSecretExpiresAt);
+
+    const got = await caller.webhooks.get({ id: created.id });
+    expect(got.secretLast4).toBe(rotated.secret.slice(-4));
+    expect(got.previousSecretExpiresAt).toEqual(rotated.previousSecretExpiresAt);
+
+    // No overlap: the outgoing secret is dropped at once.
+    const again = await caller.webhooks.rotateSecret({ id: created.id, overlapHours: 0 });
+    expect(again.previousSecretExpiresAt).toBeNull();
+    expect((await endpointRow(created.id)).prevSecretCiphertext).toBeNull();
+
+    await expect(
+      callerFor(teamId, "member").webhooks.rotateSecret({ id: created.id }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});

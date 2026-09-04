@@ -133,7 +133,9 @@ async function checkSendEligibility(
     // quota-parked row can wait days) are honored the way accept does:
     // strip the hit, refuse only when no primary recipient is left.
     const recipients = [...email.to, ...(email.cc ?? []), ...(email.bcc ?? [])];
-    const suppressed = await findSuppressed(db, email.teamId, recipients);
+    const suppressed = await findSuppressed(db, email.teamId, recipients, {
+      transactional: email.topicId === null,
+    });
     if (suppressed.size === 0) return { eligible: true, topicId: null };
     if (email.to.every((r) => suppressed.has(r))) {
       return { eligible: false, topicId: null, reason: "recipient_suppressed" };

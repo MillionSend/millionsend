@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { env, sesTenantsEnabled, trackingSubdomainsSupported } from "@millionsend/config";
+import { deriveUnsubscribeKey } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
 import { EMAIL_SEND_PRIORITY, Queue } from "@millionsend/queue";
 import {
@@ -49,6 +50,10 @@ const app = createApi({
   revision: env.MILLIONSEND_REVISION,
   appBaseUrl: env.APP_BASE_URL,
   publicApiUrl: env.PUBLIC_API_URL,
+  unsubscribeSecretKey: deriveUnsubscribeKey(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64")),
+  enqueueWebhookDelivery: async (deliveryId) => {
+    await queue.send("webhook.deliver", { deliveryId }, { dedupeKey: deliveryId });
+  },
   trackingSubdomains: trackingSubdomainsSupported(),
   ses: {
     clientForRegion,

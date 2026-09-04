@@ -21,7 +21,8 @@
     "delivery": "Delivery",
     "engagement": "Engagement",
     "problems": "Problems",
-    "account": "Account"
+    "account": "Account",
+    "audience": "Audience"
   },
   "eventLabel": {
     "email": {
@@ -41,6 +42,19 @@
       "warning": "Daily quota at 80%",
       "reached": "Daily quota reached",
       "paused": "Daily quota ceiling: sends queued"
+    },
+    "contact": {
+      "created": "Contact created",
+      "updated": "Contact updated",
+      "deleted": "Contact deleted",
+      "unsubscribed": "Contact unsubscribed",
+      "resubscribed": "Contact resubscribed",
+      "topic_opt_in": "Topic opt-in",
+      "topic_opt_out": "Topic opt-out"
+    },
+    "suppression": {
+      "added": "Address suppressed",
+      "removed": "Suppression removed"
     }
   },
   "status": {
@@ -51,6 +65,8 @@
   "enable": "Enable",
   "disable": "Disable",
   "delete": "Delete",
+  "edit": "Edit…",
+  "rotateSecret": "Rotate secret…",
   "create": {
     "title": "Add webhook",
     "url": "Endpoint URL",
@@ -69,6 +85,20 @@
     "secretLabel": "Signing secret",
     "warning": "This signing secret is shown once. Store it now.",
     "done": "Done"
+  },
+  "editDialog": {
+    "title": "Edit webhook",
+    "submit": "Save changes"
+  },
+  "rotate": {
+    "title": "Rotate signing secret",
+    "body": "A new secret is minted now. For the overlap you choose, deliveries to <code>{url}</code> carry two signatures, so the receiver keeps verifying with the old secret until you switch it. After that only the new secret signs.",
+    "overlap": "Overlap",
+    "overlapHours": "{count, plural, =0 {No overlap} one {# hour} other {# hours}}",
+    "confirm": "Rotate secret",
+    "revealTitle": "Secret rotated",
+    "previousUntil": "The previous secret also signs until {date}.",
+    "previousDropped": "The previous secret stopped signing."
   },
   "deleteConfirm": {
     "title": "Delete webhook",
@@ -105,7 +135,8 @@
     "prev": "Previous",
     "next": "Next",
     "pageOf": "{from}–{to} of {total}",
-    "notFound": "Webhook not found."
+    "notFound": "Webhook not found.",
+    "previousSecret": "The previous secret also signs until {date}"
   },
   "deliveryTable": {
     "event": "Event",

@@ -21,6 +21,14 @@ export const webhookEndpoints = pgTable("webhook_endpoints", {
   secretKeyVersion: integer("secret_key_version").notNull(),
   // Display-only masked form ("whsec_…abcd"); never enough to reconstruct.
   secretLast4: text("secret_last4").notNull(),
+  // The secret before the last rotation, encrypted the same way. It signs
+  // alongside the current one until prevSecretExpiresAt, so a receiver can
+  // switch secrets without a moment in which nothing verifies.
+  prevSecretCiphertext: bytea("prev_secret_ciphertext"),
+  prevSecretIv: bytea("prev_secret_iv"),
+  prevSecretWrappedDek: bytea("prev_secret_wrapped_dek"),
+  prevSecretKeyVersion: integer("prev_secret_key_version"),
+  prevSecretExpiresAt: timestamp("prev_secret_expires_at", { withTimezone: true }),
   // null = subscribe to all event types.
   events: jsonb("events").$type<string[]>(),
   status: webhookStatusEnum("status").notNull().default("enabled"),

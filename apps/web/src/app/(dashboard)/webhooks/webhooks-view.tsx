@@ -8,7 +8,6 @@ import { ResourceApiButton } from "@/components/api-sheet";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
-import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -23,34 +22,15 @@ import { Tooltip } from "@/components/tooltip";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { displayUrl } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
-import {
-  WEBHOOK_EVENT_GROUPS,
-  WEBHOOK_EVENT_META,
-  WEBHOOK_EVENT_TYPES,
-  type WebhookEventType,
-} from "@/lib/webhook-events";
+import { WEBHOOK_EVENT_META, type WebhookEventType } from "@/lib/webhook-events";
 import { ListFooter, PAGE_SIZES } from "../emails/list-parts";
+import {
+  type EditableWebhook,
+  EventTypesPicker,
+  WebhookEditModal,
+  WebhookRotateModal,
+} from "./webhook-dialogs";
 import { ENDPOINT_VARIANTS, WebhookStatusBadge } from "./webhook-status-badge";
-
-/** Shared dot + human-label option list for the event picker, derived from meta. */
-function useWebhookEventOptions() {
-  const t = useTranslations("webhooks");
-  return {
-    groups: WEBHOOK_EVENT_GROUPS.map((key) => ({ key, label: t(`eventGroup.${key}`) })),
-    options: WEBHOOK_EVENT_TYPES.map((value) => ({
-      value,
-      label: t(`eventLabel.${value}`),
-      group: WEBHOOK_EVENT_META[value].group,
-      adornment: (
-        <span
-          className="ms-dot"
-          style={{ background: WEBHOOK_EVENT_META[value].dot }}
-          aria-hidden="true"
-        />
-      ),
-    })),
-  };
-}
 
 /** Mirrors the loaded table: mono URL, events chip, badge, rate, time, menu. */
 function WebhooksSkeleton() {
@@ -93,47 +73,6 @@ function WebhooksSkeleton() {
   );
 }
 
-/** Shared by the create modal and the detail page's edit affordances. */
-export function EventTypesPicker({
-  allEvents,
-  selected,
-  disabled,
-  id,
-  onToggleAll,
-  onChange,
-}: {
-  allEvents: boolean;
-  selected: WebhookEventType[];
-  disabled: boolean;
-  id?: string;
-  onToggleAll: (all: boolean) => void;
-  onChange: (events: WebhookEventType[]) => void;
-}) {
-  const t = useTranslations("webhooks");
-  const { groups, options } = useWebhookEventOptions();
-  const summary = allEvents
-    ? t("create.allEvents")
-    : selected.length === 0
-      ? t("create.selectPrompt")
-      : t("eventsCount", { count: selected.length });
-  return (
-    <GroupedMultiSelect
-      value={selected}
-      onChange={(next) => onChange(next as WebhookEventType[])}
-      options={options}
-      groups={groups}
-      ariaLabel={t("create.events")}
-      summary={summary}
-      searchPlaceholder={t("create.searchEvents")}
-      noResultsLabel={t("create.noEvents")}
-      allOption={{ label: t("create.allEvents"), selected: allEvents, onToggle: onToggleAll }}
-      disabled={disabled}
-      width="100%"
-      {...(id !== undefined ? { id } : {})}
-    />
-  );
-}
-
 export function WebhooksView() {
   const t = useTranslations("webhooks");
   const common = useTranslations("common");
@@ -151,6 +90,8 @@ export function WebhooksView() {
   const [selectedEvents, setSelectedEvents] = useState<WebhookEventType[]>([]);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; url: string } | null>(null);
+  const [editTarget, setEditTarget] = useState<EditableWebhook | null>(null);
+  const [rotateTarget, setRotateTarget] = useState<{ id: string; url: string } | null>(null);
   // Client-side paging: the list query returns every endpoint (webhook counts
   // are small); the footer only bounds what is rendered.
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
@@ -193,6 +134,8 @@ export function WebhooksView() {
     resetCreate();
   }, [resetCreate]);
   const closeDelete = useCallback(() => setDeleteTarget(null), []);
+  const closeEdit = useCallback(() => setEditTarget(null), []);
+  const closeRotate = useCallback(() => setRotateTarget(null), []);
 
   const urlValid = url.trim().startsWith("https://");
   const submittable = urlValid && (allEvents || selectedEvents.length > 0);
@@ -348,6 +291,21 @@ export function WebhooksView() {
                       ariaLabel={t("table.menu")}
                       items={[
                         {
+                          label: t("edit"),
+                          onSelect: () =>
+                            setEditTarget({
+                              id: webhook.id,
+                              url: webhook.url,
+                              description: webhook.description,
+                              eventTypes: webhook.eventTypes,
+                            }),
+                        },
+                        {
+                          label: t("rotateSecret"),
+                          onSelect: () => setRotateTarget({ id: webhook.id, url: webhook.url }),
+                        },
+                        null,
+                        {
                           label: webhook.enabled ? t("disable") : t("enable"),
                           onSelect: () => void toggleEnabled(webhook),
                         },
@@ -399,8 +357,10 @@ export function WebhooksView() {
               closeCreate();
             }}
           >
-            <div className="ms-field">
-              <label htmlFor="webhook-secret">{t("reveal.secretLabel")}</label>
+            <div>
+              <div className="ms-microlabel" style={{ marginBottom: 6 }}>
+                {t("reveal.secretLabel")}
+              </div>
               <CopyChip value={revealedSecret} />
             </div>
             <p style={{ margin: 0, color: "var(--ms-warn)", fontSize: "var(--ms-fs-label)" }}>
@@ -508,6 +468,9 @@ export function WebhooksView() {
           </form>
         ) : null}
       </Modal>
+
+      <WebhookEditModal webhook={editTarget} onClose={closeEdit} />
+      <WebhookRotateModal webhook={rotateTarget} onClose={closeRotate} />
     </>
   );
 }

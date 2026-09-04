@@ -289,6 +289,7 @@ describe("tool listing", () => {
       "update_contact_topics",
       "delete_contact",
       "delete_contacts",
+      "create_contact_preferences_link",
       "add_contact_to_segment",
       "remove_contact_from_segment",
       "create_segment",
@@ -313,6 +314,7 @@ describe("tool listing", () => {
       "delete_template",
       "create_webhook",
       "update_webhook",
+      "rotate_webhook_secret",
       "delete_webhook",
       "create_api_key",
       "revoke_api_key",
@@ -380,6 +382,7 @@ describe("tool listing", () => {
       "get_webhook",
       "create_webhook",
       "update_webhook",
+      "rotate_webhook_secret",
       "delete_webhook",
       "create_api_key",
       "revoke_api_key",
@@ -695,6 +698,7 @@ it("create_webhook surfaces the signing secret verbatim and lists back without i
     "get_webhook",
     "create_webhook",
     "update_webhook",
+    "rotate_webhook_secret",
     "delete_webhook",
   ]);
   const created = await client.callTool({

@@ -17,12 +17,27 @@ export const WEBHOOK_EVENT_TYPES = [
   "quota.warning",
   "quota.reached",
   "quota.paused",
+  "contact.created",
+  "contact.updated",
+  "contact.deleted",
+  "contact.unsubscribed",
+  "contact.resubscribed",
+  "contact.topic_opt_in",
+  "contact.topic_opt_out",
+  "suppression.added",
+  "suppression.removed",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 
 /** Lifecycle buckets for the event picker; labels resolve via webhooks.eventGroup.*. */
-export const WEBHOOK_EVENT_GROUPS = ["delivery", "engagement", "problems", "account"] as const;
+export const WEBHOOK_EVENT_GROUPS = [
+  "delivery",
+  "engagement",
+  "problems",
+  "account",
+  "audience",
+] as const;
 export type WebhookEventGroup = (typeof WEBHOOK_EVENT_GROUPS)[number];
 
 /**
@@ -47,6 +62,15 @@ export const WEBHOOK_EVENT_META: Record<
   "quota.warning": { group: "account", dot: "var(--ms-dot-account)" },
   "quota.reached": { group: "account", dot: "var(--ms-dot-account)" },
   "quota.paused": { group: "account", dot: "var(--ms-dot-account)" },
+  "contact.created": { group: "audience", dot: "var(--ms-dot-delivered)" },
+  "contact.updated": { group: "audience", dot: "var(--ms-dot-sent)" },
+  "contact.deleted": { group: "audience", dot: "var(--ms-dot-failed)" },
+  "contact.unsubscribed": { group: "audience", dot: "var(--ms-dot-suppressed)" },
+  "contact.resubscribed": { group: "audience", dot: "var(--ms-dot-delivered)" },
+  "contact.topic_opt_in": { group: "audience", dot: "var(--ms-dot-opened)" },
+  "contact.topic_opt_out": { group: "audience", dot: "var(--ms-dot-queued)" },
+  "suppression.added": { group: "audience", dot: "var(--ms-dot-suppressed)" },
+  "suppression.removed": { group: "audience", dot: "var(--ms-dot-sent)" },
 };
 
 /** "whsec_••••••••abcd" — scheme plus last 4, nothing recoverable. */
