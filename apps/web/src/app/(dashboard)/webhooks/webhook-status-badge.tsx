@@ -1,10 +1,11 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import type { TONE_COLOR } from "@/components/status-tile";
 
 type EndpointStatus = "enabled" | "disabled" | "auto_disabled";
 
-const ENDPOINT_VARIANTS: Record<EndpointStatus, string> = {
+export const ENDPOINT_VARIANTS: Record<EndpointStatus, keyof typeof TONE_COLOR> = {
   enabled: "success",
   disabled: "neutral",
   // Auto-disable means deliveries kept failing — that deserves a warning tint.

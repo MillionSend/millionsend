@@ -14,6 +14,7 @@ import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, StateCard } from "../emails/list-parts";
@@ -137,13 +138,16 @@ export default function TemplatesPage() {
                 return (
                   <tr key={row.id} className="hoverable" onClick={() => router.push(href)}>
                     <td>
-                      <Link
-                        href={href}
-                        style={{ color: "var(--ms-bone)" }}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        {row.name}
-                      </Link>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                        <NavTile name="templates" color={TONE_COLOR.neutral} />
+                        <Link
+                          href={href}
+                          style={{ color: "var(--ms-bone)" }}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {row.name}
+                        </Link>
+                      </span>
                     </td>
                     <td className="right" style={{ color: "var(--ms-muted)" }}>
                       <RelativeTime date={row.updatedAt} />

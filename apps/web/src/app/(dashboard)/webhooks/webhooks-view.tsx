@@ -17,6 +17,7 @@ import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { codeRichTags } from "@/lib/code-rich-tags";
@@ -29,7 +30,7 @@ import {
   type WebhookEventType,
 } from "@/lib/webhook-events";
 import { ListFooter, PAGE_SIZES } from "../emails/list-parts";
-import { WebhookStatusBadge } from "./webhook-status-badge";
+import { ENDPOINT_VARIANTS, WebhookStatusBadge } from "./webhook-status-badge";
 
 /** Shared dot + human-label option list for the event picker, derived from meta. */
 function useWebhookEventOptions() {
@@ -281,17 +282,23 @@ export function WebhooksView() {
               {webhooks.slice(0, pages * pageSize).map((webhook) => (
                 <tr key={webhook.id}>
                   <td>
-                    <Link
-                      href={`/webhooks/${webhook.id}`}
-                      className="ms-mono"
-                      style={{
-                        color: "var(--ms-bone)",
-                        textDecoration: "underline",
-                        textUnderlineOffset: 3,
-                      }}
-                    >
-                      {displayUrl(webhook.url)}
-                    </Link>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                      <NavTile
+                        name="webhooks"
+                        color={TONE_COLOR[ENDPOINT_VARIANTS[webhook.status]]}
+                      />
+                      <Link
+                        href={`/webhooks/${webhook.id}`}
+                        className="ms-mono"
+                        style={{
+                          color: "var(--ms-bone)",
+                          textDecoration: "underline",
+                          textUnderlineOffset: 3,
+                        }}
+                      >
+                        {displayUrl(webhook.url)}
+                      </Link>
+                    </span>
                   </td>
                   <td>
                     {webhook.eventTypes === null || webhook.eventTypes.length === 0 ? (

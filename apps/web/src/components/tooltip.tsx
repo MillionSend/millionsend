@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 
 const ANCHOR_GAP = 8;
 
-function CircleInfoGlyph() {
+export function CircleInfoGlyph() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
       <circle cx="7" cy="7" r="6.25" stroke="currentColor" strokeWidth="1.2" />

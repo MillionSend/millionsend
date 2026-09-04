@@ -1,6 +1,8 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import type { TONE_COLOR } from "@/components/status-tile";
+import { DARK_CLIENT_SIM } from "@/lib/email-preview";
 import { escapeHtml } from "@/lib/html";
 import { MERGE_TOKEN_RE } from "@/lib/merge-fields";
 import { useTheme } from "@/lib/use-theme";
@@ -30,7 +32,7 @@ export type BroadcastStatus = "draft" | "scheduled" | "sending" | "sent" | "canc
 
 // Pill variant per the canvas: draft and canceled stay neutral, scheduled
 // warns (it will cost sends), sending informs, sent reads as done.
-const PILL_VARIANT: Record<BroadcastStatus, string> = {
+export const PILL_VARIANT: Record<BroadcastStatus, keyof typeof TONE_COLOR> = {
   draft: "neutral",
   scheduled: "warn",
   sending: "info",
@@ -63,18 +65,6 @@ export function StatusPill({ status }: { status: BroadcastStatus }) {
     </span>
   );
 }
-
-/*
- * Approximation of how dark-mode mail clients (Gmail's auto-darkening, Apple
- * Mail with supported-color-schemes) transform a light email: invert + rotate
- * hues, then re-invert media so photos and logos keep their real colors. Full
- * invert(1) both ways keeps images pixel-exact. Preview-only — nothing here
- * ships in a send.
- */
-const DARK_CLIENT_SIM = `<style>
-  html { filter: invert(1) hue-rotate(180deg); background: #fff; }
-  img, video, [style*="background-image"] { filter: invert(1) hue-rotate(180deg); }
-</style>`;
 
 /**
  * Sandboxed render of broadcast HTML; scripts never run. Every merge token is

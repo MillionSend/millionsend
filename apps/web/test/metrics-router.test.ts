@@ -258,3 +258,48 @@ describe("metrics.accountScore", () => {
     expect(result.insufficientOutcomeData).toBe(false);
   });
 });
+
+describe("metrics.accountScoreDetails", () => {
+  it("lists failing checks weighted by recipients with their cost and lift", async () => {
+    const teamId = await createTeam(db, "acme");
+    await db.insert(schema.usageCounters).values({ teamId, day: utcDay(0), sent: 1000 });
+    const [email] = await db
+      .insert(schema.emails)
+      .values({
+        teamId,
+        from: "sender@acme.test",
+        to: ["ada@example.com", "bob@example.com"],
+        subject: "hello",
+        sentAt: new Date(),
+      })
+      .returning({ id: schema.emails.id });
+    if (!email) throw new Error("email insert failed");
+    await db.insert(schema.emailInsights).values({
+      teamId,
+      emailId: email.id,
+      marketing: false,
+      checks: [
+        { id: "plain_text", severity: "major", status: "fail", penaltyHundredths: 100 },
+        { id: "dmarc_record", severity: "critical", status: "pass", penaltyHundredths: 0 },
+      ],
+      scoreTenths: 90,
+      scoreVersion: 1,
+    });
+
+    const result = await callerFor(teamId).metrics.accountScoreDetails();
+
+    expect(result.scoreTenths).toBe(96);
+    expect(result.blendTenths).toBe(96);
+    expect(result.governorCapTenths).toBe(115);
+    expect(result.factors).toEqual([
+      {
+        id: "plain_text",
+        severity: "major",
+        emails: 1,
+        recipients: 2,
+        penaltyTenths: 10,
+        liftTenths: 4,
+      },
+    ]);
+  });
+});

@@ -19,8 +19,12 @@ export {
   ACCOUNT_SCORE_WINDOW_DAYS,
   type AccountScore,
   type AccountScoreInput,
+  type ContentFactor,
   computeAccountScore,
+  contentFactorImpact,
   fetchAccountScore,
+  fetchAccountScoreInput,
+  fetchContentFactors,
   MIN_OUTCOME_SENDS,
 } from "./account-score.js";
 export { type ApiKeyAuth, authenticateApiKey } from "./api-key-auth.js";

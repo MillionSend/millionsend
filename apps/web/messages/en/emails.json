@@ -56,7 +56,7 @@
     "suppressedLine": "future sends blocked",
     "bounceBanner": {
       "hard": "Hard bounce — this address can't receive mail.",
-      "suppressed": "It was added to your suppression list."
+      "suppressed": "It was added to your <link>suppression list</link>."
     },
     "preview": "Preview",
     "plainText": "Plain text",
@@ -65,7 +65,10 @@
     "insights": "Insights",
     "bodyPurged": "Body purged after retention window.",
     "noHtml": "No HTML body.",
-    "noText": "No plain-text body."
+    "noText": "No plain-text body.",
+    "previewLight": "Light",
+    "previewDark": "Dark",
+    "previewScheme": "Mail client theme"
   },
   "insights": {
     "outOfTen": "/ 10",

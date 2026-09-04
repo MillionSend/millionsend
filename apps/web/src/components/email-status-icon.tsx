@@ -3,6 +3,7 @@
  * detail header (color follows the email's latest status), and the per-event
  * glyphs the delivery timeline uses. All pure SVG on design tokens.
  */
+import { StatusTile } from "./status-tile";
 
 /** Tone per email/event status — mirrors the ledger colors used elsewhere. */
 export function emailStatusColor(status: string): string {
@@ -29,24 +30,9 @@ export function emailStatusColor(status: string): string {
 
 /** Rounded-square envelope tile tinted by status. */
 export function EmailStatusIcon({ status, size = 28 }: { status: string; size?: number }) {
-  const color = emailStatusColor(status);
   const glyph = Math.round(size * 0.5);
   return (
-    <span
-      aria-hidden="true"
-      style={{
-        width: size,
-        height: size,
-        flex: "none",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: Math.max(7, Math.round(size * 0.28)),
-        border: `1px solid color-mix(in srgb, ${color} 45%, var(--ms-line))`,
-        background: `linear-gradient(180deg, color-mix(in srgb, ${color} 16%, var(--ms-panel)), color-mix(in srgb, ${color} 6%, var(--ms-panel)))`,
-        color,
-      }}
-    >
+    <StatusTile color={emailStatusColor(status)} size={size}>
       <svg
         width={glyph}
         height={glyph}
@@ -61,7 +47,7 @@ export function EmailStatusIcon({ status, size = 28 }: { status: string; size?: 
         <rect x="1.5" y="3.2" width="13" height="9.6" rx="1.8" />
         <path d="m2.2 4.4 5.8 4.4 5.8-4.4" />
       </svg>
-    </span>
+    </StatusTile>
   );
 }
 

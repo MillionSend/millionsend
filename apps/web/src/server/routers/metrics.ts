@@ -1,6 +1,11 @@
 import {
+  CHECKS,
+  computeAccountScore,
+  contentFactorImpact,
   DAY_MS,
   fetchAccountScore,
+  fetchAccountScoreInput,
+  fetchContentFactors,
   fetchDeliverabilityHealth,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
@@ -104,4 +109,26 @@ export const metricsRouter = router({
 
   /** Rolling 30-day account score (content + outcome sub-scores). */
   accountScore: teamProcedure.query(({ ctx }) => fetchAccountScore(ctx.db, ctx.teamId)),
+
+  /**
+   * The score opened up: the same computation plus every failing check
+   * priced by what it costs and what fixing it alone would gain.
+   */
+  accountScoreDetails: teamProcedure.query(async ({ ctx }) => {
+    const [input, factors] = await Promise.all([
+      fetchAccountScoreInput(ctx.db, ctx.teamId),
+      fetchContentFactors(ctx.db, ctx.teamId),
+    ]);
+    return {
+      ...computeAccountScore(input),
+      checksTotal: CHECKS.length,
+      factors: factors.map((factor) => ({
+        id: factor.id,
+        severity: factor.severity,
+        emails: factor.emails,
+        recipients: factor.recipients,
+        ...contentFactorImpact(input, factor),
+      })),
+    };
+  }),
 });

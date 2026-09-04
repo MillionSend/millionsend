@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { EllipsisGlyph } from "./icons/nav-icons.js";
+import { Spinner } from "./spinner";
 
 /** Closes an open popover when the pointer goes down outside `ref`. */
 export function useDismiss(
@@ -28,6 +29,10 @@ export interface PopoverMenuItem {
   disabled?: boolean;
   /** Right-aligned glyph, e.g. "↗" for external destinations. */
   trailing?: string;
+  /** The item's action is running: a spinner sits in the row and clicks are ignored. */
+  busy?: boolean;
+  /** Selecting leaves the menu open (for an action whose progress shows in the row). */
+  keepOpen?: boolean;
 }
 
 const GAP = 8;
@@ -130,6 +135,15 @@ export function PopoverMenu({
     nodes[next]?.focus({ preventScroll: true });
   }
 
+  // A busy item that finishes closes the menu: its work showed in the row,
+  // so the menu has nothing left to say.
+  const anyBusy = items.some((item) => item?.busy === true);
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (wasBusy.current && !anyBusy) setOpen(false);
+    wasBusy.current = anyBusy;
+  }, [anyBusy]);
+
   // Read at render (the trigger is already mounted when `open` flips true), as
   // in tooltip.tsx — a menu is transient, so no scroll/resize tracking is kept.
   // Offsets resolve against the layout viewport (documentElement.client*), not
@@ -183,12 +197,15 @@ export function PopoverMenu({
                     role="menuitem"
                     className={item.danger ? "ms-menu-item danger" : "ms-menu-item"}
                     disabled={item.disabled}
+                    aria-busy={item.busy}
                     onClick={() => {
-                      closeToTrigger();
+                      if (item.busy) return;
+                      if (!item.keepOpen) closeToTrigger();
                       item.onSelect();
                     }}
                   >
                     {item.label}
+                    {item.busy ? <Spinner size={11} /> : null}
                     {item.trailing ? (
                       <span style={{ color: "var(--ms-muted)" }} aria-hidden="true">
                         {item.trailing}

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AccountScoreInput } from "../src/account-score.js";
-import { computeAccountScore, MIN_OUTCOME_SENDS } from "../src/account-score.js";
+import {
+  computeAccountScore,
+  contentFactorImpact,
+  MIN_OUTCOME_SENDS,
+} from "../src/account-score.js";
 
 function input(overrides: Partial<AccountScoreInput>): AccountScoreInput {
   return {
@@ -98,5 +102,42 @@ describe("computeAccountScore", () => {
     const s = computeAccountScore(input({ complained: 5, hardBounced: 5 }));
     expect(s.complaintRate).toBe(0);
     expect(s.hardBounceRate).toBe(0);
+  });
+});
+
+describe("contentFactorImpact", () => {
+  it("prices a failing check by its recipient-weighted penalty and the lift fixing it alone gives", () => {
+    // 1,000 recipients at 9.0 content: a 1.0-point check (100 hundredths)
+    // failing on all of them costs the whole gap to 10.0.
+    const input = {
+      contentWeightedTenths: 90 * 1000,
+      contentRecipients: 1000,
+      sent: 1000,
+      complained: 0,
+      hardBounced: 0,
+      guardrailStatus: "ok" as const,
+    };
+    const impact = contentFactorImpact(input, { weightedPenaltyHundredths: 100 * 1000 });
+    expect(impact.penaltyTenths).toBeCloseTo(10);
+    // headline 0.4·90 + 0.6·100 = 96 → 0.4·100 + 0.6·100 = 100
+    expect(impact.liftTenths).toBe(4);
+    expect(computeAccountScore(input)).toMatchObject({
+      blendTenths: 96,
+      governorCapTenths: 115,
+      guardrailCapTenths: null,
+    });
+  });
+
+  it("gives no lift while the guardrail holds the headline down", () => {
+    const input = {
+      contentWeightedTenths: 80 * 100,
+      contentRecipients: 100,
+      sent: 1000,
+      complained: 0,
+      hardBounced: 0,
+      guardrailStatus: "paused" as const,
+    };
+    expect(contentFactorImpact(input, { weightedPenaltyHundredths: 100 * 100 }).liftTenths).toBe(0);
+    expect(computeAccountScore(input).guardrailCapTenths).toBe(49);
   });
 });

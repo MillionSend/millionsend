@@ -17,14 +17,15 @@ import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
-import { BtnSpinner, Spinner } from "@/components/spinner";
+import { BtnSpinner } from "@/components/spinner";
+import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, StateCard } from "../emails/list-parts";
 import { AwsCredentialsBanner } from "./aws-credentials-banner";
-import { type DomainStatus, DomainStatusBadge } from "./domain-status";
+import { DOMAIN_TONE, type DomainStatus, DomainStatusBadge } from "./domain-status";
 import { RegionLabel } from "./region-label";
 
 /** Mirrors the loaded rows: mono domain link, status badge, region label, relative time. */
@@ -72,8 +73,8 @@ export function DomainsView() {
       },
     }),
   );
-  // Check DNS from the row: the same verify pass as the detail header, the
-  // badge swapped for a spinner while it runs.
+  // Check DNS from the row: the same verify pass as the detail header; the
+  // menu stays open with a spinner on the item until the list refreshes.
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const verifyMutation = useMutation(
     trpc.domains.verify.mutationOptions({
@@ -266,14 +267,16 @@ export function DomainsView() {
                     {filtered.map((domain) => (
                       <tr key={domain.id}>
                         <td className="ms-mono">
-                          <Link href={`/domains/${domain.id}`}>{domain.name}</Link>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                            <NavTile
+                              name="domains"
+                              color={TONE_COLOR[DOMAIN_TONE[domain.status as DomainStatus]]}
+                            />
+                            <Link href={`/domains/${domain.id}`}>{domain.name}</Link>
+                          </span>
                         </td>
                         <td>
-                          {checkingId === domain.id ? (
-                            <Spinner />
-                          ) : (
-                            <DomainStatusBadge status={domain.status as DomainStatus} />
-                          )}
+                          <DomainStatusBadge status={domain.status as DomainStatus} />
                         </td>
                         <td style={{ color: "var(--ms-muted)" }}>
                           <RegionLabel region={domain.region} />
@@ -299,6 +302,8 @@ export function DomainsView() {
                                   ? [
                                       {
                                         label: t("detail.checkDns"),
+                                        busy: checkingId === domain.id,
+                                        keepOpen: true,
                                         onSelect: () => {
                                           setCheckingId(domain.id);
                                           verifyMutation.mutate({ id: domain.id });

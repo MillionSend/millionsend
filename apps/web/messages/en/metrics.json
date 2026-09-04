@@ -34,7 +34,32 @@
     "insufficient": "Not enough sends in the last 30 days.",
     "capped": "Capped by sending guardrail.",
     "complaintRate": "Complaint rate",
-    "hardBounceRate": "Hard-bounce rate"
+    "hardBounceRate": "Hard-bounce rate",
+    "details": {
+      "open": "See what makes up the score",
+      "title": "Score details",
+      "window": "{days} days · {sent} sends",
+      "composition": "Composition",
+      "contentOnly": "Only the content sub-score counts until the window has enough sends.",
+      "governor": "Outcome cap",
+      "governorLine": "outcome + 1.5 = {value}",
+      "applied": "applied",
+      "notApplied": "did not apply",
+      "guardrail": "Sending guardrail",
+      "guardrailOk": "ok · no cap",
+      "guardrailCapped": "capped at {value}",
+      "compositionNote": "Outcome leads. Flawless content never lands more than 1.5 above outcome, and a guardrail warning or pause caps the score at 6.9 or 4.9, by construction.",
+      "contentSection": "Content · what weighs, weighted by recipients",
+      "factorMeta": "{emails, plural, one {# email} other {# emails}} · {recipients} recipients",
+      "noFactors": "Every check passes on every scored email.",
+      "passing": "{count, plural, one {# check passing} other {# checks passing}} across the whole volume",
+      "outcomeSection": "Outcome · rates against the lines",
+      "outcomeNote": "Rates over {sent} sends. The lines follow Google Postmaster: keep complaints under 0.10% and never reach 0.30%.",
+      "lift": "How to raise",
+      "liftLine": "{title} · account score to {score}",
+      "liftNone": "Nothing left to gain from content. What remains is in the outcome rates.",
+      "agentPrompt": "In our MillionSend account the score is {score}/10 over the last 30 days. The deliverability check \"{title}\" fails on {emails} emails ({recipients} recipients), costing {points} points of the content sub-score.\n\n{description}\n\nWhat to do: {advice}\n\nFind the templates or code that send these emails and apply the fix. Keep the change minimal and explain what you changed."
+    }
   },
   "open": {
     "title": "Open rate",

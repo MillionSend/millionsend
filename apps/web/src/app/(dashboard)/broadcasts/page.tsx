@@ -15,10 +15,11 @@ import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, StateCard } from "../emails/list-parts";
-import { type BroadcastStatus, StatusPill } from "./parts";
+import { type BroadcastStatus, PILL_VARIANT, StatusPill } from "./parts";
 
 function BroadcastsHead() {
   const t = useTranslations("broadcasts");
@@ -177,13 +178,16 @@ export default function BroadcastsPage() {
                 return (
                   <tr key={row.id} className="hoverable" onClick={() => router.push(href)}>
                     <td>
-                      <Link
-                        href={href}
-                        style={{ color: "var(--ms-bone)" }}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        {label}
-                      </Link>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                        <NavTile name="broadcasts" color={TONE_COLOR[PILL_VARIANT[status]]} />
+                        <Link
+                          href={href}
+                          style={{ color: "var(--ms-bone)" }}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {label}
+                        </Link>
+                      </span>
                     </td>
                     <td>
                       <StatusPill status={status} />

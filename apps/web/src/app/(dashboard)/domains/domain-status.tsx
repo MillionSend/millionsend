@@ -2,8 +2,17 @@
 
 import { useTranslations } from "next-intl";
 import { StatusBadge } from "@/components/status-badge";
+import type { TONE_COLOR } from "@/components/status-tile";
 
 export type DomainStatus = "pending" | "verified" | "temporary_failure" | "failed";
+
+/** Row-tile tone per status, matching the badge: verified green, the two waits warn, failed danger. */
+export const DOMAIN_TONE: Record<DomainStatus, keyof typeof TONE_COLOR> = {
+  verified: "success",
+  pending: "warn",
+  temporary_failure: "warn",
+  failed: "danger",
+};
 
 /**
  * temporary_failure is domain-specific, so its label lives in the domains

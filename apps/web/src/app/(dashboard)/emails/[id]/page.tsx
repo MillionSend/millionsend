@@ -18,6 +18,7 @@ import { Skeleton, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
 import { Tooltip } from "@/components/tooltip";
+import { type EmailScheme, emulateEmailScheme } from "@/lib/email-preview";
 import {
   formatDayTime,
   formatDurationShort,
@@ -616,6 +617,9 @@ export default function EmailDetailPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("preview");
+  // The preview as a light or dark mail client would show it; light is what
+  // most clients default to, so the toggle starts there.
+  const [scheme, setScheme] = useState<EmailScheme>("light");
   const [htmlFormatted, setHtmlFormatted] = useState(true);
   const [drawer, setDrawer] = useState<"bounced" | "suppressed" | null>(null);
   // Identifies an occurrence group by its first event's id — type alone is
@@ -789,7 +793,13 @@ export default function EmailDetailPage() {
             {t("detail.bounceBanner.hard")}
           </span>
           <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
-            {t("detail.bounceBanner.suppressed")}
+            {t.rich("detail.bounceBanner.suppressed", {
+              link: (chunks) => (
+                <Link href="/emails/suppressions" className="ms-link">
+                  {chunks}
+                </Link>
+              ),
+            })}
           </span>
         </div>
       ) : null}
@@ -1127,6 +1137,25 @@ export default function EmailDetailPage() {
                 gap: 14,
               }}
             >
+              {tab === "preview" && email.html ? (
+                <span
+                  role="group"
+                  aria-label={t("detail.previewScheme")}
+                  style={{ display: "flex", gap: 2 }}
+                >
+                  {(["light", "dark"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={scheme === option ? "ms-code-tab active" : "ms-code-tab"}
+                      aria-pressed={scheme === option}
+                      onClick={() => setScheme(option)}
+                    >
+                      {t(option === "light" ? "detail.previewLight" : "detail.previewDark")}
+                    </button>
+                  ))}
+                </span>
+              ) : null}
               {tab === "html" ? (
                 <span
                   style={{
@@ -1187,14 +1216,14 @@ export default function EmailDetailPage() {
                 <iframe
                   title={t("detail.preview")}
                   sandbox=""
-                  srcDoc={email.html}
+                  srcDoc={emulateEmailScheme(email.html, scheme)}
                   style={{
                     display: "block",
                     width: "100%",
                     height: 640,
                     border: 0,
                     borderRadius: "0 0 12px 12px",
-                    background: "#ffffff",
+                    background: scheme === "dark" ? "#111113" : "#ffffff",
                   }}
                 />
               ) : (

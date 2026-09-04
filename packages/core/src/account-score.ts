@@ -5,7 +5,14 @@ import type { Db } from "@millionsend/db";
 import * as schema from "@millionsend/db/schema";
 import { and, eq, gte, isNotNull, or, sql } from "drizzle-orm";
 import { type DeliverabilityStatus, fetchDeliverabilityHealth } from "./deliverability.js";
-import { SCORE_VERSION, type ScoreBand, scoreBand } from "./email-insights.js";
+import { resultRows } from "./driver-result.js";
+import {
+  type CheckId,
+  type CheckSeverity,
+  SCORE_VERSION,
+  type ScoreBand,
+  scoreBand,
+} from "./email-insights.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /** Trailing window, in UTC calendar days, the account score is computed over. */
@@ -34,6 +41,12 @@ export interface AccountScoreInput {
 export interface AccountScore {
   scoreTenths: number | null;
   band: ScoreBand | null;
+  /** 0.4·C + 0.6·O before the governor and guardrail; null while a sub-score is missing. */
+  blendTenths: number | null;
+  /** The governor's ceiling, outcome + 1.5; null without an outcome sub-score. */
+  governorCapTenths: number | null;
+  /** The guardrail's ceiling (warning 6.9, paused 4.9); null when it does not apply. */
+  guardrailCapTenths: number | null;
   contentScoreTenths: number | null;
   /** Null when the window has fewer than MIN_OUTCOME_SENDS sends. */
   outcomeScoreTenths: number | null;
@@ -90,23 +103,30 @@ export function computeAccountScore(input: AccountScoreInput): AccountScore {
     ? null
     : Math.round(Math.max(0, 100 - outcomePenaltyTenths(complaintRate, hardBounceRate)));
 
+  const blendTenths =
+    outcomeScoreTenths !== null && contentScoreTenths !== null
+      ? Math.round(0.4 * contentScoreTenths + 0.6 * outcomeScoreTenths)
+      : null;
+  const governorCapTenths = outcomeScoreTenths === null ? null : outcomeScoreTenths + 15;
+  const guardrailCapTenths =
+    guardrailStatus === "paused" ? 49 : guardrailStatus === "warning" ? 69 : null;
+
   let headline: number | null;
-  if (outcomeScoreTenths !== null && contentScoreTenths !== null) {
-    headline = Math.min(
-      Math.round(0.4 * contentScoreTenths + 0.6 * outcomeScoreTenths),
-      outcomeScoreTenths + 15,
-    );
+  if (blendTenths !== null && governorCapTenths !== null) {
+    headline = Math.min(blendTenths, governorCapTenths);
   } else {
     headline = outcomeScoreTenths ?? contentScoreTenths;
   }
-  if (headline !== null) {
-    if (guardrailStatus === "paused") headline = Math.min(headline, 49);
-    else if (guardrailStatus === "warning") headline = Math.min(headline, 69);
+  if (headline !== null && guardrailCapTenths !== null) {
+    headline = Math.min(headline, guardrailCapTenths);
   }
 
   return {
     scoreTenths: headline,
     band: headline === null ? null : scoreBand(headline),
+    blendTenths,
+    governorCapTenths,
+    guardrailCapTenths,
     contentScoreTenths,
     outcomeScoreTenths,
     complaintRate,
@@ -131,6 +151,15 @@ export async function fetchAccountScore(
   teamId: string,
   opts?: { now?: Date },
 ): Promise<AccountScore> {
+  return computeAccountScore(await fetchAccountScoreInput(db, teamId, opts));
+}
+
+/** The window's raw inputs, so a caller can replay the formula with a factor removed. */
+export async function fetchAccountScoreInput(
+  db: Db,
+  teamId: string,
+  opts?: { now?: Date },
+): Promise<AccountScoreInput> {
   const now = (opts?.now ?? new Date()).getTime();
   const since = utcDay(now - (ACCOUNT_SCORE_WINDOW_DAYS - 1) * DAY_MS);
   // The content query windows on sentAt from the SAME UTC-day boundary the
@@ -169,12 +198,93 @@ export async function fetchAccountScore(
 
   const health = await fetchDeliverabilityHealth(db, teamId, opts?.now ? { now: opts.now } : {});
 
-  return computeAccountScore({
+  return {
     contentWeightedTenths: Number(content?.weighted ?? 0),
     contentRecipients: Number(content?.recipients ?? 0),
     sent: Number(counters?.sent ?? 0),
     complained: Number(counters?.complained ?? 0),
     hardBounced: Number(counters?.hardBounced ?? 0),
     guardrailStatus: health.status,
-  });
+  };
+}
+
+/** One failing check aggregated over the window: how many emails and recipients it touched. */
+export interface ContentFactor {
+  id: CheckId;
+  severity: CheckSeverity;
+  emails: number;
+  recipients: number;
+  /** Σ penaltyHundredths × recipients — what the check cost the content sub-score's numerator. */
+  weightedPenaltyHundredths: number;
+}
+
+/**
+ * Failing checks over the score window, heaviest first, with the same
+ * email↔insights join and window as the content sub-score so both read the
+ * same population. Info checks (zero weight) still list, at zero cost.
+ */
+export async function fetchContentFactors(
+  db: Db,
+  teamId: string,
+  opts?: { now?: Date },
+): Promise<ContentFactor[]> {
+  const now = (opts?.now ?? new Date()).getTime();
+  const sinceTs = new Date(utcDay(now - (ACCOUNT_SCORE_WINDOW_DAYS - 1) * DAY_MS));
+  const createdFloor = new Date(now - 61 * DAY_MS);
+  const e = schema.emails;
+  const i = schema.emailInsights;
+  const rows = resultRows<{
+    id: CheckId;
+    severity: CheckSeverity;
+    emails: number;
+    recipients: string;
+    weighted: string;
+  }>(
+    await db.execute(sql`
+      select c->>'id' as id,
+             c->>'severity' as severity,
+             count(distinct ${e.id})::int as emails,
+             coalesce(sum(jsonb_array_length(${e.to})), 0)::bigint as recipients,
+             coalesce(sum((c->>'penaltyHundredths')::int * jsonb_array_length(${e.to})), 0)::bigint as weighted
+      from ${e}
+      join ${i} on (${i.emailId} = ${e.id} or (${e.broadcastId} is not null and ${i.broadcastId} = ${e.broadcastId}))
+      cross join lateral jsonb_array_elements(${i.checks}) as c
+      where ${e.teamId} = ${teamId}
+        and ${e.createdAt} >= ${createdFloor}
+        and ${e.sentAt} >= ${sinceTs}
+        and c->>'status' = 'fail'
+      group by 1, 2
+      order by weighted desc, recipients desc, id asc
+    `),
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    severity: row.severity,
+    emails: Number(row.emails),
+    recipients: Number(row.recipients),
+    weightedPenaltyHundredths: Number(row.weighted),
+  }));
+}
+
+/**
+ * What one failing check costs, and what fixing it alone would gain: the
+ * formula replayed with the check's penalty handed back to the content
+ * numerator. The lift can be zero when the governor or guardrail holds.
+ */
+export function contentFactorImpact(
+  input: AccountScoreInput,
+  factor: Pick<ContentFactor, "weightedPenaltyHundredths">,
+): { penaltyTenths: number; liftTenths: number } {
+  if (input.contentRecipients === 0) return { penaltyTenths: 0, liftTenths: 0 };
+  const restoredTenths = factor.weightedPenaltyHundredths / 10;
+  const current = computeAccountScore(input).scoreTenths ?? 0;
+  const fixed =
+    computeAccountScore({
+      ...input,
+      contentWeightedTenths: input.contentWeightedTenths + restoredTenths,
+    }).scoreTenths ?? 0;
+  return {
+    penaltyTenths: restoredTenths / input.contentRecipients,
+    liftTenths: Math.max(0, fixed - current),
+  };
 }

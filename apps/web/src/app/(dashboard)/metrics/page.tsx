@@ -10,11 +10,13 @@ import { Odometer } from "@/components/odometer";
 import { PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
+import { CircleInfoGlyph } from "@/components/tooltip";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatDayUtc } from "@/lib/format";
 import { BAND_TONE, formatScoreTenths } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
+import { ScoreDetailsDrawer } from "./score-details";
 
 const RANGES = [7, 15, 30] as const;
 type Range = (typeof RANGES)[number];
@@ -389,6 +391,18 @@ export default function MetricsPage() {
   const days: Range = RANGES.find((r) => String(r) === rangeParam) ?? 15;
   const query = useQuery(trpc.metrics.window.queryOptions({ days }));
   const scoreQuery = useQuery(trpc.metrics.accountScore.queryOptions());
+  const [scoreDetailsOpen, setScoreDetailsOpen] = useState(false);
+  // Same glyph and trigger as the DNS tables' tooltip; here it opens the drawer.
+  const detailsGlyph = (
+    <button
+      type="button"
+      className="ms-tooltip-trigger"
+      aria-label={t("score.details.title")}
+      onClick={() => setScoreDetailsOpen(true)}
+    >
+      <CircleInfoGlyph />
+    </button>
+  );
 
   const fmt = new Intl.NumberFormat(locale);
   const pct1 = new Intl.NumberFormat(locale, {
@@ -510,7 +524,13 @@ export default function MetricsPage() {
                 }}
               >
                 <div>
-                  <div className="ms-microlabel">{t("score.content")}</div>
+                  <div
+                    className="ms-microlabel"
+                    style={{ display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    {t("score.content")}
+                    {detailsGlyph}
+                  </div>
                   <div className="ms-digits" style={{ fontSize: 20, marginTop: 4 }}>
                     {scoreQuery.data.contentScoreTenths != null
                       ? formatScoreTenths(scoreQuery.data.contentScoreTenths, locale)
@@ -521,7 +541,13 @@ export default function MetricsPage() {
                   </div>
                 </div>
                 <div>
-                  <div className="ms-microlabel">{t("score.outcome")}</div>
+                  <div
+                    className="ms-microlabel"
+                    style={{ display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    {t("score.outcome")}
+                    {detailsGlyph}
+                  </div>
                   <div className="ms-digits" style={{ fontSize: 20, marginTop: 4 }}>
                     {scoreQuery.data.outcomeScoreTenths != null
                       ? formatScoreTenths(scoreQuery.data.outcomeScoreTenths, locale)
@@ -546,6 +572,32 @@ export default function MetricsPage() {
                   </div>
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setScoreDetailsOpen(true)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  width: "100%",
+                  marginTop: 16,
+                  paddingTop: 12,
+                  border: 0,
+                  borderTop: "1px solid var(--ms-line)",
+                  background: "none",
+                  color: "var(--ms-muted)",
+                  font: "inherit",
+                  fontSize: "var(--ms-fs-label)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span>{t("score.details.open")}</span>
+                <span style={{ marginLeft: "auto", color: "var(--ms-faint)" }}>→</span>
+              </button>
+              <ScoreDetailsDrawer
+                open={scoreDetailsOpen}
+                onClose={() => setScoreDetailsOpen(false)}
+              />
             </div>
           )}
 

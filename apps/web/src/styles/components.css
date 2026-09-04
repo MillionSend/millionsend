@@ -528,6 +528,15 @@ table.ms-table {
   text-decoration: underline dotted var(--ms-faint);
   text-underline-offset: 3px;
 }
+/* Inline text link: the same dotted underline, always on so it reads as a link mid-sentence. */
+.ms-link {
+  color: inherit;
+  text-decoration: underline dotted var(--ms-faint);
+  text-underline-offset: 3px;
+}
+.ms-link:hover {
+  text-decoration-color: var(--ms-bone);
+}
 
 /* Field/form error line — always block-level with breathing room so it never
    glues to the control or a footnote above it. */

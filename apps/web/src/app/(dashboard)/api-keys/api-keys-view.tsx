@@ -16,6 +16,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { maskApiKey } from "@/lib/format";
@@ -216,6 +217,7 @@ export function ApiKeysView() {
                     <span
                       style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
                     >
+                      <NavTile name="api-keys" color={TONE_COLOR.neutral} />
                       {key.name}
                       <span
                         className={`ms-badge ms-badge-${

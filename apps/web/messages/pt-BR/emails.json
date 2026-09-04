@@ -56,7 +56,7 @@
     "suppressedLine": "envios futuros bloqueados",
     "bounceBanner": {
       "hard": "Bounce permanente — este endereço não pode receber e-mails.",
-      "suppressed": "Ele foi adicionado à sua lista de supressão."
+      "suppressed": "Ele foi adicionado à sua <link>lista de supressão</link>."
     },
     "preview": "Prévia",
     "plainText": "Texto simples",
@@ -65,7 +65,10 @@
     "insights": "Insights",
     "bodyPurged": "Corpo removido após a janela de retenção.",
     "noHtml": "Sem corpo HTML.",
-    "noText": "Sem corpo em texto simples."
+    "noText": "Sem corpo em texto simples.",
+    "previewLight": "Claro",
+    "previewDark": "Escuro",
+    "previewScheme": "Tema do cliente de e-mail"
   },
   "insights": {
     "outOfTen": "/ 10",
