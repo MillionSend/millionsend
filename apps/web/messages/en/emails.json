@@ -67,8 +67,7 @@
     "noHtml": "No HTML body.",
     "noText": "No plain-text body.",
     "previewLight": "Light",
-    "previewDark": "Dark",
-    "previewScheme": "Mail client theme"
+    "previewDark": "Dark"
   },
   "insights": {
     "outOfTen": "/ 10",

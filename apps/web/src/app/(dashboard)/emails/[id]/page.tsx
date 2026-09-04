@@ -1138,11 +1138,7 @@ export default function EmailDetailPage() {
               }}
             >
               {tab === "preview" && email.html ? (
-                <span
-                  role="group"
-                  aria-label={t("detail.previewScheme")}
-                  style={{ display: "flex", gap: 2 }}
-                >
+                <span style={{ display: "flex", gap: 2 }}>
                   {(["light", "dark"] as const).map((option) => (
                     <button
                       key={option}

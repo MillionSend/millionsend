@@ -67,8 +67,7 @@
     "noHtml": "Sem corpo HTML.",
     "noText": "Sem corpo em texto simples.",
     "previewLight": "Claro",
-    "previewDark": "Escuro",
-    "previewScheme": "Tema do cliente de e-mail"
+    "previewDark": "Escuro"
   },
   "insights": {
     "outOfTen": "/ 10",
