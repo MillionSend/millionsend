@@ -36,7 +36,7 @@ export type DnsRecord = {
   value: string;
   priority?: number;
   status: "verified" | "pending" | "failed" | null;
-  /** Live DNS verdict from the last Check DNS; absent until one runs. */
+  /** Live DNS verdict: from the last Check DNS, or served with the records for rows SES never checks. */
   live?: LiveDnsStatus | undefined;
   /** On a live mismatch: what the name answered instead, one answer per line. */
   found?: string | undefined;

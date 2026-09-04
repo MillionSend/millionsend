@@ -299,7 +299,25 @@ export function WebhooksView() {
                     ) : (
                       <Tooltip
                         inline
-                        text={webhook.eventTypes.map((type) => t(`eventLabel.${type}`)).join("\n")}
+                        text={
+                          <span style={{ display: "grid", gap: 4 }}>
+                            {webhook.eventTypes.map((type) => (
+                              <span
+                                key={type}
+                                style={{ display: "flex", alignItems: "center", gap: 6 }}
+                              >
+                                <span
+                                  className="ms-dot"
+                                  style={{
+                                    background: WEBHOOK_EVENT_META[type as WebhookEventType]?.dot,
+                                  }}
+                                  aria-hidden="true"
+                                />
+                                {t(`eventLabel.${type}`)}
+                              </span>
+                            ))}
+                          </span>
+                        }
                       >
                         <span className="ms-chip">
                           {t("eventsCount", { count: webhook.eventTypes.length })}

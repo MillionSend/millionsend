@@ -939,12 +939,14 @@ describe("domains.updateConfiguration", () => {
     const { records } = await caller.domains.records({ id });
     // App-layer tracking: the branded CNAME points at THIS app host (default
     // localhost:3000 when APP_BASE_URL is unset), not SES's awstrack.me.
+    // Served with its live verdict: no SES gate, so the page reads DNS directly.
     expect(records).toContainEqual({
       group: "tracking",
       type: "CNAME",
       name: "email.example.com",
       value: new URL(process.env.APP_BASE_URL ?? "http://localhost:3000").host,
       status: null,
+      live: "missing",
     });
   });
 

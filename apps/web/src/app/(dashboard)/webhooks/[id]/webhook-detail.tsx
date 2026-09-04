@@ -399,35 +399,39 @@ export function WebhookDetail({ id }: { id: string }) {
         <MetaItem label={t("detail.signingSecret")}>
           <span className="ms-mono">{maskWebhookSecret(data.secretLast4)}</span>
         </MetaItem>
-        <MetaItem label={t("detail.events")}>
-          {data.eventTypes === null ? (
-            <span className="ms-chip">{t("allEvents")}</span>
-          ) : (
-            <div className="ms-wrap-row" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {data.eventTypes.map((eventType) => {
-                const meta = WEBHOOK_EVENT_META[eventType as WebhookEventType] as
-                  | { dot: string }
-                  | undefined;
-                return (
-                  <span
-                    key={eventType}
-                    className="ms-chip"
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                  >
-                    {meta ? (
-                      <span
-                        className="ms-dot"
-                        style={{ background: meta.dot }}
-                        aria-hidden="true"
-                      />
-                    ) : null}
-                    {meta ? t(`eventLabel.${eventType}`) : eventType}
-                  </span>
-                );
-              })}
-            </div>
-          )}
-        </MetaItem>
+        {/* The chip list is the one tall cell: it spans both rows so Status
+            and Created stay under URL and Secret instead of below it. */}
+        <div className="ms-meta-tall">
+          <MetaItem label={t("detail.events")}>
+            {data.eventTypes === null ? (
+              <span className="ms-chip">{t("allEvents")}</span>
+            ) : (
+              <div className="ms-wrap-row" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {data.eventTypes.map((eventType) => {
+                  const meta = WEBHOOK_EVENT_META[eventType as WebhookEventType] as
+                    | { dot: string }
+                    | undefined;
+                  return (
+                    <span
+                      key={eventType}
+                      className="ms-chip"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      {meta ? (
+                        <span
+                          className="ms-dot"
+                          style={{ background: meta.dot }}
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      {meta ? t(`eventLabel.${eventType}`) : eventType}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </MetaItem>
+        </div>
         <MetaItem label={t("detail.status")}>
           <WebhookStatusBadge status={data.status} />
         </MetaItem>

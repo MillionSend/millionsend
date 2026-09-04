@@ -30,15 +30,35 @@ const STATUS_TONE = {
 const POST_CHECKOUT_POLLS = 6;
 const POST_CHECKOUT_POLL_MS = 2500;
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
+function Card({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  /** Right-aligned control on the title row (the card's primary action). */
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section className="ms-card" style={{ padding: 24 }}>
-      <h2
-        className="ms-display"
-        style={{ fontSize: "var(--ms-fs-h2)", color: "var(--ms-bone)", margin: "0 0 18px" }}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          margin: "0 0 18px",
+        }}
       >
-        {title}
-      </h2>
+        <h2
+          className="ms-display"
+          style={{ fontSize: "var(--ms-fs-h2)", color: "var(--ms-bone)", margin: 0 }}
+        >
+          {title}
+        </h2>
+        {action}
+      </div>
       {children}
     </section>
   );
@@ -148,7 +168,10 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     <div style={{ display: "grid", gap: 20 }}>
       {notice}
 
-      <Card title={t("plan")}>
+      <Card
+        title={t("plan")}
+        action={canManage && hasCustomer ? portalButton(t("manage"), "ms-btn-secondary") : null}
+      >
         <div className="ms-wrap-row" style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span
@@ -157,11 +180,16 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
             >
               {planName(plan)}
             </span>
-            <span className={`ms-badge ms-badge-${STATUS_TONE[planStatus]}`}>
+            {/* Optical: the display face sits a hair low in its line box, so the
+                pill follows its cap height rather than the box center. */}
+            <span
+              className={`ms-badge ms-badge-${STATUS_TONE[planStatus]}`}
+              style={{ position: "relative", top: 1 }}
+            >
               {t(`status.${planStatus}`)}
             </span>
           </div>
-          {canManage ? (
+          {canManage && canCheckout ? (
             <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
               {canCheckout ? (
                 <>
@@ -189,7 +217,6 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
                   </button>
                 </>
               ) : null}
-              {hasCustomer ? portalButton(t("manage"), "ms-btn-secondary") : null}
             </div>
           ) : null}
         </div>
@@ -200,7 +227,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
               {t("dailyLimit")}
             </div>
             <div style={{ marginTop: 6, color: "var(--ms-bone)", fontSize: "var(--ms-fs-ui)" }}>
-              {dailyLimit === null ? t("unlimited") : fmt.format(dailyLimit)}
+              {dailyLimit === null ? `${t("unlimited")} ∞` : fmt.format(dailyLimit)}
             </div>
           </div>
           {currentPeriodEnd && plan !== "free" ? (

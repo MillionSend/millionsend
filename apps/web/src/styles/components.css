@@ -8,6 +8,9 @@
 :root {
   --ms-z-popover: 500;
   --ms-z-modal: 1000;
+  /* Portaled listboxes (Select) mount on body, outside the modal that may
+     have opened them, so they need to clear it outright. */
+  --ms-z-menu: 1100;
 }
 
 /* One shared control height: every input, select trigger and button sits on an
@@ -245,6 +248,12 @@
 }
 .ms-card-danger[open] .ms-danger-chevron {
   transform: rotate(180deg);
+}
+/* A meta-grid cell whose content runs tall (a chip list) spans two rows so
+   the cells beside it keep their second row instead of dropping below it. */
+.ms-meta-tall {
+  grid-row: span 2;
+  min-width: 0;
 }
 /* Pill tabs on code panels (SDK sheets, the onboarding snippet). */
 .ms-code-tab {
@@ -1442,6 +1451,9 @@ summary:focus-visible,
   /* Meta/stat grids: 4-up (or 3-up) collapses to 2-up, then 1-up below. */
   .ms-meta-grid {
     grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .ms-meta-tall {
+    grid-row: auto;
   }
 
   /* Steppers: the add-domain preview column wraps under the form card

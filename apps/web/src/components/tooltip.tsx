@@ -4,8 +4,6 @@ import { useTranslations } from "next-intl";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-/* Flip the panel below the anchor when the viewport top leaves no headroom. */
-const FLIP_THRESHOLD = 96;
 const ANCHOR_GAP = 8;
 
 function CircleInfoGlyph() {
@@ -47,8 +45,10 @@ export function Tooltip({
   const panelId = useId();
   const open = hover || pinned;
 
-  // Fixed-position auto width shrinks to a sliver against the right viewport
-  // edge; clamp the panel's center after measuring so it stays fully visible.
+  // Placed after measuring: fixed-position auto width shrinks to a sliver
+  // against the right viewport edge, so the center is clamped back into view;
+  // and the panel sits above the anchor unless its measured height would run
+  // past the viewport top, in which case it hangs below instead.
   useLayoutEffect(() => {
     const panel = panelRef.current;
     const anchor = triggerRef.current;
@@ -59,6 +59,9 @@ export function Tooltip({
     const center = anchorRect.left + anchorRect.width / 2;
     const clamped = Math.min(Math.max(center, margin + half), window.innerWidth - margin - half);
     panel.style.left = `${clamped}px`;
+    const above = anchorRect.top - ANCHOR_GAP - panel.offsetHeight >= margin;
+    panel.style.top = `${above ? anchorRect.top - ANCHOR_GAP : anchorRect.bottom + ANCHOR_GAP}px`;
+    panel.style.transform = above ? "translate(-50%, -100%)" : "translateX(-50%)";
   });
 
   useEffect(() => {
@@ -121,19 +124,12 @@ export function Tooltip({
               id={panelId}
               role="tooltip"
               className="ms-tooltip"
-              style={
-                rect.top < FLIP_THRESHOLD
-                  ? {
-                      left: rect.left + rect.width / 2,
-                      top: rect.bottom + ANCHOR_GAP,
-                      transform: "translateX(-50%)",
-                    }
-                  : {
-                      left: rect.left + rect.width / 2,
-                      top: rect.top - ANCHOR_GAP,
-                      transform: "translate(-50%, -100%)",
-                    }
-              }
+              // First-paint guess; the layout effect measures and corrects it before paint.
+              style={{
+                left: rect.left + rect.width / 2,
+                top: rect.top - ANCHOR_GAP,
+                transform: "translate(-50%, -100%)",
+              }}
             >
               {text}
             </div>,

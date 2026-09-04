@@ -6,14 +6,15 @@ import { EllipsisGlyph } from "./icons/nav-icons.js";
 
 /** Closes an open popover when the pointer goes down outside `ref`. */
 export function useDismiss(
-  ref: React.RefObject<HTMLElement | null>,
+  ref: React.RefObject<HTMLElement | null> | React.RefObject<HTMLElement | null>[],
   open: boolean,
   onClose: () => void,
 ) {
   useEffect(() => {
     if (!open) return;
+    const refs = Array.isArray(ref) ? ref : [ref];
     function onPointerDown(event: PointerEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
+      if (!refs.some((r) => r.current?.contains(event.target as Node))) onClose();
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);

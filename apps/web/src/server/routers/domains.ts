@@ -17,6 +17,7 @@ import {
   PLAN_DOMAIN_LIMIT,
 } from "@millionsend/core";
 import { recordCheck } from "@millionsend/core/domain-status";
+import { registrableDomain } from "@millionsend/core/org-domain";
 import { type Db, schema } from "@millionsend/db";
 import {
   checkDnsRecords,
@@ -30,6 +31,7 @@ import {
   dnsRecordsForDomain,
   generateDkimKeyPair,
   getDomainVerification,
+  lookupDmarc,
   nodeDnsResolver,
   provisionDomainTenant,
   type SesIdentityClient,
@@ -405,11 +407,35 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
       // The DKIM TXT derives from the stored selector + public key (BYODKIM
       // keys never rotate behind our back); SES is only asked for statuses.
-      const [verification, provider] = await Promise.all([
+      const resolver = deps.dns ?? nodeDnsResolver;
+      const [verification, provider, dmarc] = await Promise.all([
         getDomainVerification(deps.clientForRegion(domain.region), { domain: domain.name }),
         detectProvider(deps.resolveNs, domain.name),
+        lookupDmarc(domain.name, registrableDomain(domain.name), resolver),
       ]);
-      return { provider, records: buildTrackedRecords(domain, verification) };
+      const records = buildTrackedRecords(domain, verification);
+      // Rows SES never checks (DMARC, tracking CNAME) have no stored gate, so a
+      // page open would read them Pending until a Check DNS ran. Their live
+      // verdict is read here instead — DMARC with the same organizational-domain
+      // fallback the verify pass applies, so a refresh agrees with the check.
+      const tracking = records.find((record) => record.group === "tracking");
+      const trackingLive = tracking ? (await checkDnsRecords([tracking], resolver))[0] : undefined;
+      return {
+        provider,
+        records: records.map((record) =>
+          record.group === "dmarc"
+            ? {
+                ...record,
+                live: dmarc.status,
+                ...(dmarc.status === "found" && dmarc.name !== record.name
+                  ? { inherited: { name: dmarc.name, policy: dmarc.policy } }
+                  : {}),
+              }
+            : record.group === "tracking" && trackingLive
+              ? { ...record, live: trackingLive }
+              : record,
+        ),
+      };
     }),
 
     verify: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
