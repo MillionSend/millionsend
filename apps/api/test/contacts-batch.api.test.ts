@@ -516,3 +516,42 @@ describe("counts and order", () => {
     expect((await json(again)).message).toBe("Contact already exists");
   });
 });
+
+describe("POST /contacts/batch/remove", () => {
+  it("deletes by emails (case-insensitive) or by ids, skips unknowns, and stays inside the team", async () => {
+    const created = (await json(
+      await batch([
+        { email: "bulk-a@example.com" },
+        { email: "bulk-b@example.com" },
+        { email: "bulk-c@example.com" },
+      ]),
+    )) as BatchBody;
+    const [a, b, c] = created.data.map((d) => d.id);
+
+    const byEmail = await call(tokenA, "POST", "/contacts/batch/remove", {
+      emails: ["Bulk-A@example.com", "bulk-b@example.com", "nobody@example.com"],
+    });
+    expect(byEmail.status).toBe(200);
+    const removed = (await json(byEmail)) as { data: { contact: string; deleted: true }[] };
+    expect(removed.data.map((r) => r.contact).sort()).toEqual([a, b].sort());
+    expect(removed.data.every((r) => r.deleted)).toBe(true);
+
+    // Another team's key deletes nothing, even with the right id.
+    const foreign = await call(tokenB, "POST", "/contacts/batch/remove", { ids: [c] });
+    expect((await json(foreign)) as unknown).toEqual({ data: [] });
+
+    const byId = await call(tokenA, "POST", "/contacts/batch/remove", { ids: [c] });
+    expect(((await json(byId)) as { data: unknown[] }).data).toHaveLength(1);
+    expect((await call(tokenA, "GET", `/contacts/${c}`)).status).toBe(404);
+  });
+
+  it("422s without exactly one of ids or emails, and past 1000 entries", async () => {
+    for (const body of [
+      {},
+      { ids: ["00000000-0000-4000-8000-000000000001"], emails: ["x@example.com"] },
+      { emails: Array.from({ length: 1001 }, (_, i) => `x${i}@example.com`) },
+    ]) {
+      expect((await call(tokenA, "POST", "/contacts/batch/remove", body)).status).toBe(422);
+    }
+  });
+});

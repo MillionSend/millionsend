@@ -26,6 +26,7 @@
       "verified": "{count} verified",
       "pending": "{count} pending",
       "failed": "{count} failed",
+      "partial": "{count} partial",
       "allIn": "all in {region}",
       "regions": "{count} regions"
     },
@@ -160,6 +161,9 @@
       "verified": "Verified"
     },
     "mismatchFound": "DNS answers with:\n{found}",
+    "proxiedHint": "This name answers with addresses instead of the CNAME:\n{found}\nOn Cloudflare that is the orange cloud (proxied). Switch the record to DNS only.",
+    "dnsOnly": "DNS only",
+    "dnsOnlyHint": "On Cloudflare, keep the proxy off for this record (grey cloud, \"DNS only\"). A proxied CNAME answers with Cloudflare's addresses instead of this target, and TLS for this host is served by MillionSend.",
     "inheritedDmarc": "No record at this name. Receivers fall back to <code>{from}</code> (<code>p={policy}</code>), which already covers this subdomain.",
     "goToProvider": "Go to {provider}",
     "moreActions": "More actions",

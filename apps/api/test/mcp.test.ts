@@ -288,6 +288,7 @@ describe("tool listing", () => {
       "update_contact",
       "update_contact_topics",
       "delete_contact",
+      "delete_contacts",
       "add_contact_to_segment",
       "remove_contact_from_segment",
       "create_segment",

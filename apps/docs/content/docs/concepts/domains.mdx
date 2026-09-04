@@ -55,7 +55,12 @@ Tracking is served from the domain's own tracking subdomain: pass
 gains a Tracking CNAME whose status turns `verified` once it resolves. On
 MillionSend Cloud, turning either kind on without a subdomain is refused with a
 422. Until the CNAME resolves, links are not routed through it — Cloud ships
-them clean, self-host falls back to the app host.
+them clean, self-host falls back to the app host — and the domain shows as
+**Partial** in the dashboard: verified for sending, tracking not yet live. On
+Cloudflare the tracking record must stay **DNS only** (grey cloud): a proxied
+CNAME answers with Cloudflare's addresses instead of the target, which the
+records table reports as a mismatch, and TLS for the tracking host is served
+by MillionSend.
 
 ## Open-rate accuracy
 

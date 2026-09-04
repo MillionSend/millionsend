@@ -25,7 +25,12 @@ import { useUrlState } from "@/lib/url-state";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, StateCard } from "../emails/list-parts";
 import { AwsCredentialsBanner } from "./aws-credentials-banner";
-import { DOMAIN_TONE, type DomainStatus, DomainStatusBadge } from "./domain-status";
+import {
+  DOMAIN_TONE,
+  type DomainStatus,
+  DomainStatusBadge,
+  displayDomainStatus,
+} from "./domain-status";
 import { RegionLabel } from "./region-label";
 
 /** Mirrors the loaded rows: mono domain link, status badge, region label, relative time. */
@@ -52,6 +57,9 @@ function SkeletonRows() {
     </tbody>
   );
 }
+
+const shown = (d: { status: string; trackingPending: boolean }) =>
+  displayDomainStatus(d.status as DomainStatus, d.trackingPending);
 
 export function DomainsView() {
   const t = useTranslations("domains");
@@ -118,7 +126,7 @@ export function DomainsView() {
   const regions = useMemo(() => [...new Set(rows.map((d) => d.region))], [rows]);
 
   // URL params are untrusted: unknown values fall back to "all".
-  const status = ["all", "verified", "pending", "failed"].includes(statusParam)
+  const status = ["all", "verified", "partial", "pending", "failed"].includes(statusParam)
     ? statusParam
     : "all";
   const region = regionParam === "all" || regions.includes(regionParam) ? regionParam : "all";
@@ -127,18 +135,19 @@ export function DomainsView() {
     (d) =>
       d.name.includes(search.trim().toLowerCase()) &&
       (status === "all" ||
-        d.status === status ||
+        shown(d) === status ||
         (status === "pending" && d.status === "temporary_failure")) &&
       (region === "all" || d.region === region),
   );
 
   const summary = useMemo(() => {
     if (rows.length === 0) return undefined;
-    const counts = { verified: 0, pending: 0, failed: 0 };
+    const counts = { verified: 0, partial: 0, pending: 0, failed: 0 };
     for (const d of rows) {
-      counts[d.status === "temporary_failure" ? "pending" : d.status] += 1;
+      const s = shown(d);
+      counts[s === "temporary_failure" ? "pending" : s] += 1;
     }
-    const parts = (["verified", "pending", "failed"] as const)
+    const parts = (["verified", "partial", "pending", "failed"] as const)
       .filter((key) => counts[key] > 0)
       .map((key) => t(`list.summary.${key}`, { count: counts[key] }));
     parts.push(
@@ -220,7 +229,7 @@ export function DomainsView() {
               ariaLabel={t("list.allStatuses")}
               options={[
                 { value: "all", label: t("list.allStatuses") },
-                ...(["verified", "pending", "failed"] as const).map((key) => ({
+                ...(["verified", "partial", "pending", "failed"] as const).map((key) => ({
                   value: key,
                   label: common(`status.${key}`),
                 })),
@@ -270,13 +279,13 @@ export function DomainsView() {
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
                             <NavTile
                               name="domains"
-                              color={TONE_COLOR[DOMAIN_TONE[domain.status as DomainStatus]]}
+                              color={TONE_COLOR[DOMAIN_TONE[shown(domain)]]}
                             />
                             <Link href={`/domains/${domain.id}`}>{domain.name}</Link>
                           </span>
                         </td>
                         <td>
-                          <DomainStatusBadge status={domain.status as DomainStatus} />
+                          <DomainStatusBadge status={shown(domain)} />
                         </td>
                         <td style={{ color: "var(--ms-muted)" }}>
                           <RegionLabel region={domain.region} />

@@ -45,6 +45,12 @@ transacional, mais o tratamento específico de broadcast:
   escritos para o Resend continuam funcionando sem mudança (e voltam sem
   mudança).
 
+
+Os e-mails de broadcast entram na fila de envio abaixo dos transacionais: um
+e-mail transacional aceito enquanto um broadcast está saindo é enviado antes
+dos destinatários restantes. Os envios rodam em várias pistas ao mesmo tempo,
+no ritmo da taxa de envio do SES da instância.
+
 <Callout type="info">
 Em uma instância auto-hospedada, os links de descadastro são construídos a
 partir de `APP_BASE_URL`, então o envio de broadcasts é rejeitado até que ela

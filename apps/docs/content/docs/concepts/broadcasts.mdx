@@ -42,6 +42,11 @@ plus broadcast-specific handling:
   `{{{RESEND_UNSUBSCRIBE_URL}}}` is a supported alias, so templates written
   for Resend keep working unchanged (and roll back unchanged).
 
+Broadcast emails enter the send queue below transactional ones: a
+transactional email accepted while a broadcast is going out is sent ahead of
+the remaining recipients. Sends run on several lanes at once, paced by the
+instance's SES send rate.
+
 <Callout type="info">
 On a self-hosted instance, unsubscribe links are built from `APP_BASE_URL`,
 so broadcast sending is rejected until it is configured — see

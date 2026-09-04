@@ -34,6 +34,23 @@ de email; a comparação de email não diferencia maiúsculas.
 As inscrições em tópicos são definidas por contato com
 `PATCH /contacts/{id}/topics`.
 
+## Exclusão em massa
+
+`POST /contacts/batch/remove` exclui até 1.000 contatos em uma requisição, por
+`ids` ou por `emails` (exatamente um dos dois; a comparação de email não
+diferencia maiúsculas), e retorna as linhas de fato excluídas — entradas
+desconhecidas são ignoradas. Cada exclusão é o mesmo apagamento de
+`DELETE /contacts/{id}`: o endereço some do histórico de e-mails, dos payloads
+de eventos e dos logs da API. O Resend não tem exclusão em massa; é uma
+extensão do MillionSend, também exposta como a ferramenta MCP `delete_contacts`.
+
+```sh
+curl -X POST "https://api.millionsend.com/contacts/batch/remove" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "emails": ["lista-antiga-1@example.com", "lista-antiga-2@example.com"] }'
+```
+
 ## Criação em lote
 
 `POST /contacts/batch` recebe um array JSON de 1 a 1000 itens, cada um no

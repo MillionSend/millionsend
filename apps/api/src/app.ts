@@ -72,6 +72,8 @@ import {
   batchContactsResponseSchema,
   batchEmailRequestSchema,
   batchEmailResponseSchema,
+  batchRemoveContactsRequestSchema,
+  batchRemoveContactsResponseSchema,
   broadcastIdResponseSchema,
   type CreateContactRequest,
   cancelBroadcastResponseSchema,
@@ -1099,6 +1101,56 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, db: Db): void {
         return c.json(errorBody(result.status, result.name, result.message), result.status);
       }
       return c.json({ object: "contact" as const, id: result.id }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/contacts/batch/remove",
+      summary: "Delete contacts in bulk",
+      description:
+        "MillionSend extension (Resend deletes contacts one at a time): deletes up to 1000 contacts " +
+        "by id or by email address in one request and lists the rows actually deleted; unknown ids " +
+        "or addresses are skipped. Each deletion is the same erasure as DELETE /contacts/{id}: the " +
+        "address is removed from email history, event payloads and API logs.",
+      request: {
+        body: { content: { "application/json": { schema: batchRemoveContactsRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: batchRemoveContactsResponseSchema } },
+          description: "The contacts that were deleted",
+        },
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const match =
+        body.ids !== undefined
+          ? inArray(t.id, body.ids)
+          : inArray(
+              sql`lower(${t.email})`,
+              (body.emails ?? []).map((e) => e.toLowerCase()),
+            );
+      const rows = await db
+        .delete(t)
+        .where(and(eq(t.teamId, auth.teamId), match))
+        .returning({ id: t.id, email: t.email });
+      // Deleting a contact is an erasure, one address at a time like the single delete.
+      for (const row of rows) await eraseRecipient(db, auth.teamId, row.email);
+      return c.json(
+        {
+          data: rows.map((r) => ({
+            object: "contact" as const,
+            contact: r.id,
+            deleted: true as const,
+          })),
+        },
+        200,
+      );
     },
   );
 

@@ -12,6 +12,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import {
   checkDnsRecords,
   computeDomainVerification,
@@ -92,8 +93,8 @@ export async function reconcileStalledBroadcasts(
 
 export interface DrainDeps {
   isCloud: boolean;
-  /** startAfter defers the job for emails scheduled beyond the drain time. */
-  enqueueSend: (emailId: string, startAfter?: Date) => Promise<void>;
+  /** startAfter defers the job for emails scheduled beyond the drain time; priority keeps transactional rows ahead of broadcast ones. */
+  enqueueSend: (emailId: string, startAfter?: Date, priority?: EmailSendPriority) => Promise<void>;
   /** SES's own 24-hour quota is full: releasing anything would only park it again. */
   sesQuotaExhausted?: (() => boolean) | undefined;
 }
@@ -137,6 +138,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       .select({
         id: schema.emails.id,
         teamId: schema.emails.teamId,
+        broadcastId: schema.emails.broadcastId,
         plan: schema.teams.plan,
         currentPeriodEnd: schema.teams.currentPeriodEnd,
         scheduledAt: schema.emails.scheduledAt,
@@ -182,6 +184,7 @@ async function drainOne(
   email: {
     id: string;
     teamId: string;
+    broadcastId: string | null;
     plan: keyof typeof PLAN_DAILY_LIMIT;
     currentPeriodEnd: Date | null;
     scheduledAt: Date | null;
@@ -216,7 +219,7 @@ async function drainOne(
     }
     if (outcome === "raced") return 0;
     try {
-      await deps.enqueueSend(email.id, email.scheduledAt ?? undefined);
+      await deps.enqueueSend(email.id, email.scheduledAt ?? undefined, emailSendPriority(email));
     } catch (err) {
       // A "queued" email with no job would only be picked up by the
       // reconcile sweep; re-park it so the drain retry handles it sooner.
@@ -249,7 +252,14 @@ const RECONCILE_BATCH = 1000;
  */
 export async function reconcileStalledSends(
   db: Db,
-  deps: { enqueueSend: (emailId: string, startAfter?: Date) => Promise<void>; now?: Date },
+  deps: {
+    enqueueSend: (
+      emailId: string,
+      startAfter?: Date,
+      priority?: EmailSendPriority,
+    ) => Promise<void>;
+    now?: Date;
+  },
 ): Promise<number> {
   const now = deps.now ?? new Date();
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
@@ -276,7 +286,11 @@ export async function reconcileStalledSends(
     );
   }
   const stalled = await db
-    .select({ id: schema.emails.id, scheduledAt: schema.emails.scheduledAt })
+    .select({
+      id: schema.emails.id,
+      broadcastId: schema.emails.broadcastId,
+      scheduledAt: schema.emails.scheduledAt,
+    })
     .from(schema.emails)
     .where(
       and(
@@ -288,7 +302,7 @@ export async function reconcileStalledSends(
     .orderBy(asc(schema.emails.createdAt))
     .limit(RECONCILE_BATCH);
   for (const email of stalled) {
-    await deps.enqueueSend(email.id, email.scheduledAt ?? undefined);
+    await deps.enqueueSend(email.id, email.scheduledAt ?? undefined, emailSendPriority(email));
   }
   return stalled.length;
 }

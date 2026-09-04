@@ -37,6 +37,19 @@ export interface SerializedSesEvent {
 export type JobName = keyof JobPayloads;
 
 /**
+ * Fetch order inside the email.send queue: pg-boss serves the higher priority
+ * first, then the older job. A transactional email (API, SMTP relay,
+ * onboarding) must never wait behind a broadcast fan-out or a quota drain of
+ * one, so bulk mail enqueues at 0 and transactional at 1.
+ */
+export const EMAIL_SEND_PRIORITY = { transactional: 1, bulk: 0 } as const;
+export type EmailSendPriority = (typeof EMAIL_SEND_PRIORITY)[keyof typeof EMAIL_SEND_PRIORITY];
+
+/** The priority an existing email row re-enqueues with: broadcast rows are bulk, everything else transactional. */
+export const emailSendPriority = (email: { broadcastId: string | null }): EmailSendPriority =>
+  email.broadcastId ? EMAIL_SEND_PRIORITY.bulk : EMAIL_SEND_PRIORITY.transactional;
+
+/**
  * Job queues use the "short" policy: pg-boss only enforces singletonKey
  * uniqueness under short/singleton/stately/exclusive policies — on the
  * default "standard" policy the key is silently ignored and dedupe would be
@@ -145,7 +158,7 @@ export class Queue {
   async send<N extends JobName>(
     name: N,
     payload: JobPayloads[N],
-    opts: { dedupeKey: string; startAfter?: Date },
+    opts: { dedupeKey: string; startAfter?: Date; priority?: number },
   ): Promise<string | null> {
     await this.#ensureQueue(name, JOB_QUEUE_POLICY);
     const deadLetter = deadLetterFor(name);
@@ -153,6 +166,7 @@ export class Queue {
     return this.#boss.send(name, payload, {
       singletonKey: opts.dedupeKey,
       ...(opts.startAfter ? { startAfter: opts.startAfter } : {}),
+      ...(opts.priority !== undefined ? { priority: opts.priority } : {}),
       ...(deadLetter ? { deadLetter } : {}),
       retryLimit: 10,
       retryBackoff: true,

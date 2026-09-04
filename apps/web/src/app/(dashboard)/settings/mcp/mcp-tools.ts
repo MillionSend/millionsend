@@ -36,6 +36,7 @@ export const MCP_TOOLS: { name: string; scope: McpScope; readOnly?: boolean }[] 
   { name: "update_contact", scope: "audience:write" },
   { name: "update_contact_topics", scope: "audience:write" },
   { name: "delete_contact", scope: "audience:write" },
+  { name: "delete_contacts", scope: "audience:write" },
   { name: "add_contact_to_segment", scope: "audience:write" },
   { name: "remove_contact_from_segment", scope: "audience:write" },
   { name: "create_segment", scope: "audience:write" },

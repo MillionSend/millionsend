@@ -34,6 +34,7 @@ import {
   batchAddSuppressionsRequestSchema,
   batchContactsRequestSchema,
   batchEmailRequestSchema,
+  batchRemoveContactsRequestSchema,
   batchRemoveSuppressionsRequestSchema,
   createApiKeyRequestSchema,
   createBroadcastRequestSchema,
@@ -798,6 +799,17 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       destructive: true,
     },
     ({ id }) => api("DELETE", `/contacts/${enc(id)}`),
+  );
+  tool(
+    "delete_contacts",
+    "audience:write",
+    {
+      description:
+        "Delete up to 1000 contacts in one call, by ids or by email addresses (exactly one of the two). Returns the contacts actually deleted; unknown ones are skipped. Each deletion erases the address from email history like delete_contact. This cannot be undone.",
+      inputSchema: batchRemoveContactsRequestSchema,
+      destructive: true,
+    },
+    (body) => api("POST", "/contacts/batch/remove", body),
   );
   tool(
     "add_contact_to_segment",

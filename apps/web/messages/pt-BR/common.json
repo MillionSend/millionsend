@@ -65,7 +65,8 @@
     "failed": "Falhou",
     "canceled": "Cancelado",
     "verified": "Verificado",
-    "pending": "Pendente"
+    "pending": "Pendente",
+    "partial": "Parcial"
   },
   "band": {
     "excellent": "Excelente",

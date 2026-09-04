@@ -15,7 +15,7 @@ import {
   sesEventsHealth,
 } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
-import { Queue } from "@millionsend/queue";
+import { EMAIL_SEND_PRIORITY, type EmailSendPriority, Queue } from "@millionsend/queue";
 import {
   createKeyringFromEnv,
   createSesAccountClient,
@@ -129,13 +129,28 @@ setInterval(() => void sesQuota.refresh(), 60_000).unref();
 
 const queue = await Queue.start(env.DATABASE_URL);
 
-const enqueueSend = async (emailId: string, startAfter?: Date): Promise<void> => {
+// Everything the worker itself enqueues is bulk unless the caller says
+// otherwise: broadcast fan-out always, drained or reconciled rows by origin.
+const enqueueSend = async (
+  emailId: string,
+  startAfter?: Date,
+  priority: EmailSendPriority = EMAIL_SEND_PRIORITY.bulk,
+): Promise<void> => {
   await queue.send(
     "email.send",
     { emailId },
-    { dedupeKey: emailId, ...(startAfter ? { startAfter } : {}) },
+    { dedupeKey: emailId, priority, ...(startAfter ? { startAfter } : {}) },
   );
 };
+
+/**
+ * Concurrent send lanes. One send waits on KMS, SES and a few writes (about a
+ * second), so a single lane moves about one email a second while the rate
+ * bucket sits full. Sixteen lanes saturate a 14/s bucket with room to spare;
+ * the bucket, not this number, is what SES sees. The db pool (packages/db) is
+ * sized for them.
+ */
+const SEND_CONCURRENCY = 16;
 
 const enqueueWebhook = async (deliveryId: string, startAfter?: Date): Promise<void> => {
   await queue.send(
@@ -145,24 +160,28 @@ const enqueueWebhook = async (deliveryId: string, startAfter?: Date): Promise<vo
   );
 };
 
-await queue.work("email.send", async (payload) => {
-  await sendEmail(
-    db,
-    {
-      keyring,
-      ses,
-      defaultConfigurationSet: env.SES_CONFIGURATION_SET,
-      onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
-      throttle: () => bucket.take(),
-      reschedule: (emailId, at) => enqueueSend(emailId, at),
-      sesQuota,
-      enqueueWebhookDelivery: enqueueWebhook,
-      tracking,
-      ...(unsubscribe ? { unsubscribe } : {}),
-    },
-    payload,
-  );
-});
+await queue.work(
+  "email.send",
+  async (payload) => {
+    await sendEmail(
+      db,
+      {
+        keyring,
+        ses,
+        defaultConfigurationSet: env.SES_CONFIGURATION_SET,
+        onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
+        throttle: () => bucket.take(),
+        reschedule: (emailId, at, priority) => enqueueSend(emailId, at, priority),
+        sesQuota,
+        enqueueWebhookDelivery: enqueueWebhook,
+        tracking,
+        ...(unsubscribe ? { unsubscribe } : {}),
+      },
+      payload,
+    );
+  },
+  { concurrency: SEND_CONCURRENCY },
+);
 
 // Retries exhausted: the row must not stay "queued" for the reconcile sweep
 // to resurrect forever.

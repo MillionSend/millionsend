@@ -218,19 +218,27 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
   // throttle for everyone.
   const createLimited = createFixedWindowLimiter(DOMAIN_CREATE_LIMIT_PER_HOUR, 3_600_000);
   return router({
-    list: teamProcedure.query(({ ctx }) =>
-      ctx.db
+    list: teamProcedure.query(async ({ ctx }) => {
+      const rows = await ctx.db
         .select({
           id: schema.domains.id,
           name: schema.domains.name,
           region: schema.domains.region,
           status: schema.domains.status,
           createdAt: schema.domains.createdAt,
+          trackingSubdomain: schema.domains.trackingSubdomain,
+          trackingSubdomainSetAt: schema.domains.trackingSubdomainSetAt,
         })
         .from(schema.domains)
         .where(eq(schema.domains.teamId, ctx.teamId))
-        .orderBy(desc(schema.domains.createdAt)),
-    ),
+        .orderBy(desc(schema.domains.createdAt));
+      // A set subdomain whose 72h clock is still armed has a CNAME nobody has
+      // seen resolve: the domain sends, but not through its tracking host.
+      return rows.map(({ trackingSubdomain, trackingSubdomainSetAt, ...row }) => ({
+        ...row,
+        trackingPending: trackingSubdomain !== null && trackingSubdomainSetAt !== null,
+      }));
+    }),
 
     get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
@@ -248,6 +256,8 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         openTracking: domain.openTracking,
         clickTracking: domain.clickTracking,
         trackingSubdomain: domain.trackingSubdomain,
+        trackingPending:
+          domain.trackingSubdomain !== null && domain.trackingSubdomainSetAt !== null,
         tlsMode: domain.tlsMode,
         createdAt: domain.createdAt,
         verifiedAt: domain.verifiedAt,

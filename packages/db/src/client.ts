@@ -8,9 +8,14 @@ export type Db = ReturnType<typeof createDb>;
 /** timestamptz, timestamp, date — the scalar OIDs a Date param can bind to. */
 const DATE_OIDS = [1184, 1114, 1082];
 
+// Sized for the worker's concurrent send lanes (apps/worker SEND_CONCURRENCY)
+// plus its crons; the API and web tiers never approach it. Three processes
+// at this size stay under Postgres's default max_connections of 100.
+const POOL_MAX = 24;
+
 function createDb() {
   // prepare:false keeps the client compatible with transaction-mode poolers (PgBouncer).
-  const sql = postgres(env.DATABASE_URL, { prepare: false });
+  const sql = postgres(env.DATABASE_URL, { prepare: false, max: POOL_MAX });
   const db = drizzle(sql, { schema });
   // drizzle's postgres-js driver swaps the driver's date serializers for the
   // identity function (column-bound values reach it already mapped to text),

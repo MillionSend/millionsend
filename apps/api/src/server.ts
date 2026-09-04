@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { env, sesTenantsEnabled, trackingSubdomainsSupported } from "@millionsend/config";
 import { getDb } from "@millionsend/db";
-import { Queue } from "@millionsend/queue";
+import { EMAIL_SEND_PRIORITY, Queue } from "@millionsend/queue";
 import {
   createCachingCertFetcher,
   createKeyringFromEnv,
@@ -62,7 +62,11 @@ const app = createApi({
     await queue.send(
       "email.send",
       { emailId },
-      { dedupeKey: emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) },
+      {
+        dedupeKey: emailId,
+        priority: EMAIL_SEND_PRIORITY.transactional,
+        ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}),
+      },
     );
   },
   enqueueBroadcastSend: async (broadcastId, opts) => {

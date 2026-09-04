@@ -26,6 +26,7 @@
       "verified": "{count} verificado(s)",
       "pending": "{count} pendente(s)",
       "failed": "{count} com falha",
+      "partial": "{count} parcial",
       "allIn": "todos em {region}",
       "regions": "{count} regiões"
     },
@@ -160,6 +161,9 @@
       "verified": "Verificado"
     },
     "mismatchFound": "O DNS responde com:\n{found}",
+    "proxiedHint": "Este nome responde com endereços em vez do CNAME:\n{found}\nNo Cloudflare isso é a nuvem laranja (proxy). Mude o registro para somente DNS.",
+    "dnsOnly": "Somente DNS",
+    "dnsOnlyHint": "No Cloudflare, mantenha o proxy desligado neste registro (nuvem cinza, \"DNS only\"). Um CNAME com proxy responde com os endereços do Cloudflare em vez deste alvo, e o TLS deste host é servido pelo MillionSend.",
     "inheritedDmarc": "Nenhum registro neste nome. Os destinatários recorrem a <code>{from}</code> (<code>p={policy}</code>), que já cobre este subdomínio.",
     "goToProvider": "Ir para {provider}",
     "moreActions": "Mais ações",

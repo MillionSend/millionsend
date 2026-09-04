@@ -58,7 +58,12 @@ domínio: informe `tracking_subdomain` (um rótulo como `links`) e o `records[]`
 da resposta ganha um CNAME de rastreamento, cujo status passa a `verified` assim
 que ele resolve. No MillionSend Cloud, ligar qualquer um dos dois sem um
 subdomínio é recusado com 422. Enquanto o CNAME não resolve, os links não passam
-por ele — o Cloud os envia limpos, o self-host recorre ao host do app.
+por ele — o Cloud os envia limpos, o self-host recorre ao host do app — e o
+domínio aparece como **Parcial** no dashboard: verificado para enviar, com o
+rastreamento ainda não ativo. No Cloudflare, o registro de rastreamento precisa
+ficar como **somente DNS** (nuvem cinza): um CNAME com proxy responde com os
+endereços do Cloudflare em vez do alvo, o que a tabela de registros mostra como
+divergência, e o TLS do host de rastreamento é servido pelo MillionSend.
 
 ## Precisão da taxa de abertura
 

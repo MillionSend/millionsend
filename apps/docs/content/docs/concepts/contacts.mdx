@@ -32,6 +32,23 @@ matching is case-insensitive.
 
 Topic subscriptions are set per contact with `PATCH /contacts/{id}/topics`.
 
+## Bulk delete
+
+`POST /contacts/batch/remove` deletes up to 1,000 contacts in one request, by
+`ids` or by `emails` (exactly one of the two; email matching is
+case-insensitive), and returns the rows actually deleted — unknown entries are
+skipped. Each deletion is the same erasure as `DELETE /contacts/{id}`: the
+address disappears from email history, event payloads and API logs. Resend
+has no bulk deletion; this is a MillionSend extension, also exposed as the
+`delete_contacts` MCP tool.
+
+```sh
+curl -X POST "https://api.millionsend.com/contacts/batch/remove" \
+  -H "Authorization: Bearer ms_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "emails": ["old-list-1@example.com", "old-list-2@example.com"] }'
+```
+
 ## Bulk create
 
 `POST /contacts/batch` takes a JSON array of 1–1000 items, each shaped like

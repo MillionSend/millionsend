@@ -70,12 +70,41 @@ function RecordStatusBadge({ status, note }: { status: RecordStatus; note?: Reac
   );
 }
 
+/** Only MX records carry a priority; the column exists only in a table that has one. */
+const GROUP_HAS_PRIORITY: Record<(typeof GROUPS)[number], boolean> = {
+  verification: false,
+  sending: true,
+  dmarc: false,
+  tracking: false,
+};
+
+const IP_RE = /^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f:]+)$/i;
+/** A CNAME name answering with addresses was flattened by a proxying DNS provider. */
+const answersWithAddresses = (found: string) => found.split("\n").every((line) => IP_RE.test(line));
+
+/** The record must stay a plain CNAME: a proxy in front of it hides the target and takes over TLS. */
+function DnsOnlyNote() {
+  const t = useTranslations("domains");
+  return (
+    <span
+      className="ms-badge ms-badge-neutral"
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, marginLeft: 8 }}
+    >
+      <span aria-hidden="true">☁</span>
+      {t("detail.dnsOnly")}
+      <Tooltip text={t("detail.dnsOnlyHint")} />
+    </span>
+  );
+}
+
 function RecordsTable({
   children,
   showStatus,
+  showPriority,
 }: {
   children: React.ReactNode;
   showStatus: boolean;
+  showPriority: boolean;
 }) {
   const t = useTranslations("domains");
   return (
@@ -87,7 +116,7 @@ function RecordsTable({
           <th style={{ width: "30%" }}>{t("detail.columns.name")}</th>
           <th>{t("detail.columns.value")}</th>
           <th style={{ width: 58 }}>{t("detail.columns.ttl")}</th>
-          <th style={{ width: 72 }}>{t("detail.columns.priority")}</th>
+          {showPriority ? <th style={{ width: 72 }}>{t("detail.columns.priority")}</th> : null}
           {showStatus ? <th style={{ width: 96 }}>{t("detail.columns.status")}</th> : null}
         </tr>
       </thead>
@@ -129,6 +158,7 @@ export function DnsRecordsTable({
     <div style={{ display: "grid", gap: 20 }}>
       {GROUPS.map((group) => {
         const rows = records.filter((r) => r.group === group);
+        const showPriority = rows.some((r) => r.priority !== undefined);
         if (rows.length === 0 && !forceGroups.includes(group)) return null;
         return (
           <div
@@ -156,7 +186,7 @@ export function DnsRecordsTable({
                 {emptyNotes[group]}
               </p>
             ) : (
-              <RecordsTable showStatus={showStatus}>
+              <RecordsTable showStatus={showStatus} showPriority={showPriority}>
                 {rows.map((record) => {
                   const name = domain ? zoneRelativeName(record.name, domain) : record.name;
                   return (
@@ -172,9 +202,10 @@ export function DnsRecordsTable({
                             ? { display: abbreviateDkim(record.value) }
                             : {})}
                         />
+                        {record.type === "CNAME" ? <DnsOnlyNote /> : null}
                       </td>
                       <td>{t("detail.ttlAuto")}</td>
-                      <td>{record.priority ?? "—"}</td>
+                      {showPriority ? <td>{record.priority ?? "—"}</td> : null}
                       {showStatus ? (
                         <td style={{ whiteSpace: "nowrap" }}>
                           <RecordStatusBadge
@@ -190,12 +221,14 @@ export function DnsRecordsTable({
                                     policy: record.inherited.policy,
                                   })
                                 : record.live === "mismatch" && record.found
-                                  ? t("detail.mismatchFound", {
-                                      found: record.found
-                                        .split("\n")
-                                        .map(abbreviateDkim)
-                                        .join("\n"),
-                                    })
+                                  ? record.type === "CNAME" && answersWithAddresses(record.found)
+                                    ? t("detail.proxiedHint", { found: record.found })
+                                    : t("detail.mismatchFound", {
+                                        found: record.found
+                                          .split("\n")
+                                          .map(abbreviateDkim)
+                                          .join("\n"),
+                                      })
                                   : undefined
                             }
                           />
@@ -223,7 +256,7 @@ export function DnsRecordsTableSkeleton({ showStatus = false }: { showStatus?: b
           <p className="ms-microlabel" style={{ margin: "0 0 8px" }}>
             {t(`detail.groups.${group}`)}
           </p>
-          <RecordsTable showStatus={showStatus}>
+          <RecordsTable showStatus={showStatus} showPriority={GROUP_HAS_PRIORITY[group]}>
             {Array.from({ length: GROUP_ROWS[group] }, (_, row) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: identical placeholder rows, position is identity
               <tr key={row}>
@@ -239,9 +272,11 @@ export function DnsRecordsTableSkeleton({ showStatus = false }: { showStatus?: b
                 <td>
                   <Skeleton width={32} />
                 </td>
-                <td>
-                  <Skeleton width={20} />
-                </td>
+                {GROUP_HAS_PRIORITY[group] ? (
+                  <td>
+                    <Skeleton width={20} />
+                  </td>
+                ) : null}
                 {showStatus ? (
                   <td>
                     <SkeletonBadge />

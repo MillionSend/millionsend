@@ -27,7 +27,7 @@ import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { isLoopbackUrl } from "@/lib/url";
 import { zoneRelativeName } from "@/lib/zone";
-import { DomainStatusBadge } from "../domain-status";
+import { type DomainStatus, DomainStatusBadge, displayDomainStatus } from "../domain-status";
 import { RegionLabel } from "../region-label";
 import { useTrackingToggle } from "../use-tracking-toggle";
 
@@ -634,6 +634,12 @@ export function DomainDetail({ id }: { id: string }) {
   // hides and the action moves into the ⋯ menu for the rare manual re-check.
   const trackingRow = rows.find((r) => r.group === "tracking");
   const needsDnsCheck = status !== "verified" || (!!trackingRow && trackingRow.live !== "found");
+  // The header badge reads the live row: a verified identity whose tracking
+  // CNAME is not resolving is partial until a check sees it.
+  const shownStatus = displayDomainStatus(
+    status as DomainStatus,
+    !!trackingRow && trackingRow.live !== "found",
+  );
 
   function recordsText(): string {
     return rows
@@ -771,7 +777,7 @@ export function DomainDetail({ id }: { id: string }) {
           </span>
         </MetaItem>
         <MetaItem label={t("detail.status")}>
-          <DomainStatusBadge status={status} />
+          <DomainStatusBadge status={shownStatus} />
         </MetaItem>
         <MetaItem label={t("detail.region")}>
           <RegionLabel region={data.region} variant="meta" />

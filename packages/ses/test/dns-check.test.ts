@@ -137,3 +137,34 @@ describe("DoH answer parsing", () => {
     });
   });
 });
+
+describe("a proxied CNAME", () => {
+  const nodata = () => Promise.reject(Object.assign(new Error("ENODATA"), { code: "ENODATA" }));
+  it("reads as a mismatch naming the addresses when the resolver can look them up", async () => {
+    const resolver: DnsResolver = {
+      resolveTxt: async () => [],
+      resolveMx: async () => [],
+      resolveCname: nodata,
+      resolveA: async () => ["104.21.55.1", "172.67.140.2"],
+    };
+    const [check] = await checkDnsRecordsDetailed(
+      [{ type: "CNAME", name: "links.news.example.com", value: "t.example-dns.com" }],
+      resolver,
+    );
+    expect(check).toEqual({ status: "mismatch", found: "104.21.55.1\n172.67.140.2" });
+  });
+  it("stays missing for a resolver without address lookups, and when no address exists either", async () => {
+    const bare: DnsResolver = {
+      resolveTxt: async () => [],
+      resolveMx: async () => [],
+      resolveCname: nodata,
+    };
+    expect(await checkDnsRecords([{ type: "CNAME", name: "c", value: "t" }], bare)).toEqual([
+      "missing",
+    ]);
+    const empty: DnsResolver = { ...bare, resolveA: nodata };
+    expect(await checkDnsRecords([{ type: "CNAME", name: "c", value: "t" }], empty)).toEqual([
+      "missing",
+    ]);
+  });
+});

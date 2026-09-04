@@ -605,6 +605,31 @@ export const removeContactResponseSchema = z
   .object({ object: z.literal("contact"), contact: z.uuid(), deleted: z.literal(true) })
   .openapi("RemoveContactResponse");
 
+/** Bulk deletion; Resend deletes contacts one at a time. Same shape as the suppressions batch remove. */
+export const batchRemoveContactsRequestSchema = z
+  .object({
+    ids: z
+      .array(z.uuid())
+      .min(1)
+      .max(1000)
+      .optional()
+      .describe("Contact ids to delete, up to 1000"),
+    emails: z
+      .array(z.email())
+      .min(1)
+      .max(1000)
+      .optional()
+      .describe("Contact email addresses to delete, up to 1000; matched case-insensitively"),
+  })
+  .refine((v) => (v.ids === undefined) !== (v.emails === undefined), {
+    message: "provide exactly one of ids or emails",
+  })
+  .openapi("BatchRemoveContactsRequest");
+
+export const batchRemoveContactsResponseSchema = z
+  .object({ data: z.array(removeContactResponseSchema) })
+  .openapi("BatchRemoveContactsResponse");
+
 // contacts.segments.add/remove (SDK AddContactSegmentResponseSuccess /
 // RemoveContactSegmentResponseSuccess): id is the contact, audienceId the
 // segment (audiences are a pure alias of segments in resend v6).

@@ -25,6 +25,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { createTransport } from "nodemailer";
 import { isSesQuotaRefusal, isSesThrottle, type SesQuotaGate } from "./ses-quota.js";
@@ -69,7 +70,9 @@ export interface SendDeps {
    */
   throttle?: (() => Promise<void>) | undefined;
   /** Re-enqueue a not-yet-due scheduled email at its due time. */
-  reschedule?: ((emailId: string, at: Date) => Promise<void>) | undefined;
+  reschedule?:
+    | ((emailId: string, at: Date, priority: EmailSendPriority) => Promise<void>)
+    | undefined;
   /** SES's 24-hour quota; absent in tests that never reach it. */
   sesQuota?: SesQuotaGate | undefined;
   /** Enqueue a webhook.deliver job; email.sent webhooks are skipped when absent. */
@@ -319,7 +322,7 @@ export async function sendEmail(
   if (email.scheduledAt && email.scheduledAt.getTime() > Date.now()) {
     // Returning without re-enqueueing would ack the job and strand the
     // email forever; hand it back to the queue for its due time.
-    await deps.reschedule?.(email.id, email.scheduledAt);
+    await deps.reschedule?.(email.id, email.scheduledAt, emailSendPriority(email));
     return "deferred";
   }
   // SES at its 24-hour ceiling: park before building anything, the way an
@@ -589,7 +592,7 @@ export async function sendEmail(
   }
   if (eligibility.strip) {
     await stripRecipients(db, email, eligibility.strip);
-    await deps.reschedule?.(email.id, new Date());
+    await deps.reschedule?.(email.id, new Date(), emailSendPriority(email));
     return "deferred";
   }
 

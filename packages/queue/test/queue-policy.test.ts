@@ -5,7 +5,10 @@ import { Queue } from "../src/index.js";
 // implementation's INSERT ... ON CONFLICT DO NOTHING: a pre-existing queue
 // keeps its stored policy no matter what the caller asks for.
 const queues = new Map<string, { policy: string }>();
-const sent: { name: string; opts: { singletonKey?: string; deadLetter?: string } }[] = [];
+const sent: {
+  name: string;
+  opts: { singletonKey?: string; deadLetter?: string; priority?: number };
+}[] = [];
 
 vi.mock("pg-boss", () => ({
   PgBoss: class {
@@ -21,7 +24,7 @@ vi.mock("pg-boss", () => ({
     async send(
       name: string,
       _data: unknown,
-      opts: { singletonKey?: string; deadLetter?: string },
+      opts: { singletonKey?: string; deadLetter?: string; priority?: number },
     ): Promise<string> {
       sent.push({ name, opts });
       return "job-1";
@@ -59,4 +62,11 @@ it("routes retry-exhausted send and delivery jobs to a dead-letter queue that ex
   expect(sent[0]?.opts).toMatchObject({ deadLetter: "email.send.dead" });
   // Event ingestion has no terminal row state to record; no dead letter there.
   expect(sent[1]?.opts).not.toHaveProperty("deadLetter");
+});
+
+it("forwards a job priority so transactional sends fetch ahead of bulk ones", async () => {
+  const queue = await Queue.start("postgres://unused");
+  await queue.send("email.send", { emailId: "tx" }, { dedupeKey: "tx", priority: 1 });
+  await queue.send("email.send", { emailId: "bulk" }, { dedupeKey: "bulk" });
+  expect(sent.map((s) => s.opts.priority)).toEqual([1, undefined]);
 });

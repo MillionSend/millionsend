@@ -1,5 +1,5 @@
 import { env } from "@millionsend/config";
-import { Queue } from "@millionsend/queue";
+import { EMAIL_SEND_PRIORITY, Queue } from "@millionsend/queue";
 
 let instance: Promise<Queue> | undefined;
 
@@ -20,7 +20,11 @@ export function getQueue(): Promise<Queue> {
 /** Enqueue an email.send job from the web tier (the onboarding send); mirrors the API's seam. */
 export async function enqueueEmailSend(emailId: string): Promise<void> {
   const queue = await getQueue();
-  await queue.send("email.send", { emailId }, { dedupeKey: emailId });
+  await queue.send(
+    "email.send",
+    { emailId },
+    { dedupeKey: emailId, priority: EMAIL_SEND_PRIORITY.transactional },
+  );
 }
 
 /**

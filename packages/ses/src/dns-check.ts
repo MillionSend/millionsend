@@ -1,4 +1,5 @@
 import {
+  resolve4 as dnsResolve4,
   resolveCname as dnsResolveCname,
   resolveMx as dnsResolveMx,
   resolveTxt as dnsResolveTxt,
@@ -10,6 +11,13 @@ export interface DnsResolver {
   resolveTxt(hostname: string): Promise<string[][]>;
   resolveMx(hostname: string): Promise<{ priority: number; exchange: string }[]>;
   resolveCname(hostname: string): Promise<string[]>;
+  /**
+   * Addresses at a name that should be a CNAME. A proxying DNS provider
+   * (Cloudflare's orange cloud) flattens the CNAME into its own A records, so
+   * the record the customer added reads as present-but-wrong rather than
+   * absent. Optional: a resolver without it reports such a name as missing.
+   */
+  resolveA?(hostname: string): Promise<string[]>;
 }
 
 /* Public resolvers are asked first, over DNS-over-HTTPS: the host's stub
@@ -24,7 +32,7 @@ const DOH_ENDPOINTS = ["https://cloudflare-dns.com/dns-query", "https://dns.goog
 const DOH_TIMEOUT_MS = 2500;
 /* The public round's budget: one DoH timeout plus slack for the body. */
 const PUBLIC_DNS_TIMEOUT_MS = 3000;
-const RR_TYPE = { TXT: 16, MX: 15, CNAME: 5 } as const;
+const RR_TYPE = { TXT: 16, MX: 15, CNAME: 5, A: 1 } as const;
 type RrType = keyof typeof RR_TYPE;
 
 const dnsError = (code: "ENOTFOUND" | "ENODATA") => Object.assign(new Error(code), { code });
@@ -103,6 +111,11 @@ export const nodeDnsResolver: DnsResolver = {
       () => dohResolve(name, "CNAME").then((rows) => rows.map((r) => r.replace(/\.$/, ""))),
       () => dnsResolveCname(name),
     ),
+  resolveA: (name) =>
+    resolvePublicFirst(
+      () => dohResolve(name, "A"),
+      () => dnsResolve4(name),
+    ),
 };
 
 export interface DnsCheckRecord {
@@ -176,8 +189,22 @@ async function checkOne(record: DnsCheckRecord, resolver: DnsResolver): Promise<
         : mismatch(rows.map((r) => `${r.priority} ${stripDot(r.exchange)}`));
     }
     if (record.type === "CNAME") {
-      const rows = await withTimeout(resolver.resolveCname(record.name), DNS_TIMEOUT_MS);
-      if (rows.length === 0) return { status: "missing" };
+      const rows = await withTimeout(resolver.resolveCname(record.name), DNS_TIMEOUT_MS).catch(
+        (err: unknown) => {
+          if (dnsErrorStatus(err) !== "missing") throw err;
+          return [] as string[];
+        },
+      );
+      if (rows.length === 0) {
+        // No CNAME at the name: addresses there mean a proxy flattened it,
+        // and an address can never equal the target, so it is a mismatch.
+        const addresses = resolver.resolveA
+          ? await withTimeout(resolver.resolveA(record.name), DNS_TIMEOUT_MS).catch(
+              () => [] as string[],
+            )
+          : [];
+        return addresses.length === 0 ? { status: "missing" } : mismatch(addresses);
+      }
       const want = stripDot(record.value);
       return rows.some((r) => stripDot(r) === want)
         ? { status: "found" }
