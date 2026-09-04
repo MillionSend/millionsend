@@ -60,8 +60,9 @@ export const DEAD_LETTER_QUEUES = {
 export type DeadLetteredJobName = keyof typeof DEAD_LETTER_QUEUES;
 
 export const CRON_JOBS = {
-  // Midnight UTC: quota-parked emails drain back into the send queue.
-  "quota.drain": "0 0 * * *",
+  // Every 15 min: quota-parked emails drain back into the send queue as the
+  // plan's UTC day rolls over or SES's rolling 24-hour window frees up.
+  "quota.drain": "*/15 * * * *",
   // Every 15 min: re-enqueue accepted emails whose send job was lost.
   "sends.reconcile": "*/15 * * * *",
   // Hourly retention sweeps keep purge batches small.

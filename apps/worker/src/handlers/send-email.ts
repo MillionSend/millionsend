@@ -16,15 +16,18 @@ import {
   makeUnsubscribeToken,
   openAttachments,
   parseSingleSender,
+  releaseDailyQuota,
   rewriteForTracking,
   SCORE_VERSION,
   substituteUnsubscribeUrl,
+  transitionQueueState,
   utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { createTransport } from "nodemailer";
+import { isSesQuotaRefusal, isSesThrottle, type SesQuotaGate } from "./ses-quota.js";
 
 /**
  * Sends one queued email through SES. The SES client is injected (tests use
@@ -67,6 +70,8 @@ export interface SendDeps {
   throttle?: (() => Promise<void>) | undefined;
   /** Re-enqueue a not-yet-due scheduled email at its due time. */
   reschedule?: ((emailId: string, at: Date) => Promise<void>) | undefined;
+  /** SES's 24-hour quota; absent in tests that never reach it. */
+  sesQuota?: SesQuotaGate | undefined;
   /** Enqueue a webhook.deliver job; email.sent webhooks are skipped when absent. */
   enqueueWebhookDelivery?: ((deliveryId: string) => Promise<void>) | undefined;
   /**
@@ -106,7 +111,7 @@ export interface SendDeps {
     | undefined;
 }
 
-export type SendOutcome = "sent" | "skipped" | "deferred" | "suppressed" | "failed";
+export type SendOutcome = "sent" | "skipped" | "deferred" | "suppressed" | "failed" | "parked";
 
 interface SendEligibility {
   eligible: boolean;
@@ -242,6 +247,24 @@ export async function failQueuedEmail(db: Db, emailId: string, reason: string): 
 }
 
 /**
+ * Park a queued email as queued_quota because SES, not the plan, is out of
+ * sends. Hands its reservation back (the drain reserves again on release,
+ * one per row, as it does for plan-parked mail) so the two kinds share one
+ * drain path. A row that already left "queued" is left alone.
+ */
+async function parkForSesQuota(db: Db, email: { id: string; teamId: string }): Promise<void> {
+  await db.transaction(async (tx) => {
+    const txDb = tx as unknown as Db;
+    const moved = await transitionQueueState(txDb, email.id, {
+      from: "queued",
+      to: "queued_quota",
+    });
+    if (moved) await releaseDailyQuota(txDb, { teamId: email.teamId, count: 1 });
+  });
+  console.warn(`email.send: SES 24h quota reached, parked ${email.id}`);
+}
+
+/**
  * SES errors that no retry can fix: the message itself (MessageRejected,
  * BadRequest) or the sending identity/account is refused. Throttling,
  * SendingPaused and 5xx stay retryable.
@@ -294,6 +317,12 @@ export async function sendEmail(
     // email forever; hand it back to the queue for its due time.
     await deps.reschedule?.(email.id, email.scheduledAt);
     return "deferred";
+  }
+  // SES at its 24-hour ceiling: park before building anything, the way an
+  // over-plan email parks at accept. The drain releases it as the window frees.
+  if (deps.sesQuota?.exhausted()) {
+    await parkForSesQuota(db, email);
+    return "parked";
   }
 
   let eligibility = await checkSendEligibility(db, email);
@@ -602,6 +631,16 @@ export async function sendEmail(
       .update(schema.emails)
       .set({ sentAt: null })
       .where(and(eq(schema.emails.id, email.id), eq(schema.emails.latestStatus, "queued")));
+    // The 24-hour quota is not a retry's problem: SES names it, or the same
+    // throttling exception arrives and a fresh account read says the window
+    // is full. Either way the email parks; a plain rate refusal keeps retrying.
+    if (
+      isSesQuotaRefusal(err) ||
+      (isSesThrottle(err) && deps.sesQuota !== undefined && (await deps.sesQuota.refresh()))
+    ) {
+      await parkForSesQuota(db, email);
+      return "parked";
+    }
     throw err;
   }
 

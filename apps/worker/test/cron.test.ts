@@ -511,3 +511,17 @@ it("billing reconcile visits only teams with a Stripe customer and isolates fail
   expect(result).toEqual({ reconciled: 1, failed: 1 });
   expect(visited.sort()).toEqual([withStripe, failing].sort());
 });
+
+it("holds every parked email while SES's own 24-hour quota is full", async () => {
+  await insertParked(new Date("2026-08-13T01:00:00Z"));
+  const enqueued: string[] = [];
+  const result = await drainQuotaParked(db, {
+    isCloud: true,
+    enqueueSend: async (id) => {
+      enqueued.push(id);
+    },
+    sesQuotaExhausted: () => true,
+  });
+  expect(result).toEqual({ drained: 0, stillParked: 1 });
+  expect(enqueued).toEqual([]);
+});

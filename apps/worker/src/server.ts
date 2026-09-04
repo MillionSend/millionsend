@@ -18,7 +18,9 @@ import { getDb } from "@millionsend/db";
 import { Queue } from "@millionsend/queue";
 import {
   createKeyringFromEnv,
+  createSesAccountClient,
   createSesv2Client,
+  getAccountOverview,
   nodeDnsResolver,
   type SesIdentityClient,
 } from "@millionsend/ses";
@@ -43,6 +45,7 @@ import { runPlatformBreaker } from "./handlers/platform-breaker.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
 import { sendBroadcast } from "./handlers/send-broadcast.js";
 import { createTokenBucket, failQueuedEmail, sendEmail } from "./handlers/send-email.js";
+import { createSesQuotaGate } from "./handlers/ses-quota.js";
 import { syncTenants } from "./handlers/tenants.js";
 import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
@@ -112,6 +115,18 @@ setInterval(() => {
   applySendRate().catch((err) => console.warn("send-rate refresh failed", err));
 }, 60_000).unref();
 
+// SES's rolling 24-hour quota, read once a minute with the send rate: sends
+// park as queued_quota before SES starts refusing them, and the drain holds
+// until the window has headroom again. A failed read keeps the last answer.
+const accountClient = createSesAccountClient({
+  region: env.AWS_REGION,
+  accessKeyId: env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+});
+const sesQuota = createSesQuotaGate(async () => (await getAccountOverview(accountClient)).quota);
+await sesQuota.refresh();
+setInterval(() => void sesQuota.refresh(), 60_000).unref();
+
 const queue = await Queue.start(env.DATABASE_URL);
 
 const enqueueSend = async (emailId: string, startAfter?: Date): Promise<void> => {
@@ -140,6 +155,7 @@ await queue.work("email.send", async (payload) => {
       onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
       throttle: () => bucket.take(),
       reschedule: (emailId, at) => enqueueSend(emailId, at),
+      sesQuota,
       enqueueWebhookDelivery: enqueueWebhook,
       tracking,
       ...(unsubscribe ? { unsubscribe } : {}),
@@ -242,7 +258,11 @@ await queue.workDeadLetter("webhook.deliver", async ({ deliveryId }) => {
 
 await queue.scheduleCrons({
   "quota.drain": async () => {
-    const result = await drainQuotaParked(db, { isCloud: env.IS_CLOUD, enqueueSend });
+    const result = await drainQuotaParked(db, {
+      isCloud: env.IS_CLOUD,
+      enqueueSend,
+      sesQuotaExhausted: () => sesQuota.exhausted(),
+    });
     console.log(`quota.drain: drained=${result.drained} stillParked=${result.stillParked}`);
   },
   "sends.reconcile": async () => {

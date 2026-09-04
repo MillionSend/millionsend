@@ -1254,3 +1254,69 @@ it("drops the tenant when the send's configuration set is not the one associated
   ).toBe("sent");
   expect(again.sends[0]?.tenantName).toBe(teamId);
 });
+
+it("parks the email as queued_quota when SES refuses for its daily quota", async () => {
+  const emailId = await insertEmail();
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: utcDay(Date.now()), accepted: 5 })
+    .onConflictDoUpdate({
+      target: [schema.usageCounters.teamId, schema.usageCounters.day],
+      set: { accepted: 5 },
+    });
+  const ses: SesSender = {
+    async sendRaw() {
+      throw Object.assign(new Error("Daily message quota exceeded"), {
+        name: "TooManyRequestsException",
+      });
+    },
+  };
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("parked");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("queued_quota");
+  expect(row?.sentAt).toBeNull();
+  const [counter] = await db
+    .select({ accepted: schema.usageCounters.accepted })
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  // One reservation handed back for the drain to take again.
+  expect(counter?.accepted).toBe(4);
+});
+
+it("a rate refusal with quota headroom stays a retry; the same refusal at the ceiling parks", async () => {
+  const rate = () =>
+    Object.assign(new Error("Maximum sending rate exceeded"), {
+      name: "TooManyRequestsException",
+    });
+  const ses: SesSender = {
+    async sendRaw() {
+      throw rate();
+    },
+  };
+  let full = false;
+  const sesQuota = { exhausted: () => false, refresh: async () => full };
+
+  const retried = await insertEmail();
+  await expect(sendEmail(db, { keyring, ses, sesQuota }, { emailId: retried })).rejects.toThrow(
+    "Maximum sending rate exceeded",
+  );
+  const [stillQueued] = await db.select().from(schema.emails).where(eq(schema.emails.id, retried));
+  expect(stillQueued?.latestStatus).toBe("queued");
+  expect(stillQueued?.sentAt).toBeNull();
+
+  full = true;
+  const parked = await insertEmail();
+  expect(await sendEmail(db, { keyring, ses, sesQuota }, { emailId: parked })).toBe("parked");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, parked));
+  expect(row?.latestStatus).toBe("queued_quota");
+});
+
+it("holds a send before SES while the account sits at its quota", async () => {
+  const { ses, sends } = fakeSes();
+  const emailId = await insertEmail();
+  const sesQuota = { exhausted: () => true, refresh: async () => true };
+  expect(await sendEmail(db, { keyring, ses, sesQuota }, { emailId })).toBe("parked");
+  expect(sends).toHaveLength(0);
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("queued_quota");
+});

@@ -94,6 +94,8 @@ export interface DrainDeps {
   isCloud: boolean;
   /** startAfter defers the job for emails scheduled beyond the drain time. */
   enqueueSend: (emailId: string, startAfter?: Date) => Promise<void>;
+  /** SES's own 24-hour quota is full: releasing anything would only park it again. */
+  sesQuotaExhausted?: (() => boolean) | undefined;
 }
 
 export interface DrainResult {
@@ -108,17 +110,21 @@ class DrainRaced extends Error {}
 const DRAIN_PAGE = 500;
 
 /**
- * Midnight drain of quota-parked emails. Parked emails hold NO reservation
- * (accept-time reservation failed — that is why they parked), so each one
- * must win a reservation against the new day's cap before it may move to
+ * Drain of quota-parked emails, every 15 minutes (which covers the UTC
+ * midnight rollover that frees plan quota, and the rolling window that frees
+ * SES's own). Parked emails hold NO reservation (accept-time reservation
+ * failed, or the send handler handed it back when SES was full), so each one
+ * must win a reservation against the day's cap before it may move to
  * "queued": without this, parking would be a quota bypass. Oldest first;
- * once a team's cap fills, its remaining emails stay parked for tomorrow.
+ * once a team's cap fills, its remaining emails stay parked for later. While
+ * SES's 24-hour quota is full nothing moves at all.
  *
  * Reserve + transition commit atomically per email (no crash window that
  * burns quota or half-moves a row). One email's failure never blocks the
  * rest — errors are collected and rethrown at the end so the cron retries.
  */
 export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainResult> {
+  if (deps.sesQuotaExhausted?.()) return { drained: 0, stillParked: await countParked(db) };
   const exhausted = new Set<string>();
   const failures: unknown[] = [];
   let drained = 0;
@@ -158,11 +164,15 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
   if (failures.length > 0) {
     throw new Error(`quota drain: ${failures.length} email(s) failed`, { cause: failures[0] });
   }
+  return { drained, stillParked: await countParked(db) };
+}
+
+async function countParked(db: Db): Promise<number> {
   const [rest] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.emails)
     .where(eq(schema.emails.latestStatus, "queued_quota"));
-  return { drained, stillParked: rest?.n ?? 0 };
+  return rest?.n ?? 0;
 }
 
 /** Returns 1 when the email moved to queued and its job was enqueued, else 0. */
