@@ -128,7 +128,7 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
         200: {
           content: { "application/json": { schema: batchAddSuppressionsResponseSchema } },
           description:
-            "One entry per distinct address (case-insensitive) in input order; addresses already suppressed for any reason return their existing id and keep their origin. New rows record the request's origin (bounce, complaint or manual; default manual). Accepts up to 1000 addresses (Resend: 100).",
+            "One entry per distinct address (case-insensitive) in input order; addresses already suppressed for any reason return their existing id and keep their origin. New rows record the request's origin (bounce, complaint, manual or unsubscribe; default manual). Accepts up to 1000 addresses (Resend: 100).",
         },
         422: jsonErr("Validation error"),
       },
@@ -203,7 +203,7 @@ export function registerSuppressionRoutes(app: OpenAPIHono<Env>, db: Db): void {
         200: {
           content: { "application/json": { schema: suppressionIdResponseSchema } },
           description:
-            "Address blocked with the given origin (bounce, complaint or manual; default manual). Idempotent: an address already suppressed for any reason (bounce, complaint, unsubscribe, manual) keeps its entry and origin, and its existing id is returned.",
+            "Address blocked with the given origin (bounce, complaint, manual or unsubscribe; default manual). Idempotent: an address already suppressed for any reason (bounce, complaint, unsubscribe, manual) keeps its entry and origin, and its existing id is returned.",
         },
         422: jsonErr("Validation error"),
       },

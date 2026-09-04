@@ -1204,15 +1204,15 @@ export const listSuppressionsQuerySchema = listQuerySchema.extend({
 });
 
 /**
- * Origin a caller may record on a new suppression (an import from another
- * provider keeps its bounce/complaint history). `unsubscribe` is reserved
- * for the one-click opt-out flow.
+ * Origin a caller may record on a new suppression: an import from another
+ * provider keeps its bounce/complaint history, and a migrated opt-out list
+ * keeps `unsubscribe` — which then behaves like a one-click opt-out (only an
+ * explicit re-subscribe clears it).
  */
-const suppressionWriteOriginSchema = z
-  .enum(["bounce", "complaint", "manual"])
+const suppressionWriteOriginSchema = suppressionOriginSchema
   .optional()
   .describe(
-    "Origin recorded on rows this request creates (default manual); an address already suppressed keeps its origin",
+    "Origin recorded on rows this request creates (default manual): bounce, complaint, manual or unsubscribe; an address already suppressed keeps its origin",
   );
 
 export const createSuppressionRequestSchema = z

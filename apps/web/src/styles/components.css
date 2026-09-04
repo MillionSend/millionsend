@@ -232,6 +232,20 @@
   mask-composite: exclude;
   pointer-events: none;
 }
+/* Danger zone: the card keeps its shape, only the border and its edge light
+   turn to the danger tone. Collapsed <details>; the chevron flips when open. */
+.ms-card-danger {
+  border-color: var(--ms-danger-border);
+}
+.ms-card-danger::before {
+  background: radial-gradient(80% 60% at 50% 0, var(--ms-danger-border), transparent 70%);
+}
+.ms-card-danger > summary::-webkit-details-marker {
+  display: none;
+}
+.ms-card-danger[open] .ms-danger-chevron {
+  transform: rotate(180deg);
+}
 /* Pill tabs on code panels (SDK sheets, the onboarding snippet). */
 .ms-code-tab {
   border: 0;

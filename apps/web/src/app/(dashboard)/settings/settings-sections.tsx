@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
+import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { RelativeTime } from "@/components/relative-time";
@@ -527,7 +528,15 @@ function PendingInvitations() {
                   type="button"
                   className="ms-btn ms-btn-secondary"
                   disabled={busy}
-                  onClick={() => revoke.mutate({ id: invite.id })}
+                  onClick={async () => {
+                    const ok = await confirmDialog({
+                      title: t("invitations.pending.revokeTitle"),
+                      message: t("invitations.pending.revokeBody", { email: invite.email }),
+                      confirmLabel: t("invitations.pending.revoke"),
+                      danger: true,
+                    });
+                    if (ok) revoke.mutate({ id: invite.id });
+                  }}
                 >
                   {t("invitations.pending.revoke")}
                 </button>
@@ -953,8 +962,30 @@ function DangerSection() {
 
   const busy = deleteTeam.isPending || accountBusy;
   return (
-    <SectionCard title={t("title")}>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+    // Collapsed by default: the irreversible actions stay out of reach until
+    // the operator opens the zone.
+    <details className="ms-card ms-card-danger" style={{ padding: 24 }}>
+      <summary
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          cursor: "pointer",
+          listStyle: "none",
+        }}
+      >
+        <h2
+          className="ms-display"
+          style={{ fontSize: "var(--ms-fs-h2)", color: "var(--ms-bone)", margin: 0 }}
+        >
+          {t("title")}
+        </h2>
+        <span className="ms-danger-chevron" style={{ display: "flex", color: "var(--ms-muted)" }}>
+          <ChevronGlyph direction="down" />
+        </span>
+      </summary>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
         {active?.role === "owner" ? (
           <button
             type="button"
@@ -984,7 +1015,7 @@ function DangerSection() {
           {error}
         </p>
       ) : null}
-    </SectionCard>
+    </details>
   );
 }
 

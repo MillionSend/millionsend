@@ -204,7 +204,9 @@
       "revoke": "Revogar",
       "actions": "Ações",
       "resendError": "Não foi possível reenviar: {reason}",
-      "pageOf": "Página 1 – {pages} de {total} convites"
+      "pageOf": "Página 1 – {pages} de {total} convites",
+      "revokeTitle": "Revogar convite",
+      "revokeBody": "O link enviado para {email} deixa de funcionar. Você pode convidar de novo quando quiser."
     },
     "accept": {
       "title": "Entrar no time",

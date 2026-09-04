@@ -119,11 +119,12 @@ describe("POST /suppressions", () => {
     }
   });
 
-  it("records an explicit origin on new rows only, and refuses unsubscribe", async () => {
+  it("records an explicit origin on new rows only, unsubscribe included", async () => {
     for (const [origin, reason] of [
       ["bounce", "hard_bounce"],
       ["complaint", "complaint"],
       ["manual", "manual"],
+      ["unsubscribe", "one_click_unsubscribe"],
     ] as const) {
       const res = await call(fullKey, "POST", "/suppressions", {
         email: `origin-${origin}@example.com`,
@@ -147,7 +148,7 @@ describe("POST /suppressions", () => {
     expect(((await again.json()) as { id: string }).id).toBe(manual);
     expect((await readRow(manual))?.reason).toBe("manual");
 
-    for (const origin of ["unsubscribe", "hard_bounce", ""]) {
+    for (const origin of ["one_click_unsubscribe", "hard_bounce", ""]) {
       const res = await call(fullKey, "POST", "/suppressions", { email: "x@example.com", origin });
       expect(res.status, origin).toBe(422);
     }
@@ -357,11 +358,14 @@ describe("POST /suppressions/batch/add", () => {
     expect(data[2]?.id).toBe(existing);
     expect((await readRow(existing))?.reason).toBe("manual");
 
-    const bad = await call(fullKey, "POST", "/suppressions/batch/add", {
+    // A migrated opt-out list keeps its reason instead of reading as manual.
+    const optOuts = await call(fullKey, "POST", "/suppressions/batch/add", {
       emails: ["x@example.com"],
       origin: "unsubscribe",
     });
-    expect(bad.status).toBe(422);
+    expect(optOuts.status).toBe(200);
+    const [optOut] = ((await optOuts.json()) as { data: { id: string }[] }).data;
+    expect((await readRow(optOut?.id ?? ""))?.reason).toBe("one_click_unsubscribe");
   });
 
   it("accepts more than Resend's 100 and caps at 1000", async () => {

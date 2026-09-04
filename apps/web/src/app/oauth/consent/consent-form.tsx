@@ -23,7 +23,7 @@ const OFFLINE_ACCESS = "offline_access";
  * is never offered them, mirroring the API's role check on the tools behind
  * them.
  */
-const ADMIN_ONLY_SCOPES = ["domains:write", "webhooks:write"];
+const ADMIN_ONLY_SCOPES = ["domains:write", "webhooks:write", "api-keys:write"];
 
 export function ConsentForm({
   app,

@@ -48,9 +48,10 @@ bounce or complaint created it.
 - `GET /suppressions/{id}` and `DELETE /suppressions/{id}` — the path
   segment is the suppression id or the email address.
 - `POST /suppressions` with `{ "email": "...", "origin": "manual" }` — blocks
-  the address. `origin` is optional (`bounce`, `complaint` or `manual`,
-  default `manual`) and lets an import from another provider keep its bounce
-  and complaint history. Idempotent: an address already suppressed for any
+  the address. `origin` is optional (`bounce`, `complaint`, `manual` or
+  `unsubscribe`, default `manual`) and lets an import from another provider
+  keep its bounce and complaint history, or a migrated opt-out list keep its
+  reason. Idempotent: an address already suppressed for any
   reason keeps its entry and origin, and its existing id is returned.
 - `POST /suppressions/batch/add` with `{ "emails": [...], "origin": "bounce" }`
   and `POST /suppressions/batch/remove` with `{ "emails": [...] }` or
@@ -61,8 +62,9 @@ bounce or complaint created it.
 
 Three MillionSend specifics: `origin` on add is accepted (Resend's SDK type
 has no such field, so pass it through a raw request), `origin: "unsubscribe"`
-is a superset value Resend does not have (its SDK's type union lacks it; it
-cannot be set on add), and an address whose personal
+is a superset value Resend does not have (its SDK's type union lacks it) and
+behaves like a one-click opt-out — only an explicit re-subscribe of the
+contact clears it — and an address whose personal
 data was erased (GDPR/LGPD) keeps blocking sends but is hidden from the list
 and from lookups by email — it is reachable by id only, reading
 `"[erased]"` as its email, and re-suppressing the address returns that id

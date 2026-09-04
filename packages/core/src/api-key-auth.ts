@@ -10,6 +10,8 @@ export interface ApiKeyAuth {
   plan: Plan;
   /** Null when the caller authenticated with an OAuth access token (MCP) instead of a key. */
   apiKeyId: string | null;
+  /** The OAuth token's holder, so audit rows name the person behind an MCP call. */
+  userId?: string;
   /**
    * SECURITY: the key's scope, enforced server-side. "sending_access" keys may
    * only reach the send surface; a non-null domainId restricts sends to that

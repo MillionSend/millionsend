@@ -118,11 +118,11 @@ segredo fica na configuração do cliente.
   cliente, em até 15 minutos.
 - Um membro removido do time perde o acesso MCP imediatamente, mesmo antes de
   o token expirar.
-- Seu papel no time vale aqui também: as ferramentas que gerenciam domínios e
-  webhooks (e `get_webhook`, que retorna o segredo de assinatura) só são
-  oferecidas a owners e admins, como no dashboard. Um **membro** com essas
-  permissões concedidas ainda recebe as listagens somente leitura de domínios
-  e webhooks. Em uma concessão **Todos os times** as ferramentas aparecem se
+- Seu papel no time vale aqui também: as ferramentas que gerenciam domínios,
+  webhooks e chaves de API (e `get_webhook`, que retorna o segredo de
+  assinatura) só são oferecidas a owners e admins, como no dashboard. Um
+  **membro** com essas permissões concedidas ainda recebe as listagens somente
+  leitura de domínios, webhooks e chaves de API. Em uma concessão **Todos os times** as ferramentas aparecem se
   você for admin em algum time, e chamadas em um time onde você é membro são
   recusadas.
 - Chamadas MCP compartilham o limite por minuto da API.
@@ -138,6 +138,7 @@ cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
 | --- | --- | --- |
 | `list_emails` | `emails:read` | Lista e-mails enviados, na fila e agendados. |
 | `get_email` | `emails:read` | Busca um e-mail com o status de entrega. |
+| `get_usage` | `emails:read` | Plano, limites diários de envio e de domínios e o total aceito hoje — consulte antes de trabalho em massa. |
 | `list_contacts` | `audience:read` | Lista contatos, opcionalmente os membros de um segmento. |
 | `get_contact` | `audience:read` | Busca um contato por id ou endereço de e-mail. |
 | `list_segments` | `audience:read` | Lista segmentos — os alvos dos broadcasts. |
@@ -145,10 +146,15 @@ cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
 | `list_topics` | `audience:read` | Lista tópicos de inscrição. |
 | `get_topic` | `audience:read` | Busca um tópico de inscrição. |
 | `list_contact_properties` | `audience:read` | Lista as propriedades customizadas de contato. |
+| `list_suppressions` | `audience:read` | Lista endereços suprimidos, opcionalmente por `origin` (bounce, complaint, manual, unsubscribe). |
+| `get_suppression` | `audience:read` | Busca uma supressão por id ou endereço de e-mail. |
 | `list_broadcasts` | `broadcasts:read` | Lista broadcasts com o status. |
 | `get_broadcast` | `broadcasts:read` | Busca um broadcast. |
+| `list_templates` | `templates:read` | Lista templates de e-mail. |
+| `get_template` | `templates:read` | Busca um template por id ou alias, com assunto, html e texto. |
 | `list_webhooks` | `webhooks:write` | Lista os webhooks (linhas de lista nunca trazem o segredo de assinatura). |
 | `get_webhook` | `webhooks:write` | **admin** Busca um webhook, incluindo o segredo de assinatura. |
+| `list_api_keys` | `api-keys:write` | Lista as chaves de API ativas (nunca os tokens). |
 | `list_domains` | `domains:read` | Lista domínios de envio com o status de verificação. |
 | `get_domain` | `domains:read` | Busca um domínio com os registros DNS. |
 | `send_email` | `emails:send` | Envia ou agenda um e-mail transacional. |
@@ -156,6 +162,7 @@ cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
 | `update_email` | `emails:send` | Reagenda um e-mail agendado. |
 | `cancel_email` | `emails:send` | Cancela um e-mail agendado. |
 | `create_contact` | `audience:write` | Cria um contato, com segmentos e inscrições em tópicos. |
+| `create_contact_batch` | `audience:write` | Cria até 1.000 contatos em uma chamada; `on_conflict` skip/upsert, `validation` strict/permissive. |
 | `update_contact` | `audience:write` | Atualiza nome, propriedades ou o cancelamento de um contato. |
 | `update_contact_topics` | `audience:write` | Define as inscrições por tópico de um contato. |
 | `delete_contact` | `audience:write` | Exclui um contato. |
@@ -170,14 +177,22 @@ cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
 | `create_contact_property` | `audience:write` | Define uma propriedade customizada de contato. |
 | `update_contact_property` | `audience:write` | Atualiza a definição de uma propriedade. |
 | `delete_contact_property` | `audience:write` | Exclui a definição de uma propriedade. |
+| `add_suppressions` | `audience:write` | Bloqueia até 1.000 endereços, registrando um `origin` (bounce, complaint, manual ou unsubscribe) nas linhas novas. |
+| `remove_suppressions` | `audience:write` | Desbloqueia até 1.000 endereços por e-mails ou ids. |
+| `delete_suppression` | `audience:write` | Remove uma supressão por id ou e-mail. |
 | `create_broadcast` | `broadcasts:write` | Cria um rascunho de broadcast (ou envia na hora). |
 | `update_broadcast` | `broadcasts:write` | Atualiza um rascunho de broadcast. |
 | `send_broadcast` | `broadcasts:write` | Envia ou agenda um rascunho de broadcast. |
 | `cancel_broadcast` | `broadcasts:write` | Cancela um broadcast agendado. |
 | `delete_broadcast` | `broadcasts:write` | Exclui um rascunho de broadcast. |
+| `create_template` | `templates:write` | Cria um template de e-mail (ativo na hora). |
+| `update_template` | `templates:write` | Altera nome, assunto, html, texto ou alias de um template. |
+| `delete_template` | `templates:write` | Exclui um template; os broadcasts mantêm a própria cópia. |
 | `create_webhook` | `webhooks:write` | **admin** Cria um webhook; a resposta inclui o segredo de assinatura. |
 | `update_webhook` | `webhooks:write` | **admin** Atualiza URL, eventos ou status de um webhook. |
 | `delete_webhook` | `webhooks:write` | **admin** Exclui um webhook. |
+| `create_api_key` | `api-keys:write` | **admin** Cria uma chave de API; o token só vem nesta resposta. |
+| `revoke_api_key` | `api-keys:write` | **admin** Revoga uma chave de API. |
 | `create_domain` | `domains:write` | **admin** Adiciona um domínio de envio e retorna os registros DNS; configurações de rastreamento opcionais valem já na criação. |
 | `update_domain` | `domains:write` | **admin** Muda as configurações de rastreamento de um domínio; o `tracking_subdomain` é o que gera o CNAME de rastreamento (obrigatório no Cloud). |
 | `verify_domain` | `domains:write` | **admin** Reverifica o DNS e a verificação SES de um domínio. |
@@ -197,9 +212,10 @@ embrulhada em um envelope que a marca como dado não confiável:
 }
 ```
 
-Nomes e propriedades de contatos, assuntos e corpos de e-mail e os nomes de
-segmentos, tópicos, webhooks e domínios são todos escritos pelos seus
-usuários finais ou por terceiros. O envelope permite ao agente separá-los da
+Nomes e propriedades de contatos, assuntos e corpos de e-mail, nomes e corpos
+de templates, endereços suprimidos e os nomes de segmentos, tópicos, webhooks,
+domínios e chaves de API são todos escritos pelos seus usuários finais ou por
+terceiros. O envelope permite ao agente separá-los da
 saída da ferramenta, para que um contato cujo nome parece uma instrução não
 seja seguido como tal. Leia `untrusted_data` para obter o payload; um
 resultado com `isError` traz o corpo de erro da REST no mesmo lugar.

@@ -11,7 +11,7 @@ import { MCP_TOOLS } from "@/app/(dashboard)/settings/mcp/mcp-tools";
 describe("MCP tools manifest", () => {
   it("matches the tool registrations in apps/api/src/mcp.ts", () => {
     const source = readFileSync(join(__dirname, "../../api/src/mcp.ts"), "utf8");
-    const registered = [...source.matchAll(/tool\(\s*"([a-z_]+)",\s*"([a-z]+:[a-z]+)"/g)].map(
+    const registered = [...source.matchAll(/tool\(\s*"([a-z_]+)",\s*"([a-z-]+:[a-z]+)"/g)].map(
       ([, name, scope]) => ({ name, scope }),
     );
     expect(registered.length).toBeGreaterThan(0);

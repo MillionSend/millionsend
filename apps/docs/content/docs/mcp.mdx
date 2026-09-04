@@ -116,10 +116,11 @@ client's config.
   minutes.
 - A member removed from the team loses MCP access immediately, even before
   their token expires.
-- Your team role applies: tools that manage domains and webhooks (and
-  `get_webhook`, which returns the signing secret) are only offered to
+- Your team role applies: tools that manage domains, webhooks and API keys
+  (and `get_webhook`, which returns the signing secret) are only offered to
   owners and admins, matching the dashboard. A **member** with those
-  permissions granted still gets the read-only domain and webhook listings.
+  permissions granted still gets the read-only domain, webhook and API key
+  listings.
   On an **All teams** grant the tools appear when you are an admin in any
   team, and calls into a team where you are a member are refused.
 - MCP calls share the API's per-minute rate limit.
@@ -135,6 +136,7 @@ and admins.
 | --- | --- | --- |
 | `list_emails` | `emails:read` | List sent, queued and scheduled emails. |
 | `get_email` | `emails:read` | Get one email with its delivery status. |
+| `get_usage` | `emails:read` | Plan, daily send and domain limits, and today's accepted count — check before bulk work. |
 | `list_contacts` | `audience:read` | List contacts, optionally one segment's members. |
 | `get_contact` | `audience:read` | Get a contact by id or email address. |
 | `list_segments` | `audience:read` | List segments — the targets broadcasts are sent to. |
@@ -142,10 +144,15 @@ and admins.
 | `list_topics` | `audience:read` | List subscription topics. |
 | `get_topic` | `audience:read` | Get one subscription topic. |
 | `list_contact_properties` | `audience:read` | List the custom contact property definitions. |
+| `list_suppressions` | `audience:read` | List suppressed addresses, optionally one `origin` (bounce, complaint, manual, unsubscribe). |
+| `get_suppression` | `audience:read` | Get one suppression by id or email address. |
 | `list_broadcasts` | `broadcasts:read` | List broadcasts with their status. |
 | `get_broadcast` | `broadcasts:read` | Get one broadcast. |
+| `list_templates` | `templates:read` | List email templates. |
+| `get_template` | `templates:read` | Get one template by id or alias, with its subject, html and text. |
 | `list_webhooks` | `webhooks:write` | List webhook endpoints (list rows never carry signing secrets). |
 | `get_webhook` | `webhooks:write` | **admin** Get one webhook, including its signing secret. |
+| `list_api_keys` | `api-keys:write` | List active API keys (never their tokens). |
 | `list_domains` | `domains:read` | List sending domains with verification status. |
 | `get_domain` | `domains:read` | Get one domain with its DNS records. |
 | `send_email` | `emails:send` | Send or schedule a transactional email. |
@@ -153,6 +160,7 @@ and admins.
 | `update_email` | `emails:send` | Reschedule a scheduled email. |
 | `cancel_email` | `emails:send` | Cancel a scheduled email. |
 | `create_contact` | `audience:write` | Create a contact, with segments and topic subscriptions. |
+| `create_contact_batch` | `audience:write` | Create up to 1,000 contacts in one call; `on_conflict` skip/upsert, `validation` strict/permissive. |
 | `update_contact` | `audience:write` | Update a contact's name, properties or unsubscribe flag. |
 | `update_contact_topics` | `audience:write` | Set a contact's per-topic subscriptions. |
 | `delete_contact` | `audience:write` | Delete a contact. |
@@ -167,14 +175,22 @@ and admins.
 | `create_contact_property` | `audience:write` | Define a custom contact property. |
 | `update_contact_property` | `audience:write` | Update a custom property definition. |
 | `delete_contact_property` | `audience:write` | Delete a custom property definition. |
+| `add_suppressions` | `audience:write` | Block up to 1,000 addresses, recording an `origin` (bounce, complaint, manual or unsubscribe) on new rows. |
+| `remove_suppressions` | `audience:write` | Unblock up to 1,000 addresses by emails or ids. |
+| `delete_suppression` | `audience:write` | Remove one suppression by id or email. |
 | `create_broadcast` | `broadcasts:write` | Create a broadcast draft (or send it immediately). |
 | `update_broadcast` | `broadcasts:write` | Update a draft broadcast. |
 | `send_broadcast` | `broadcasts:write` | Send or schedule a draft broadcast. |
 | `cancel_broadcast` | `broadcasts:write` | Cancel a scheduled broadcast. |
 | `delete_broadcast` | `broadcasts:write` | Delete a draft broadcast. |
+| `create_template` | `templates:write` | Create an email template (live immediately). |
+| `update_template` | `templates:write` | Change a template's name, subject, html, text or alias. |
+| `delete_template` | `templates:write` | Delete a template; broadcasts keep their own copy. |
 | `create_webhook` | `webhooks:write` | **admin** Create a webhook endpoint; the response includes the signing secret. |
 | `update_webhook` | `webhooks:write` | **admin** Update a webhook's URL, events or status. |
 | `delete_webhook` | `webhooks:write` | **admin** Delete a webhook endpoint. |
+| `create_api_key` | `api-keys:write` | **admin** Create an API key; the token is returned only in this response. |
+| `revoke_api_key` | `api-keys:write` | **admin** Revoke an API key. |
 | `create_domain` | `domains:write` | **admin** Add a sending domain and get its DNS records; optional tracking settings apply at creation. |
 | `update_domain` | `domains:write` | **admin** Change a domain's tracking settings; `tracking_subdomain` is what yields the Tracking CNAME (required on Cloud). |
 | `verify_domain` | `domains:write` | **admin** Re-check a domain's DNS and SES verification. |
@@ -194,9 +210,9 @@ envelope that marks it as untrusted data:
 }
 ```
 
-Contact names and properties, email subjects and bodies, and the names of
-segments, topics, webhooks and domains are all authored by your end users or
-third parties. The envelope lets an agent keep them apart from tool output,
+Contact names and properties, email subjects and bodies, template names and
+bodies, suppressed addresses, and the names of segments, topics, webhooks,
+domains and API keys are all authored by your end users or third parties. The envelope lets an agent keep them apart from tool output,
 so a contact whose name reads like an instruction is not followed as one.
 Read `untrusted_data` for the payload; an `isError` result carries the REST
 error body in the same place.

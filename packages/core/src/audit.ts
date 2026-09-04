@@ -23,9 +23,10 @@ export type ParsedAuditActor =
   | { kind: "api_key"; id: string }
   | { kind: "oauth" | "stripe" | "system" };
 
-/** Actor for a REST/MCP request: the key when one signed it, else the OAuth token. */
-export function apiRequestActor(auth: { apiKeyId: string | null }): AuditActor {
-  return auth.apiKeyId ? { apiKeyId: auth.apiKeyId } : "oauth";
+/** Actor for a REST/MCP request: the key when one signed it, else the OAuth token's holder. */
+export function apiRequestActor(auth: { apiKeyId: string | null; userId?: string }): AuditActor {
+  if (auth.apiKeyId) return { apiKeyId: auth.apiKeyId };
+  return auth.userId ? { userId: auth.userId } : "oauth";
 }
 
 function encodeActor(actor: AuditActor): string {

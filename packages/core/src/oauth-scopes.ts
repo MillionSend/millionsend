@@ -12,10 +12,15 @@ export const MCP_SCOPES = [
   "broadcasts:write",
   "domains:read",
   "domains:write",
+  "templates:read",
+  "templates:write",
   // One scope for the whole webhook surface: even reads return signing
   // secrets (the SDK wire retrieves them by design), so a read/write split
   // would imply a safety boundary that does not exist.
   "webhooks:write",
+  // One scope for API keys as well: listing never returns a token, but the
+  // surface exists to mint credentials, so it is granted as a whole.
+  "api-keys:write",
 ] as const;
 
 export type McpScope = (typeof MCP_SCOPES)[number];
@@ -25,7 +30,11 @@ export type McpScope = (typeof MCP_SCOPES)[number];
  * line): the consent page withholds them from members and the MCP server
  * refuses their tools for a member's token regardless of what it carries.
  */
-export const ADMIN_MCP_SCOPES = ["domains:write", "webhooks:write"] as const satisfies McpScope[];
+export const ADMIN_MCP_SCOPES = [
+  "domains:write",
+  "webhooks:write",
+  "api-keys:write",
+] as const satisfies McpScope[];
 
 /**
  * Grant referenceId / token team_id meaning "every team the user belongs

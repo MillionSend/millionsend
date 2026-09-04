@@ -204,7 +204,9 @@
       "revoke": "Revoke",
       "actions": "Actions",
       "resendError": "Could not resend: {reason}",
-      "pageOf": "Page 1 – {pages} of {total} invitations"
+      "pageOf": "Page 1 – {pages} of {total} invitations",
+      "revokeTitle": "Revoke invitation",
+      "revokeBody": "The link sent to {email} stops working. You can invite them again any time."
     },
     "accept": {
       "title": "Join the team",

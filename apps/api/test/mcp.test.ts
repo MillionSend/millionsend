@@ -259,6 +259,7 @@ describe("tool listing", () => {
       "get_email",
       "get_email_insights",
       "get_deliverability",
+      "get_usage",
       "list_contacts",
       "get_contact",
       "list_segments",
@@ -266,10 +267,15 @@ describe("tool listing", () => {
       "list_topics",
       "get_topic",
       "list_contact_properties",
+      "list_suppressions",
+      "get_suppression",
       "list_broadcasts",
       "get_broadcast",
+      "list_templates",
+      "get_template",
       "list_webhooks",
       "get_webhook",
+      "list_api_keys",
       "list_domains",
       "get_domain",
       "send_email",
@@ -277,6 +283,7 @@ describe("tool listing", () => {
       "update_email",
       "cancel_email",
       "create_contact",
+      "create_contact_batch",
       "update_contact",
       "update_contact_topics",
       "delete_contact",
@@ -291,14 +298,22 @@ describe("tool listing", () => {
       "create_contact_property",
       "update_contact_property",
       "delete_contact_property",
+      "add_suppressions",
+      "remove_suppressions",
+      "delete_suppression",
       "create_broadcast",
       "update_broadcast",
       "send_broadcast",
       "cancel_broadcast",
       "delete_broadcast",
+      "create_template",
+      "update_template",
+      "delete_template",
       "create_webhook",
       "update_webhook",
       "delete_webhook",
+      "create_api_key",
+      "revoke_api_key",
       "create_domain",
       "update_domain",
       "verify_domain",
@@ -315,6 +330,8 @@ describe("tool listing", () => {
       "list_topics",
       "get_topic",
       "list_contact_properties",
+      "list_suppressions",
+      "get_suppression",
     ]);
     await readOnly.close();
 
@@ -354,12 +371,15 @@ describe("tool listing", () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names).toContain("list_webhooks");
     expect(names).toContain("list_domains");
+    expect(names).toContain("list_api_keys");
     expect(names).toContain("send_email");
     for (const hidden of [
       "get_webhook",
       "create_webhook",
       "update_webhook",
       "delete_webhook",
+      "create_api_key",
+      "revoke_api_key",
       "create_domain",
       "update_domain",
       "verify_domain",
@@ -691,4 +711,168 @@ it("create_webhook surfaces the signing secret verbatim and lists back without i
   const got = resultJson(await client.callTool({ name: "get_webhook", arguments: { id } }));
   expect((got as { signing_secret?: string }).signing_secret).toBe(signing_secret);
   await client.close();
+});
+
+describe("REST parity tools", () => {
+  it("suppressions: batch add with an origin, filtered list, get by email, batch remove, delete", async () => {
+    const client = await connect(await mintToken());
+    const added = await client.callTool({
+      name: "add_suppressions",
+      arguments: { emails: ["optout@example.com", "gone@example.com"], origin: "unsubscribe" },
+    });
+    expect(added.isError).toBeFalsy();
+    const ids = (resultJson(added) as { data: Array<{ id: string }> }).data.map((d) => d.id);
+    expect(ids).toHaveLength(2);
+
+    const listed = resultJson(
+      await client.callTool({ name: "list_suppressions", arguments: { origin: "unsubscribe" } }),
+    ) as { data: Array<{ id: string; origin: string }> };
+    expect(listed.data.map((s) => s.id).sort()).toEqual([...ids].sort());
+
+    expect(
+      resultJson(
+        await client.callTool({ name: "get_suppression", arguments: { id: "optout@example.com" } }),
+      ),
+    ).toMatchObject({ object: "suppression", email: "optout@example.com", origin: "unsubscribe" });
+
+    const removed = resultJson(
+      await client.callTool({
+        name: "remove_suppressions",
+        arguments: { emails: ["gone@example.com"] },
+      }),
+    ) as { data: Array<{ id: string; deleted: boolean }> };
+    expect(removed.data).toEqual([{ object: "suppression", id: ids[1], deleted: true }]);
+
+    expect(
+      resultJson(await client.callTool({ name: "delete_suppression", arguments: { id: ids[0] } })),
+    ).toMatchObject({ id: ids[0], deleted: true });
+    const after = resultJson(
+      await client.callTool({ name: "list_suppressions", arguments: {} }),
+    ) as { data: Array<{ id: string }> };
+    expect(after.data.map((s) => s.id)).not.toContain(ids[0]);
+    await client.close();
+  });
+
+  it("create_contact_batch: permissive writes the valid subset; strict rejects the batch; upsert updates", async () => {
+    const client = await connect(await mintToken());
+    const permissive = await client.callTool({
+      name: "create_contact_batch",
+      arguments: {
+        contacts: [
+          { email: "b1@example.com" },
+          { email: "not-an-email" },
+          { email: "b2@example.com" },
+        ],
+        validation: "permissive",
+      },
+    });
+    expect(permissive.isError).toBeFalsy();
+    const body = resultJson(permissive) as {
+      counts: { created: number; failed: number };
+      errors: unknown[];
+    };
+    expect(body.counts).toMatchObject({ created: 2, failed: 1 });
+    expect(body.errors).toHaveLength(1);
+
+    const strict = await client.callTool({
+      name: "create_contact_batch",
+      arguments: { contacts: [{ email: "b3@example.com" }, { email: "nope" }] },
+    });
+    expect(strict.isError).toBe(true);
+    expect(resultJson(strict)).toMatchObject({ statusCode: 422 });
+
+    const upsert = resultJson(
+      await client.callTool({
+        name: "create_contact_batch",
+        arguments: {
+          contacts: [{ email: "b1@example.com", first_name: "Bee" }],
+          on_conflict: "upsert",
+        },
+      }),
+    ) as { counts: { updated: number } };
+    expect(upsert.counts.updated).toBe(1);
+    await client.close();
+  });
+
+  it("templates: create, get by alias, update, list, delete", async () => {
+    const client = await connect(await mintToken());
+    const created = await client.callTool({
+      name: "create_template",
+      arguments: { name: "Welcome", alias: "welcome", subject: "Hi", html: "<p>Hi</p>" },
+    });
+    expect(created.isError).toBeFalsy();
+    const id = resultJson(created).id as string;
+    expect(
+      resultJson(await client.callTool({ name: "get_template", arguments: { id: "welcome" } })),
+    ).toMatchObject({ id, name: "Welcome", html: "<p>Hi</p>" });
+    expect(
+      (await client.callTool({ name: "update_template", arguments: { id, name: "Welcome v2" } }))
+        .isError,
+    ).toBeFalsy();
+    const list = resultJson(await client.callTool({ name: "list_templates", arguments: {} })) as {
+      data: Array<{ id: string; name: string }>;
+    };
+    expect(list.data.find((t) => t.id === id)?.name).toBe("Welcome v2");
+    expect(
+      resultJson(await client.callTool({ name: "delete_template", arguments: { id } })),
+    ).toMatchObject({ id, deleted: true });
+    await client.close();
+  });
+
+  it("get_usage reports the plan picture of the token's team", async () => {
+    const client = await connect(await mintToken({ scope: "emails:read" }));
+    expect(resultJson(await client.callTool({ name: "get_usage", arguments: {} }))).toMatchObject({
+      object: "usage",
+      cloud: false,
+      plan: null,
+      team: { id: teamId },
+    });
+    await client.close();
+  });
+
+  it("api keys: create returns the token once, list never does, revoke cuts it off; members only list", async () => {
+    const client = await connect(await mintToken({ scope: "api-keys:write" }));
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual([
+      "list_api_keys",
+      "create_api_key",
+      "revoke_api_key",
+    ]);
+    const created = await client.callTool({
+      name: "create_api_key",
+      arguments: { name: "minted over mcp" },
+    });
+    expect(created.isError).toBeFalsy();
+    const { id, token } = resultJson(created) as { id: string; token: string };
+    expect(token).toMatch(/^ms_/);
+    // The audit row names the person behind the token, as a dashboard action would.
+    const audits = await db
+      .select({ actorId: schema.auditLog.actorId })
+      .from(schema.auditLog)
+      .where(
+        and(eq(schema.auditLog.teamId, teamId), eq(schema.auditLog.action, "api_key.created")),
+      );
+    expect(audits).toEqual([{ actorId: `user:${userId}` }]);
+    const listed = JSON.stringify(
+      resultJson(await client.callTool({ name: "list_api_keys", arguments: {} })),
+    );
+    expect(listed).toContain(id);
+    expect(listed).not.toContain(token);
+    // The minted key is a real REST credential for the same team.
+    const asKey = (path: string) =>
+      app.request(path, { headers: { authorization: `Bearer ${token}` } });
+    expect((await asKey("/usage")).status).toBe(200);
+    expect(
+      resultJson(await client.callTool({ name: "revoke_api_key", arguments: { id } })),
+    ).toMatchObject({ id, deleted: true });
+    expect((await asKey("/usage")).status).toBe(401);
+    await client.close();
+
+    await db.insert(schema.user).values({ id: "member-2", name: "Member", email: "m2@acme.dev" });
+    await db.insert(schema.teamMembers).values({ teamId, userId: "member-2", role: "member" });
+    const member = await connect(
+      await mintToken({ sub: "member-2", team_role: "admin", scope: "api-keys:write" }),
+    );
+    expect((await member.listTools()).tools.map((t) => t.name)).toEqual(["list_api_keys"]);
+    await member.close();
+  });
 });
