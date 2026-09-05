@@ -32,6 +32,15 @@ Contacts are managed via `POST/GET/PATCH/DELETE /contacts` and
 path segment accepts either the contact UUID or its email address; email
 matching is case-insensitive.
 
+Two MillionSend extensions make reading an audience cheap. `GET /contacts`
+and `GET /segments/{id}/contacts` accept `include=properties,topics` and
+attach to every item the `{type, value}` property map and the topic rows that
+`GET /contacts/{id}` and `GET /contacts/{id}/topics` return; without `include`
+the items keep the Resend shape. `POST /contacts/batch/get` reads up to 1,000
+contacts by id or email in one request, in request order, with the same
+`include`; entries that match no contact are listed under `missing` rather
+than failing the call. One call is one request against the rate limit.
+
 Topic subscriptions are set per contact with `PATCH /contacts/{id}/topics`,
 and `GET /contacts/{id}/topics` reads them back with defaults applied: each
 topic's effective `subscription`, whether it was chosen explicitly, and its

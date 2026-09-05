@@ -45,6 +45,7 @@ import {
   createTemplateRequestSchema,
   createTopicRequestSchema,
   createWebhookRequestSchema,
+  listContactsQuerySchema,
   listQuerySchema,
   listSuppressionsQuerySchema,
   rotateWebhookSecretRequestSchema,
@@ -476,8 +477,8 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     "audience:read",
     {
       description:
-        "List contacts of the team, oldest first, with cursor pagination. Pass segment_id to list only that segment's members.",
-      inputSchema: listQuerySchema.extend({
+        "List contacts of the team, oldest first, with cursor pagination. Pass segment_id to list only that segment's members; include=properties,topics attaches the typed property map and the topic subscriptions to every item.",
+      inputSchema: listContactsQuerySchema.extend({
         segment_id: z.uuid().optional().describe("Only contacts in this segment"),
       }),
       readOnly: true,

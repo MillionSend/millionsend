@@ -491,24 +491,51 @@ export const usageResponseSchema = z
  * limit 1-100 (default 20), cursors are item ids, after and before are
  * mutually exclusive.
  */
-export const listQuerySchema = z
-  .object({
-    limit: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .optional()
-      .describe("Page size, 1-100 (default 20)"),
-    after: z.uuid().optional().describe("Cursor: id of the last item of the previous page"),
-    before: z
-      .uuid()
-      .optional()
-      .describe("Cursor: id of the first item of the next page (page backwards)"),
-  })
-  .refine((q) => !(q.after && q.before), {
+const listQueryFields = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe("Page size, 1-100 (default 20)"),
+  after: z.uuid().optional().describe("Cursor: id of the last item of the previous page"),
+  before: z
+    .uuid()
+    .optional()
+    .describe("Cursor: id of the first item of the next page (page backwards)"),
+});
+const oneCursor = <T extends z.ZodObject>(fields: T) =>
+  fields.refine((q) => !(q.after && q.before), {
     message: "after and before cannot be used together",
   });
+export const listQuerySchema = oneCursor(listQueryFields);
+
+export const CONTACT_INCLUDES = ["properties", "topics"] as const;
+export type ContactInclude = (typeof CONTACT_INCLUDES)[number];
+const isContactInclude = (v: string): v is ContactInclude =>
+  (CONTACT_INCLUDES as readonly string[]).includes(v);
+/** `include=properties,topics` → the facets to attach; empty when absent (the schema rejects unknown names). */
+export function parseContactInclude(raw: string | undefined): Set<ContactInclude> {
+  const out = new Set<ContactInclude>();
+  for (const part of (raw ?? "").split(",")) {
+    const name = part.trim();
+    if (isContactInclude(name)) out.add(name);
+  }
+  return out;
+}
+const contactIncludeQuery = z
+  .string()
+  .optional()
+  .refine((v) => v === undefined || v.split(",").every((p) => isContactInclude(p.trim())), {
+    message: "include accepts properties and topics, comma-separated",
+  })
+  .describe(
+    "MillionSend extension: comma-separated facets attached to every item — `properties` (the {type, value} map GET /contacts/{id} returns) and `topics` (the rows GET /contacts/{id}/topics returns). Omitted, each item has the Resend shape.",
+  );
+export const listContactsQuerySchema = oneCursor(
+  listQueryFields.extend({ include: contactIncludeQuery }),
+);
 
 export type ListQuery = z.infer<typeof listQuerySchema>;
 
@@ -599,8 +626,36 @@ export const getContactResponseSchema = contactSchema
   })
   .openapi("GetContactResponse");
 
+export const contactTopicRowSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  description: z.string().nullable(),
+  subscription: subscriptionEnum.describe(
+    "Effective choice: the contact's explicit one, else the topic's default",
+  ),
+  explicit: z
+    .boolean()
+    .describe("True when the contact or the API chose this; false when it is the topic's default"),
+  visibility: z
+    .enum(["public", "private"])
+    .describe("The hosted preference page lists public topics only"),
+});
+
+/** A list item, plus the facets `include=` asked for. */
+const contactWithFacetsSchema = contactSchema.extend({
+  properties: z
+    .record(z.string(), contactPropertyValueSchema)
+    .optional()
+    .describe("Present with include=properties"),
+  topics: z.array(contactTopicRowSchema).optional().describe("Present with include=topics"),
+});
+
 export const listContactsResponseSchema = z
-  .object({ object: z.literal("list"), data: z.array(contactSchema), has_more: z.boolean() })
+  .object({
+    object: z.literal("list"),
+    data: z.array(contactWithFacetsSchema),
+    has_more: z.boolean(),
+  })
   .openapi("ListContactsResponse");
 
 export const removeContactResponseSchema = z
@@ -631,6 +686,42 @@ export const batchRemoveContactsRequestSchema = z
 export const batchRemoveContactsResponseSchema = z
   .object({ data: z.array(removeContactResponseSchema) })
   .openapi("BatchRemoveContactsResponse");
+
+const contactRefSchema = z
+  .object({ id: z.uuid().optional(), email: z.email().optional() })
+  .refine((v) => (v.id === undefined) !== (v.email === undefined), {
+    message: "each entry needs exactly one of id or email",
+  });
+export const batchGetContactsRequestSchema = z
+  .object({
+    contacts: z
+      .array(contactRefSchema)
+      .min(1)
+      .max(1000)
+      .describe("Up to 1000 contacts, each by id or by email address (matched case-insensitively)"),
+    include: z
+      .array(z.enum(CONTACT_INCLUDES))
+      .optional()
+      .describe("Facets to attach to every contact returned: properties and/or topics"),
+  })
+  .openapi("BatchGetContactsRequest");
+export const batchGetContactsResponseSchema = z
+  .object({
+    object: z.literal("list"),
+    data: z
+      .array(contactWithFacetsSchema.extend({ object: z.literal("contact") }))
+      .describe("The contacts found, in request order"),
+    missing: z
+      .array(
+        z.object({
+          index: z.number().int().describe("Position in the request's contacts array"),
+          id: z.uuid().optional(),
+          email: z.string().optional(),
+        }),
+      )
+      .describe("Request entries that matched no contact of the team"),
+  })
+  .openapi("BatchGetContactsResponse");
 
 // contacts.segments.add/remove (SDK AddContactSegmentResponseSuccess /
 // RemoveContactSegmentResponseSuccess): id is the contact, audienceId the
@@ -1302,24 +1393,7 @@ export const contactPreferencesLinkResponseSchema = z
 export const listContactTopicsResponseSchema = z
   .object({
     object: z.literal("list"),
-    data: z.array(
-      z.object({
-        id: z.uuid(),
-        name: z.string(),
-        description: z.string().nullable(),
-        subscription: subscriptionEnum.describe(
-          "Effective choice: the contact's explicit one, else the topic's default",
-        ),
-        explicit: z
-          .boolean()
-          .describe(
-            "True when the contact or the API chose this; false when it is the topic's default",
-          ),
-        visibility: z
-          .enum(["public", "private"])
-          .describe("The hosted preference page lists public topics only"),
-      }),
-    ),
+    data: z.array(contactTopicRowSchema),
     has_more: z.literal(false),
   })
   .openapi("ListContactTopicsResponse");

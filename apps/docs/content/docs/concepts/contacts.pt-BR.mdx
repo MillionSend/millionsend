@@ -33,6 +33,16 @@ Contatos são gerenciados via `POST/GET/PATCH/DELETE /contacts` e
 segmento de caminho `{id}` aceita tanto o UUID do contato quanto seu endereço
 de email; a comparação de email não diferencia maiúsculas.
 
+Duas extensões do MillionSend tornam barata a leitura de uma audiência.
+`GET /contacts` e `GET /segments/{id}/contacts` aceitam
+`include=properties,topics` e anexam a cada item o mapa de propriedades
+`{type, value}` e as linhas de tópicos que `GET /contacts/{id}` e
+`GET /contacts/{id}/topics` retornam; sem `include`, os itens mantêm o formato
+do Resend. `POST /contacts/batch/get` lê até 1.000 contatos por id ou email em
+uma requisição, na ordem do pedido, com o mesmo `include`; entradas que não
+correspondem a nenhum contato são listadas em `missing` em vez de falhar a
+chamada. Uma chamada conta como uma requisição no limite de taxa.
+
 As inscrições em tópicos são definidas por contato com
 `PATCH /contacts/{id}/topics`, e `GET /contacts/{id}/topics` as lê de volta com
 os padrões aplicados: a `subscription` efetiva de cada tópico, se foi escolhida

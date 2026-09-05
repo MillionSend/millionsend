@@ -62,7 +62,19 @@ import {
   snsMessageSchema,
   verifySnsMessage,
 } from "@millionsend/ses";
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -85,9 +97,12 @@ import {
   batchContactsResponseSchema,
   batchEmailRequestSchema,
   batchEmailResponseSchema,
+  batchGetContactsRequestSchema,
+  batchGetContactsResponseSchema,
   batchRemoveContactsRequestSchema,
   batchRemoveContactsResponseSchema,
   broadcastIdResponseSchema,
+  type ContactInclude,
   type CreateContactRequest,
   cancelBroadcastResponseSchema,
   cancelEmailResponseSchema,
@@ -106,12 +121,14 @@ import {
   getSegmentResponseSchema,
   type ListQuery,
   listBroadcastsResponseSchema,
+  listContactsQuerySchema,
   listContactsResponseSchema,
   listContactTopicsResponseSchema,
   listEmailsResponseSchema,
   listQuerySchema,
   listSegmentsResponseSchema,
   listTopicsResponseSchema,
+  parseContactInclude,
   removeBroadcastResponseSchema,
   removeContactResponseSchema,
   removeContactSegmentResponseSchema,
@@ -614,6 +631,88 @@ function contactListItem(r: typeof schema.contacts.$inferSelect) {
     created_at: r.createdAt.toISOString(),
     unsubscribed: r.unsubscribed,
   };
+}
+
+type ContactTopicRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  subscription: "opt_in" | "opt_out";
+  explicit: boolean;
+  visibility: "public" | "private";
+};
+
+/**
+ * Every topic of the team per contact, with the effective subscription (the
+ * contact's explicit choice, else the topic's default) — two statements for
+ * any number of contacts, so a page or a batch costs the same as one contact.
+ */
+async function loadContactTopicRows(
+  db: Db,
+  teamId: string,
+  contactIds: readonly string[],
+): Promise<Map<string, ContactTopicRow[]>> {
+  const out = new Map<string, ContactTopicRow[]>();
+  if (contactIds.length === 0) return out;
+  const topics = await db
+    .select({
+      id: schema.topics.id,
+      name: schema.topics.name,
+      description: schema.topics.description,
+      defaultSubscribed: schema.topics.defaultSubscribed,
+      visibility: schema.topics.visibility,
+    })
+    .from(schema.topics)
+    .where(eq(schema.topics.teamId, teamId))
+    .orderBy(asc(schema.topics.createdAt), asc(schema.topics.id));
+  const s = schema.contactTopicSubscriptions;
+  const chosen = new Map<string, boolean>();
+  if (topics.length > 0) {
+    const subs = await db
+      .select({ contactId: s.contactId, topicId: s.topicId, subscribed: s.subscribed })
+      .from(s)
+      .where(inArray(s.contactId, [...contactIds]));
+    for (const row of subs) chosen.set(`${row.contactId}:${row.topicId}`, row.subscribed);
+  }
+  for (const contactId of contactIds) {
+    out.set(
+      contactId,
+      topics.map((topic) => {
+        const explicit = chosen.get(`${contactId}:${topic.id}`);
+        return {
+          id: topic.id,
+          name: topic.name,
+          description: topic.description,
+          subscription: (explicit ?? topic.defaultSubscribed) ? "opt_in" : "opt_out",
+          explicit: explicit !== undefined,
+          visibility: topic.visibility,
+        };
+      }),
+    );
+  }
+  return out;
+}
+
+/** List items plus the facets asked for; with none asked, exactly the Resend-shaped item. */
+async function contactItems(
+  db: Db,
+  teamId: string,
+  rows: readonly (typeof schema.contacts.$inferSelect)[],
+  include: ReadonlySet<ContactInclude>,
+) {
+  const types = include.has("properties") ? await loadContactPropertyTypes(db, teamId) : null;
+  const topics = include.has("topics")
+    ? await loadContactTopicRows(
+        db,
+        teamId,
+        rows.map((r) => r.id),
+      )
+    : null;
+  return rows.map((r) => ({
+    ...contactListItem(r),
+    ...(types ? { properties: wireContactProperties(r.properties, types) } : {}),
+    ...(topics ? { topics: topics.get(r.id) ?? [] } : {}),
+  }));
 }
 
 /**
@@ -1221,6 +1320,68 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
   app.openapi(
     createRoute({
       method: "post",
+      path: "/contacts/batch/get",
+      summary: "Read contacts in bulk",
+      description:
+        "MillionSend extension: returns up to 1000 contacts by id or by email address in one " +
+        "request, in request order, optionally with their properties and topic subscriptions. " +
+        "Entries that match no contact are listed under `missing` instead of failing the call. " +
+        "One call counts as one request against the rate limit.",
+      request: {
+        body: { content: { "application/json": { schema: batchGetContactsRequestSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: batchGetContactsResponseSchema } },
+          description: "The contacts found, and the entries that matched none",
+        },
+        422: jsonErr("Validation error"),
+      },
+    }),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const ids = body.contacts.flatMap((r) => (r.id === undefined ? [] : [r.id]));
+      const emails = body.contacts.flatMap((r) =>
+        r.email === undefined ? [] : [r.email.toLowerCase()],
+      );
+      const matches = [
+        ...(ids.length > 0 ? [inArray(t.id, ids)] : []),
+        ...(emails.length > 0 ? [inArray(sql`lower(${t.email})`, emails)] : []),
+      ];
+      const rows =
+        matches.length === 0
+          ? []
+          : await db
+              .select()
+              .from(t)
+              .where(and(eq(t.teamId, auth.teamId), or(...matches)));
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const byEmail = new Map(rows.map((r) => [r.email.toLowerCase(), r]));
+      const found: typeof rows = [];
+      const missing: { index: number; id?: string; email?: string }[] = [];
+      body.contacts.forEach((ref, index) => {
+        const row =
+          ref.id !== undefined ? byId.get(ref.id) : byEmail.get((ref.email ?? "").toLowerCase());
+        if (row) found.push(row);
+        else if (ref.id !== undefined) missing.push({ index, id: ref.id });
+        else missing.push({ index, email: ref.email ?? "" });
+      });
+      const items = await contactItems(db, auth.teamId, found, new Set(body.include ?? []));
+      return c.json(
+        {
+          object: "list" as const,
+          data: items.map((item) => ({ object: "contact" as const, ...item })),
+          missing,
+        },
+        200,
+      );
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
       path: "/contacts/batch/remove",
       summary: "Delete contacts in bulk",
       description:
@@ -1352,7 +1513,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "get",
       path: "/contacts",
-      request: { query: listQuerySchema },
+      request: { query: listContactsQuerySchema },
       responses: {
         200: {
           content: { "application/json": { schema: listContactsResponseSchema } },
@@ -1363,8 +1524,9 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     }),
     async (c) => {
       const auth = c.get("auth");
+      const query = c.req.valid("query");
       const page = await keysetPage({
-        query: c.req.valid("query"),
+        query,
         createdAt: t.createdAt,
         id: t.id,
         loadCursor: async (id) =>
@@ -1388,7 +1550,11 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         return c.json(errorBody(422, "validation_error", "invalid pagination cursor"), 422);
       }
       return c.json(
-        { object: "list" as const, data: page.rows.map(contactListItem), has_more: page.hasMore },
+        {
+          object: "list" as const,
+          data: await contactItems(db, auth.teamId, page.rows, parseContactInclude(query.include)),
+          has_more: page.hasMore,
+        },
         200,
       );
     },
@@ -1528,36 +1694,9 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       const auth = c.get("auth");
       const contact = await findContact(auth.teamId, c.req.valid("param").id);
       if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
-      const s = schema.contactTopicSubscriptions;
-      const rows = await db
-        .select({
-          id: schema.topics.id,
-          name: schema.topics.name,
-          description: schema.topics.description,
-          defaultSubscribed: schema.topics.defaultSubscribed,
-          visibility: schema.topics.visibility,
-          subscribed: s.subscribed,
-        })
-        .from(schema.topics)
-        .leftJoin(s, and(eq(s.topicId, schema.topics.id), eq(s.contactId, contact.id)))
-        .where(eq(schema.topics.teamId, auth.teamId))
-        .orderBy(asc(schema.topics.createdAt), asc(schema.topics.id));
-      return c.json(
-        {
-          object: "list" as const,
-          data: rows.map((r) => ({
-            id: r.id,
-            name: r.name,
-            description: r.description,
-            subscription:
-              (r.subscribed ?? r.defaultSubscribed) ? ("opt_in" as const) : ("opt_out" as const),
-            explicit: r.subscribed !== null,
-            visibility: r.visibility,
-          })),
-          has_more: false as const,
-        },
-        200,
-      );
+      const rows =
+        (await loadContactTopicRows(db, auth.teamId, [contact.id])).get(contact.id) ?? [];
+      return c.json({ object: "list" as const, data: rows, has_more: false as const }, 200);
     },
   );
 
@@ -2187,7 +2326,7 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
     createRoute({
       method: "get",
       path: "/segments/{id}/contacts",
-      request: { params: idParam, query: listQuerySchema },
+      request: { params: idParam, query: listContactsQuerySchema },
       responses: {
         200: {
           content: { "application/json": { schema: listContactsResponseSchema } },
@@ -2206,8 +2345,9 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
       if (!segment) return c.json(errorBody(404, "not_found", "Segment not found"), 404);
       const ct = schema.contacts;
       const inSegment = segmentContactsWhere(ct, segment);
+      const query = c.req.valid("query");
       const page = await keysetPage({
-        query: c.req.valid("query"),
+        query,
         createdAt: ct.createdAt,
         id: ct.id,
         loadCursor: async (id) =>
@@ -2231,7 +2371,11 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
         return c.json(errorBody(422, "validation_error", "invalid pagination cursor"), 422);
       }
       return c.json(
-        { object: "list" as const, data: page.rows.map(contactListItem), has_more: page.hasMore },
+        {
+          object: "list" as const,
+          data: await contactItems(db, auth.teamId, page.rows, parseContactInclude(query.include)),
+          has_more: page.hasMore,
+        },
         200,
       );
     },
