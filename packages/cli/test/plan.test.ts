@@ -128,8 +128,6 @@ templates
     contact properties
 contacts (5)
   + contacts  batch upsert, 3 segment memberships
-enrichment (5)
-  ~ contacts  properties and topic subscriptions, read per contact
 broadcasts
   + November announcements  draft
   ! Beta invite  from domain updates.example.com is not verified here — re-run
@@ -137,13 +135,15 @@ broadcasts
   − Launch recap  already sent; --include-sent imports sent broadcasts as drafts
 suppressions (3)
   + suppressions  batch add with origin
+enrichment (5)
+  ~ contacts  topic subscriptions, then properties, read per contact
 api-keys
   ! Production  create by hand; Resend exposes only the name
   ! Staging  create by hand; Resend exposes only the name
 
 Plan: 11 to create, 5 to update, 2 unchanged, 11 manual, 1 skipped.
 warning: 2 domains to create; the Free plan allows 1 (1 already there)
-Estimate: ~66 requests · 3 s at 8 req/s
+Estimate: ~67 requests · 3 s at 8 req/s
 `;
 
 const stdout = process.stdout as unknown as { columns?: number | undefined };
@@ -182,8 +182,8 @@ describe("buildPlan + renderPlan (golden)", () => {
   });
 
   it("estimates: spent + one read per contact per facet + writes; seconds count only what is ahead", () => {
-    // writes: 9 creates + 4 updates + contacts batch + suppressions batch + enrichment batch = 16
-    expect(plan.estimate).toEqual({ requests: 40 + 10 + 16, seconds: Math.ceil(10 / 8 + 16 / 10) });
+    // writes: 9 creates + 4 updates + contacts batch + suppressions batch + one enrichment batch per facet = 17
+    expect(plan.estimate).toEqual({ requests: 40 + 10 + 17, seconds: Math.ceil(10 / 8 + 17 / 10) });
     const topicsOnly = buildPlan({
       snapshot: { ...snapshot, properties: [] },
       target: goldenTarget,
@@ -258,9 +258,9 @@ describe("buildPlan + renderPlan (golden)", () => {
       "webhooks",
       "templates",
       "contacts",
-      "enrichment",
       "broadcasts",
       "suppressions",
+      "enrichment",
       "api-keys",
     ]);
   });
@@ -331,6 +331,24 @@ describe("buildPlan against an empty target", () => {
     // No enrichment reads, no per-item writes: 40 + (1 + 1) writes; the 40 are already spent.
     expect(plan.estimate).toEqual({ requests: 42, seconds: Math.ceil(2 / 10) });
     expect(plan.items[0]?.detail).toBe("batch upsert, 0 segment memberships");
+  });
+
+  it("plans enrichment on its own when the target already holds the contacts", () => {
+    const plan = buildPlan({
+      snapshot,
+      target: { ...goldenTarget, hasContacts: true },
+      options: options({ include: new Set<Resource>(["enrichment"]) }),
+    });
+    expect(plan.items.map((i) => i.resource)).toEqual(["enrichment"]);
+    expect(plan.warnings).toEqual(
+      expect.arrayContaining([expect.stringContaining("topics are excluded")]),
+    );
+    const bare = buildPlan({
+      snapshot,
+      target: goldenTarget,
+      options: options({ include: new Set<Resource>(["enrichment"]) }),
+    });
+    expect(bare.items).toEqual([]);
   });
 
   it("skips the enrichment item when the snapshot is already enriched", () => {

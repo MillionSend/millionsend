@@ -26,6 +26,15 @@ describe("parseConfig", () => {
     });
   });
 
+  it("accepts --rps above Resend's default limit up to the ceiling, and remembers it was given", () => {
+    const raised = parseConfig(["migrate", "--from", "resend", "--rps", "50"], env, true);
+    expect(raised).toMatchObject({ rps: 50, rpsGiven: true });
+    expect(parseConfig(["migrate", "--from", "resend"], env, true).rpsGiven).toBe(false);
+    expect(() => parseConfig(["migrate", "--from", "resend", "--rps", "101"], env, true)).toThrow(
+      "between 1 and 100",
+    );
+  });
+
   it("parses subcommands, the plan file and every flag", () => {
     const config = parseConfig(
       [
@@ -114,7 +123,7 @@ describe("parseConfig", () => {
     [["migrate", "plan", "x.json", "--from", "resend"], "Unexpected argument `x.json`"],
     [
       ["migrate", "--from", "resend", "--rps", "0"],
-      "--rps must be a whole number between 1 and 10 (got 0)",
+      "--rps must be a whole number between 1 and 100 (got 0)",
     ],
     [["migrate", "--from", "resend", "--rps", "2.5"], "--rps must be a whole number"],
     [

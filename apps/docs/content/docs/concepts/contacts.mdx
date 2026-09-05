@@ -22,6 +22,8 @@ the same, minus the audience nesting.
 - `properties` — a flat map of custom string values (`plan: "pro"`,
   `city: "Berlin"`). Nested objects and arrays are rejected with `422`.
   Properties feed template merge fields and segment filters.
+  `PATCH /contacts/{id}` merges `properties` key by key; a `null` value
+  removes that key. The stored map holds at most 100 keys.
 
 ## API
 

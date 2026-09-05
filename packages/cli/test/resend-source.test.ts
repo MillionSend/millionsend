@@ -276,7 +276,7 @@ describe("createResendSource", () => {
     const snapshot = await src.readShallow({ include: new Set(["topics"]) });
     expect(snapshot.topics).toHaveLength(2);
     expect(fake.requests.filter((r) => r.path === "/topics")).toHaveLength(2);
-    expect(lines).toContain("warning: retry 2/8 in 0s — Resend 429");
+    expect(lines.some((l) => l.startsWith("warning: retry 2/8 in 0s — Resend 429"))).toBe(true);
   });
 
   it("enrichContacts merges properties and topics, skips alreadyDone, emits per contact", async () => {
@@ -290,6 +290,7 @@ describe("createResendSource", () => {
     const done = new Set(["a2b3c4d5-e6f7-4a8b-9c0d-1e2f3a4b5c6d"]);
     const result = await src.enrichContacts(snapshot, {
       alreadyDone: done,
+      concurrency: 1,
       onProgress: (e) => events.push(e),
       onContact: async (contact) => {
         emitted.push(contact.email);
@@ -313,13 +314,88 @@ describe("createResendSource", () => {
       "/contacts/f0e1d2c3-b4a5-4968-8776-655443322110",
       "/contacts/f0e1d2c3-b4a5-4968-8776-655443322110/topics",
     ]);
+    // The contact already done counts as completed from the start.
     expect(events).toEqual([
-      { label: "Enrichment", n: 1, total: 3, done: false },
       { label: "Enrichment", n: 2, total: 3, done: false },
       { label: "Enrichment", n: 3, total: 3, done: false },
       { label: "Enrichment", n: 3, total: 3, done: true },
     ]);
     expect(fake.writes).toBe(0);
+  });
+
+  it("enrichContacts reads a few contacts ahead and still hands them over one at a time", async () => {
+    const { src } = source();
+    const snapshot = await src.readShallow({
+      include: new Set(["properties", "topics", "contacts"]),
+    });
+    fake.requests.length = 0;
+    const emitted: string[] = [];
+    let inFlight = 0;
+    let overlapped = false;
+    await src.enrichContacts(snapshot, {
+      onContact: async (contact) => {
+        inFlight += 1;
+        if (inFlight > 1) overlapped = true;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        emitted.push(contact.email);
+        inFlight -= 1;
+      },
+    });
+    expect(overlapped).toBe(false);
+    expect(emitted.sort()).toEqual(snapshot.contacts.map((c) => c.email).sort());
+    expect(fake.requests.filter((r) => r.path.endsWith("/topics"))).toHaveLength(3);
+    // Every property arrives unwrapped from Resend's {value, type} shape; a null value is no key.
+    expect(
+      snapshot.contacts.find((c) => c.email === "steve.wozniak@gmail.com")?.properties,
+    ).toEqual({
+      plan: "pro",
+      seats: 5,
+    });
+    const nullSeats = snapshot.contacts.find(
+      (c) => c.id === "a2b3c4d5-e6f7-4a8b-9c0d-1e2f3a4b5c6d",
+    );
+    expect(nullSeats?.properties).not.toHaveProperty("seats");
+  });
+
+  it("enrichContacts with one facet leaves the other untouched", async () => {
+    const { src } = source();
+    const snapshot = await src.readShallow({
+      include: new Set(["properties", "topics", "contacts"]),
+    });
+    fake.requests.length = 0;
+    await src.enrichContacts(snapshot, { facets: ["topics"], onContact: () => {} });
+    expect(fake.requests.every((r) => r.path.endsWith("/topics"))).toBe(true);
+    expect(snapshot.contacts[0]).not.toHaveProperty("properties");
+    expect(snapshot.contacts[0]?.topics).toBeDefined();
+  });
+
+  it("listAll stops with a PaginationError when the server ignores the cursor", async () => {
+    const { src } = source();
+    const twoRows = {
+      status: 200,
+      body: {
+        object: "list",
+        data: [
+          { id: "e169aa45-1ecf-4183-9955-b1499d5701d3", email: "steve.wozniak@gmail.com" },
+          { id: "f0e1d2c3-b4a5-4968-8776-655443322110", email: "grace@example.net" },
+        ],
+        has_more: true,
+      },
+    };
+    fake.injectOnce("/contacts", twoRows);
+    fake.injectOnce("/contacts", twoRows);
+    await expect(src.readShallow({ include: new Set(["contacts"]) })).rejects.toThrow(
+      /ignored `after`/,
+    );
+  });
+
+  it("readShallow lists contacts, properties and topics for an enrichment-only include", async () => {
+    const { src } = source();
+    const snapshot = await src.readShallow({ include: new Set(["enrichment"]) });
+    expect(snapshot.contacts.length).toBeGreaterThan(0);
+    expect(snapshot.properties.length).toBeGreaterThan(0);
+    expect(snapshot.topics.length).toBeGreaterThan(0);
+    expect(snapshot.domains).toEqual([]);
   });
 
   it("enrichContacts makes no request when the account has no properties or topics", async () => {

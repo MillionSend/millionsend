@@ -22,7 +22,9 @@ caminhos de contato são os mesmos, sem o aninhamento de audience.
 - `properties` — um mapa plano de valores string customizados
   (`plan: "pro"`, `city: "Berlin"`). Objetos aninhados e arrays são
   rejeitados com `422`. As propriedades alimentam os campos de mesclagem de
-  templates e os filtros de segmentos.
+  templates e os filtros de segmentos. `PATCH /contacts/{id}` mescla
+  `properties` chave a chave; um valor `null` remove a chave. O mapa
+  armazenado tem no máximo 100 chaves.
 
 ## API
 

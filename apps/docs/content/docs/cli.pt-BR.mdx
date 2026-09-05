@@ -65,9 +65,9 @@ millionsend --help | --version
 | `--to-url <url>` | URL da API do MillionSend: `https://api.millionsend.com` para o Cloud, ou a URL da sua instância. |
 | `--to-key-stdin` | Lê a chave de API do MillionSend do stdin (segunda linha quando as duas flags de stdin estão presentes). |
 | `--to-key <key>` | Chave de API do MillionSend como argumento. Mesma ressalva. |
-| `--rps <n>` | Requisições por segundo contra a origem, de 1 a 10. Padrão 8: o Resend permite 10 por time, compartilhadas com o seu envio em produção. |
+| `--rps <n>` | Requisições por segundo contra a origem; padrão 8. O limite do time no Resend é 10, compartilhado com o seu envio em produção; a CLI mostra ao conectar o limite que detecta, se mantém abaixo dele e avisa quando o ritmo passa dele. Valores acima de 10 (até 100) são para um limite que o Resend aumentou sob pedido. |
 | `--only <a,b>` | Migra apenas estes recursos. |
-| `--skip <a,b>` | Pula estes recursos. `enrichment` é a passagem por contato de propriedades e tópicos. |
+| `--skip <a,b>` | Pula estes recursos. `enrichment` é a passagem por contato que roda por último: inscrições em tópicos, depois propriedades, cada uma retomável. |
 | `--on-conflict <mode>` | Contatos que já existem no destino: `upsert` (padrão), `skip`, `error`. |
 | `--include-sent` | Importa broadcasts enviados como rascunhos. Pulados por padrão. |
 | `--fresh-webhook-secrets` | Gera segredos de assinatura de webhook novos em vez de copiá-los. Mostrados uma vez, no relatório. |
@@ -83,8 +83,8 @@ millionsend --help | --version
 | `-h`, `--help` / `-V`, `--version` | Texto de ajuda / versão. |
 
 Nomes de recurso para `--only` e `--skip`, na ordem de aplicação: `domains`,
-`properties`, `topics`, `segments`, `contacts`, `enrichment`, `broadcasts`,
-`templates`, `webhooks`, `suppressions`, `api-keys`.
+`properties`, `topics`, `segments`, `contacts`, `broadcasts`,
+`templates`, `webhooks`, `suppressions`, `enrichment`, `api-keys`.
 
 ## Ambiente
 

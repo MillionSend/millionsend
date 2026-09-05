@@ -16,10 +16,11 @@ export const providers: Record<ProviderId, Provider> = {
 };
 
 export type {
+  EnrichFacet,
   EnrichOptions,
   OnProgress,
   ReadShallowOptions,
   Source,
   SourceProgress,
 } from "./resend.js";
-export { estimateSourceRequests } from "./resend.js";
+export { ENRICH_CONCURRENCY, estimateSourceRequests } from "./resend.js";

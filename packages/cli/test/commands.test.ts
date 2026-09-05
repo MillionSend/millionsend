@@ -839,3 +839,64 @@ describe("plan, apply and status edge cases (own target)", () => {
     expect(stdout).not.toContain("\x07");
   });
 });
+
+describe("cutover-first run shape", () => {
+  it(
+    "prints the connected limit, the cutover block before enrichment, and per-pass counts",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "millionsend-cli-cut-"));
+      const result = await run(
+        ["migrate", "--from", "resend", "--yes", "--only", "properties,topics,contacts,enrichment"],
+        { cwd: dir },
+      );
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("limit 10 req/s, using 8");
+      const cutover = result.stdout.indexOf("Cutover ready");
+      const topicsPass = result.stdout.indexOf("Enrichment · topics");
+      const propertiesPass = result.stdout.indexOf("Enrichment · properties");
+      expect(cutover).toBeGreaterThan(-1);
+      expect(topicsPass).toBeGreaterThan(cutover);
+      expect(propertiesPass).toBeGreaterThan(topicsPass);
+      expect(result.stdout).toContain("set RESEND_BASE_URL=");
+      expect(result.stdout).toMatch(/with topic subscriptions/);
+      expect(result.stdout).toMatch(/with properties/);
+      const report = readReport(dir);
+      expect(report.enrichment?.withProperties).toBeGreaterThan(0);
+      expect(report.enrichment?.withTopics).toBeGreaterThan(0);
+      expect(readState(dir)?.progress.topicsDone).toBeUndefined();
+
+      // The target now holds the contacts: enrichment can run on its own.
+      const again = await run(["migrate", "--from", "resend", "--yes", "--only", "enrichment"], {
+        cwd: dir,
+      });
+      expect(again.code).toBe(0);
+      expect(again.stdout).toContain("Enrichment · topics");
+      expect(again.stdout).not.toContain("Nothing to do");
+    },
+    SLOW,
+  );
+
+  it(
+    "refuses a stale plan file before reading the source again",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "millionsend-cli-stale-"));
+      const planFile = join(dir, "plan.json");
+      const planned = await run(
+        ["migrate", "plan", "--from", "resend", "--only", "topics", "--out", planFile],
+        { cwd: dir },
+      );
+      expect([0, 2]).toContain(planned.code);
+      const saved = JSON.parse(readFileSync(planFile, "utf8")) as { createdAt: string };
+      saved.createdAt = new Date(Date.now() - 3 * 3_600_000).toISOString();
+      writeFileSync(planFile, JSON.stringify(saved));
+      fake.requests.length = 0;
+      const applied = await run(["migrate", "apply", planFile, "--yes", "--non-interactive"], {
+        cwd: dir,
+      });
+      expect(applied.code).not.toBe(0);
+      expect(applied.stderr).toMatch(/is about 3 h old|is about 180 min old|old\./);
+      expect(fake.requests).toHaveLength(0);
+    },
+    SLOW,
+  );
+});

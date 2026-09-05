@@ -25,15 +25,27 @@ export async function apply(ctx: Context): Promise<number> {
     );
   }
   const saved = parsePlan(text);
+  // Age needs no network: a stale file is refused before the source is read again.
+  const ageMs = Date.now() - Date.parse(saved.createdAt);
+  const stale = !(ageMs < MAX_PLAN_AGE_MS);
+  if (stale && config.nonInteractive) {
+    throw new Error(
+      `${config.planFile} is ${formatDuration(ageMs / 1000)} old. Re-run \`migrate plan --out\`, or apply without a file.`,
+    );
+  }
+  if (stale) {
+    out.write(
+      `${config.planFile} is ${formatDuration(ageMs / 1000)} old; reading the source again to build a current plan.\n`,
+    );
+  }
   const prepared = await prepare(ctx, config.from ?? saved.source);
   if (saved.target.baseUrl !== prepared.baseUrl) {
     throw new Error(
       `${config.planFile} was made for ${saved.target.baseUrl}; connected to ${prepared.baseUrl}.`,
     );
   }
-  const ageMs = Date.now() - Date.parse(saved.createdAt);
   const reasons: string[] = [];
-  if (!(ageMs < MAX_PLAN_AGE_MS)) reasons.push(`is ${formatDuration(ageMs / 1000)} old`);
+  if (stale) reasons.push(`is ${formatDuration(ageMs / 1000)} old`);
   if (planHash(saved) !== planHash(prepared.plan)) reasons.push("differs from the plan just built");
   if (reasons.length > 0) {
     const notice = `${config.planFile} ${reasons.join(" and ")}; the plan above is current.`;

@@ -40,23 +40,59 @@ npx @millionsend/cli migrate --from resend --to-url https://api.sua-instancia
 O que ele faz:
 
 - **O Resend é apenas lido.** Toda requisição ao Resend é um `GET` a um
-  endpoint documentado; nada lá é criado, alterado ou excluído. O ritmo é de 8
-  requisições por segundo por padrão (o limite do Resend é 10 por time,
-  compartilhado com o seu envio em produção; `--rps` reduz).
+  endpoint documentado; nada lá é criado, alterado ou excluído. A CLI mostra
+  ao conectar o limite de taxa que o Resend informa e se mantém abaixo dele:
+  8 requisições por segundo por padrão (o limite do time no Resend é 10,
+  compartilhado com o seu envio em produção), recuando pelos cabeçalhos
+  `ratelimit-*` e a cada `429`. `--rps` muda o ritmo.
 - **Suas chaves nunca saem da sua máquina.** A ferramenta fala apenas com
   `api.resend.com` e com a sua API do MillionSend. As chaves ficam em memória
   durante a execução, nunca são gravadas em arquivo e são redigidas de toda
   linha de log. Sem telemetria, sem verificação de atualização.
-- **Duas passagens.** A passagem 1 cria propriedades, tópicos, segmentos,
-  domínios, webhooks, templates e supressões e faz upsert dos contatos com
-  suas associações a segmentos. A passagem 2 — só quando a conta usa
-  propriedades de contato ou tópicos — lê cada contato mais uma vez para
-  trazê-los. A passagem 2 é retomável e pode ser pulada (`--skip enrichment`).
+- **Virada primeiro, enriquecimento depois.** A passagem 1 cria propriedades,
+  tópicos, segmentos, domínios, webhooks, templates, broadcasts e supressões e
+  faz upsert dos contatos com suas associações a segmentos e o `unsubscribed`.
+  Ela termina em minutos, e a CLI então imprime **Cutover ready** com os
+  registros DNS e a linha do `RESEND_BASE_URL`: o envio transacional já pode
+  mudar nesse ponto. O enriquecimento — só quando a conta usa tópicos ou
+  propriedades de contato — lê então cada contato uma vez por faceta, primeiro
+  as inscrições em tópicos (para os opt-outs chegarem antes das propriedades),
+  depois as propriedades, com ritmo e tempo restante ao vivo. Segure envios
+  por tópico e broadcasts até ele terminar. As duas passagens retomam de onde
+  pararam após um Ctrl-C e uma nova execução, e `--skip enrichment` as deixa
+  de fora.
 - **Rode de novo antes da virada.** Cada execução é um diff: linhas existentes
   são atualizadas quando diferem e deixadas como estão quando são iguais;
   contatos passam por upsert pelo e-mail. Rode o mesmo comando de novo logo
   antes de virar o tráfego e os contatos que chegaram nesse meio-tempo vêm
-  junto.
+  junto. Uma nova execução lê todos os contatos de novo, então custa o tempo
+  inteiro de enriquecimento; `--only enrichment` roda só as duas passagens
+  sobre contatos que já estão no destino.
+
+### Antes de uma migração grande
+
+O enriquecimento domina: dois `GET`s por contato contra um limite
+compartilhado com o envio que o seu app faz no mesmo time do Resend. A
+estimativa que o plano imprime segue de `contatos × facetas ÷ ritmo`:
+
+| Contatos | Facetas | A 8 req/s | A 10 req/s | A 50 req/s |
+| --- | --- | --- | --- | --- |
+| 36.685 | tópicos + propriedades | cerca de 2 h 30 min | cerca de 2 h | cerca de 25 min |
+| 160.000 | tópicos + propriedades | cerca de 11 h | cerca de 9 h | cerca de 1 h 50 min |
+| 160.000 | só tópicos | cerca de 5 h 30 min | cerca de 4 h 30 min | cerca de 55 min |
+
+Três coisas encurtam isso:
+
+- **Peça ao Resend um aumento temporário.** A documentação do Resend diz que o
+  limite do time "pode ser aumentado para remetentes confiáveis sob pedido"
+  (Settings → Usage mostra o atual). Passe o ritmo concedido explicitamente —
+  `--rps 50` — a CLI aceita valores acima de 10 e avisa quando o ritmo passa
+  do limite que detectou.
+- **Rode fora do horário de pico.** O limite é por time, então o
+  enriquecimento compete com os envios da sua produção; os `429` caem nos
+  dois lados. Uma segunda chave de API não ajuda.
+- **Deixe folga.** Quando a CLI detecta um limite acima de 10 e `--rps` não
+  foi passado, ela usa o limite menos 2 para o seu app continuar enviando.
 
 | Recurso | O que vem |
 | --- | --- |

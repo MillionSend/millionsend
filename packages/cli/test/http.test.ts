@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, AuthError, createHttp, retryAfterMs } from "../src/http.js";
+import {
+  ApiError,
+  AuthError,
+  createHttp,
+  cursorGuard,
+  PaginationError,
+  retryAfterMs,
+} from "../src/http.js";
 import { createLogger } from "../src/log.js";
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
@@ -132,7 +139,7 @@ describe("createHttp", () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect((await pending).body).toEqual({ ok: true });
-    expect(lines).toContain("warning: retry 2/8 in 3s — Resend 429");
+    expect(lines.some((l) => l.startsWith("warning: retry 2/8 in 3s — Resend 429"))).toBe(true);
   });
 
   it("429 gives up after rateLimitAttempts", async () => {
@@ -238,6 +245,56 @@ describe("createHttp", () => {
     await all;
   });
 
+  it("exposes the team limit header and holds the next request while the window is nearly spent", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        json(
+          200,
+          {},
+          { "ratelimit-limit": "10", "ratelimit-remaining": "2", "ratelimit-reset": "2" },
+        ),
+      )
+      .mockResolvedValue(json(200, {}));
+    const client = http(fetchMock);
+    expect(client.rateLimit).toBeNull();
+    await client.get("/a");
+    expect(client.rateLimit).toBe(10);
+    const second = client.get("/b");
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await second;
+  });
+
+  it("halves the pace after a 429 and says so", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json(429, { name: "rate_limit_exceeded" }, { "retry-after": "1" }))
+      .mockResolvedValue(json(200, {}));
+    const lines: string[] = [];
+    const pending = http(fetchMock, lines, { rps: 8 }).get("/a");
+    await vi.advanceTimersByTimeAsync(1000);
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(lines.some((l) => l.includes("slowing to 4 req/s"))).toBe(true);
+  });
+
+  it("setRps re-paces the client", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(json(200, {})));
+    const client = http(fetchMock);
+    client.setRps(2);
+    const all = Promise.all([client.get("/a"), client.get("/b")]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await all;
+  });
+
   it("never logs the token", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("bad Bearer re_secret_123456789"));
     const lines: string[] = [];
@@ -259,5 +316,36 @@ describe("retryAfterMs", () => {
     expect(retryAfterMs(new Headers({ "ratelimit-reset": "1" }))).toBe(1000);
     expect(retryAfterMs(new Headers())).toBeNull();
     expect(retryAfterMs(new Headers({ "retry-after": "9999" }))).toBe(120_000);
+  });
+});
+
+describe("cursorGuard", () => {
+  const rows = (...ids: string[]) => ids.map((id) => ({ id }));
+
+  it("lets a moving walk through", () => {
+    const guard = cursorGuard("/contacts");
+    guard(rows("a", "b"), undefined);
+    guard(rows("c", "d"), "b");
+    guard([], "d");
+  });
+
+  it("throws when the page ends at the cursor it was asked to start after", () => {
+    const guard = cursorGuard("/contacts");
+    guard(rows("a", "b"), undefined);
+    expect(() => guard(rows("a", "b"), "b")).toThrow(PaginationError);
+    expect(() => guard(rows("a", "b"), "b")).toThrow("/contacts");
+  });
+
+  it("throws when a page brings only ids already listed", () => {
+    const guard = cursorGuard("/segments/s1/contacts");
+    guard(rows("a", "b"), undefined);
+    expect(() => guard(rows("b", "a"), "x")).toThrow("already listed");
+  });
+
+  it("caps the number of pages instead of walking forever", () => {
+    const guard = cursorGuard("/emails", 2);
+    guard(rows("a"), undefined);
+    guard(rows("b"), "a");
+    expect(() => guard(rows("c"), "b")).toThrow("more than 2 pages");
   });
 });

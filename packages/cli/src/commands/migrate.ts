@@ -1,4 +1,10 @@
-import { type ApplyOutcome, applyPlan, type Counts, RESOURCE_LABEL } from "../apply.js";
+import {
+  type ApplyOutcome,
+  applyPlan,
+  type Counts,
+  ENRICHMENT_LABEL,
+  RESOURCE_LABEL,
+} from "../apply.js";
 import type { Context } from "../context.js";
 import type { MillionSendTarget } from "../millionsend.js";
 import {
@@ -240,7 +246,14 @@ function idleOutcome(plan: Plan, state: MigrateState): ApplyOutcome {
     else if (item.action === "manual") c.manual += 1;
     else if (item.action === "skip") c.skipped += 1;
   }
-  return { state, counts, freshSecrets: [], domainRecords: {}, ids: [] };
+  return {
+    state,
+    counts,
+    freshSecrets: [],
+    domainRecords: {},
+    ids: [],
+    enrichment: { withProperties: 0, withTopics: 0 },
+  };
 }
 
 const runReport = (prepared: Prepared, outcome: ApplyOutcome): Report =>
@@ -285,7 +298,9 @@ export async function execute(ctx: Context, prepared: Prepared): Promise<number>
       totals.set(i.resource, (totals.get(i.resource) ?? 0) + (i.count ?? 1));
   }
   ctx.progress.section(
-    [...totals.keys()].map((r) => RESOURCE_LABEL[r]),
+    [...totals.keys()].flatMap((r) =>
+      r === "enrichment" ? Object.values(ENRICHMENT_LABEL) : [RESOURCE_LABEL[r]],
+    ),
     [...totals.values()].map((n) => `${formatNumber(n)}/${formatNumber(n)}`),
   );
   const outcome = await applyPlan({

@@ -24,7 +24,9 @@ import type {
   WebhookPayload,
 } from "./plan.js";
 import type { Progress, StepHandle } from "./progress.js";
-import type { Source } from "./providers/index.js";
+import type { EnrichFacet, Source } from "./providers/index.js";
+import { cutoverReadyLines } from "./report.js";
+import { dim, warn } from "./theme.js";
 import { chunk, formatNumber, pluralize } from "./utils.js";
 
 export interface ResourceCounts {
@@ -46,6 +48,8 @@ export interface ApplyOutcome {
   domainRecords: Record<string, DnsRecord[]>;
   /** Source id → target id for the resources code refers to by id. */
   ids: IdMapping[];
+  /** Contacts that received at least one property / one topic subscription this run. */
+  enrichment: { withProperties: number; withTopics: number };
 }
 
 export interface IdMapping {
@@ -95,6 +99,12 @@ export const RESOURCE_LABEL: Record<Resource, string> = {
   "api-keys": "API keys",
 };
 
+/** The two enrichment passes, as the progress lines name them. */
+export const ENRICHMENT_LABEL: Record<EnrichFacet, string> = {
+  topics: "Enrichment · topics",
+  properties: "Enrichment · properties",
+};
+
 const emptyCounts = (): ResourceCounts => ({
   created: 0,
   updated: 0,
@@ -119,15 +129,21 @@ export function enrichmentItem(
   c: SourceContact,
   pass1Status: "created" | "updated",
   maps: { propertyKeys: ReadonlySet<string>; topicBySource: ReadonlyMap<string, string> },
+  facets: readonly EnrichFacet[] = ["properties", "topics"],
 ): ContactBatchItem {
-  const properties = Object.fromEntries(
-    Object.entries(c.properties ?? {}).filter(([key]) => maps.propertyKeys.has(key)),
-  );
-  const topics = (c.topics ?? []).flatMap((t) => {
-    const id = maps.topicBySource.get(t.id);
-    if (id === undefined || (pass1Status === "updated" && t.subscription !== "opt_out")) return [];
-    return [{ id, subscription: t.subscription }];
-  });
+  const properties = facets.includes("properties")
+    ? Object.fromEntries(
+        Object.entries(c.properties ?? {}).filter(([key]) => maps.propertyKeys.has(key)),
+      )
+    : {};
+  const topics = facets.includes("topics")
+    ? (c.topics ?? []).flatMap((t) => {
+        const id = maps.topicBySource.get(t.id);
+        if (id === undefined || (pass1Status === "updated" && t.subscription !== "opt_out"))
+          return [];
+        return [{ id, subscription: t.subscription }];
+      })
+    : [];
   return {
     email: c.email,
     ...(Object.keys(properties).length > 0 ? { properties } : {}),
@@ -157,7 +173,14 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
     state.updatedAt = new Date().toISOString();
     input.save(state);
   };
-  const outcome: ApplyOutcome = { state, counts, freshSecrets: [], domainRecords: {}, ids: [] };
+  const outcome: ApplyOutcome = {
+    state,
+    counts,
+    freshSecrets: [],
+    domainRecords: {},
+    ids: [],
+    enrichment: { withProperties: 0, withTopics: 0 },
+  };
 
   // Target ids by name (broadcast references) and by source id (contact associations).
   const topicByName = new Map<string, string>();
@@ -351,69 +374,6 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
     finish(step, tally("contacts").failed, total);
   }
 
-  if (plan.items.some((i) => i.resource === "enrichment")) {
-    const step = progress.step(RESOURCE_LABEL.enrichment);
-    // A resume cursor, not a ledger: holds the ids upserted so far in an interrupted
-    // run and is cleared once the pass completes, so the next sync refreshes everyone.
-    const doneIds = new Set(state.progress.enrichmentDone ?? []);
-    if (doneIds.size > 0) {
-      step.note(
-        `resuming: skipping ${pluralize(doneIds.size, "contact")} enriched in an earlier run`,
-      );
-    }
-    // Until one pass has reached the end, no contact has been enriched yet (an
-    // interrupted first run resumes with the full topic list); afterwards only
-    // contacts created in this run are new.
-    const synced = state.progress.enrichmentCompleted === true;
-    let buffer: { id: string; item: ContactBatchItem }[] = [];
-    const flush = async (): Promise<void> => {
-      const sendable = buffer.filter((b) => b.item.properties !== undefined || b.item.topics);
-      const failedIds = new Set<string>();
-      if (sendable.length > 0) {
-        const out = await target.batchContacts(
-          sendable.map((b) => b.item),
-          { onConflict: "upsert" },
-        );
-        tally("enrichment").updated += out.data.length;
-        for (const error of out.errors) {
-          const entry = sendable[error.index];
-          if (entry !== undefined) failedIds.add(entry.id);
-          failed("enrichment", entry?.item.email ?? `#${error.index}`, error.message);
-        }
-      }
-      for (const b of buffer) if (!failedIds.has(b.id)) doneIds.add(b.id);
-      state.progress.enrichmentDone = [...doneIds];
-      buffer = [];
-      save();
-    };
-    await source.enrichContacts(snapshot, {
-      alreadyDone: doneIds,
-      onProgress: (event) => step.update(event.n, event.total),
-      onContact: async (contact) => {
-        const status = pass1.get(contact.email.toLowerCase());
-        if (status === "failed" || status === "skipped") return;
-        const item = enrichmentItem(
-          contact,
-          status === "created" || !synced ? "created" : "updated",
-          {
-            propertyKeys,
-            topicBySource,
-          },
-        );
-        buffer.push({ id: contact.id, item });
-        if (buffer.length >= BATCH_MAX) await flush();
-      },
-    });
-    await flush();
-    state.progress.enrichmentCompleted = true;
-    if (tally("enrichment").failed === 0) {
-      delete state.progress.enrichmentDone;
-      state.progress.contactsCursor = null;
-    }
-    save();
-    finish(step, tally("enrichment").failed, snapshot.contacts.length);
-  }
-
   await runRows("broadcasts", (item) => {
     const { input: b, segmentName, topicName } = item.payload as BroadcastPayload;
     return target.createBroadcast({
@@ -460,6 +420,130 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
     state.progress.suppressionsDone = true;
     save();
     finish(step, tally("suppressions").failed, total);
+  }
+
+  if (plan.items.some((i) => i.resource === "enrichment")) {
+    // Until both passes have reached the end once, no contact counts as enriched
+    // (an interrupted first run resumes with the full topic list); afterwards
+    // only contacts created in this run are new.
+    const synced = state.progress.enrichmentCompleted === true;
+    const enrichedIds = new Set<string>();
+    const failedIds = new Set<string>();
+    const total = snapshot.contacts.length;
+    // Opt-outs first: a broadcast sent between the passes must reach nobody who left.
+    const passes: {
+      facet: EnrichFacet;
+      ledger: "topicsDone" | "enrichmentDone";
+      wanted: boolean;
+      skipped: string;
+    }[] = [
+      {
+        facet: "topics",
+        ledger: "topicsDone",
+        wanted: snapshot.topics.length > 0 && topicBySource.size > 0,
+        skipped: snapshot.topics.length === 0 ? "no topics on the source" : "topics not migrated",
+      },
+      {
+        facet: "properties",
+        ledger: "enrichmentDone",
+        wanted: snapshot.properties.length > 0 && propertyKeys.size > 0,
+        skipped:
+          snapshot.properties.length === 0
+            ? "no contact properties on the source"
+            : "contact properties not migrated",
+      },
+    ];
+    if (passes.some((p) => p.wanted)) {
+      for (const line of cutoverReadyLines(plan.source, plan.target.baseUrl, outcome.domainRecords))
+        progress.line(line);
+      progress.line("");
+    }
+    for (const pass of passes) {
+      if (!pass.wanted) {
+        progress.line(dim(`${ENRICHMENT_LABEL[pass.facet]}: skipped, ${pass.skipped}`));
+        continue;
+      }
+      const step = progress.step(ENRICHMENT_LABEL[pass.facet]);
+      const doneIds = new Set(state.progress[pass.ledger] ?? []);
+      if (doneIds.size > 0) {
+        step.note(
+          `resuming: skipping ${pluralize(doneIds.size, "contact")} enriched in an earlier run`,
+        );
+      }
+      const failedBefore = failedIds.size;
+      let processed = 0;
+      let withValues = 0;
+      let buffer: { id: string; item: ContactBatchItem }[] = [];
+      const flush = async (): Promise<void> => {
+        const sendable = buffer.filter(
+          (b) => b.item.properties !== undefined || b.item.topics !== undefined,
+        );
+        const failedNow = new Set<string>();
+        if (sendable.length > 0) {
+          const out = await target.batchContacts(
+            sendable.map((b) => b.item),
+            { onConflict: "upsert" },
+          );
+          for (const error of out.errors) {
+            const entry = sendable[error.index];
+            if (entry !== undefined) {
+              failedNow.add(entry.id);
+              failedIds.add(entry.id);
+            }
+            failed("enrichment", entry?.item.email ?? `#${error.index}`, error.message);
+          }
+          withValues += sendable.length - failedNow.size;
+          for (const b of sendable) if (!failedNow.has(b.id)) enrichedIds.add(b.id);
+        }
+        for (const b of buffer) if (!failedNow.has(b.id)) doneIds.add(b.id);
+        // A contact is counted once however many passes wrote or failed it.
+        tally("enrichment").updated = enrichedIds.size;
+        tally("enrichment").failed = failedIds.size;
+        state.progress[pass.ledger] = [...doneIds];
+        buffer = [];
+        save();
+      };
+      await source.enrichContacts(snapshot, {
+        alreadyDone: doneIds,
+        facets: [pass.facet],
+        onProgress: (event) => step.update(event.n, event.total),
+        onContact: async (contact) => {
+          const status = pass1.get(contact.email.toLowerCase());
+          if (status === "failed" || status === "skipped") return;
+          processed += 1;
+          const item = enrichmentItem(
+            contact,
+            status === "created" || !synced ? "created" : "updated",
+            { propertyKeys, topicBySource },
+            [pass.facet],
+          );
+          buffer.push({ id: contact.id, item });
+          if (buffer.length >= BATCH_MAX) await flush();
+        },
+      });
+      await flush();
+      const noun = pass.facet === "properties" ? "properties" : "topic subscriptions";
+      if (pass.facet === "properties") outcome.enrichment.withProperties = withValues;
+      else outcome.enrichment.withTopics = withValues;
+      if (pass.facet === "properties" && processed > 0 && withValues === 0) {
+        const message = "no contact carried a property value — check the source shape";
+        step.note(warn(message));
+        log.warn(message);
+      }
+      const failedInPass = failedIds.size - failedBefore;
+      if (failedInPass > 0) {
+        step.fail(`${formatNumber(failedInPass)} of ${formatNumber(total)} failed`);
+      } else {
+        step.done(`${formatNumber(total)} · ${formatNumber(withValues)} with ${noun}`);
+      }
+    }
+    state.progress.enrichmentCompleted = true;
+    if (tally("enrichment").failed === 0) {
+      delete state.progress.enrichmentDone;
+      delete state.progress.topicsDone;
+      state.progress.contactsCursor = null;
+    }
+    save();
   }
 
   const mapping = (

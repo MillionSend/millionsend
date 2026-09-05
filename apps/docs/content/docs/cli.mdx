@@ -65,9 +65,9 @@ millionsend --help | --version
 | `--to-url <url>` | MillionSend API URL: `https://api.millionsend.com` for Cloud, or your instance's URL. |
 | `--to-key-stdin` | Read the MillionSend API key from stdin (second line when both stdin flags are set). |
 | `--to-key <key>` | MillionSend API key as an argument. Same caveat. |
-| `--rps <n>` | Requests per second against the source, 1 to 10. Default 8: Resend allows 10 per team, shared with your production sending. |
+| `--rps <n>` | Requests per second against the source; default 8. Resend's team limit is 10, shared with your production sending; the CLI prints the limit it detects on connect, paces under it, and warns when the rate is above it. Values above 10 (up to 100) are for a limit Resend raised on request. |
 | `--only <a,b>` | Migrate only these resources. |
-| `--skip <a,b>` | Skip these resources. `enrichment` is the per-contact properties and topics pass. |
+| `--skip <a,b>` | Skip these resources. `enrichment` is the per-contact pass that runs last: topic subscriptions, then properties, each resumable. |
 | `--on-conflict <mode>` | Contacts that already exist on the target: `upsert` (default), `skip`, `error`. |
 | `--include-sent` | Import sent broadcasts as drafts. Skipped by default. |
 | `--fresh-webhook-secrets` | Mint new webhook signing secrets instead of copying them. Shown once, in the report. |
@@ -83,8 +83,8 @@ millionsend --help | --version
 | `-h`, `--help` / `-V`, `--version` | Help text / version. |
 
 Resource names for `--only` and `--skip`, in apply order: `domains`,
-`properties`, `topics`, `segments`, `contacts`, `enrichment`, `broadcasts`,
-`templates`, `webhooks`, `suppressions`, `api-keys`.
+`properties`, `topics`, `segments`, `contacts`, `broadcasts`,
+`templates`, `webhooks`, `suppressions`, `enrichment`, `api-keys`.
 
 ## Environment
 

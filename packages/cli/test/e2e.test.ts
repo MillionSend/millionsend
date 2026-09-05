@@ -337,12 +337,16 @@ describe("millionsend (built bundle)", () => {
         webhooks: 2,
         templates: 4,
         contacts: CONTACT_COUNT,
+        broadcasts: 3,
+        suppressions: 40,
       });
       expect(state.progress.contactsCursor).toBeNull();
+      expect(state.progress.topicsDone ?? []).toEqual([]);
       expect(state.progress.enrichmentDone ?? []).toEqual([]);
       expect(existsSync(migratePaths(cwd).reportJson)).toBe(false);
       expect(await rowCount(cloud, schema.contacts)).toBe(CONTACT_COUNT);
-      expect(await rowCount(cloud, schema.broadcasts)).toBe(0);
+      // Enrichment runs last, so the first run already carried the broadcasts across.
+      expect(await rowCount(cloud, schema.broadcasts)).toBe(3);
     },
     READ,
   );
@@ -372,8 +376,8 @@ describe("millionsend (built bundle)", () => {
       expect(stdout).toContain("Resend was only read; nothing there was changed.");
       expect(stdout).toContain(`${CONTACT_COUNT.toLocaleString("en-US")}  contacts updated`);
       expect(stdout).toContain(`${enrichable().toLocaleString("en-US")}  contacts enriched`);
-      expect(stdout).toContain("3  broadcasts created");
-      expect(stdout).toContain("40  suppressions created");
+      expect(stdout).toContain("3  broadcasts unchanged");
+      expect(stdout).toContain("40  suppressions unchanged");
       expect(stdout).toContain("steps done — left:");
       expect(stdout).toContain("[ ] add DNS records for news.example.com");
       expect(stdout).toContain(`[ ] set RESEND_BASE_URL=${cloud.baseUrl} in your app`);
@@ -428,7 +432,9 @@ describe("millionsend (built bundle)", () => {
       });
       expect(report.counts.enrichment).toMatchObject({ updated: enrichable(), failed: 0 });
       expect(report.counts.domains).toMatchObject({ created: 0, unchanged: 2, manual: 2 });
-      expect(report.counts.broadcasts).toMatchObject({ created: 3, skipped: 3 });
+      // Broadcasts and suppressions went across before the 401; this run finds them in place.
+      expect(report.counts.broadcasts).toMatchObject({ created: 0, unchanged: 3, skipped: 3 });
+      expect(report.counts.suppressions).toMatchObject({ created: 0, unchanged: 40 });
       expect(report.dns.map((d) => d.domain)).toEqual(["news.example.com"]);
       expect(report.apiKeys).toEqual([...API_KEY_NAMES]);
       expect(report.offer).toMatchObject({

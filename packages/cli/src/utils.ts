@@ -74,3 +74,26 @@ export function truncate(s: string, width: number): string {
   if (chars.length <= width) return s;
   return `${chars.slice(0, Math.max(0, width - 1)).join("")}…`;
 }
+
+/** Runs `fn` over `items` with at most `limit` in flight; the first failure stops the walk and is rethrown. */
+export async function forEachConcurrent<T>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  let stopped = false;
+  const worker = async (): Promise<void> => {
+    while (!stopped && next < items.length) {
+      const item = items[next++] as T;
+      try {
+        await fn(item);
+      } catch (error) {
+        stopped = true;
+        throw error;
+      }
+    }
+  };
+  const workers = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workers }, worker));
+}

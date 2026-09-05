@@ -8,6 +8,7 @@ import {
   authenticateApiKey,
   beginIdempotent,
   buildUnsubscribeUrl,
+  CONTACT_PROPERTY_MAX_KEYS,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   type ContactActivityRow,
   type ContactEventContext,
@@ -50,7 +51,7 @@ import {
   type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
-import { schema } from "@millionsend/db";
+import { keysetCursorWhere, schema } from "@millionsend/db";
 import type { SegmentFilter } from "@millionsend/db/schema";
 import type { SerializedSesEvent } from "@millionsend/queue";
 import {
@@ -396,18 +397,26 @@ export function numericPropertyValue(value: unknown): number | null {
 
 /**
  * Coerces an incoming contact `properties` record to the stored flat
- * string→string map: scalars pass through `String()`, null clears a key
- * (omitted). Invalid — for a precise 422 rather than silently storing bad
+ * string→string map: scalars pass through `String()`, null marks the key as
+ * `removed` (the update path unsets it; create and batch have nothing to
+ * unset). Invalid — for a precise 422 rather than silently storing bad
  * data — are nested objects/arrays, and values for a key registered as
  * 'number' that don't parse to a finite number.
  */
 function coerceContactProperties(
   input: Record<string, unknown>,
   types: ContactPropertyTypes,
-): { ok: true; properties: Record<string, string> } | { ok: false; message: string } {
+):
+  | { ok: true; properties: Record<string, string>; removed: string[] }
+  | { ok: false; message: string } {
   const out: Record<string, string> = {};
+  const removed: string[] = [];
   for (const [key, value] of Object.entries(input)) {
-    if (value === null || value === undefined) continue;
+    if (value === undefined) continue;
+    if (value === null) {
+      removed.push(key);
+      continue;
+    }
     if (typeof value === "object") {
       return { ok: false, message: "contact properties must be flat string or number values" };
     }
@@ -423,7 +432,7 @@ function coerceContactProperties(
     }
     out[key] = text;
   }
-  return { ok: true, properties: out };
+  return { ok: true, properties: out, removed };
 }
 
 type WireContactPropertyValue =
@@ -550,9 +559,7 @@ export async function keysetPage<R>(opts: {
   if (cursorId) {
     const cur = await opts.loadCursor(cursorId);
     if (!cur) return "bad_cursor";
-    cond = query.before
-      ? sql`(${opts.createdAt}, ${opts.id}) < (${cur.createdAt}, ${cur.id}::uuid)`
-      : sql`(${opts.createdAt}, ${opts.id}) > (${cur.createdAt}, ${cur.id}::uuid)`;
+    cond = keysetCursorWhere(opts.createdAt, opts.id, cur.id, query.before ? "before" : "after");
   }
   // One extra row decides has_more without a count query.
   const fetched = await opts.loadRows(cond, Boolean(query.before), limit + 1);
@@ -1080,24 +1087,38 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     idOrEmail: string,
     body: z.infer<typeof updateContactRequestSchema>,
   ): Promise<{ invalid: string } | { id: string } | undefined> => {
-    let properties: Record<string, string> | undefined;
+    let incoming: { properties: Record<string, string>; removed: string[] } | undefined;
     if (body.properties !== undefined) {
       const coerced = coerceContactProperties(
         body.properties,
         await loadContactPropertyTypes(db, teamId),
       );
       if (!coerced.ok) return { invalid: coerced.message };
-      properties = coerced.properties;
+      incoming = coerced;
     }
     // Read the flag before writing so the timeline records only real flips —
-    // a PATCH restating the current state stays silent.
+    // a PATCH restating the current state stays silent. Properties are
+    // merged, so the stored-map cap is checked against the merged key set.
     const [before] =
-      body.unsubscribed === undefined
+      body.unsubscribed === undefined && incoming === undefined
         ? []
         : await db
-            .select({ unsubscribed: t.unsubscribed })
+            .select({ unsubscribed: t.unsubscribed, properties: t.properties })
             .from(t)
             .where(teamContactWhere(teamId, idOrEmail));
+    let properties: SQL | undefined;
+    if (incoming && before) {
+      const keys = new Set(Object.keys(before.properties));
+      for (const key of incoming.removed) keys.delete(key);
+      for (const key of Object.keys(incoming.properties)) keys.add(key);
+      if (keys.size > CONTACT_PROPERTY_MAX_KEYS) {
+        return { invalid: `at most ${CONTACT_PROPERTY_MAX_KEYS} properties` };
+      }
+      if (Object.keys(incoming.properties).length > 0 || incoming.removed.length > 0) {
+        properties = sql`(${t.properties} || ${JSON.stringify(incoming.properties)}::jsonb)`;
+        for (const key of incoming.removed) properties = sql`${properties} - ${key}::text`;
+      }
+    }
     const [row] = await db
       .update(t)
       .set({
@@ -1126,7 +1147,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         enqueue: contactEvents.enqueue,
       });
     }
-    if (row && before && before.unsubscribed !== body.unsubscribed) {
+    if (
+      row &&
+      before &&
+      body.unsubscribed !== undefined &&
+      before.unsubscribed !== body.unsubscribed
+    ) {
       await recordContactActivity(
         db,
         {

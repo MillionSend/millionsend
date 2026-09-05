@@ -20,7 +20,7 @@ Node 18 or newer; no dependencies.
 
 | Resource | How |
 | --- | --- |
-| Contacts | Upserted by email through the batch endpoint; `unsubscribed` and topic opt-outs are preserved, never re-subscribed. A second pass adds properties and topic subscriptions when the account uses them. |
+| Contacts | Upserted by email through the batch endpoint; `unsubscribed` and topic opt-outs are preserved, never re-subscribed. Topic subscriptions and properties follow in two per-contact passes that run after everything else, so the account is sendable before they finish. |
 | Segments, topics, properties | Matched by name / name / key: created when missing, updated when different, left alone when equal. Segment memberships follow the contacts. |
 | Templates | Name, alias, subject, html, text. From, reply-to and variables cannot be stored — listed as manual steps. |
 | Webhooks | Endpoint and events. Signing secrets are copied so receivers keep verifying (`--fresh-webhook-secrets` mints new ones, shown once). Events MillionSend also emits carry over (`email.*`, `contact.created`, `contact.updated`, `contact.deleted`); the rest are dropped per webhook and listed. |
@@ -45,8 +45,8 @@ Audiences (deprecated in Resend) are skipped — segments cover them.
 
 `millionsend --help` lists every flag. The ones that change what happens:
 
-- `--only a,b` / `--skip a,b` — resource names: `domains, properties, topics, segments, contacts, enrichment, broadcasts, templates, webhooks, suppressions, api-keys`. `enrichment` is the per-contact second pass.
-- `--rps N` — requests per second against the source, 1..10 (default 8). Resend allows 10 per team, shared with your production sending.
+- `--only a,b` / `--skip a,b` — resource names: `domains, properties, topics, segments, contacts, enrichment, broadcasts, templates, webhooks, suppressions, api-keys`. `enrichment` is the per-contact pass (topic subscriptions, then properties) that runs last.
+- `--rps N` — requests per second against the source (default 8). Resend's team limit is 10, shared with your production sending; the CLI prints the limit it detects and warns above it. Go past 10 (up to 100) only after Resend raised your limit.
 - `--on-conflict upsert|skip|error` — contacts that already exist on the target (default `upsert`).
 - `--include-sent`, `--fresh-webhook-secrets`, `--fresh` (ignore the state file).
 - `--yes`, `--non-interactive` (automatic when stdin is not a terminal), `--json` (JSON on stdout, progress on stderr), `--verbose`, `--color auto|always|never` (`--no-color` = `never`).

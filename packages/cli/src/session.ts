@@ -1,4 +1,11 @@
-import { type KeyInput, sourceKeyEnv, TARGET_KEY_ENV, TARGET_URL_ENV } from "./config.js";
+import {
+  type KeyInput,
+  MAX_RPS,
+  RPS_HEADROOM,
+  sourceKeyEnv,
+  TARGET_KEY_ENV,
+  TARGET_URL_ENV,
+} from "./config.js";
 import type { Context } from "./context.js";
 import { AuthError, createHttp } from "./http.js";
 import { CLOUD_API_URL, USER_AGENT, VERSION } from "./meta.js";
@@ -91,8 +98,30 @@ export async function connectSource(ctx: Context, id: ProviderId): Promise<Sourc
     }
     throw error;
   }
+  // The limit header arrives with the probe. A raised limit is used with headroom
+  // unless --rps chose the rate; a rate above the limit is allowed but announced,
+  // since the 429s land on the account's production sending too.
+  const limit = http.rateLimit;
+  let rps = ctx.config.rps;
+  if (!ctx.config.rpsGiven && limit !== null && limit > MAX_RPS) rps = limit - RPS_HEADROOM;
+  if (rps !== ctx.config.rps) {
+    http.setRps(rps);
+    ctx.config.rps = rps;
+  }
+  if (limit !== null && rps > limit) {
+    ctx.log.warn(
+      `--rps ${rps} is above the ${provider.label} team limit of ${limit} req/s. The limit is shared with your production sending, so both sides will see 429s.`,
+    );
+  } else if (limit === null && rps > MAX_RPS) {
+    ctx.log.warn(
+      `--rps ${rps} is above ${provider.label}'s default team limit of ${MAX_RPS} req/s and no limit header was seen. Go past ${MAX_RPS} only after ${provider.label} raised your limit.`,
+    );
+  }
   const host = baseUrl === provider.baseUrl({}) ? "" : ` (${baseUrl})`;
-  ctx.out.write(`${ok(SYM.ok)} ${provider.label} ${dim("·")} connected${host}\n`);
+  const rate = limit === null ? `${rps} req/s` : `limit ${limit} req/s, using ${rps}`;
+  ctx.out.write(
+    `${ok(SYM.ok)} ${provider.label} ${dim("·")} connected${host} ${dim("·")} ${rate}\n`,
+  );
   return { provider, source };
 }
 

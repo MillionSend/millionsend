@@ -27,6 +27,8 @@ export interface Config {
   /** Trailing slash stripped; null means ask (Cloud or self-hosted URL). */
   toUrl: string | null;
   rps: number;
+  /** --rps was passed: the limit detected on connect then never changes the rate. */
+  rpsGiven: boolean;
   only: Resource[] | null;
   skip: Resource[];
   onConflict: OnConflict;
@@ -52,7 +54,12 @@ export class ConfigError extends Error {
 }
 
 export const DEFAULT_RPS = 8;
+/** Resend's default team limit; shared with the account's production sending. */
 export const MAX_RPS = 10;
+/** Above 10, --rps is only useful after the provider raised the limit; the ceiling catches typos. */
+export const RPS_CEILING = 100;
+/** Requests per second left to production sending when a raised limit is detected and --rps was not given. */
+export const RPS_HEADROOM = 2;
 
 export const TARGET_KEY_ENV = "MILLIONSEND_API_KEY";
 export const TARGET_URL_ENV = "MILLIONSEND_BASE_URL";
@@ -249,11 +256,12 @@ export function parseConfig(
   }
 
   let rps = DEFAULT_RPS;
+  const rpsGiven = values.rps !== undefined;
   if (values.rps !== undefined) {
     rps = Number(values.rps);
-    if (!Number.isInteger(rps) || rps < 1 || rps > MAX_RPS) {
+    if (!Number.isInteger(rps) || rps < 1 || rps > RPS_CEILING) {
       throw new ConfigError(
-        `--rps must be a whole number between 1 and ${MAX_RPS} (got ${values.rps}).`,
+        `--rps must be a whole number between 1 and ${RPS_CEILING} (got ${values.rps}).`,
       );
     }
   }
@@ -283,6 +291,7 @@ export function parseConfig(
     toKey,
     toUrl,
     rps,
+    rpsGiven,
     only: resourceList("--only", values.only),
     skip: resourceList("--skip", values.skip) ?? [],
     onConflict,
@@ -309,6 +318,7 @@ function minimal(command: "help" | "version"): Config {
     toKey: { source: "prompt", value: null },
     toUrl: null,
     rps: DEFAULT_RPS,
+    rpsGiven: false,
     only: null,
     skip: [],
     onConflict: "upsert",
@@ -344,8 +354,9 @@ Options
   --to-url <url>             MillionSend API URL: ${CLOUD_API_URL} for Cloud, or your instance's URL
   --to-key-stdin             read the MillionSend API key from stdin (second line when both stdin flags are set)
   --to-key <key>             MillionSend API key as an argument (same caveat)
-  --rps <n>                  requests per second against the source, 1..${MAX_RPS} (default ${DEFAULT_RPS}: Resend allows 10 per team,
-                             shared with your production sending)
+  --rps <n>                  requests per second against the source (default ${DEFAULT_RPS}). Resend's team limit is ${MAX_RPS}, shared
+                             with your production sending; the CLI prints the limit it detects and warns above it.
+                             Go past ${MAX_RPS} only after Resend raised your limit (up to ${RPS_CEILING})
   --only <a,b>               migrate only these resources
   --skip <a,b>               skip these resources; \`enrichment\` is the per-contact properties/topics pass
   --on-conflict <mode>       contacts that already exist on the target: upsert (default), skip, error

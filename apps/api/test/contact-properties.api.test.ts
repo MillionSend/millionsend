@@ -186,3 +186,89 @@ describe("number-typed property values on /contacts", () => {
     });
   });
 });
+
+describe("PATCH /contacts/{id} merges properties", () => {
+  let contactId: string;
+  let segmentId: string;
+
+  beforeAll(async () => {
+    const created = await call(tokenA, "POST", "/contacts", {
+      email: "merge@example.com",
+      properties: { plan: "free", source: "web", persona: "dev" },
+    });
+    expect(created.status).toBeLessThan(300);
+    contactId = (await json(created)).id as string;
+    const segment = await call(tokenA, "POST", "/segments", { name: "merge-alias" });
+    segmentId = (await json(segment)).id as string;
+  });
+
+  const properties = async () =>
+    ((await json(await call(tokenA, "GET", `/contacts/${contactId}`))).properties ?? {}) as Record<
+      string,
+      { type: string; value: unknown }
+    >;
+
+  it("keeps the keys a PATCH does not mention", async () => {
+    const res = await call(tokenA, "PATCH", `/contacts/${contactId}`, {
+      properties: { plan: "pro" },
+    });
+    expect(res.status).toBe(200);
+    const stored = await properties();
+    expect(stored.plan?.value).toBe("pro");
+    expect(stored.source?.value).toBe("web");
+    expect(stored.persona?.value).toBe("dev");
+  });
+
+  it("removes only the keys set to null", async () => {
+    const res = await call(tokenA, "PATCH", `/contacts/${contactId}`, {
+      properties: { source: null },
+    });
+    expect(res.status).toBe(200);
+    const stored = await properties();
+    expect(Object.keys(stored).sort()).toEqual(["persona", "plan"]);
+  });
+
+  it("leaves properties alone when the PATCH has none, and treats an empty map as a no-op", async () => {
+    expect(
+      (await call(tokenA, "PATCH", `/contacts/${contactId}`, { unsubscribed: true })).status,
+    ).toBe(200);
+    expect((await call(tokenA, "PATCH", `/contacts/${contactId}`, { properties: {} })).status).toBe(
+      200,
+    );
+    expect(Object.keys(await properties()).sort()).toEqual(["persona", "plan"]);
+  });
+
+  it("merges through the audiences alias as well", async () => {
+    const res = await call(tokenA, "PATCH", `/audiences/${segmentId}/contacts/${contactId}`, {
+      properties: { persona: "ops" },
+    });
+    expect(res.status).toBe(200);
+    const stored = await properties();
+    expect(stored.persona?.value).toBe("ops");
+    expect(stored.plan?.value).toBe("pro");
+  });
+
+  it("caps the stored map at 100 keys, and a removal frees a slot", async () => {
+    const full = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`k${i}`, "v"]));
+    const created = await call(tokenA, "POST", "/contacts", {
+      email: "capped@example.com",
+      properties: full,
+    });
+    expect(created.status).toBeLessThan(300);
+    const id = (await json(created)).id as string;
+    const over = await call(tokenA, "PATCH", `/contacts/${id}`, { properties: { extra: "v" } });
+    expect(over.status).toBe(422);
+    expect((await json(over)).message).toContain("at most 100 properties");
+    const swap = await call(tokenA, "PATCH", `/contacts/${id}`, {
+      properties: { k0: null, extra: "v" },
+    });
+    expect(swap.status).toBe(200);
+    const stored = (await json(await call(tokenA, "GET", `/contacts/${id}`))).properties as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(stored)).toHaveLength(100);
+    expect(stored.k0).toBeUndefined();
+    expect(stored.extra).toBeDefined();
+  });
+});

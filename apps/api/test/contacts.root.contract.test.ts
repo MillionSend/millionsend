@@ -4,6 +4,7 @@ import { EnvKeyring, generateApiKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { sql } from "drizzle-orm";
 import { Resend } from "resend";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi } from "../src/app.js";
@@ -201,5 +202,38 @@ describe("official resend SDK: top-level /contacts", () => {
     expect(before.error).toBeNull();
     expect(before.data?.data.map((c) => c.id)).toEqual(page1.data?.data.map((c) => c.id));
     expect(before.data?.has_more).toBe(false);
+  });
+
+  it("pages past rows that share one created_at down to the microsecond", async () => {
+    const pinned: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const created = await resend.contacts.create({ email: `ks${i}@example.com` });
+      expect(created.error).toBeNull();
+      pinned.push(created.data?.id ?? "");
+    }
+    // Rows written by one statement share one now(); PGlite's now() is
+    // millisecond-only, so the microsecond fraction is pinned by hand.
+    await db.execute(
+      sql`update ${schema.contacts} set created_at = '2099-01-01T00:00:00.000123Z' where ${schema.contacts.email} like 'ks%@example.com'`,
+    );
+
+    const seen: string[] = [];
+    let after: string | undefined;
+    for (let hops = 0; ; hops++) {
+      expect(hops).toBeLessThan(50);
+      const page = await resend.contacts.list({ limit: 2, ...(after ? { after } : {}) });
+      expect(page.error).toBeNull();
+      const ids = page.data?.data.map((c) => c.id) ?? [];
+      expect(ids.length).toBeGreaterThan(0);
+      seen.push(...ids);
+      after = ids.at(-1);
+      if (!page.data?.has_more) break;
+    }
+    expect(new Set(seen).size).toBe(seen.length);
+    for (const id of pinned) expect(seen).toContain(id);
+
+    const before = await resend.contacts.list({ limit: 2, before: seen.at(-1) ?? "" });
+    expect(before.error).toBeNull();
+    expect(before.data?.data.map((c) => c.id)).toEqual(seen.slice(-3, -1));
   });
 });

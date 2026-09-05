@@ -9,7 +9,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { reconcileWebhookDeliveries } from "../src/handlers/cron.js";
 import { processSesEvent } from "../src/handlers/process-ses-event.js";
@@ -284,4 +284,34 @@ it("reconcile sweep pages through every overdue delivery in bounded statements",
   expect(new Set(seen)).toEqual(expect.objectContaining({ size: new Set(seen).size }));
   for (const row of inserted) expect(seen).toContain(row.id);
   expect(Math.max(...pages)).toBeLessThanOrEqual(1000);
+});
+
+it("reconcile sweep terminates when more than a page of overdue deliveries share one created_at", async () => {
+  const endpointId = await insertEndpoint(teamId, null);
+  const inserted = await db
+    .insert(schema.webhookDeliveries)
+    .values(
+      Array.from({ length: 1001 }, (_, i) => ({
+        endpointId,
+        messageId: `msg_same_${i}`,
+        eventType: "email.delivered",
+        payload: {},
+        status: "pending" as const,
+      })),
+    )
+    .returning({ id: schema.webhookDeliveries.id });
+  // Rows written by one statement share one now(); PGlite's now() is
+  // millisecond-only, so the microsecond fraction is pinned by hand.
+  await db.execute(
+    sql`update ${schema.webhookDeliveries} set created_at = '2020-01-01T00:00:00.000123Z' where ${schema.webhookDeliveries.messageId} like 'msg_same_%'`,
+  );
+  const seen: string[] = [];
+  await reconcileWebhookDeliveries(db, {
+    enqueue: async (rows) => {
+      seen.push(...rows.map((r) => r.id));
+    },
+  });
+  const distinct = new Set(seen);
+  expect(distinct.size).toBe(seen.length);
+  for (const row of inserted) expect(distinct.has(row.id)).toBe(true);
 });

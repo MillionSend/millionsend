@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { createContext } from "../src/context.js";
 import { countUp, createProgress } from "../src/progress.js";
@@ -291,5 +291,26 @@ describe("format helpers", () => {
     expect(formatDuration(12)).toBe("12 s");
     expect(formatDuration(0.2)).toBe("1 s");
     expect(formatDuration(267)).toBe("about 4 min");
+  });
+});
+
+describe("createProgress (tty pace)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("shows the rate and the time left once enough items are in", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-05T12:00:00Z"));
+    setColorMode("never");
+    const { chunks, stream } = sink();
+    const step = createProgress({ stream, tty: true }).step("Enrichment · topics");
+    for (let n = 1; n <= 40; n++) {
+      vi.advanceTimersByTime(500);
+      step.update(n, 1000);
+    }
+    const last = chunks.at(-1) ?? "";
+    expect(last).toContain("40/1,000");
+    expect(last).toMatch(/2(\.0)?\/s · ~8 min left/);
+    step.update(1000, 1000);
+    expect(chunks.at(-1)).not.toContain("left");
   });
 });

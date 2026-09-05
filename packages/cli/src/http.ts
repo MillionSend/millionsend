@@ -23,6 +23,49 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A cursor walk that stopped moving: the server answered the same page for a
+ * new `after`, or the walk ran past MAX_PAGES. Thrown instead of looping
+ * forever on duplicates; the list is never silently truncated.
+ */
+export class PaginationError extends Error {
+  constructor(path: string, after: string | undefined, reason: string) {
+    super(`${path}: ${reason} (cursor after=${after ?? "none"})`);
+    this.name = "PaginationError";
+  }
+}
+
+export const MAX_PAGES = 100_000;
+
+/**
+ * One check per page of a cursor walk. A server that ignores `after` hands the
+ * first page back forever; every page must move the cursor and bring new ids.
+ */
+export function cursorGuard(
+  path: string,
+  maxPages = MAX_PAGES,
+): (page: readonly { id: string }[], after: string | undefined) => void {
+  const seen = new Set<string>();
+  let pages = 0;
+  return (page, after) => {
+    pages += 1;
+    if (pages > maxPages) {
+      throw new PaginationError(path, after, `more than ${maxPages} pages walked`);
+    }
+    if (page.length > 0 && page[page.length - 1]?.id === after) {
+      throw new PaginationError(
+        path,
+        after,
+        "the page ends at the cursor it was asked to start after; the API ignored `after`",
+      );
+    }
+    if (page.length > 0 && page.every((row) => seen.has(row.id))) {
+      throw new PaginationError(path, after, "the page holds only ids already listed");
+    }
+    for (const row of page) seen.add(row.id);
+  };
+}
+
 export interface HttpResponse<T = unknown> {
   status: number;
   body: T;
@@ -49,11 +92,22 @@ export interface Http {
   delete<T = unknown>(path: string, options?: RequestOptions): Promise<HttpResponse<T>>;
 }
 
+/** What createHttp returns: the request methods plus the pacing controls the session uses. */
+export interface HttpClient extends Http {
+  /** The last `ratelimit-limit` header seen (Resend: requests per second per team); null until a response carries one. */
+  readonly rateLimit: number | null;
+  /** Re-paces the client; the header-driven throttle keeps applying on top. */
+  setRps(rps: number): void;
+}
+
 export interface HttpOptions {
   baseUrl: string;
   token: string;
   userAgent: string;
-  /** Requests per second; a request starts at most every 1000/rps ms. */
+  /**
+   * Requests per second; a request starts at most every 1000/rps ms. A 429
+   * halves the effective rate, which climbs back one req/s per clean second.
+   */
   rps: number;
   /** Attempts for 5xx and network failures (backoff 1s, 2s, 4s, 8s). */
   maxAttempts?: number | undefined;
@@ -69,21 +123,34 @@ export interface HttpOptions {
 }
 
 const MAX_WAIT_MS = 120_000;
+/**
+ * Requests left in the window at which acquire() waits for the reset. The
+ * window is the team's, shared with its production sending, so the last
+ * slots are left to the app rather than spent here.
+ */
+const REMAINING_RESERVE = 2;
+
+const clampWait = (ms: number): number => Math.min(MAX_WAIT_MS, Math.max(0, ms));
+
+/** A numeric header, or null when absent or not a number. */
+function headerNumber(headers: Headers, name: string): number | null {
+  const raw = headers.get(name);
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
 
 /** Milliseconds to wait per `retry-after` (seconds or HTTP date) or `ratelimit-reset` (seconds); null without either. */
 export function retryAfterMs(headers: Headers, now = Date.now()): number | null {
   const retryAfter = headers.get("retry-after");
   if (retryAfter !== null) {
     const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds)) return Math.min(MAX_WAIT_MS, Math.max(0, seconds * 1000));
+    if (Number.isFinite(seconds)) return clampWait(seconds * 1000);
     const date = Date.parse(retryAfter);
-    if (Number.isFinite(date)) return Math.min(MAX_WAIT_MS, Math.max(0, date - now));
+    if (Number.isFinite(date)) return clampWait(date - now);
   }
-  const reset = Number(headers.get("ratelimit-reset"));
-  if (headers.get("ratelimit-reset") !== null && Number.isFinite(reset)) {
-    return Math.min(MAX_WAIT_MS, Math.max(0, reset * 1000));
-  }
-  return null;
+  const reset = headerNumber(headers, "ratelimit-reset");
+  return reset === null ? null : clampWait(reset * 1000);
 }
 
 async function parseBody(response: Response): Promise<unknown> {
@@ -126,7 +193,7 @@ export function networkReason(error: unknown): string {
 const isPlanLimit = (body: unknown): boolean =>
   (body as { name?: unknown } | null)?.name === "plan_limit_reached";
 
-export function createHttp(options: HttpOptions): Http {
+export function createHttp(options: HttpOptions): HttpClient {
   const {
     name,
     log,
@@ -136,13 +203,38 @@ export function createHttp(options: HttpOptions): Http {
     fetch: fetchFn = globalThis.fetch,
   } = options;
   const base = options.baseUrl.replace(/\/+$/, "");
-  const interval = 1000 / options.rps;
+  let targetRps = options.rps;
+  let rps = targetRps;
+  let rampedAt = 0;
   let nextSlot = 0;
+  let holdUntil = 0;
+  let rateLimit: number | null = null;
+
+  /** The effective rate: recovers one req/s per second since the last 429 (or step) until it meets the target. */
+  const currentRps = (now: number): number => {
+    if (rps < targetRps) {
+      const steps = Math.floor((now - rampedAt) / 1000);
+      if (steps > 0) {
+        rps = Math.min(targetRps, rps + steps);
+        rampedAt += steps * 1000;
+      }
+    }
+    return rps;
+  };
   const acquire = async (): Promise<void> => {
     const now = Date.now();
-    const at = Math.max(now, nextSlot);
-    nextSlot = at + interval;
+    const at = Math.max(now, nextSlot, holdUntil);
+    nextSlot = at + 1000 / currentRps(now);
     if (at > now) await sleep(at - now);
+  };
+  const readRateHeaders = (headers: Headers): void => {
+    const limit = headerNumber(headers, "ratelimit-limit");
+    if (limit !== null && limit > 0) rateLimit = limit;
+    const remaining = headerNumber(headers, "ratelimit-remaining");
+    const reset = headerNumber(headers, "ratelimit-reset");
+    if (remaining !== null && reset !== null && remaining <= REMAINING_RESERVE) {
+      holdUntil = Math.max(holdUntil, Date.now() + clampWait(reset * 1000));
+    }
   };
 
   async function request<T>(
@@ -200,6 +292,7 @@ export function createHttp(options: HttpOptions): Http {
         continue;
       }
       log.debug(`${label} → ${response.status} (${Date.now() - started} ms)`);
+      readRateHeaders(response.headers);
       const parsed = await parseBody(response);
       const { status } = response;
       // 403 is a key problem except when the API names a plan limit (a domain past the plan's cap).
@@ -217,7 +310,11 @@ export function createHttp(options: HttpOptions): Http {
           );
         }
         const wait = retryAfterMs(response.headers) ?? 2000;
-        log.warn(`retry ${rateLimited + 1}/${rateLimitAttempts} in ${seconds(wait)} — ${name} 429`);
+        rps = Math.max(1, rps / 2);
+        rampedAt = Date.now();
+        log.warn(
+          `retry ${rateLimited + 1}/${rateLimitAttempts} in ${seconds(wait)} — ${name} 429 · slowing to ${Math.round(rps * 10) / 10} req/s`,
+        );
         await sleep(wait);
         continue;
       }
@@ -252,6 +349,14 @@ export function createHttp(options: HttpOptions): Http {
   }
 
   return {
+    get rateLimit() {
+      return rateLimit;
+    },
+    setRps(next) {
+      // An unthrottled client follows the new target; one recovering from a 429 keeps climbing towards it.
+      rps = rps >= targetRps ? next : Math.min(rps, next);
+      targetRps = next;
+    },
     get: (path, options) => request("GET", path, undefined, options),
     post: (path, body, options) => request("POST", path, body, options),
     patch: (path, body, options) => request("PATCH", path, body, options),

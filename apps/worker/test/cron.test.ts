@@ -2,7 +2,7 @@ import { DAY_MS, PLAN_DAILY_LIMIT, QUOTA_TOLERANCE, utcDay } from "@millionsend/
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   drainQuotaParked,
@@ -635,4 +635,15 @@ it("keeps a scheduled email until its delivery day has also left the window", as
     .from(schema.emails)
     .where(eq(schema.emails.teamId, teamId));
   expect(left.map((r) => r.id)).toEqual([dueYesterday.id]);
+});
+
+it("drain terminates when an exhausted team's parked rows share one created_at", async () => {
+  await db.insert(schema.usageCounters).values({ teamId, day: today(), accepted: FREE_CEILING });
+  await insertParked(new Date("2026-08-13T01:00:00Z"));
+  await insertParked(new Date("2026-08-13T01:00:00Z"));
+  // Rows written by one statement share one now(); PGlite's now() is
+  // millisecond-only, so the microsecond fraction is pinned by hand.
+  await db.execute(sql`update ${schema.emails} set created_at = '2026-08-13T01:00:00.000123Z'`);
+  const result = await drainQuotaParked(db, { isCloud: true, enqueueSend: async () => {} });
+  expect(result).toEqual({ drained: 0, stillParked: 2 });
 });

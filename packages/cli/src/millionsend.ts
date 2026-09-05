@@ -1,5 +1,5 @@
 import { TARGET_KEY_ENV, TARGET_URL_ENV } from "./config.js";
-import { ApiError, AuthError, type Http, type RequestOptions } from "./http.js";
+import { ApiError, AuthError, cursorGuard, type Http, type RequestOptions } from "./http.js";
 import type { Logger } from "./log.js";
 import { VERSION } from "./meta.js";
 import type {
@@ -157,8 +157,10 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
   async function listAll<T extends { id: string }>(path: string): Promise<T[]> {
     const rows: T[] = [];
     let after: string | undefined;
+    const guard = cursorGuard(path);
     for (;;) {
       const { body } = await api.get<ListPage<T>>(path, { query: { limit: 100, after } });
+      guard(body.data, after);
       rows.push(...body.data);
       const last = body.data.at(-1);
       if (!body.has_more || !last) return rows;
@@ -195,16 +197,25 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
 
   async function readState(): Promise<TargetState> {
     const usage = await probe();
-    const [domainRows, properties, topics, segments, webhooks, templateRows, broadcasts] =
-      await Promise.all([
-        listAll<{ id: string }>("/domains"),
-        listAll<TargetProperty>("/contact-properties"),
-        listAll<TopicWire>("/topics"),
-        listAll<TargetSegment>("/segments"),
-        listAll<WebhookWire>("/webhooks"),
-        listAll<{ id: string }>("/templates"),
-        listAll<{ id: string; name: string | null; status: string }>("/broadcasts"),
-      ]);
+    const [
+      domainRows,
+      properties,
+      topics,
+      segments,
+      webhooks,
+      templateRows,
+      broadcasts,
+      firstContact,
+    ] = await Promise.all([
+      listAll<{ id: string }>("/domains"),
+      listAll<TargetProperty>("/contact-properties"),
+      listAll<TopicWire>("/topics"),
+      listAll<TargetSegment>("/segments"),
+      listAll<WebhookWire>("/webhooks"),
+      listAll<{ id: string }>("/templates"),
+      listAll<{ id: string; name: string | null; status: string }>("/broadcasts"),
+      api.get<ListPage<{ id: string }>>("/contacts", { query: { limit: 1 } }),
+    ]);
     const domains: TargetDomain[] = [];
     for (const { id } of domainRows) {
       const { body } = await api.get<DomainWire>(`/domains/${id}`);
@@ -232,6 +243,7 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
     return {
       usage,
       domains,
+      hasContacts: firstContact.body.data.length > 0,
       properties: properties.map(({ id, key, type }) => ({ id, key, type })),
       topics: topics.map(
         (t): TargetTopic => ({

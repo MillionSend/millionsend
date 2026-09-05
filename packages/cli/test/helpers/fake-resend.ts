@@ -151,7 +151,14 @@ export async function startFakeResend(
   };
 
   const send = (res: ServerResponse, status: number, body: unknown, headers = {}): void => {
-    res.writeHead(status, { "content-type": "application/json", ...headers });
+    // Resend answers every request with its team limit headers.
+    res.writeHead(status, {
+      "content-type": "application/json",
+      "ratelimit-limit": "10",
+      "ratelimit-remaining": "9",
+      "ratelimit-reset": "1",
+      ...headers,
+    });
     res.end(JSON.stringify(body));
   };
 
@@ -213,11 +220,24 @@ export async function startFakeResend(
     }
     const detail =
       head === "contacts"
-        ? omit(row, "topics")
+        ? wireContactDetail(omit(row, "topics"))
         : head === "segments"
           ? omit(row, "member_ids")
           : row;
     return { status: 200, body: { object: DETAIL_OBJECT[head] ?? head, ...detail } };
+  };
+
+  /** GET /contacts/{id} wraps each property as {value, type}; the fixtures hold the flat seed. */
+  const wireContactDetail = (row: Row): Row => {
+    const { properties, ...rest } = row as Row & { properties?: Record<string, unknown> };
+    const wrapped = Object.fromEntries(
+      Object.entries(properties ?? {}).flatMap(([key, value]) =>
+        value === null || value === undefined
+          ? []
+          : [[key, { value, type: typeof value === "number" ? "number" : "string" }]],
+      ),
+    );
+    return { ...rest, properties: wrapped };
   };
 
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {

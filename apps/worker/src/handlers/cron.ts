@@ -13,7 +13,7 @@ import {
   type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
-import { schema } from "@millionsend/db";
+import { keysetCursorWhere, schema } from "@millionsend/db";
 import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import {
   checkDnsRecords,
@@ -47,25 +47,18 @@ export async function reconcileWebhookDeliveries(
   // Keyset pages over (createdAt, id): every overdue row is re-enqueued each
   // run, one bounded statement and one queue insert per page, so a slow
   // endpoint's backlog never starves a lost delivery behind it.
-  let cursor: { createdAt: Date; id: string } | undefined;
+  let cursorId: string | undefined;
   let requeued = 0;
   for (;;) {
     const page = await db
-      .select({ id: d.id, endpointId: d.endpointId, createdAt: d.createdAt })
+      .select({ id: d.id, endpointId: d.endpointId })
       .from(d)
-      .where(
-        and(
-          stale,
-          cursor
-            ? sql`(${d.createdAt}, ${d.id}) > (${cursor.createdAt}, ${cursor.id}::uuid)`
-            : undefined,
-        ),
-      )
+      .where(and(stale, cursorId ? keysetCursorWhere(d.createdAt, d.id, cursorId) : undefined))
       .orderBy(asc(d.createdAt), asc(d.id))
       .limit(RECONCILE_BATCH);
     const last = page.at(-1);
     if (!last) break;
-    cursor = { createdAt: last.createdAt, id: last.id };
+    cursorId = last.id;
     await deps.enqueue(page.map(({ id, endpointId }) => ({ id, endpointId })));
     requeued += page.length;
     if (page.length < RECONCILE_BATCH) break;
@@ -146,7 +139,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
   // Keyset pages over (createdAt, id): global oldest-first order keeps the
   // per-team fairness, and a row that stays parked (exhausted team, failed
   // enqueue) can never be re-read into an infinite loop.
-  let cursor: { createdAt: Date; id: string } | undefined;
+  let cursorId: string | undefined;
   for (;;) {
     const page = await db
       .select({
@@ -156,7 +149,6 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
         plan: schema.teams.plan,
         currentPeriodEnd: schema.teams.currentPeriodEnd,
         scheduledAt: schema.emails.scheduledAt,
-        createdAt: schema.emails.createdAt,
         to: schema.emails.to,
         cc: schema.emails.cc,
         bcc: schema.emails.bcc,
@@ -166,8 +158,8 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       .where(
         and(
           eq(schema.emails.latestStatus, "queued_quota"),
-          cursor
-            ? sql`(${schema.emails.createdAt}, ${schema.emails.id}) > (${cursor.createdAt}, ${cursor.id}::uuid)`
+          cursorId
+            ? keysetCursorWhere(schema.emails.createdAt, schema.emails.id, cursorId)
             : undefined,
         ),
       )
@@ -175,7 +167,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       .limit(DRAIN_PAGE);
     const last = page.at(-1);
     if (!last) break;
-    cursor = { createdAt: last.createdAt, id: last.id };
+    cursorId = last.id;
     for (const email of page) {
       drained += await drainOne(db, deps, email, exhausted, failures);
     }

@@ -45,9 +45,9 @@ const RESOURCE_ORDER: Resource[] = [
   "webhooks",
   "templates",
   "contacts",
-  "enrichment",
   "broadcasts",
   "suppressions",
+  "enrichment",
   "api-keys",
 ];
 
@@ -335,16 +335,33 @@ export function buildPlan({
     });
   }
 
+  // Facets in pass order: opt-outs first, so a broadcast sent early reaches nobody who left.
+  const facets = [
+    ...(snapshot.topics.length > 0 ? ["topic subscriptions"] : []),
+    ...(snapshot.properties.length > 0 ? ["properties"] : []),
+  ];
+  const enrichCount = snapshot.contacts.length;
   const enrichment =
     has("enrichment") &&
-    contactCount > 0 &&
+    enrichCount > 0 &&
+    (contactCount > 0 || target.hasContacts === true) &&
     !snapshot.enriched &&
-    (snapshot.properties.length > 0 || snapshot.topics.length > 0);
+    facets.length > 0;
   if (enrichment) {
     add("enrichment", "update", "contacts", {
-      count: contactCount,
-      detail: "properties and topic subscriptions, read per contact",
+      count: enrichCount,
+      detail: `${facets.join(", then ")}, read per contact`,
     });
+    if (!has("topics") && snapshot.topics.length > 0) {
+      warnings.push(
+        "topics are excluded, so the topic-subscriptions pass has nothing to write and is skipped",
+      );
+    }
+    if (!has("properties") && snapshot.properties.length > 0) {
+      warnings.push(
+        "contact properties are excluded, so the properties pass has nothing to write and is skipped",
+      );
+    }
   }
 
   if (has("broadcasts")) {
@@ -412,7 +429,7 @@ export function buildPlan({
     rowWrites +
     batches(contactCount) +
     batches(suppressionCount) +
-    (enrichment ? batches(contactCount) : 0);
+    (enrichment ? facets.length * batches(enrichCount) : 0);
   // Source reads still ahead run at `rps`; target writes at its own 10/s. Spent reads are behind us.
   const reads = enrichment ? estimateSourceRequests(snapshot).enrichment : 0;
   const requests = options.sourceRequestsSpent + reads + writes;

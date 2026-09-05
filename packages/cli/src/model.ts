@@ -213,6 +213,8 @@ export interface TargetBroadcast {
 
 /** What the target already has — the plan diffs the Snapshot against this. */
 export interface TargetState {
+  /** At least one contact exists on the target; enrichment can run without a contacts pass. */
+  hasContacts?: boolean | undefined;
   usage: TargetUsage;
   domains: TargetDomain[];
   properties: TargetProperty[];
@@ -261,8 +263,10 @@ export interface MigrateState {
   created: Record<string, string[]>;
   progress: {
     contactsCursor?: string | null | undefined;
+    /** Resume ledgers of the two enrichment passes: contact ids whose properties / topics were written. */
     enrichmentDone?: string[] | undefined;
-    /** Set once an enrichment pass has reached the end of the source; later passes are syncs. */
+    topicsDone?: string[] | undefined;
+    /** Set once both enrichment passes have reached the end of the source; later runs are syncs. */
     enrichmentCompleted?: boolean | undefined;
     suppressionsDone?: boolean | undefined;
   };

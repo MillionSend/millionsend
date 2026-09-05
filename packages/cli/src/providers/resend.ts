@@ -1,4 +1,4 @@
-import type { Http, RequestOptions } from "../http.js";
+import { cursorGuard, type Http, type RequestOptions } from "../http.js";
 import type { Logger } from "../log.js";
 import type {
   DnsRecord,
@@ -12,6 +12,7 @@ import type {
   SourceTemplate,
   SourceTemplateVariable,
 } from "../model.js";
+import { forEachConcurrent } from "../utils.js";
 
 export const RESEND_BASE_URL = "https://api.resend.com";
 /**
@@ -45,12 +46,23 @@ export interface ReadShallowOptions {
   onProgress?: OnProgress | undefined;
 }
 
+export type EnrichFacet = "properties" | "topics";
+
+/** Contacts read ahead at once: enough to fill the rate slot through the round trip, few enough to leave the team's window to its production sending. */
+export const ENRICH_CONCURRENCY = 3;
+
 export interface EnrichOptions {
   /** Contact ids already enriched by an earlier run (resume). */
   alreadyDone?: ReadonlySet<string> | undefined;
   onProgress?: OnProgress | undefined;
-  /** Called per enriched contact, in order; awaited so the caller can batch and persist. */
+  /**
+   * Called once per enriched contact, never two at a time but not in list
+   * order; awaited so the caller can batch and persist.
+   */
   onContact: (contact: SourceContact) => void | Promise<void>;
+  /** Per-contact reads to make; both when omitted. A facet with no definitions on the source is skipped either way. */
+  facets?: readonly EnrichFacet[] | undefined;
+  concurrency?: number | undefined;
 }
 
 export interface Source {
@@ -261,7 +273,12 @@ function toProperties(
   raw: Record<string, unknown> | null | undefined,
 ): Record<string, string | number> {
   const properties: Record<string, string | number> = {};
-  for (const [key, value] of Object.entries(raw ?? {})) {
+  for (const [key, wire] of Object.entries(raw ?? {})) {
+    // GET /contacts/{id} wraps each property as {value, type}; a flat scalar is accepted too.
+    const value =
+      typeof wire === "object" && wire !== null && "value" in wire
+        ? (wire as { value: unknown }).value
+        : wire;
     if (typeof value === "string" || typeof value === "number") properties[key] = value;
   }
   return properties;
@@ -300,9 +317,11 @@ export function createResendSource(http: Http, log: Logger): Source {
   ): Promise<T[]> {
     const items: T[] = [];
     let after: string | undefined;
+    const guard = cursorGuard(route);
     for (;;) {
       const { body } = await get<ListBody<T>>(route, { query: { ...query, limit: PAGE, after } });
       const data = body.data ?? [];
+      guard(data, after);
       items.push(...data);
       const last = data[data.length - 1];
       const hasMore = body.has_more ?? data.length === PAGE;
@@ -354,7 +373,7 @@ export function createResendSource(http: Http, log: Logger): Source {
           async (item) => toDomain((await get<WireDomain>(path("domains", item.id))).body),
         );
       }
-      if (include.has("properties")) {
+      if (include.has("properties") || include.has("enrichment")) {
         const list = await listAll<WireProperty>(
           "/contact-properties",
           {},
@@ -367,7 +386,7 @@ export function createResendSource(http: Http, log: Logger): Source {
           fallbackValue: property.fallback_value,
         }));
       }
-      if (include.has("topics")) {
+      if (include.has("topics") || include.has("enrichment")) {
         const list = await listAll<WireTopic>("/topics", {}, "Topics", onProgress);
         snapshot.topics = list.map((topic) => ({
           id: topic.id,
@@ -396,7 +415,7 @@ export function createResendSource(http: Http, log: Logger): Source {
           },
         );
       }
-      if (include.has("contacts")) {
+      if (include.has("contacts") || include.has("enrichment")) {
         const list = await listAll<WireContact>("/contacts", {}, "Contacts", onProgress);
         snapshot.contacts = list.map(toContact);
       }
@@ -456,34 +475,45 @@ export function createResendSource(http: Http, log: Logger): Source {
       return snapshot;
     },
 
-    async enrichContacts(snapshot, { alreadyDone, onProgress, onContact }) {
-      const wantProperties = snapshot.properties.length > 0;
-      const wantTopics = snapshot.topics.length > 0;
+    async enrichContacts(
+      snapshot,
+      { alreadyDone, onProgress, onContact, facets, concurrency = ENRICH_CONCURRENCY },
+    ) {
+      const wants = (facet: EnrichFacet): boolean => facets === undefined || facets.includes(facet);
+      const wantProperties = wants("properties") && snapshot.properties.length > 0;
+      const wantTopics = wants("topics") && snapshot.topics.length > 0;
       const total = snapshot.contacts.length;
+      const label = "Enrichment";
       if (wantProperties || wantTopics) {
-        for (const [index, contact] of snapshot.contacts.entries()) {
-          if (alreadyDone?.has(contact.id) !== true) {
-            const enriched: SourceContact = { ...contact };
-            if (wantProperties) {
-              const { body } = await get<WireContact>(path("contacts", contact.id));
-              enriched.properties = toProperties(body.properties);
-            }
-            if (wantTopics) {
-              const topics = await listAll<WireContactTopic>(
-                path("contacts", contact.id, "topics"),
-              );
-              enriched.topics = topics.map((topic) => ({
-                id: topic.id,
-                subscription: topic.subscription ?? "opt_in",
-              }));
-            }
-            snapshot.contacts[index] = enriched;
-            await onContact(enriched);
+        const pending = snapshot.contacts.flatMap((contact, index) =>
+          alreadyDone?.has(contact.id) === true ? [] : [{ contact, index }],
+        );
+        let completed = total - pending.length;
+        // Reads run a few contacts ahead; deliveries are chained so the caller
+        // sees one contact at a time, and a failed delivery poisons the chain
+        // so nothing later is handed over after it.
+        let deliver: Promise<void> = Promise.resolve();
+        await forEachConcurrent(pending, concurrency, async ({ contact, index }) => {
+          const enriched: SourceContact = { ...contact };
+          if (wantProperties) {
+            const { body } = await get<WireContact>(path("contacts", contact.id));
+            enriched.properties = toProperties(body.properties);
           }
-          onProgress?.({ label: "Enrichment", n: index + 1, total, done: false });
-        }
+          if (wantTopics) {
+            const topics = await listAll<WireContactTopic>(path("contacts", contact.id, "topics"));
+            enriched.topics = topics.map((topic) => ({
+              id: topic.id,
+              subscription: topic.subscription ?? "opt_in",
+            }));
+          }
+          snapshot.contacts[index] = enriched;
+          deliver = deliver.then(() => onContact(enriched));
+          await deliver;
+          completed += 1;
+          onProgress?.({ label, n: completed, total, done: false });
+        });
       }
-      onProgress?.({ label: "Enrichment", n: total, total, done: true });
+      onProgress?.({ label, n: total, total, done: true });
       snapshot.enriched = true;
       return snapshot;
     },

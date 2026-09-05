@@ -39,22 +39,56 @@ npx @millionsend/cli migrate --from resend --to-url https://api.your-instance
 What it does:
 
 - **Resend is only read.** Every request against Resend is a `GET` to a
-  documented endpoint; nothing there is created, changed or deleted. It is
-  throttled to 8 requests per second by default (Resend's limit is 10 per
-  team, shared with your production sending; `--rps` lowers it).
+  documented endpoint; nothing there is created, changed or deleted. The CLI
+  prints the rate limit Resend reports on connect and paces itself under it:
+  8 requests per second by default (Resend's team limit is 10, shared with
+  your production sending), backing off on the `ratelimit-*` headers and on
+  every `429`. `--rps` changes the rate.
 - **Your keys never leave your machine.** The tool talks to `api.resend.com`
   and to your MillionSend API only. Keys live in memory for the run, are never
   written to a file, and are redacted from every log line. No telemetry, no
   update check.
-- **Two passes.** Pass 1 creates properties, topics, segments, domains,
-  webhooks, templates and suppressions and upserts contacts with their
-  segment memberships. Pass 2 — only when the account uses contact properties
-  or topics — reads each contact once more to bring those over. Pass 2 is
-  resumable and skippable (`--skip enrichment`).
+- **Cutover first, enrichment after.** Pass 1 creates properties, topics,
+  segments, domains, webhooks, templates, broadcasts and suppressions and
+  upserts contacts with their segment memberships and `unsubscribed` flags.
+  It finishes in minutes, and the CLI then prints **Cutover ready** with the
+  DNS records and the `RESEND_BASE_URL` line: transactional sending can move
+  at that point. Enrichment — only when the account uses topics or contact
+  properties — then reads each contact once per facet, topic subscriptions
+  first (so opt-outs land before properties), then properties, with a live
+  rate and time left. Hold topic sends and broadcasts until it finishes. Both
+  passes resume where they stopped after Ctrl-C and a re-run, and
+  `--skip enrichment` leaves them out.
 - **Re-run before cutover.** Every run is a diff: existing rows are updated
   when they differ and left alone when they match, contacts are upserted by
   email. Run the same command again right before you switch traffic and the
-  contacts that arrived in between come across.
+  contacts that arrived in between come across. A re-run reads every contact
+  again, so it costs the full enrichment time; `--only enrichment` re-runs
+  just the two passes against contacts already on the target.
+
+### Before a large migration
+
+Enrichment dominates: two `GET`s per contact against a limit shared with the
+sending your app does on the same Resend team. The estimate the plan prints
+follows from `contacts × facets ÷ rate`:
+
+| Contacts | Facets | At 8 req/s | At 10 req/s | At 50 req/s |
+| --- | --- | --- | --- | --- |
+| 36,685 | topics + properties | about 2 h 30 min | about 2 h | about 25 min |
+| 160,000 | topics + properties | about 11 h | about 9 h | about 1 h 50 min |
+| 160,000 | topics only | about 5 h 30 min | about 4 h 30 min | about 55 min |
+
+Three things shorten it:
+
+- **Ask Resend for a temporary raise.** Resend's documentation says the team
+  limit "can be increased for trusted senders by request" (Settings → Usage
+  shows the current one). Pass the granted rate explicitly — `--rps 50` — the
+  CLI accepts values above 10 and warns when the rate exceeds the limit it
+  detected.
+- **Run off-peak.** The limit is per team, so the enrichment competes with
+  your production sends; `429`s land on both. A second API key does not help.
+- **Leave headroom.** When the CLI detects a limit above 10 and `--rps` was not
+  given, it uses the limit minus 2 so your app keeps sending.
 
 | Resource | What moves |
 | --- | --- |

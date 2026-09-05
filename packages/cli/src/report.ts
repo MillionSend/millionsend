@@ -36,6 +36,8 @@ export interface Report {
   sourceLabel: string;
   target: { baseUrl: string; cloud: boolean; plan: string | null };
   counts: Counts;
+  /** Contacts that received at least one property / one topic subscription in the enrichment passes. */
+  enrichment?: { withProperties: number; withTopics: number } | undefined;
   /** The source was only read; nothing there was changed. */
   sourceReadOnly: true;
   /** Minted this run. Printed once and part of the --json output; stripped from the files. */
@@ -169,6 +171,7 @@ export function buildReport({
     sourceLabel,
     target: { baseUrl, cloud: usage.cloud, plan: usage.plan },
     counts: outcome.counts,
+    enrichment: outcome.enrichment,
     sourceReadOnly: true,
     freshWebhookSecrets: outcome.freshSecrets,
     checklist: { done, left },
@@ -189,6 +192,28 @@ export function dnsCards(records: DnsRecord[]): string[] {
     `  ${info(r.type)}  ${r.name}${r.priority === undefined ? "" : dim(`  priority ${r.priority}`)}`,
     `    ${bold(r.value)}`,
   ]);
+}
+
+/**
+ * Printed as soon as everything but the per-contact enrichment is on the
+ * target: sending can move while the enrichment passes are still running.
+ */
+export function cutoverReadyLines(
+  source: ProviderId,
+  baseUrl: string,
+  domainRecords: Record<string, DnsRecord[]>,
+): string[] {
+  const lines = [
+    "",
+    heading("Cutover ready"),
+    "Everything but the per-contact enrichment is on MillionSend: transactional sending can move now.",
+    "Topic opt-outs and properties land in the enrichment passes below; hold topic sends and broadcasts until they finish.",
+    `  ${dim("[")} ${dim("]")} set ${source.toUpperCase()}_BASE_URL=${baseUrl} in your app`,
+  ];
+  for (const [domain, records] of Object.entries(domainRecords)) {
+    lines.push("", `DNS records for ${domain}:`, ...dnsCards(records));
+  }
+  return lines;
 }
 
 /** Two lines per pair: the name, then `shortened-source → full-target` (the target id is the thing to copy). */
@@ -239,12 +264,19 @@ const orderedCounts = (counts: Counts): [Resource, ResourceCounts][] =>
     return c === undefined ? [] : [[resource, c] as [Resource, ResourceCounts]];
   });
 
-export function countRows(counts: Counts): { label: string; value: number }[] {
+export function countRows(
+  counts: Counts,
+  enrichment?: Report["enrichment"],
+): { label: string; value: number }[] {
   const rows: { label: string; value: number }[] = [];
   for (const [resource, c] of orderedCounts(counts)) {
     const name = COUNT_LABEL[resource];
     if (name !== undefined) {
       if (c.updated > 0) rows.push({ label: name, value: c.updated });
+      if (resource === "enrichment" && enrichment !== undefined) {
+        rows.push({ label: "with topic subscriptions", value: enrichment.withTopics });
+        rows.push({ label: "with properties", value: enrichment.withProperties });
+      }
     } else {
       if (c.created > 0) rows.push({ label: `${resource} created`, value: c.created });
       if (c.updated > 0) rows.push({ label: `${resource} updated`, value: c.updated });
@@ -265,7 +297,7 @@ export async function printSummary(out: OutStream, raw: Report): Promise<void> {
     out.write(`${wrapIndent(text, opts)}\n`);
   };
   out.write(`\n${heading("Done")}\n\n`);
-  await countUp(countRows(report.counts), { stream: out });
+  await countUp(countRows(report.counts, report.enrichment), { stream: out });
   out.write(`\n${dim(`${report.sourceLabel} was only read; nothing there was changed.`)}\n`);
   if (report.freshWebhookSecrets.length > 0) {
     out.write("\nWebhook signing secrets, shown once (they are not saved anywhere):\n");
