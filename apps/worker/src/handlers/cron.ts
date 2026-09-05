@@ -25,7 +25,7 @@ import {
   type SesIdentityClient,
   verificationDbPatch,
 } from "@millionsend/ses";
-import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 /**
  * Safety net for webhook.deliver jobs lost between the delivery-row insert

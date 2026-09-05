@@ -4,7 +4,6 @@ import {
   broadcastSendSpacingMs,
   buildUnsubscribeHeaders,
   encryptEmailBody,
-  escapeHtml,
   fetchDeliverabilityHealth,
   fetchEffectivePlan,
   findSuppressed,
