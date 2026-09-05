@@ -43,6 +43,14 @@
   --ms-neutral: #b5b3ad;
   --ms-neutral-bg: #1a1a1c;
   --ms-neutral-border: #2a2a2e;
+  /* Two hues outside the status set, for badges that mirror Postman's method
+     palette (PATCH purple, OPTIONS pink); built like the families above. */
+  --ms-violet: #c0a8e1;
+  --ms-violet-bg: #1c1527;
+  --ms-violet-border: #33264a;
+  --ms-pink: #e88bc0;
+  --ms-pink-bg: #271320;
+  --ms-pink-border: #47203a;
   /* Status dots — filter-option adornments. One hue per terminal outcome;
      the in-flight family stays on grays so chroma always means a delivery
      event. Tuned to this palette's dimness, deliberately muted. */
@@ -100,6 +108,12 @@
   --ms-neutral: #55534e;
   --ms-neutral-bg: #efede8;
   --ms-neutral-border: #d9d7d1;
+  --ms-violet: #623497;
+  --ms-violet-bg: #f1eaf8;
+  --ms-violet-border: #d9c8ec;
+  --ms-pink: #a61468;
+  --ms-pink-bg: #fbe9f3;
+  --ms-pink-border: #efc3dc;
   /* Dots — same grammar (grays in flight, chroma on delivery events),
      darkened so 8px dots survive the paper ground. */
   --ms-dot-queued: #8a8880;

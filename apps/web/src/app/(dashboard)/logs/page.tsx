@@ -13,6 +13,7 @@ import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { type BadgeTone, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
+import { httpMethodTone } from "@/lib/http-method-tone";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { statusCodeColor } from "@/lib/status-code-color";
 import { useTRPC } from "@/lib/trpc";
@@ -35,13 +36,7 @@ const STATUS_CLASS_TONE: Record<StatusClass, BadgeTone> = {
   "4xx": "warn",
   "5xx": "danger",
 };
-const METHOD_TONE: Record<Method, BadgeTone> = {
-  GET: "info",
-  POST: "success",
-  PATCH: "warn",
-  DELETE: "danger",
-};
-const toneColor = (tone: BadgeTone) => `var(--ms-${tone})`;
+const toneColor = (tone: string) => `var(--ms-${tone})`;
 
 const COL = { method: "12%", source: "11%", status: "10%", when: "14%" } as const;
 
@@ -167,7 +162,7 @@ export default function LogsPage() {
             ...METHODS.map((m) => ({
               value: m,
               label: m,
-              adornment: <StatusDot color={toneColor(METHOD_TONE[m])} />,
+              adornment: <StatusDot color={toneColor(httpMethodTone(m))} />,
             })),
           ]}
         />
@@ -242,9 +237,7 @@ export default function LogsPage() {
                   onClick={() => router.push(`/logs/${row.id}`)}
                 >
                   <td>
-                    <span
-                      className={`ms-badge ms-badge-${METHOD_TONE[row.method as Method] ?? "neutral"} ms-mono`}
-                    >
+                    <span className={`ms-badge ms-badge-${httpMethodTone(row.method)} ms-mono`}>
                       {row.method}
                     </span>
                   </td>

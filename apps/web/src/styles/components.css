@@ -160,6 +160,16 @@
   background: var(--ms-neutral-bg);
   border-color: var(--ms-neutral-border);
 }
+.ms-badge-violet {
+  color: var(--ms-violet);
+  background: var(--ms-violet-bg);
+  border-color: var(--ms-violet-border);
+}
+.ms-badge-pink {
+  color: var(--ms-pink);
+  background: var(--ms-pink-bg);
+  border-color: var(--ms-pink-border);
+}
 /* Count pill riding after a label ("Subscribed 4", "General +2"): tinted
    from currentColor so it follows whatever text it sits in. */
 .ms-count {

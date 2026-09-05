@@ -51,3 +51,27 @@ button[data-checked] svg {
     animation: none;
   }
 }
+
+/* fumadocs-openapi's MethodLabel colors a method with a Tailwind text utility
+   (GET green, POST blue, PUT yellow, PATCH orange, DELETE red). Developers
+   read Postman's palette — POST yellow, PUT blue, PATCH purple — so the three
+   that differ are re-mapped by those utilities; an upgrade that renames them
+   only restores fumadocs' defaults. */
+span.font-mono.font-medium.text-blue-600 {
+  color: #ad7a03;
+}
+.dark span.font-mono.font-medium.text-blue-600 {
+  color: #ffe47e;
+}
+span.font-mono.font-medium.text-yellow-600 {
+  color: #0053b8;
+}
+.dark span.font-mono.font-medium.text-yellow-600 {
+  color: #74aef6;
+}
+span.font-mono.font-medium.text-orange-600 {
+  color: #623497;
+}
+.dark span.font-mono.font-medium.text-orange-600 {
+  color: #c0a8e1;
+}
