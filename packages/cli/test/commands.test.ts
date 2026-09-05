@@ -877,6 +877,33 @@ describe("cutover-first run shape", () => {
   );
 
   it(
+    "runs the properties pass alone when topics are left out of the include set",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "millionsend-cli-props-"));
+      // The contacts must already be on the target for enrichment to plan on its own.
+      expect(
+        (await run(["migrate", "--from", "resend", "--yes", "--only", "contacts"], { cwd: dir }))
+          .code,
+      ).toBe(0);
+      fake.requests.length = 0;
+      const result = await run(
+        ["migrate", "--from", "resend", "--yes", "--only", "properties,enrichment"],
+        { cwd: dir },
+      );
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("Enrichment · topics: skipped, topics not migrated");
+      expect(result.stdout).toMatch(/Enrichment · properties .*with properties/);
+      expect(
+        fake.requests.some((r) => r.path.endsWith("/topics") && r.path.startsWith("/contacts/")),
+      ).toBe(false);
+      const report = readReport(dir);
+      expect(report.enrichment?.withTopics).toBe(0);
+      expect(report.enrichment?.withProperties).toBeGreaterThan(0);
+    },
+    SLOW,
+  );
+
+  it(
     "refuses a stale plan file before reading the source again",
     async () => {
       const dir = mkdtempSync(join(tmpdir(), "millionsend-cli-stale-"));

@@ -64,7 +64,10 @@ What it does:
   email. Run the same command again right before you switch traffic and the
   contacts that arrived in between come across. A re-run reads every contact
   again, so it costs the full enrichment time; `--only enrichment` re-runs
-  just the two passes against contacts already on the target.
+  just the two passes against contacts already on the target, and
+  `--only properties,enrichment` runs the properties pass alone. Accounts
+  migrated with CLI 0.1.x received no property values (the wire shape was
+  misread); that one command fills them in.
 
 ### Before a large migration
 

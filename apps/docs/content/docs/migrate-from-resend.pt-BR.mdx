@@ -67,7 +67,10 @@ O que ele faz:
   antes de virar o tráfego e os contatos que chegaram nesse meio-tempo vêm
   junto. Uma nova execução lê todos os contatos de novo, então custa o tempo
   inteiro de enriquecimento; `--only enrichment` roda só as duas passagens
-  sobre contatos que já estão no destino.
+  sobre contatos que já estão no destino, e `--only properties,enrichment`
+  roda só a passagem de propriedades. Contas migradas com a CLI 0.1.x não
+  receberam valores de propriedades (o formato do fio foi lido errado); esse
+  único comando os preenche.
 
 ### Antes de uma migração grande
 
