@@ -4,6 +4,9 @@ import { createMDX } from "fumadocs-mdx/next";
 const config = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Content pages are prerendered with dynamicParams = false, so an unknown
+  // URL never reaches [lang]/not-found; the global page answers it instead.
+  experimental: { globalNotFound: true },
   async rewrites() {
     return [
       // Agent-readable markdown: appending .md to any content page URL serves
