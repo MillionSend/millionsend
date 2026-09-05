@@ -69,15 +69,17 @@ it("fans a team-level event out to subscribed endpoints with no email attached",
   expect(enqueued).toEqual([rows[0]?.id]);
 });
 
-it("fans a bulk event set out above the driver's bind-parameter cap in bounded slices", async () => {
-  // 15 endpoints × 1000 events = 15,000 rows: five parameters each would be
-  // 75,000 bound values in one statement, past Postgres's 65,534.
-  for (let i = 0; i < 15; i++) await endpoint(null);
+it("fans a bulk event set out in slices that stay under the driver's bind-parameter cap", async () => {
+  // 2 endpoints × 1001 events = 2,002 rows, one more than a slice holds, so the
+  // insert has to split. A slice of 2,000 rows × 5 parameters is 10,000 bound
+  // values, under Postgres's 65,534; one unsliced statement of 15,000 rows
+  // would not be, and PGlite is too slow for that many rows in CI.
+  for (let i = 0; i < 2; i++) await endpoint(null);
   const batches: number[] = [];
   const occurredAt = new Date("2026-09-03T12:00:00Z");
   await enqueueTeamWebhookEvents(db, {
     teamId,
-    events: Array.from({ length: 1000 }, (_, i) => ({
+    events: Array.from({ length: 1001 }, (_, i) => ({
       type: "contact.created" as const,
       occurredAt,
       data: { id: `c${i}`, email: `c${i}@example.com`, source: "api" },
@@ -86,10 +88,9 @@ it("fans a bulk event set out above the driver's bind-parameter cap in bounded s
       batches.push(rows.length);
     },
   });
-  expect(batches.reduce((a, b) => a + b, 0)).toBe(15_000);
-  expect(Math.max(...batches)).toBeLessThanOrEqual(2000);
+  expect(batches).toEqual([2000, 2]);
   const stored = await db
     .select({ id: schema.webhookDeliveries.id })
     .from(schema.webhookDeliveries);
-  expect(stored).toHaveLength(15_000);
-});
+  expect(stored).toHaveLength(2002);
+}, 30_000);
