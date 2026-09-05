@@ -3,7 +3,7 @@ import { EnvKeyring, generateApiKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { createApi } from "../src/app.js";
 
 let db: Db;
@@ -38,6 +38,13 @@ beforeAll(async () => {
 });
 
 afterAll(() => close());
+
+// The limiter counts in fixed minute windows; a test whose calls straddle a
+// boundary sees a fresh window and no 429. Wait out the last seconds of one.
+beforeEach(async () => {
+  const left = 60_000 - (Date.now() % 60_000);
+  if (left < 3_000) await new Promise((resolve) => setTimeout(resolve, left));
+});
 
 it("atomically limits each API key and returns a retry boundary", async () => {
   const call = () => app.request("/topics", { headers: { authorization: `Bearer ${token}` } });
