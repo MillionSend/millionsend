@@ -108,7 +108,7 @@
     },
     "tracking": {
       "open": "Ativar rastreamento de aberturas",
-      "openHint": "Injeta um pixel 1×1 transparente com uma referência única, servido pelo seu subdomínio de rastreamento, para que uma renderização conte como abertura. As contagens são aproximadas — proxies de privacidade e scanners as inflam; imagens bloqueadas ou só-texto não contam.",
+      "openHint": "Injeta um pixel 1×1 transparente com uma referência única, servido pelo seu subdomínio de rastreamento, para que uma pessoa renderizá-lo conte como abertura. Buscas que um cliente de email ou scanner de segurança fez antes de alguém ler são registradas como pré-carregadas e nunca contam; imagens bloqueadas e envios só-texto continuam sem contar.",
       "click": "Ativar rastreamento de cliques",
       "clickHint": "Reescreve cada link para redirecionar pelo seu subdomínio de rastreamento e depois encaminha o destinatário para a URL de destino original.",
       "subdomain": "Subdomínio de rastreamento",

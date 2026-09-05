@@ -91,6 +91,7 @@ export function LineChart({
   height = 228,
   formatDay,
   formatValue,
+  partialNote,
 }: {
   days: string[];
   series: LineChartSeries[];
@@ -98,6 +99,11 @@ export function LineChart({
   /** Localized short-day label for the axis and tooltip (UTC-pinned). */
   formatDay: (day: string) => string;
   formatValue: (value: number) => string;
+  /**
+   * Set when the newest day is still in progress: its segment draws dashed
+   * and the tooltip's day label carries this note ("so far").
+   */
+  partialNote?: string | undefined;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -229,13 +235,33 @@ export function LineChart({
           {series.map((s) => (
             <polyline
               key={s.key}
-              points={s.values.map((v, i) => point(i, v)).join(" ")}
+              // An in-progress last day keeps its point but not the solid
+              // line into it: that segment is drawn dashed below.
+              points={s.values
+                .slice(0, partialNote && n > 1 ? n - 1 : n)
+                .map((v, i) => point(i, v))
+                .join(" ")}
               fill="none"
               stroke={s.color}
               strokeWidth={1.5}
               strokeLinejoin="round"
             />
           ))}
+          {partialNote && n > 1
+            ? series.map((s) => (
+                <line
+                  key={`${s.key}-partial`}
+                  x1={x(n - 2)}
+                  y1={y(s.values[n - 2] ?? 0)}
+                  x2={x(n - 1)}
+                  y2={y(s.values[n - 1] ?? 0)}
+                  stroke={s.color}
+                  strokeWidth={1.5}
+                  strokeDasharray="3 3"
+                  strokeLinecap="round"
+                />
+              ))
+            : null}
           {hover
             ? series.map((s) => (
                 <circle
@@ -258,6 +284,7 @@ export function LineChart({
             style={{ fontSize: 11, color: "var(--ms-muted)", marginBottom: 4 }}
           >
             {formatDay(days[hover.index] ?? "")}
+            {partialNote && hover.index === n - 1 ? ` · ${partialNote}` : ""}
           </div>
           {series.map((s) => (
             <div

@@ -26,6 +26,10 @@ export const WEBHOOK_EVENT_TYPES = [
   "email.complained",
   "email.opened",
   "email.clicked",
+  // Opt-in: a tracking-image fetch classified as automated (see
+  // open-classifier). Never delivered to an endpoint subscribed to "all
+  // events" — naming it is the consent; see endpointSubscribes.
+  "email.prefetched",
   // Team-level standing events: no email in the payload.
   "deliverability.warning",
   "deliverability.paused",
@@ -50,6 +54,16 @@ export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 
 export function isWebhookEventType(value: string): value is WebhookEventType {
   return (WEBHOOK_EVENT_TYPES as readonly string[]).includes(value);
+}
+
+/** Event types an endpoint receives only by naming them; "all events" (null) skips them. */
+const OPT_IN_EVENT_TYPES: ReadonlySet<string> = new Set<WebhookEventType>(["email.prefetched"]);
+
+export function endpointSubscribes(
+  events: readonly string[] | null,
+  type: WebhookEventType,
+): boolean {
+  return events === null ? !OPT_IN_EVENT_TYPES.has(type) : events.includes(type);
 }
 
 const SECRET_PREFIX = "whsec_";
@@ -412,7 +426,7 @@ export async function enqueueTeamWebhookEvents(
   const endpoints = await enabledEndpoints(db, params.teamId);
   const values = params.events.flatMap((event) =>
     endpoints
-      .filter((e) => e.events === null || e.events.includes(event.type))
+      .filter((e) => endpointSubscribes(e.events, event.type))
       .map((endpoint) => ({
         endpointId: endpoint.id,
         emailId: null,
@@ -471,7 +485,7 @@ async function insertDeliveries(
   },
 ): Promise<void> {
   const endpoints = await enabledEndpoints(db, params.teamId);
-  const matching = endpoints.filter((e) => e.events === null || e.events.includes(params.type));
+  const matching = endpoints.filter((e) => endpointSubscribes(e.events, params.type));
   await insertDeliveryRows(
     db,
     matching.map((endpoint) => ({

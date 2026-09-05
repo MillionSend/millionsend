@@ -65,13 +65,20 @@ by MillionSend.
 ## Open-rate accuracy
 
 Open tracking injects a 1×1 transparent pixel with a unique reference into the
-HTML body; loading that image records an `email.opened` event. It is a
-directional signal, not an exact count.
+HTML body; a person loading that image records an `email.opened` event. It is
+a directional signal, not an exact count.
 
-Opens are **over-counted** when privacy proxies (Apple Mail Privacy Protection,
-for one) pre-load every image the moment mail arrives, or when security and
-anti-malware scanners fetch the pixel to inspect the message — neither means a
-human read anything.
+Fetches a machine plausibly made are recorded as **prefetched**, not opened:
+Apple Mail Privacy Protection downloads every image in the background whether
+or not the message is read, Gmail pre-fetches while the inbox is already open,
+and security scanners fetch the pixel within seconds of delivery. A prefetch
+shows on the email's timeline and as its own line under the open rate, but it
+never moves the status, never counts in the open rate, and never fires
+`email.opened` (endpoints can opt in to `email.prefetched`). The timing rule's
+window is `OPEN_PREFETCH_WINDOW_SECONDS` for self-hosters (default `10`; `0`
+keeps only the user-agent rules). One honest consequence: a recipient whose
+only opens come through Apple Mail never registers as opened, so Apple-heavy
+audiences read lower than they would elsewhere.
 
 Opens are **under-counted** when the recipient's client blocks images, when the
 email has no HTML part (a plain-text send carries no pixel), or when Gmail clips

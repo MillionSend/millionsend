@@ -28,6 +28,9 @@ export const usageCounters = pgTable(
     // counts once, so rates against `delivered` stay <= 100%.
     opened: integer("opened").notNull().default(0),
     clicked: integer("clicked").notNull().default(0),
+    // Tracking-image fetches a machine made before anyone opened, unique per
+    // email like `opened`, kept apart so open rates count people only.
+    prefetched: integer("prefetched").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.day] })],
 );

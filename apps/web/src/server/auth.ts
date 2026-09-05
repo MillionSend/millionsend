@@ -1,5 +1,5 @@
 import { oauthProvider } from "@better-auth/oauth-provider";
-import { env, isCloudDeployment, parseCommaList } from "@millionsend/config";
+import { env, isCloudDeployment } from "@millionsend/config";
 import { ALL_TEAMS_GRANT, isLoopbackUrl, MCP_SCOPES } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { type BetterAuthPlugin, betterAuth } from "better-auth";
@@ -18,6 +18,7 @@ import {
   type SystemMailDeps,
   sendPasswordResetEmail,
 } from "./system-mail";
+import { trustedProxies } from "./trusted-proxies";
 
 export type Auth = ReturnType<typeof createAuth>;
 
@@ -68,13 +69,6 @@ export async function assertNotSoleOwner(db: Db, userId: string): Promise<void> 
       message: "Transfer ownership of your teams before deleting your account.",
     });
   }
-}
-
-/** Under SKIP_ENV_VALIDATION the env proxy carries the raw string, not the parsed list. */
-function trustedProxies(): string[] {
-  const raw: unknown = env.TRUSTED_PROXIES;
-  if (Array.isArray(raw)) return raw;
-  return parseCommaList(typeof raw === "string" ? raw : undefined) ?? ["127.0.0.1", "::1"];
 }
 
 /**

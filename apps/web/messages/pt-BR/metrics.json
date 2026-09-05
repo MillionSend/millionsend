@@ -20,6 +20,9 @@
     "risk": "RISCO 0,01%",
     "complained": "Reclamações"
   },
+  "chart": {
+    "soFar": "até agora"
+  },
   "engagement": {
     "denominator": "das entregues"
   },
@@ -63,7 +66,10 @@
   },
   "open": {
     "title": "Taxa de abertura",
-    "opened": "Aberturas"
+    "opened": "Aberturas",
+    "prefetched": "Pré-carregados",
+    "notCounted": "não contados",
+    "prefetchedHint": "Buscas da imagem de rastreamento feitas por um cliente de email ou scanner de segurança antes de alguém abrir. Nunca entram na taxa de abertura."
   },
   "click": {
     "title": "Taxa de cliques",

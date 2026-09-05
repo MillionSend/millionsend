@@ -41,6 +41,7 @@ async function insertCounter(
     complained: number;
     opened: number;
     clicked: number;
+    prefetched: number;
   }>,
 ): Promise<void> {
   await db.insert(schema.usageCounters).values({ teamId, day, ...counts });
@@ -67,6 +68,7 @@ describe("metrics.window", () => {
       complained: 0,
       opened: 0,
       clicked: 0,
+      prefetched: 0,
     });
     // Days without a counter row come back as zeros.
     expect(result.days[13]).toEqual({
@@ -79,6 +81,7 @@ describe("metrics.window", () => {
       complained: 0,
       opened: 0,
       clicked: 0,
+      prefetched: 0,
     });
     expect(result.totals).toEqual({
       accepted: 15,
@@ -89,6 +92,7 @@ describe("metrics.window", () => {
       complained: 1,
       opened: 0,
       clicked: 0,
+      prefetched: 0,
     });
   });
 
@@ -144,8 +148,18 @@ describe("metrics.window", () => {
       complained: 0,
       opened: 0,
       clicked: 0,
+      prefetched: 0,
     });
     expect(result.allTimeDelivered).toBe(2);
+  });
+
+  it("carries prefetched beside opened without folding it into the open rate", async () => {
+    const teamId = await createTeam(db);
+    await insertCounter(teamId, utcDay(0), { delivered: 10, opened: 4, prefetched: 3 });
+    const result = await callerFor(teamId).metrics.window();
+    expect(result.days[14]).toMatchObject({ opened: 4, prefetched: 3 });
+    expect(result.totals.prefetched).toBe(3);
+    expect(result.totals.opened / result.totals.delivered).toBeCloseTo(0.4);
   });
 
   it("returns opened and clicked per day and in the window totals", async () => {

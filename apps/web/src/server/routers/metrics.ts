@@ -27,6 +27,7 @@ const COUNTS = {
   complained: 0,
   opened: 0,
   clicked: 0,
+  prefetched: 0,
 };
 type Counts = typeof COUNTS;
 
@@ -51,6 +52,7 @@ export const metricsRouter = router({
             complained: c.complained,
             opened: c.opened,
             clicked: c.clicked,
+            prefetched: c.prefetched,
           })
           .from(c)
           .where(and(eq(c.teamId, ctx.teamId), gte(c.day, since)))
@@ -81,11 +83,19 @@ export const metricsRouter = router({
           complained: acc.complained + d.complained,
           opened: acc.opened + d.opened,
           clicked: acc.clicked + d.clicked,
+          prefetched: acc.prefetched + d.prefetched,
         }),
         { ...COUNTS },
       );
 
-      return { days, totals, allTimeDelivered: Number(allTime?.delivered ?? 0) };
+      // The window always ends on the current UTC day, which is still being
+      // counted: charts draw it as in progress.
+      return {
+        days,
+        totals,
+        allTimeDelivered: Number(allTime?.delivered ?? 0),
+        today: utcDay(now),
+      };
     }),
 
   /**

@@ -100,7 +100,15 @@ describe("broadcasts.create / get / list", () => {
       segmentId: null,
       segmentName: null,
       topicName: null,
-      stats: { total: 0, delivered: 0, bounced: 0, complained: 0 },
+      stats: {
+        total: 0,
+        delivered: 0,
+        opened: 0,
+        clicked: 0,
+        prefetched: 0,
+        bounced: 0,
+        complained: 0,
+      },
     });
 
     const { items } = await caller.broadcasts.list({});
@@ -535,7 +543,17 @@ describe("delivery stats", () => {
     );
 
     const { stats } = await caller.broadcasts.get({ id });
-    expect(stats).toEqual({ total: 6, delivered: 3, bounced: 1, complained: 1 });
+    // Opened counts the opened rung and clicked above it; a prefetch would
+    // never lift a row here, so none is expected.
+    expect(stats).toEqual({
+      total: 6,
+      delivered: 3,
+      opened: 2,
+      clicked: 1,
+      prefetched: 0,
+      bounced: 1,
+      complained: 1,
+    });
 
     const { items } = await caller.broadcasts.list({});
     expect(items[0]?.recipients).toBe(6);

@@ -31,6 +31,7 @@ export function parseCommaList(value: string | undefined): string[] | undefined 
 // consumers needing the default without zod's parsing read these.
 export const SES_MAX_SEND_RATE_DEFAULT = 14;
 export const EMAIL_RETENTION_DAYS_DEFAULT = 30;
+export const OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT = 10;
 
 const emailAddress = z.email();
 
@@ -168,6 +169,15 @@ export const env = createEnv({
     // industry norm (Resend keeps email data 30 days) and what the metadata
     // tables are sized for; daily counters and broadcast results outlive it.
     EMAIL_METADATA_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
+    // A tracking-image fetch within this many seconds of delivery (or before
+    // it) is recorded as prefetched, not opened: security gateways scan a
+    // message within seconds, while a person reading a push notification
+    // takes longer. 0 leaves only the user-agent rules.
+    OPEN_PREFETCH_WINDOW_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .default(OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT),
 
     // Public base URL of this deployment; SNS subscriptions and hosted
     // unsubscribe pages are derived from it.

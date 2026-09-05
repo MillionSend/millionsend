@@ -40,7 +40,8 @@ type EventType =
   | "complained"
   | "suppressed"
   | "rendering_failure"
-  | "failed";
+  | "failed"
+  | "prefetched";
 
 /**
  * Ledger word color per the canvas: sent stays muted (it's the baseline,
@@ -60,7 +61,21 @@ const EVENT_COLOR: Record<EventType, string> = {
   suppressed: "var(--ms-danger)",
   rendering_failure: "var(--ms-danger)",
   failed: "var(--ms-danger)",
+  // A machine's fetch, not an outcome: the same muted tone as sent.
+  prefetched: "var(--ms-muted)",
 };
+
+const PREFETCH_REASONS = [
+  "apple_mpp",
+  "gmail_prefetch",
+  "scanner",
+  "before_delivery",
+  "timing",
+] as const;
+type PrefetchReason = (typeof PREFETCH_REASONS)[number];
+function isPrefetchReason(value: unknown): value is PrefetchReason {
+  return typeof value === "string" && (PREFETCH_REASONS as readonly string[]).includes(value);
+}
 
 type EventData = Record<string, unknown> | null;
 
@@ -77,6 +92,11 @@ function bounceOf(data: EventData): BounceData | null {
 function clickOf(data: EventData): { link?: string } | null {
   const c = data?.click;
   return c && typeof c === "object" ? (c as { link?: string }) : null;
+}
+/** The pixel fetch's identity (opened and prefetched events share the shape). */
+function openOf(data: EventData): { userAgent?: string; reason?: unknown } | null {
+  const o = data?.open;
+  return o && typeof o === "object" ? (o as { userAgent?: string; reason?: unknown }) : null;
 }
 function complaintOf(data: EventData): { complaintFeedbackType?: string } | null {
   const c = data?.complaint;
@@ -472,10 +492,17 @@ export default function EmailDetailPage() {
   const events = groups.map((group) => group.first);
   // Ingestion off (no SNS topics) means nothing after the locally-recorded
   // "sent" can ever arrive — the timeline says so instead of silently stalling.
+  // A prefetch is a machine's fetch, not something SES pushed, so it does
+  // not count as an event that arrived after "sent".
   const eventsStalled =
-    sesEnv.data?.snsTopicsConfigured === false && events[events.length - 1]?.type === "sent";
+    sesEnv.data?.snsTopicsConfigured === false &&
+    events.filter((event) => event.type !== "prefetched").at(-1)?.type === "sent";
   const eventLabel = (type: EventType) =>
-    type === "rendering_failure" ? t("detail.event.rendering_failure") : common(`status.${type}`);
+    type === "rendering_failure" || type === "prefetched"
+      ? t(`detail.event.${type}`)
+      : common(`status.${type}`);
+  const prefetchReason = (reason: unknown) =>
+    isPrefetchReason(reason) ? t(`detail.prefetchReason.${reason}`) : null;
 
   const sentEvent = events.find((event) => event.type === "sent");
   // Anchor for the occurrences drawer's "+42 min" offsets — the actual send
@@ -533,6 +560,7 @@ export default function EmailDetailPage() {
     }
     if (type === "complained") return complaintOf(data)?.complaintFeedbackType ?? null;
     if (type === "suppressed") return t("detail.suppressedLine");
+    if (type === "prefetched") return prefetchReason(openOf(data)?.reason);
     return null;
   }
 
@@ -696,7 +724,7 @@ export default function EmailDetailPage() {
                 <>
                   <span style={{ position: "relative", display: "inline-flex" }}>
                     <EventIconTile type={type} />
-                    {latest ? (
+                    {latest && type !== "prefetched" ? (
                       <span
                         style={{
                           position: "absolute",
@@ -712,6 +740,7 @@ export default function EmailDetailPage() {
                     ) : null}
                   </span>
                   <span
+                    title={type === "prefetched" ? t("detail.prefetchedHint") : undefined}
                     style={{
                       marginTop: 10,
                       display: "inline-flex",
@@ -719,8 +748,9 @@ export default function EmailDetailPage() {
                       gap: 5,
                       padding: "3px 9px",
                       borderRadius: "var(--ms-r-chip)",
-                      border: `1px solid color-mix(in srgb, ${EVENT_COLOR[type]} 35%, var(--ms-line))`,
-                      background: `color-mix(in srgb, ${EVENT_COLOR[type]} 10%, var(--ms-panel))`,
+                      // Dashed: it happened, and it does not count.
+                      border: `1px ${type === "prefetched" ? "dashed" : "solid"} color-mix(in srgb, ${EVENT_COLOR[type]} 35%, var(--ms-line))`,
+                      background: `color-mix(in srgb, ${EVENT_COLOR[type]} ${type === "prefetched" ? 4 : 10}%, var(--ms-panel))`,
                       fontSize: 12,
                       fontWeight: 600,
                       color: EVENT_COLOR[type],
@@ -1005,6 +1035,12 @@ export default function EmailDetailPage() {
           {[...groupOccurrences].reverse().map((event, index) => {
             const sinceSend = new Date(event.occurredAt).getTime() - new Date(sendAt).getTime();
             const link = openGroup?.type === "clicked" ? clickOf(event.data)?.link : undefined;
+            const open = openGroup?.type === "clicked" ? null : openOf(event.data);
+            // One mono line per row: the click's destination, or who fetched
+            // the pixel (a prefetch's reason, then the user agent).
+            const line = link
+              ? displayUrl(link)
+              : [prefetchReason(open?.reason), open?.userAgent].filter(Boolean).join(" · ");
             return (
               <div
                 key={event.id}
@@ -1027,7 +1063,7 @@ export default function EmailDetailPage() {
                     </span>
                   ) : null}
                 </div>
-                {link ? (
+                {line ? (
                   <div
                     className="ms-mono"
                     style={{
@@ -1037,7 +1073,7 @@ export default function EmailDetailPage() {
                       overflowWrap: "anywhere",
                     }}
                   >
-                    {displayUrl(link)}
+                    {line}
                   </div>
                 ) : null}
               </div>

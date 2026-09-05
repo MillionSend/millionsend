@@ -223,10 +223,16 @@ export const broadcastsRouter = router({
       : [];
     // "Delivered" counts the delivered rung and everything above it on the
     // status ladder — an opened or clicked email was necessarily delivered.
+    // Opened likewise includes clicked; both count people only, since a
+    // prefetch never lifts the status (see the tracking recorder).
+    const ev = schema.emailEvents;
     const [stats] = await ctx.db
       .select({
         total: sql<number>`count(*)::int`,
         delivered: sql<number>`count(*) filter (where ${e.latestStatus} in ('delivered', 'opened', 'clicked'))::int`,
+        opened: sql<number>`count(*) filter (where ${e.latestStatus} in ('opened', 'clicked'))::int`,
+        clicked: sql<number>`count(*) filter (where ${e.latestStatus} = 'clicked')::int`,
+        prefetched: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ev.emailId} = ${e.id} and ${ev.type} = 'prefetched'))::int`,
         bounced: sql<number>`count(*) filter (where ${e.latestStatus} = 'bounced')::int`,
         complained: sql<number>`count(*) filter (where ${e.latestStatus} = 'complained')::int`,
       })
@@ -243,6 +249,12 @@ export const broadcastsRouter = router({
       stats: {
         total: row.recipientCount ?? live?.total ?? 0,
         delivered: live?.delivered ?? row.deliveredCount ?? 0,
+        // Engagement keeps arriving after the send, so no snapshot could
+        // stand in once the rows age out: null past the metadata window,
+        // zero before any fan-out (recipientCount is set when a send ends).
+        opened: live?.opened ?? (row.recipientCount ? null : 0),
+        clicked: live?.clicked ?? (row.recipientCount ? null : 0),
+        prefetched: live?.prefetched ?? (row.recipientCount ? null : 0),
         bounced: live?.bounced ?? row.bouncedCount ?? 0,
         complained: live?.complained ?? row.complainedCount ?? 0,
       },

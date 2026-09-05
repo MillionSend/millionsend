@@ -68,13 +68,22 @@ divergência, e o TLS do host de rastreamento é servido pelo MillionSend.
 ## Precisão da taxa de abertura
 
 O rastreamento de aberturas injeta um pixel 1×1 transparente com uma referência
-única no corpo HTML; carregar essa imagem registra um evento `email.opened`. É
-um sinal direcional, não uma contagem exata.
+única no corpo HTML; uma pessoa carregar essa imagem registra um evento
+`email.opened`. É um sinal direcional, não uma contagem exata.
 
-As aberturas são **contadas a mais** quando proxies de privacidade (o Apple Mail
-Privacy Protection, por exemplo) pré-carregam toda imagem no momento em que a
-mensagem chega, ou quando scanners de segurança e antimalware buscam o pixel
-para inspecionar a mensagem — nenhum dos dois significa que uma pessoa leu algo.
+Buscas que uma máquina plausivelmente fez são registradas como
+**pré-carregadas**, não como aberturas: o Apple Mail Privacy Protection baixa
+toda imagem em segundo plano, a mensagem sendo lida ou não; o Gmail pré-carrega
+enquanto a caixa de entrada já está aberta; e scanners de segurança buscam o
+pixel segundos após a entrega. Um pré-carregamento aparece na linha do tempo do
+e-mail e como uma linha própria sob a taxa de abertura, mas nunca muda o status,
+nunca entra na taxa de abertura e nunca dispara `email.opened` (endpoints podem
+optar por `email.prefetched`). A janela da regra de tempo é
+`OPEN_PREFETCH_WINDOW_SECONDS` em instâncias auto-hospedadas (padrão `10`; `0`
+mantém só as regras por user agent). Uma consequência honesta: um destinatário
+cujas únicas aberturas passam pelo Apple Mail nunca registra abertura, então
+públicos com muitos usuários de Apple Mail mostram uma taxa de abertura menor do
+que teriam em outra ferramenta.
 
 As aberturas são **contadas a menos** quando o cliente do destinatário bloqueia
 imagens, quando o e-mail não tem parte HTML (um envio só-texto não carrega

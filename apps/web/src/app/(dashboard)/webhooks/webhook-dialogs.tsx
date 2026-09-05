@@ -27,6 +27,7 @@ function useWebhookEventOptions() {
       value,
       label: t(`eventLabel.${value}`),
       group: WEBHOOK_EVENT_META[value].group,
+      ...(WEBHOOK_EVENT_META[value].optIn ? { excludedFromAll: true, hint: t("optInHint") } : {}),
       adornment: (
         <span
           className="ms-dot"

@@ -23,7 +23,8 @@ export function emailStatusColor(status: string): string {
     case "delivery_delayed":
       return "var(--ms-neutral)";
     default:
-      // queued / queued_quota / sent / canceled — the baseline, not an outcome.
+      // queued / queued_quota / sent / canceled / prefetched — the baseline,
+      // not an outcome.
       return "var(--ms-muted)";
   }
 }
@@ -113,6 +114,13 @@ export function EventGlyph({ type, size = 15 }: { type: string; size?: number })
           <path d="M3.6 12.4 12.4 3.6" />
         </svg>
       );
+    case "prefetched":
+      return (
+        <svg {...common} aria-hidden="true">
+          <rect x="1.5" y="3.2" width="13" height="9.6" rx="1.8" strokeDasharray="2.2 1.6" />
+          <path d="M8 5.2v5M6 8.2l2 2 2-2" />
+        </svg>
+      );
     case "delivery_delayed":
     case "queued":
     case "queued_quota":
@@ -145,7 +153,8 @@ export function EventIconTile({ type, size = 34 }: { type: string; size?: number
         alignItems: "center",
         justifyContent: "center",
         borderRadius: 10,
-        border: `1px solid color-mix(in srgb, ${color} 45%, var(--ms-line))`,
+        // Dashed for a prefetch: it happened, and it does not count.
+        border: `1px ${type === "prefetched" ? "dashed" : "solid"} color-mix(in srgb, ${color} 45%, var(--ms-line))`,
         background: `linear-gradient(180deg, color-mix(in srgb, ${color} 16%, var(--ms-panel)), color-mix(in srgb, ${color} 5%, var(--ms-panel)))`,
         color,
       }}

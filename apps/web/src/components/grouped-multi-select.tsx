@@ -11,6 +11,10 @@ export interface GroupedOption {
   group: string;
   /** Leading adornment in the option row, e.g. a colored dot. */
   adornment?: React.ReactNode;
+  /** Stays unchecked under the "all" option: it is only ever picked by name. */
+  excludedFromAll?: boolean;
+  /** Muted note after the label. */
+  hint?: string;
 }
 
 export interface OptionGroup {
@@ -186,8 +190,8 @@ export function GroupedMultiSelect({
   }
 
   const activeId = open && activeIndex < rowCount ? `${listboxId}-${activeIndex}` : undefined;
-  const rowChecked = (optionValue: string) =>
-    allOption?.selected === true || value.includes(optionValue);
+  const rowChecked = (option: GroupedOption) =>
+    (allOption?.selected === true && !option.excludedFromAll) || value.includes(option.value);
 
   function Row({
     index,
@@ -195,12 +199,14 @@ export function GroupedMultiSelect({
     onClick,
     adornment,
     label,
+    hint,
   }: {
     index: number;
     checked: boolean;
     onClick: () => void;
     adornment?: React.ReactNode;
     label: string;
+    hint?: string;
   }) {
     return (
       <button
@@ -216,6 +222,9 @@ export function GroupedMultiSelect({
         <span style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
           {adornment}
           <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+          {hint ? (
+            <span style={{ color: "var(--ms-faint)", fontSize: 12, flex: "none" }}>{hint}</span>
+          ) : null}
         </span>
         {checked ? <span aria-hidden="true">✓</span> : null}
       </button>
@@ -331,11 +340,12 @@ export function GroupedMultiSelect({
                         <Row
                           key={option.value}
                           index={index}
-                          checked={rowChecked(option.value)}
+                          checked={rowChecked(option)}
                           onClick={() => activate(index)}
                           {...(option.adornment !== undefined
                             ? { adornment: option.adornment }
                             : {})}
+                          {...(option.hint !== undefined ? { hint: option.hint } : {})}
                           label={option.label}
                         />
                       );

@@ -35,6 +35,9 @@ export default function BroadcastDetailPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
+  // Engagement is counted live from the email rows; once they age out the
+  // number is gone, not zero.
+  const engagement = (count: number | null) => (count == null ? "—" : nf.format(count));
 
   const [cancelOpen, setCancelOpen] = useState(false);
 
@@ -186,7 +189,7 @@ export default function BroadcastDetailPage() {
         className="ms-meta-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: "repeat(6, 1fr)",
           gap: 22,
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
@@ -201,6 +204,19 @@ export default function BroadcastDetailPage() {
         <StatBlock
           label={t("detail.stats.delivered")}
           value={broadcast ? nf.format(broadcast.stats.delivered) : null}
+        />
+        <StatBlock
+          label={t("detail.stats.opened")}
+          value={broadcast ? engagement(broadcast.stats.opened) : null}
+          hint={
+            broadcast?.stats.prefetched
+              ? t("detail.stats.prefetched", { count: nf.format(broadcast.stats.prefetched) })
+              : undefined
+          }
+        />
+        <StatBlock
+          label={t("detail.stats.clicked")}
+          value={broadcast ? engagement(broadcast.stats.clicked) : null}
         />
         <StatBlock
           label={t("detail.stats.bounced")}

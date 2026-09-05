@@ -108,7 +108,7 @@
     },
     "tracking": {
       "open": "Enable open tracking",
-      "openHint": "Injects a 1×1 transparent pixel with a unique reference, served from your tracking subdomain, so a render counts as an open. Counts are approximate — privacy proxies and scanners inflate them; blocked or plain-text images miss them.",
+      "openHint": "Injects a 1×1 transparent pixel with a unique reference, served from your tracking subdomain, so a person rendering it counts as an open. Fetches a mail client or security scanner made before anyone looked are recorded as prefetched and never count; blocked images and plain-text sends are still missed.",
       "click": "Enable click tracking",
       "clickHint": "Rewrites each link to redirect through your tracking subdomain, then sends the recipient on to the original destination URL.",
       "subdomain": "Tracking subdomain",

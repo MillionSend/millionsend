@@ -17,8 +17,9 @@ entregas por endpoint.
 | `email.delivery_delayed` | A entrega está sendo repetida (ex.: caixa cheia, greylisting). |
 | `email.bounced` | A mensagem teve hard bounce. O endereço também é [suprimido](/pt-BR/concepts/suppressions). |
 | `email.complained` | O destinatário marcou como spam. Também suprimido. |
-| `email.opened` | O pixel de rastreamento foi carregado (exige rastreamento de aberturas no [domínio](/pt-BR/concepts/domains)). |
-| `email.clicked` | Um link reescrito foi clicado (exige rastreamento de cliques). |
+| `email.opened` | Uma pessoa carregou o pixel de rastreamento (exige rastreamento de aberturas no [domínio](/pt-BR/concepts/domains)). `data.open` traz `ipAddress`, `userAgent` e `timestamp` da busca. |
+| `email.clicked` | Um link reescrito foi clicado (exige rastreamento de cliques). `data.click` traz `link`, `ipAddress`, `userAgent` e `timestamp`, como no Resend. |
+| `email.prefetched` | O pixel foi buscado antes de alguém abrir — pelo Mail Privacy Protection da Apple, pelo pré-carregamento do Gmail, por um scanner de segurança ou segundos após a entrega; `data.open.reason` diz qual (veja [precisão da taxa de abertura](/pt-BR/concepts/domains#precisão-da-taxa-de-abertura)). Opt-in: entregue só a endpoints que o listam, nunca a "todos os eventos". |
 
 Eventos de conta não carregam email; `data` descreve a situação do time:
 

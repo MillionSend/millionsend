@@ -12,6 +12,7 @@ export const WEBHOOK_EVENT_TYPES = [
   "email.complained",
   "email.opened",
   "email.clicked",
+  "email.prefetched",
   "deliverability.warning",
   "deliverability.paused",
   "quota.warning",
@@ -48,13 +49,16 @@ export type WebhookEventGroup = (typeof WEBHOOK_EVENT_GROUPS)[number];
  */
 export const WEBHOOK_EVENT_META: Record<
   WebhookEventType,
-  { group: WebhookEventGroup; dot: string }
+  // optIn mirrors OPT_IN_EVENT_TYPES in packages/core/src/webhooks.ts: the
+  // picker leaves it unchecked under "All" because "all events" never carries it.
+  { group: WebhookEventGroup; dot: string; optIn?: true }
 > = {
   "email.sent": { group: "delivery", dot: "var(--ms-dot-sent)" },
   "email.delivered": { group: "delivery", dot: "var(--ms-dot-delivered)" },
   "email.delivery_delayed": { group: "delivery", dot: "var(--ms-dot-delivery-delayed)" },
   "email.opened": { group: "engagement", dot: "var(--ms-dot-opened)" },
   "email.clicked": { group: "engagement", dot: "var(--ms-dot-clicked)" },
+  "email.prefetched": { group: "engagement", dot: "var(--ms-dot-queued)", optIn: true },
   "email.bounced": { group: "problems", dot: "var(--ms-dot-bounced)" },
   "email.complained": { group: "problems", dot: "var(--ms-dot-complained)" },
   "deliverability.warning": { group: "account", dot: "var(--ms-dot-account)" },

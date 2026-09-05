@@ -179,6 +179,7 @@ worker cabem sem ajuste.
 | `SQS_POLL_CONCURRENCY` | Loops paralelos de long polling no SQS para eventos do SES (padrão `4`). |
 | `WEBHOOK_DELIVERY_RETENTION_DAYS` | Por quanto tempo as linhas e payloads de entrega de webhook ficam legíveis no log de entregas (padrão `30`); as mais antigas são expurgadas. |
 | `EMAIL_METADATA_RETENTION_DAYS` | Dias que as linhas inteiras de email (destinatários, assunto, status, eventos) são mantidas (padrão `30`, a norma do setor); os corpos saem antes pela configuração de retenção do painel, e contadores diários e resultados de broadcasts são mantidos sempre. Versões anteriores à v0.6.30 usavam `365`: defina explicitamente antes de atualizar se esse histórico precisa ficar. |
+| `OPEN_PREFETCH_WINDOW_SECONDS` | Uma busca do pixel de rastreamento até esta quantidade de segundos após a entrega (ou antes dela) é registrada como pré-carregada, não como abertura (padrão `10`); `0` mantém só as regras por user agent. Veja [precisão da taxa de abertura](/pt-BR/concepts/domains#precisão-da-taxa-de-abertura). |
 
 ### Armazenamento de objetos (uploads e backups)
 

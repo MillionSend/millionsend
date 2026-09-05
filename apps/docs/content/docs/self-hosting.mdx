@@ -173,6 +173,7 @@ connections, so separate containers and worker replicas fit without tuning.
 | `SQS_POLL_CONCURRENCY` | Parallel SQS long-poll loops for SES events (default `4`). |
 | `WEBHOOK_DELIVERY_RETENTION_DAYS` | How long webhook delivery rows and payloads stay readable in the delivery log (default `30`); older ones are purged. |
 | `EMAIL_METADATA_RETENTION_DAYS` | Days whole email rows (recipients, subject, status, events) are kept (default `30`, the industry norm); bodies leave earlier on the dashboard's retention setting, and daily counters and broadcast results are kept regardless. Releases before v0.6.30 defaulted to `365`: set it explicitly before upgrading if that history must stay. |
+| `OPEN_PREFETCH_WINDOW_SECONDS` | A tracking-pixel fetch within this many seconds of delivery (or before it) is recorded as prefetched, not opened (default `10`); `0` keeps only the user-agent rules. See [open-rate accuracy](/concepts/domains#open-rate-accuracy). |
 
 ### Object storage (uploads & backups)
 

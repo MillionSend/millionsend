@@ -55,12 +55,23 @@ export async function eraseRecipient(
     .where(and(eq(e.teamId, teamId), mentions));
 
   // Events first: their scope is derived from the recipient lists that the
-  // emails update below tombstones.
+  // emails update below tombstones. An open or click carries the fetcher's
+  // IP and user agent — personal data on their own — so those keys go too,
+  // and such rows are selected even though they never mention the address.
   const ev = schema.emailEvents;
+  const withoutFetcher = sql`${ev.data} #- '{open,ipAddress}' #- '{open,userAgent}' #- '{click,ipAddress}' #- '{click,userAgent}'`;
+  const hasFetcher = sql`(${ev.data}->'open' ?| array['ipAddress','userAgent'] or ${ev.data}->'click' ?| array['ipAddress','userAgent'])`;
   const events = await db
     .update(ev)
-    .set({ data: scrubJson(ev.data) })
-    .where(and(inArray(ev.emailId, teamEmailsMentioning), sql`${ev.data}::text ~* ${json}`))
+    .set({
+      data: sql`regexp_replace((${withoutFetcher})::text, ${json}, ${jsonTombstone}, 'gi')::jsonb`,
+    })
+    .where(
+      and(
+        inArray(ev.emailId, teamEmailsMentioning),
+        or(sql`${ev.data}::text ~* ${json}`, hasFetcher),
+      ),
+    )
     .returning({ id: ev.id });
 
   // Scoped by endpoint, not email: test deliveries have no email_id, and a
@@ -72,10 +83,13 @@ export async function eraseRecipient(
   // personal data, so it leaves with the address.
   const contactPayload = sql`lower(${d.payload}->'data'->>'email') = ${addr}`;
   const withoutNames = sql`case when ${contactPayload} then ${d.payload} #- '{data,first_name}' #- '{data,last_name}' else ${d.payload} end`;
+  // Engagement payloads name the recipient in `to`, so the address match
+  // already selects them; the fetcher keys leave the same way as on events.
+  const withoutFetcherPayload = sql`(${withoutNames}) #- '{data,open,ipAddress}' #- '{data,open,userAgent}' #- '{data,click,ipAddress}' #- '{data,click,userAgent}'`;
   const deliveries = await db
     .update(d)
     .set({
-      payload: sql`regexp_replace((${withoutNames})::text, ${json}, ${jsonTombstone}, 'gi')::jsonb`,
+      payload: sql`regexp_replace((${withoutFetcherPayload})::text, ${json}, ${jsonTombstone}, 'gi')::jsonb`,
       lastResponseBody: sql`regexp_replace(${d.lastResponseBody}, ${plain}, ${ERASED_TOMBSTONE}, 'gi')`,
     })
     .where(

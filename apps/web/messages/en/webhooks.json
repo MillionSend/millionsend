@@ -13,6 +13,7 @@
     "menu": "Webhook actions"
   },
   "allEvents": "All",
+  "optInHint": "Not included in All",
   "eventsCount": "{count, plural, one {# event} other {# events}}",
   "loadMore": "Load more",
   "pageOf": "Page 1 – {pages} of {total} webhooks",
@@ -31,6 +32,7 @@
       "delivery_delayed": "Delivery delayed",
       "opened": "Email opened",
       "clicked": "Link clicked",
+      "prefetched": "Email prefetched",
       "bounced": "Email bounced",
       "complained": "Marked as spam"
     },

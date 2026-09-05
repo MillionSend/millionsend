@@ -62,6 +62,7 @@ export {
   type MergeContact,
 } from "./broadcast-content.js";
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
+export { forwardedClientIp } from "./client-ip.js";
 export { type ContactActivityRow, recordContactActivity } from "./contact-activities.js";
 export {
   type ContactEvent,
@@ -185,6 +186,7 @@ export {
   type McpScope,
   mcpResourceUrl,
 } from "./oauth-scopes.js";
+export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
 export { isRootDomainSend, registrableDomain } from "./org-domain.js";
 export {
   effectivePlan,

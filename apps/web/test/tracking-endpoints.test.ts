@@ -42,14 +42,20 @@ async function seedEmail(): Promise<{ emailId: string; teamId: string }> {
   return { emailId: email?.id ?? "", teamId };
 }
 
-function req(token: string) {
+// A phone's mail client: what a person's fetch looks like.
+const IPHONE =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
+
+function req(token: string, headers: Record<string, string> = { "user-agent": IPHONE }) {
   return [
-    new Request(`https://links.example.com/t/x/${token}`),
+    new Request(`https://links.example.com/t/x/${token}`, { headers }),
     { params: Promise.resolve({ token }) },
   ] as const;
 }
 
-async function counts(emailId: string, teamId: string, type: "opened" | "clicked") {
+type EngagementType = "opened" | "clicked" | "prefetched";
+
+async function counts(emailId: string, teamId: string, type: EngagementType) {
   const events = await db
     .select({ id: schema.emailEvents.id })
     .from(schema.emailEvents)
@@ -62,7 +68,11 @@ async function counts(emailId: string, teamId: string, type: "opened" | "clicked
 }
 
 /** Push every existing event of this type past the 60s damping window. */
-async function backdateEvents(emailId: string, type: "opened" | "clicked", ageMs: number) {
+async function backdateEvents(
+  emailId: string,
+  type: (typeof schema.emailEventTypeEnum.enumValues)[number],
+  ageMs: number,
+) {
   await db
     .update(schema.emailEvents)
     .set({ occurredAt: new Date(Date.now() - ageMs) })
@@ -80,12 +90,15 @@ describe("click endpoint /t/c", () => {
     expect(res.headers.get("location")).toBe(url);
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
 
-    // The event carries the signed destination in the SES click shape.
+    // The event carries the signed destination and the fetcher in Resend's
+    // click shape.
     const [event] = await db
       .select({ data: schema.emailEvents.data })
       .from(schema.emailEvents)
       .where(and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "clicked")));
-    expect(event?.data).toEqual({ click: { link: url } });
+    expect(event?.data).toMatchObject({
+      click: { link: url, userAgent: IPHONE, timestamp: expect.stringMatching(/Z$/) },
+    });
 
     // A second click within the damping window is dropped entirely.
     const res2 = await clickGet(...req(token));
@@ -176,6 +189,76 @@ describe("open endpoint /t/o", () => {
     // Immediately after the repeat, a third hit is inside the window again.
     await openGet(...req(token));
     expect(await counts(emailId, teamId, "opened")).toEqual({ events: 2, counter: 1 });
+  });
+
+  it("records Apple Mail Privacy Protection's fetch as prefetched: no status lift, no opened counter", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = makeOpenToken({ emailId, secretKey });
+
+    const res = await openGet(...req(token, { "user-agent": "Mozilla/5.0" }));
+    expect(res.status).toBe(200);
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 1, counter: 1 });
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
+    const [row] = await db
+      .select({ status: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, emailId));
+    expect(row?.status).toBe("queued");
+    const [event] = await db
+      .select({ data: schema.emailEvents.data })
+      .from(schema.emailEvents)
+      .where(
+        and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "prefetched")),
+      );
+    expect(event?.data).toMatchObject({ open: { reason: "apple_mpp", userAgent: "Mozilla/5.0" } });
+  });
+
+  it("marks a fetch seconds after delivery as prefetched, and the person who opens next still counts", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = makeOpenToken({ emailId, secretKey });
+    await db
+      .insert(schema.emailEvents)
+      .values({ emailId, type: "delivered", occurredAt: new Date(Date.now() - 3_000) });
+
+    await openGet(...req(token));
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 1, counter: 1 });
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
+
+    // The same person, well past the window: an open in its own right, not
+    // damped by the prefetch a moment earlier.
+    await backdateEvents(emailId, "delivered", 120_000);
+    await openGet(...req(token));
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 1, counter: 1 });
+    const [row] = await db
+      .select({ status: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, emailId));
+    expect(row?.status).toBe("opened");
+  });
+
+  it("measures the window from the first delivery, not a later recipient's", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = makeOpenToken({ emailId, secretKey });
+    await db.insert(schema.emailEvents).values([
+      { emailId, type: "delivered", occurredAt: new Date(Date.now() - 300_000) },
+      { emailId, type: "delivered", occurredAt: new Date(Date.now() - 5_000) },
+    ]);
+
+    await openGet(...req(token));
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 0, counter: 0 });
+  });
+
+  it("stores the fetcher's address and user agent on the open", async () => {
+    const { emailId } = await seedEmail();
+    const token = makeOpenToken({ emailId, secretKey });
+    await openGet(...req(token, { "user-agent": IPHONE, "x-forwarded-for": "203.0.113.9" }));
+    const [event] = await db
+      .select({ data: schema.emailEvents.data })
+      .from(schema.emailEvents)
+      .where(and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "opened")));
+    expect(event?.data).toMatchObject({ open: { ipAddress: "203.0.113.9", userAgent: IPHONE } });
   });
 
   it("returns the gif silently for an invalid token and records nothing", async () => {

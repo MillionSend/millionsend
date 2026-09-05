@@ -45,7 +45,7 @@ const CHART_SERIES = [
   { key: "complained", color: "var(--ms-warn)" },
 ] as const;
 
-type Bar = { day: string; height: number; dayLabel: string; detail: string };
+type Bar = { day: string; height: number; dayLabel: string; detail: string; partial: boolean };
 type DayCounts = { day: string; sent: number; hardBounced: number; complained: number };
 type EngagementDay = { day: string; delivered: number; opened: number; clicked: number };
 
@@ -56,6 +56,7 @@ function rateBars(
   fmtPct: Intl.NumberFormat,
   fmt: Intl.NumberFormat,
   locale: string,
+  today: string,
 ): Bar[] {
   const pxPerThreshold = BAR_AREA - geometry.lineTop;
   return days.map((d) => {
@@ -66,6 +67,7 @@ function rateBars(
       height: Math.min(BAR_AREA, Math.round((rate / geometry.threshold) * pxPerThreshold)),
       dayLabel: formatDayUtc(d.day, locale),
       detail: `${fmtPct.format(rate)} · ${fmt.format(c)}`,
+      partial: d.day === today,
     };
   });
 }
@@ -81,6 +83,7 @@ function engagementBars(
   fmtPct: Intl.NumberFormat,
   fmt: Intl.NumberFormat,
   locale: string,
+  today: string,
 ): Bar[] {
   const rates = days.map((d) => (d.delivered > 0 ? count(d) / d.delivered : 0));
   const max = Math.max(0, ...rates);
@@ -91,6 +94,7 @@ function engagementBars(
       height: max > 0 ? Math.round((rate / max) * BAR_AREA) : 0,
       dayLabel: formatDayUtc(d.day, locale),
       detail: `${fmtPct.format(rate)} · ${fmt.format(count(d))}`,
+      partial: d.day === today,
     };
   });
 }
@@ -118,6 +122,10 @@ function RateCard(props: {
   risk?: { label: string; lineTop: number };
   // Engagement: neutral denominator note (no threshold — higher is better).
   note?: string;
+  // Tooltip suffix for a bar whose day is still being counted.
+  partialNote: string;
+  // Muted second footer row for what deliberately stays out of the headline.
+  secondary?: { label: string; note: string; hint: string; count: string; pct: string } | undefined;
 }) {
   const areaRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null);
@@ -193,7 +201,14 @@ function RateCard(props: {
                 // 2px floor keeps zero days visible as a baseline stub.
                 height: Math.max(2, bar.height),
                 background: props.color,
-                opacity: hover?.index === index ? 1 : 0.85,
+                // A day still being counted sits lighter than the settled ones.
+                opacity: bar.partial
+                  ? hover?.index === index
+                    ? 0.55
+                    : 0.4
+                  : hover?.index === index
+                    ? 1
+                    : 0.85,
                 borderRadius: 1,
               }}
             />
@@ -208,6 +223,7 @@ function RateCard(props: {
           >
             <div className="ms-mono" style={{ fontSize: 11, color: "var(--ms-muted)" }}>
               {hoveredBar.dayLabel}
+              {hoveredBar.partial ? ` · ${props.partialNote}` : ""}
             </div>
             <div
               className="ms-mono"
@@ -268,6 +284,39 @@ function RateCard(props: {
           </span>
         </span>
       </div>
+      {props.secondary ? (
+        <div
+          title={props.secondary.hint}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+            color: "var(--ms-muted)",
+            padding: "7px 0",
+            borderTop: "1px solid var(--ms-line)",
+          }}
+        >
+          <span
+            style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--ms-faint)" }}
+          />
+          {props.secondary.label}
+          <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
+            {props.secondary.note}
+          </span>
+          <span style={{ marginLeft: "auto" }}>
+            <span className="ms-digits" style={{ fontSize: 12.5, color: "var(--ms-faint)" }}>
+              {props.secondary.count}
+            </span>
+            <span
+              className="ms-digits"
+              style={{ fontSize: 12.5, color: "var(--ms-muted)", marginLeft: 8 }}
+            >
+              {props.secondary.pct}
+            </span>
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -473,6 +522,7 @@ export default function MetricsPage() {
                 }))}
                 formatDay={(day) => formatDayUtc(day, locale)}
                 formatValue={(value) => fmt.format(value)}
+                partialNote={t("chart.soFar")}
               />
             </div>
           </div>
@@ -609,7 +659,16 @@ export default function MetricsPage() {
               }
               risk={{ label: t("bounce.risk"), lineTop: BOUNCE.lineTop }}
               color="var(--ms-danger)"
-              bars={rateBars(data.days, (d) => d.hardBounced, BOUNCE, pct2, fmt, locale)}
+              partialNote={t("chart.soFar")}
+              bars={rateBars(
+                data.days,
+                (d) => d.hardBounced,
+                BOUNCE,
+                pct2,
+                fmt,
+                locale,
+                data.today,
+              )}
               rowLabel={t("bounce.bounced")}
               rowCount={fmt.format(data.totals.hardBounced)}
               rowPct={
@@ -623,7 +682,16 @@ export default function MetricsPage() {
               }
               risk={{ label: t("complaint.risk"), lineTop: COMPLAINT.lineTop }}
               color="var(--ms-warn)"
-              bars={rateBars(data.days, (d) => d.complained, COMPLAINT, pct2, fmt, locale)}
+              partialNote={t("chart.soFar")}
+              bars={rateBars(
+                data.days,
+                (d) => d.complained,
+                COMPLAINT,
+                pct2,
+                fmt,
+                locale,
+                data.today,
+              )}
               rowLabel={t("complaint.complained")}
               rowCount={fmt.format(data.totals.complained)}
               rowPct={
@@ -642,8 +710,23 @@ export default function MetricsPage() {
                   : "—"
               }
               color="var(--ms-info)"
-              bars={engagementBars(data.days, (d) => d.opened, pct1, fmt, locale)}
+              partialNote={t("chart.soFar")}
+              bars={engagementBars(data.days, (d) => d.opened, pct1, fmt, locale, data.today)}
               rowLabel={t("open.opened")}
+              secondary={
+                data.totals.prefetched > 0
+                  ? {
+                      label: t("open.prefetched"),
+                      note: t("open.notCounted"),
+                      hint: t("open.prefetchedHint"),
+                      count: fmt.format(data.totals.prefetched),
+                      pct:
+                        data.totals.delivered > 0
+                          ? pct1.format(data.totals.prefetched / data.totals.delivered)
+                          : "—",
+                    }
+                  : undefined
+              }
               rowCount={fmt.format(data.totals.opened)}
               rowPct={
                 data.totals.delivered > 0
@@ -660,7 +743,8 @@ export default function MetricsPage() {
                   : "—"
               }
               color="var(--ms-info)"
-              bars={engagementBars(data.days, (d) => d.clicked, pct1, fmt, locale)}
+              partialNote={t("chart.soFar")}
+              bars={engagementBars(data.days, (d) => d.clicked, pct1, fmt, locale, data.today)}
               rowLabel={t("click.clicked")}
               rowCount={fmt.format(data.totals.clicked)}
               rowPct={

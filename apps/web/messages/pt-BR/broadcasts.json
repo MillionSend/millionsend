@@ -93,6 +93,9 @@
     "stats": {
       "recipients": "Destinatários",
       "delivered": "Entregues",
+      "opened": "Abertos",
+      "clicked": "Clicados",
+      "prefetched": "{count} pré-carregados · não contados",
       "bounced": "Devolvidos",
       "complaints": "Reclamações"
     },

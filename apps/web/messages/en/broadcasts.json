@@ -93,6 +93,9 @@
     "stats": {
       "recipients": "Recipients",
       "delivered": "Delivered",
+      "opened": "Opened",
+      "clicked": "Clicked",
+      "prefetched": "{count} prefetched · not counted",
       "bounced": "Bounced",
       "complaints": "Complaints"
     },

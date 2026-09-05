@@ -186,3 +186,81 @@ it("drops the contact's name from contact event payloads along with the address"
     data: { id: "c1", email: "[erased]", source: "api" },
   });
 });
+
+it("drops the fetcher's address and user agent from open and click events and their payloads", async () => {
+  const emailId = await seedEmail(teamId, [ADDRESS]);
+  const at = "2026-09-05T12:00:00.000Z";
+  await db.insert(schema.emailEvents).values([
+    {
+      emailId,
+      type: "opened",
+      occurredAt: new Date(),
+      data: {
+        open: { ipAddress: "203.0.113.9", userAgent: "Mozilla/5.0 (iPhone)", timestamp: at },
+      },
+    },
+    {
+      emailId,
+      type: "clicked",
+      occurredAt: new Date(),
+      data: {
+        click: {
+          link: "https://example.com/",
+          ipAddress: "203.0.113.9",
+          userAgent: "Mozilla/5.0 (iPhone)",
+          timestamp: at,
+        },
+      },
+    },
+  ]);
+  const [endpoint] = await db
+    .insert(schema.webhookEndpoints)
+    .values({
+      teamId,
+      url: "https://hooks.example.com",
+      secretCiphertext: Buffer.from("c"),
+      secretIv: Buffer.from("i"),
+      secretWrappedDek: Buffer.from("d"),
+      secretKeyVersion: 1,
+      secretLast4: "abcd",
+    })
+    .returning({ id: schema.webhookEndpoints.id });
+  if (!endpoint) throw new Error("insert failed");
+  const [delivery] = await db
+    .insert(schema.webhookDeliveries)
+    .values({
+      endpointId: endpoint.id,
+      emailId,
+      messageId: "msg_open",
+      eventType: "email.opened",
+      payload: {
+        type: "email.opened",
+        data: {
+          to: [ADDRESS],
+          open: { ipAddress: "203.0.113.9", userAgent: "Mozilla/5.0 (iPhone)", timestamp: at },
+        },
+      },
+    })
+    .returning({ id: schema.webhookDeliveries.id });
+  if (!delivery) throw new Error("insert failed");
+
+  const result = await eraseRecipient(db, teamId, ADDRESS);
+  expect(result.events).toBe(2);
+
+  const events = await db
+    .select({ type: schema.emailEvents.type, data: schema.emailEvents.data })
+    .from(schema.emailEvents)
+    .where(eq(schema.emailEvents.emailId, emailId));
+  expect(events.find((e) => e.type === "opened")?.data).toEqual({ open: { timestamp: at } });
+  expect(events.find((e) => e.type === "clicked")?.data).toEqual({
+    click: { link: "https://example.com/", timestamp: at },
+  });
+  const [d] = await db
+    .select({ payload: schema.webhookDeliveries.payload })
+    .from(schema.webhookDeliveries)
+    .where(eq(schema.webhookDeliveries.id, delivery.id));
+  expect(d?.payload).toEqual({
+    type: "email.opened",
+    data: { to: ["[erased]"], open: { timestamp: at } },
+  });
+});
