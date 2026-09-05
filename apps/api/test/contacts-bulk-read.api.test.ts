@@ -138,6 +138,14 @@ describe("GET /contacts?include=", () => {
     expect(page2[0]?.topics).toHaveLength(1);
   });
 
+  it("accepts the percent-encoded comma every SDK's query encoder produces", async () => {
+    const res = await call(token, "GET", "/contacts?limit=1&include=properties%2Ctopics");
+    expect(res.status).toBe(200);
+    const [item] = (await json(res)).data as Item[];
+    expect(item?.properties).toBeDefined();
+    expect(item?.topics).toBeDefined();
+  });
+
   it("rejects unknown facets with 422", async () => {
     const res = await call(token, "GET", "/contacts?include=segments");
     expect(res.status).toBe(422);
