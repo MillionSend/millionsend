@@ -5,8 +5,10 @@ import {
   enqueueWebhookDeliveries,
   hashRecipient,
   isWebhookEventType,
+  type QueuedWebhookDelivery,
   type SuppressionEventRow,
   utcDay,
+  type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -78,7 +80,7 @@ export async function processSesEvent(
   opts: {
     snsMessageId?: string;
     /** Enqueue a webhook.deliver job; deliveries are skipped when absent. */
-    enqueueWebhookDelivery?: (deliveryId: string) => Promise<void>;
+    enqueueWebhookDelivery?: WebhookEnqueue;
   } = {},
 ): Promise<void> {
   const status = STATUS_BY_EVENT[event.eventType];
@@ -129,7 +131,7 @@ export async function processSesEvent(
   // delivery rows) commit in ONE transaction — a gate committed without its
   // effects would make a retry early-return and permanently drop them,
   // losing e.g. a hard-bounce suppression.
-  const deliveryIds: string[] = [];
+  const deliveries: QueuedWebhookDelivery[] = [];
   const applied = await db.transaction(async (tx) => {
     const txDb = tx as unknown as Db;
     if (email.matchedByTag) {
@@ -178,8 +180,8 @@ export async function processSesEvent(
         type: webhookType,
         occurredAt: new Date(event.occurredAt),
         extras: webhookExtras(event),
-        enqueue: async (deliveryId) => {
-          deliveryIds.push(deliveryId);
+        enqueue: async (rows) => {
+          deliveries.push(...rows);
         },
       });
     }
@@ -257,8 +259,8 @@ export async function processSesEvent(
         teamId: email.teamId,
         type: "suppression.added",
         rows: suppressedRows,
-        enqueue: async (deliveryId) => {
-          deliveryIds.push(deliveryId);
+        enqueue: async (rows) => {
+          deliveries.push(...rows);
         },
       });
     }
@@ -267,13 +269,11 @@ export async function processSesEvent(
   if (!applied) return;
 
   const enqueueDelivery = opts.enqueueWebhookDelivery;
-  if (enqueueDelivery) {
-    for (const deliveryId of deliveryIds) {
-      try {
-        await enqueueDelivery(deliveryId);
-      } catch (err) {
-        console.error("webhook.deliver enqueue failed; reconcile sweep will recover", err);
-      }
+  if (enqueueDelivery && deliveries.length > 0) {
+    try {
+      await enqueueDelivery(deliveries);
+    } catch (err) {
+      console.error("webhook.deliver enqueue failed; reconcile sweep will recover", err);
     }
   }
 }

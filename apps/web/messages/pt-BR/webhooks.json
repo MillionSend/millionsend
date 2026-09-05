@@ -134,7 +134,7 @@
     "noResponse": "Nenhuma resposta registrada.",
     "prev": "Anterior",
     "next": "Próxima",
-    "pageOf": "{from}–{to} de {total}",
+    "pageOf": "{from}–{to}",
     "notFound": "Webhook não encontrado.",
     "previousSecret": "O segredo anterior também assina até {date}"
   },

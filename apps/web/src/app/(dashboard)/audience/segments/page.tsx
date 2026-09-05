@@ -72,6 +72,22 @@ function SegmentsSkeleton() {
   );
 }
 
+/**
+ * The list shows stored counts (refreshed on edit and by a periodic recount),
+ * so each row says how fresh its numbers are; a never-counted segment is
+ * still waiting on its first recount.
+ */
+function CountedHint({ countedAt }: { countedAt: Date | null }) {
+  const t = useTranslations("audience.segments");
+  return (
+    <div style={{ fontSize: 11, color: "var(--ms-faint)", marginTop: 2 }}>
+      {countedAt === null
+        ? t("counting")
+        : t.rich("countedAt", { time: () => <RelativeTime date={countedAt} /> })}
+    </div>
+  );
+}
+
 export default function SegmentsPage() {
   const t = useTranslations("audience.segments");
   const common = useTranslations("common");
@@ -260,9 +276,14 @@ export default function SegmentsPage() {
                       ) : null}
                     </div>
                   </td>
-                  <td className="right ms-mono">{nf.format(row.count)}</td>
+                  <td className="right">
+                    <span className="ms-mono">
+                      {row.contactCount === null ? "—" : nf.format(row.contactCount)}
+                    </span>
+                    <CountedHint countedAt={row.countedAt} />
+                  </td>
                   <td className="right ms-mono" style={{ color: "var(--ms-muted)" }}>
-                    {nf.format(row.unsubscribedCount)}
+                    {row.unsubscribedCount === null ? "—" : nf.format(row.unsubscribedCount)}
                   </td>
                   <td className="right" style={{ color: "var(--ms-muted)" }}>
                     <RelativeTime date={row.createdAt} />

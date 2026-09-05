@@ -87,8 +87,8 @@ function fakeDeps(
       posts.push({ url, body, headers });
       return respond();
     },
-    reenqueue: async (id, at) => {
-      reenqueued.push({ id, at });
+    reenqueue: async (delivery, at) => {
+      reenqueued.push({ id: delivery.id, at });
     },
   };
 }
@@ -244,7 +244,7 @@ it("one success inside the window keeps the breaker open", async () => {
   expect(endpoint?.status).toBe("enabled");
 });
 
-it("caps in-flight deliveries per endpoint: the overflow is deferred, not queued behind a stall", async () => {
+it("runs concurrent deliveries to one endpoint; the queue's group cap, not the handler, bounds them", async () => {
   const endpointId = await insertEndpoint();
   const ids = await Promise.all([1, 2, 3].map(() => insertDelivery(endpointId)));
   let release!: () => void;
@@ -261,8 +261,9 @@ it("caps in-flight deliveries per endpoint: the overflow is deferred, not queued
   await new Promise((r) => setTimeout(r, 50));
   release();
   const outcomes = await Promise.all(running);
-  expect(outcomes.filter((o) => o === "success")).toHaveLength(2);
-  expect(outcomes.filter((o) => o === "deferred")).toHaveLength(1);
-  expect(deps.reenqueued).toHaveLength(1);
-  expect(deps.posts).toHaveLength(2);
+  // Per-endpoint fairness is the queue's job now (group concurrency), so the
+  // handler itself runs every delivery it is handed.
+  expect(outcomes.filter((o) => o === "success")).toHaveLength(3);
+  expect(deps.reenqueued).toHaveLength(0);
+  expect(deps.posts).toHaveLength(3);
 });

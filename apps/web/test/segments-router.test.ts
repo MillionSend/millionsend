@@ -1,4 +1,4 @@
-import { segmentFilterSchema } from "@millionsend/core";
+import { recountSegment, segmentFilterSchema } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -61,7 +61,7 @@ const filterOf = (
 ) => ({ match, conditions });
 
 describe("segments CRUD and isolation", () => {
-  it("creates, lists with live count, gets, updates, and deletes", async () => {
+  it("creates, lists with the stored count, gets, updates, and deletes", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
     await insertContact(teamId, { email: "ada@x.com" });
@@ -72,9 +72,11 @@ describe("segments CRUD and isolation", () => {
       filter: filterOf("all", [{ field: "email", op: "ends_with", value: "@x.com" }]),
     });
 
+    // create stores the count, so the list is right without a live scan.
     const listed = await caller.segments.list();
     expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ id, name: "X domain", count: 1 });
+    expect(listed[0]).toMatchObject({ id, name: "X domain", contactCount: 1 });
+    expect(listed[0]?.countedAt).toBeInstanceOf(Date);
 
     const got = await caller.segments.get({ id });
     expect(got.count).toBe(1);
@@ -84,8 +86,9 @@ describe("segments CRUD and isolation", () => {
       name: "Everyone",
       filter: filterOf("all", []),
     });
+    // A filter change recounts before the list is read again.
+    expect((await caller.segments.list())[0]).toMatchObject({ name: "Everyone", contactCount: 2 });
     expect((await caller.segments.get({ id })).count).toBe(2);
-    expect((await caller.segments.list())[0]?.name).toBe("Everyone");
 
     await caller.segments.delete({ id });
     expect(await caller.segments.list()).toEqual([]);
@@ -281,7 +284,7 @@ describe("builder produces a valid filter shape", () => {
 });
 
 describe("segment counts include unsubscribed contacts", () => {
-  it("list batches contact + unsubscribed counts per segment; get matches", async () => {
+  it("list reads the stored contact + unsubscribed counts; get counts live and refreshes them", async () => {
     const teamId = await createTeam(db, "team-unsub");
     const caller = callerFor(teamId);
     await insertContact(teamId, { email: "ada@x.com" });
@@ -310,12 +313,24 @@ describe("segment counts include unsubscribed contacts", () => {
     await db.insert(schema.segmentMembers).values({ segmentId: manual.id, contactId: cyd.id });
 
     const byId = new Map((await caller.segments.list()).map((row) => [row.id, row]));
-    expect(byId.get(xId)).toMatchObject({ count: 2, unsubscribedCount: 1 });
-    expect(byId.get(allId)).toMatchObject({ count: 3, unsubscribedCount: 2 });
-    expect(byId.get(manual.id)).toMatchObject({ count: 1, unsubscribedCount: 1 });
+    expect(byId.get(xId)).toMatchObject({ contactCount: 2, unsubscribedCount: 1 });
+    expect(byId.get(allId)).toMatchObject({ contactCount: 3, unsubscribedCount: 2 });
+    // Inserted outside the router: never counted until get or the cron runs.
+    expect(byId.get(manual.id)).toMatchObject({
+      contactCount: null,
+      unsubscribedCount: null,
+      countedAt: null,
+    });
 
     const got = await caller.segments.get({ id: xId });
     expect(got).toMatchObject({ count: 2, unsubscribedCount: 1 });
+    expect(await caller.segments.get({ id: manual.id })).toMatchObject({
+      count: 1,
+      unsubscribedCount: 1,
+    });
+    const refreshed = (await caller.segments.list()).find((row) => row.id === manual.id);
+    expect(refreshed).toMatchObject({ contactCount: 1, unsubscribedCount: 1 });
+    expect(refreshed?.countedAt).toBeInstanceOf(Date);
   });
 
   it("counts other teams' contacts in neither total", async () => {
@@ -388,9 +403,10 @@ describe("manual (null-filter) segments", () => {
     if (!contact) throw new Error("contact missing");
     await db.insert(schema.segmentMembers).values({ segmentId: segment.id, contactId: contact.id });
 
-    const listed = await caller.segments.list();
-    expect(listed[0]).toMatchObject({ id: segment.id, filter: null, count: 1 });
     expect((await caller.segments.get({ id: segment.id })).count).toBe(1);
+    await recountSegment(db, { id: segment.id, teamId, filter: null });
+    const listed = await caller.segments.list();
+    expect(listed[0]).toMatchObject({ id: segment.id, filter: null, contactCount: 1 });
   });
 
   it("broadcasts.recipientCount resolves manual members plus filter matches", async () => {

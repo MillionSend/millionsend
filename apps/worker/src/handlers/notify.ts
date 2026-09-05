@@ -15,6 +15,7 @@ import {
   utcDay,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
+  type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -32,7 +33,7 @@ import type { SystemMailer } from "../system-mail.js";
 export interface NotifyDeps {
   isCloud: boolean;
   mailer: SystemMailer;
-  enqueueWebhook: (deliveryId: string) => Promise<void>;
+  enqueueWebhook: WebhookEnqueue;
   appBaseUrl?: string | undefined;
   now?: Date;
 }

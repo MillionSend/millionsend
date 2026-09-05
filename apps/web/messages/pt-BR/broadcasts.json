@@ -64,7 +64,11 @@
       "two": "Conteúdo"
     },
     "continue": "Continuar",
-    "stepChange": "Alterar"
+    "stepChange": "Alterar",
+    "sendTest": "Enviar teste",
+    "testSent": "Teste enviado para {email}",
+    "testRateLimited": "Muitos e-mails de teste — tente de novo em uma hora.",
+    "testFailed": "Não foi possível enviar o e-mail de teste."
   },
   "guard": {
     "title": "Enviar transmissão",

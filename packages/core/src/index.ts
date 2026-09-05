@@ -5,6 +5,7 @@ export {
   type AcceptEmailPayload,
   type AcceptEmailResult,
   acceptEmail,
+  countDistinctRecipients,
   estimateAttachmentBytes,
   isOnboardingSender,
   MAX_ATTACHMENT_BYTES,
@@ -55,6 +56,11 @@ export {
   resolveBounceGuidance,
   resolveComplaintGuidance,
 } from "./bounce-guidance.js";
+export {
+  applyMergeFields,
+  injectPreheader,
+  type MergeContact,
+} from "./broadcast-content.js";
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
 export { type ContactActivityRow, recordContactActivity } from "./contact-activities.js";
 export {
@@ -205,8 +211,19 @@ export {
   regionPause,
   regionWindowCounts,
 } from "./platform-breaker.js";
-export { type QuotaResult, releaseDailyQuota, reserveDailyQuota } from "./quota.js";
+export {
+  dailyCeiling,
+  type QuotaResult,
+  releaseDailyQuota,
+  reserveDailyQuota,
+} from "./quota.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
+export {
+  countSegment,
+  recountSegment,
+  recountStaleSegments,
+  type SegmentCounts,
+} from "./segment-counts.js";
 export {
   SEGMENT_FILTER_MAX_CONDITIONS,
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
@@ -276,6 +293,7 @@ export {
   generateWebhookSecret,
   isWebhookEventType,
   parseWebhookSecret,
+  type QueuedWebhookDelivery,
   rotatedWebhookSecretColumns,
   rotationOverlapEnd,
   signWebhook,
@@ -287,6 +305,7 @@ export {
   WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
   WEBHOOK_ROTATION_MAX_OVERLAP_HOURS,
   type WebhookEmailFacts,
+  type WebhookEnqueue,
   type WebhookEventType,
   type WebhookPayload,
   type WebhookSignatureHeaders,

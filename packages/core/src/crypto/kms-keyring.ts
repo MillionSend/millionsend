@@ -52,7 +52,7 @@ export const WRAP_CACHE_MAX_USES = 500;
 // Unwrap-side LRU: dashboard reads and webhook deliveries re-open the same
 // wrapped DEKs in bursts. 256 × 32-byte keys is negligible memory; the TTL
 // bounds how long decryption keeps working after KMS-side key revocation.
-export const UNWRAP_CACHE_MAX_ENTRIES = 256;
+export const UNWRAP_CACHE_MAX_ENTRIES = 1024;
 export const UNWRAP_CACHE_TTL_MS = 10 * 60 * 1000;
 
 interface DekPair {

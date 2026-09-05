@@ -18,6 +18,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import {
   addrSpec,
+  displayUrl,
   formatDayTime,
   formatDurationShort,
   formatRelative,
@@ -526,7 +527,10 @@ export default function EmailDetailPage() {
       const parts = [code ?? b.bounceSubType, b.bounceType?.toLowerCase()].filter(Boolean);
       return parts.length > 0 ? parts.join(" · ") : null;
     }
-    if (type === "clicked") return clickOf(data)?.link ?? null;
+    if (type === "clicked") {
+      const link = clickOf(data)?.link;
+      return link ? displayUrl(link) : null;
+    }
     if (type === "complained") return complaintOf(data)?.complaintFeedbackType ?? null;
     if (type === "suppressed") return t("detail.suppressedLine");
     return null;
@@ -1033,7 +1037,7 @@ export default function EmailDetailPage() {
                       overflowWrap: "anywhere",
                     }}
                   >
-                    {link}
+                    {displayUrl(link)}
                   </div>
                 ) : null}
               </div>

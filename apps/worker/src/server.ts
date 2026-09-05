@@ -9,9 +9,13 @@ import {
 import {
   deriveTrackingKey,
   deriveUnsubscribeKey,
+  eraseRecipient,
   getInstanceSettings,
+  hashRecipient,
   postJson,
   purgeExpiredIdempotencyKeys,
+  type QueuedWebhookDelivery,
+  recountStaleSegments,
   sesEventsHealth,
 } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
@@ -104,10 +108,12 @@ const clientForRegion = (region: string): SesIdentityClient => {
 // process only (see SES_MAX_SEND_RATE in @millionsend/config). The db-backed
 // instance setting overrides env; polled so a Settings → Instance change
 // applies within a minute, without a restart.
-const bucket = createTokenBucket(env.SES_MAX_SEND_RATE);
+// Each worker process takes its share of the account's rate: the bucket is
+// per process, so WORKER_REPLICAS keeps N processes at the account's total.
+const bucket = createTokenBucket(env.SES_MAX_SEND_RATE / env.WORKER_REPLICAS);
 const applySendRate = async (): Promise<void> => {
   const { sesMaxSendRate } = await getInstanceSettings(db);
-  bucket.setRate(sesMaxSendRate ?? env.SES_MAX_SEND_RATE);
+  bucket.setRate((sesMaxSendRate ?? env.SES_MAX_SEND_RATE) / env.WORKER_REPLICAS);
 };
 await applySendRate();
 setInterval(() => {
@@ -151,7 +157,7 @@ const enqueueSend = async (
  * sized for them. Each lane fetches two jobs at a time so a backlog is pulled
  * continuously instead of one job per polling interval.
  */
-const SEND_CONCURRENCY = 16;
+const SEND_CONCURRENCY = env.SEND_CONCURRENCY;
 const SEND_BATCH = 2;
 
 /**
@@ -162,11 +168,20 @@ const SEND_BATCH = 2;
 const EVENT_CONCURRENCY = 4;
 const EVENT_BATCH = 10;
 
-const enqueueWebhook = async (deliveryId: string, startAfter?: Date): Promise<void> => {
-  await queue.send(
+// One statement per fan-out, each job in its endpoint's fairness group so a
+// stalled receiver only ever holds its own lanes.
+const enqueueWebhook = async (
+  deliveries: readonly QueuedWebhookDelivery[],
+  startAfter?: Date,
+): Promise<void> => {
+  await queue.sendMany(
     "webhook.deliver",
-    { deliveryId },
-    { dedupeKey: deliveryId, ...(startAfter ? { startAfter } : {}) },
+    deliveries.map((d) => ({
+      payload: { deliveryId: d.id },
+      dedupeKey: d.id,
+      group: d.endpointId,
+      ...(startAfter ? { startAfter } : {}),
+    })),
   );
 };
 
@@ -208,20 +223,26 @@ const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise
   );
 };
 
-await queue.work("broadcast.send", async (payload) => {
-  await sendBroadcast(
-    db,
-    {
-      keyring,
-      unsubscribeSecretKey,
-      appBaseUrl: env.APP_BASE_URL,
-      isCloud: env.IS_CLOUD,
-      enqueueEmailSend: enqueueSend,
-      reschedule: (broadcastId, at) => enqueueBroadcast(broadcastId, at),
-    },
-    payload,
-  );
-});
+await queue.work(
+  "broadcast.send",
+  async (payload) => {
+    await sendBroadcast(
+      db,
+      {
+        keyring,
+        unsubscribeSecretKey,
+        appBaseUrl: env.APP_BASE_URL,
+        isCloud: env.IS_CLOUD,
+        enqueueEmailSend: enqueueSend,
+        reschedule: (broadcastId, at) => enqueueBroadcast(broadcastId, at),
+      },
+      payload,
+    );
+  },
+  // Two broadcasts fired together fan out side by side instead of the
+  // second waiting for the first's whole walk.
+  { concurrency: 2 },
+);
 
 await queue.work(
   "ses.event",
@@ -256,6 +277,7 @@ if (env.SQS_QUEUE_URL) {
       }),
       queueUrl: env.SQS_QUEUE_URL,
       allowedTopicArns,
+      concurrency: env.SQS_POLL_CONCURRENCY,
       enqueueSesEvent: async (event, snsMessageId) => {
         await queue.send("ses.event", { event, snsMessageId }, { dedupeKey: snsMessageId });
       },
@@ -274,17 +296,31 @@ await queue.work(
         keyring,
         post: (url, body, headers) =>
           postJson(url, { body, headers, allowLocalhost: env.WEBHOOK_ALLOW_LOCALHOST }),
-        reenqueue: enqueueWebhook,
+        reenqueue: (delivery, at) => enqueueWebhook([delivery], at),
       },
       payload,
     );
   },
-  // Receivers are tenant-controlled and can stall for the full timeout;
-  // several workers keep one slow endpoint from serializing every tenant, and
-  // one job per fetch keeps a stalled receiver from holding a second delivery
-  // hostage, so a faster poll stands in for batching here.
-  { concurrency: 8, pollingIntervalSeconds: 1 },
+  // Receivers are tenant-controlled and can stall for the full timeout. Each
+  // job carries its endpoint as a fairness group capped at two in flight, so
+  // a dead receiver holds two lanes and the other fourteen keep draining
+  // everyone else; batches of two keep the fetch continuous under a backlog.
+  { concurrency: 16, batchSize: 2, groupConcurrency: 2 },
 );
+
+// Erasure scans a team's whole history; it runs here so the request that
+// deleted the contact returns at once.
+await queue.work("recipient.erase", async ({ teamId, address }) => {
+  await eraseRecipient(db, teamId, address);
+});
+// An erasure that exhausted its retries must not vanish: the log names the
+// team and the address's hash (never the address, which is what is being
+// erased) so an operator can re-run it from Audience → Erase recipient.
+await queue.workDeadLetter("recipient.erase", async ({ teamId, address }) => {
+  console.error(
+    `recipient.erase: dead-lettered team=${teamId} recipient=${hashRecipient(address)}; re-run it from Audience → Erase recipient`,
+  );
+});
 
 await queue.workDeadLetter("webhook.deliver", async ({ deliveryId }) => {
   const abandoned = await abandonWebhookDelivery(db, deliveryId);
@@ -314,7 +350,10 @@ await queue.scheduleCrons({
     const stripped = await stripExpiredEventPayloads(db, {
       defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
     });
-    const metadata = await purgeExpiredEmailMetadata(db, { retentionDays: metadataRetentionDays });
+    const metadata = await purgeExpiredEmailMetadata(db, {
+      retentionDays: metadataRetentionDays,
+      deliveryRetentionDays: env.WEBHOOK_DELIVERY_RETENTION_DAYS,
+    });
     const sessions = await purgeExpiredSessions(db);
     const stripeEvents = await purgeStripeEvents(db);
     const counts = {
@@ -324,6 +363,7 @@ await queue.scheduleCrons({
       deliveries: stripped.deliveries,
       emails: metadata.emails,
       oldDeliveries: metadata.deliveries,
+      broadcastsFrozen: metadata.broadcasts,
       sessions,
       stripeEvents,
     };
@@ -355,11 +395,15 @@ await queue.scheduleCrons({
     });
     if (requeued > 0) console.log(`broadcasts.reconcile: requeued=${requeued}`);
   },
+  "segments.recount": async () => {
+    const recounted = await recountStaleSegments(db, { olderThanMs: 30 * 60_000 });
+    if (recounted > 0) console.log(`segments.recount: recounted=${recounted}`);
+  },
   "notifications.sweep": async () => {
     const result = await sweepNotifications(db, {
       isCloud: env.IS_CLOUD,
       mailer,
-      enqueueWebhook: (deliveryId) => enqueueWebhook(deliveryId),
+      enqueueWebhook,
       appBaseUrl: env.APP_BASE_URL,
     });
     if (result.sent > 0) console.log(`notifications.sweep: sent=${result.sent}`);

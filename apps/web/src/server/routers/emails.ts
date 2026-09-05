@@ -7,10 +7,10 @@ import {
   hashRecipient,
   utcDay,
 } from "@millionsend/core";
-import { schema } from "@millionsend/db";
+import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gt, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
-import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { getKeyring } from "../keyring";
@@ -72,6 +72,25 @@ function paginate<T extends { id: string; cursorCreatedAt: string }>(
   return { items, nextCursor };
 }
 
+/**
+ * Filter-scope total (the cursor excluded), computed for the first page only:
+ * later pages return null and the client keeps reading pages[0].total, so an
+ * infinite scroll costs one count, not one per page.
+ */
+async function firstPageTotal(
+  db: Db,
+  table: PgTable,
+  filters: (SQL | undefined)[],
+  cursor: Cursor | undefined,
+): Promise<number | null> {
+  if (cursor) return null;
+  const [row] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(table)
+    .where(and(...filters));
+  return row?.total ?? 0;
+}
+
 export const emailsRouter = router({
   list: teamProcedure
     .input(
@@ -100,11 +119,7 @@ export const emailsRouter = router({
       if (input.domainId) filters.push(eq(t.domainId, input.domainId));
       if (input.broadcastId) filters.push(eq(t.broadcastId, input.broadcastId));
       if (input.since) filters.push(gte(t.createdAt, input.since));
-      // Total counts the filter scope, not the page — the cursor is excluded.
-      const [totalRow] = await ctx.db
-        .select({ total: sql<number>`count(*)::int` })
-        .from(t)
-        .where(and(...filters));
+      const total = await firstPageTotal(ctx.db, t, filters, input.cursor);
       const ascending = input.order === "asc";
       if (input.cursor) {
         filters.push(ascending ? afterCursor(t, input.cursor) : beforeCursor(t, input.cursor));
@@ -123,10 +138,10 @@ export const emailsRouter = router({
         .where(and(...filters))
         .orderBy(...(ascending ? [asc(t.createdAt), asc(t.id)] : [desc(t.createdAt), desc(t.id)]))
         .limit(input.limit + 1);
-      return { ...paginate(rows, input.limit), total: totalRow?.total ?? 0 };
+      return { ...paginate(rows, input.limit), total };
     }),
 
-  /** Masthead proof strip + cap banner: today's sends, all-time deliveries, p50, queued backlog. */
+  /** Masthead proof strip + cap banner: today's sends, all-time deliveries, queued backlog. */
   stats: teamProcedure.query(async ({ ctx }) => {
     const today = utcDay();
     const c = schema.usageCounters;
@@ -144,29 +159,10 @@ export const emailsRouter = router({
       .from(t)
       .where(and(eq(t.teamId, ctx.teamId), eq(t.latestStatus, "queued_quota")));
 
-    // p50 over SES delivery processingTimeMillis recorded in delivered events.
-    const ev = schema.emailEvents;
-    const [p50] = await ctx.db
-      .select({
-        p50: sql<
-          string | null
-        >`percentile_cont(0.5) within group (order by (${ev.data}->'delivery'->>'processingTimeMillis')::numeric)`,
-      })
-      .from(ev)
-      .innerJoin(t, eq(ev.emailId, t.id))
-      .where(
-        and(
-          eq(t.teamId, ctx.teamId),
-          eq(ev.type, "delivered"),
-          sql`${ev.data}->'delivery'->>'processingTimeMillis' is not null`,
-        ),
-      );
-
     return {
       sentToday: usage?.sentToday ?? 0,
       deliveredAllTime: usage?.deliveredAllTime ?? 0,
       queuedQuota: queued?.count ?? 0,
-      p50DeliveryMs: p50?.p50 == null ? null : Math.round(Number(p50.p50)),
     };
   }),
 
@@ -268,11 +264,7 @@ export const emailsRouter = router({
         if (input.search) filters.push(ilike(t.email, `%${escapeLike(input.search)}%`));
         if (input.reason) filters.push(eq(t.reason, input.reason));
         if (input.since) filters.push(gte(t.createdAt, input.since));
-        // Total counts the filter scope, not the page — the cursor is excluded.
-        const [totalRow] = await ctx.db
-          .select({ total: sql<number>`count(*)::int` })
-          .from(t)
-          .where(and(...filters));
+        const total = await firstPageTotal(ctx.db, t, filters, input.cursor);
         if (input.cursor) filters.push(beforeCursor(t, input.cursor));
         const rows = await ctx.db
           .select({
@@ -286,7 +278,7 @@ export const emailsRouter = router({
           .where(and(...filters))
           .orderBy(desc(t.createdAt), desc(t.id))
           .limit(input.limit + 1);
-        return { ...paginate(rows, input.limit), total: totalRow?.total ?? 0 };
+        return { ...paginate(rows, input.limit), total };
       }),
 
     /** Masthead proof strip: "{total} addresses blocked · {n} bounce · {n} complaint". */
@@ -365,7 +357,7 @@ export const emailsRouter = router({
             type: "suppression.added",
             rows: [row],
             source: "dashboard",
-            enqueue: ctx.enqueueWebhookDelivery,
+            enqueue: ctx.enqueueWebhookDeliveries,
           });
           return { id: row.id };
         }
@@ -392,7 +384,7 @@ export const emailsRouter = router({
         type: "suppression.removed",
         rows: [row],
         source: "dashboard",
-        enqueue: ctx.enqueueWebhookDelivery,
+        enqueue: ctx.enqueueWebhookDeliveries,
       });
       return { id: row.id };
     }),

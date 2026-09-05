@@ -1,6 +1,6 @@
 import { verifyClickToken } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
-import { enqueueWebhookDelivery } from "../../../../server/queue";
+import { enqueueWebhookDeliveries } from "../../../../server/queue";
 import { recordEngagement, trackingKey } from "../../record";
 
 /**
@@ -22,7 +22,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ token: str
 
   // data mirrors the SES click payload shape ({ click: { link } }) so one
   // extractor serves both ingestion paths on the email detail page.
-  await recordEngagement(getDb(), parsed.emailId, "clicked", enqueueWebhookDelivery, {
+  await recordEngagement(getDb(), parsed.emailId, "clicked", enqueueWebhookDeliveries, {
     click: { link: parsed.url },
   });
   return Response.redirect(parsed.url, 302);

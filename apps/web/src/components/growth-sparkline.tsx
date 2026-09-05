@@ -16,13 +16,28 @@ interface DayCount {
   count: number;
 }
 
-/** Cumulative value per day across the union of both series' day axes. */
-function buildSeries(added: DayCount[], unsubscribed: DayCount[]) {
+/** Where the window's cumulative lines start: the counts from before its first day. */
+export interface GrowthBaseline {
+  total: number;
+  out: number;
+}
+
+/**
+ * Cumulative value per day across the union of both series' day axes. The
+ * series cover a bounded window, so the lines start from the baseline the
+ * page already knows (all-time totals minus the window's own additions)
+ * rather than from zero.
+ */
+export function buildSeries(
+  added: DayCount[],
+  unsubscribed: DayCount[],
+  baseline: GrowthBaseline = { total: 0, out: 0 },
+) {
   const days = [...new Set([...added, ...unsubscribed].map((d) => d.day))].sort();
   const addedBy = new Map(added.map((d) => [d.day, d.count]));
   const unsubBy = new Map(unsubscribed.map((d) => [d.day, d.count]));
-  let total = 0;
-  let out = 0;
+  let total = baseline.total;
+  let out = baseline.out;
   return days.map((day) => {
     total += addedBy.get(day) ?? 0;
     out += unsubBy.get(day) ?? 0;
@@ -33,6 +48,7 @@ function buildSeries(added: DayCount[], unsubscribed: DayCount[]) {
 export function GrowthSparkline({
   added,
   unsubscribed,
+  baseline,
   totalLabel,
   outLabel,
   formatDay,
@@ -42,6 +58,7 @@ export function GrowthSparkline({
 }: {
   added: DayCount[];
   unsubscribed: DayCount[];
+  baseline?: GrowthBaseline;
   totalLabel: string;
   outLabel: string;
   /** Localized short-day label for the tooltip (UTC-pinned). */
@@ -51,7 +68,7 @@ export function GrowthSparkline({
   height?: number;
 }) {
   const [hover, setHover] = useState<{ index: number; px: number; py: number } | null>(null);
-  const series = buildSeries(added, unsubscribed);
+  const series = buildSeries(added, unsubscribed, baseline);
   if (series.length === 0) {
     return (
       <svg width={width} height={height} aria-hidden="true">
@@ -67,7 +84,7 @@ export function GrowthSparkline({
     );
   }
 
-  const max = Math.max(series[series.length - 1]?.total ?? 1, 1);
+  const max = Math.max(...series.map((s) => Math.max(s.total, s.out)), 1);
   const pad = 2;
   const x = (i: number) =>
     series.length === 1 ? width - pad : pad + (i * (width - pad * 2)) / (series.length - 1);

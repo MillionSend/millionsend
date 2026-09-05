@@ -7,6 +7,7 @@ import {
   normalizeAddress,
   type SuppressionEventRow,
   suppressionHashesFor,
+  type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -35,7 +36,7 @@ const ERASED_ROWS_NOTE =
 export function registerSuppressionRoutes(
   app: OpenAPIHono<Env>,
   db: Db,
-  events: { enqueue?: ((deliveryId: string) => Promise<void>) | undefined } = {},
+  events: { enqueue?: WebhookEnqueue | undefined } = {},
 ): void {
   const jsonErr = (description: string) => ({
     content: { "application/json": { schema: errorSchema } },

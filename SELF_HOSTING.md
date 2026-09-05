@@ -73,7 +73,7 @@ docker compose pull
 docker compose up -d
 ```
 
-Migrations run on boot, so that is the whole upgrade. The compose file runs
+Migrations run on boot, so that is the whole upgrade for a small instance. The compose file runs
 `ghcr.io/millionsend/millionsend:latest`, the latest tagged release (`:1.2.3`
 and `:1.2` tags exist alongside it; `:edge` follows `main`, where every build
 passed the test suite first). To hold a version, set `MILLIONSEND_IMAGE`
@@ -82,7 +82,22 @@ in `.env` to a version tag or an immutable digest
 what is running) and `docker compose up -d`. The previous pin put back is the
 rollback — with the caveat that schema migrations run forward only, so take a
 dump before a big jump (Backups below); a rolled-back image may not start on a
-newer schema.
+newer schema. Upgrading from a release before v0.6.30: the metadata window
+default drops from 365 to 30 days, and the first hourly purge after boot
+deletes email rows older than that (counters and broadcast results stay). Set
+`EMAIL_METADATA_RETENTION_DAYS=365` first if that history must remain.
+
+Once tables are large (millions of emails or contacts), a migration that
+rewrites or indexes them takes minutes. Migrations run in one transaction and
+their locks block reads and writes on the tables they touch until it commits,
+so that wait is downtime whether it happens at boot or before the swap. Run
+it before the swap anyway, from a throwaway container, at a quiet hour: a
+migration that fails leaves the old container serving instead of a container
+that will not boot, and the boot-time pass then finds nothing pending:
+
+```sh
+docker compose pull && docker compose run --rm --no-deps millionsend migrate && docker compose up -d
+```
 
 Automatic upgrades, for a host that can only reach out (behind a CDN-only
 firewall, say): a cron line is enough, since `up -d` recreates a container
@@ -523,13 +538,21 @@ docker compose start millionsend smtp
   up a rate change within a minute, retention on the next purge run. (`SES_MAX_SEND_RATE`
   and `EMAIL_RETENTION_DAYS` remain honored as boot overrides if set in the
   environment, but are no longer part of the documented setup.) Whole email rows —
-  recipients, subject, status, events — and webhook delivery records outlive their
-  bodies and are deleted after `EMAIL_METADATA_RETENTION_DAYS` (default 365).
+  recipients, subject, status, events — outlive their bodies and are deleted after
+  `EMAIL_METADATA_RETENTION_DAYS` (default 30, the industry norm; daily counters and broadcast results are kept regardless); webhook delivery rows (payload,
+  response, attempts) stay readable for `WEBHOOK_DELIVERY_RETENTION_DAYS` (default
+  30) and are then purged.
   Deleting a contact tombstones its address across email history, event payloads and
   API logs; only the suppression hash is kept.
-- One worker container only: the SES rate limiter is in-memory, so N worker replicas
-  send at N × the configured send rate. Scale the worker vertically, or divide the
-  rate by the replica count.
+- Worker sizing: `SEND_CONCURRENCY` (default 16) is the number of parallel send
+  lanes — about 1.2 per message/second of SES rate; `SQS_POLL_CONCURRENCY` (default
+  4) is the number of parallel SQS long-poll loops. The SES rate limiter is a
+  per-process token bucket, so N workers would send at N × the configured rate:
+  when running more than one worker, set `WORKER_REPLICAS` (default 1) to that
+  count and each process divides the rate by it.
+- Postgres runs with `max_connections=200` in the compose files; each process
+  (api, worker, web) holds a pool of up to 24 connections, so separate containers
+  and worker replicas fit without tuning.
 - To run processes in separate containers, set `PROCESS` to `api`, `worker`, or `web`
   per container (default `all`).
 - Email bodies are encrypted at rest with `MASTER_ENCRYPTION_KEY` and purged after

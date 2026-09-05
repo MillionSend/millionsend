@@ -1,19 +1,25 @@
 import { env } from "@millionsend/config";
 import {
+  acceptEmail,
+  applyMergeFields,
   DAY_MS,
   emailInsightsView,
   fetchBroadcastInsights,
   fetchDeliverabilityHealth,
+  fetchEffectivePlan,
+  injectPreheader,
+  type MergeContact,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   parseSingleSender,
   regionPause,
+  substituteUnsubscribeUrl,
   verifySenderDomain,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, sql } from "drizzle-orm";
 import { createTranslator } from "next-intl";
 import { z } from "zod";
 import { mailyDocumentSchema } from "@/lib/email-doc";
@@ -21,6 +27,7 @@ import enDeliverability from "../../../messages/en/deliverability.json";
 import ptBRDeliverability from "../../../messages/pt-BR/deliverability.json";
 import type { AppLocale } from "../../i18n/request";
 import { resolveEditorSave } from "../email-content";
+import { getKeyring } from "../keyring";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { activeLocale } from "../locale";
 import { router, teamProcedure } from "../trpc";
@@ -28,6 +35,14 @@ import { assertSegment, savedSegmentPredicate } from "./segments";
 import { assertTopic, topicMembershipSql } from "./topics";
 
 const MAX_SCHEDULE_AHEAD_DAYS = 30;
+
+/**
+ * Test sends are real emails through the team's quota to the signed-in
+ * user. The tag marks them so the per-team hourly cap below can count them
+ * without a table of its own.
+ */
+const TEST_SEND_TAG = "millionsend_test";
+const TEST_SENDS_PER_HOUR = 10;
 
 const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
   en: enDeliverability,
@@ -138,6 +153,16 @@ async function getOwnBroadcast(ctx: { db: Db; teamId: string }, id: string): Pro
   return row;
 }
 
+/**
+ * recipient_count is written once when the fan-out completes and survives the
+ * emails retention purge; rows that predate the column (or are still sending)
+ * fall back to a live count over the fan-out's own unique index, per row.
+ */
+function recipientsSql(b: typeof schema.broadcasts) {
+  const e = schema.emails;
+  return sql<number>`coalesce(${b.recipientCount}, (select count(*)::int from ${e} where ${e.broadcastId} = ${b.id}))`;
+}
+
 function assertDraft(row: BroadcastRow): void {
   if (row.status !== "draft") {
     throw new TRPCError({
@@ -158,7 +183,6 @@ export const broadcastsRouter = router({
     .query(async ({ ctx, input }) => {
       const b = schema.broadcasts;
       const sg = schema.segments;
-      const e = schema.emails;
       const filters = [eq(b.teamId, ctx.teamId)];
       if (input.cursor) {
         const cursorFilter = beforeCursor(b, input.cursor);
@@ -171,7 +195,7 @@ export const broadcastsRouter = router({
           subject: b.subject,
           status: b.status,
           segmentName: sg.name,
-          recipients: sql<number>`count(${e.id})::int`,
+          recipients: recipientsSql(b),
           scheduledAt: b.scheduledAt,
           sentAt: b.sentAt,
           createdAt: b.createdAt,
@@ -179,9 +203,7 @@ export const broadcastsRouter = router({
         })
         .from(b)
         .leftJoin(sg, eq(sg.id, b.segmentId))
-        .leftJoin(e, eq(e.broadcastId, b.id))
         .where(and(...filters))
-        .groupBy(b.id, sg.name)
         .orderBy(desc(b.createdAt), desc(b.id))
         .limit(input.limit + 1);
       return paginate(rows, input.limit);
@@ -210,12 +232,20 @@ export const broadcastsRouter = router({
       })
       .from(e)
       .where(and(eq(e.broadcastId, row.id), eq(e.teamId, ctx.teamId)));
+    const live = stats && stats.total > 0 ? stats : null;
     return {
       ...row,
       replyTo: firstReplyTo(row.replyTo),
       topicName: topic?.name ?? null,
       segmentName: segment?.name ?? null,
-      stats: stats ?? { total: 0, delivered: 0, bounced: 0, complained: 0 },
+      // Live counts while any email row still exists; the counts recorded
+      // before the rows aged out stand in once they are gone.
+      stats: {
+        total: row.recipientCount ?? live?.total ?? 0,
+        delivered: live?.delivered ?? row.deliveredCount ?? 0,
+        bounced: live?.bounced ?? row.bouncedCount ?? 0,
+        complained: live?.complained ?? row.complainedCount ?? 0,
+      },
       insights: emailInsightsView(await fetchBroadcastInsights(ctx.db, ctx.teamId, row.id)),
     };
   }),
@@ -396,6 +426,102 @@ export const broadcastsRouter = router({
         console.error("broadcast.send enqueue failed; reconcile sweep will recover", err);
       }
       return { id: input.id, scheduledAt };
+    }),
+
+  /**
+   * Sends the composer's current content to the signed-in user, rendered the
+   * way the fan-out renders it (merge fields, preheader), with the subject
+   * marked as a test. Needs no saved draft, so a new broadcast can be
+   * previewed in a real inbox before its first save.
+   */
+  sendTest: teamProcedure
+    .input(
+      z.object({
+        from: z.string().trim().min(1),
+        subject: z.string().trim().min(1),
+        html: z.string().nullable(),
+        text: z.string().nullable(),
+        previewText: z.string().nullable().optional(),
+        replyTo: z.array(z.string().trim().min(1)).max(10).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const to = ctx.session?.user.email;
+      if (!to) throw new TRPCError({ code: "UNAUTHORIZED" });
+      if (!input.html && !input.text) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Write some content first." });
+      }
+      const sender = await verifySenderDomain(ctx.db, ctx.teamId, input.from);
+      if (!sender.ok) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            sender.reason === "invalid_sender"
+              ? "From must be a single address."
+              : `The ${sender.fromDomain} domain is not verified for this team.`,
+        });
+      }
+      const guardError =
+        (await deliverabilityGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
+      if (guardError) throw guardError;
+      const e = schema.emails;
+      const [recent] = await ctx.db
+        .select({ n: count() })
+        .from(e)
+        .where(
+          and(
+            eq(e.teamId, ctx.teamId),
+            gt(e.createdAt, new Date(Date.now() - 60 * 60 * 1000)),
+            sql`${e.tags} ? ${TEST_SEND_TAG}`,
+          ),
+        );
+      if ((recent?.n ?? 0) >= TEST_SENDS_PER_HOUR) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS" });
+      }
+      // The reader is the sender's own account, so merge fields resolve to
+      // it; there is no contact to unsubscribe, so the link points home.
+      const [firstName, ...rest] = (ctx.session.user.name ?? "").trim().split(/\s+/);
+      const contact: MergeContact = {
+        email: to,
+        firstName: firstName || null,
+        lastName: rest.length > 0 ? rest.join(" ") : null,
+        properties: {},
+      };
+      const unsubscribeUrl = env.APP_BASE_URL ? `${env.APP_BASE_URL}/broadcasts` : "#";
+      const personalize = (content: string | null, html: boolean) =>
+        content === null
+          ? undefined
+          : applyMergeFields(substituteUnsubscribeUrl(content, unsubscribeUrl), contact, { html });
+      const htmlWithPreheader =
+        input.html && input.previewText
+          ? injectPreheader(input.html, input.previewText)
+          : input.html;
+      const result = await acceptEmail(
+        {
+          db: ctx.db,
+          keyring: getKeyring(),
+          isCloud: env.IS_CLOUD,
+          // Absent in tests: the reconcile sweep re-enqueues accepted rows.
+          enqueueEmailSend: ctx.enqueueEmailSend ?? (async () => {}),
+        },
+        {
+          teamId: ctx.teamId,
+          plan: (await fetchEffectivePlan(ctx.db, ctx.teamId)) ?? "free",
+          apiKeyId: null,
+        },
+        {
+          from: input.from,
+          to: [to],
+          ...(input.replyTo && input.replyTo.length > 0 ? { replyTo: input.replyTo } : {}),
+          subject: `[Test] ${applyMergeFields(input.subject, contact, { html: false })}`,
+          html: personalize(htmlWithPreheader, true),
+          text: personalize(input.text, false),
+          tags: { [TEST_SEND_TAG]: "1" },
+          domainId: sender.domainId,
+        },
+      );
+      if (!result.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: result.reason });
+      return { to };
     }),
 
   cancel: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {

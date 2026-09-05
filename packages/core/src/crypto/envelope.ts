@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { GCM_IV_LENGTH, GCM_TAG_LENGTH } from "./constants.js";
 import type { DekContext, Keyring } from "./keyring.js";
 
@@ -120,13 +121,25 @@ export async function decryptPayload(
   }
 }
 
+/**
+ * Bodies are gzipped before sealing: ciphertext is indistinguishable from
+ * random and does not compress, so the only place to shrink the per-recipient
+ * copy is the plaintext. The sender authors the whole body, so the classic
+ * compression side channel (an attacker injecting chosen text beside a secret
+ * and watching ciphertext lengths) has no foothold here.
+ *
+ * Decrypt sniffs the format: gzip output starts with 0x1f 0x8b, while the
+ * JSON of a legacy row starts with '{' (0x7b) — no key-version bump needed.
+ */
+const GZIP_MAGIC = Buffer.from([0x1f, 0x8b]);
+
 export async function encryptEmailBody(
   body: EmailBody,
   keyring: Keyring,
   owner?: EnvelopeOwner,
 ): Promise<EncryptedBody> {
   return encryptPayload(
-    Buffer.from(JSON.stringify(body), "utf8"),
+    gzipSync(Buffer.from(JSON.stringify(body), "utf8")),
     keyring,
     owner && { ...owner, kind: "email_body" },
   );
@@ -196,5 +209,6 @@ export async function decryptEmailBody(
     keyring,
     owner && { ...owner, kind: "email_body" },
   );
-  return JSON.parse(plaintext.toString("utf8")) as EmailBody;
+  const json = plaintext.subarray(0, 2).equals(GZIP_MAGIC) ? gunzipSync(plaintext) : plaintext;
+  return JSON.parse(json.toString("utf8")) as EmailBody;
 }

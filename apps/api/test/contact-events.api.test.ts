@@ -19,6 +19,7 @@ let teamId: string;
 let token: string;
 let endpointId: string;
 const enqueued: string[] = [];
+const erasures: { teamId: string; address: string }[] = [];
 const masterKey = randomBytes(32);
 
 function call(method: string, path: string, body?: unknown) {
@@ -65,8 +66,11 @@ beforeAll(async () => {
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
     isCloud: false,
     enqueueEmailSend: async () => {},
-    enqueueWebhookDelivery: async (id) => {
-      enqueued.push(id);
+    enqueueWebhookDeliveries: async (rows) => {
+      enqueued.push(...rows.map((r) => r.id));
+    },
+    enqueueRecipientErase: async (teamId, address) => {
+      erasures.push({ teamId, address });
     },
     appBaseUrl: "https://app.example.com",
     unsubscribeSecretKey: deriveUnsubscribeKey(masterKey),
@@ -242,5 +246,17 @@ describe("GET /contacts/{id}/topics", () => {
     const { data } = (await res.json()) as { data: { name: string; visibility: string }[] };
     expect(data.length).toBeGreaterThan(0);
     for (const topic of data) expect(["public", "private"]).toContain(topic.visibility);
+  });
+});
+
+describe("deleting a contact", () => {
+  it("hands the history scrub to the queue and returns as soon as the row is gone", async () => {
+    const contact = (await (
+      await call("POST", "/contacts", { email: "gone@example.com" })
+    ).json()) as { id: string };
+    erasures.length = 0;
+    expect((await call("DELETE", `/contacts/${contact.id}`)).status).toBe(200);
+    expect(erasures).toEqual([{ teamId, address: "gone@example.com" }]);
+    expect((await call("GET", `/contacts/${contact.id}`)).status).toBe(404);
   });
 });

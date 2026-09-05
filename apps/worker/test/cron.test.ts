@@ -390,6 +390,7 @@ it("metadata purge deletes whole expired rows (events cascade) and old deliverie
   expect(await purgeExpiredEmailMetadata(db, { retentionDays: 365, now })).toEqual({
     emails: 1,
     deliveries: 1,
+    broadcasts: 0,
   });
   const remaining = await db.select({ id: schema.emails.id }).from(schema.emails);
   expect(remaining.map((r) => r.id).sort()).toEqual([fresh, future].sort());
@@ -398,6 +399,7 @@ it("metadata purge deletes whole expired rows (events cascade) and old deliverie
   expect(await purgeExpiredEmailMetadata(db, { retentionDays: 365, now })).toEqual({
     emails: 0,
     deliveries: 0,
+    broadcasts: 0,
   });
 });
 
@@ -524,4 +526,113 @@ it("holds every parked email while SES's own 24-hour quota is full", async () =>
   });
   expect(result).toEqual({ drained: 0, stillParked: 1 });
   expect(enqueued).toEqual([]);
+});
+
+it("purges bodies in bounded batches when the backlog exceeds one batch", async () => {
+  const teamId = await createTeam(db, "purge-batches");
+  const now = new Date("2026-09-01T00:00:00Z");
+  await db.insert(schema.emails).values(
+    Array.from({ length: 1200 }, (_, i) => ({
+      teamId,
+      from: "a@acme.dev",
+      to: [`r${i}@example.com`],
+      subject: "old",
+      latestStatus: "delivered" as const,
+      createdAt: new Date("2026-07-01T00:00:00Z"),
+      bodyCiphertext: Buffer.from("x"),
+      bodyIv: Buffer.from("y"),
+      bodyWrappedDek: Buffer.from("z"),
+      bodyKeyVersion: 1,
+    })),
+  );
+  expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(1200);
+  expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(0);
+});
+
+it("records a broadcast's results before its emails age out, so the campaign keeps its numbers", async () => {
+  const teamId = await createTeam(db, "broadcast-freeze");
+  const now = new Date("2026-09-01T00:00:00Z");
+  const sentAt = new Date("2026-07-01T00:00:00Z");
+  const [broadcast] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId, from: "a@acme.dev", subject: "July news", status: "sent", sentAt })
+    .returning({ id: schema.broadcasts.id });
+  if (!broadcast) throw new Error("broadcast insert failed");
+  await db.insert(schema.emails).values(
+    (["delivered", "opened", "bounced"] as const).map((latestStatus, i) => ({
+      teamId,
+      broadcastId: broadcast.id,
+      from: "a@acme.dev",
+      to: [`r${i}@example.com`],
+      subject: "July news",
+      latestStatus,
+      createdAt: sentAt,
+    })),
+  );
+
+  const first = await purgeExpiredEmailMetadata(db, { retentionDays: 30, now });
+  expect(first).toMatchObject({ emails: 3, broadcasts: 1 });
+  const [row] = await db
+    .select({
+      total: schema.broadcasts.recipientCount,
+      delivered: schema.broadcasts.deliveredCount,
+      bounced: schema.broadcasts.bouncedCount,
+      complained: schema.broadcasts.complainedCount,
+    })
+    .from(schema.broadcasts)
+    .where(eq(schema.broadcasts.id, broadcast.id));
+  expect(row).toEqual({ total: 3, delivered: 2, bounced: 1, complained: 0 });
+  expect(
+    await db
+      .select({ id: schema.emails.id })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, teamId)),
+  ).toHaveLength(0);
+  // Already recorded: the next run leaves it alone.
+  expect((await purgeExpiredEmailMetadata(db, { retentionDays: 30, now })).broadcasts).toBe(0);
+});
+
+it("keeps a scheduled email until its delivery day has also left the window", async () => {
+  const teamId = await createTeam(db, "purge-scheduled");
+  const now = new Date("2026-09-01T00:00:00Z");
+  const old = new Date("2026-07-01T00:00:00Z");
+  const body = {
+    bodyCiphertext: Buffer.from("x"),
+    bodyIv: Buffer.from("y"),
+    bodyWrappedDek: Buffer.from("z"),
+    bodyKeyVersion: 1,
+  };
+  const [dueYesterday, longPast] = await db
+    .insert(schema.emails)
+    .values([
+      // Created 62 days ago, scheduled for yesterday: a queued send that the
+      // tick after its due time must not strip or delete.
+      {
+        teamId,
+        from: "a@acme.dev",
+        to: ["r@example.com"],
+        subject: "s",
+        createdAt: old,
+        scheduledAt: new Date("2026-08-31T00:00:00Z"),
+        ...body,
+      },
+      {
+        teamId,
+        from: "a@acme.dev",
+        to: ["r@example.com"],
+        subject: "s",
+        createdAt: old,
+        scheduledAt: old,
+        ...body,
+      },
+    ])
+    .returning({ id: schema.emails.id });
+  if (!dueYesterday || !longPast) throw new Error("insert failed");
+  expect(await purgeExpiredEmailBodies(db, { defaultRetentionDays: 30, now })).toBe(1);
+  expect((await purgeExpiredEmailMetadata(db, { retentionDays: 30, now })).emails).toBe(1);
+  const left = await db
+    .select({ id: schema.emails.id })
+    .from(schema.emails)
+    .where(eq(schema.emails.teamId, teamId));
+  expect(left.map((r) => r.id)).toEqual([dueYesterday.id]);
 });

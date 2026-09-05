@@ -97,13 +97,18 @@ export const topicsRouter = router({
       if (input.subscribed !== undefined) {
         filters.push(input.subscribed ? membership : not(membership));
       }
-      // Total counts the filter scope, not the page — the cursor is excluded.
-      const [totalRow] = await ctx.db
-        .select({ total: sql<number>`count(*)::int` })
-        .from(c)
-        .innerJoin(t, eq(t.id, input.topicId))
-        .leftJoin(s, and(eq(s.topicId, t.id), eq(s.contactId, c.id)))
-        .where(and(...filters));
+      // Total counts the filter scope, not the page, and only on the first
+      // page: later pages reuse it instead of recounting the team.
+      const total = input.cursor
+        ? null
+        : ((
+            await ctx.db
+              .select({ total: sql<number>`count(*)::int` })
+              .from(c)
+              .innerJoin(t, eq(t.id, input.topicId))
+              .leftJoin(s, and(eq(s.topicId, t.id), eq(s.contactId, c.id)))
+              .where(and(...filters))
+          )[0]?.total ?? 0);
       if (input.cursor) filters.push(beforeCursor(c, input.cursor));
       const rows = await ctx.db
         .select({
@@ -122,7 +127,7 @@ export const topicsRouter = router({
         .orderBy(desc(c.createdAt), desc(c.id))
         .limit(input.limit + 1);
       const page = paginate(rows, input.limit);
-      return { items: page.items, nextCursor: page.nextCursor, total: totalRow?.total ?? 0 };
+      return { items: page.items, nextCursor: page.nextCursor, total };
     }),
 
   create: teamProcedure

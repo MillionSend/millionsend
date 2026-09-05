@@ -21,6 +21,22 @@ describe("envelope encryption", () => {
     await expect(decryptEmailBody(encrypted, keyring)).resolves.toEqual(body);
   });
 
+  it("still opens a legacy body sealed without compression", async () => {
+    const body = { html: "<p>legacy</p>", text: "old" };
+    const legacy = await encryptPayload(Buffer.from(JSON.stringify(body), "utf8"), keyring);
+    await expect(decryptEmailBody(legacy, keyring)).resolves.toEqual(body);
+  });
+
+  it("compresses a repetitive body several times over", async () => {
+    const html = "<tr><td>Item</td><td>R$ 10,00</td></tr>\n".repeat(500);
+    expect(html.length).toBeGreaterThanOrEqual(20_000);
+    const body = { html, text: null };
+    const compressed = await encryptEmailBody(body, keyring);
+    const plain = await encryptPayload(Buffer.from(JSON.stringify(body), "utf8"), keyring);
+    expect(compressed.ciphertext.length * 5).toBeLessThan(plain.ciphertext.length);
+    await expect(decryptEmailBody(compressed, keyring)).resolves.toEqual(body);
+  });
+
   it("produces distinct ciphertexts for identical bodies (fresh DEK per email)", async () => {
     const body = { html: "<p>same</p>", text: null };
     const a = await encryptEmailBody(body, keyring);

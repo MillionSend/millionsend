@@ -4,7 +4,11 @@ import { inArray } from "drizzle-orm";
 import type { ContactActivityRow } from "./contact-activities.js";
 import { ERASED_TOMBSTONE } from "./erase-recipient.js";
 import { SUPPRESSION_ORIGIN_BY_REASON, type SuppressionReason } from "./suppressions.js";
-import { enqueueTeamWebhookEvents, type WebhookEventType } from "./webhooks.js";
+import {
+  enqueueTeamWebhookEvents,
+  type WebhookEnqueue,
+  type WebhookEventType,
+} from "./webhooks.js";
 
 /**
  * Who made a contact or suppression change: the recipient themselves through
@@ -20,7 +24,7 @@ export type ContactEventSource = "one_click" | "hosted_page" | "api" | "dashboar
  */
 export interface ContactEventContext {
   source: ContactEventSource;
-  enqueue?: ((deliveryId: string) => Promise<void>) | undefined;
+  enqueue?: WebhookEnqueue | undefined;
 }
 
 export type ContactSnapshot = Pick<
@@ -176,7 +180,7 @@ export async function emitSuppressionEvents(
     type: "suppression.added" | "suppression.removed";
     rows: readonly SuppressionEventRow[];
     source?: ContactEventSource | undefined;
-    enqueue?: ((deliveryId: string) => Promise<void>) | undefined;
+    enqueue?: WebhookEnqueue | undefined;
     occurredAt?: Date;
   },
 ): Promise<void> {

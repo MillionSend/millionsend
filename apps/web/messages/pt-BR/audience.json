@@ -281,6 +281,8 @@
     "deleteBody": "{name} é excluído. Transmissões já enviadas a ele mantêm seu histórico.",
     "deleteConfirm": "Excluir segmento",
     "unsubscribed": "Descadastrados",
+    "countedAt": "contado <time></time>",
+    "counting": "contando…",
     "searchPlaceholder": "Buscar segmentos…",
     "edit": "Editar",
     "copyId": "Copiar ID",

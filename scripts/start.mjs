@@ -66,6 +66,24 @@ if (process.argv[2] === "setup") {
   process.exit(cli.status ?? 1);
 }
 
+function runMigrations() {
+  return spawnSync(
+    join(root, "packages/db/node_modules/.bin/tsx"),
+    [join(root, "packages/db/src/migrate.ts")],
+    { cwd: root, stdio: "inherit" },
+  );
+}
+
+// "migrate" argv mode runs pending migrations and exits without starting any
+// process. Migrations lock the tables they touch, so a slow one is downtime
+// either way; running it here, before `up -d`, means a failure leaves the
+// old container serving instead of a container that will not boot, and the
+// boot-time pass then finds nothing pending:
+//   docker compose run --rm --no-deps millionsend migrate
+if (process.argv[2] === "migrate") {
+  process.exit(runMigrations().status ?? 1);
+}
+
 // biome-ignore lint/suspicious/noUndeclaredEnvVars: container runtime selector, never read under turbo
 const selection = process.env.PROCESS ?? "all";
 const names = selection === "all" ? ALL_PROCESSES : [selection];
@@ -81,11 +99,7 @@ for (const name of names) {
 // The docs site is static content with no database; a docs-only container
 // must boot without DATABASE_URL (its compose service has no postgres).
 if (names.some((name) => name !== "docs")) {
-  const migrate = spawnSync(
-    join(root, "packages/db/node_modules/.bin/tsx"),
-    [join(root, "packages/db/src/migrate.ts")],
-    { cwd: root, stdio: "inherit" },
-  );
+  const migrate = runMigrations();
   if (migrate.status !== 0) {
     console.error("start: migrations failed, not starting processes");
     process.exit(migrate.status ?? 1);

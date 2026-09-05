@@ -15,6 +15,8 @@
 services:
   postgres:
     image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    # Three app pools plus the queue's own would exceed the 100 default; unused slots cost nothing.
+    command: ["postgres", "-c", "max_connections=200"]
     environment:
       POSTGRES_USER: millionsend
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-millionsend}

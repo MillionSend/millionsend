@@ -153,8 +153,29 @@ export function estimateAttachmentBytes(
  */
 export const QUOTA_BACKLOG_DAYS = 3;
 
+/**
+ * Distinct mailboxes an email reaches: what the daily quota charges, since
+ * every recipient is one SES message and one unit of shared reputation.
+ */
+export function countDistinctRecipients(
+  to: readonly string[],
+  cc?: readonly string[] | null,
+  bcc?: readonly string[] | null,
+): number {
+  return new Set(
+    [...to, ...(cc ?? []), ...(bcc ?? [])].map((r) => normalizeAddress(extractAddrSpec(r))),
+  ).size;
+}
+
 export type AcceptEmailResult =
-  | { ok: true; id: string; parked: boolean }
+  | {
+      ok: true;
+      id: string;
+      parked: boolean;
+      /** Distinct mailboxes charged to the quota, and the UTC day they count against. */
+      recipientCount: number;
+      day: string;
+    }
   | { ok: false; reason: "all_suppressed" }
   | { ok: false; reason: "attachments_too_large"; maxBytes: number }
   | { ok: false; reason: "quota_backlog_full" };
@@ -182,6 +203,13 @@ export async function acceptEmail(
      * matching single-send's guarantee that a mid-flight failure sends nothing.
      */
     tx?: Db | undefined;
+    /**
+     * Skip the per-email quota reservation: the caller reserves once for the
+     * whole batch after its loop, so the team's daily counter row is locked
+     * for one statement instead of the length of the transaction. Rows insert
+     * as queued; the caller parks them if its reservation fails.
+     */
+    quota?: "deferred" | undefined;
   } = {},
 ): Promise<AcceptEmailResult> {
   if (estimateAttachmentBytes(payload.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
@@ -216,9 +244,7 @@ export async function acceptEmail(
   const bcc = keep(payload.bcc);
   // Quota is charged per distinct mailbox, not per email: every recipient is
   // one SES message and one unit of shared reputation.
-  const recipientCount = new Set(
-    [...to, ...(cc ?? []), ...(bcc ?? [])].map((r) => normalizeAddress(extractAddrSpec(r))),
-  ).size;
+  const recipientCount = countDistinctRecipients(to, cc, bcc);
 
   // The row id is fixed before sealing: the envelope is bound to it.
   const emailId = randomUUID();
@@ -238,15 +264,14 @@ export async function acceptEmail(
   // Quota reservation, email insert, and the caller's in-transaction hook
   // commit atomically (the quota contract). Over-quota mail is parked as
   // queued_quota — still accepted, drained after the midnight rollover.
+  // A scheduled send is charged to its delivery day, so a team cannot stack
+  // many days of the cap onto one future instant.
+  const day = utcDay(payload.scheduledAt ?? new Date());
   const runAccept = async (txDb: Db) => {
-    // A scheduled send is charged to its delivery day, so a team cannot
-    // stack many days of the cap onto one future instant.
-    const quota = await reserveDailyQuota(txDb, {
-      teamId: auth.teamId,
-      count: recipientCount,
-      limit,
-      ...(payload.scheduledAt ? { day: utcDay(payload.scheduledAt) } : {}),
-    });
+    const quota =
+      opts.quota === "deferred"
+        ? { reserved: true }
+        : await reserveDailyQuota(txDb, { teamId: auth.teamId, count: recipientCount, limit, day });
     if (!quota.reserved && limit !== null) {
       const [parked] = await txDb
         .select({ n: count() })
@@ -308,5 +333,5 @@ export async function acceptEmail(
       console.error("email.send enqueue failed; reconcile sweep will recover", err);
     }
   }
-  return { ok: true, id: accepted.id, parked: accepted.parked };
+  return { ok: true, id: accepted.id, parked: accepted.parked, recipientCount, day };
 }

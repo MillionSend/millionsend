@@ -122,6 +122,13 @@ export const emails = pgTable(
     index("emails_team_quota_parked_idx")
       .on(t.teamId)
       .where(sql`${t.latestStatus} = 'queued_quota'`),
+    // The send reconcile sweep walks queued rows oldest first every 15
+    // minutes; without this it reads the whole table twice per run.
+    index("emails_queued_created_idx").on(t.createdAt).where(sql`${t.latestStatus} = 'queued'`),
+    // Metadata retention deletes by age across every team.
+    index("emails_created_idx").on(t.createdAt),
+    // The dashboard filters a team's list by status within a date window.
+    index("emails_team_status_created_idx").on(t.teamId, t.latestStatus, t.createdAt),
     // Fan-out idempotency spine: re-running a broadcast fan-out can never
     // insert (and thus never send) a second email to the same contact.
     uniqueIndex("emails_broadcast_contact_idx")

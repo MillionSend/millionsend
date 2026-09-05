@@ -1,4 +1,4 @@
-import { index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { segments } from "./segments.js";
 import { teams } from "./teams.js";
 import { topics } from "./topics.js";
@@ -46,6 +46,15 @@ export const broadcasts = pgTable(
     status: broadcastStatusEnum("status").notNull().default("draft"),
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
+    // Emails the fan-out wrote, recorded when it completes so lists never
+    // count the emails table. Null for rows that predate the column.
+    recipientCount: integer("recipient_count"),
+    // Results recorded once the broadcast's emails are about to age out of
+    // the metadata window, so a campaign keeps its numbers after its rows
+    // are gone. Null while the emails are still there to count.
+    deliveredCount: integer("delivered_count"),
+    bouncedCount: integer("bounced_count"),
+    complainedCount: integer("complained_count"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

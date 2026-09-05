@@ -1,4 +1,5 @@
 import {
+  countDistinctRecipients,
   DAY_MS,
   effectivePlan,
   failQueuedEmailsForDomain,
@@ -9,6 +10,7 @@ import {
   releaseDailyQuota,
   reserveDailyQuota,
   transitionQueueState,
+  type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -33,30 +35,42 @@ import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "
  */
 export async function reconcileWebhookDeliveries(
   db: Db,
-  deps: { enqueue: (deliveryId: string) => Promise<void>; now?: Date },
+  deps: { enqueue: WebhookEnqueue; now?: Date },
 ): Promise<number> {
   const now = deps.now ?? new Date();
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
-  const stalled = await db
-    .select({ id: schema.webhookDeliveries.id })
-    .from(schema.webhookDeliveries)
-    .where(
-      or(
+  const d = schema.webhookDeliveries;
+  const stale = or(
+    and(eq(d.status, "pending"), lt(d.createdAt, staleBefore)),
+    and(eq(d.status, "failed"), lt(d.nextAttemptAt, staleBefore)),
+  );
+  // Keyset pages over (createdAt, id): every overdue row is re-enqueued each
+  // run, one bounded statement and one queue insert per page, so a slow
+  // endpoint's backlog never starves a lost delivery behind it.
+  let cursor: { createdAt: Date; id: string } | undefined;
+  let requeued = 0;
+  for (;;) {
+    const page = await db
+      .select({ id: d.id, endpointId: d.endpointId, createdAt: d.createdAt })
+      .from(d)
+      .where(
         and(
-          eq(schema.webhookDeliveries.status, "pending"),
-          lt(schema.webhookDeliveries.createdAt, staleBefore),
+          stale,
+          cursor
+            ? sql`(${d.createdAt}, ${d.id}) > (${cursor.createdAt}, ${cursor.id}::uuid)`
+            : undefined,
         ),
-        and(
-          eq(schema.webhookDeliveries.status, "failed"),
-          lt(schema.webhookDeliveries.nextAttemptAt, staleBefore),
-        ),
-      ),
-    )
-    .orderBy(asc(schema.webhookDeliveries.createdAt));
-  for (const delivery of stalled) {
-    await deps.enqueue(delivery.id);
+      )
+      .orderBy(asc(d.createdAt), asc(d.id))
+      .limit(RECONCILE_BATCH);
+    const last = page.at(-1);
+    if (!last) break;
+    cursor = { createdAt: last.createdAt, id: last.id };
+    await deps.enqueue(page.map(({ id, endpointId }) => ({ id, endpointId })));
+    requeued += page.length;
+    if (page.length < RECONCILE_BATCH) break;
   }
-  return stalled.length;
+  return requeued;
 }
 
 /**
@@ -143,6 +157,9 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
         currentPeriodEnd: schema.teams.currentPeriodEnd,
         scheduledAt: schema.emails.scheduledAt,
         createdAt: schema.emails.createdAt,
+        to: schema.emails.to,
+        cc: schema.emails.cc,
+        bcc: schema.emails.bcc,
       })
       .from(schema.emails)
       .innerJoin(schema.teams, eq(schema.emails.teamId, schema.teams.id))
@@ -188,6 +205,9 @@ async function drainOne(
     plan: keyof typeof PLAN_DAILY_LIMIT;
     currentPeriodEnd: Date | null;
     scheduledAt: Date | null;
+    to: string[];
+    cc: string[] | null;
+    bcc: string[] | null;
   },
   exhausted: Set<string>,
   failures: unknown[],
@@ -196,11 +216,13 @@ async function drainOne(
   const limit = deps.isCloud
     ? PLAN_DAILY_LIMIT[effectivePlan(email.plan, email.currentPeriodEnd)]
     : null;
+  // Charged the way accept charged it: one unit per distinct mailbox.
+  const units = countDistinctRecipients(email.to, email.cc, email.bcc);
   try {
     const outcome = await db
       .transaction(async (tx) => {
         const txDb = tx as unknown as Db;
-        const quota = await reserveDailyQuota(txDb, { teamId: email.teamId, count: 1, limit });
+        const quota = await reserveDailyQuota(txDb, { teamId: email.teamId, count: units, limit });
         if (!quota.reserved) return "exhausted" as const;
         const moved = await transitionQueueState(txDb, email.id, {
           from: "queued_quota",
@@ -224,7 +246,7 @@ async function drainOne(
       // A "queued" email with no job would only be picked up by the
       // reconcile sweep; re-park it so the drain retry handles it sooner.
       await transitionQueueState(db, email.id, { from: "queued", to: "queued_quota" });
-      await releaseDailyQuota(db, { teamId: email.teamId, count: 1 });
+      await releaseDailyQuota(db, { teamId: email.teamId, count: units });
       throw err;
     }
     return 1;
@@ -326,26 +348,43 @@ export async function purgeExpiredEmailBodies(
   const retentionDays = emailRetentionDays ?? params.defaultRetentionDays;
   const now = params.now ?? new Date();
   const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
-  const purged = await db
-    .update(schema.emails)
-    .set({
-      bodyCiphertext: null,
-      bodyIv: null,
-      bodyWrappedDek: null,
-      bodyKeyVersion: null,
-      // Attachments are content on the same retention clock as the body.
-      attachments: null,
-      bodyPurgedAt: now,
-    })
-    .where(
-      and(
-        lt(schema.emails.createdAt, cutoff),
-        isNull(schema.emails.bodyPurgedAt),
-        or(isNull(schema.emails.scheduledAt), lte(schema.emails.scheduledAt, now)),
-      ),
-    )
-    .returning({ id: schema.emails.id });
-  return purged.length;
+  const e = schema.emails;
+  // Batched like the metadata purge: a backlog (a shortened retention, a
+  // worker outage) must not become one statement returning millions of ids.
+  let purged = 0;
+  for (;;) {
+    const batch = await db
+      .update(e)
+      .set({
+        bodyCiphertext: null,
+        bodyIv: null,
+        bodyWrappedDek: null,
+        bodyKeyVersion: null,
+        // Attachments are content on the same retention clock as the body.
+        attachments: null,
+        bodyPurgedAt: now,
+      })
+      .where(
+        inArray(
+          e.id,
+          db
+            .select({ id: e.id })
+            .from(e)
+            .where(
+              and(
+                lt(e.createdAt, cutoff),
+                isNull(e.bodyPurgedAt),
+                or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff)),
+              ),
+            )
+            .limit(PURGE_BATCH),
+        ),
+      )
+      .returning({ id: e.id });
+    purged += batch.length;
+    if (batch.length < PURGE_BATCH) break;
+  }
+  return purged;
 }
 
 /**
@@ -361,11 +400,22 @@ export async function purgeExpiredApiRequests(
   const retentionDays = emailRetentionDays ?? params.defaultRetentionDays;
   const now = params.now ?? new Date();
   const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
-  const purged = await db
-    .delete(schema.apiRequests)
-    .where(lt(schema.apiRequests.createdAt, cutoff))
-    .returning({ id: schema.apiRequests.id });
-  return purged.length;
+  const r = schema.apiRequests;
+  let purged = 0;
+  for (;;) {
+    const batch = await db
+      .delete(r)
+      .where(
+        inArray(
+          r.id,
+          db.select({ id: r.id }).from(r).where(lt(r.createdAt, cutoff)).limit(PURGE_BATCH),
+        ),
+      )
+      .returning({ id: r.id });
+    purged += batch.length;
+    if (batch.length < PURGE_BATCH) break;
+  }
+  return purged;
 }
 
 /** Domains whose live DNS is re-checked at most this often (bounds SES/DNS load). */
@@ -660,17 +710,55 @@ const PURGE_BATCH = 1000;
 /**
  * Metadata retention: whole email rows (recipients, subject, headers, tags —
  * events cascade with them) past the metadata window are deleted in batches.
- * Webhook deliveries only lose their email_id on that cascade, so they age
- * out here on the same clock. Future-scheduled rows are kept like the body
- * purge does. Env-only window; no instance setting overrides it.
+ * Webhook deliveries are a log with their own, shorter window
+ * (`deliveryRetentionDays`), purged here on the same schedule.
+ * Future-scheduled rows are kept like the body purge does. Env-only
+ * windows; no instance setting overrides them.
  */
 export async function purgeExpiredEmailMetadata(
   db: Db,
-  params: { retentionDays: number; now?: Date },
-): Promise<{ emails: number; deliveries: number }> {
+  params: { retentionDays: number; deliveryRetentionDays?: number; now?: Date },
+): Promise<{ emails: number; deliveries: number; broadcasts: number }> {
   const now = params.now ?? new Date();
   const cutoff = new Date(now.getTime() - params.retentionDays * DAY_MS);
+  const deliveryCutoff = new Date(
+    now.getTime() - (params.deliveryRetentionDays ?? params.retentionDays) * DAY_MS,
+  );
   const e = schema.emails;
+  // Broadcast results outlive the emails they are counted from: a sent
+  // broadcast whose fan-out is about to leave the window records its
+  // delivered, bounced and complained counts once, before the rows go. Two
+  // days of slack cover a fan-out that ran past its sent_at.
+  const b = schema.broadcasts;
+  const freezeBefore = new Date(cutoff.getTime() + 2 * DAY_MS);
+  const frozen = await db.execute(sql`
+    update ${b} set
+      recipient_count = coalesce(${b.recipientCount}, s.total),
+      delivered_count = s.delivered,
+      bounced_count = s.bounced,
+      complained_count = s.complained
+    from (
+      select
+        ${e.broadcastId} as broadcast_id,
+        count(*)::int as total,
+        count(*) filter (where ${e.latestStatus} in ('delivered', 'opened', 'clicked'))::int as delivered,
+        count(*) filter (where ${e.latestStatus} = 'bounced')::int as bounced,
+        count(*) filter (where ${e.latestStatus} = 'complained')::int as complained
+      from ${e}
+      where ${e.broadcastId} in (
+        select ${b.id} from ${b}
+        where ${b.status} = 'sent' and ${b.sentAt} < ${freezeBefore} and ${b.deliveredCount} is null
+      )
+      group by ${e.broadcastId}
+    ) s
+    where ${b.id} = s.broadcast_id
+    returning ${b.id}
+  `);
+  // postgres-js hands back the returned rows as the result; other drivers
+  // wrap them in { rows }.
+  const broadcasts = (
+    Array.isArray(frozen) ? frozen : ((frozen as { rows?: unknown[] }).rows ?? [])
+  ).length;
   let emails = 0;
   for (;;) {
     const batch = await db
@@ -681,7 +769,9 @@ export async function purgeExpiredEmailMetadata(
           db
             .select({ id: e.id })
             .from(e)
-            .where(and(lt(e.createdAt, cutoff), or(isNull(e.scheduledAt), lte(e.scheduledAt, now))))
+            .where(
+              and(lt(e.createdAt, cutoff), or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff))),
+            )
             .limit(PURGE_BATCH),
         ),
       )
@@ -697,14 +787,14 @@ export async function purgeExpiredEmailMetadata(
       .where(
         inArray(
           d.id,
-          db.select({ id: d.id }).from(d).where(lt(d.createdAt, cutoff)).limit(PURGE_BATCH),
+          db.select({ id: d.id }).from(d).where(lt(d.createdAt, deliveryCutoff)).limit(PURGE_BATCH),
         ),
       )
       .returning({ id: d.id });
     deliveries += batch.length;
     if (batch.length < PURGE_BATCH) break;
   }
-  return { emails, deliveries };
+  return { emails, deliveries, broadcasts };
 }
 
 /**

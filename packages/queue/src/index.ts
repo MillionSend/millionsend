@@ -14,6 +14,9 @@ export interface JobPayloads {
   // dedupe alone cannot cover an SNS redelivery after the job completed.
   "ses.event": { event: SerializedSesEvent; snsMessageId: string };
   "webhook.deliver": { deliveryId: string };
+  // Cross-table scrub of one address after its contact was deleted; too slow
+  // for a request on a large team, so it runs here.
+  "recipient.erase": { teamId: string; address: string };
 }
 
 /** ParsedSesEvent with occurredAt as ISO string (JSON-safe). */
@@ -68,9 +71,30 @@ const JOB_QUEUE_POLICY = "short" as const;
 export const DEAD_LETTER_QUEUES = {
   "email.send": "email.send.dead",
   "webhook.deliver": "webhook.deliver.dead",
+  "recipient.erase": "recipient.erase.dead",
 } as const;
 
 export type DeadLetteredJobName = keyof typeof DEAD_LETTER_QUEUES;
+
+/**
+ * Jobs allowed to stay active longer than pg-boss's 15-minute default before
+ * it retries them under a still-running handler. A broadcast fan-out walks
+ * every contact in one job; an erasure scans a team's whole history.
+ */
+const EXPIRE_SECONDS: Partial<Record<JobName, number>> = {
+  "broadcast.send": 6 * 3600,
+  // Longest pg-boss allows short of a day: the handler does not watch the
+  // abort signal, so an expiry must never fire under a scan still running.
+  "recipient.erase": 23 * 3600,
+};
+
+/**
+ * Finished jobs are history the queue never reads again; an hour keeps the
+ * table small enough that the supervisor's per-minute counts stay cheap.
+ */
+const DELETE_AFTER_SECONDS = 3600;
+
+const JOB_RETRY = { retryLimit: 10, retryBackoff: true, retryDelay: 5 } as const;
 
 export const CRON_JOBS = {
   // Every 15 min: quota-parked emails drain back into the send queue as the
@@ -85,6 +109,8 @@ export const CRON_JOBS = {
   "webhooks.reconcile": "*/15 * * * *",
   // Every 15 min: re-enqueue broadcasts stuck in scheduled/sending.
   "broadcasts.reconcile": "*/15 * * * *",
+  // Every 30 min: refresh the cached contact counts the Segments page shows.
+  "segments.recount": "*/30 * * * *",
   // Every 15 min: re-check live DNS so a removed record demotes a verified
   // domain (blocking sends) without waiting for a page open.
   "domains.reverify": "*/15 * * * *",
@@ -113,6 +139,18 @@ function deadLetterFor(name: JobName): string | undefined {
   return name in DEAD_LETTER_QUEUES ? DEAD_LETTER_QUEUES[name as DeadLetteredJobName] : undefined;
 }
 
+/**
+ * `dedupeKey` is REQUIRED: on the short-policy queues it is the singletonKey
+ * that collapses duplicates while a job is queued. `startAfter` defers the
+ * job; `group` names the fairness group a worker's groupConcurrency caps.
+ */
+export interface JobSendOptions {
+  dedupeKey: string;
+  startAfter?: Date | undefined;
+  priority?: number | undefined;
+  group?: string | undefined;
+}
+
 export class Queue {
   #boss: PgBoss;
   #created = new Set<string>();
@@ -122,7 +160,15 @@ export class Queue {
   }
 
   static async start(databaseUrl: string): Promise<Queue> {
-    const boss = new PgBoss({ connectionString: databaseUrl, schema: "pgboss" });
+    // Maintenance every 10 minutes deletes finished jobs in small slices
+    // instead of one daily statement; four connections cover every fetch and
+    // completion, which are millisecond statements.
+    const boss = new PgBoss({
+      connectionString: databaseUrl,
+      schema: "pgboss",
+      maintenanceIntervalSeconds: 600,
+      max: 4,
+    });
     boss.on("error", (err: Error) => console.error("pg-boss error", err));
     await boss.start();
     return new Queue(boss);
@@ -150,28 +196,54 @@ export class Queue {
     this.#created.add(name);
   }
 
-  /**
-   * Enqueue a job. `dedupeKey` is REQUIRED: on the short-policy queues it is
-   * the singletonKey that collapses duplicates while a job is queued.
-   * `startAfter` defers the job (scheduled sends).
-   */
+  /** Enqueue one job; see JobSendOptions. */
   async send<N extends JobName>(
     name: N,
     payload: JobPayloads[N],
-    opts: { dedupeKey: string; startAfter?: Date; priority?: number },
+    opts: JobSendOptions,
   ): Promise<string | null> {
+    const deadLetter = await this.#prepare(name);
+    return this.#boss.send(name, payload, this.#jobOptions(name, opts, deadLetter));
+  }
+
+  /**
+   * Enqueue many jobs of one queue in a single statement: a webhook fan-out
+   * writes one job per endpoint, and a bulk import many per contact.
+   */
+  async sendMany<N extends JobName>(
+    name: N,
+    jobs: readonly (JobSendOptions & { payload: JobPayloads[N] })[],
+  ): Promise<void> {
+    if (jobs.length === 0) return;
+    const deadLetter = await this.#prepare(name);
+    await this.#boss.insert(
+      name,
+      jobs.map(({ payload, ...opts }) => ({
+        data: payload,
+        ...this.#jobOptions(name, opts, deadLetter),
+      })),
+    );
+  }
+
+  async #prepare(name: JobName): Promise<string | undefined> {
     await this.#ensureQueue(name, JOB_QUEUE_POLICY);
     const deadLetter = deadLetterFor(name);
     if (deadLetter) await this.#ensureQueue(deadLetter);
-    return this.#boss.send(name, payload, {
+    return deadLetter;
+  }
+
+  #jobOptions(name: JobName, opts: JobSendOptions, deadLetter: string | undefined) {
+    const expireInSeconds = EXPIRE_SECONDS[name];
+    return {
       singletonKey: opts.dedupeKey,
       ...(opts.startAfter ? { startAfter: opts.startAfter } : {}),
       ...(opts.priority !== undefined ? { priority: opts.priority } : {}),
+      ...(opts.group ? { group: { id: opts.group } } : {}),
       ...(deadLetter ? { deadLetter } : {}),
-      retryLimit: 10,
-      retryBackoff: true,
-      retryDelay: 5,
-    });
+      ...(expireInSeconds ? { expireInSeconds } : {}),
+      deleteAfterSeconds: DELETE_AFTER_SECONDS,
+      ...JOB_RETRY,
+    };
   }
 
   /**
@@ -189,7 +261,18 @@ export class Queue {
   async work<N extends JobName>(
     name: N,
     handler: (payload: JobPayloads[N]) => Promise<void>,
-    opts: { batchSize?: number; concurrency?: number; pollingIntervalSeconds?: number } = {},
+    opts: {
+      batchSize?: number;
+      concurrency?: number;
+      pollingIntervalSeconds?: number;
+      /**
+       * Cap on jobs of one `group` (see JobSendOptions) running at once across
+       * every worker process, enforced in the fetch itself, so one slow
+       * receiver cannot occupy every lane and no fetched job waits on an
+       * in-memory limiter.
+       */
+      groupConcurrency?: number;
+    } = {},
   ): Promise<void> {
     await this.#ensureQueue(name, JOB_QUEUE_POLICY);
     const batchSize = opts.batchSize ?? 1;
@@ -202,6 +285,7 @@ export class Queue {
         ...(opts.pollingIntervalSeconds !== undefined
           ? { pollingIntervalSeconds: opts.pollingIntervalSeconds }
           : {}),
+        ...(opts.groupConcurrency !== undefined ? { groupConcurrency: opts.groupConcurrency } : {}),
       },
       async (jobs: { data: JobPayloads[N] }[]) => {
         for (const job of jobs) {

@@ -6,6 +6,7 @@ import {
   generateWebhookSecret,
   postFailureCode,
   postJson,
+  resultRows,
   rotatedWebhookSecretColumns,
   rotationOverlapEnd,
   signWebhook,
@@ -15,7 +16,7 @@ import {
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit";
 import { getKeyring } from "../keyring";
@@ -78,39 +79,36 @@ function toEnabled(status: (typeof schema.webhookEndpoints.$inferSelect)["status
 /**
  * Per-endpoint success rate over the last SUCCESS_RATE_WINDOW deliveries:
  * success / settled (pending rows are still in flight and count for neither
- * side). Null when nothing has settled yet.
+ * side). Null when nothing has settled yet. One LATERAL per endpoint reads
+ * exactly the window off the (endpoint_id, created_at) index; a window
+ * function over every delivery row would read the endpoint's whole history.
  */
 async function successRates(db: Db, endpointIds: string[]): Promise<Map<string, number | null>> {
   const rates = new Map<string, number | null>(endpointIds.map((id) => [id, null]));
   if (endpointIds.length === 0) return rates;
   const d = schema.webhookDeliveries;
-  const recent = db.$with("recent").as(
-    db
-      .select({
-        endpointId: d.endpointId,
-        status: d.status,
-        rn: sql<number>`row_number() over (partition by ${d.endpointId} order by ${d.createdAt} desc, ${d.id} desc)`.as(
-          "rn",
-        ),
-      })
-      .from(d)
-      .where(inArray(d.endpointId, endpointIds)),
+  const ids = sql.join(
+    endpointIds.map((id) => sql`${id}::uuid`),
+    sql`, `,
   );
-  const stats = await db
-    .with(recent)
-    .select({
-      endpointId: recent.endpointId,
-      settled: sql<number>`count(*) filter (where ${recent.status} in ('success', 'failed', 'exhausted'))::int`,
-      succeeded: sql<number>`count(*) filter (where ${recent.status} = 'success')::int`,
-    })
-    .from(recent)
-    .where(lte(recent.rn, SUCCESS_RATE_WINDOW))
-    .groupBy(recent.endpointId);
+  const stats = resultRows<{ id: string; settled: number; succeeded: number }>(
+    await db.execute(sql`
+      select e.id,
+             count(*) filter (where recent.status in ('success', 'failed', 'exhausted'))::int as settled,
+             count(*) filter (where recent.status = 'success')::int as succeeded
+      from unnest(array[${ids}]) as e(id)
+      cross join lateral (
+        select ${d.status} as status
+        from ${d}
+        where ${d.endpointId} = e.id
+        order by ${d.createdAt} desc, ${d.id} desc
+        limit ${SUCCESS_RATE_WINDOW}
+      ) recent
+      group by e.id
+    `),
+  );
   for (const row of stats) {
-    rates.set(
-      row.endpointId,
-      row.settled > 0 ? Math.round((100 * row.succeeded) / row.settled) : null,
-    );
+    rates.set(row.id, row.settled > 0 ? Math.round((100 * row.succeeded) / row.settled) : null);
   }
   return rates;
 }
@@ -428,19 +426,16 @@ export const webhooksRouter = router({
       .query(async ({ ctx, input }) => {
         await requireEndpoint(ctx.db, ctx.teamId, input.endpointId);
         const d = schema.webhookDeliveries;
-        const where = eq(d.endpointId, input.endpointId);
-        const [totalRow] = await ctx.db
-          .select({ total: sql<number>`count(*)::int` })
-          .from(d)
-          .where(where);
-        const items = await ctx.db
+        // limit + 1 answers "is there a next page" without counting the
+        // endpoint's whole delivery history on every page.
+        const rows = await ctx.db
           .select(deliveryListColumns)
           .from(d)
-          .where(where)
+          .where(eq(d.endpointId, input.endpointId))
           .orderBy(desc(d.createdAt), desc(d.id))
           .offset(input.offset)
-          .limit(input.limit);
-        return { items, total: totalRow?.total ?? 0 };
+          .limit(input.limit + 1);
+        return { items: rows.slice(0, input.limit), hasMore: rows.length > input.limit };
       }),
 
     get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {

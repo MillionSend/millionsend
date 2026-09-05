@@ -321,6 +321,26 @@ export async function decryptWebhookSigningSecrets(
   return secrets;
 }
 
+/** A delivery row just written, with the endpoint it belongs to (the queue's fairness group). */
+export interface QueuedWebhookDelivery {
+  id: string;
+  endpointId: string;
+}
+
+/**
+ * Hands freshly written delivery rows to the queue: one call per fan-out
+ * however many endpoints matched, so a burst is one statement, not one per
+ * endpoint.
+ */
+export type WebhookEnqueue = (deliveries: readonly QueuedWebhookDelivery[]) => Promise<void>;
+
+/**
+ * Rows per INSERT. postgres.js binds one parameter per value and Postgres
+ * caps a statement at 65,534, so a fan-out of contacts × endpoints is sliced
+ * well under that.
+ */
+const INSERT_CHUNK = 2000;
+
 /**
  * Fan an email event out to the owning team's enabled endpoints: one
  * delivery row + one job per matching endpoint. Callers invoke this exactly
@@ -336,7 +356,7 @@ export async function enqueueWebhookDeliveries(
     type: WebhookEventType;
     occurredAt: Date;
     extras?: Record<string, unknown>;
-    enqueue: (deliveryId: string) => Promise<void>;
+    enqueue: WebhookEnqueue;
   },
 ): Promise<void> {
   await insertDeliveries(db, {
@@ -359,7 +379,7 @@ export async function enqueueTeamWebhookDeliveries(
     type: WebhookEventType;
     occurredAt: Date;
     data: Record<string, unknown>;
-    enqueue: (deliveryId: string) => Promise<void>;
+    enqueue: WebhookEnqueue;
   },
 ): Promise<void> {
   await enqueueTeamWebhookEvents(db, {
@@ -385,7 +405,7 @@ export async function enqueueTeamWebhookEvents(
   params: {
     teamId: string;
     events: readonly TeamWebhookEvent[];
-    enqueue: (deliveryId: string) => Promise<void>;
+    enqueue: WebhookEnqueue;
   },
 ): Promise<void> {
   if (params.events.length === 0) return;
@@ -405,12 +425,27 @@ export async function enqueueTeamWebhookEvents(
         } as Record<string, unknown>,
       })),
   );
-  if (values.length === 0) return;
-  const rows = await db
-    .insert(schema.webhookDeliveries)
-    .values(values)
-    .returning({ id: schema.webhookDeliveries.id });
-  for (const row of rows) await params.enqueue(row.id);
+  await insertDeliveryRows(db, values, params.enqueue);
+}
+
+type DeliveryInsert = typeof schema.webhookDeliveries.$inferInsert;
+
+/** Writes delivery rows in bounded slices and hands each slice to the queue. */
+async function insertDeliveryRows(
+  db: Db,
+  values: DeliveryInsert[],
+  enqueue: WebhookEnqueue,
+): Promise<void> {
+  for (let i = 0; i < values.length; i += INSERT_CHUNK) {
+    const rows = await db
+      .insert(schema.webhookDeliveries)
+      .values(values.slice(i, i + INSERT_CHUNK))
+      .returning({
+        id: schema.webhookDeliveries.id,
+        endpointId: schema.webhookDeliveries.endpointId,
+      });
+    if (rows.length > 0) await enqueue(rows);
+  }
 }
 
 function enabledEndpoints(db: Db, teamId: string) {
@@ -432,22 +467,20 @@ async function insertDeliveries(
     emailId: string | null;
     type: WebhookEventType;
     payload: WebhookPayload;
-    enqueue: (deliveryId: string) => Promise<void>;
+    enqueue: WebhookEnqueue;
   },
 ): Promise<void> {
   const endpoints = await enabledEndpoints(db, params.teamId);
   const matching = endpoints.filter((e) => e.events === null || e.events.includes(params.type));
-  for (const endpoint of matching) {
-    const [row] = await db
-      .insert(schema.webhookDeliveries)
-      .values({
-        endpointId: endpoint.id,
-        emailId: params.emailId,
-        messageId: `msg_${randomUUID()}`,
-        eventType: params.type,
-        payload: params.payload as unknown as Record<string, unknown>,
-      })
-      .returning({ id: schema.webhookDeliveries.id });
-    if (row) await params.enqueue(row.id);
-  }
+  await insertDeliveryRows(
+    db,
+    matching.map((endpoint) => ({
+      endpointId: endpoint.id,
+      emailId: params.emailId,
+      messageId: `msg_${randomUUID()}`,
+      eventType: params.type,
+      payload: params.payload as unknown as Record<string, unknown>,
+    })),
+    params.enqueue,
+  );
 }

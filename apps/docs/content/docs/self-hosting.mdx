@@ -55,7 +55,8 @@ docker compose pull
 docker compose up -d
 ```
 
-Migrations run on boot, so that is the whole upgrade. The compose file runs
+Migrations run on boot, so that is the whole upgrade for a small instance. The
+compose file runs
 `ghcr.io/millionsend/millionsend:latest`, the latest tagged release (`:1.2.3`
 and `:1.2` tags exist alongside it; `:edge` follows `main`, where every build
 passed the test suite first). To hold a version, set `MILLIONSEND_IMAGE`
@@ -65,6 +66,18 @@ what is running) and `docker compose up -d`. The previous pin put back is the
 rollback — with the caveat that schema migrations run forward only, so take a
 dump before a big jump ([Backups](#backups)); a rolled-back image may not
 start on a newer schema.
+
+Once tables are large (millions of emails or contacts), a migration that
+rewrites or indexes them takes minutes. Migrations run in one transaction and
+their locks block reads and writes on the tables they touch until it commits,
+so that wait is downtime whether it happens at boot or before the swap. Run
+it before the swap anyway, from a throwaway container, at a quiet hour: a
+migration that fails leaves the old container serving instead of a container
+that will not boot, and the boot-time pass then finds nothing pending:
+
+```sh
+docker compose pull && docker compose run --rm --no-deps millionsend migrate && docker compose up -d
+```
 
 Automatic upgrades, for a host that can only reach out (behind a CDN-only
 firewall, say): a cron line is enough, since `up -d` recreates a container
@@ -146,6 +159,20 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys, both or neither. When set, sign-in, sign-up, password reset and the onboarding "Send email" button verify a challenge token (invisible or managed widgets both work). Unset, every form runs without a captcha. |
 | `ONBOARDING_EMAIL_FROM` | Shared sender for the onboarding "Send email" button and snippet, as `Name <user@domain>` or a bare address on a domain verified in this SES account. Any team may send from it, but only to its own members' inboxes. Leave unset to hide the button; the snippet then asks for the team's own domain. |
 | `NOTIFICATIONS_EMAIL_FROM` | Sender for account notifications to team owners (daily quota nearly or fully used, bounce/complaint rates at risk or paused) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. |
+
+### Worker sizing
+
+Defaults fit the 14/s send rate. Postgres runs with `max_connections=200` in
+the compose files; each process (api, worker, web) holds a pool of up to 24
+connections, so separate containers and worker replicas fit without tuning.
+
+| Variable | Purpose |
+| --- | --- |
+| `SEND_CONCURRENCY` | Parallel send lanes in the worker (default `16`) — about 1.2 per message/second of SES send rate. |
+| `WORKER_REPLICAS` | Number of worker processes running (default `1`). The SES rate limiter is a per-process token bucket, so each worker divides the send rate by this to keep the account at its total. |
+| `SQS_POLL_CONCURRENCY` | Parallel SQS long-poll loops for SES events (default `4`). |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS` | How long webhook delivery rows and payloads stay readable in the delivery log (default `30`); older ones are purged. |
+| `EMAIL_METADATA_RETENTION_DAYS` | Days whole email rows (recipients, subject, status, events) are kept (default `30`, the industry norm); bodies leave earlier on the dashboard's retention setting, and daily counters and broadcast results are kept regardless. Releases before v0.6.30 defaulted to `365`: set it explicitly before upgrading if that history must stay. |
 
 ### Object storage (uploads & backups)
 
@@ -572,10 +599,8 @@ you have opened signup deliberately.
   Instance** (owner/admin). Defaults are 14/s and 30 days until changed there;
   the worker picks up a rate change within a minute, retention on the next
   purge run.
-- One worker container only: the SES rate limiter is in-memory, so N worker
-  replicas send at N × the configured send rate. Scale the worker vertically,
-  or divide the rate by the replica count.
+- Worker sizing: `SEND_CONCURRENCY` lanes (default 16, about 1.2 per message/second of SES rate) and `WORKER_REPLICAS` (default 1). The SES rate limiter lives in each worker process, so every worker divides the account's rate by `WORKER_REPLICAS`; set it to the number of worker containers you run.
 - To run processes in separate containers, set `PROCESS` to `api`, `worker`,
   `web`, `smtp`, or `docs` per container (default `all` = api + worker + web).
-- Email bodies are encrypted at rest with `MASTER_ENCRYPTION_KEY` and purged
-  after the retention window. Back up the key with the database.
+- Email bodies are gzipped, then encrypted at rest with `MASTER_ENCRYPTION_KEY`,
+  and purged after the retention window. Back up the key with the database.

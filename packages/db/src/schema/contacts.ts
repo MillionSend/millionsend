@@ -39,6 +39,9 @@ export const contacts = pgTable(
   (t) => [
     // Case-insensitive uniqueness: one contact per address per team.
     uniqueIndex("contacts_team_email_idx").on(t.teamId, sql`lower(${t.email})`),
-    index("contacts_team_idx").on(t.teamId),
+    // Every list orders a team's contacts by creation, newest or oldest first.
+    index("contacts_team_created_idx").on(t.teamId, t.createdAt, t.id),
+    // The broadcast fan-out walks a team's contacts by id in keyset pages.
+    index("contacts_team_id_idx").on(t.teamId, t.id),
   ],
 );

@@ -57,7 +57,8 @@ docker compose pull
 docker compose up -d
 ```
 
-As migrações rodam no boot, então a atualização é só isso. O arquivo compose
+As migrações rodam no boot, então, para uma instância pequena, a atualização é
+só isso. O arquivo compose
 roda `ghcr.io/millionsend/millionsend:latest`, a release mais recente com tag
 (as tags `:1.2.3` e `:1.2` existem ao lado dela; `:edge` acompanha a `main`,
 onde todo build passou pela suíte de testes antes). Para segurar uma versão, defina
@@ -68,6 +69,19 @@ pin anterior é o rollback — com a ressalva de que as migrações de schema s�
 andam para frente, então faça um dump antes de um salto grande
 ([Backups](#backups)); uma imagem revertida pode não subir em um schema mais
 novo.
+
+Quando as tabelas ficam grandes (milhões de emails ou contatos), uma migração
+que as reescreve ou indexa leva minutos. As migrações rodam em uma transação
+e seus bloqueios impedem leituras e escritas nas tabelas tocadas até o
+commit, então essa espera é indisponibilidade tanto no boot quanto antes da
+troca. Mesmo assim, rode-a antes da troca, a partir de um contêiner
+descartável, em um horário calmo: uma migração que falha deixa o contêiner
+antigo atendendo em vez de um contêiner que não sobe, e a passagem do boot
+então não encontra nada pendente:
+
+```sh
+docker compose pull && docker compose run --rm --no-deps millionsend migrate && docker compose up -d
+```
 
 Atualizações automáticas, para um host que só consegue sair para a internet
 (atrás de um firewall só-CDN, por exemplo): uma linha de cron basta, já que o
@@ -150,6 +164,21 @@ auto-hospedada não tem limites de plano.
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login, o cadastro, a redefinição de senha e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
 | `ONBOARDING_EMAIL_FROM` | Remetente compartilhado do botão "Enviar e-mail" e do snippet do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Qualquer time pode enviar por ele, só para as caixas de entrada dos próprios membros. Deixe vazio para ocultar o botão; o snippet então pede o domínio do próprio time. |
 | `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos donos do time (cota diária quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para o time, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. |
+
+### Dimensionamento do worker
+
+Os padrões atendem à taxa de envio de 14/s. O Postgres roda com
+`max_connections=200` nos arquivos compose; cada processo (api, worker, web)
+mantém um pool de até 24 conexões, então contêineres separados e réplicas de
+worker cabem sem ajuste.
+
+| Variável | Propósito |
+| --- | --- |
+| `SEND_CONCURRENCY` | Faixas de envio paralelas no worker (padrão `16`) — cerca de 1,2 por mensagem/segundo da taxa de envio do SES. |
+| `WORKER_REPLICAS` | Quantos processos de worker estão rodando (padrão `1`). O limitador de taxa do SES é um token bucket por processo, então cada worker divide a taxa de envio por este número para manter a conta no total. |
+| `SQS_POLL_CONCURRENCY` | Loops paralelos de long polling no SQS para eventos do SES (padrão `4`). |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS` | Por quanto tempo as linhas e payloads de entrega de webhook ficam legíveis no log de entregas (padrão `30`); as mais antigas são expurgadas. |
+| `EMAIL_METADATA_RETENTION_DAYS` | Dias que as linhas inteiras de email (destinatários, assunto, status, eventos) são mantidas (padrão `30`, a norma do setor); os corpos saem antes pela configuração de retenção do painel, e contadores diários e resultados de broadcasts são mantidos sempre. Versões anteriores à v0.6.30 usavam `365`: defina explicitamente antes de atualizar se esse histórico precisa ficar. |
 
 ### Armazenamento de objetos (uploads e backups)
 
@@ -596,12 +625,10 @@ deliberadamente.
   **Configurações → Instância** (owner/admin). Os padrões são 14/s e 30 dias
   até serem alterados lá; o worker aplica mudança de taxa em até um minuto, e
   a retenção na próxima execução do expurgo.
-- Apenas um contêiner de worker: o limitador de taxa do SES é em memória,
-  então N réplicas de worker enviam a N × a taxa configurada. Escale o worker
-  verticalmente, ou divida a taxa pelo número de réplicas.
+- Dimensionamento do worker: `SEND_CONCURRENCY` pistas (padrão 16, cerca de 1,2 por mensagem/segundo da taxa do SES) e `WORKER_REPLICAS` (padrão 1). O limitador de taxa do SES vive em cada processo do worker, então cada worker divide a taxa da conta por `WORKER_REPLICAS`; defina-o como o número de contêineres de worker em execução.
 - Para rodar processos em contêineres separados, defina `PROCESS` como
   `api`, `worker`, `web`, `smtp` ou `docs` por contêiner (padrão `all` =
   api + worker + web).
-- Os corpos dos emails são criptografados em repouso com
+- Os corpos dos emails são comprimidos com gzip, criptografados em repouso com
   `MASTER_ENCRYPTION_KEY` e expurgados após a janela de retenção. Faça backup
   da chave junto com o banco.

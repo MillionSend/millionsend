@@ -270,17 +270,18 @@ describe("webhooks.testDelivery", () => {
 });
 
 describe("webhooks.deliveries.list", () => {
-  it("pages newest-first with a total", async () => {
+  it("pages newest-first and flags whether a next page exists", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
     const { id } = await caller.webhooks.create({ url: "https://example.com/hooks" });
     for (let i = 0; i < 3; i++) await insertDelivery(id, "success");
 
     const page = await caller.webhooks.deliveries.list({ endpointId: id, offset: 0, limit: 2 });
-    expect(page.total).toBe(3);
+    expect(page.hasMore).toBe(true);
     expect(page.items).toHaveLength(2);
     const rest = await caller.webhooks.deliveries.list({ endpointId: id, offset: 2, limit: 2 });
     expect(rest.items).toHaveLength(1);
+    expect(rest.hasMore).toBe(false);
     // No page leaks the payload; only deliveries.get carries it.
     expect(page.items[0]).not.toHaveProperty("payload");
   });

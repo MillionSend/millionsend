@@ -281,6 +281,8 @@
     "deleteBody": "{name} is deleted. Broadcasts already sent to it keep their history.",
     "deleteConfirm": "Delete segment",
     "unsubscribed": "Unsubscribed",
+    "countedAt": "counted <time></time>",
+    "counting": "counting…",
     "searchPlaceholder": "Search segments…",
     "edit": "Edit",
     "copyId": "Copy ID",

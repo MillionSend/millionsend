@@ -167,6 +167,8 @@ function AddContactsSplit({
 }
 
 /** The team's Contacts surface, rendered at /audience. `migrateToUrl` is null on Cloud. */
+const sumCounts = (rows: { count: number }[]) => rows.reduce((n, r) => n + r.count, 0);
+
 export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | null }) {
   const t = useTranslations("audience");
   const common = useTranslations("common");
@@ -534,10 +536,16 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
             {t("contacts.stats.metrics")}
           </div>
           <div style={{ marginTop: 6, display: "flex" }}>
-            {growth.data ? (
+            {growth.data && stats.data ? (
               <GrowthSparkline
                 added={growth.data.added}
                 unsubscribed={growth.data.unsubscribed}
+                baseline={{
+                  // The window's lines start from what existed before it;
+                  // the clamp covers the two queries not sharing a snapshot.
+                  total: Math.max(0, stats.data.contacts - sumCounts(growth.data.added)),
+                  out: Math.max(0, stats.data.unsubscribed - sumCounts(growth.data.unsubscribed)),
+                }}
                 totalLabel={t("contacts.stats.subscribers")}
                 outLabel={t("contacts.stats.unsubscribed")}
                 formatDay={(day) => formatDayUtc(day, locale)}

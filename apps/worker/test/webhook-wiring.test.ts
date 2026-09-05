@@ -95,8 +95,8 @@ it("SES event fans out only to matching endpoints of the owning team", async () 
   };
   await processSesEvent(db, event, {
     snsMessageId: "sns-wh-1",
-    enqueueWebhookDelivery: async (id) => {
-      enqueued.push(id);
+    enqueueWebhookDelivery: async (rows) => {
+      enqueued.push(...rows.map((r) => r.id));
     },
   });
 
@@ -117,8 +117,8 @@ it("SES event fans out only to matching endpoints of the owning team", async () 
   // SNS redelivery of the same MessageId creates no second delivery.
   await processSesEvent(db, event, {
     snsMessageId: "sns-wh-1",
-    enqueueWebhookDelivery: async (id) => {
-      enqueued.push(id);
+    enqueueWebhookDelivery: async (rows) => {
+      enqueued.push(...rows.map((r) => r.id));
     },
   });
   expect(await deliveriesFor([allEvents])).toHaveLength(1);
@@ -192,8 +192,8 @@ it("send path fans out email.sent after the claim", async () => {
     {
       keyring,
       ses: { sendRaw: async () => ({ messageId: `wh-sent-${email.id}` }) },
-      enqueueWebhookDelivery: async (id) => {
-        enqueued.push(id);
+      enqueueWebhookDelivery: async (rows) => {
+        enqueued.push(...rows.map((r) => r.id));
       },
     },
     { emailId: email.id },
@@ -247,10 +247,41 @@ it("reconcile sweep re-enqueues only well-overdue deliveries", async () => {
 
   const enqueued: string[] = [];
   const count = await reconcileWebhookDeliveries(db, {
-    enqueue: async (id) => {
-      enqueued.push(id);
+    enqueue: async (rows) => {
+      enqueued.push(...rows.map((r) => r.id));
     },
   });
   expect(count).toBe(2);
   expect(new Set(enqueued)).toEqual(new Set([inserted[0]?.id, inserted[1]?.id]));
+});
+
+it("reconcile sweep pages through every overdue delivery in bounded statements", async () => {
+  const endpointId = await insertEndpoint(teamId, null);
+  const old = new Date(Date.now() - 60 * 60 * 1000);
+  const inserted = await db
+    .insert(schema.webhookDeliveries)
+    .values(
+      Array.from({ length: 1050 }, (_, i) => ({
+        endpointId,
+        messageId: `msg_bulk_${i}`,
+        eventType: "email.delivered",
+        payload: {},
+        status: "pending" as const,
+        createdAt: new Date(old.getTime() - i * 1000),
+      })),
+    )
+    .returning({ id: schema.webhookDeliveries.id });
+  const seen: string[] = [];
+  const pages: number[] = [];
+  const total = await reconcileWebhookDeliveries(db, {
+    enqueue: async (rows) => {
+      pages.push(rows.length);
+      seen.push(...rows.map((r) => r.id));
+    },
+  });
+  // Every overdue row in one run, handed over one bounded page at a time.
+  expect(total).toBeGreaterThanOrEqual(1050);
+  expect(new Set(seen)).toEqual(expect.objectContaining({ size: new Set(seen).size }));
+  for (const row of inserted) expect(seen).toContain(row.id);
+  expect(Math.max(...pages)).toBeLessThanOrEqual(1000);
 });

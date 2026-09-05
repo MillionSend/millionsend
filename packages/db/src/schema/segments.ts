@@ -1,4 +1,13 @@
-import { index, jsonb, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { contacts } from "./contacts.js";
 import { teams } from "./teams.js";
 
@@ -23,6 +32,12 @@ export const segments = pgTable(
     // Null = manual-membership-only segment (rows in segment_members); a
     // null filter must never be read as "matches everyone".
     filter: jsonb("filter").$type<SegmentFilter>(),
+    // Counting a segment scans the team's contacts, so the counts the
+    // Segments page shows are cached here and refreshed on a schedule and
+    // when the segment changes; the builder preview stays live.
+    contactCount: integer("contact_count"),
+    unsubscribedCount: integer("unsubscribed_count"),
+    countedAt: timestamp("counted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("segments_team_idx").on(t.teamId)],

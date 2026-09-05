@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  applyMergeFields,
   broadcastSendSpacingMs,
   buildUnsubscribeHeaders,
   encryptEmailBody,
@@ -7,6 +8,7 @@ import {
   fetchDeliverabilityHealth,
   fetchEffectivePlan,
   findSuppressed,
+  injectPreheader,
   isSubscribedToTopic,
   type Keyring,
   makeUnsubscribeToken,
@@ -48,69 +50,10 @@ export type BroadcastOutcome = "sent" | "skipped" | "deferred";
 /** How long a fan-out waits before re-checking a held region. */
 const REGION_HOLD_RETRY_MS = 15 * 60 * 1000;
 
-// Resend's broadcast merge syntax: {{{NAME}}} or {{{NAME|fallback}}}. NAME is a
-// builtin (FIRST_NAME/LAST_NAME/EMAIL) or a custom-property key; a name with no
-// matching value falls back (or resolves to "") so no raw token reaches an inbox.
-const MERGE_TOKEN = /\{\{\{([A-Za-z0-9_]+)(?:\|([^{}]*))?\}\}\}/g;
-// A token opening an href/src value: the contact value becomes the link's
-// scheme, so only web/mail URLs may land there (a javascript:/data: link
-// from an imported property is a phishing primitive, not personalization).
-const URL_ATTRIBUTE_OPEN = /(?:href|src)\s*=\s*["']?$/i;
-const LINK_SCHEME = /^(?:https?:\/\/|mailto:)/i;
-
-export interface MergeContact {
-  email: string;
-  firstName: string | null;
-  lastName: string | null;
-  properties: Record<string, string>;
-}
-
-/**
- * Substitutes contact merge tokens. Builtins (EMAIL/FIRST_NAME/LAST_NAME) win
- * over a same-named custom property; any other name resolves against
- * `properties` by exact key. A null/empty value falls back to the token's
- * `|fallback` text, or to "" without one — the raw token must never reach an
- * inbox. Contact values are user data landing in markup, so the html body gets
- * them escaped; fallbacks are the author's own content and stay literal.
- */
-export function applyMergeFields(
-  content: string,
-  contact: MergeContact,
-  opts: { html: boolean },
-): string {
-  return content.replace(
-    MERGE_TOKEN,
-    (_match, field: string, fallback: string | undefined, offset: number) => {
-      const value =
-        field === "EMAIL"
-          ? contact.email
-          : field === "FIRST_NAME"
-            ? contact.firstName
-            : field === "LAST_NAME"
-              ? contact.lastName
-              : (contact.properties[field] ?? null);
-      if (!value) return fallback ?? "";
-      if (!opts.html) return value;
-      const opensUrl = URL_ATTRIBUTE_OPEN.test(content.slice(Math.max(0, offset - 12), offset));
-      if (opensUrl && !LINK_SCHEME.test(value)) return fallback ?? "";
-      return escapeHtml(value);
-    },
-  );
-}
-
-/**
- * Hidden-preheader injection (the standard inbox-preview pattern): the preview
- * text goes first in the body inside a display:none container, padded with
- * zero-width characters so clients that ignore the hiding styles still don't
- * pull visible body content into the snippet. Inserted right after `<body>`
- * when present (full documents), else prepended (fragments).
- */
-export function injectPreheader(html: string, previewText: string): string {
-  const preheader = `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all">${escapeHtml(previewText)}${"&nbsp;&zwnj;".repeat(40)}</div>`;
-  const bodyTag = /<body[^>]*>/i.exec(html);
-  const at = bodyTag ? bodyTag.index + bodyTag[0].length : 0;
-  return html.slice(0, at) + preheader + html.slice(at);
-}
+// The merge and preheader helpers live in core so the dashboard's test send
+// renders exactly what the fan-out renders; re-exported for the callers that
+// reach them through this handler.
+export { applyMergeFields, injectPreheader, type MergeContact } from "@millionsend/core";
 
 export async function sendBroadcast(
   db: Db,
@@ -248,7 +191,10 @@ export async function sendBroadcast(
       ? injectPreheader(broadcast.html, broadcast.previewText)
       : broadcast.html;
   const batchSize = deps.batchSize ?? 100;
-  let cursor = "";
+  // Keyset pages over (team_id, id): comparing the uuid column itself keeps
+  // every page an index range; casting it to text made each page rescan the
+  // whole team.
+  let cursor: string | null = null;
   for (;;) {
     const contacts = await db
       .select({
@@ -263,14 +209,24 @@ export async function sendBroadcast(
         and(
           eq(schema.contacts.teamId, broadcast.teamId),
           eq(schema.contacts.unsubscribed, false),
-          gt(sql`${schema.contacts.id}::text`, cursor),
+          cursor ? gt(schema.contacts.id, cursor) : undefined,
           segmentPredicate,
         ),
       )
-      .orderBy(asc(sql`${schema.contacts.id}::text`))
+      .orderBy(asc(schema.contacts.id))
       .limit(batchSize);
     if (contacts.length === 0) break;
-    cursor = contacts[contacts.length - 1]?.id ?? "";
+    cursor = contacts[contacts.length - 1]?.id ?? cursor;
+    // Heartbeat: the stall reconcile re-enqueues a "sending" broadcast whose
+    // row has not moved in fifteen minutes, so a long walk touches it once
+    // per page. The status guard also stops a run whose twin already
+    // finished the broadcast.
+    const [alive] = await db
+      .update(schema.broadcasts)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(schema.broadcasts.id, broadcast.id), eq(schema.broadcasts.status, "sending")))
+      .returning({ id: schema.broadcasts.id });
+    if (!alive) return "skipped";
 
     // Suppression mirrors the API accept path: a bounced or complained
     // address must never receive bulk mail again, or SES reputation pays.
@@ -396,7 +352,14 @@ export async function sendBroadcast(
 
   await db
     .update(schema.broadcasts)
-    .set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
+    .set({
+      status: "sent",
+      sentAt: new Date(),
+      updatedAt: new Date(),
+      // Counted once here off the fan-out's own unique index, so lists never
+      // join the emails table to size a broadcast.
+      recipientCount: sql`(select count(*)::int from ${schema.emails} where ${schema.emails.broadcastId} = ${broadcast.id})`,
+    })
     .where(and(eq(schema.broadcasts.id, broadcast.id), eq(schema.broadcasts.status, "sending")));
   return "sent";
 }

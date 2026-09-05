@@ -7,6 +7,7 @@ import { EnvKeyring } from "../src/crypto/keyring.js";
 import {
   encryptWebhookSecret,
   enqueueTeamWebhookDeliveries,
+  enqueueTeamWebhookEvents,
   generateWebhookSecret,
 } from "../src/webhooks.js";
 
@@ -49,8 +50,8 @@ it("fans a team-level event out to subscribed endpoints with no email attached",
     type: "quota.warning",
     occurredAt,
     data: { used: 80, limit: 100 },
-    enqueue: async (id) => {
-      enqueued.push(id);
+    enqueue: async (rows) => {
+      enqueued.push(...rows.map((r) => r.id));
     },
   });
   const rows = await db.select().from(schema.webhookDeliveries);
@@ -66,4 +67,29 @@ it("fans a team-level event out to subscribed endpoints with no email attached",
     },
   });
   expect(enqueued).toEqual([rows[0]?.id]);
+});
+
+it("fans a bulk event set out above the driver's bind-parameter cap in bounded slices", async () => {
+  // 15 endpoints × 1000 events = 15,000 rows: five parameters each would be
+  // 75,000 bound values in one statement, past Postgres's 65,534.
+  for (let i = 0; i < 15; i++) await endpoint(null);
+  const batches: number[] = [];
+  const occurredAt = new Date("2026-09-03T12:00:00Z");
+  await enqueueTeamWebhookEvents(db, {
+    teamId,
+    events: Array.from({ length: 1000 }, (_, i) => ({
+      type: "contact.created" as const,
+      occurredAt,
+      data: { id: `c${i}`, email: `c${i}@example.com`, source: "api" },
+    })),
+    enqueue: async (rows) => {
+      batches.push(rows.length);
+    },
+  });
+  expect(batches.reduce((a, b) => a + b, 0)).toBe(15_000);
+  expect(Math.max(...batches)).toBeLessThanOrEqual(2000);
+  const stored = await db
+    .select({ id: schema.webhookDeliveries.id })
+    .from(schema.webhookDeliveries);
+  expect(stored).toHaveLength(15_000);
 });

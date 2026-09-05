@@ -24,6 +24,12 @@ export interface SqsPollerDeps {
   allowedTopicArns: string[];
   enqueueSesEvent(event: SerializedSesEvent, snsMessageId: string): Promise<void>;
   log?: ((line: string) => void) | undefined;
+  /**
+   * Parallel long-poll loops. One loop is bounded by the round trip to the
+   * queue's region (two per ten messages); each loop owns the receipt handles
+   * it fetched, and the SNS message id dedupes the rare duplicate delivery.
+   */
+  concurrency?: number | undefined;
 }
 
 /**
@@ -102,7 +108,7 @@ async function processMessage(message: Message, deps: SqsPollerDeps): Promise<vo
 export function startSqsPoller(deps: SqsPollerDeps): { stop(): void } {
   let running = true;
   const log = deps.log ?? (() => {});
-  void (async () => {
+  const loop = async () => {
     while (running) {
       try {
         await pollSqsOnce(deps);
@@ -111,7 +117,8 @@ export function startSqsPoller(deps: SqsPollerDeps): { stop(): void } {
         await new Promise((resolve) => setTimeout(resolve, 10_000));
       }
     }
-  })();
+  };
+  for (let i = 0; i < Math.max(1, deps.concurrency ?? 1); i++) void loop();
   return {
     stop() {
       running = false;

@@ -22,6 +22,7 @@ import {
   substituteUnsubscribeUrl,
   transitionQueueState,
   utcDay,
+  type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -76,7 +77,7 @@ export interface SendDeps {
   /** SES's 24-hour quota; absent in tests that never reach it. */
   sesQuota?: SesQuotaGate | undefined;
   /** Enqueue a webhook.deliver job; email.sent webhooks are skipped when absent. */
-  enqueueWebhookDelivery?: ((deliveryId: string) => Promise<void>) | undefined;
+  enqueueWebhookDelivery?: WebhookEnqueue | undefined;
   /**
    * RFC 8058 one-click unsubscribe config for broadcast emails. Broadcast
    * rows (contactId set) REFUSE to send without it — a marketing email must
@@ -816,7 +817,7 @@ export function createTokenBucket(ratePerSecond: number): TokenBucket {
     async take(): Promise<void> {
       for (;;) {
         const now = Date.now();
-        tokens = Math.min(rate, tokens + ((now - lastRefill) / 1000) * rate);
+        tokens = Math.min(Math.max(rate, 1), tokens + ((now - lastRefill) / 1000) * rate);
         lastRefill = now;
         if (tokens >= 1) {
           tokens -= 1;

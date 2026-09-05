@@ -146,13 +146,28 @@ export const env = createEnv({
     // SES's standard production default; sandbox accounts must set 1.
     // Bootstrap value only — the instance_settings row overrides it.
     SES_MAX_SEND_RATE: z.coerce.number().positive().default(SES_MAX_SEND_RATE_DEFAULT),
+    // Concurrent send lanes in the worker. A lane spends most of a send
+    // waiting on SES, so about 1.2 lanes per message/second of send rate
+    // keeps the bucket full; the default matches the standard 14/s account.
+    SEND_CONCURRENCY: z.coerce.number().int().min(1).default(16),
+    // Worker processes sharing one SES account. Each divides the send rate
+    // by this number, since the bucket lives in process memory.
+    WORKER_REPLICAS: z.coerce.number().int().min(1).default(1),
+    // Parallel SQS long-poll loops. One loop is bounded by the round trip to
+    // the queue's region; four keep up with a 55/s burst from another region.
+    SQS_POLL_CONCURRENCY: z.coerce.number().int().min(1).default(4),
+    // Days webhook delivery rows (payload, response, attempts) stay readable
+    // in the dashboard before the retention purge deletes them.
+    WEBHOOK_DELIVERY_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
 
     // Days email BODIES are kept; metadata and events are unaffected.
     // Bootstrap value only — the instance_settings row overrides it.
     EMAIL_RETENTION_DAYS: z.coerce.number().int().min(1).default(EMAIL_RETENTION_DAYS_DEFAULT),
-    // Whole email rows (recipients, subject, status, events) outlive their bodies,
-    // which age out on EMAIL_RETENTION_DAYS.
-    EMAIL_METADATA_RETENTION_DAYS: z.coerce.number().int().min(1).default(365),
+    // Whole email rows (recipients, subject, status, events) age out on this
+    // window; bodies leave earlier on EMAIL_RETENTION_DAYS. Thirty days is the
+    // industry norm (Resend keeps email data 30 days) and what the metadata
+    // tables are sized for; daily counters and broadcast results outlive it.
+    EMAIL_METADATA_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
 
     // Public base URL of this deployment; SNS subscriptions and hosted
     // unsubscribe pages are derived from it.

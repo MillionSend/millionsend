@@ -331,9 +331,8 @@ export function WebhookDetail({ id }: { id: string }) {
   }
 
   const data = webhook.data;
-  const total = deliveries.data?.total ?? 0;
   const pageItems = deliveries.data?.items ?? [];
-  const lastPage = (page + 1) * pageSize >= total;
+  const hasMore = deliveries.data?.hasMore ?? false;
 
   return (
     <>
@@ -496,7 +495,7 @@ export function WebhookDetail({ id }: { id: string }) {
             </div>
           ) : !deliveries.isSuccess ? (
             <DeliveriesSkeleton />
-          ) : total === 0 ? (
+          ) : page === 0 && pageItems.length === 0 ? (
             <p style={{ margin: 0, fontSize: "var(--ms-fs-ui)", color: "var(--ms-muted)" }}>
               {t("detail.noDeliveries")}
             </p>
@@ -541,7 +540,7 @@ export function WebhookDetail({ id }: { id: string }) {
                   ))}
                 </tbody>
               </Table>
-              {total > pageSize ? (
+              {page > 0 || hasMore ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
                   <button
                     type="button"
@@ -557,7 +556,7 @@ export function WebhookDetail({ id }: { id: string }) {
                   <button
                     type="button"
                     className="ms-btn ms-btn-secondary"
-                    disabled={lastPage}
+                    disabled={!hasMore}
                     onClick={() => {
                       setExpandedId(null);
                       setPage((p) => p + 1);
@@ -570,8 +569,7 @@ export function WebhookDetail({ id }: { id: string }) {
               <ListFooter
                 left={t("detail.pageOf", {
                   from: page * pageSize + 1,
-                  to: Math.min((page + 1) * pageSize, total),
-                  total,
+                  to: page * pageSize + pageItems.length,
                 })}
                 size={pageSize}
                 onSize={(next) => {
@@ -580,7 +578,7 @@ export function WebhookDetail({ id }: { id: string }) {
                   setPageSize(next);
                 }}
                 sizeLabel={(size) => t("pageSize", { count: size })}
-                singlePage={page === 0 && total <= pageSize}
+                singlePage={page === 0 && !hasMore}
               />
             </>
           )}

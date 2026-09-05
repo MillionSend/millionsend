@@ -257,6 +257,35 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const createMutation = useMutation(trpc.broadcasts.create.mutationOptions());
   const updateMutation = useMutation(trpc.broadcasts.update.mutationOptions());
   const sendMutation = useMutation(trpc.broadcasts.send.mutationOptions());
+  const [testResult, setTestResult] = useState<
+    { kind: "sent"; to: string } | { kind: "rateLimited" } | { kind: "failed" } | null
+  >(null);
+  const testMutation = useMutation(
+    trpc.broadcasts.sendTest.mutationOptions({
+      onSuccess: (result) => setTestResult({ kind: "sent", to: result.to }),
+      onError: (error) =>
+        setTestResult({
+          kind: error.data?.code === "TOO_MANY_REQUESTS" ? "rateLimited" : "failed",
+        }),
+    }),
+  );
+  const sendTest = () => {
+    setTestResult(null);
+    testMutation.mutate({
+      from: from.trim(),
+      subject: subject.trim(),
+      html: html.trim() ? html : null,
+      text: text.trim() ? text : null,
+      ...(replyTo.trim()
+        ? {
+            replyTo: replyTo
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          }
+        : {}),
+    });
+  };
 
   const complete = from.trim() !== "" && subject.trim() !== "";
   const saving = createMutation.isPending || updateMutation.isPending;
@@ -355,6 +384,37 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
         title={initial ? t("composer.editTitle") : t("composer.newTitle")}
         actions={
           <>
+            <div style={{ position: "relative" }}>
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                disabled={!complete || testMutation.isPending}
+                onClick={sendTest}
+              >
+                <BtnSpinner on={testMutation.isPending} />
+                {t("composer.sendTest")}
+              </button>
+              {testResult ? (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    right: 0,
+                    whiteSpace: "nowrap",
+                    color: testResult.kind === "sent" ? "var(--ms-muted)" : "var(--ms-danger)",
+                    fontSize: "var(--ms-fs-label)",
+                  }}
+                >
+                  {testResult.kind === "sent"
+                    ? `✓ ${t("composer.testSent", { email: testResult.to })}`
+                    : t(
+                        testResult.kind === "rateLimited"
+                          ? "composer.testRateLimited"
+                          : "composer.testFailed",
+                      )}
+                </span>
+              ) : null}
+            </div>
             <button
               type="button"
               className="ms-btn ms-btn-secondary"

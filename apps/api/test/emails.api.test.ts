@@ -9,7 +9,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi } from "../src/app.js";
 
@@ -1206,5 +1206,48 @@ describe("a recipient's own unsubscribe and transactional mail", () => {
       body: JSON.stringify([{ ...item, topic_id: topic.id }]),
     });
     expect(topicalBatch.status).toBe(422);
+  });
+});
+
+describe("POST /emails/batch quota", () => {
+  it("reserves once for the batch, sends the prefix that fits and parks the rest", async () => {
+    // Free plan: 100/day, ceiling 150. With 149 used, a two-recipient batch
+    // does not fit as a whole: the first email still goes (one unit of room),
+    // the second parks, and the counter moves once, to the ceiling.
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId, day: utcDay(), accepted: 149 })
+      .onConflictDoUpdate({
+        target: [schema.usageCounters.teamId, schema.usageCounters.day],
+        set: { accepted: 149 },
+      });
+    const before = enqueuedSends.length;
+    const res = await app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify([
+        { ...validBody, to: ["q1@example.com"] },
+        { ...validBody, to: ["q2@example.com"] },
+      ]),
+    });
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as { data: { id: string }[] };
+    expect(data).toHaveLength(2);
+    const rows = await db
+      .select({ status: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(
+        inArray(
+          schema.emails.id,
+          data.map((d) => d.id),
+        ),
+      );
+    expect(rows.map((r) => r.status)).toEqual(["queued", "queued_quota"]);
+    expect(enqueuedSends.length).toBe(before + 1);
+    const [counter] = await db
+      .select({ accepted: schema.usageCounters.accepted })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, teamId));
+    expect(counter?.accepted).toBe(150);
   });
 });

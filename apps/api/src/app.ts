@@ -16,6 +16,7 @@ import {
   clearUnsubscribeSuppression,
   completeIdempotent,
   DAY_MS,
+  dailyCeiling,
   decryptEmailBody,
   emitContactEvents,
   emitSuppressionEvents,
@@ -32,16 +33,21 @@ import {
   makeUnsubscribeToken,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
+  PLAN_DAILY_LIMIT,
   parseScheduledAt,
+  QUOTA_BACKLOG_DAYS,
   recordContactActivity,
+  recountSegment,
   regionPause,
   releaseIdempotent,
+  reserveDailyQuota,
   SCHEDULED_AT_FORMS,
   scoreBand,
   segmentContactsWhere,
   segmentFilterSchema,
   verifyOnboardingSender,
   verifySenderDomain,
+  type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -55,7 +61,7 @@ import {
   snsMessageSchema,
   verifySnsMessage,
 } from "@millionsend/ses";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -162,7 +168,12 @@ export interface ApiDeps {
    * suppression events the API publishes. Optional: without it the rows still
    * land and the webhooks.reconcile sweep sends them within fifteen minutes.
    */
-  enqueueWebhookDelivery?: ((deliveryId: string) => Promise<void>) | undefined;
+  enqueueWebhookDeliveries?: WebhookEnqueue | undefined;
+  /**
+   * Scrubs a deleted contact's address from the team's history in the worker.
+   * Optional: without it the delete request erases inline before returning.
+   */
+  enqueueRecipientErase?: ((teamId: string, address: string) => Promise<void>) | undefined;
   /**
    * The key the hosted unsubscribe page verifies tokens with (core
    * deriveUnsubscribeKey over MASTER_ENCRYPTION_KEY). With appBaseUrl it lets
@@ -636,7 +647,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
   // provenance; the enqueue is optional, the reconcile sweep covers its absence.
   const contactEvents: ContactEventContext = {
     source: "api",
-    enqueue: deps.enqueueWebhookDelivery,
+    enqueue: deps.enqueueWebhookDeliveries,
+  };
+  // Deleting a contact is an erasure: the address must not survive in email
+  // history, event payloads or API logs. The scan is the worker's when a
+  // queue is wired, so the request returns as soon as the row is gone.
+  const eraseDeletedContact = async (teamId: string, address: string): Promise<void> => {
+    if (deps.enqueueRecipientErase) await deps.enqueueRecipientErase(teamId, address);
+    else await eraseRecipient(db, teamId, address);
   };
   const contactSnapshotColumns = {
     id: t.id,
@@ -1137,15 +1155,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         .returning(contactSnapshotColumns)
     )[0];
     if (row) {
-      // Deleting a contact is an erasure: the address must not survive in
-      // email history, event payloads or API logs; the deleted event already
-      // carries the tombstone.
       await emitContactEvents(db, {
         teamId,
         events: [{ type: "contact.deleted", contact: row }],
         ctx: contactEvents,
       });
-      await eraseRecipient(db, teamId, row.email);
+      await eraseDeletedContact(teamId, row.email);
     }
     return row;
   };
@@ -1212,14 +1227,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         .delete(t)
         .where(and(eq(t.teamId, auth.teamId), match))
         .returning(contactSnapshotColumns);
-      // Deleting a contact is an erasure, one address at a time like the
-      // single delete.
       await emitContactEvents(db, {
         teamId: auth.teamId,
         events: rows.map((contact) => ({ type: "contact.deleted" as const, contact })),
         ctx: contactEvents,
       });
-      for (const row of rows) await eraseRecipient(db, auth.teamId, row.email);
+      for (const row of rows) await eraseDeletedContact(auth.teamId, row.email);
       return c.json(
         {
           data: rows.map((r) => ({
@@ -2027,18 +2040,12 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
   // Live count of contacts the segment currently resolves to (filter matches
   // plus manual members). Reuses the one resolver, so the count can never
   // drift from what the fan-out targets.
+  // The read counts the segment anyway; storing the result keeps the
+  // dashboard's cached count fresh without a second scan.
   const contactCount = async (
-    teamId: string,
-    segment: { id: string; filter: SegmentFilter | null },
-  ): Promise<number> => {
-    const [row] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.contacts)
-      .where(
-        and(eq(schema.contacts.teamId, teamId), segmentContactsWhere(schema.contacts, segment)),
-      );
-    return row?.count ?? 0;
-  };
+    _teamId: string,
+    segment: { id: string; teamId: string; filter: SegmentFilter | null },
+  ): Promise<number> => (await recountSegment(db, segment)).count;
 
   const filterError = (issues: string[]) => errorBody(422, "validation_error", issues.join("; "));
 
@@ -2961,7 +2968,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
 
   app.use("/suppressions", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/suppressions/*", requireApiKey, enforceRateLimit, requireFullAccess);
-  registerSuppressionRoutes(app, deps.db, { enqueue: deps.enqueueWebhookDelivery });
+  registerSuppressionRoutes(app, deps.db, { enqueue: deps.enqueueWebhookDeliveries });
 
   app.use("/templates", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/templates/*", requireApiKey, enforceRateLimit, requireFullAccess);
@@ -3296,17 +3303,94 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         return c.json(paused, 403);
       }
+      const limit = deps.isCloud ? PLAN_DAILY_LIMIT[auth.plan] : null;
       const accepted = await deps.db.transaction(async (dbTx) => {
         const txDb = dbTx as unknown as Db;
-        const out: { id: string; parked: boolean; startAfter?: Date }[] = [];
+        const out: {
+          id: string;
+          parked: boolean;
+          startAfter?: Date;
+          index: number;
+          day: string;
+          recipientCount: number;
+        }[] = [];
         for (const { payload, index } of payloads) {
-          const result = await acceptEmail(deps, auth, payload, { tx: txDb });
+          const result = await acceptEmail(deps, auth, payload, { tx: txDb, quota: "deferred" });
           if (!result.ok) throw new AcceptRejectedError(result, index);
           out.push({
             id: result.id,
-            parked: result.parked,
+            parked: false,
+            index,
+            day: result.day,
+            recipientCount: result.recipientCount,
             ...(payload.scheduledAt ? { startAfter: payload.scheduledAt } : {}),
           });
+        }
+        // One reservation per delivery day for the whole batch, after the
+        // inserts: the team's daily counter row is shared with every send
+        // lane and event, so it is locked for one statement and the commit
+        // instead of the whole loop. A batch that does not fit parks whole.
+        // Days in one global order so two concurrent batches never lock the
+        // team's counter rows in opposite orders.
+        for (const day of [...new Set(out.map((o) => o.day))].sort()) {
+          const items = out.filter((o) => o.day === day);
+          const quota = await reserveDailyQuota(txDb, {
+            teamId: auth.teamId,
+            count: items.reduce((n, o) => n + o.recipientCount, 0),
+            limit,
+            day,
+          });
+          if (quota.reserved) continue;
+          // The whole batch did not fit: the longest run of items that does,
+          // in request order, still goes out, and only the tail parks, as a
+          // per-item reservation would have done.
+          let toPark = items;
+          if (limit !== null) {
+            const room = dailyCeiling(limit) - quota.acceptedToday;
+            let sum = 0;
+            let fit = 0;
+            for (const o of items) {
+              if (sum + o.recipientCount > room) break;
+              sum += o.recipientCount;
+              fit += 1;
+            }
+            if (fit > 0) {
+              const head = await reserveDailyQuota(txDb, {
+                teamId: auth.teamId,
+                count: sum,
+                limit,
+                day,
+              });
+              if (head.reserved) toPark = items.slice(fit);
+            }
+          }
+          if (limit !== null) {
+            const [parked] = await txDb
+              .select({ n: count() })
+              .from(schema.emails)
+              .where(
+                and(
+                  eq(schema.emails.teamId, auth.teamId),
+                  eq(schema.emails.latestStatus, "queued_quota"),
+                ),
+              );
+            if ((parked?.n ?? 0) >= limit * QUOTA_BACKLOG_DAYS) {
+              throw new AcceptRejectedError(
+                { ok: false, reason: "quota_backlog_full" },
+                items[0]?.index ?? 0,
+              );
+            }
+          }
+          await txDb
+            .update(schema.emails)
+            .set({ latestStatus: "queued_quota" })
+            .where(
+              inArray(
+                schema.emails.id,
+                toPark.map((o) => o.id),
+              ),
+            );
+          for (const o of toPark) o.parked = true;
         }
         if (idemKey) {
           const recorded = await completeIdempotent(txDb, {

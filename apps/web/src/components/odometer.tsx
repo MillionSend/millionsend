@@ -9,6 +9,8 @@ const BLUR_LEVELS = [1, 2, 3.5, 5, 7];
 /* Keep in step with --ms-dur-digit (tokens/motion.css). */
 const DIGIT_MS = 400;
 const STAGGER_MS = 45;
+/* Allowance for the two paint frames the roll waits for before it starts. */
+const FRAME_MS = 17;
 
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -27,17 +29,27 @@ export function Odometer({ formatted }: { formatted: string }) {
   const [armed, setArmed] = useState(false);
   const [settled, setSettled] = useState(false);
   useEffect(() => {
-    setArmed(true);
     if (reducedMotion()) {
+      setArmed(true);
       setSettled(true);
       return;
     }
+    // The zeroed strips must reach the screen once before the target is
+    // set, or the transition has no start frame: the digits appear already
+    // landed while the blur still plays over them. Two frames guarantee a
+    // paint in between.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => setArmed(true));
+    });
     const digits = formatted.replace(/\D/g, "").length;
     const landed = window.setTimeout(
       () => setSettled(true),
-      Math.max(0, digits - 1) * STAGGER_MS + DIGIT_MS,
+      Math.max(0, digits - 1) * STAGGER_MS + DIGIT_MS + 2 * FRAME_MS,
     );
-    return () => window.clearTimeout(landed);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(landed);
+    };
   }, [formatted]);
   // useId carries punctuation React reserves; url(#…) wants a plain token.
   const filterId = useId().replace(/\W/g, "");

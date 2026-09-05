@@ -21,6 +21,11 @@ export type QuotaResult =
  * sent. Callers that cannot share a transaction must compensate failures
  * with releaseDailyQuota.
  */
+/** Most a team may accept in one UTC day: the plan cap plus its tolerance. */
+export function dailyCeiling(limit: number): number {
+  return Math.floor(limit * (1 + QUOTA_TOLERANCE));
+}
+
 export async function reserveDailyQuota(
   db: Db,
   params: { teamId: string; count: number; limit: number | null; day?: string },
@@ -29,7 +34,7 @@ export async function reserveDailyQuota(
   if (count <= 0) throw new Error("count must be positive");
   const day = params.day ?? utcDay();
   const t = schema.usageCounters;
-  const ceiling = limit === null ? null : Math.floor(limit * (1 + QUOTA_TOLERANCE));
+  const ceiling = limit === null ? null : dailyCeiling(limit);
 
   if (ceiling !== null && count > ceiling) {
     const existing = await db

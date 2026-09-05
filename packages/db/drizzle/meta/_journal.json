@@ -169,6 +169,20 @@
       "when": 1788550754183,
       "tag": "0023_webhook_secret_rotation",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788573187602,
+      "tag": "0024_scale_indexes_and_counts",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788574935350,
+      "tag": "0025_broadcast_result_snapshot",
+      "breakpoints": true
     }
   ]
 }

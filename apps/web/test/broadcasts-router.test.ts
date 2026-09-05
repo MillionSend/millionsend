@@ -6,6 +6,10 @@ import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCaller } from "@/server/routers";
 
+// vitest.config sets SKIP_ENV_VALIDATION (env reads stay live), so setting
+// the KEK here is enough for the router's lazily built keyring.
+process.env.MASTER_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+
 // vitest.config sets SKIP_ENV_VALIDATION, so env reads stay live process.env
 // reads — send's APP_BASE_URL gate is exercised by setting/clearing it here.
 process.env.APP_BASE_URL = "http://localhost:3000";
@@ -535,6 +539,15 @@ describe("delivery stats", () => {
 
     const { items } = await caller.broadcasts.list({});
     expect(items[0]?.recipients).toBe(6);
+
+    // Once the fan-out has stored recipient_count it is the size of record
+    // (email rows are purged by retention; the stored count is not).
+    await db
+      .update(schema.broadcasts)
+      .set({ recipientCount: 9 })
+      .where(eq(schema.broadcasts.id, id));
+    expect((await caller.broadcasts.get({ id })).stats.total).toBe(9);
+    expect((await caller.broadcasts.list({})).items[0]?.recipients).toBe(9);
   });
 
   it("keeps stats scoped to the broadcast", async () => {
@@ -572,5 +585,51 @@ describe("fan-out idempotency spine", () => {
       .from(schema.emails)
       .where(and(eq(schema.emails.broadcastId, id), eq(schema.emails.contactId, contactId)));
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe("broadcasts.sendTest", () => {
+  it("sends the composer's content to the signed-in user, rendered and marked, under an hourly cap", async () => {
+    const teamId = await createTeam(db, "team-test-send");
+    await db
+      .insert(schema.domains)
+      .values({ teamId, name: "acme.dev", region: "us-east-1", status: "verified" });
+    const caller = callerFor(teamId);
+    const result = await caller.broadcasts.sendTest({
+      from: "Acme <news@acme.dev>",
+      subject: "Hello {{{FIRST_NAME|there}}}",
+      html: '<p>Hi {{{FIRST_NAME}}}</p><a href="{{{UNSUBSCRIBE_URL}}}">out</a>',
+      text: null,
+      previewText: "Preview",
+    });
+    expect(result).toEqual({ to: "u1@example.com" });
+    const [row] = await db
+      .select({ to: schema.emails.to, subject: schema.emails.subject, tags: schema.emails.tags })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, teamId));
+    expect(row).toMatchObject({
+      to: ["u1@example.com"],
+      subject: "[Test] Hello u1",
+      tags: { millionsend_test: "1" },
+    });
+
+    // Ten in the last hour is the cap; the eleventh is refused.
+    await db.insert(schema.emails).values(
+      Array.from({ length: 9 }, (_, i) => ({
+        teamId,
+        from: "news@acme.dev",
+        to: ["u1@example.com"],
+        subject: `t${i}`,
+        tags: { millionsend_test: "1" },
+      })),
+    );
+    await expect(
+      caller.broadcasts.sendTest({
+        from: "news@acme.dev",
+        subject: "s",
+        html: "<p>x</p>",
+        text: null,
+      }),
+    ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
   });
 });

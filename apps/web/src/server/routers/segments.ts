@@ -1,4 +1,5 @@
 import {
+  recountSegment,
   SEGMENT_FILTER_MAX_CONDITIONS,
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
   segmentContactsWhere,
@@ -8,7 +9,6 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { unionAll } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { isForeignKeyViolation } from "../db-errors";
 import { router, teamProcedure } from "../trpc";
@@ -93,60 +93,39 @@ export async function countMatching(
   return row?.count ?? 0;
 }
 
-type SegmentCounts = { count: number; unsubscribedCount: number };
-
-/**
- * Live contact + unsubscribed counts for saved segments in ONE round trip.
- * Each segment's predicate differs, so a per-segment aggregate is UNION ALLed
- * rather than issued as N separate count queries.
- */
-async function countSegments(
-  ctx: { db: Db; teamId: string },
-  segments: { id: string; filter: SegmentFilter }[],
-): Promise<Map<string, SegmentCounts>> {
-  const c = schema.contacts;
-  const selects = segments.map((segment) =>
-    ctx.db
-      .select({
-        // Cast the bound id: Postgres cannot infer a type for a bare
-        // parameter that only appears in a select list.
-        id: sql<string>`${segment.id}::text`.as("segment_id"),
-        count: sql<number>`count(*)::int`.as("contact_count"),
-        unsubscribedCount: sql<number>`count(*) filter (where ${c.unsubscribed})::int`.as(
-          "unsubscribed_count",
-        ),
-      })
-      .from(c)
-      .where(and(eq(c.teamId, ctx.teamId), savedSegmentPredicate(segment))),
-  );
-  const [first, second, ...rest] = selects;
-  const rows = !first ? [] : !second ? await first : await unionAll(first, second, ...rest);
-  return new Map(rows.map(({ id, ...counts }) => [id, counts]));
-}
-
-const zeroCounts: SegmentCounts = { count: 0, unsubscribedCount: 0 };
-
 export const segmentsRouter = router({
-  list: teamProcedure.query(async ({ ctx }) => {
+  /**
+   * Counts come from the stored columns (refreshed by recountSegment on
+   * create/update/get and by the stale-segment cron), never live: four
+   * screens load this list and a live count is one contacts scan per segment.
+   * contactCount/countedAt are null for a segment never counted yet.
+   */
+  list: teamProcedure.query(({ ctx }) => {
     const s = schema.segments;
-    const rows = await ctx.db
+    return ctx.db
       .select({
         id: s.id,
         name: s.name,
         filter: s.filter,
         createdAt: s.createdAt,
+        contactCount: s.contactCount,
+        unsubscribedCount: s.unsubscribedCount,
+        countedAt: s.countedAt,
       })
       .from(s)
       .where(eq(s.teamId, ctx.teamId))
       .orderBy(desc(s.createdAt), desc(s.id));
-    const counts = await countSegments(ctx, rows);
-    return rows.map((row) => ({ ...row, ...(counts.get(row.id) ?? zeroCounts) }));
   }),
 
+  /** Live counts; the same scan also refreshes the stored columns the list reads. */
   get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
     const row = await assertSegment(ctx, input.id);
-    const counts = await countSegments(ctx, [row]);
-    return { ...row, ...(counts.get(row.id) ?? zeroCounts) };
+    const counts = await recountSegment(ctx.db, row).catch((err: unknown) =>
+      surfacing422(() => {
+        throw err;
+      }),
+    );
+    return { ...row, ...counts };
   }),
 
   create: teamProcedure
@@ -159,8 +138,9 @@ export const segmentsRouter = router({
       const [row] = await ctx.db
         .insert(s)
         .values({ teamId: ctx.teamId, name: input.name, filter: input.filter })
-        .returning({ id: s.id });
+        .returning({ id: s.id, teamId: s.teamId, filter: s.filter });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await recountSegment(ctx.db, row);
       return { id: row.id };
     }),
 
@@ -176,13 +156,16 @@ export const segmentsRouter = router({
       await assertSegment(ctx, input.id);
       if (input.filter !== undefined) segmentPredicate(input.filter);
       const s = schema.segments;
-      await ctx.db
+      const [row] = await ctx.db
         .update(s)
         .set({
           ...(input.name !== undefined ? { name: input.name } : {}),
           ...(input.filter !== undefined ? { filter: input.filter } : {}),
         })
-        .where(and(eq(s.id, input.id), eq(s.teamId, ctx.teamId)));
+        .where(and(eq(s.id, input.id), eq(s.teamId, ctx.teamId)))
+        .returning({ id: s.id, teamId: s.teamId, filter: s.filter });
+      // A rename leaves the membership untouched; only a filter change recounts.
+      if (row && input.filter !== undefined) await recountSegment(ctx.db, row);
       return { id: input.id };
     }),
 

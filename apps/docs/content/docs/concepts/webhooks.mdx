@@ -137,3 +137,5 @@ A delivery is considered successful on any 2xx response. Failures are retried
 with exponential backoff (starting at seconds, capped at hours, up to 6
 attempts). A reconcile job re-dispatches deliveries lost to crashes, so
 delivery is at-least-once — make handlers idempotent, keyed on `webhook-id`.
+Delivery rows (payload, response, attempts) are kept for
+`WEBHOOK_DELIVERY_RETENTION_DAYS` (default 30) and then purged.

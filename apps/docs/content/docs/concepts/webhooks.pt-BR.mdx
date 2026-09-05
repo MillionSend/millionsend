@@ -138,3 +138,5 @@ repetidas com backoff exponencial (começando em segundos, limitado a horas,
 até 6 tentativas). Um job de reconciliação redespacha entregas perdidas em
 quedas, então a entrega é pelo-menos-uma-vez — torne seus handlers
 idempotentes, chaveados por `webhook-id`.
+As linhas de entrega (payload, resposta, tentativas) são mantidas por
+`WEBHOOK_DELIVERY_RETENTION_DAYS` (padrão 30) e depois expurgadas.

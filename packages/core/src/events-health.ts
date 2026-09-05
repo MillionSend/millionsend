@@ -28,16 +28,24 @@ export async function sesEventsHealth(db: Db, now = new Date()): Promise<SesEven
     .select({ n: count() })
     .from(schema.emails)
     .where(and(gte(schema.emails.sentAt, windowStart), lte(schema.emails.sentAt, judgeBefore)));
-  const [events] = await db
-    .select({
-      inWindow: sql<number>`count(*) filter (where ${schema.emailEvents.createdAt} >= ${windowStart})::int`,
-      last: sql<string | null>`max(${schema.emailEvents.createdAt})`,
-    })
+  // Two bounded reads instead of one aggregate over every SES event ever
+  // stored: the windowed count walks an index range, the newest event is a
+  // backward index scan.
+  const [inWindow] = await db
+    .select({ n: count() })
+    .from(schema.emailEvents)
+    .where(
+      and(
+        isNotNull(schema.emailEvents.snsMessageId),
+        gte(schema.emailEvents.createdAt, windowStart),
+      ),
+    );
+  const [latest] = await db
+    .select({ last: sql<string | null>`max(${schema.emailEvents.createdAt})` })
     .from(schema.emailEvents)
     .where(isNotNull(schema.emailEvents.snsMessageId));
   const sentInWindow = sent?.n ?? 0;
-  const lastSesEventAt = events?.last ? new Date(events.last) : null;
-  const status =
-    sentInWindow === 0 ? "idle" : (events?.inWindow ?? 0) > 0 ? "healthy" : "unhealthy";
+  const lastSesEventAt = latest?.last ? new Date(latest.last) : null;
+  const status = sentInWindow === 0 ? "idle" : (inWindow?.n ?? 0) > 0 ? "healthy" : "unhealthy";
   return { status, sentInWindow, lastSesEventAt };
 }

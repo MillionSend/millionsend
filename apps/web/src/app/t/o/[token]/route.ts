@@ -1,6 +1,6 @@
 import { verifyOpenToken } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
-import { enqueueWebhookDelivery } from "../../../../server/queue";
+import { enqueueWebhookDeliveries } from "../../../../server/queue";
 import { recordEngagement, trackingKey } from "../../record";
 
 // 1x1 transparent GIF — the smallest valid image an email client will render.
@@ -16,7 +16,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ token: str
   const { token } = await ctx.params;
   const key = trackingKey();
   const parsed = key ? verifyOpenToken(token, key) : null;
-  if (parsed) await recordEngagement(getDb(), parsed.emailId, "opened", enqueueWebhookDelivery);
+  if (parsed) await recordEngagement(getDb(), parsed.emailId, "opened", enqueueWebhookDeliveries);
 
   return new Response(PIXEL, {
     status: 200,

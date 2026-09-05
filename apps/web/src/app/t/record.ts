@@ -3,7 +3,9 @@ import {
   applyStatusCas,
   deriveTrackingKey,
   enqueueWebhookDeliveries,
+  type QueuedWebhookDelivery,
   utcDay,
+  type WebhookEnqueue,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -41,7 +43,7 @@ export async function recordEngagement(
   db: Db,
   emailId: string,
   type: "opened" | "clicked",
-  enqueueWebhookDelivery?: (deliveryId: string) => Promise<void>,
+  enqueueWebhookDeliveriesFn?: WebhookEnqueue,
   data?: Record<string, unknown>,
 ): Promise<void> {
   // A raw non-uuid string must never reach a uuid column — Postgres would 500.
@@ -61,7 +63,7 @@ export async function recordEngagement(
   if (!email) return;
 
   const occurredAt = new Date();
-  const deliveryIds: string[] = [];
+  const deliveries: QueuedWebhookDelivery[] = [];
   await db.transaction(async (txRaw) => {
     const tx = txRaw as unknown as Db;
     const [newest] = await tx
@@ -80,17 +82,6 @@ export async function recordEngagement(
       .insert(schema.emailEvents)
       .values({ emailId: email.id, type, occurredAt, ...(data ? { data } : {}) });
     await applyStatusCas(tx, email.id, type);
-    // Counter advances only on the first (unique) open/click per email:
-    // dashboards divide it by sent/delivered, so it must count emails
-    // engaged, not engagement hits.
-    if (!newest) {
-      await tx.execute(sql`
-        insert into ${schema.usageCounters} (team_id, day, ${sql.raw(type)})
-        values (${email.teamId}, ${utcDay(occurredAt)}, 1)
-        on conflict (team_id, day) do update
-          set ${sql.raw(type)} = ${schema.usageCounters}.${sql.raw(type)} + 1
-      `);
-    }
 
     // Fan every recorded open/click out to the team's webhook endpoints
     // (damped no-ops above never reach this): delivery rows join this
@@ -101,19 +92,31 @@ export async function recordEngagement(
       email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
       type: `email.${type}`,
       occurredAt,
-      enqueue: async (deliveryId) => {
-        deliveryIds.push(deliveryId);
+      enqueue: async (rows) => {
+        deliveries.push(...rows);
       },
     });
+
+    // Counter advances only on the first (unique) open/click per email:
+    // dashboards divide it by sent/delivered, so it must count emails
+    // engaged, not engagement hits. Last in the transaction: this row is
+    // shared by every send and event of the team, so its lock is held for
+    // one statement and the commit, not across the fan-out above.
+    if (!newest) {
+      await tx.execute(sql`
+        insert into ${schema.usageCounters} (team_id, day, ${sql.raw(type)})
+        values (${email.teamId}, ${utcDay(occurredAt)}, 1)
+        on conflict (team_id, day) do update
+          set ${sql.raw(type)} = ${schema.usageCounters}.${sql.raw(type)} + 1
+      `);
+    }
   });
 
-  if (enqueueWebhookDelivery) {
-    for (const deliveryId of deliveryIds) {
-      try {
-        await enqueueWebhookDelivery(deliveryId);
-      } catch (err) {
-        console.error("webhook.deliver enqueue failed; reconcile sweep will recover", err);
-      }
+  if (enqueueWebhookDeliveriesFn && deliveries.length > 0) {
+    try {
+      await enqueueWebhookDeliveriesFn(deliveries);
+    } catch (err) {
+      console.error("webhook.deliver enqueue failed; reconcile sweep will recover", err);
     }
   }
 }

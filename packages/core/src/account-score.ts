@@ -3,9 +3,9 @@ import type { Db } from "@millionsend/db";
 // postgres driver (node:net), which breaks any client bundle importing the
 // thresholds below.
 import * as schema from "@millionsend/db/schema";
-import { and, eq, gte, isNotNull, or, sql } from "drizzle-orm";
+import { and, eq, gte, type SQL, sql } from "drizzle-orm";
 import { type DeliverabilityStatus, fetchDeliverabilityHealth } from "./deliverability.js";
-import { resultRows } from "./driver-result.js";
+import { firstRow, resultRows } from "./driver-result.js";
 import {
   type CheckId,
   type CheckSeverity,
@@ -154,24 +154,56 @@ export async function fetchAccountScore(
   return computeAccountScore(await fetchAccountScoreInput(db, teamId, opts));
 }
 
+/**
+ * The score window's scored sends as (score_tenths, checks, recipients,
+ * emails) rows. API sends join their own emailId-keyed insights row; fan-out
+ * emails are collapsed per broadcast first and then join the shared
+ * broadcastId-keyed row, so each branch is one index-driven join — an OR over
+ * both keys would multiply every email by the checks array and spill.
+ */
+function scoredSendsSql(teamId: string, window: { sinceTs: Date; createdFloor: Date }): SQL {
+  const e = schema.emails;
+  const i = schema.emailInsights;
+  const inWindow = sql`${e.teamId} = ${teamId} and ${e.createdAt} >= ${window.createdFloor} and ${e.sentAt} >= ${window.sinceTs}`;
+  return sql`
+    select ${i.scoreTenths} as score_tenths, ${i.checks} as checks,
+           jsonb_array_length(${e.to}) as recipients, 1 as emails
+    from ${e}
+    join ${i} on ${i.emailId} = ${e.id}
+    where ${inWindow} and ${e.broadcastId} is null
+    union all
+    select ${i.scoreTenths}, ${i.checks}, b.recipients, b.emails
+    from (
+      select ${e.broadcastId} as broadcast_id, count(*)::int as emails,
+             sum(jsonb_array_length(${e.to})) as recipients
+      from ${e}
+      where ${inWindow} and ${e.broadcastId} is not null
+      group by 1
+    ) b
+    join ${i} on ${i.broadcastId} = b.broadcast_id
+  `;
+}
+
+/**
+ * Window bounds shared by the content sub-score and its factors. The content
+ * query windows on sentAt from the SAME UTC-day boundary the counters window
+ * on, or the two sub-scores measure different populations. The createdAt
+ * floor is loose (schedule cap 30d + window 30d + margin) and exists purely
+ * to drive the (teamId, createdAt) index.
+ */
+function scoreWindow(now: number) {
+  const since = utcDay(now - (ACCOUNT_SCORE_WINDOW_DAYS - 1) * DAY_MS);
+  return { since, sinceTs: new Date(since), createdFloor: new Date(now - 61 * DAY_MS) };
+}
+
 /** The window's raw inputs, so a caller can replay the formula with a factor removed. */
 export async function fetchAccountScoreInput(
   db: Db,
   teamId: string,
   opts?: { now?: Date },
 ): Promise<AccountScoreInput> {
-  const now = (opts?.now ?? new Date()).getTime();
-  const since = utcDay(now - (ACCOUNT_SCORE_WINDOW_DAYS - 1) * DAY_MS);
-  // The content query windows on sentAt from the SAME UTC-day boundary the
-  // counters window on, or the two sub-scores measure different populations.
-  const sinceTs = new Date(since);
-  // Loose createdAt floor purely to drive the (teamId, createdAt) index:
-  // schedule cap 30d + window 30d + margin.
-  const createdFloor = new Date(now - 61 * DAY_MS);
-
+  const window = scoreWindow((opts?.now ?? new Date()).getTime());
   const c = schema.usageCounters;
-  const e = schema.emails;
-  const i = schema.emailInsights;
 
   const [counters] = await db
     .select({
@@ -180,21 +212,15 @@ export async function fetchAccountScoreInput(
       hardBounced: sql<string>`coalesce(sum(${c.hardBounced}), 0)::bigint`,
     })
     .from(c)
-    .where(and(eq(c.teamId, teamId), gte(c.day, since)));
+    .where(and(eq(c.teamId, teamId), gte(c.day, window.since)));
 
-  // ponytail: OR-join over the two unique insight keys; rewrite as a UNION of
-  // two index-driven joins if this scan ever shows up in slow queries.
-  const [content] = await db
-    .select({
-      weighted: sql<string>`coalesce(sum(${i.scoreTenths} * jsonb_array_length(${e.to})), 0)::bigint`,
-      recipients: sql<string>`coalesce(sum(jsonb_array_length(${e.to})), 0)::bigint`,
-    })
-    .from(e)
-    .innerJoin(
-      i,
-      or(eq(i.emailId, e.id), and(isNotNull(e.broadcastId), eq(i.broadcastId, e.broadcastId))),
-    )
-    .where(and(eq(e.teamId, teamId), gte(e.createdAt, createdFloor), gte(e.sentAt, sinceTs)));
+  const content = firstRow<{ weighted: string; recipients: string }>(
+    await db.execute(sql`
+      select coalesce(sum(s.score_tenths * s.recipients), 0)::bigint as weighted,
+             coalesce(sum(s.recipients), 0)::bigint as recipients
+      from (${scoredSendsSql(teamId, window)}) s
+    `),
+  );
 
   const health = await fetchDeliverabilityHealth(db, teamId, opts?.now ? { now: opts.now } : {});
 
@@ -228,11 +254,7 @@ export async function fetchContentFactors(
   teamId: string,
   opts?: { now?: Date },
 ): Promise<ContentFactor[]> {
-  const now = (opts?.now ?? new Date()).getTime();
-  const sinceTs = new Date(utcDay(now - (ACCOUNT_SCORE_WINDOW_DAYS - 1) * DAY_MS));
-  const createdFloor = new Date(now - 61 * DAY_MS);
-  const e = schema.emails;
-  const i = schema.emailInsights;
+  const window = scoreWindow((opts?.now ?? new Date()).getTime());
   const rows = resultRows<{
     id: CheckId;
     severity: CheckSeverity;
@@ -243,16 +265,12 @@ export async function fetchContentFactors(
     await db.execute(sql`
       select c->>'id' as id,
              c->>'severity' as severity,
-             count(distinct ${e.id})::int as emails,
-             coalesce(sum(jsonb_array_length(${e.to})), 0)::bigint as recipients,
-             coalesce(sum((c->>'penaltyHundredths')::int * jsonb_array_length(${e.to})), 0)::bigint as weighted
-      from ${e}
-      join ${i} on (${i.emailId} = ${e.id} or (${e.broadcastId} is not null and ${i.broadcastId} = ${e.broadcastId}))
-      cross join lateral jsonb_array_elements(${i.checks}) as c
-      where ${e.teamId} = ${teamId}
-        and ${e.createdAt} >= ${createdFloor}
-        and ${e.sentAt} >= ${sinceTs}
-        and c->>'status' = 'fail'
+             sum(s.emails)::int as emails,
+             coalesce(sum(s.recipients), 0)::bigint as recipients,
+             coalesce(sum((c->>'penaltyHundredths')::int * s.recipients), 0)::bigint as weighted
+      from (${scoredSendsSql(teamId, window)}) s
+      cross join lateral jsonb_array_elements(s.checks) as c
+      where c->>'status' = 'fail'
       group by 1, 2
       order by weighted desc, recipients desc, id asc
     `),

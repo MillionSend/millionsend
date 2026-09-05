@@ -7,7 +7,7 @@ import {
 import { getDb, schema } from "@millionsend/db";
 import { eq, sql } from "drizzle-orm";
 import { appBaseUrl } from "@/lib/api-base-url";
-import { enqueueWebhookDelivery } from "@/server/queue";
+import { enqueueWebhookDeliveries } from "@/server/queue";
 import { postUnsubscribeLocation, preferenceTopics, targetForToken } from "../lookup";
 
 /**
@@ -46,7 +46,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
   const oneClick = form.get("List-Unsubscribe") === "One-Click";
   const events: ContactEventContext = {
     source: oneClick ? "one_click" : "hosted_page",
-    enqueue: enqueueWebhookDelivery,
+    enqueue: enqueueWebhookDeliveries,
   };
 
   // Preferences save from the confirm page: every listed topic gets an

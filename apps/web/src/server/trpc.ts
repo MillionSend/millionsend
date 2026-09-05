@@ -1,3 +1,4 @@
+import type { WebhookEnqueue } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { getDb } from "@millionsend/db";
 import { initTRPC, TRPCError } from "@trpc/server";
@@ -5,7 +6,12 @@ import { cookies } from "next/headers";
 import superjson from "superjson";
 import { getAuth } from "./auth";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership, type TeamRole } from "./membership";
-import { enqueueEmailSend, enqueueWebhookDelivery, getQueue } from "./queue";
+import {
+  enqueueEmailSend,
+  enqueueRecipientErase,
+  enqueueWebhookDeliveries,
+  getQueue,
+} from "./queue";
 
 export interface SessionUser {
   id: string;
@@ -44,7 +50,12 @@ export interface Context {
    * suppression events the routers publish. Absent in tests; the
    * webhooks.reconcile sweep sends rows nobody enqueued.
    */
-  enqueueWebhookDelivery?: (deliveryId: string) => Promise<void>;
+  enqueueWebhookDeliveries?: WebhookEnqueue;
+  /**
+   * Scrubs a deleted contact's address from the team's history in the
+   * worker. Absent in tests, where the routers erase inline instead.
+   */
+  enqueueRecipientErase?: (teamId: string, address: string) => Promise<void>;
 }
 
 const enqueueBroadcastSend = async (
@@ -76,7 +87,8 @@ export async function createContext({ headers }: { headers: Headers }): Promise<
     role: membership?.role ?? null,
     enqueueBroadcastSend,
     enqueueEmailSend,
-    enqueueWebhookDelivery,
+    enqueueWebhookDeliveries,
+    enqueueRecipientErase,
     setActiveTeamCookie: (teamId) =>
       cookieStore.set(ACTIVE_TEAM_COOKIE, teamId, {
         httpOnly: true,

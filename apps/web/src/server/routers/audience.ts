@@ -9,11 +9,12 @@ import {
   eraseRecipient,
   recordContactActivity,
   resultRows,
+  type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, ilike, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
 import { CONTACT_STATUSES } from "@/lib/contact-status";
 import { escapeLike } from "@/lib/sql";
@@ -70,10 +71,27 @@ async function assertContacts(
   return unique;
 }
 
+/**
+ * A deleted contact's address is scrubbed from the team's history by the
+ * worker, so the request returns as soon as the row is gone; without the
+ * queue seam (tests) the scrub runs inline.
+ */
+const eraseDeletedContact = async (
+  ctx: {
+    db: Db;
+    teamId: string;
+    enqueueRecipientErase?: ((teamId: string, address: string) => Promise<void>) | undefined;
+  },
+  email: string,
+): Promise<void> => {
+  if (ctx.enqueueRecipientErase) await ctx.enqueueRecipientErase(ctx.teamId, email);
+  else await eraseRecipient(ctx.db, ctx.teamId, email);
+};
+
 /** Dashboard-made changes publish with this provenance; the enqueue is absent in tests. */
 const dashboardEvents = (ctx: {
-  enqueueWebhookDelivery?: ((deliveryId: string) => Promise<void>) | undefined;
-}): ContactEventContext => ({ source: "dashboard", enqueue: ctx.enqueueWebhookDelivery });
+  enqueueWebhookDeliveries?: WebhookEnqueue | undefined;
+}): ContactEventContext => ({ source: "dashboard", enqueue: ctx.enqueueWebhookDeliveries });
 
 const contactSnapshotColumns = {
   id: schema.contacts.id,
@@ -101,9 +119,11 @@ export const audienceRouter = router({
     }),
 
     /**
-     * Daily additions and unsubscribes for the contacts-page growth chart.
-     * Unsubscribe days come from unsubscribed_at, so rows unsubscribed before
-     * that column existed carry their backfilled (approximate) time.
+     * Daily additions and unsubscribes for the contacts-page growth sparkline,
+     * bounded to its 90-day window so the query walks (team_id, created_at)
+     * instead of the team's whole history. Unsubscribe days come from
+     * unsubscribed_at, so rows unsubscribed before that column existed carry
+     * their backfilled (approximate) time.
      */
     growth: teamProcedure.query(async ({ ctx }) => {
       const c = schema.contacts;
@@ -113,7 +133,7 @@ export const audienceRouter = router({
           count: sql<number>`count(*)::int`,
         })
         .from(c)
-        .where(eq(c.teamId, ctx.teamId))
+        .where(and(eq(c.teamId, ctx.teamId), sql`${c.createdAt} >= now() - interval '90 days'`))
         .groupBy(sql`1`)
         .orderBy(sql`1`);
       const unsubscribed = await ctx.db
@@ -122,7 +142,13 @@ export const audienceRouter = router({
           count: sql<number>`count(*)::int`,
         })
         .from(c)
-        .where(and(eq(c.teamId, ctx.teamId), eq(c.unsubscribed, true), isNotNull(c.unsubscribedAt)))
+        .where(
+          and(
+            eq(c.teamId, ctx.teamId),
+            eq(c.unsubscribed, true),
+            sql`${c.unsubscribedAt} >= now() - interval '90 days'`,
+          ),
+        )
         .groupBy(sql`1`)
         .orderBy(sql`1`);
       return { added, unsubscribed };
@@ -169,11 +195,16 @@ export const audienceRouter = router({
             )} where ${and(eq(tp.id, input.topicId), topicMembershipSql(s, tp))})`,
           );
         }
-        // Total counts the filter scope, not the page — the cursor is excluded.
-        const [totalRow] = await ctx.db
-          .select({ total: sql<number>`count(*)::int` })
-          .from(t)
-          .where(and(...filters));
+        // Total counts the filter scope, not the page, and only on the first
+        // page: later pages reuse it instead of recounting the team.
+        const total = input.cursor
+          ? null
+          : ((
+              await ctx.db
+                .select({ total: sql<number>`count(*)::int` })
+                .from(t)
+                .where(and(...filters))
+            )[0]?.total ?? 0);
         if (input.cursor) filters.push(beforeCursor(t, input.cursor));
         const rows = await ctx.db
           .select({
@@ -250,7 +281,7 @@ export const audienceRouter = router({
             segments: segmentsByContact.get(r.id) ?? [],
           })),
           nextCursor: page.nextCursor,
-          total: totalRow?.total ?? 0,
+          total,
         };
       }),
 
@@ -420,7 +451,7 @@ export const audienceRouter = router({
             type: "suppression.removed",
             rows: dropped,
             source: "dashboard",
-            enqueue: ctx.enqueueWebhookDelivery,
+            enqueue: ctx.enqueueWebhookDeliveries,
           });
         }
         if (before && before.unsubscribed !== row.unsubscribed) {
@@ -456,7 +487,7 @@ export const audienceRouter = router({
         events: [{ type: "contact.deleted", contact: row }],
         ctx: dashboardEvents(ctx),
       });
-      await eraseRecipient(ctx.db, ctx.teamId, row.email);
+      await eraseDeletedContact(ctx, row.email);
       return { id: row.id };
     }),
 
@@ -596,7 +627,7 @@ export const audienceRouter = router({
         });
         // ponytail: one cross-table scan per address; fold the batch into one
         // regex alternation if bulk deletes get slow.
-        for (const row of deleted) await eraseRecipient(ctx.db, ctx.teamId, row.email);
+        for (const row of deleted) await eraseDeletedContact(ctx, row.email);
         return { deleted: deleted.length };
       }),
 

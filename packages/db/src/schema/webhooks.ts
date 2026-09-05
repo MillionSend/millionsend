@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm";
 import { index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { bytea } from "./custom-types.js";
-import { emails } from "./emails.js";
 import { teams } from "./teams.js";
 
 export const webhookStatusEnum = pgEnum("webhook_status", ["enabled", "disabled", "auto_disabled"]);
@@ -49,7 +48,10 @@ export const webhookDeliveries = pgTable(
     endpointId: uuid("endpoint_id")
       .notNull()
       .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
-    emailId: uuid("email_id").references(() => emails.id, { onDelete: "set null" }),
+    // The email this delivery reported on, kept as a plain reference: the
+    // row is a log with its own retention clock, and a foreign key here
+    // would make every purged email scan this table.
+    emailId: uuid("email_id"),
     // Standard Webhooks msg id: stable across retries so receivers can dedupe.
     messageId: text("message_id").notNull(),
     eventType: text("event_type").notNull(),

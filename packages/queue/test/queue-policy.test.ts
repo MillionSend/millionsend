@@ -7,9 +7,10 @@ import { Queue } from "../src/index.js";
 const queues = new Map<string, { policy: string }>();
 const sent: {
   name: string;
-  opts: { singletonKey?: string; deadLetter?: string; priority?: number };
+  opts: Record<string, unknown>;
 }[] = [];
 const workers: { name: string; opts: Record<string, unknown> }[] = [];
+const inserted: { name: string; job: Record<string, unknown> }[] = [];
 
 vi.mock("pg-boss", () => ({
   PgBoss: class {
@@ -22,17 +23,16 @@ vi.mock("pg-boss", () => ({
       const q = queues.get(name);
       return q ? { name, policy: q.policy } : null;
     }
-    async send(
-      name: string,
-      _data: unknown,
-      opts: { singletonKey?: string; deadLetter?: string; priority?: number },
-    ): Promise<string> {
+    async send(name: string, _data: unknown, opts: Record<string, unknown>): Promise<string> {
       sent.push({ name, opts });
       return "job-1";
     }
     async work(name: string, opts: Record<string, unknown>): Promise<string> {
       workers.push({ name, opts });
       return "worker-1";
+    }
+    async insert(name: string, jobs: Record<string, unknown>[]): Promise<void> {
+      for (const job of jobs) inserted.push({ name, job });
     }
   },
 }));
@@ -41,6 +41,7 @@ beforeEach(() => {
   queues.clear();
   sent.length = 0;
   workers.length = 0;
+  inserted.length = 0;
 });
 
 it("creates job queues with the dedupe-enforcing policy", async () => {
@@ -99,4 +100,49 @@ it("fetches bursty queues continuously: a batch above one turns burst mode on, a
       },
     },
   ]);
+});
+
+it("caps a fairness group per process when asked", async () => {
+  const queue = await Queue.start("postgres://unused");
+  await queue.work("webhook.deliver", async () => {}, {
+    concurrency: 16,
+    batchSize: 2,
+    groupConcurrency: 2,
+  });
+  expect(workers.at(-1)?.opts).toEqual({
+    batchSize: 2,
+    localConcurrency: 16,
+    burstWhenBatchFull: true,
+    groupConcurrency: 2,
+  });
+});
+
+it("sends many jobs in one statement with the same policy as single sends, plus group and expiry", async () => {
+  const queue = await Queue.start("postgres://unused");
+  await queue.sendMany("webhook.deliver", [
+    { payload: { deliveryId: "d1" }, dedupeKey: "d1", group: "endpoint-a" },
+    {
+      payload: { deliveryId: "d2" },
+      dedupeKey: "d2",
+      group: "endpoint-b",
+      startAfter: new Date(0),
+    },
+  ]);
+  expect(inserted.map((i) => i.name)).toEqual(["webhook.deliver", "webhook.deliver"]);
+  expect(inserted[0]?.job).toMatchObject({
+    data: { deliveryId: "d1" },
+    singletonKey: "d1",
+    group: { id: "endpoint-a" },
+    deadLetter: "webhook.deliver.dead",
+    deleteAfterSeconds: 3600,
+    retryLimit: 10,
+  });
+  expect(inserted[1]?.job).toMatchObject({ startAfter: new Date(0) });
+  await queue.sendMany("email.send", []);
+  expect(inserted).toHaveLength(2);
+
+  await queue.send("broadcast.send", { broadcastId: "b" }, { dedupeKey: "b" });
+  expect(sent.at(-1)?.opts).toMatchObject({ expireInSeconds: 6 * 3600, deleteAfterSeconds: 3600 });
+  await queue.send("email.send", { emailId: "e" }, { dedupeKey: "e" });
+  expect(sent.at(-1)?.opts).not.toHaveProperty("expireInSeconds");
 });

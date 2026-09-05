@@ -63,8 +63,8 @@ export async function eraseRecipient(
     .where(and(inArray(ev.emailId, teamEmailsMentioning), sql`${ev.data}::text ~* ${json}`))
     .returning({ id: ev.id });
 
-  // Scoped by endpoint, not email: test deliveries and deliveries whose email
-  // already aged out have no email_id.
+  // Scoped by endpoint, not email: test deliveries have no email_id, and a
+  // purged email leaves its id dangling (no foreign key).
   const d = schema.webhookDeliveries;
   const wh = schema.webhookEndpoints;
   const teamEndpoints = db.select({ id: wh.id }).from(wh).where(eq(wh.teamId, teamId));

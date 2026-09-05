@@ -2,6 +2,7 @@ import {
   decryptWebhookSigningSecrets,
   type Keyring,
   type PostJsonResult,
+  type QueuedWebhookDelivery,
   signWebhook,
   WEBHOOK_MAX_ATTEMPTS,
   WEBHOOK_RETRY_SCHEDULE_MS,
@@ -21,12 +22,12 @@ export interface DeliverDeps {
   keyring: Keyring;
   /** SSRF-guarded POST (production: core's postJson; tests: a fake). */
   post: (url: string, body: string, headers: Record<string, string>) => Promise<PostJsonResult>;
-  /** Re-enqueue this delivery for its next attempt. */
-  reenqueue: (deliveryId: string, at: Date) => Promise<void>;
+  /** Re-enqueue this delivery for its next attempt, in its endpoint's fairness group. */
+  reenqueue: (delivery: QueuedWebhookDelivery, at: Date) => Promise<void>;
   now?: () => Date;
 }
 
-export type DeliverOutcome = "success" | "retry" | "exhausted" | "skipped" | "deferred";
+export type DeliverOutcome = "success" | "retry" | "exhausted" | "skipped";
 
 const RESPONSE_SNIPPET_CHARS = 1024;
 
@@ -36,16 +37,6 @@ const RESPONSE_SNIPPET_CHARS = 1024;
  * endpoint is auto-disabled and receives nothing further until re-enabled.
  */
 export const WEBHOOK_AUTO_DISABLE_AFTER = 20;
-
-/**
- * Per-endpoint in-flight cap, tracked in this process (the worker runs as a
- * single process, like the send-rate bucket). Beyond the cap a job is handed
- * back to the queue for a moment instead of holding a delivery worker, so
- * one slow receiver cannot occupy every worker at once.
- */
-const ENDPOINT_MAX_IN_FLIGHT = 2;
-const DEFER_MS = 5_000;
-const inFlight = new Map<string, number>();
 
 /** Terminal abandon for a delivery whose job will never run again. */
 export async function abandonWebhookDelivery(db: Db, deliveryId: string): Promise<boolean> {
@@ -120,20 +111,11 @@ export async function deliverWebhook(
     await abandonWebhookDelivery(db, delivery.id);
     return "skipped";
   }
+  // How many deliveries of one endpoint run at once is the queue's job
+  // (each job carries the endpoint as its fairness group), so a stalled
+  // receiver holds its own two lanes and no one else's.
   const now = deps.now?.() ?? new Date();
-  const active = inFlight.get(endpoint.id) ?? 0;
-  if (active >= ENDPOINT_MAX_IN_FLIGHT) {
-    await deps.reenqueue(delivery.id, new Date(now.getTime() + DEFER_MS));
-    return "deferred";
-  }
-  inFlight.set(endpoint.id, active + 1);
-  try {
-    return await attemptDelivery(db, deps, delivery, endpoint, now);
-  } finally {
-    const left = (inFlight.get(endpoint.id) ?? 1) - 1;
-    if (left > 0) inFlight.set(endpoint.id, left);
-    else inFlight.delete(endpoint.id);
-  }
+  return attemptDelivery(db, deps, delivery, endpoint, now);
 }
 
 async function attemptDelivery(
@@ -194,7 +176,8 @@ async function attemptDelivery(
       nextAttemptAt,
     })
     .where(eq(schema.webhookDeliveries.id, delivery.id));
-  if (nextAttemptAt) await deps.reenqueue(delivery.id, nextAttemptAt);
+  if (nextAttemptAt)
+    await deps.reenqueue({ id: delivery.id, endpointId: endpoint.id }, nextAttemptAt);
   if (exhausted) await autoDisableIfDead(db, endpoint.id);
   return exhausted ? "exhausted" : "retry";
 }

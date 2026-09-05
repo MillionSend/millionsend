@@ -62,6 +62,29 @@ describe("audience.contacts.stats", () => {
       unsubscribed: 0,
     });
   });
+
+  it("growth covers only the sparkline's 90-day window", async () => {
+    const teamId = await createTeam(db, "team-growth");
+    const caller = callerFor(teamId);
+    const day = (ms: number) => new Date(Date.now() - ms).toISOString().slice(0, 10);
+    const recent = 5 * 24 * 60 * 60 * 1000;
+    const ancient = 120 * 24 * 60 * 60 * 1000;
+    await db.insert(schema.contacts).values([
+      { teamId, email: "new@example.com", createdAt: new Date(Date.now() - recent) },
+      { teamId, email: "old@example.com", createdAt: new Date(Date.now() - ancient) },
+      {
+        teamId,
+        email: "gone@example.com",
+        createdAt: new Date(Date.now() - ancient),
+        unsubscribed: true,
+        unsubscribedAt: new Date(Date.now() - recent),
+      },
+    ]);
+
+    const growth = await caller.audience.contacts.growth();
+    expect(growth.added).toEqual([{ day: day(recent), count: 1 }]);
+    expect(growth.unsubscribed).toEqual([{ day: day(recent), count: 1 }]);
+  });
 });
 
 describe("tenant isolation", () => {

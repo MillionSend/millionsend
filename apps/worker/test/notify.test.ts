@@ -1,5 +1,11 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { EnvKeyring, encryptWebhookSecret, generateWebhookSecret, utcDay } from "@millionsend/core";
+import {
+  EnvKeyring,
+  encryptWebhookSecret,
+  generateWebhookSecret,
+  type QueuedWebhookDelivery,
+  utcDay,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -50,8 +56,8 @@ const deps = (isCloud = true, now?: Date) => ({
       sends.push({ to, subject: m.subject, text: m.text });
     },
   },
-  enqueueWebhook: async (id: string) => {
-    enqueued.push(id);
+  enqueueWebhook: async (rows: readonly QueuedWebhookDelivery[]) => {
+    enqueued.push(...rows.map((r) => r.id));
   },
   appBaseUrl: "https://app.example.test",
   ...(now ? { now } : {}),

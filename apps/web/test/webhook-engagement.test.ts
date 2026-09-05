@@ -58,8 +58,8 @@ describe("recordEngagement webhook fan-out", () => {
     const endpointId = await seedEndpoint(teamId, ["email.opened"]);
     const enqueued: string[] = [];
 
-    await recordEngagement(db, emailId, "opened", async (id) => {
-      enqueued.push(id);
+    await recordEngagement(db, emailId, "opened", async (rows) => {
+      enqueued.push(...rows.map((r) => r.id));
     });
 
     const rows = await deliveries(endpointId);

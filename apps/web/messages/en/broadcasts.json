@@ -64,7 +64,11 @@
       "two": "Content"
     },
     "continue": "Continue",
-    "stepChange": "Change"
+    "stepChange": "Change",
+    "sendTest": "Send test",
+    "testSent": "Test sent to {email}",
+    "testRateLimited": "Too many test emails — try again in an hour.",
+    "testFailed": "Couldn't send the test email."
   },
   "guard": {
     "title": "Send broadcast",
