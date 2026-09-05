@@ -17,12 +17,12 @@
   "dependencies": {
     "@millionsend/db": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "stripe": "^22.5.0"
+    "stripe": "^22.6.0"
   },
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
     "@types/node": "^22.20.1",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }
