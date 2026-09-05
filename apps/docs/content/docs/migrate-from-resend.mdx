@@ -67,7 +67,11 @@ What it does:
   just the two passes against contacts already on the target, and
   `--only properties,enrichment` runs the properties pass alone. Accounts
   migrated with CLI 0.1.x received no property values (the wire shape was
-  misread); that one command fills them in.
+  misread); that one command fills them in. A contact that appeared on
+  Resend since the last run is created by that pass with its `unsubscribed`
+  flag and names, and is recorded for rollback like any other. The
+  cutover-ready checklist prints only when contacts, domains and
+  suppressions are all part of the run.
 
 ### Before a large migration
 

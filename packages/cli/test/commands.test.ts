@@ -845,10 +845,8 @@ describe("cutover-first run shape", () => {
     "prints the connected limit, the cutover block before enrichment, and per-pass counts",
     async () => {
       const dir = mkdtempSync(join(tmpdir(), "millionsend-cli-cut-"));
-      const result = await run(
-        ["migrate", "--from", "resend", "--yes", "--only", "properties,topics,contacts,enrichment"],
-        { cwd: dir },
-      );
+      // A full run: the cutover-ready block presumes contacts, domains and suppressions came along.
+      const result = await run(["migrate", "--from", "resend", "--yes"], { cwd: dir });
       expect(result.code).toBe(0);
       expect(result.stdout).toContain("limit 10 req/s, using 8");
       const cutover = result.stdout.indexOf("Cutover ready");
@@ -899,6 +897,51 @@ describe("cutover-first run shape", () => {
       const report = readReport(dir);
       expect(report.enrichment?.withTopics).toBe(0);
       expect(report.enrichment?.withProperties).toBeGreaterThan(0);
+    },
+    SLOW,
+  );
+
+  it(
+    "creates a contact that appeared since the last run with its unsubscribed flag, and records it for rollback",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "millionsend-cli-signup-"));
+      expect(
+        (await run(["migrate", "--from", "resend", "--yes", "--only", "contacts"], { cwd: dir }))
+          .code,
+      ).toBe(0);
+      const contacts = fake.data.contacts as { id: string }[];
+      const newcomer = {
+        id: "0f0f0f0f-1111-4222-8333-444455556666",
+        email: "newcomer@example.net",
+        first_name: "New",
+        last_name: "Comer",
+        created_at: "2026-09-05 16:00:22+00",
+        unsubscribed: true,
+        properties: { plan: "free" },
+        topics: [],
+      };
+      contacts.push(newcomer);
+      try {
+        const result = await run(
+          ["migrate", "--from", "resend", "--yes", "--only", "properties,enrichment"],
+          { cwd: dir },
+        );
+        expect(result.code).toBe(0);
+        expect(result.stdout).not.toContain("Cutover ready");
+        expect(result.stdout).toContain("not a cutover");
+        const onTarget = await apiList<{ id: string; email: string; unsubscribed: boolean }>(
+          "/contacts",
+        );
+        const created = onTarget.find((c) => c.email === newcomer.email);
+        expect(created?.unsubscribed).toBe(true);
+        expect(readState(dir)?.created.contacts).toEqual([created?.id]);
+        expect(readReport(dir).counts.contacts).toMatchObject({ created: 1 });
+      } finally {
+        contacts.splice(
+          contacts.findIndex((c) => c.id === newcomer.id),
+          1,
+        );
+      }
     },
     SLOW,
   );

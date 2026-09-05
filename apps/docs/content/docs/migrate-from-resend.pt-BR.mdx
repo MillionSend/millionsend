@@ -70,7 +70,10 @@ O que ele faz:
   sobre contatos que já estão no destino, e `--only properties,enrichment`
   roda só a passagem de propriedades. Contas migradas com a CLI 0.1.x não
   receberam valores de propriedades (o formato do fio foi lido errado); esse
-  único comando os preenche.
+  único comando os preenche. Um contato que surgiu no Resend desde a última
+  execução é criado por essa passagem com o `unsubscribed` e os nomes, e fica
+  registrado para o rollback como qualquer outro. O checklist de virada só é
+  impresso quando contatos, domínios e supressões fazem parte da execução.
 
 ### Antes de uma migração grande
 

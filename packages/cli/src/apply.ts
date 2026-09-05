@@ -62,6 +62,8 @@ export interface IdMapping {
 export interface ApplyInput {
   plan: Plan;
   snapshot: Snapshot;
+  /** Resources this run covers; the cutover-ready block needs contacts, domains and suppressions among them. */
+  include?: ReadonlySet<Resource> | undefined;
   source: Source;
   target: MillionSendTarget;
   state: MigrateState;
@@ -98,6 +100,9 @@ export const RESOURCE_LABEL: Record<Resource, string> = {
   suppressions: "Suppressions",
   "api-keys": "API keys",
 };
+
+/** What "cutover ready" presumes is on the target; a run that left one out is not a cutover. */
+const CUTOVER_RESOURCES: readonly Resource[] = ["contacts", "domains", "suppressions"];
 
 /** The two enrichment passes, as the progress lines name them. */
 export const ENRICHMENT_LABEL: Record<EnrichFacet, string> = {
@@ -454,8 +459,17 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
       },
     ];
     if (passes.some((p) => p.wanted)) {
-      for (const line of cutoverReadyLines(plan.source, plan.target.baseUrl, outcome.domainRecords))
-        progress.line(line);
+      const leftOut = CUTOVER_RESOURCES.filter((r) => input.include?.has(r) === false);
+      const lines =
+        leftOut.length === 0
+          ? cutoverReadyLines(plan.source, plan.target.baseUrl, outcome.domainRecords)
+          : [
+              "",
+              dim(
+                `Enrichment follows. This run left out ${leftOut.join(", ")}, so it is not a cutover; run without --only for the cutover-ready checklist.`,
+              ),
+            ];
+      for (const line of lines) progress.line(line);
       progress.line("");
     }
     for (const pass of passes) {
@@ -492,6 +506,9 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
             }
             failed("enrichment", entry?.item.email ?? `#${error.index}`, error.message);
           }
+          // The upsert creates a contact the contacts pass never saw (a signup
+          // since the last run); it is ours to roll back like any other.
+          for (const row of out.data) if (row.status === "created") created("contacts", row.id);
           withValues += sendable.length - failedNow.size;
           for (const b of sendable) if (!failedNow.has(b.id)) enrichedIds.add(b.id);
         }
@@ -517,6 +534,14 @@ export async function applyPlan(input: ApplyInput): Promise<ApplyOutcome> {
             { propertyKeys, topicBySource },
             [pass.facet],
           );
+          // Without a contacts pass this run, the upsert may create the contact:
+          // it must carry the unsubscribed flag (and names) rather than land
+          // subscribed with only its properties. The API never re-subscribes.
+          if (status === undefined) {
+            item.unsubscribed = contact.unsubscribed;
+            item.first_name = contact.firstName ?? undefined;
+            item.last_name = contact.lastName ?? undefined;
+          }
           buffer.push({ id: contact.id, item });
           if (buffer.length >= BATCH_MAX) await flush();
         },

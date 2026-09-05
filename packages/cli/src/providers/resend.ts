@@ -280,6 +280,7 @@ function toProperties(
         ? (wire as { value: unknown }).value
         : wire;
     if (typeof value === "string" || typeof value === "number") properties[key] = value;
+    else if (typeof value === "boolean") properties[key] = String(value);
   }
   return properties;
 }

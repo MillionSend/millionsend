@@ -42,6 +42,7 @@ export interface Prepared {
   snapshot: Snapshot;
   targetState: TargetState;
   plan: Plan;
+  include: ReadonlySet<Resource>;
 }
 
 type PickerOption = { label: string; hint?: string };
@@ -189,7 +190,7 @@ export async function prepare(ctx: Context, providerId: ProviderId): Promise<Pre
   out.write(`\n${heading("Plan")}\n`);
   out.write(renderPlan(plan));
   plan = await resolveDomainLimit(ctx, plan, targetState);
-  return { provider, source, target, usage, baseUrl, snapshot, targetState, plan };
+  return { provider, source, target, usage, baseUrl, snapshot, targetState, plan, include: chosen };
 }
 
 /** Manual items are listed, not counted: a converged migration must exit 0 even with API keys to recreate. */
@@ -305,6 +306,7 @@ export async function execute(ctx: Context, prepared: Prepared): Promise<number>
   );
   const outcome = await applyPlan({
     plan,
+    include: prepared.include,
     snapshot: prepared.snapshot,
     source: prepared.source,
     target: prepared.target,
