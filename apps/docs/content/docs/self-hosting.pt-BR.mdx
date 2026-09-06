@@ -160,10 +160,10 @@ auto-hospedada não tem limites de plano.
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PORTAL_CONFIG` | Somente na nuvem hospedada; ignorados quando `IS_CLOUD=false`. Chave de API do Stripe, o segredo de assinatura do endpoint de webhook em `/api/billing/webhook` e um id opcional de configuração do portal do cliente. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciais OAuth do "Continuar com Google". O botão só aparece com ambas definidas. URL de callback: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
-| `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha só aparece com isto definido e credenciais SES configuradas — deixe vazio para ocultá-la por completo. |
+| `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha, confirmação de e-mail), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha e a confirmação no cadastro só existem com isto definido e credenciais SES configuradas — deixe vazio para pular as duas. Verifique o domínio em um time em **Domínios** e esses e-mails passam a ser registrados lá, com as novas contas como seus contatos (veja [E-mails de conta](#e-mails-de-conta-contatos-e-novidades)). |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login, o cadastro, a redefinição de senha e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
-| `ONBOARDING_EMAIL_FROM` | Remetente compartilhado do botão "Enviar e-mail" e do snippet do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Qualquer time pode enviar por ele, só para as caixas de entrada dos próprios membros. Deixe vazio para ocultar o botão; o snippet então pede o domínio do próprio time. |
-| `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos donos do time (cota diária quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para o time, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. |
+| `ONBOARDING_EMAIL_FROM` | Remetente compartilhado do botão "Enviar e-mail" e do snippet do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Qualquer time pode enviar por ele, só para membros que confirmaram o e-mail (onde a instância confirma e-mails), e sempre com este nome de exibição exato. Deixe vazio para ocultar o botão; o snippet então pede o domínio do próprio time. |
+| `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos donos do time (cota diária quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para o time, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. Verifique o domínio em um time para registrar esses e-mails lá. |
 
 ### Dimensionamento do worker
 
@@ -619,6 +619,58 @@ criar chaves de API que enviam pela sua conta SES, então o cadastro fica
 desligado a menos que você opte por abri-lo com `ALLOW_SIGNUP=true`. Mantenha
 a porta 3000 fora da internet pública a menos que tenha aberto o cadastro
 deliberadamente.
+
+## E-mails de conta, contatos e novidades
+
+Os e-mails do próprio MillionSend — redefinição de senha, confirmação de
+e-mail, convites para times e os avisos de cota e entregabilidade aos donos
+dos times — saem de `AUTH_EMAIL_FROM` e `NOTIFICATIONS_EMAIL_FROM`.
+Verifique o domínio do remetente em **Domínios** em um time e, a partir daí,
+esses e-mails são registrados e medidos nesse time como qualquer outro:
+aparecem na lista de E-mails com a tag `millionsend_system`, contam nas
+Métricas e as Supressões se preenchem com os bounces deles. O corpo é
+descartado assim que o SES aceita a mensagem, já que um link de redefinição é
+uma credencial válida, e os links nunca são reescritos para rastreio de
+cliques. Enquanto nenhum time tiver o domínio, eles saem direto pelo SES sem
+deixar rastro, como antes.
+
+O mesmo time é a audiência das novidades do produto. Em uma instância com
+`ALLOW_SIGNUP=true`, toda conta nova vira um contato ali com a propriedade
+`source: signup` (nome, endereço, data do cadastro e idioma do painel) assim
+que o endereço é confirmado — um login social já chega confirmado, um cadastro
+por senha conta quando o link enviado é aberto. A tela de cadastro avisa, e
+excluir a conta exclui o contato e apaga o endereço do histórico desse time.
+Uma instância fechada não inscreve ninguém. Para inscrever contas que existiam
+antes de o domínio ser verificado, rode uma vez (contas que nunca confirmaram
+se inscrevem sozinhas no próximo login):
+
+```sql
+insert into contacts (team_id, email, first_name, last_name, properties)
+select '<id do time>', email,
+       split_part(name, ' ', 1),
+       nullif(substr(name, length(split_part(name, ' ', 1)) + 2), ''),
+       jsonb_build_object('source', 'backfill', 'signed_up_at', to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
+from "user"
+where email_verified
+on conflict do nothing;
+```
+
+Os envios a esses contatos seguem as regras de sempre: crie um tópico (por
+exemplo, "Novidades") para que um cancelamento valha para ele e nunca para os
+e-mails de conta, e envie broadcasts pelo domínio verificado do time.
+
+A confirmação de e-mail fica ligada sempre que `AUTH_EMAIL_FROM` está
+definido e há credenciais SES — a mesma condição da recuperação de senha. Um
+cadastro por senha não recebe sessão até o link enviado ser aberto; contas
+anteriores confirmam no próximo login. Onde a instância confirma e-mails, o
+remetente do onboarding só alcança membros que confirmaram.
+
+Nada em uma instância auto-hospedada contata millionsend.com por conta
+própria. O assistente de configuração oferece, uma vez e só de forma
+interativa, inscrever o e-mail do operador nas notas de lançamento do
+MillionSend; é o assistente na sua máquina enviando a sua resposta, e um link
+de confirmação chega antes de qualquer coisa ser armazenada.
+**Configurações → Instância** leva à mesma página.
 
 ## Operações
 

@@ -189,6 +189,7 @@ export {
 } from "./oauth-scopes.js";
 export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
 export { isRootDomainSend, registrableDomain } from "./org-domain.js";
+export { splitPersonName } from "./person-name.js";
 export {
   effectivePlan,
   PLAN_DAILY_LIMIT,
@@ -258,6 +259,11 @@ export {
   suppressionHashesFor,
 } from "./suppressions.js";
 export {
+  confirmSystemContact,
+  enrollSystemContact,
+  removeSystemContact,
+} from "./system-contacts.js";
+export {
   findSenderDomainOwner,
   type SenderDomainOwner,
   SYSTEM_MAIL_TAG,
@@ -294,6 +300,13 @@ export {
   UNSUBSCRIBE_URL_TOKENS,
   verifyUnsubscribeToken,
 } from "./unsubscribe.js";
+export {
+  deriveUpdatesKey,
+  makeUpdatesToken,
+  UPDATES_SOURCES,
+  type UpdatesSource,
+  verifyUpdatesToken,
+} from "./updates-token.js";
 export { isLoopbackUrl } from "./url.js";
 export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
 export {

@@ -1,0 +1,25 @@
+{
+  "page": {
+    "title": "MillionSend product updates",
+    "intro": "Occasional emails about new features and announcements. We send a confirmation link first; nothing is stored until you open it, and every email carries an unsubscribe.",
+    "email": "Email",
+    "emailPlaceholder": "you@example.com",
+    "submit": "Send me the confirmation link",
+    "sent": "If that address can receive mail, a confirmation link is on its way. Open it to finish subscribing.",
+    "confirmed": "You're subscribed. Product updates will arrive at this address; every one carries an unsubscribe.",
+    "invalid": "This confirmation link is invalid or has expired. Request a new one below.",
+    "confirmPrompt": "Subscribe {email} to MillionSend product updates?",
+    "confirmButton": "Yes, subscribe me",
+    "invalidEmail": "That doesn't look like an email address.",
+    "tryLater": "Too many requests — try again later."
+  },
+  "email": {
+    "subject": "Confirm your MillionSend product updates",
+    "greeting": "Hi,",
+    "body": "Someone asked to receive MillionSend product updates at this address. Confirm below and you're in.",
+    "button": "Confirm subscription",
+    "linkFallback": "Or copy this link into your browser:",
+    "expiry": "This link expires in {hours} hours.",
+    "ignore": "If this wasn't you, ignore this email — nothing is stored until the link is opened."
+  }
+}

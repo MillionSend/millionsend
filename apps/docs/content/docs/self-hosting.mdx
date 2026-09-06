@@ -155,10 +155,10 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PORTAL_CONFIG` | Hosted cloud only; ignored when `IS_CLOUD=false`. Stripe API key, the signing secret of the webhook endpoint at `/api/billing/webhook`, and an optional customer-portal configuration id. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials for "Continue with Google". The button appears only when both are set. Callback URL: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Same, for GitHub. Callback URL: `{APP_BASE_URL}/api/auth/callback/github`. |
-| `AUTH_EMAIL_FROM` | Sender for account emails (password reset), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery only appears when this is set and SES credentials are configured — leave unset to hide it entirely. |
+| `AUTH_EMAIL_FROM` | Sender for account emails (password reset, email verification), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery and sign-up verification only exist when this is set and SES credentials are configured — leave unset to skip both. Verify its domain in a team under **Domains** and those emails are logged there, with new accounts as its contacts (see [Account mail](#account-mail-contacts-and-product-updates)). |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys, both or neither. When set, sign-in, sign-up, password reset and the onboarding "Send email" button verify a challenge token (invisible or managed widgets both work). Unset, every form runs without a captcha. |
-| `ONBOARDING_EMAIL_FROM` | Shared sender for the onboarding "Send email" button and snippet, as `Name <user@domain>` or a bare address on a domain verified in this SES account. Any team may send from it, but only to its own members' inboxes. Leave unset to hide the button; the snippet then asks for the team's own domain. |
-| `NOTIFICATIONS_EMAIL_FROM` | Sender for account notifications to team owners (daily quota nearly or fully used, bounce/complaint rates at risk or paused) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. |
+| `ONBOARDING_EMAIL_FROM` | Shared sender for the onboarding "Send email" button and snippet, as `Name <user@domain>` or a bare address on a domain verified in this SES account. Any team may send from it, but only to members who verified their address (where the instance verifies), and always with this exact display name. Leave unset to hide the button; the snippet then asks for the team's own domain. |
+| `NOTIFICATIONS_EMAIL_FROM` | Sender for account notifications to team owners (daily quota nearly or fully used, bounce/complaint rates at risk or paused) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. Verify its domain in a team to log these emails there. |
 
 ### Worker sizing
 
@@ -593,6 +593,56 @@ needed. After that, registration is closed: anyone with an account can create
 API keys that send through your SES account, so signup stays off unless you
 opt in with `ALLOW_SIGNUP=true`. Keep port 3000 off the public internet unless
 you have opened signup deliberately.
+
+## Account mail, contacts and product updates
+
+MillionSend's own emails — password resets, email verification, team
+invitations, and the quota and deliverability notices to team owners — go out
+from `AUTH_EMAIL_FROM` and `NOTIFICATIONS_EMAIL_FROM`. Verify the sender's
+domain under **Domains** in a team, and from then on those emails are logged
+and measured in that team like any other: they appear in its Emails list with
+a `millionsend_system` tag, count in its Metrics, and its Suppressions fill in
+from their bounces. Their body is purged the moment SES accepts the message,
+since a reset link is a live credential, and their links are never rewritten
+for click tracking. Until a team holds the domain they are sent straight
+through SES and leave no trace, as before.
+
+The same team is the audience for product updates. On an instance with
+`ALLOW_SIGNUP=true`, every new account becomes a contact there with a
+`source: signup` property (name, address, sign-up date and dashboard
+locale) once its address is verified — a social sign-in arrives verified, a
+password sign-up counts when the emailed link is opened. The sign-up screen
+says so, and deleting the account deletes the contact and scrubs the address
+from that team's history. A closed instance enrolls nobody. To enroll
+accounts that existed before the domain was verified, run once (accounts
+that never verified enroll on their own at their next sign-in):
+
+```sql
+insert into contacts (team_id, email, first_name, last_name, properties)
+select '<team id>', email,
+       split_part(name, ' ', 1),
+       nullif(substr(name, length(split_part(name, ' ', 1)) + 2), ''),
+       jsonb_build_object('source', 'backfill', 'signed_up_at', to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
+from "user"
+where email_verified
+on conflict do nothing;
+```
+
+Sends to these contacts follow the usual rules: create a topic (say,
+"Product updates") so an unsubscribe applies to it and never to account
+mail, and send broadcasts from the team's verified domain.
+
+Email verification is on whenever `AUTH_EMAIL_FROM` is set and SES
+credentials are configured — the same condition as password recovery. A
+password sign-up gets no session until the emailed link is opened; accounts
+from before verify at their next sign-in. Where the instance verifies, the
+onboarding sender only reaches members who did.
+
+Nothing on a self-hosted instance contacts millionsend.com on its own. The
+setup wizard offers, once and interactively, to subscribe the operator's
+address to MillionSend release notes; that is the wizard on your machine
+posting your answer, and a confirmation link is sent before anything is
+stored. **Settings → Instance** links to the same page.
 
 ## Operations
 

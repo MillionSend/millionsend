@@ -1,4 +1,6 @@
 export {
+  accountEmailFrom,
+  accountMailDeliverable,
   assertEnvConsistency,
   EMAIL_RETENTION_DAYS_DEFAULT,
   type Env,
@@ -11,6 +13,7 @@ export {
   parseSnsTopicArns,
   SES_MAX_SEND_RATE_DEFAULT,
   sesTenantsEnabled,
+  signupOpen,
   trackingCnameTarget,
   trackingSubdomainsSupported,
 } from "./env.js";

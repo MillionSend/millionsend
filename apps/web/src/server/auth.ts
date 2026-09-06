@@ -1,6 +1,13 @@
 import { oauthProvider } from "@better-auth/oauth-provider";
-import { env, isCloudDeployment } from "@millionsend/config";
-import { ALL_TEAMS_GRANT, isLoopbackUrl, MCP_SCOPES } from "@millionsend/core";
+import { accountEmailFrom, env, isCloudDeployment, signupOpen } from "@millionsend/config";
+import {
+  ALL_TEAMS_GRANT,
+  enrollSystemContact,
+  findSenderDomainOwner,
+  isLoopbackUrl,
+  MCP_SCOPES,
+  removeSystemContact,
+} from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { type BetterAuthPlugin, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -11,7 +18,9 @@ import { alias } from "drizzle-orm/pg-core";
 import { headers } from "next/headers";
 import { mcpResourceUrl, resolveBaseUrl } from "@/lib/api-base-url";
 import { httpOrigin } from "@/lib/http-url";
+import { localeFromHeaders } from "./locale";
 import { getActiveMembership, listMemberships } from "./membership";
+import { enqueueRecipientErase } from "./queue";
 import {
   emailVerificationEnabled,
   passwordRecoveryEnabled,
@@ -152,14 +161,55 @@ export async function grantClaims(
   return { team_id: membership.teamId, team_role: membership.role };
 }
 
-/** Exported for tests, which inject a PGlite db and a captured mail sender. */
-export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
+/** The team holding the instance's account mail, if a team verified the sender's domain. */
+async function accountMailTeam(db: Db) {
+  const from = accountEmailFrom();
+  return from ? findSenderDomainOwner(db, from) : null;
+}
+
+/**
+ * Exported for tests, which inject a PGlite db, a captured mail sender and an
+ * inline erasure (production hands the address to the worker queue).
+ */
+export function createAuth(
+  db: Db = getDb(),
+  mail?: SystemMailDeps,
+  deps: { eraseRecipient?: (teamId: string, address: string) => Promise<unknown> } = {},
+) {
   // env.ts leaves BETTER_AUTH_SECRET optional (api/worker don't need it);
   // the web process is the one that must refuse to run without it.
   if (!env.BETTER_AUTH_SECRET) {
     throw new Error("BETTER_AUTH_SECRET is required to run the web app");
   }
   const baseURL = resolveBaseUrl(env.APP_BASE_URL);
+  const erase = deps.eraseRecipient ?? enqueueRecipientErase;
+  /**
+   * A proven account becomes a contact of the account-mail team. Proven:
+   * the address is verified, or this instance cannot verify anyone (no
+   * sender to send the link) and the account is all there is. An address
+   * merely typed at sign-up may be someone else's inbox, so it waits for
+   * the verification link. Only instances open to sign-up enroll — a closed
+   * self-host has nobody to market to. Best-effort: the account exists
+   * whatever happens here.
+   */
+  const enrollAccount = async (
+    user: { email: string; name: string; emailVerified: boolean },
+    headers: Headers | undefined,
+  ) => {
+    try {
+      if (!signupOpen()) return;
+      if (emailVerificationEnabled() && !user.emailVerified) return;
+      const owner = await accountMailTeam(db);
+      if (!owner) return;
+      await enrollSystemContact(db, owner.teamId, {
+        email: user.email,
+        name: user.name,
+        locale: localeFromHeaders(headers),
+      });
+    } catch (error) {
+      console.error("Account-mail contact enrollment failed", error);
+    }
+  };
   return betterAuth({
     database: drizzleAdapter(db, {
       provider: "pg",
@@ -192,6 +242,20 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
         enabled: true,
         beforeDelete: async (user) => {
           await assertNotSoleOwner(db, user.id);
+        },
+        // The row is already gone; the contact copy and the address in the
+        // account-mail team's history go with it — for a proven address
+        // only, or deleting an account registered with someone else's
+        // address would scrub that person's own account mail from the log.
+        // Best-effort: nothing here may fail a deletion that has happened.
+        afterDelete: async (user) => {
+          try {
+            if (emailVerificationEnabled() && !user.emailVerified) return;
+            const owner = await accountMailTeam(db);
+            if (owner) await removeSystemContact(db, owner.teamId, user.email, erase);
+          } catch (error) {
+            console.error("Account-mail contact removal failed", error);
+          }
         },
       },
     },
@@ -285,10 +349,14 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
             },
             sendOnSignUp: true,
             sendOnSignIn: true,
-            // The emailed link signs the visitor in, so the callback page
-            // can forward straight to where sign-up was headed.
-            autoSignInAfterVerification: true,
+            // No session from the link: whoever registered the address set
+            // the password, and the address's real owner opening the link
+            // must not land inside that account. They sign in — or reset the
+            // password, which revokes the registrant's sessions.
             expiresIn: VERIFY_TOKEN_TTL_MINUTES * 60,
+            afterEmailVerification: async (user, request) => {
+              await enrollAccount(user, request?.headers);
+            },
           },
         }
       : {}),
@@ -304,6 +372,8 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
       customRules: {
         "/request-password-reset": { window: 15 * 60, max: 3 },
         "/send-verification-email": { window: 15 * 60, max: 3 },
+        // Each sign-up mails a stranger's address with the registrant's name in it.
+        "/sign-up/email": { window: 15 * 60, max: 10 },
         "/reset-password": { window: 15 * 60, max: 5 },
         "/reset-password/*": { window: 15 * 60, max: 5 },
         "/oauth2/register": { window: 15 * 60, max: 10 },
@@ -333,6 +403,12 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
         create: {
           before: async () => {
             await assertSignupAllowed(db, env.ALLOW_SIGNUP);
+          },
+          // Runs after the row exists (after the adapter's transaction for a
+          // social first sign-in). Social sign-ins arrive verified and enroll
+          // here; a password sign-up enrolls from afterEmailVerification.
+          after: async (user, ctx) => {
+            await enrollAccount(user, ctx?.headers ?? ctx?.request?.headers);
           },
         },
       },

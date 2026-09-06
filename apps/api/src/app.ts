@@ -169,6 +169,8 @@ export interface ApiDeps {
   isCloud: boolean;
   /** ONBOARDING_EMAIL_FROM: the shared first-email sender (core verifyOnboardingSender). */
   onboardingEmailFrom?: string | undefined;
+  /** Whether the shared sender reaches only members who verified their address (the instance verifies). */
+  requireVerifiedMembers?: boolean | undefined;
   /**
    * Hands an accepted email to the send queue. REQUIRED: accepting mail
    * without a producer would strand it in "queued" forever.
@@ -3196,6 +3198,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       body.from,
       [...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])],
       deps.onboardingEmailFrom,
+      { requireVerified: deps.requireVerifiedMembers ?? true },
     );
     if (onboarding && !onboarding.ok) {
       return c.json(

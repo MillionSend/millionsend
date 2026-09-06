@@ -48,6 +48,7 @@ export function AuthForm({
   legal,
   forgotPassword = false,
   turnstileSiteKey = null,
+  productUpdates = false,
 }: {
   mode: "login" | "signup";
   providers: SocialProviderFlags;
@@ -56,6 +57,8 @@ export function AuthForm({
   forgotPassword?: boolean;
   /** Set when the instance verifies a Turnstile token on the email form. */
   turnstileSiteKey?: string | null;
+  /** Signup only: the instance enrolls new accounts for product updates, and says so. */
+  productUpdates?: boolean;
 }) {
   const t = useTranslations(`auth.${mode}`);
   const tSocial = useTranslations("auth.social");
@@ -83,8 +86,8 @@ export function AuthForm({
   const [awaitingVerification, setAwaitingVerification] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [resent, setResent] = useState(false);
-  // Where the emailed verification link lands: a page that forwards the
-  // now signed-in visitor to `next`, or explains an expired link.
+  // Where the emailed verification link lands: a page that sends the
+  // verified visitor on to sign in for `next`, or explains an expired link.
   const verifyCallback = `/verify-email?next=${encodeURIComponent(next)}`;
   // Login is email-first: the password field appears on the first "Sign in",
   // so the common flow starts as a single field. Signup shows everything.
@@ -162,7 +165,7 @@ export function AuthForm({
       email: awaitingVerification,
       callbackURL: verifyCallback,
     });
-    if (error) setNotice(t("error"));
+    if (error) setNotice(t("resendFailed"));
     else setResent(true);
     setPending(null);
   }
@@ -205,6 +208,9 @@ export function AuthForm({
         </button>
         {resent ? <p className={styles.notice}>{t("resent")}</p> : null}
         {notice ? <p className={styles.error}>{notice}</p> : null}
+        <p className={styles.subline}>
+          <Link href={`/login?next=${encodeURIComponent(next)}`}>{t("backToLogin")}</Link>
+        </p>
       </AuthScreen>
     );
   }
@@ -331,24 +337,27 @@ export function AuthForm({
             {t("submit")}
           </button>
         </form>
-        {legal.termsUrl || legal.privacyUrl ? (
+        {legal.termsUrl || legal.privacyUrl || productUpdates ? (
           <p className={styles.legal}>
-            {tLegal.rich(
-              // The sentence names only the documents that exist.
-              `${mode}.${legal.termsUrl && legal.privacyUrl ? "both" : legal.termsUrl ? "terms" : "privacy"}`,
-              {
-                terms: (chunks) => (
-                  <a href={legal.termsUrl ?? "#"} target="_blank" rel="noopener noreferrer">
-                    {chunks}
-                  </a>
-                ),
-                privacy: (chunks) => (
-                  <a href={legal.privacyUrl ?? "#"} target="_blank" rel="noopener noreferrer">
-                    {chunks}
-                  </a>
-                ),
-              },
-            )}
+            {legal.termsUrl || legal.privacyUrl
+              ? tLegal.rich(
+                  // The sentence names only the documents that exist.
+                  `${mode}.${legal.termsUrl && legal.privacyUrl ? "both" : legal.termsUrl ? "terms" : "privacy"}`,
+                  {
+                    terms: (chunks) => (
+                      <a href={legal.termsUrl ?? "#"} target="_blank" rel="noopener noreferrer">
+                        {chunks}
+                      </a>
+                    ),
+                    privacy: (chunks) => (
+                      <a href={legal.privacyUrl ?? "#"} target="_blank" rel="noopener noreferrer">
+                        {chunks}
+                      </a>
+                    ),
+                  },
+                )
+              : null}
+            {productUpdates ? ` ${tLegal("updates")}` : null}
           </p>
         ) : null}
       </div>

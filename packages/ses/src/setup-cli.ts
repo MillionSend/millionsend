@@ -304,6 +304,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     // --- account email (password recovery sender) ---
     await accountEmailStep(rl, writeEnv);
 
+    // --- release notes opt-in (the operator's own request, not the instance's) ---
+    await updatesStep(rl, interactive);
+
     return await launchStep(
       rl,
       interactive,
@@ -445,6 +448,44 @@ async function socialLoginStep(
 
 /** Accepted shapes mirror packages/config parseEmailFrom; boot re-validates. */
 const EMAIL_FROM_RE = /^(?:[^<>]+<)?[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+>?$/;
+
+const UPDATES_SUBSCRIBE_URL = "https://app.millionsend.com/api/updates/subscribe";
+const UPDATES_PAGE_URL = "https://app.millionsend.com/updates";
+
+/**
+ * Optional, interactive only: the operator's one-time opt-in to release
+ * notes. This is the wizard on the operator's machine asking a human and
+ * posting the answer once; the instance it sets up never calls home. The
+ * cloud replies with a confirmation link, so a typo enrolls nobody.
+ */
+async function updatesStep(rl: LineReader, interactive: boolean): Promise<void> {
+  if (!interactive) return;
+  console.log("");
+  const value = (
+    await rl.question(
+      "Optional: MillionSend release notes by email? A confirmation link is sent first; nothing else ever leaves this machine. Your email (empty skips): ",
+    )
+  ).trim();
+  if (value === "") return;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+    console.log(
+      dim(`Doesn't look like an address — skipped. Subscribe any time at ${UPDATES_PAGE_URL}.`),
+    );
+    return;
+  }
+  try {
+    const res = await fetch(UPDATES_SUBSCRIBE_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: value, source: "self-host" }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    console.log(dim("Check your inbox for the confirmation link."));
+  } catch {
+    console.log(dim(`Couldn't reach millionsend.com — subscribe any time at ${UPDATES_PAGE_URL}.`));
+  }
+}
 
 /**
  * Optional account-email step: the sender for password-reset mail. Env-only;

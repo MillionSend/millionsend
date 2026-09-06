@@ -239,7 +239,8 @@
     "retentionLabel": "Email body retention (days)",
     "save": "Save",
     "saved": "Saved",
-    "error": "Could not save."
+    "error": "Could not save.",
+    "updates": "Product updates from MillionSend: <link>subscribe at app.millionsend.com/updates</link>. This instance never contacts millionsend.com on its own."
   },
   "language": {
     "title": "Language",

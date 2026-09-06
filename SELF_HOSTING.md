@@ -283,6 +283,28 @@ signup deliberately.
 </details>
 
 <details>
+<summary><b>Account mail, contacts and product updates</b></summary>
+
+MillionSend's own emails (password resets, email verification, invitations, quota and
+deliverability notices) go out from `AUTH_EMAIL_FROM` / `NOTIFICATIONS_EMAIL_FROM`. Verify
+the sender's domain under **Domains** in a team and those emails are logged and measured
+there, tagged `millionsend_system`, with their body purged once SES accepts them. Until a
+team holds the domain they go straight through SES and leave no trace.
+
+On an instance with `ALLOW_SIGNUP=true`, every new account becomes a contact of that team
+(`source: signup`) once its address is verified; the sign-up screen says so, and deleting the
+account removes the contact and scrubs the address from that team's history. A closed instance enrolls nobody. Email
+verification is on whenever `AUTH_EMAIL_FROM` and SES credentials are set; earlier accounts
+verify at their next sign-in.
+
+Nothing on the instance contacts millionsend.com on its own. The wizard offers, once and
+interactively, to subscribe your address to release notes (a confirmation link comes first);
+**Settings → Instance** links to the same page. Full text: docs, "Account mail, contacts and
+product updates".
+
+</details>
+
+<details>
 <summary><b>Production: nginx + TLS</b></summary>
 
 The recommended production shape: nginx on the host terminates TLS and proxies

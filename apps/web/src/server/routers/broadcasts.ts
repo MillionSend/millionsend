@@ -13,6 +13,7 @@ import {
   PAUSE_COMPLAINT_RATE,
   parseSingleSender,
   regionPause,
+  splitPersonName,
   substituteUnsubscribeUrl,
   verifySenderDomain,
 } from "@millionsend/core";
@@ -492,11 +493,9 @@ export const broadcastsRouter = router({
       }
       // The reader is the sender's own account, so merge fields resolve to
       // it; there is no contact to unsubscribe, so the link points home.
-      const [firstName, ...rest] = (ctx.session.user.name ?? "").trim().split(/\s+/);
       const contact: MergeContact = {
         email: to,
-        firstName: firstName || null,
-        lastName: rest.length > 0 ? rest.join(" ") : null,
+        ...splitPersonName(ctx.session.user.name),
         properties: {},
       };
       const unsubscribeUrl = env.APP_BASE_URL ? `${env.APP_BASE_URL}/broadcasts` : "#";

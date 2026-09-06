@@ -239,7 +239,8 @@
     "retentionLabel": "Retenção de corpos de e-mail (dias)",
     "save": "Salvar",
     "saved": "Salvo",
-    "error": "Não foi possível salvar."
+    "error": "Não foi possível salvar.",
+    "updates": "Novidades do MillionSend: <link>inscreva-se em app.millionsend.com/updates</link>. Esta instância nunca contata millionsend.com por conta própria."
   },
   "language": {
     "title": "Idioma",

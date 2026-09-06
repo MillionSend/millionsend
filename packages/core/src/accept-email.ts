@@ -42,9 +42,10 @@ export type OnboardingSenderVerdict =
  * The instance's shared onboarding sender (ONBOARDING_EMAIL_FROM): any team
  * may send from it without a verified domain, but only to its own members'
  * inboxes — so the first-email snippet runs as written and the shared
- * address can never reach a stranger. Verified members only: an account is
- * created with any address and no proof of ownership, so an unverified
- * member's inbox may belong to someone else, and the body is the caller's.
+ * address can never reach a stranger. Verified members only where the
+ * instance verifies: an account is created with any address and no proof of
+ * ownership, so an unverified member's inbox may belong to someone else, and
+ * the body is the caller's.
  * Null when `from` is not that sender; callers then fall through to
  * verifySenderDomain.
  */
@@ -54,6 +55,14 @@ export async function verifyOnboardingSender(
   from: string,
   recipients: readonly string[],
   onboardingFrom: string | undefined,
+  opts: {
+    /**
+     * Whether members must have verified their address. True wherever the
+     * instance verifies (accountMailDeliverable); an instance that cannot
+     * send the link has nobody verified, and its members stay reachable.
+     */
+    requireVerified: boolean;
+  } = { requireVerified: true },
 ): Promise<OnboardingSenderVerdict | null> {
   if (!isOnboardingSender(from, onboardingFrom)) return null;
   const members = await db
@@ -66,7 +75,7 @@ export async function verifyOnboardingSender(
     const address = extractAddrSpec(r);
     const verified = address === null ? undefined : allowed.get(normalizeAddress(address));
     if (verified === undefined) return { ok: false, reason: "recipient_not_member" };
-    if (!verified) return { ok: false, reason: "recipient_not_verified" };
+    if (opts.requireVerified && !verified) return { ok: false, reason: "recipient_not_verified" };
   }
   // parseSingleSender succeeded inside isOnboardingSender.
   return { ok: true, domainId: null, address: parseSingleSender(from)?.address ?? "" };

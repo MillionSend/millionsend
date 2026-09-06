@@ -9,10 +9,11 @@ import { hasSession } from "@/server/auth";
 
 /**
  * Where the emailed verification link lands once Better Auth has verified
- * the address and signed the visitor in: on to where sign-up was headed.
- * Without a session the link was invalid or expired (Better Auth appends
- * ?error=), or the verification succeeded but no session could be set —
- * either way sign-in is the next step, and it re-sends the link if needed.
+ * the address. No session comes with the link (the registrant, not
+ * necessarily the address's owner, chose the password), so the page sends
+ * a verified visitor to sign in for where sign-up was headed; an invalid or
+ * expired link (Better Auth appends ?error=) reads why, and sign-in re-sends
+ * one. A visitor who already has a session simply moves on.
  */
 export default async function VerifyEmailPage({
   searchParams,

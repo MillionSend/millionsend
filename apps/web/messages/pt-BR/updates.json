@@ -1,0 +1,25 @@
+{
+  "page": {
+    "title": "Novidades do MillionSend",
+    "intro": "E-mails ocasionais sobre novos recursos e anúncios. Enviamos um link de confirmação primeiro; nada é armazenado até que você o abra, e todo e-mail traz um link para cancelar.",
+    "email": "E-mail",
+    "emailPlaceholder": "voce@exemplo.com",
+    "submit": "Enviar o link de confirmação",
+    "sent": "Se esse endereço recebe e-mails, um link de confirmação está a caminho. Abra-o para concluir a inscrição.",
+    "confirmed": "Inscrição confirmada. As novidades chegarão neste endereço; todo e-mail traz um link para cancelar.",
+    "invalid": "Este link de confirmação é inválido ou expirou. Peça um novo abaixo.",
+    "confirmPrompt": "Inscrever {email} nas novidades do MillionSend?",
+    "confirmButton": "Sim, quero receber",
+    "invalidEmail": "Isso não parece um endereço de e-mail.",
+    "tryLater": "Muitas tentativas — tente de novo mais tarde."
+  },
+  "email": {
+    "subject": "Confirme as novidades do MillionSend",
+    "greeting": "Olá,",
+    "body": "Alguém pediu para receber as novidades do MillionSend neste endereço. Confirme abaixo e pronto.",
+    "button": "Confirmar inscrição",
+    "linkFallback": "Ou copie este link no seu navegador:",
+    "expiry": "Este link expira em {hours} horas.",
+    "ignore": "Se não foi você, ignore este e-mail — nada é armazenado até que o link seja aberto."
+  }
+}

@@ -18,6 +18,7 @@ import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
 import type { AppLocale } from "@/i18n/request";
 import { authClient } from "@/lib/auth-client";
+import { UPDATES_URL } from "@/lib/docs-links";
 import { TEAM_LOGO_ACCEPT, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
 import { removeTeamLogo, uploadTeamLogo } from "@/lib/team-logo-api";
 import { useTRPC } from "@/lib/trpc";
@@ -857,6 +858,17 @@ function InstanceSection() {
         }}
       >
         {t("instance.subtitle")}
+      </p>
+      <p
+        style={{ margin: "-8px 0 16px", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}
+      >
+        {t.rich("instance.updates", {
+          link: (chunks) => (
+            <a href={UPDATES_URL} target="_blank" rel="noopener noreferrer">
+              {chunks}
+            </a>
+          ),
+        })}
       </p>
       <form
         onSubmit={(e) => {

@@ -18,14 +18,14 @@ export async function activeLocale(): Promise<AppLocale> {
 }
 
 /**
- * The locale of a bare request, for mail sent from an auth endpoint where
- * next-intl's request scope does not exist: the NEXT_LOCALE cookie the app
- * sets, then Accept-Language. Anything that isn't Portuguese reads English —
- * the email locales mirror the dashboard's launch locales.
+ * The locale of bare request headers, for mail sent from an auth endpoint
+ * where next-intl's request scope does not exist: the NEXT_LOCALE cookie the
+ * app sets, then Accept-Language. Anything that isn't Portuguese reads
+ * English — the email locales mirror the dashboard's launch locales.
  */
-export function localeFromRequest(request: Request | undefined): AppLocale {
-  const cookie = request?.headers.get("cookie")?.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/)?.[1];
-  const acceptLanguage = request?.headers.get("accept-language") ?? "";
+export function localeFromHeaders(headers: Headers | null | undefined): AppLocale {
+  const cookie = headers?.get("cookie")?.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/)?.[1];
+  const acceptLanguage = headers?.get("accept-language") ?? "";
   for (const candidate of [cookie, ...acceptLanguage.split(",")]) {
     const tag = candidate?.trim().toLowerCase();
     if (!tag) continue;

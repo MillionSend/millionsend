@@ -1,4 +1,4 @@
-import { env } from "@millionsend/config";
+import { env, signupOpen } from "@millionsend/config";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
@@ -17,6 +17,7 @@ export default async function SignupPage() {
       providers={enabledSocialProviders()}
       legal={{ termsUrl: env.TERMS_URL ?? null, privacyUrl: env.PRIVACY_URL ?? null }}
       turnstileSiteKey={env.TURNSTILE_SITE_KEY ?? null}
+      productUpdates={signupOpen()}
     />
   );
 }

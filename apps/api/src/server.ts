@@ -1,5 +1,10 @@
 import { serve } from "@hono/node-server";
-import { env, sesTenantsEnabled, trackingSubdomainsSupported } from "@millionsend/config";
+import {
+  accountMailDeliverable,
+  env,
+  sesTenantsEnabled,
+  trackingSubdomainsSupported,
+} from "@millionsend/config";
 import { deriveUnsubscribeKey, hashRecipient } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
 import { EMAIL_SEND_PRIORITY, Queue } from "@millionsend/queue";
@@ -46,6 +51,7 @@ const app = createApi({
   keyring,
   isCloud: env.IS_CLOUD,
   onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
+  requireVerifiedMembers: accountMailDeliverable(),
   rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   revision: env.MILLIONSEND_REVISION,
   appBaseUrl: env.APP_BASE_URL,

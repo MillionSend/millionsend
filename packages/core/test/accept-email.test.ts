@@ -73,10 +73,16 @@ describe("verifyOnboardingSender", () => {
         platform,
       ),
     ).toEqual({ ok: false, reason: "recipient_not_member" });
-    // A member whose address was never verified may be anyone's inbox.
+    // A member whose address was never verified may be anyone's inbox —
+    // unless the instance cannot verify anyone, where members stay reachable.
     expect(
       await verifyOnboardingSender(db, teamId, platform, ["bob@example.com"], platform),
     ).toEqual({ ok: false, reason: "recipient_not_verified" });
+    expect(
+      await verifyOnboardingSender(db, teamId, platform, ["bob@example.com"], platform, {
+        requireVerified: false,
+      }),
+    ).toMatchObject({ ok: true });
   });
 });
 

@@ -14,12 +14,13 @@ let close: () => Promise<void>;
 let teamId: string;
 let token: string;
 
-function api(onboardingEmailFrom?: string) {
+function api(onboardingEmailFrom?: string, requireVerifiedMembers = true) {
   return createApi({
     db,
     keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
     isCloud: true,
     onboardingEmailFrom,
+    requireVerifiedMembers,
     enqueueEmailSend: async () => {},
   });
 }
@@ -72,10 +73,11 @@ describe("POST /emails from the shared onboarding sender", () => {
     expect(row?.from).toBe(PLATFORM);
   });
 
-  it("rejects a member who never verified their address", async () => {
+  it("rejects a member who never verified their address, where the instance verifies", async () => {
     const res = await send(api(PLATFORM), ["bob@example.com"]);
     expect(res.status).toBe(422);
     expect(((await res.json()) as { message: string }).message).toContain("verified");
+    expect((await send(api(PLATFORM, false), ["bob@example.com"])).status).toBe(200);
   });
 
   it("rejects a recipient outside the team", async () => {

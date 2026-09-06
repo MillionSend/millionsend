@@ -1,4 +1,10 @@
-import { env, isCloudDeployment, notificationsEmailFrom } from "@millionsend/config";
+import {
+  accountEmailFrom,
+  accountMailDeliverable,
+  env,
+  isCloudDeployment,
+  notificationsEmailFrom,
+} from "@millionsend/config";
 import { type SystemMailMessage, sendSystemMail } from "@millionsend/core";
 import { EMAIL_WORDMARK_URL, escapeHtml } from "@millionsend/core/html";
 import { type Db, getDb, schema } from "@millionsend/db";
@@ -6,12 +12,14 @@ import { createSesSendClient, sendSimpleEmail } from "@millionsend/ses";
 import { and, eq, gt, like, ne } from "drizzle-orm";
 import enInvite from "../../messages/en/invite-email.json";
 import en from "../../messages/en/reset-email.json";
+import enUpdates from "../../messages/en/updates.json";
 import enVerify from "../../messages/en/verify-email.json";
 import ptBRInvite from "../../messages/pt-BR/invite-email.json";
 import ptBR from "../../messages/pt-BR/reset-email.json";
+import ptBRUpdates from "../../messages/pt-BR/updates.json";
 import ptBRVerify from "../../messages/pt-BR/verify-email.json";
 import { getKeyring } from "./keyring";
-import { localeFromRequest } from "./locale";
+import { localeFromHeaders } from "./locale";
 import { enqueueEmailSend } from "./queue";
 
 export const RESET_TOKEN_TTL_MINUTES = 30;
@@ -23,6 +31,7 @@ export const RESET_EMAIL_THROTTLE_MS = 2 * 60 * 1000;
 const MESSAGES = { en, "pt-BR": ptBR } as const;
 const INVITE_MESSAGES = { en: enInvite, "pt-BR": ptBRInvite } as const;
 const VERIFY_MESSAGES = { en: enVerify, "pt-BR": ptBRVerify } as const;
+const UPDATES_MESSAGES = { en: enUpdates.email, "pt-BR": ptBRUpdates.email } as const;
 export type MailLocale = keyof typeof MESSAGES;
 
 /**
@@ -44,7 +53,7 @@ export function awsCredentialsConfigured(): boolean {
  * screen hides the link and the reset endpoint stays disabled otherwise.
  */
 export function passwordRecoveryEnabled(): boolean {
-  return awsCredentialsConfigured() && Boolean(env.AUTH_EMAIL_FROM);
+  return accountMailDeliverable();
 }
 
 /**
@@ -149,6 +158,30 @@ export function buildVerificationEmail(input: {
       muted: [`${expiry} ${m.ignore}`],
     }),
     kind: "email_verification",
+  };
+}
+
+/** The product-updates confirmation link (server/updates.ts), from the account sender. */
+export function buildUpdatesConfirmEmail(input: {
+  to: string;
+  url: string;
+  locale: MailLocale;
+  expiresInHours?: number;
+}): SystemMailMessage {
+  const m = UPDATES_MESSAGES[input.locale];
+  const expiry = fill(m.expiry, { hours: String(input.expiresInHours ?? 24) });
+  return {
+    from: accountEmailFrom() ?? "",
+    to: input.to,
+    subject: m.subject,
+    ...accountMailCard({
+      paragraphs: [m.greeting, m.body],
+      button: m.button,
+      url: input.url,
+      linkFallback: m.linkFallback,
+      muted: [`${expiry} ${m.ignore}`],
+    }),
+    kind: "updates.confirm",
   };
 }
 
@@ -262,7 +295,7 @@ export async function sendPasswordResetEmail(
       to: data.user.email,
       name: data.user.name,
       url: data.url,
-      locale: localeFromRequest(request),
+      locale: localeFromHeaders(request?.headers),
     });
     void deps.send(message).catch((error) => {
       console.error("Password reset email failed to send", error);
@@ -289,7 +322,7 @@ export function sendVerificationEmail(
       to: data.user.email,
       name: data.user.name,
       url: data.url,
-      locale: localeFromRequest(request),
+      locale: localeFromHeaders(request?.headers),
     });
     void deps.send(message).catch((error) => {
       console.error("Verification email failed to send", error);

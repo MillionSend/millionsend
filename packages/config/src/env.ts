@@ -311,6 +311,38 @@ export function notificationsEmailFrom(e: Env = env): string | undefined {
 }
 
 /**
+ * The sender whose verified domain says which team holds the instance's
+ * account mail and its users as contacts: the auth sender, else the
+ * notifications one. Undefined when neither is configured.
+ */
+export function accountEmailFrom(e: Env = env): string | undefined {
+  return e.AUTH_EMAIL_FROM ?? e.NOTIFICATIONS_EMAIL_FROM;
+}
+
+/**
+ * Whether this process can deliver account mail: explicit SES keys, or the
+ * operator's explicit opt-in to the SDK default provider chain, plus the
+ * auth sender. AWS_DEFAULT_CHAIN is read raw — an opt-in flag outside the
+ * validated schema. Password recovery and email verification exist on
+ * exactly these terms, and so does requiring verified recipients anywhere.
+ */
+export function accountMailDeliverable(e: Env = env): boolean {
+  const chain = process.env.AWS_DEFAULT_CHAIN;
+  const reachable =
+    Boolean(e.AWS_ACCESS_KEY_ID && e.AWS_SECRET_ACCESS_KEY) || chain === "true" || chain === "1";
+  return reachable && Boolean(e.AUTH_EMAIL_FROM);
+}
+
+/**
+ * Whether strangers may register. Cloud is always open; a self-host is open
+ * only by explicit choice, and a closed one has nobody to market to — sign-ups
+ * become contacts only where this is true.
+ */
+export function signupOpen(e: Env = env): boolean {
+  return envFlag(e.ALLOW_SIGNUP);
+}
+
+/**
  * Whether a domain's branded tracking subdomain — a customer CNAME pointing
  * at this app — can actually be served here.
  *
