@@ -36,6 +36,10 @@ export function emulateEmailScheme(html: string, scheme: EmailScheme): string {
   const forced = html.replace(SCHEME_QUERY, (_m, which: string) =>
     (which.toLowerCase() === "dark") === dark ? ALWAYS : NEVER,
   );
-  const base = `<style>:root{color-scheme:${scheme}}</style>`;
-  return forced + base + (dark && !declares ? DARK_CLIENT_SIM : "");
+  // The auto-darkening simulation inverts a LIGHT rendering: under
+  // color-scheme:dark the UA would already paint unstyled text light, and the
+  // invert would turn it dark again (a text-only message reads black on black).
+  const simulate = dark && !declares;
+  const base = `<style>:root{color-scheme:${simulate ? "light" : scheme}}</style>`;
+  return forced + base + (simulate ? DARK_CLIENT_SIM : "");
 }
