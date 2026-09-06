@@ -118,7 +118,7 @@ function HistoryHead() {
 function UsageSkeleton() {
   const t = useTranslations("settings.usage");
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       <section className="ms-card" style={{ padding: "20px 24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <Skeleton width={RING_SIZE} height={RING_SIZE} radius="50%" />
@@ -172,7 +172,7 @@ export function UsageView() {
   const { accepted, limit } = data.today;
 
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       <section className="ms-card" style={{ padding: "20px 24px" }}>
         {/* The deployment's one real quota — the instance/plan daily cap.
             Self-host has none, reported honestly as unlimited. */}

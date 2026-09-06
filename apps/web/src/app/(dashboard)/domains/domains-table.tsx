@@ -140,29 +140,10 @@ export function DomainsView() {
       (region === "all" || d.region === region),
   );
 
-  const summary = useMemo(() => {
-    if (rows.length === 0) return undefined;
-    const counts = { verified: 0, partial: 0, pending: 0, failed: 0 };
-    for (const d of rows) {
-      const s = shown(d);
-      counts[s === "temporary_failure" ? "pending" : s] += 1;
-    }
-    const parts = (["verified", "partial", "pending", "failed"] as const)
-      .filter((key) => counts[key] > 0)
-      .map((key) => t(`list.summary.${key}`, { count: counts[key] }));
-    parts.push(
-      regions.length === 1 && regions[0]
-        ? t("list.summary.allIn", { region: regions[0] })
-        : t("list.summary.regions", { count: regions.length }),
-    );
-    return parts.join(" · ");
-  }, [rows, regions, t]);
-
   return (
     <>
       <PageHeader
         title={t("list.title")}
-        {...(summary ? { subtitle: summary } : {})}
         actions={
           <>
             {canManage ? <ExportCsvLink href="/export/domains" /> : null}

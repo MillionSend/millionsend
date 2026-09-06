@@ -706,12 +706,21 @@ table.ms-table {
   background: var(--ms-line);
 }
 
-/* Tabs */
+/* Tabs — one line that scrolls sideways when the row outgrows its container
+   (settings has nine tabs). The 2px padding/negative margin keeps the focus
+   ring inside the scroll clip. */
 .ms-tabs {
   display: flex;
   gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ms-line-strong) transparent;
+  padding: 2px;
+  margin: -2px;
 }
 .ms-tabs button {
+  flex: none;
+  white-space: nowrap;
   font: 500 var(--ms-fs-ui) var(--ms-font-sans);
   color: var(--ms-muted);
   background: none;
@@ -1509,6 +1518,12 @@ summary:focus-visible,
   .ms-page-actions > .ms-menu-trigger-bare {
     flex: 0 0 auto;
   }
+  /* A split (primary button + menu root) grows like any action; the button
+     inside must take that width too, or it floats centered in empty space. */
+  .ms-page-actions > .ms-split > .ms-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
 
   /* Lists scroll sideways rather than folding a cell onto four lines
      (white-space inherits into every cell). */
@@ -1676,6 +1691,11 @@ summary:focus-visible,
   .ms-cmdk-hints {
     display: none;
   }
+  /* Side sheets run edge to edge; their code blocks scroll inside. */
+  .ms-sheet {
+    width: 100%;
+    max-width: none;
+  }
 }
 
 @media (max-width: 479px) {
@@ -1722,6 +1742,7 @@ summary:focus-visible,
   display: inline-block;
   vertical-align: middle;
   flex-shrink: 0;
+  max-width: 100%;
   background-color: var(--ms-inset);
   background-image: linear-gradient(
     100deg,
@@ -1756,6 +1777,12 @@ summary:focus-visible,
   -webkit-appearance: none;
   appearance: none;
   margin: 0;
+}
+
+/* Side sheet panel (drawer.tsx). */
+.ms-sheet {
+  width: 440px;
+  max-width: calc(100vw - 24px);
 }
 
 /* Horizontal tab/chip strips: keep one line, scroll quietly. */

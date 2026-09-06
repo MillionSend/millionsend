@@ -172,6 +172,7 @@ function CheckRow({ ok, name, detail }: { ok: boolean; name: string; detail: Rea
       style={{
         display: "flex",
         alignItems: "baseline",
+        flexWrap: "wrap",
         gap: 10,
         padding: "8px 0",
         borderBottom: "1px solid var(--ms-line)",
@@ -567,7 +568,7 @@ export function SesSetupView() {
 
           {result?.ok ? (
             <>
-              <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 18 }}>
                 <span
                   className={`ms-badge ${result.sendingEnabled ? "ms-badge-success" : "ms-badge-danger"}`}
                 >

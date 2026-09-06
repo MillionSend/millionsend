@@ -42,10 +42,13 @@ const IMPORT_BATCH = 1000;
 /** The bulk mutations' contactIds ceiling — larger selections go up in sequential batches. */
 const BULK_BATCH = 100;
 
+// Fixed layout: column shares hold and long cells truncate instead of pushing
+// the trailing columns past the page edge. The floor keeps the status badge
+// readable at its 15% share; narrower viewports scroll the Table box.
+const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 720 };
+
 function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
   const t = useTranslations("audience");
-  // The table runs fixed layout: column shares hold and long cells truncate
-  // instead of pushing the trailing columns past the page edge.
   return (
     <thead>
       <tr>
@@ -64,7 +67,7 @@ function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
 function ContactsSkeleton() {
   const widths = ["58%", "42%", "66%", "50%", "38%"];
   return (
-    <Table gutter={28} style={{ tableLayout: "fixed" }}>
+    <Table gutter={28} style={TABLE_STYLE}>
       <ContactsHead />
       <tbody>
         {widths.map((width, row) => (
@@ -115,6 +118,7 @@ function AddContactsSplit({
     // biome-ignore lint/a11y/noStaticElementInteractions: keydown only intercepts Escape bubbling from the trigger/menu
     <div
       ref={rootRef}
+      className="ms-split"
       style={{ position: "relative", display: "inline-flex" }}
       onKeyDown={(event) => {
         if (event.key === "Escape" && open) {
@@ -634,7 +638,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
         )
       ) : (
         <>
-          <Table gutter={28} style={{ tableLayout: "fixed" }}>
+          <Table gutter={28} style={TABLE_STYLE}>
             <ContactsHead
               selectAll={
                 <input

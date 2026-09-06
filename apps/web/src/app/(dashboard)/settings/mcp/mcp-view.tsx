@@ -100,7 +100,7 @@ export function McpView({ serverUrl }: { serverUrl: string }) {
   const snippet = clientSnippet(client, serverUrl);
 
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       <section className="ms-card" style={{ padding: 24 }}>
         <p style={{ margin: "0 0 4px", fontSize: 14, color: "var(--ms-bone)" }}>{t("intro")}</p>
         <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--ms-muted)" }}>

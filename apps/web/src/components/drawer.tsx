@@ -52,13 +52,12 @@ export function Drawer({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        className="ms-sheet"
         style={{
           position: "absolute",
           top: 0,
           right: 0,
           bottom: 0,
-          width: 440,
-          maxWidth: "calc(100vw - 24px)",
           background: "var(--ms-panel)",
           borderLeft: "1px solid var(--ms-line-strong)",
           padding: 24,

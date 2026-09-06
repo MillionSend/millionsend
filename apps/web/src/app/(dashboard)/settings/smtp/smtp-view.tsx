@@ -47,7 +47,7 @@ export function SmtpView() {
   const { data } = useQuery(trpc.settings.smtp.get.queryOptions());
 
   return (
-    <div style={{ maxWidth: 720, display: "grid", gap: 20 }}>
+    <div style={{ maxWidth: 720, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       {data && !data.tlsConfigured ? (
         data.allowInsecureAuth ? (
           <p

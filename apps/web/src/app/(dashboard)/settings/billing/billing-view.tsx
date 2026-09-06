@@ -144,7 +144,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
 
   if (!status.data) {
     return (
-      <div style={{ display: "grid", gap: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
         {notice}
         <BillingSkeleton title={t("plan")} />
       </div>
@@ -165,7 +165,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   );
 
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       {notice}
 
       <Card

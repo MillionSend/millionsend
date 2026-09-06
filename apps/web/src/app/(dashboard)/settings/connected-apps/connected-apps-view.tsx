@@ -41,7 +41,7 @@ export function ConnectedAppsView() {
   const grants = listQuery.data;
 
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       <p style={{ margin: 0, fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.55 }}>
         {t("intro")}
       </p>

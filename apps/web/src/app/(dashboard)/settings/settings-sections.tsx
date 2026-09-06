@@ -173,12 +173,12 @@ function TeamSection({ billing }: { billing: boolean }) {
           >
             <div className="ms-field" style={{ flex: "1 1 220px", maxWidth: 280 }}>
               <label htmlFor="settings-team-name">{t("team.name")}</label>
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <input
                   id="settings-team-name"
                   type="text"
                   className="ms-input"
-                  style={{ flex: 1, maxWidth: 420 }}
+                  style={{ flex: 1, minWidth: 0, maxWidth: 420 }}
                   required
                   maxLength={80}
                   disabled={rename.isPending}
@@ -242,7 +242,7 @@ function TeamSection({ billing }: { billing: boolean }) {
                   void runLogoChange((teamId) => uploadTeamLogo(teamId, file));
                 }}
               />
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <TeamLogo name={team.name} logoUrl={team.logoUrl} size={30} />
                 <button
                   type="button"
@@ -1021,7 +1021,9 @@ function DangerSection() {
 
 export function SettingsSections({ showInstance }: { showInstance: boolean }) {
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    // minmax(0, 1fr): an implicit auto track grows to the widest card's
+    // min-content (the members table), pushing the page past a phone viewport.
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       <TeamSection billing={!showInstance} />
       <MembersSection />
       {showInstance ? <InstanceSection /> : null}
