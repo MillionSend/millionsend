@@ -15,7 +15,21 @@
     "retry": "Retry",
     "deleteTitle": "Delete template",
     "deleteBody": "\"{name}\" will be deleted. Broadcasts that started from it keep their copy.",
-    "deleteConfirm": "Delete"
+    "deleteConfirm": "Delete",
+    "htmlChipHint": "Created as HTML; opens in code mode"
+  },
+  "html": {
+    "banner": "Created as HTML. The block editor can't edit this layout faithfully, so it opens in code mode.",
+    "editHtml": "Edit HTML",
+    "convert": "Convert to blocks",
+    "source": "HTML",
+    "textStored": "Plain text: sent as stored.",
+    "textNone": "Plain text: none — HTML only.",
+    "convertTitle": "Convert to blocks?",
+    "convertBody": "The layout will be flattened into the block editor's model: tables, inline CSS and anything the blocks can't express are lost. The stored HTML only changes when you save.",
+    "convertCopy": "Duplicate and convert",
+    "convertInPlace": "Convert this template",
+    "copyError": "Couldn't create the copy."
   },
   "editor": {
     "newTitle": "New template",

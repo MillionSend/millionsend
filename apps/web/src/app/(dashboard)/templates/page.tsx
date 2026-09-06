@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, StateCard } from "../emails/list-parts";
 
@@ -147,6 +148,16 @@ export default function TemplatesPage() {
                         >
                           {row.name}
                         </Link>
+                        {row.htmlAuthored ? (
+                          <Tooltip inline text={t("list.htmlChipHint")}>
+                            <span
+                              className="ms-chip"
+                              style={{ fontSize: 10.5, padding: "1px 7px" }}
+                            >
+                              HTML
+                            </span>
+                          </Tooltip>
+                        ) : null}
                       </span>
                     </td>
                     <td className="right" style={{ color: "var(--ms-muted)" }}>

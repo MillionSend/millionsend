@@ -23,6 +23,17 @@ de acordo — `status` é sempre `published`, `published_at` é igual a
 um no-op idempotente, mantido para que o `templates.publish()` do SDK do
 Resend (e o `templates.create(...).publish()`) funcionem.
 
+## Templates em HTML e o editor de blocos
+
+Um template criado com `html` — pela API, pelo MCP ou por uma migração — é
+autorado em HTML: o painel o abre na pré-visualização e o edita no modo
+código (fonte ao lado de uma pré-visualização ao vivo), mantendo o HTML byte a
+byte. O editor de blocos nunca o toca por conta própria, porque interpretar um
+layout de tabelas e CSS inline como blocos o achata. Converter em blocos é uma
+escolha explícita do usuário no painel: como uma cópia convertida
+(`<name> (blocks)`, com o original intacto) ou no próprio template, caso em
+que o HTML armazenado só muda na próxima gravação.
+
 ## Aliases
 
 Um template pode ter um `alias` — letras, dígitos, `.`, `_` ou `-`,

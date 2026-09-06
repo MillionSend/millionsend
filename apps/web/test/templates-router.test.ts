@@ -138,6 +138,20 @@ describe("templates.list keyset paging", () => {
     const seen = [...page1.items, ...page2.items].map((t) => t.id);
     expect(new Set(seen).size).toBe(3);
   });
+
+  it("flags rows whose html was authored outside the block editor", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: htmlId } = await caller.templates.create(TEMPLATE_INPUT);
+    const { id: docId } = await caller.templates.create({
+      name: "Doc",
+      html: "<p>ignored</p>",
+      document: SAMPLE_DOC,
+    });
+    const { items } = await caller.templates.list({});
+    expect(items.find((t) => t.id === htmlId)?.htmlAuthored).toBe(true);
+    expect(items.find((t) => t.id === docId)?.htmlAuthored).toBe(false);
+  });
 });
 
 describe("templates.document", () => {

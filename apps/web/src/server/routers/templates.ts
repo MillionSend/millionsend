@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { mailyDocumentSchema } from "@/lib/email-doc";
 import { resolveEditorSave } from "../email-content";
@@ -52,6 +52,9 @@ export const templatesRouter = router({
           id: t.id,
           name: t.name,
           updatedAt: t.updatedAt,
+          // Mirrors lib/email-doc isMailyDoc: anything but a Tiptap doc node
+          // is html authored outside the block editor, shown as such in the list.
+          htmlAuthored: sql<boolean>`${t.document} is null or ${t.document}->>'type' is distinct from 'doc'`,
           cursorCreatedAt: createdAtCursorField(keys),
         })
         .from(t)

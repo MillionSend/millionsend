@@ -1,9 +1,9 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDismiss } from "@/components/popover-menu";
-import { makeMergeToken } from "@/lib/merge-fields";
+import { MERGE_FIELDS_I18N_NS, type MergeFieldOption, makeMergeToken } from "@/lib/merge-fields";
 import { ChevronDownIcon, SearchIcon, VariableIcon } from "./icons";
 
 export interface PickerField {
@@ -12,6 +12,22 @@ export interface PickerField {
   description: string;
   /** UNSUBSCRIBE_URL is system-generated, so it never takes a fallback. */
   allowsFallback: boolean;
+}
+
+/** Picker rows for the team's merge fields, labelled and described in the UI language. */
+export function usePickerFields(mergeFields: MergeFieldOption[]): PickerField[] {
+  const tf = useTranslations(MERGE_FIELDS_I18N_NS);
+  return useMemo(
+    () =>
+      mergeFields.map((f) => ({
+        name: f.name,
+        label: f.labelKey ? tf(f.labelKey) : f.name,
+        description: f.labelKey ? tf(`desc.${f.labelKey}`) : tf("desc.custom"),
+        // UNSUBSCRIBE_URL is generated per recipient, so it never takes a fallback.
+        allowsFallback: f.name !== "UNSUBSCRIBE_URL",
+      })),
+    [mergeFields, tf],
+  );
 }
 
 /**

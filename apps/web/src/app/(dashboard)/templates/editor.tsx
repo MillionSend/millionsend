@@ -4,17 +4,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DraftBanner } from "@/components/draft-banner";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
+import { blocksCopyName, templateEditorMode, templateSaveInput } from "@/lib/template-mode";
 import { useTRPC } from "@/lib/trpc";
 import { useLocalDraft } from "@/lib/use-local-draft";
-import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
+import { confirmUnsavedNavigation, useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
 import { ContentPreview } from "../broadcasts/parts";
+import { ConvertBlocksDialog, HtmlAuthoredBanner, HtmlCodeMode } from "./html-mode";
 
 // Client-only: the Maily editor pulls in tiptap and touches the DOM, so it
 // must not render on the server. The ghost holds the field's height meanwhile.
@@ -83,15 +85,28 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   const [html, setHtml] = useState(initial?.html ?? "");
   const [text, setText] = useState(initial?.text ?? "");
   const [document, setDocument] = useState<unknown>(initial?.document ?? null);
-  const [tab, setTab] = useState<"edit" | "preview">("edit");
+  // Armed by "Convert this template": the block editor then mounts on the
+  // html seed and emits its parse. Until then a document-less row never
+  // reaches the block editor — its html would be flattened on the first edit.
+  const [converting, setConverting] = useState(false);
+  const mode = templateEditorMode({ isNew: !initial, document, converting });
+  // Html-authored rows open on their faithful preview, not on an editor.
+  const [tab, setTab] = useState<"edit" | "preview">(() =>
+    templateEditorMode({ isNew: !initial, document: initial?.document ?? null }) === "code"
+      ? "preview"
+      : "edit",
+  );
+  const [convertOpen, setConvertOpen] = useState(false);
 
   // Unsaved-body tracking for the native leave warning: the baseline is the
   // last-persisted document (or the editor's very first emit for a new one);
-  // any later emit that differs arms beforeunload until the next save.
+  // any later emit that differs arms beforeunload until the next save. Code
+  // mode compares the html itself.
   const [dirty, setDirty] = useState(false);
   const savedDoc = useRef<string | null>(
     initial !== undefined ? JSON.stringify(initial.document ?? null) : null,
   );
+  const savedHtml = useRef(initial?.html ?? "");
   useUnsavedChangesWarning(dirty, common("unsavedWarn"));
 
   // Local crash-recovery draft (browser-only, one key per template).
@@ -147,8 +162,8 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
 
   // Send html is rendered server-side (Maily needs juice), so a design-mode
   // edit cannot emit it — this debounced render both feeds the preview and
-  // supplies the html we persist. A legacy raw-html document keeps its stored
-  // html untouched until the first real edit converts it (see MailyEditor).
+  // supplies the html we persist. Code mode never renders: its html is the
+  // source itself.
   const [debouncedDoc, setDebouncedDoc] = useState<unknown>(document);
   useEffect(() => {
     const id = setTimeout(() => setDebouncedDoc(document), 350);
@@ -171,32 +186,26 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
 
   const complete = name.trim() !== "" && html.trim() !== "";
   const saving = createMutation.isPending || updateMutation.isPending;
-  const saveError = createMutation.isError || updateMutation.isError;
+  // On an existing template the create mutation only ever makes the converted copy.
+  const errorText =
+    updateMutation.isError || (createMutation.isError && !initial)
+      ? t("editor.saveError")
+      : createMutation.isError
+        ? t("html.copyError")
+        : null;
 
   /** Create-or-update; returns the template id. */
   async function persist(): Promise<string> {
+    const fields = templateSaveInput(mode, { name, subject, html, text, document });
+    let id: string;
     if (initial) {
-      await updateMutation.mutateAsync({
-        id: initial.id,
-        name: name.trim(),
-        subject: subject.trim(),
-        html,
-        text,
-        document,
-      });
-      savedDoc.current = JSON.stringify(document);
-      setDirty(false);
-      draft.markSaved();
-      return initial.id;
+      await updateMutation.mutateAsync({ id: initial.id, ...fields });
+      id = initial.id;
+    } else {
+      ({ id } = await createMutation.mutateAsync(fields));
     }
-    const { id } = await createMutation.mutateAsync({
-      name: name.trim(),
-      ...(subject.trim() ? { subject: subject.trim() } : {}),
-      html,
-      ...(text ? { text } : {}),
-      ...(document ? { document } : {}),
-    });
-    savedDoc.current = JSON.stringify(document);
+    savedDoc.current = JSON.stringify(fields.document);
+    savedHtml.current = html;
     setDirty(false);
     draft.markSaved();
     return id;
@@ -238,6 +247,46 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  // Html→blocks conversion. Both paths run Tiptap's parse inside the block
+  // editor itself (MailyEditor convertHtml); the duplicate path does it in a
+  // hidden mount so the original's page never shows a converted body.
+  const [probeHtml, setProbeHtml] = useState<string | null>(null);
+  const probeFired = useRef(false);
+  const closeConvert = useCallback(() => setConvertOpen(false), []);
+  const convertInPlace = useCallback(() => {
+    setConvertOpen(false);
+    setConverting(true);
+    setTab("edit");
+  }, []);
+  const duplicateAndConvert = useCallback(() => {
+    // The copy carries the current html and we leave for it; unsaved edits
+    // to the original would be lost, so the shared leave prompt applies.
+    if (!confirmUnsavedNavigation()) return;
+    setConvertOpen(false);
+    probeFired.current = false;
+    setProbeHtml(html);
+  }, [html]);
+  async function createConvertedCopy(doc: unknown) {
+    setProbeHtml(null);
+    try {
+      const { id } = await createMutation.mutateAsync(
+        templateSaveInput("blocks", {
+          name: blocksCopyName(name),
+          subject,
+          html,
+          text,
+          document: doc,
+        }),
+      );
+      queryClient.invalidateQueries(trpc.templates.pathFilter());
+      router.push(`/templates/${id}/edit`);
+    } catch {
+      // Shown via the create mutation's error state.
+    }
+  }
+
+  const wideBody = mode === "code" && tab === "edit";
 
   return (
     <>
@@ -286,8 +335,8 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
         }
       />
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 720 }}>
-        <div className="ms-field">
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div className="ms-field" style={{ maxWidth: 720 }}>
           <label htmlFor="tpl-name">{t("editor.nameLabel")}</label>
           <input
             id="tpl-name"
@@ -299,7 +348,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
           />
         </div>
 
-        <div className="ms-field">
+        <div className="ms-field" style={{ maxWidth: 720 }}>
           <label htmlFor="tpl-subject">
             {t("editor.subjectLabel")}{" "}
             <span style={{ color: "var(--ms-faint)", textTransform: "none" }}>
@@ -315,7 +364,8 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
           />
         </div>
 
-        <div className="ms-field">
+        {/* Source beside preview needs the room; every other body stays at reading width. */}
+        <div className="ms-field" style={{ maxWidth: wideBody ? 1200 : 720 }}>
           <div
             style={{
               display: "flex",
@@ -349,10 +399,11 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
               ))}
             </div>
           </div>
-          {tab === "edit" ? (
+          {tab === "edit" && mode === "blocks" ? (
             <MailyEditor
               key={editorNonce}
               value={{ document, html }}
+              convertHtml={converting}
               onChange={(v) => {
                 setDocument(v.document);
                 const snapshot = JSON.stringify(v.document);
@@ -362,33 +413,52 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
               }}
               mergeFields={mergeFields}
             />
-          ) : (
-            <div
-              style={{
-                border: "1px solid var(--ms-line)",
-                borderRadius: "var(--ms-r-input)",
-                overflow: "hidden",
+          ) : tab === "edit" ? (
+            <HtmlCodeMode
+              html={html}
+              onChange={(next) => {
+                setHtml(next);
+                setDirty(next !== savedHtml.current);
               }}
-            >
-              {html ? (
-                <ContentPreview
-                  html={html}
-                  title={t("editor.previewTab")}
-                  samples={previewSamples}
+              mergeFields={mergeFields}
+              previewSamples={previewSamples}
+              hasText={text !== ""}
+            />
+          ) : (
+            <>
+              {mode === "code" ? (
+                <HtmlAuthoredBanner
+                  onEditHtml={() => setTab("edit")}
+                  onConvert={() => setConvertOpen(true)}
                 />
-              ) : (
-                <p
-                  style={{
-                    margin: 0,
-                    padding: "16px 18px",
-                    color: "var(--ms-muted)",
-                    fontSize: "var(--ms-fs-ui)",
-                  }}
-                >
-                  {t("editor.noHtml")}
-                </p>
-              )}
-            </div>
+              ) : null}
+              <div
+                style={{
+                  border: "1px solid var(--ms-line)",
+                  borderRadius: "var(--ms-r-input)",
+                  overflow: "hidden",
+                }}
+              >
+                {html ? (
+                  <ContentPreview
+                    html={html}
+                    title={t("editor.previewTab")}
+                    samples={previewSamples}
+                  />
+                ) : (
+                  <p
+                    style={{
+                      margin: 0,
+                      padding: "16px 18px",
+                      color: "var(--ms-muted)",
+                      fontSize: "var(--ms-fs-ui)",
+                    }}
+                  >
+                    {t("editor.noHtml")}
+                  </p>
+                )}
+              </div>
+            </>
           )}
           {draft.recovered ? (
             <DraftBanner
@@ -402,12 +472,34 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
           ) : null}
         </div>
 
-        {saveError ? (
+        {errorText ? (
           <p className="ms-field-error" style={{ margin: 0 }}>
-            {t("editor.saveError")}
+            {errorText}
           </p>
         ) : null}
       </div>
+
+      <ConvertBlocksDialog
+        open={convertOpen}
+        busy={createMutation.isPending}
+        onClose={closeConvert}
+        onDuplicate={duplicateAndConvert}
+        onConvertInPlace={convertInPlace}
+      />
+      {probeHtml !== null ? (
+        <div hidden>
+          <MailyEditor
+            value={{ document: null, html: probeHtml }}
+            convertHtml
+            mergeFields={mergeFields}
+            onChange={(v) => {
+              if (probeFired.current) return;
+              probeFired.current = true;
+              void createConvertedCopy(v.document);
+            }}
+          />
+        </div>
+      ) : null}
     </>
   );
 }

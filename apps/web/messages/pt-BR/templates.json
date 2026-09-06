@@ -15,7 +15,21 @@
     "retry": "Tentar novamente",
     "deleteTitle": "Excluir modelo",
     "deleteBody": "\"{name}\" será excluído. Transmissões que partiram dele mantêm sua cópia.",
-    "deleteConfirm": "Excluir"
+    "deleteConfirm": "Excluir",
+    "htmlChipHint": "Criado como HTML; abre no modo código"
+  },
+  "html": {
+    "banner": "Criado como HTML. O editor de blocos não consegue editar este layout com fidelidade, por isso ele abre no modo código.",
+    "editHtml": "Editar HTML",
+    "convert": "Converter em blocos",
+    "source": "HTML",
+    "textStored": "Texto simples: enviado como está armazenado.",
+    "textNone": "Texto simples: nenhum — só HTML.",
+    "convertTitle": "Converter em blocos?",
+    "convertBody": "O layout será achatado para o modelo do editor de blocos: tabelas, CSS inline e tudo que os blocos não expressam se perdem. O HTML armazenado só muda quando você salvar.",
+    "convertCopy": "Duplicar e converter",
+    "convertInPlace": "Converter este modelo",
+    "copyError": "Não foi possível criar a cópia."
   },
   "editor": {
     "newTitle": "Novo modelo",

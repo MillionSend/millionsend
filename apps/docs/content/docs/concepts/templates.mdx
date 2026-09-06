@@ -21,6 +21,17 @@ template's own id and `has_unpublished_versions` is `false` — and
 `POST /templates/{id}/publish` is an idempotent no-op, kept so the Resend
 SDK's `templates.publish()` (and `templates.create(...).publish()`) work.
 
+## HTML templates and the block editor
+
+A template created with `html` — through the API, MCP or a migration — is
+html-authored: the dashboard opens it on its preview and edits it in code
+mode (source beside a live preview), keeping the HTML byte for byte. The block
+editor never touches it on its own, because parsing a table-and-inline-CSS
+layout into blocks flattens it. Converting to blocks is the user's explicit
+choice in the dashboard: as a converted duplicate (`<name> (blocks)`, the
+original untouched) or in place, where the stored HTML only changes on the
+next save.
+
 ## Aliases
 
 A template can carry an `alias` — letters, digits, `.`, `_` or `-`, starting

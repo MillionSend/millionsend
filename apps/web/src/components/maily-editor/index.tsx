@@ -34,7 +34,7 @@ import { MERGE_FIELDS_I18N_NS, type MergeFieldOption, makeMergeToken } from "@/l
 import { VariableIcon } from "./icons";
 import { EditorToolbar, type TiptapEditor } from "./toolbar";
 import { createVariableNodeView } from "./variable-node-view";
-import type { PickerField } from "./variable-picker";
+import { usePickerFields } from "./variable-picker";
 import { makeVariableSuggestionsPopover } from "./variable-suggestions";
 
 /**
@@ -70,6 +70,12 @@ export interface MailyEditorProps {
   value: MailyEditorValue;
   onChange: (value: MailyEditorChange) => void;
   mergeFields: MergeFieldOption[];
+  /**
+   * Explicit html→blocks conversion: when the seed is raw html, emit Tiptap's
+   * parse of it on create instead of waiting for the first edit. Only set
+   * after the user chose to convert — see the seed emit rule below.
+   */
+  convertHtml?: boolean;
 }
 
 type MailyContent = NonNullable<EditorProps["contentJson"]>;
@@ -106,7 +112,12 @@ function emptyMailyDoc(): MailyDoc {
   return { type: "doc", content: [{ type: "paragraph" }] };
 }
 
-export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) {
+export function MailyEditor({
+  value,
+  onChange,
+  mergeFields,
+  convertHtml = false,
+}: MailyEditorProps) {
   const t = useTranslations("block-editor");
   const tf = useTranslations(MERGE_FIELDS_I18N_NS);
 
@@ -221,17 +232,7 @@ export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) 
     [renderVariable, t],
   );
 
-  const fields = useMemo<PickerField[]>(
-    () =>
-      mergeFields.map((f) => ({
-        name: f.name,
-        label: f.labelKey ? tf(f.labelKey) : f.name,
-        description: f.labelKey ? tf(`desc.${f.labelKey}`) : tf("desc.custom"),
-        // UNSUBSCRIBE_URL is generated per recipient, so it never takes a fallback.
-        allowsFallback: f.name !== "UNSUBSCRIBE_URL",
-      })),
-    [mergeFields, tf],
-  );
+  const fields = usePickerFields(mergeFields);
 
   const config = useMemo(
     () => ({
@@ -250,16 +251,17 @@ export function MailyEditor({ value, onChange, mergeFields }: MailyEditorProps) 
   // document with zero user action — an untouched open-then-save would then
   // silently rewrite the stored html. So the conversion is only emitted from
   // onUpdate, i.e. after a deliberate edit; until then the stored html stands.
-  const seededFromHtml = seed.current.contentHtml !== undefined;
+  // `convertHtml` is that deliberate action taken up front, so it emits.
+  const emitOnCreate = seed.current.contentHtml === undefined || convertHtml;
 
   const onCreate = useCallback(
     (ed: TiptapEditor) => {
       liveDoc.current = ed.getJSON() as MailyDoc;
       setEditor(ed);
       ed.on("transaction", () => setTick((n) => n + 1));
-      if (!seededFromHtml) emit();
+      if (emitOnCreate) emit();
     },
-    [emit, seededFromHtml],
+    [emit, emitOnCreate],
   );
   const onUpdate = useCallback(
     (ed: TiptapEditor) => {
