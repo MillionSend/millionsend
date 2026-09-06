@@ -1971,7 +1971,6 @@ summary:focus-visible,
   margin-top: 8px;
 }
 
-
 /* ============================================================================
    TEMPLATES — html-authored rows (templates/html-mode.tsx, components/code-editor.tsx).
    The notice box follows notice-strip.tsx in the info tone; the source editor
