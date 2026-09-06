@@ -111,7 +111,7 @@ export function CodeEditor({
           {"\n"}
         </pre>
       ) : null}
-      <pre ref={preRef} className="ms-code-editor-hl" aria-hidden="true">
+      <pre ref={preRef} className="ms-code-editor-hl ms-hl" aria-hidden="true">
         <CodeHighlight code={value} language={language} />
         {"\n"}
       </pre>

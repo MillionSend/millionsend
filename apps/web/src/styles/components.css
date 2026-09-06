@@ -2097,7 +2097,11 @@ summary:focus-visible,
   min-width: 0;
   width: 0;
   margin-left: 4px;
+  appearance: none;
+  -webkit-appearance: none;
   border: 0;
+  border-radius: 0;
+  padding: 0;
   background: none;
   outline: none;
   color: var(--ms-bone);
