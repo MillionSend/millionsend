@@ -12,12 +12,12 @@
   },
   "bounce": {
     "title": "Taxa de bounce permanente",
-    "risk": "RISCO 4%",
+    "risk": "RISCO {rate}",
     "bounced": "Bounces permanentes"
   },
   "complaint": {
     "title": "Taxa de reclamação",
-    "risk": "RISCO 0,01%",
+    "risk": "RISCO {rate}",
     "complained": "Reclamações"
   },
   "chart": {

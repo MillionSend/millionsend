@@ -21,7 +21,7 @@ import { DAY_MS, utcDay } from "./utc-day.js";
  * and full mailboxes are not a reputation signal.
  */
 export const WARN_BOUNCE_RATE = 0.04;
-export const WARN_COMPLAINT_RATE = 0.0001;
+export const WARN_COMPLAINT_RATE = 0.0005;
 export const PAUSE_BOUNCE_RATE = 0.05;
 export const PAUSE_COMPLAINT_RATE = 0.001;
 
@@ -38,6 +38,12 @@ export const MIN_GUARDRAIL_VOLUME = 100;
  */
 export const MIN_PAUSE_COMPLAINTS = 3;
 export const MIN_PAUSE_HARD_BOUNCES = 10;
+/**
+ * The warning tier's own floor for complaints: one complaint in a small week
+ * clears 0.05% on its own and would throttle a team's broadcasts for seven
+ * days; two make it a pattern.
+ */
+export const MIN_WARN_COMPLAINTS = 2;
 
 /** Trailing window, in UTC calendar days, the warning tier and the displayed rates use. */
 export const GUARDRAIL_WINDOW_DAYS = 7;
@@ -52,11 +58,11 @@ export const PAUSE_WINDOW_DAYS = 2;
 
 /**
  * Reduced per-second fan-out rate for a team in the "tolerance" band (warning
- * or paused): sends continue but are dripped so reputation can recover. Well
- * under SES's 14/s default so a large campaign still drains, just not in a
- * burst.
+ * or paused): sends continue but are dripped so reputation can recover. One a
+ * second is SES's own sandbox pace; a 36k campaign still drains within a day,
+ * just never in a burst.
  */
-export const THROTTLED_BROADCAST_RATE_PER_SECOND = 5;
+export const THROTTLED_BROADCAST_RATE_PER_SECOND = 1;
 
 export type DeliverabilityStatus = "ok" | "warning" | "paused";
 
@@ -117,7 +123,7 @@ export function evaluateDeliverability(
   const reasons: DeliverabilityReason[] = [];
   const judge = (
     metric: DeliverabilityReason["metric"],
-    lines: { warn: number; pause: number; minPauseEvents: number },
+    lines: { warn: number; pause: number; minPauseEvents: number; minWarnEvents: number },
   ) => {
     const events = metric === "bounce" ? "hardBounced" : "complained";
     const pauseRate = rateOf(pause[events], pause.sent);
@@ -130,7 +136,7 @@ export function evaluateDeliverability(
       return;
     }
     const warnRate = rateOf(warn[events], warn.sent);
-    if (warn.sent >= minVolume && warnRate >= lines.warn) {
+    if (warn.sent >= minVolume && warnRate >= lines.warn && warn[events] >= lines.minWarnEvents) {
       reasons.push({ metric, rate: warnRate, tier: "warning", windowDays: GUARDRAIL_WINDOW_DAYS });
     }
   };
@@ -138,11 +144,13 @@ export function evaluateDeliverability(
     warn: WARN_BOUNCE_RATE,
     pause: PAUSE_BOUNCE_RATE,
     minPauseEvents: MIN_PAUSE_HARD_BOUNCES,
+    minWarnEvents: 1,
   });
   judge("complaint", {
     warn: WARN_COMPLAINT_RATE,
     pause: PAUSE_COMPLAINT_RATE,
     minPauseEvents: MIN_PAUSE_COMPLAINTS,
+    minWarnEvents: MIN_WARN_COMPLAINTS,
   });
 
   const status: DeliverabilityStatus = reasons.some((r) => r.tier === "paused")

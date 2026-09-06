@@ -197,7 +197,7 @@ describe("metrics.health", () => {
     });
     expect(result.thresholds).toEqual({
       warnBounce: 0.04,
-      warnComplaint: 0.0001,
+      warnComplaint: 0.0005,
       pauseBounce: 0.05,
       pauseComplaint: 0.001,
     });

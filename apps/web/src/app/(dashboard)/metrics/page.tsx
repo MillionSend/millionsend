@@ -24,7 +24,7 @@ type Range = (typeof RANGES)[number];
 /**
  * Rate-card geometry from the canvas: 120px bar area, dashed RISK line at a
  * fixed top offset — bars scale so the threshold rate lands exactly on the
- * line (bounce line at top 6px → 114px = 4%; complaint at 14px → 106px = 0.01%).
+ * line (bounce line at top 6px → 114px = 4%; complaint at 14px → 106px = 0.05%).
  */
 const BAR_AREA = 120;
 const BAR_GAP = 4;
@@ -437,6 +437,8 @@ export default function MetricsPage() {
   const t = useTranslations("metrics");
   const common = useTranslations("common");
   const locale = useLocale();
+  // The chart's risk line is drawn at a fixed height; its label carries the threshold the line stands for.
+  const riskPct = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 2 });
   const trpc = useTRPC();
   const [rangeParam, setRangeParam] = useUrlState("range", "15");
   // URL input — anything but a known range key falls back to the default.
@@ -660,7 +662,10 @@ export default function MetricsPage() {
               headline={
                 data.totals.sent > 0 ? pct1.format(data.totals.hardBounced / data.totals.sent) : "—"
               }
-              risk={{ label: t("bounce.risk"), lineTop: BOUNCE.lineTop }}
+              risk={{
+                label: t("bounce.risk", { rate: riskPct.format(WARN_BOUNCE_RATE) }),
+                lineTop: BOUNCE.lineTop,
+              }}
               color="var(--ms-danger)"
               partialNote={t("chart.soFar")}
               bars={rateBars(
@@ -683,7 +688,10 @@ export default function MetricsPage() {
               headline={
                 data.totals.sent > 0 ? pct2.format(data.totals.complained / data.totals.sent) : "—"
               }
-              risk={{ label: t("complaint.risk"), lineTop: COMPLAINT.lineTop }}
+              risk={{
+                label: t("complaint.risk", { rate: riskPct.format(WARN_COMPLAINT_RATE) }),
+                lineTop: COMPLAINT.lineTop,
+              }}
               color="var(--ms-warn)"
               partialNote={t("chart.soFar")}
               bars={rateBars(

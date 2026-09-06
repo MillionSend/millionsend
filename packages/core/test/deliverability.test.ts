@@ -68,8 +68,15 @@ describe("evaluateDeliverability", () => {
     ]);
   });
 
+  it("a single complaint never warns, however small the week", () => {
+    // 1 in 1,000 is 0.1%, twice the warning line, but one event is not a pattern.
+    expect(evaluateDeliverability(today(1_000, 0, 1)).status).toBe("ok");
+    // Two complaints in 4,000 (0.05%) are.
+    expect(evaluateDeliverability(today(4_000, 0, 2)).status).toBe("warning");
+  });
+
   it("mixes a paused bounce with a warning complaint, overall paused", () => {
-    // bounce 6% (paused), complaint 0.05% (>= 0.01% WARN, < 0.1% PAUSE)
+    // bounce 6% (paused), complaint 0.05% (>= 0.05% WARN with 5 complaints, < 0.1% PAUSE)
     const r = evaluateDeliverability(today(10_000, 600, 5));
     expect(r.status).toBe("paused");
     expect(r.reasons).toEqual([
@@ -93,12 +100,13 @@ describe("evaluateDeliverability", () => {
     ]);
   });
 
-  it("one complaint at 150 sends is a warning, not a pause", () => {
-    // 0.67% is far over the 0.1% line, but 1 < MIN_PAUSE_COMPLAINTS.
-    const r = evaluateDeliverability(today(150, 0, 1));
+  it("two complaints at 150 sends is a warning, not a pause; one alone is nothing", () => {
+    expect(evaluateDeliverability(today(150, 0, 1)).status).toBe("ok");
+    // 1.33% is far over the 0.1% line, but 2 < MIN_PAUSE_COMPLAINTS.
+    const r = evaluateDeliverability(today(150, 0, 2));
     expect(r.status).toBe("warning");
     expect(r.reasons).toEqual([
-      { metric: "complaint", rate: 1 / 150, tier: "warning", windowDays: GUARDRAIL_WINDOW_DAYS },
+      { metric: "complaint", rate: 2 / 150, tier: "warning", windowDays: GUARDRAIL_WINDOW_DAYS },
     ]);
   });
 

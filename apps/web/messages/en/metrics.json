@@ -12,12 +12,12 @@
   },
   "bounce": {
     "title": "Hard-bounce rate",
-    "risk": "RISK 4%",
+    "risk": "RISK {rate}",
     "bounced": "Hard bounced"
   },
   "complaint": {
     "title": "Complaint rate",
-    "risk": "RISK 0.01%",
+    "risk": "RISK {rate}",
     "complained": "Complained"
   },
   "engagement": {
