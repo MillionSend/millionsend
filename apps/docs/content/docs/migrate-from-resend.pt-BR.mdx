@@ -130,7 +130,13 @@ RESEND_BASE_URL=https://api.millionsend.com
 
 Auto-hospedado, use a origem da API da sua instância.
 
-Dois detalhes que diferem do que uma integração com o Resend pode assumir:
+Três detalhes que diferem do que uma integração com o Resend pode assumir:
+
+- Os campos de remetente e destinatário aceitam exatamente uma caixa postal
+  cada, nas formas da RFC 5322 `ada@example.com`, `Ada <ada@example.com>` ou
+  `"Ada, Inc." <ada@example.com>`. Um nome de exibição com vírgula precisa
+  estar entre aspas; sem elas, é lido como dois endereços e o envio é
+  rejeitado com `422`. O Resend aceita a forma sem aspas.
 
 - `PATCH /contacts/{id}/topics` recebe um array JSON puro de entradas
   `{ "id": "<topic-id>", "subscription": "opt_in" | "opt_out" }`, não um objeto

@@ -44,7 +44,8 @@ const emailAddress = z.string().transform((v, ctx) => {
  * mailbox (parseSingleSender, the same parser verifySenderDomain uses).
  */
 const fromAddress = z.string().refine((v) => parseSingleSender(v) !== null, {
-  message: "from must be a single address",
+  message:
+    'from must be a single address like ada@example.com or "Ada Lovelace" <ada@example.com>; quote a display name that contains a comma',
 });
 
 // Shape first (string | string[]), addresses second, so a bad entry reports

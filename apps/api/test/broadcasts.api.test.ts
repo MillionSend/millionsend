@@ -212,7 +212,7 @@ describe("broadcasts API", () => {
     expect(sent.status).toBe(422);
     expect(await sent.json()).toMatchObject({
       name: "validation_error",
-      message: "from must be a single address",
+      message: expect.stringContaining("from must be a single address"),
     });
   });
 

@@ -2489,7 +2489,7 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         422,
         "validation_error",
         domain.reason === "invalid_sender"
-          ? "from must be a single address"
+          ? 'from must be a single address like ada@example.com or "Ada Lovelace" <ada@example.com>; quote a display name that contains a comma'
           : `The ${domain.fromDomain} domain is not verified for this team`,
       );
     }
@@ -3185,7 +3185,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           422,
           "validation_error",
           domain.reason === "invalid_sender"
-            ? "from must be a single address"
+            ? 'from must be a single address like ada@example.com or "Ada Lovelace" <ada@example.com>; quote a display name that contains a comma'
             : `The ${domain.fromDomain} domain is not verified for this team`,
         ),
         422,
@@ -3335,7 +3335,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         name: "validation_error",
         message:
           domain.reason === "invalid_sender"
-            ? "from must be a single address"
+            ? 'from must be a single address like ada@example.com or "Ada Lovelace" <ada@example.com>; quote a display name that contains a comma'
             : `The ${domain.fromDomain} domain is not verified for this team`,
       };
     }

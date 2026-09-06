@@ -127,7 +127,13 @@ RESEND_BASE_URL=https://api.millionsend.com
 
 Self-hosted, use your instance's API origin instead.
 
-Two details that differ from what a Resend integration may assume:
+Three details that differ from what a Resend integration may assume:
+
+- Sender and recipient fields take exactly one mailbox each, in the RFC 5322
+  shapes `ada@example.com`, `Ada <ada@example.com>` or
+  `"Ada, Inc." <ada@example.com>`. A display name that contains a comma must
+  be quoted; unquoted, it reads as two addresses and the send is rejected with
+  `422`. Resend accepts the unquoted form.
 
 - `PATCH /contacts/{id}/topics` takes a bare JSON array of
   `{ "id": "<topic-id>", "subscription": "opt_in" | "opt_out" }` entries, not an
