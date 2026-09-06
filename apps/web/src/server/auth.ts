@@ -260,10 +260,22 @@ export function createAuth(
       },
     },
     plugins: [
-      // Turnstile on sign-in, sign-up and password reset when the instance
-      // opts in; the forms send the token in x-captcha-response.
+      // Turnstile on sign-in, sign-up, password reset and the verification
+      // resend when the instance opts in; the forms send the token in
+      // x-captcha-response. The plugin's default list lacks the resend.
       ...(env.TURNSTILE_SECRET_KEY
-        ? [captcha({ provider: "cloudflare-turnstile", secretKey: env.TURNSTILE_SECRET_KEY })]
+        ? [
+            captcha({
+              provider: "cloudflare-turnstile",
+              secretKey: env.TURNSTILE_SECRET_KEY,
+              endpoints: [
+                "/sign-up/email",
+                "/sign-in/email",
+                "/request-password-reset",
+                "/send-verification-email",
+              ],
+            }),
+          ]
         : []),
       // Issuer is the bare APP_BASE_URL (not .../api/auth) so RFC 8414
       // discovery resolves at /.well-known/oauth-authorization-server

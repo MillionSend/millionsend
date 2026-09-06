@@ -62,6 +62,10 @@ function loadTurnstile(): Promise<TurnstileApi> {
 export function useTurnstile(siteKey: string | null) {
   const slotRef = useRef<HTMLDivElement>(null);
   const widgetId = useRef<string | null>(null);
+  // The element the widget was rendered into: a screen that swaps its form
+  // for a notice mounts a fresh slot, and a widget in a detached div never
+  // answers, so the next token request renders again.
+  const renderedIn = useRef<HTMLElement | null>(null);
   const pending = useRef<{ resolve: (token: string) => void; reject: () => void } | null>(null);
 
   useEffect(() => {
@@ -76,9 +80,14 @@ export function useTurnstile(siteKey: string | null) {
   const getToken = useCallback(async (): Promise<string | null> => {
     if (!siteKey) return null;
     const turnstile = await loadTurnstile();
+    if (widgetId.current && renderedIn.current !== slotRef.current) {
+      turnstile.remove(widgetId.current);
+      widgetId.current = null;
+    }
     if (!widgetId.current) {
       const slot = slotRef.current;
       if (!slot) throw new Error("turnstile");
+      renderedIn.current = slot;
       widgetId.current = turnstile.render(slot, {
         sitekey: siteKey,
         execution: "execute",

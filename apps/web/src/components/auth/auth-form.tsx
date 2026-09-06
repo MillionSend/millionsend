@@ -161,12 +161,28 @@ export function AuthForm({
     setPending("email");
     setResent(false);
     setNotice(null);
+    let token: string | null;
+    try {
+      token = await turnstile.getToken();
+    } catch {
+      setNotice(t("captcha"));
+      setPending(null);
+      return;
+    }
     const { error } = await authClient.sendVerificationEmail({
       email: awaitingVerification,
       callbackURL: verifyCallback,
+      fetchOptions: { headers: captchaHeaders(token) },
     });
-    if (error) setNotice(t("resendFailed"));
-    else setResent(true);
+    if (error) {
+      setNotice(
+        error.code === "VERIFICATION_FAILED" || error.code === "MISSING_RESPONSE"
+          ? t("captcha")
+          : t("resendFailed"),
+      );
+    } else {
+      setResent(true);
+    }
     setPending(null);
   }
 
@@ -208,6 +224,7 @@ export function AuthForm({
         </button>
         {resent ? <p className={styles.notice}>{t("resent")}</p> : null}
         {notice ? <p className={styles.error}>{notice}</p> : null}
+        {turnstile.slot}
         <p className={styles.subline}>
           <Link href={`/login?next=${encodeURIComponent(next)}`}>{t("backToLogin")}</Link>
         </p>
