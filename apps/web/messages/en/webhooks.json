@@ -67,8 +67,8 @@
   "enable": "Enable",
   "disable": "Disable",
   "delete": "Delete",
-  "edit": "Edit…",
-  "rotateSecret": "Rotate secret…",
+  "edit": "Edit",
+  "rotateSecret": "Rotate secret",
   "create": {
     "title": "Add webhook",
     "url": "Endpoint URL",

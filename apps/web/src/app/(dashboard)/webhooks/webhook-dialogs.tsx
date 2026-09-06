@@ -10,6 +10,7 @@ import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { codeRichTags } from "@/lib/code-rich-tags";
+import { displayUrl } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import {
   WEBHOOK_EVENT_GROUPS,
@@ -310,7 +311,7 @@ export function WebhookRotateModal({
           }}
         >
           <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
-            {t.rich("rotate.body", { ...codeRichTags, url: webhook.url })}
+            {t.rich("rotate.body", { ...codeRichTags, url: displayUrl(webhook.url) })}
           </p>
           <div className="ms-field">
             <label htmlFor="webhook-rotate-overlap">{t("rotate.overlap")}</label>
