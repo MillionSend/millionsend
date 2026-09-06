@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError, helpText, parseConfig } from "../src/config.js";
-import { TRADEMARK_NOTICE } from "../src/meta.js";
+import { CLOUD_API_URL, TRADEMARK_NOTICE } from "../src/meta.js";
 
 const env = {
   RESEND_API_KEY: "re_x",
@@ -156,13 +156,14 @@ describe("parseConfig", () => {
     expect(() =>
       parseConfig(["migrate", "--from", "resend"], { RESEND_API_KEY: "re_x" }, false),
     ).toThrow("Missing MillionSend API key. Set MILLIONSEND_API_KEY or pass --to-key-stdin");
-    expect(() =>
+    // No instance named: MillionSend Cloud, like the SDKs.
+    expect(
       parseConfig(
-        ["migrate", "--from", "resend"],
+        ["migrate", "--from", "resend", "--yes"],
         { RESEND_API_KEY: "re_x", MILLIONSEND_API_KEY: "ms_y" },
         false,
-      ),
-    ).toThrow("Missing MillionSend API URL. Set MILLIONSEND_BASE_URL or pass --to-url <url>");
+      ).toUrl,
+    ).toBe(CLOUD_API_URL);
     expect(() => parseConfig(["migrate", "rollback"], {}, false)).toThrow(
       "Missing MillionSend API key",
     );

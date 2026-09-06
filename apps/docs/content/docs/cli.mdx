@@ -62,7 +62,7 @@ millionsend --help | --version
 | `--from <provider>` | Source provider. Only `resend` exists. |
 | `--from-key-stdin` | Read the source API key from stdin (first line). |
 | `--from-key <key>` | Source API key as an argument. Visible in process lists; the tool warns. Prefer the env var. |
-| `--to-url <url>` | MillionSend API URL: `https://api.millionsend.com` for Cloud, or your instance's URL. |
+| `--to-url <url>` | API URL of a self-hosted MillionSend instance. Unset, the target is MillionSend Cloud (`https://api.millionsend.com`), like the SDKs. |
 | `--to-key-stdin` | Read the MillionSend API key from stdin (second line when both stdin flags are set). |
 | `--to-key <key>` | MillionSend API key as an argument. Same caveat. |
 | `--rps <n>` | Requests per second against the source; default 8. Resend's team limit is 10, shared with your production sending; the CLI prints the limit it detects on connect, paces under it, and warns when the rate is above it. Values above 10 (up to 100) are for a limit Resend raised on request. |
@@ -92,15 +92,16 @@ Resource names for `--only` and `--skip`, in apply order: `domains`,
 | --- | --- |
 | `RESEND_API_KEY` | Source API key, full access. The tool only ever reads from Resend. |
 | `MILLIONSEND_API_KEY` | MillionSend API key, full access. |
-| `MILLIONSEND_BASE_URL` | MillionSend API URL, same as `--to-url`. |
+| `MILLIONSEND_BASE_URL` | API URL of a self-hosted instance, same as `--to-url`. Unset means MillionSend Cloud. |
 | `NO_COLOR` | Disable colors. |
 | `FORCE_COLOR` | Colors even when piped, same as `--color always`. |
 | `DO_NOT_TRACK` | Honored, as a no-op: the tool sends no telemetry, never phones home and never checks for updates. |
 
 Each key is resolved in this order: environment variable, then the `-stdin`
 flag, then the argument flag, then — in a terminal — a masked prompt. The
-target URL comes from `MILLIONSEND_BASE_URL` or `--to-url`; in a terminal
-with neither set, a select offers MillionSend Cloud or a self-hosted URL.
+target URL comes from `MILLIONSEND_BASE_URL` or `--to-url`; with neither set,
+a terminal offers a choice between MillionSend Cloud and a self-hosted URL,
+and a non-interactive run targets MillionSend Cloud, like the SDKs.
 
 ## Files
 

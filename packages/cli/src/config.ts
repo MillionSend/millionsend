@@ -228,7 +228,7 @@ export function parseConfig(
     warnings,
   );
   const toUrlRaw = values["to-url"] ?? env[TARGET_URL_ENV];
-  const toUrl = toUrlRaw === undefined || toUrlRaw === "" ? null : apiUrl(toUrlRaw);
+  let toUrl = toUrlRaw === undefined || toUrlRaw === "" ? null : apiUrl(toUrlRaw);
 
   const needsTarget = needsSource || command === "rollback";
   if (nonInteractive && needsTarget) {
@@ -242,11 +242,9 @@ export function parseConfig(
         `Missing MillionSend API key. Set ${TARGET_KEY_ENV} or pass --to-key-stdin (non-interactive mode never prompts).`,
       );
     }
-    if (toUrl === null) {
-      throw new ConfigError(
-        `Missing MillionSend API URL. Set ${TARGET_URL_ENV} or pass --to-url <url> (${CLOUD_API_URL} for MillionSend Cloud).`,
-      );
-    }
+    // Like the SDKs, the target is MillionSend Cloud unless an instance URL is named;
+    // a terminal still asks, since a self-hoster's key against Cloud is only a 401.
+    if (toUrl === null) toUrl = CLOUD_API_URL;
     // Decided here, before any network call: the confirmation would only come after the whole source is read.
     if (command !== "plan" && values.yes !== true) {
       throw new ConfigError(
@@ -351,7 +349,7 @@ Options
   --from <provider>          source provider; only \`resend\` exists
   --from-key-stdin           read the source API key from stdin (first line)
   --from-key <key>           source API key as an argument (visible in process lists; prefer the env var)
-  --to-url <url>             MillionSend API URL: ${CLOUD_API_URL} for Cloud, or your instance's URL
+  --to-url <url>             MillionSend API URL of a self-hosted instance (default ${CLOUD_API_URL}; a terminal asks)
   --to-key-stdin             read the MillionSend API key from stdin (second line when both stdin flags are set)
   --to-key <key>             MillionSend API key as an argument (same caveat)
   --rps <n>                  requests per second against the source (default ${DEFAULT_RPS}). Resend's team limit is ${MAX_RPS}, shared
