@@ -2007,41 +2007,118 @@ summary:focus-visible,
   gap: 8px;
   margin-left: auto;
 }
+/* Name and subject share a row once the field is wide enough for two inputs. */
+.ms-tpl-meta {
+  display: grid;
+  gap: 18px;
+}
+@media (min-width: 900px) {
+  .ms-tpl-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 .ms-tpl-code {
   container-type: inline-size;
-}
-.ms-tpl-code-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  /* One body height for both panes: the code box and the preview frame start
+     and end on the same lines. */
+  --ms-tpl-pane-h: clamp(420px, 70vh, 900px);
 }
 .ms-tpl-code-tabs {
   display: none;
   gap: 2px;
+  margin-bottom: 8px;
 }
 .ms-tpl-code-panes {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
-  align-items: stretch;
 }
-.ms-tpl-code-source {
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
+/* Each pane: a toolbar row over a body of the shared height, framed like the
+   block editor (toolbar + surface). Not clipped — the Variables popover hangs
+   out of the code pane's toolbar. */
+.ms-tpl-code-source,
+.ms-tpl-code-preview {
+  display: grid;
+  grid-template-rows: auto var(--ms-tpl-pane-h);
   min-width: 0;
+}
+.ms-tpl-code-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 42px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--ms-line);
+  border-bottom: 0;
+  border-radius: var(--ms-r-input) var(--ms-r-input) 0 0;
+  background: var(--ms-panel);
+}
+.ms-tpl-code-frame {
+  min-height: 0;
+  border: 1px solid var(--ms-line);
+  border-radius: 0 0 var(--ms-r-input) var(--ms-r-input);
+  overflow: hidden;
+}
+.ms-tpl-code-frame > iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
 }
 .ms-tpl-code-hint {
   margin: 8px 0 0;
   font-size: var(--ms-fs-label);
   color: var(--ms-muted);
 }
-.ms-tpl-code-preview {
+/* Find, in the code pane's toolbar: field, "n / total", previous, next, close. */
+.ms-code-find {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
   min-width: 0;
-  border: 1px solid var(--ms-line);
-  border-radius: var(--ms-r-input);
-  overflow: hidden;
+  max-width: 380px;
+  height: 30px;
+  padding: 0 4px 0 9px;
+  box-sizing: border-box;
+  border: 1px solid var(--ms-line-strong);
+  border-radius: 7px;
+  background: var(--ms-inset);
+  color: var(--ms-muted);
+  transition: box-shadow var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-code-find:focus-within {
+  border-color: var(--ms-focus-border);
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-code-find input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 0;
+  margin-left: 4px;
+  border: 0;
+  background: none;
+  outline: none;
+  color: var(--ms-bone);
+  font: 400 12.5px var(--ms-font-sans);
+}
+.ms-code-find input::placeholder {
+  color: var(--ms-faint);
+}
+.ms-code-find-count {
+  flex: none;
+  padding: 0 6px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ms-code-find .ms-maily-tool {
+  height: 22px;
+  min-width: 22px;
+  padding: 0 3px;
+  border-radius: 5px;
+  font-size: 11px;
 }
 /* Below two comfortable panes the field shows one at a time, picked by the tabs. */
 @container (max-width: 799px) {
@@ -2052,7 +2129,8 @@ summary:focus-visible,
     grid-template-columns: minmax(0, 1fr);
   }
   .ms-tpl-code[data-pane="source"] .ms-tpl-code-preview,
-  .ms-tpl-code[data-pane="preview"] .ms-tpl-code-source {
+  .ms-tpl-code[data-pane="preview"] .ms-tpl-code-source,
+  .ms-tpl-code[data-pane="preview"] .ms-tpl-code-hint {
     display: none;
   }
 }
@@ -2073,9 +2151,18 @@ summary:focus-visible,
   overflow: hidden;
   transition: box-shadow var(--ms-dur-fast) var(--ms-ease);
 }
+/* Under its toolbar row the frame joins the head: line-tone at rest, no top rounding. */
+.ms-tpl-code-source .ms-code-editor {
+  border-color: var(--ms-line);
+  border-radius: 0 0 var(--ms-r-input) var(--ms-r-input);
+}
 .ms-code-editor:focus-within {
   border-color: var(--ms-focus-border);
   box-shadow: var(--ms-focus-ring);
+}
+.ms-tpl-code-source .ms-code-editor:focus-within {
+  /* The head above would sit outside a ring; the border colour alone marks focus. */
+  box-shadow: none;
 }
 /* Mirror and textarea share every metric that moves a glyph. */
 .ms-code-editor-hl,
@@ -2111,4 +2198,17 @@ summary:focus-visible,
 }
 .ms-code-editor-input::selection {
   background: color-mix(in srgb, var(--ms-info) 32%, transparent);
+}
+/* Find matches: the same text made invisible, only the <mark> grounds show
+   through under the highlighted glyphs. */
+.ms-code-editor-marks {
+  color: transparent;
+}
+.ms-code-editor-marks mark {
+  color: transparent;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ms-warn) 24%, transparent);
+}
+.ms-code-editor-marks mark[data-current] {
+  background: color-mix(in srgb, var(--ms-warn) 52%, transparent);
 }

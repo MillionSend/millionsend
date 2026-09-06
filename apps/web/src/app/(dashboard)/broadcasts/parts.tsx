@@ -23,7 +23,7 @@ const PREVIEW_SAMPLES: Record<string, string> = {
  * per-contact-property values where the caller has them. Values are
  * HTML-escaped — contact-controlled property strings must read as text in the
  * preview, never as markup. */
-function fillMergeSamples(html: string, samples: Record<string, string>): string {
+export function fillMergeSamples(html: string, samples: Record<string, string>): string {
   return html.replace(MERGE_TOKEN_RE, (_m, name: string, fallback: string | undefined) =>
     escapeHtml(PREVIEW_SAMPLES[name] ?? samples[name] ?? fallback ?? name),
   );

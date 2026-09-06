@@ -29,7 +29,12 @@
     "convertBody": "O layout será achatado para o modelo do editor de blocos: tabelas, CSS inline e tudo que os blocos não expressam se perdem. O HTML armazenado só muda quando você salvar.",
     "convertCopy": "Duplicar e converter",
     "convertInPlace": "Converter este modelo",
-    "copyError": "Não foi possível criar a cópia."
+    "copyError": "Não foi possível criar a cópia.",
+    "find": "Localizar",
+    "findPlaceholder": "Localizar no HTML…",
+    "findCount": "{current} / {total}",
+    "findPrev": "Ocorrência anterior",
+    "findNext": "Próxima ocorrência"
   },
   "editor": {
     "newTitle": "Novo modelo",

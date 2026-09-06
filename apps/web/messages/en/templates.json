@@ -29,7 +29,12 @@
     "convertBody": "The layout will be flattened into the block editor's model: tables, inline CSS and anything the blocks can't express are lost. The stored HTML only changes when you save.",
     "convertCopy": "Duplicate and convert",
     "convertInPlace": "Convert this template",
-    "copyError": "Couldn't create the copy."
+    "copyError": "Couldn't create the copy.",
+    "find": "Find",
+    "findPlaceholder": "Find in HTML…",
+    "findCount": "{current} / {total}",
+    "findPrev": "Previous match",
+    "findNext": "Next match"
   },
   "editor": {
     "newTitle": "New template",

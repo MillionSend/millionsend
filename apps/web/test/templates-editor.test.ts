@@ -45,7 +45,7 @@ vi.mock("@/components/modal", () => ({
 }));
 
 const { TemplateEditor } = await import("@/app/(dashboard)/templates/editor");
-const { ConvertBlocksDialog } = await import("@/app/(dashboard)/templates/html-mode");
+const { ConvertBlocksDialog, HtmlCodeMode } = await import("@/app/(dashboard)/templates/html-mode");
 const { default: TemplatesPage } = await import("@/app/(dashboard)/templates/page");
 
 const MAILY_DOC = { type: "doc", content: [{ type: "paragraph" }] };
@@ -84,12 +84,54 @@ describe("template editor mode", () => {
     expect(out).not.toContain("templates.html.banner");
   });
 
+  it("lays name and subject out as one row", () => {
+    const out = renderToStaticMarkup(createElement(TemplateEditor, { initial: HTML_ROW }));
+    expect(out).toMatch(/class="ms-tpl-meta"[^>]*>.*id="tpl-name".*id="tpl-subject"/);
+  });
+
   it("derives code mode for anything but a Maily document, unless converting", () => {
     expect(templateEditorMode({ isNew: false, document: null })).toBe("code");
     expect(templateEditorMode({ isNew: false, document: { version: 2, blocks: [] } })).toBe("code");
     expect(templateEditorMode({ isNew: false, document: MAILY_DOC })).toBe("blocks");
     expect(templateEditorMode({ isNew: true, document: null })).toBe("blocks");
     expect(templateEditorMode({ isNew: false, document: null, converting: true })).toBe("blocks");
+  });
+});
+
+describe("code mode panes", () => {
+  const out = renderToStaticMarkup(
+    createElement(HtmlCodeMode, {
+      html: HTML_ROW.html,
+      onChange: () => {},
+      mergeFields: [],
+      previewSamples: {},
+      hasText: false,
+    }),
+  );
+  const source = out.indexOf('class="ms-tpl-code-source"');
+  const preview = out.indexOf('class="ms-tpl-code-preview"');
+
+  it("gives both panes the same toolbar row, then a body", () => {
+    expect(out.match(/class="ms-tpl-code-head"/g)).toHaveLength(2);
+    expect(out).toMatch(/ms-tpl-code-head".*?ms-code-editor"/);
+    expect(out).toMatch(/ms-tpl-code-head".*?ms-tpl-code-frame"/);
+  });
+
+  it("puts Find and Variables in the code pane's toolbar, nothing above the panes", () => {
+    const variables = out.indexOf("block-editor.toolbar.variables");
+    const find = out.indexOf("templates.html.find");
+    expect(variables).toBeGreaterThan(source);
+    expect(variables).toBeLessThan(preview);
+    expect(find).toBeGreaterThan(source);
+    expect(find).toBeLessThan(variables);
+    expect(out.slice(0, source)).not.toContain("toolbar.variables");
+    // The pane switch for narrow widths is all that sits above the panes.
+    expect(out.slice(0, source)).toContain("ms-tpl-code-tabs");
+  });
+
+  it("previews in a same-origin, script-less frame so the scroll survives updates", () => {
+    expect(out).toMatch(/<iframe[^>]*sandbox="allow-same-origin"/);
+    expect(out).not.toContain("allow-scripts");
   });
 });
 

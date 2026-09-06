@@ -59,14 +59,16 @@ export function EditorSkeleton() {
         </h1>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 720 }}>
-        {[0, 1].map((row) => (
-          <div key={row}>
-            <Skeleton width={90} height={11} />
-            <div style={{ marginTop: 8, display: "flex" }}>
-              <Skeleton width="100%" height={38} radius="var(--ms-r-input)" />
+        <div className="ms-tpl-meta">
+          {[0, 1].map((row) => (
+            <div key={row}>
+              <Skeleton width={90} height={11} />
+              <div style={{ marginTop: 8, display: "flex" }}>
+                <Skeleton width="100%" height={38} radius="var(--ms-r-input)" />
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
         <Skeleton width="100%" height={260} radius="var(--ms-r-input)" />
       </div>
     </>
@@ -336,35 +338,36 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
       />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-        <div className="ms-field" style={{ maxWidth: 720 }}>
-          <label htmlFor="tpl-name">{t("editor.nameLabel")}</label>
-          <input
-            id="tpl-name"
-            className="ms-input"
-            style={{ width: "100%" }}
-            placeholder={t("editor.nameHint")}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </div>
-
-        <div className="ms-field" style={{ maxWidth: 720 }}>
-          <label htmlFor="tpl-subject">
-            {t("editor.subjectLabel")}{" "}
-            <span style={{ color: "var(--ms-faint)", textTransform: "none" }}>
-              — {t("editor.optional")}
-            </span>
-          </label>
-          <input
-            id="tpl-subject"
-            className="ms-input"
-            style={{ width: "100%" }}
-            value={subject}
-            onChange={(event) => setSubject(event.target.value)}
-          />
-        </div>
-
         {/* Source beside preview needs the room; every other body stays at reading width. */}
+        <div className="ms-tpl-meta" style={{ maxWidth: wideBody ? 1200 : 720 }}>
+          <div className="ms-field">
+            <label htmlFor="tpl-name">{t("editor.nameLabel")}</label>
+            <input
+              id="tpl-name"
+              className="ms-input"
+              style={{ width: "100%" }}
+              placeholder={t("editor.nameHint")}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </div>
+          <div className="ms-field">
+            <label htmlFor="tpl-subject">
+              {t("editor.subjectLabel")}{" "}
+              <span style={{ color: "var(--ms-faint)", textTransform: "none" }}>
+                — {t("editor.optional")}
+              </span>
+            </label>
+            <input
+              id="tpl-subject"
+              className="ms-input"
+              style={{ width: "100%" }}
+              value={subject}
+              onChange={(event) => setSubject(event.target.value)}
+            />
+          </div>
+        </div>
+
         <div className="ms-field" style={{ maxWidth: wideBody ? 1200 : 720 }}>
           <div
             style={{

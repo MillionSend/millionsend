@@ -14,3 +14,8 @@ export function jsSingleQuote(value: string): string {
 export function shellSingleQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
+
+/** Escapes a literal so a RegExp built from it matches the text verbatim. */
+export function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
