@@ -1444,6 +1444,13 @@ summary:focus-visible,
    Media queries only: desktop ≥900px keeps every rule above pixel-identical.
    !important is required only where a rule overrides an inline style. */
 
+/* Side sheets: a fixed panel on wide screens; the phone rule below widens it
+   to the viewport, and must come after this one to win. */
+.ms-sheet {
+  width: 440px;
+  max-width: calc(100vw - 24px);
+}
+
 @media (max-width: 899px) {
   /* App shell: topbar over content; sidebar becomes an off-canvas drawer. */
   .ms-app-shell {
@@ -1667,6 +1674,17 @@ summary:focus-visible,
 }
 
 @media (max-width: 639px) {
+  /* Stacked stat blocks: the growth chart stretches to the row instead of its
+     desktop 200px, so the trend is readable at phone width. */
+  .ms-meta-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .ms-meta-grid > .ms-kpi-metrics {
+    min-width: 0;
+  }
+  .ms-sparkline {
+    max-width: none !important;
+  }
   /* KPI figure rows wrap instead of overflowing. */
   .ms-kpi-row {
     flex-wrap: wrap;
@@ -1780,10 +1798,6 @@ summary:focus-visible,
 }
 
 /* Side sheet panel (drawer.tsx). */
-.ms-sheet {
-  width: 440px;
-  max-width: calc(100vw - 24px);
-}
 
 /* Horizontal tab/chip strips: keep one line, scroll quietly. */
 .ms-scroll-x {

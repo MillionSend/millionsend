@@ -36,9 +36,9 @@ export function SearchBox({
   }, []);
 
   return (
-    // Search fills the filter row up to a cap; the selects keep fixed widths
-    // sized for their longest label.
-    <span style={{ flex: 1, minWidth: 160, maxWidth: 400 }}>
+    // Search takes whatever the row has left, so the fixed-width selects end
+    // flush with the table's right edge.
+    <span style={{ flex: "1 1 160px", minWidth: 0 }}>
       <input
         ref={ref}
         className="ms-input"

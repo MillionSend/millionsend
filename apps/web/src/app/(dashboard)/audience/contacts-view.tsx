@@ -535,7 +535,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
           label={t("contacts.stats.unsubscribed")}
           value={stats.data ? nf.format(stats.data.unsubscribed) : null}
         />
-        <div>
+        <div className="ms-kpi-metrics">
           <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
             {t("contacts.stats.metrics")}
           </div>
@@ -772,7 +772,10 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                         statusBadge
                       )}
                     </td>
-                    <td className="right" style={{ color: "var(--ms-muted)" }}>
+                    <td
+                      className="right"
+                      style={{ color: "var(--ms-muted)", whiteSpace: "nowrap" }}
+                    >
                       <RelativeTime date={row.createdAt} />
                     </td>
                     {/* biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only guard so a menu click does not also trigger the row navigation; keyboard users reach the menu button directly */}

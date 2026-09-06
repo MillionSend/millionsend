@@ -67,11 +67,25 @@ export function GrowthSparkline({
   width?: number;
   height?: number;
 }) {
-  const [hover, setHover] = useState<{ index: number; px: number; py: number } | null>(null);
+  const [hover, setHover] = useState<{
+    index: number;
+    px: number;
+    py: number;
+    /** Rendered width at hover time: the svg stretches to its container on phones. */
+    w: number;
+  } | null>(null);
   const series = buildSeries(added, unsubscribed, baseline);
   if (series.length === 0) {
     return (
-      <svg width={width} height={height} aria-hidden="true">
+      <svg
+        className="ms-sparkline"
+        width="100%"
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        style={{ display: "block", maxWidth: width }}
+        aria-hidden="true"
+      >
         <line
           x1="0"
           y1={height - 1}
@@ -79,6 +93,7 @@ export function GrowthSparkline({
           y2={height - 1}
           stroke="var(--ms-line-strong)"
           strokeDasharray="3 4"
+          vectorEffect="non-scaling-stroke"
         />
       </svg>
     );
@@ -104,22 +119,32 @@ export function GrowthSparkline({
     const rect = event.currentTarget.getBoundingClientRect();
     const px = event.clientX - rect.left;
     const py = event.clientY - rect.top;
-    const frac = series.length <= 1 ? 1 : (px - pad) / (width - pad * 2);
+    // Pointer position in viewBox units: the svg may be stretched to the container.
+    const localX = rect.width > 0 ? (px / rect.width) * width : px;
+    const frac = series.length <= 1 ? 1 : (localX - pad) / (width - pad * 2);
     const index = Math.min(series.length - 1, Math.max(0, Math.round(frac * (series.length - 1))));
-    setHover({ index, px, py });
+    setHover({ index, px, py, w: rect.width });
   }
 
   const hovered = hover ? series[hover.index] : undefined;
 
   return (
     <div
-      style={{ position: "relative", width, height, touchAction: "pan-y" }}
+      className="ms-sparkline"
+      style={{ position: "relative", width: "100%", maxWidth: width, height, touchAction: "pan-y" }}
       onPointerMove={track}
       onPointerDown={track}
       onPointerLeave={() => setHover(null)}
       onPointerCancel={() => setHover(null)}
     >
-      <svg width={width} height={height} aria-hidden="true" style={{ display: "block" }}>
+      <svg
+        width="100%"
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        style={{ display: "block" }}
+      >
         <path d={area} fill="color-mix(in srgb, var(--ms-success) 22%, transparent)" />
         <polyline
           points={totalPoints.join(" ")}
@@ -127,6 +152,7 @@ export function GrowthSparkline({
           stroke="var(--ms-success)"
           strokeWidth="1.5"
           strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
         />
         <polyline
           points={outPoints.join(" ")}
@@ -134,6 +160,7 @@ export function GrowthSparkline({
           stroke="var(--ms-danger)"
           strokeWidth="1.2"
           strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
         />
         {hover && hovered ? (
           <>
@@ -143,6 +170,7 @@ export function GrowthSparkline({
               y1={0}
               y2={height}
               stroke="var(--ms-line-strong)"
+              vectorEffect="non-scaling-stroke"
             />
             <circle
               cx={x(hover.index)}
@@ -164,7 +192,7 @@ export function GrowthSparkline({
         ) : null}
       </svg>
       {hover && hovered ? (
-        <ChartTip x={hover.px} y={hover.py} width={width} height={height}>
+        <ChartTip x={hover.px} y={hover.py} width={hover.w} height={height}>
           <div
             className="ms-mono"
             style={{ fontSize: 11, color: "var(--ms-muted)", marginBottom: 4 }}
