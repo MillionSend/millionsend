@@ -190,6 +190,13 @@
       "when": 1788583513988,
       "tag": "0026_prefetched_opens",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788709516272,
+      "tag": "0027_unsubscribe_logo_radius",
+      "breakpoints": true
     }
   ]
 }

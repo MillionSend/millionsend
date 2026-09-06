@@ -1,0 +1,2 @@
+CREATE TYPE "public"."unsubscribe_logo_radius" AS ENUM('square', 'gentle', 'rounded', 'circle');--> statement-breakpoint
+ALTER TABLE "teams" ADD COLUMN "unsubscribe_logo_radius" "unsubscribe_logo_radius" DEFAULT 'gentle' NOT NULL;

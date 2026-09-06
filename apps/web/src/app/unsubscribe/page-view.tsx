@@ -1,4 +1,9 @@
-import { unsubscribeAccentStyle, unsubscribeThemeStyle } from "@/lib/unsubscribe-theme";
+import {
+  UNSUBSCRIBE_LOGO_RADIUS,
+  type UnsubscribeLogoRadius,
+  unsubscribeAccentStyle,
+  unsubscribeThemeStyle,
+} from "@/lib/unsubscribe-theme";
 import type en from "../../../messages/en/unsubscribe.json";
 
 /** Recipient-facing catalog shape (en and pt-BR are structurally identical). */
@@ -18,6 +23,7 @@ export interface UnsubscribeViewCustomization {
   message: string | null;
   successMessage: string | null;
   logoUrl: string | null;
+  logoRadius: UnsubscribeLogoRadius;
   backgroundColor: string | null;
   textColor: string | null;
   accentColor: string | null;
@@ -28,6 +34,7 @@ export const EMPTY_UNSUBSCRIBE_CUSTOMIZATION: UnsubscribeViewCustomization = {
   message: null,
   successMessage: null,
   logoUrl: null,
+  logoRadius: "gentle",
   backgroundColor: null,
   textColor: null,
   accentColor: null,
@@ -158,7 +165,12 @@ export function UnsubscribePageView({
         <img
           src={customization.logoUrl}
           alt={customization.brandName ?? ""}
-          style={{ maxHeight: 48, maxWidth: 200, objectFit: "contain" }}
+          style={{
+            maxHeight: 48,
+            maxWidth: 200,
+            objectFit: "contain",
+            borderRadius: UNSUBSCRIBE_LOGO_RADIUS[customization.logoRadius],
+          }}
         />
       ) : null}
       {customization.brandName ? (

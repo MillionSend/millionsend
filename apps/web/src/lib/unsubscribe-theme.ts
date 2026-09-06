@@ -1,3 +1,4 @@
+import type { schema } from "@millionsend/db";
 import type { CSSProperties } from "react";
 import { contrastTextColor, isHexColor } from "./hex-color";
 
@@ -43,3 +44,13 @@ export function unsubscribeAccentStyle(accentColor: string | null): CSSPropertie
   if (!accentColor || !isHexColor(accentColor)) return undefined;
   return { background: accentColor, color: contrastTextColor(accentColor) };
 }
+
+export type UnsubscribeLogoRadius = (typeof schema.unsubscribeLogoRadiusEnum.enumValues)[number];
+
+/** Corner radius of the team logo against its 48px-tall box on the hosted page. */
+export const UNSUBSCRIBE_LOGO_RADIUS: Record<UnsubscribeLogoRadius, string | number> = {
+  square: 0,
+  gentle: 8,
+  rounded: 16,
+  circle: "50%",
+};

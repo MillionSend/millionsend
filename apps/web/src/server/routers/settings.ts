@@ -795,6 +795,7 @@ export function createSettingsRouter(
             textColor: schema.teams.unsubscribeTextColor,
             accentColor: schema.teams.unsubscribeAccentColor,
             hideBranding: schema.teams.unsubscribeHideBranding,
+            logoRadius: schema.teams.unsubscribeLogoRadius,
           })
           .from(schema.teams)
           .where(eq(schema.teams.id, ctx.teamId));
@@ -813,6 +814,7 @@ export function createSettingsRouter(
             textColor: nullableHexColor,
             accentColor: nullableHexColor,
             hideBranding: z.boolean(),
+            logoRadius: z.enum(schema.unsubscribeLogoRadiusEnum.enumValues),
           }),
         )
         .mutation(async ({ ctx, input }) => {
@@ -828,6 +830,7 @@ export function createSettingsRouter(
               unsubscribeTextColor: input.textColor,
               unsubscribeAccentColor: input.accentColor,
               unsubscribeHideBranding: input.hideBranding,
+              unsubscribeLogoRadius: input.logoRadius,
             })
             .where(eq(schema.teams.id, ctx.teamId));
           return input;

@@ -39,6 +39,13 @@
     "showLogo": "Exibir seu logotipo",
     "showLogoNote": "O logotipo do seu time substitui a marca MillionSend no topo da página.",
     "showLogoMissing": "Envie um logotipo do time na aba Configurações para habilitar.",
+    "logoRadius": "Cantos do logotipo",
+    "logoRadiusOptions": {
+      "square": "Retos",
+      "gentle": "Suaves",
+      "rounded": "Arredondados",
+      "circle": "Círculo"
+    },
     "colors": "Cores",
     "colorBackground": "Fundo",
     "colorText": "Texto",

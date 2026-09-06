@@ -345,7 +345,7 @@ describe("settings.smtp", () => {
 describe("settings.unsubscribe", () => {
   // Default get result for a fresh team — tests override what they exercise.
   // teamName rides along so the page can fall back to it as the brand name;
-  // hideBranding (the "show your logo" opt-in) defaults on.
+  // hideBranding (the "show your logo" opt-in) defaults on; logo corners to gentle.
   const emptyCfg = {
     teamName: "acme",
     brandName: null,
@@ -356,6 +356,7 @@ describe("settings.unsubscribe", () => {
     textColor: null,
     accentColor: null,
     hideBranding: true,
+    logoRadius: "gentle" as const,
   };
 
   it("get returns the team's customization, defaults by default", async () => {
@@ -378,6 +379,7 @@ describe("settings.unsubscribe", () => {
       textColor: "#FFFFFF",
       accentColor: "#46a3f9",
       hideBranding: true,
+      logoRadius: "circle" as const,
     };
     await caller.settings.unsubscribe.update(full);
     expect(await caller.settings.unsubscribe.get()).toEqual({ teamName: "acme", ...full });
@@ -391,9 +393,20 @@ describe("settings.unsubscribe", () => {
       textColor: "",
       accentColor: "",
       hideBranding: false,
+      logoRadius: "gentle",
     });
     // hideBranding false was an explicit choice, not a cleared field.
     expect(await caller.settings.unsubscribe.get()).toEqual({ ...emptyCfg, hideBranding: false });
+  });
+
+  it("update rejects a logo radius outside the enum", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    const caller = callerFor("u1", teamId, "owner");
+    await expect(
+      caller.settings.unsubscribe.update({ ...emptyCfg, logoRadius: "pill" as never }),
+    ).rejects.toThrow();
+    expect(await caller.settings.unsubscribe.get()).toEqual(emptyCfg);
   });
 
   it("update is forbidden for role member", async () => {

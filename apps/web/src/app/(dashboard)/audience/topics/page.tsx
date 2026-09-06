@@ -335,6 +335,7 @@ export default function TopicsPage() {
                 // hideBranding is the "show my logo" opt-in; team.get already
                 // nulls logoUrl when object storage is off.
                 logoUrl: unsubSettings.data.hideBranding ? (team.data?.logoUrl ?? null) : null,
+                logoRadius: unsubSettings.data.logoRadius,
                 backgroundColor: unsubSettings.data.backgroundColor,
                 textColor: unsubSettings.data.textColor,
                 accentColor: unsubSettings.data.accentColor,

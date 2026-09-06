@@ -2,7 +2,11 @@ import { deriveUnsubscribeKey, hashRecipient, makeUnsubscribeToken } from "@mill
 import { type Db, schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EMPTY_UNSUBSCRIBE_CUSTOMIZATION, UnsubscribePageView } from "@/app/unsubscribe/page-view";
+import en from "../messages/en/unsubscribe.json";
 
 // A known 32-byte master key so lookup derives the same key we sign with.
 const KEY_B64 = "dOdpMPArQsV3KWv5I+kizDihKLus3uMLev4DODaFnOQ=";
@@ -132,6 +136,7 @@ describe("targetForToken customization", () => {
         unsubscribeBackgroundColor: "#000000",
         unsubscribeTextColor: "#ffffff",
         unsubscribeAccentColor: "#46a3f9",
+        unsubscribeLogoRadius: "circle",
       })
       .where(eq(schema.teams.id, teamId));
     const contactId = await seedContact(teamId);
@@ -144,6 +149,7 @@ describe("targetForToken customization", () => {
       successMessage: "All set.",
       redirectUrl: "https://acme.com/bye",
       logoUrl: null,
+      logoRadius: "circle",
       backgroundColor: "#000000",
       textColor: "#ffffff",
       accentColor: "#46a3f9",
@@ -163,6 +169,7 @@ describe("targetForToken customization", () => {
       redirectUrl: null,
       // hideBranding defaults on, but with no stored logo there is none to show.
       logoUrl: null,
+      logoRadius: "gentle",
       backgroundColor: null,
       textColor: null,
       accentColor: null,
@@ -195,5 +202,28 @@ describe("targetForToken customization", () => {
       .set({ unsubscribeHideBranding: false })
       .where(eq(schema.teams.id, teamId));
     expect((await targetForToken(db, token))?.customization.logoUrl).toBeNull();
+  });
+});
+
+describe("UnsubscribePageView logo", () => {
+  function render(logoRadius: (typeof EMPTY_UNSUBSCRIBE_CUSTOMIZATION)["logoRadius"]): string {
+    return renderToStaticMarkup(
+      createElement(UnsubscribePageView, {
+        m: en,
+        state: "confirm",
+        customization: {
+          ...EMPTY_UNSUBSCRIBE_CUSTOMIZATION,
+          logoUrl: "https://cdn.example.com/team-logos/x.png?v=1",
+          logoRadius,
+        },
+      }),
+    );
+  }
+
+  it("rounds the logo corners by the team's chosen radius", () => {
+    expect(render("square")).toContain("border-radius:0");
+    expect(render("gentle")).toContain("border-radius:8px");
+    expect(render("rounded")).toContain("border-radius:16px");
+    expect(render("circle")).toContain("border-radius:50%");
   });
 });

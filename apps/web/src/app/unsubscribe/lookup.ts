@@ -9,6 +9,7 @@ import { schema } from "@millionsend/db";
 import { and, asc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { appBaseUrl } from "@/lib/api-base-url";
+import type { UnsubscribeLogoRadius } from "@/lib/unsubscribe-theme";
 import { uploadsEnabled } from "@/server/storage";
 
 /** Per-team customization the hosted confirm page applies; all fields optional. */
@@ -19,6 +20,7 @@ export interface UnsubscribeCustomization {
   redirectUrl: string | null;
   /** Set only when the team opted in AND a servable logo exists. */
   logoUrl: string | null;
+  logoRadius: UnsubscribeLogoRadius;
   backgroundColor: string | null;
   textColor: string | null;
   accentColor: string | null;
@@ -119,6 +121,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
       textColor: tm.unsubscribeTextColor,
       accentColor: tm.unsubscribeAccentColor,
       hideBranding: tm.unsubscribeHideBranding,
+      logoRadius: tm.unsubscribeLogoRadius,
       logoUrl: tm.logoUrl,
     })
     .from(c)
@@ -136,6 +139,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
     redirectUrl: contact.redirectUrl,
     // Storage off ⇒ stored URLs may be dead; fall back to name/wordmark.
     logoUrl: contact.hideBranding && uploadsEnabled() ? contact.logoUrl : null,
+    logoRadius: contact.logoRadius,
     backgroundColor: contact.backgroundColor,
     textColor: contact.textColor,
     accentColor: contact.accentColor,

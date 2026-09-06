@@ -17,6 +17,14 @@ export const planStatusEnum = pgEnum("plan_status", [
   "incomplete",
 ]);
 
+// Corner radius of the team logo on the hosted unsubscribe page.
+export const unsubscribeLogoRadiusEnum = pgEnum("unsubscribe_logo_radius", [
+  "square",
+  "gentle",
+  "rounded",
+  "circle",
+]);
+
 export const teams = pgTable(
   "teams",
   {
@@ -42,6 +50,9 @@ export const teams = pgTable(
     unsubscribeAccentColor: text("unsubscribe_accent_color"),
     // Default on: recipients should see the sender's brand, not MillionSend's.
     unsubscribeHideBranding: boolean("unsubscribe_hide_branding").notNull().default(true),
+    unsubscribeLogoRadius: unsubscribeLogoRadiusEnum("unsubscribe_logo_radius")
+      .notNull()
+      .default("gentle"),
     // Success-state copy shown after preferences are saved.
     unsubscribeSuccessMessage: text("unsubscribe_success_message"),
     // Public URL of the uploaded team logo (S3-compatible storage), including a

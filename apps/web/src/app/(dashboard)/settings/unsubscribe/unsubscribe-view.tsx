@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
@@ -10,6 +11,7 @@ import { toPreviewTopics, UnsubscribePreview } from "@/components/unsubscribe-pr
 import { isHexColor } from "@/lib/hex-color";
 import { isHttpUrl } from "@/lib/http-url";
 import { useTRPC } from "@/lib/trpc";
+import { UNSUBSCRIBE_LOGO_RADIUS, type UnsubscribeLogoRadius } from "@/lib/unsubscribe-theme";
 
 interface Draft {
   brandName: string;
@@ -20,7 +22,10 @@ interface Draft {
   textColor: string;
   accentColor: string;
   hideBranding: boolean;
+  logoRadius: UnsubscribeLogoRadius;
 }
+
+const LOGO_RADII = Object.keys(UNSUBSCRIBE_LOGO_RADIUS) as UnsubscribeLogoRadius[];
 
 /** Trimmed empty strings persist as null, matching the router's clear semantics. */
 function toNull(value: string): string | null {
@@ -144,6 +149,7 @@ export function UnsubscribeView() {
     textColor: data.textColor ?? "",
     accentColor: data.accentColor ?? "",
     hideBranding: data.hideBranding,
+    logoRadius: data.logoRadius,
   };
   const set = (patch: Partial<Draft>) => setDraft({ ...form, ...patch });
   const redirectInvalid = form.redirectUrl.trim() !== "" && !isHttpUrl(form.redirectUrl.trim());
@@ -169,6 +175,7 @@ export function UnsubscribeView() {
             textColor: toNull(form.textColor),
             accentColor: toNull(form.accentColor),
             hideBranding: form.hideBranding,
+            logoRadius: form.logoRadius,
           });
         }}
       >
@@ -197,6 +204,22 @@ export function UnsubscribeView() {
               disabled={disabled || !logoAvailable}
               onChange={(checked) => set({ hideBranding: checked })}
               ariaLabel={t("showLogo")}
+            />
+          </div>
+
+          <div className="ms-field" style={{ marginBottom: 18 }}>
+            <label htmlFor="unsub-logo-radius">{t("logoRadius")}</label>
+            <Select
+              id="unsub-logo-radius"
+              width={180}
+              value={form.logoRadius}
+              disabled={disabled || !logoAvailable}
+              onChange={(value) => set({ logoRadius: value as UnsubscribeLogoRadius })}
+              ariaLabel={t("logoRadius")}
+              options={LOGO_RADII.map((value) => ({
+                value,
+                label: t(`logoRadiusOptions.${value}`),
+              }))}
             />
           </div>
 
@@ -361,6 +384,7 @@ export function UnsubscribeView() {
             message: toNull(form.message),
             successMessage: toNull(form.successMessage),
             logoUrl: form.hideBranding && logoAvailable ? (team?.logoUrl ?? null) : null,
+            logoRadius: form.logoRadius,
             backgroundColor: toNull(form.backgroundColor),
             textColor: toNull(form.textColor),
             accentColor: toNull(form.accentColor),
