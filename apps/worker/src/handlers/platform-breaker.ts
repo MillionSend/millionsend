@@ -5,7 +5,11 @@ import {
   type RegionDecision,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
-import { regionPausedMail, regionResumedMail } from "../notifications/templates.js";
+import {
+  type MailContent,
+  regionPausedMail,
+  regionResumedMail,
+} from "../notifications/templates.js";
 import type { SystemMailer } from "../system-mail.js";
 
 export interface PlatformBreakerDeps {
@@ -30,10 +34,14 @@ export async function runPlatformBreaker(
   const url = deps.appBaseUrl ?? "";
   // The flip is already persisted (the banner shows it); a failing mail is
   // logged, never allowed to abort the handler or the other regions' mails.
-  const mail = async (region: string, content: Parameters<SystemMailer["send"]>[1]) => {
+  const mail = async (
+    region: string,
+    kind: "region.paused" | "region.resumed",
+    content: MailContent,
+  ) => {
     if (!operator) return;
     try {
-      await deps.mailer.send(operator.email, content);
+      await deps.mailer.send(operator.email, { ...content, kind });
     } catch (err) {
       console.error(`platform.breaker: operator mail for ${region} failed`, err);
     }
@@ -51,6 +59,7 @@ export async function runPlatformBreaker(
     );
     await mail(
       region,
+      "region.paused",
       regionPausedMail({
         region,
         ...d.reason,
@@ -65,7 +74,7 @@ export async function runPlatformBreaker(
   }
   for (const region of changed.resumed) {
     console.log(`platform.breaker: broadcasts resumed in ${region}`);
-    await mail(region, regionResumedMail({ region, url }));
+    await mail(region, "region.resumed", regionResumedMail({ region, url }));
   }
   return changed;
 }

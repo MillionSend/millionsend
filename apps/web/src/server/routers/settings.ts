@@ -10,6 +10,7 @@ import {
   INVITE_TTL_MS,
   PLAN_DAILY_LIMIT,
   type Plan,
+  SystemMailRefused,
   signInviteToken,
   utcDay,
   verifyInviteToken,
@@ -257,6 +258,13 @@ export function createSettingsRouter(
       await mail.send(message);
       return true;
     } catch (error) {
+      // A suppressed invitee (bounced or complained on the instance's own
+      // mail) reads as sent: `emailed: false` would tell any team admin that
+      // an arbitrary address is suppressed in the instance's system team.
+      if (error instanceof SystemMailRefused && error.reason === "all_suppressed") {
+        console.warn(`Invitation email withheld: recipient suppressed (invite ${invite.id})`);
+        return true;
+      }
       console.error("Invitation email failed to send", error);
       return false;
     }

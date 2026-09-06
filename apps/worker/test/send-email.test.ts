@@ -632,6 +632,31 @@ it("clickTracking on routes <a href> through /t/c and the token verifies to the 
   expect(verifyClickToken(match?.[1] ?? "", trackingSecret)).toEqual({ emailId, url });
 });
 
+it("account mail ships untracked on a tracking domain and loses its body once SES holds it", async () => {
+  const { ses, sends } = fakeSes("mid-system");
+  const url = "https://app.example.com/reset-password?token=secret";
+  const emailId = await insertEmail(
+    { tags: { millionsend_system: "password_reset" } },
+    `<a href="${url}">reset</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: { secretKey: trackingSecret, defaultBaseUrl: "https://track.example.com" },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).toContain(url);
+  expect(mime).not.toContain("/t/c/");
+  expect(mime).not.toContain("/t/o/");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("sent");
+  expect(row?.bodyCiphertext).toBeNull();
+  expect(row?.bodyWrappedDek).toBeNull();
+  expect(row?.bodyPurgedAt).toBeInstanceOf(Date);
+});
+
 it("openTracking on injects the pixel; a custom subdomain sets the tracking host", async () => {
   const [both] = await db
     .insert(schema.domains)

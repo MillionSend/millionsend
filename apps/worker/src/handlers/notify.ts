@@ -99,7 +99,9 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       }),
     );
     for (const owner of await listTeamOwners(db, teamId)) {
-      await attempt(`mail to ${owner.email}`, () => deps.mailer.send(owner.email, mail));
+      await attempt(`mail to ${owner.email}`, () =>
+        deps.mailer.send(owner.email, { ...mail, kind: type }),
+      );
     }
     sent += 1;
   };

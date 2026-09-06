@@ -35,10 +35,11 @@ export interface SimpleEmail {
 }
 
 /**
- * One transactional (system) message via SESv2 Simple content — SES builds
- * the MIME, so no raw-mode machinery is needed outside the worker. No
- * configuration set on purpose: system mail must stay out of the event
- * pipeline, which matches events to team-owned email rows by tag.
+ * One account message via SESv2 Simple content — SES builds the MIME, so no
+ * raw-mode machinery is needed outside the worker. This is the fallback for
+ * a sender no team owns (core sendSystemMail routes the rest through the
+ * pipeline): without an emails row nothing could join the SES events back,
+ * so no configuration set is named and none are requested.
  */
 export async function sendSimpleEmail(client: SesSendClient, message: SimpleEmail): Promise<void> {
   await client.send(

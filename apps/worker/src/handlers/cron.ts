@@ -6,6 +6,7 @@ import {
   getInstanceSettings,
   isIdentitySharedByOtherDomains,
   PLAN_DAILY_LIMIT,
+  purgedEmailBodyColumns,
   recordAudit,
   releaseDailyQuota,
   reserveDailyQuota,
@@ -347,15 +348,7 @@ export async function purgeExpiredEmailBodies(
   for (;;) {
     const batch = await db
       .update(e)
-      .set({
-        bodyCiphertext: null,
-        bodyIv: null,
-        bodyWrappedDek: null,
-        bodyKeyVersion: null,
-        // Attachments are content on the same retention clock as the body.
-        attachments: null,
-        bodyPurgedAt: now,
-      })
+      .set(purgedEmailBodyColumns(now))
       .where(
         inArray(
           e.id,

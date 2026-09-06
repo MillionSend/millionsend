@@ -1,12 +1,16 @@
-import { env, notificationsEmailFrom } from "@millionsend/config";
+import { env, isCloudDeployment, notificationsEmailFrom } from "@millionsend/config";
+import { type SystemMailMessage, sendSystemMail } from "@millionsend/core";
 import { EMAIL_WORDMARK_URL, escapeHtml } from "@millionsend/core/html";
-import { type Db, schema } from "@millionsend/db";
-import { createSesSendClient, type SimpleEmail, sendSimpleEmail } from "@millionsend/ses";
+import { type Db, getDb, schema } from "@millionsend/db";
+import { createSesSendClient, sendSimpleEmail } from "@millionsend/ses";
 import { and, eq, gt, like, ne } from "drizzle-orm";
 import enInvite from "../../messages/en/invite-email.json";
 import en from "../../messages/en/reset-email.json";
 import ptBRInvite from "../../messages/pt-BR/invite-email.json";
 import ptBR from "../../messages/pt-BR/reset-email.json";
+import { getKeyring } from "./keyring";
+import { localeFromRequest } from "./locale";
+import { enqueueEmailSend } from "./queue";
 
 export const RESET_TOKEN_TTL_MINUTES = 30;
 
@@ -39,23 +43,6 @@ export function passwordRecoveryEnabled(): boolean {
   return awsCredentialsConfigured() && Boolean(env.AUTH_EMAIL_FROM);
 }
 
-/**
- * Dashboard-surface locale: the NEXT_LOCALE cookie the app sets, then
- * Accept-Language. Anything that isn't Portuguese reads English — the email
- * locales mirror the dashboard's launch locales.
- */
-function pickLocale(request: Request | undefined): MailLocale {
-  const cookie = request?.headers.get("cookie")?.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/)?.[1];
-  const acceptLanguage = request?.headers.get("accept-language") ?? "";
-  for (const candidate of [cookie, ...acceptLanguage.split(",")]) {
-    const tag = candidate?.trim().toLowerCase();
-    if (!tag) continue;
-    if (tag.startsWith("pt")) return "pt-BR";
-    if (tag.startsWith("en")) return "en";
-  }
-  return "en";
-}
-
 const MUTED = 'style="font-size:13px;line-height:1.5;color:#52525b;margin:24px 0 0"';
 
 /** Exported for tests; interpolates and escapes, so strings stay in JSON. */
@@ -73,7 +60,7 @@ export function buildResetEmail(input: {
   name: string;
   url: string;
   locale: MailLocale;
-}): SimpleEmail {
+}): SystemMailMessage {
   const m = MESSAGES[input.locale];
   const greeting = fill(m.greeting, { name: input.name });
   const expiry = fill(m.expiry, { minutes: String(RESET_TOKEN_TTL_MINUTES) });
@@ -89,7 +76,14 @@ export function buildResetEmail(input: {
   </div>
 </div>`;
   const text = `${greeting}\n\n${m.body}\n\n${input.url}\n\n${expiry} ${m.ignore}\n`;
-  return { from: env.AUTH_EMAIL_FROM ?? "", to: input.to, subject: m.subject, html, text };
+  return {
+    from: env.AUTH_EMAIL_FROM ?? "",
+    to: input.to,
+    subject: m.subject,
+    html,
+    text,
+    kind: "password_reset",
+  };
 }
 
 /**
@@ -104,7 +98,7 @@ export function buildInvitationEmail(input: {
   url: string;
   expiresInDays: number;
   locale: MailLocale;
-}): SimpleEmail {
+}): SystemMailMessage {
   const m = INVITE_MESSAGES[input.locale];
   const values = {
     inviter: input.inviterName,
@@ -129,26 +123,48 @@ export function buildInvitationEmail(input: {
   </div>
 </div>`;
   const text = `${body}\n\n${input.url}\n\n${noAccount}\n\n${expiry} ${m.ignore}\n`;
-  return { from: notificationsEmailFrom() ?? "", to: input.to, subject, html, text };
+  return {
+    from: notificationsEmailFrom() ?? "",
+    to: input.to,
+    subject,
+    html,
+    text,
+    kind: "invitation",
+  };
 }
 
-/** SES seam so tests capture sends instead of stubbing the AWS SDK. */
+/** Mail seam so tests capture sends instead of stubbing the pipeline or the AWS SDK. */
 export interface SystemMailDeps {
-  send(message: SimpleEmail): Promise<void>;
+  send(message: SystemMailMessage): Promise<void>;
 }
 
+/**
+ * Account mail rides the team pipeline when a team holds the sender's
+ * verified domain (core sendSystemMail), else SESv2 Simple content as
+ * before. Clients are built per send: system mail is rare, so there is
+ * nothing worth caching.
+ */
 export const defaultSystemMailDeps: SystemMailDeps = {
-  // Client per send, like defaultSesDeps in routers/system.ts: resets are
-  // rare, so there is nothing worth caching.
-  send: (message) =>
-    sendSimpleEmail(
-      createSesSendClient({
-        region: env.AWS_REGION,
-        accessKeyId: env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-      }),
+  send: async (message) => {
+    await sendSystemMail(
+      {
+        db: getDb(),
+        keyring: getKeyring(),
+        isCloud: isCloudDeployment(),
+        enqueueEmailSend,
+        raw: (m) =>
+          sendSimpleEmail(
+            createSesSendClient({
+              region: env.AWS_REGION,
+              accessKeyId: env.AWS_ACCESS_KEY_ID,
+              secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+            }),
+            m,
+          ),
+      },
       message,
-    ),
+    );
+  },
 };
 
 /**
@@ -187,7 +203,7 @@ export async function sendPasswordResetEmail(
       to: data.user.email,
       name: data.user.name,
       url: data.url,
-      locale: pickLocale(request),
+      locale: localeFromRequest(request),
     });
     void deps.send(message).catch((error) => {
       console.error("Password reset email failed to send", error);

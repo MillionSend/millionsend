@@ -16,9 +16,11 @@ import {
   makeUnsubscribeToken,
   openAttachments,
   parseSingleSender,
+  purgedEmailBodyColumns,
   releaseDailyQuota,
   rewriteForTracking,
   SCORE_VERSION,
+  SYSTEM_MAIL_TAG,
   substituteUnsubscribeUrl,
   transitionQueueState,
   utcDay,
@@ -428,8 +430,12 @@ export async function sendEmail(
   // on, WE rewrite links through our redirect endpoint and inject our pixel
   // before the MIME is built — SES never touches the body. Both off ships the
   // raw links and no pixel (clean-links requirement).
-  const click = domain?.clickTracking ?? false;
-  const open = domain?.openTracking ?? false;
+  // Account mail (core sendSystemMail) carries live credentials — reset and
+  // verification links — so its anchors are never rewritten through the
+  // redirect and no pixel rides along, whatever the domain's toggles say.
+  const systemMail = email.tags?.[SYSTEM_MAIL_TAG] !== undefined;
+  const click = (domain?.clickTracking ?? false) && !systemMail;
+  const open = (domain?.openTracking ?? false) && !systemMail;
   let html = body.html;
   let text = body.text;
 
@@ -680,6 +686,17 @@ export async function sendEmail(
       target: [counter.teamId, counter.day],
       set: { sent: sql`${counter.sent} + 1` },
     });
+  // Account mail's body is gone the moment SES holds it: a reset link is a
+  // live credential for thirty minutes, and the row's body is otherwise
+  // readable by every member of the owning team, any full-access key and
+  // any connected app until the retention purge. Recipient, subject, status,
+  // events and counters stay; insights below evaluate the in-memory body.
+  if (systemMail) {
+    await db
+      .update(schema.emails)
+      .set(purgedEmailBodyColumns(new Date()))
+      .where(eq(schema.emails.id, email.id));
+  }
   // Insights are best-effort bookkeeping on an already-accepted send: a bug
   // here must never fail (and so retry) the delivery.
   try {

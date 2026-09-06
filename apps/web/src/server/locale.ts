@@ -16,3 +16,21 @@ export async function activeLocale(): Promise<AppLocale> {
     return DEFAULT_LOCALE;
   }
 }
+
+/**
+ * The locale of a bare request, for mail sent from an auth endpoint where
+ * next-intl's request scope does not exist: the NEXT_LOCALE cookie the app
+ * sets, then Accept-Language. Anything that isn't Portuguese reads English —
+ * the email locales mirror the dashboard's launch locales.
+ */
+export function localeFromRequest(request: Request | undefined): AppLocale {
+  const cookie = request?.headers.get("cookie")?.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/)?.[1];
+  const acceptLanguage = request?.headers.get("accept-language") ?? "";
+  for (const candidate of [cookie, ...acceptLanguage.split(",")]) {
+    const tag = candidate?.trim().toLowerCase();
+    if (!tag) continue;
+    if (tag.startsWith("pt")) return "pt-BR";
+    if (tag.startsWith("en")) return "en";
+  }
+  return DEFAULT_LOCALE;
+}

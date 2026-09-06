@@ -230,7 +230,12 @@ it("without a configured sender the mailer is a no-op", async () => {
   vi.stubEnv("NOTIFICATIONS_EMAIL_FROM", "");
   vi.stubEnv("AUTH_EMAIL_FROM", "");
   await expect(
-    createSystemMailer().send("x@example.com", { subject: "s", html: "<p>h</p>", text: "t" }),
+    createSystemMailer({ db, keyring, enqueueSend: async () => {} }).send("x@example.com", {
+      subject: "s",
+      html: "<p>h</p>",
+      text: "t",
+      kind: "quota.warning",
+    }),
   ).resolves.toBeUndefined();
 });
 

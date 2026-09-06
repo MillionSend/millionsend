@@ -85,7 +85,6 @@ const unsubscribe = env.APP_BASE_URL
   ? { secretKey: unsubscribeSecretKey, baseUrl: env.APP_BASE_URL }
   : undefined;
 const ses = createSesSender(env.AWS_REGION);
-const mailer = createSystemMailer();
 // SESv2 identity clients (GetEmailIdentity) for domain re-verification, cached
 // per region since identities live in the domain's region. Distinct from the
 // send client above (SendEmail); credentials fall back to the provider chain.
@@ -148,6 +147,9 @@ const enqueueSend = async (
     { dedupeKey: emailId, priority, ...(startAfter ? { startAfter } : {}) },
   );
 };
+
+// Account mail rides the pipeline, so the mailer needs the queue it enqueues into.
+const mailer = createSystemMailer({ db, keyring, enqueueSend });
 
 /**
  * Concurrent send lanes. One send waits on KMS, SES and a few writes (about a

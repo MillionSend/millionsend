@@ -163,6 +163,7 @@ export {
   fetchBroadcastInsights,
   fetchEmailInsights,
 } from "./email-insights-lookup.js";
+export { purgedEmailBodyColumns } from "./email-retention.js";
 export { ERASED_TOMBSTONE, type EraseRecipientResult, eraseRecipient } from "./erase-recipient.js";
 export { type SesEventsHealth, sesEventsHealth } from "./events-health.js";
 export { EMAIL_WORDMARK_URL, escapeHtml } from "./html.js";
@@ -256,6 +257,16 @@ export {
   type SuppressionReason,
   suppressionHashesFor,
 } from "./suppressions.js";
+export {
+  findSenderDomainOwner,
+  type SenderDomainOwner,
+  SYSTEM_MAIL_TAG,
+  type SystemMailKind,
+  type SystemMailMessage,
+  SystemMailRefused,
+  type SystemSendDeps,
+  sendSystemMail,
+} from "./system-mail.js";
 export {
   INVITE_EMAILS_PER_HOUR,
   INVITE_MAX_SENDS,
