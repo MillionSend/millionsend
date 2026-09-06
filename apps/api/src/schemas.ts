@@ -1180,13 +1180,43 @@ export const updateDomainRequestSchema = z
   .openapi("UpdateDomainRequest");
 
 const domainRecordSchema = z.object({
-  record: z.string(),
+  record: z
+    .string()
+    .describe(
+      "Which record this is: DKIM, SPF (the MAIL FROM MX and TXT rows), DMARC, or Tracking (the branded tracking CNAME, present once a tracking subdomain is set). Only the DKIM and SPF rows gate sending.",
+    ),
   name: z.string(),
   type: z.string(),
   ttl: z.string(),
-  status: z.string(),
+  status: z
+    .string()
+    .describe(
+      "not_started | pending | verified | failed. DKIM and SPF rows combine public DNS with the provider's verification: found in DNS but not yet confirmed reads pending, a different published value reads failed, no record reads not_started. DMARC reads verified when a policy covers the domain — its own or a parent domain's (see inherited_from) — and not_started when none does. Tracking reads verified once its CNAME resolves.",
+    ),
   value: z.string(),
   priority: z.number().optional(),
+  live: z
+    .enum(["found", "missing", "mismatch", "unknown"])
+    .optional()
+    .describe(
+      "What public DNS answers for this record right now: found, missing, mismatch (a different value is published) or unknown (the lookup did not conclude). Omitted when no live check ran (the create response).",
+    ),
+  detail: z
+    .string()
+    .optional()
+    .describe(
+      "One sentence explaining a row that is not verified: found but awaiting the provider, the value that is published instead, no record at the name, or which parent DMARC policy covers the domain. Omitted when there is nothing to add.",
+    ),
+  inherited_from: z
+    .string()
+    .optional()
+    .describe(
+      "DMARC only: the _dmarc name whose policy covers this domain when it has no record of its own (RFC 7489 organizational-domain fallback).",
+    ),
+  policy: z
+    .enum(["none", "quarantine", "reject"])
+    .optional()
+    .describe("DMARC only, alongside inherited_from: the inherited policy's p= value."),
 });
 
 const domainSchema = z.object({

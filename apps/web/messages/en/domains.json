@@ -22,14 +22,6 @@
     "pageOf": "Page 1 – {pages} of {total} domains",
     "noMatch": "No domains match the filters.",
     "clearFilters": "Clear filters",
-    "summary": {
-      "verified": "{count} verified",
-      "pending": "{count} pending",
-      "failed": "{count} failed",
-      "partial": "{count} partial",
-      "allIn": "all in {region}",
-      "regions": "{count} regions"
-    },
     "columns": {
       "domain": "Domain",
       "status": "Status",
@@ -165,6 +157,7 @@
     "dnsOnly": "DNS only",
     "dnsOnlyHint": "On Cloudflare, keep the proxy off for this record (grey cloud, \"DNS only\"). A proxied CNAME answers with Cloudflare's addresses instead of this target, and TLS for this host is served by MillionSend.",
     "inheritedDmarc": "No record at this name. Receivers fall back to <code>{from}</code> (<code>p={policy}</code>), which already covers this subdomain.",
+    "foundAwaitingProvider": "Record found in DNS; awaiting the provider's confirmation (usually minutes, up to 72 hours).",
     "goToProvider": "Go to {provider}",
     "moreActions": "More actions",
     "forwardInstructions": "Forward instructions",

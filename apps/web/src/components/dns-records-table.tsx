@@ -189,6 +189,12 @@ export function DnsRecordsTable({
               <RecordsTable showStatus={showStatus} showPriority={showPriority}>
                 {rows.map((record) => {
                   const name = domain ? zoneRelativeName(record.name, domain) : record.name;
+                  // Found in DNS with SES still pending is the one pending
+                  // state that needs no action, so the badge says so.
+                  const status = combineRecordStatus({
+                    live: record.live,
+                    sesGate: sesGateFromRecordStatus(record.status),
+                  });
                   return (
                     <tr key={`${record.type}-${record.name}-${record.value}`}>
                       <td>{record.type}</td>
@@ -209,10 +215,7 @@ export function DnsRecordsTable({
                       {showStatus ? (
                         <td style={{ whiteSpace: "nowrap" }}>
                           <RecordStatusBadge
-                            status={combineRecordStatus({
-                              live: record.live,
-                              sesGate: sesGateFromRecordStatus(record.status),
-                            })}
+                            status={status}
                             note={
                               record.inherited
                                 ? t.rich("detail.inheritedDmarc", {
@@ -229,7 +232,9 @@ export function DnsRecordsTable({
                                           .map(abbreviateDkim)
                                           .join("\n"),
                                       })
-                                  : undefined
+                                  : status === "pending" && record.live === "found"
+                                    ? t("detail.foundAwaitingProvider")
+                                    : undefined
                             }
                           />
                         </td>

@@ -19,29 +19,115 @@ import {
   type SesIdentityClient,
 } from "./domain-identity.js";
 
-/** A DNS checklist row with its SES-derived status; `null` = SES never checks it (DMARC). */
-export interface TrackedDnsRecord {
-  group: DnsRecordGroup;
-  type: "MX" | "TXT";
+/**
+ * One row of the domain's DNS checklist with every signal a surface renders:
+ * the expected record, SES's gate on it, and the live verdict where a lookup ran.
+ */
+export interface DnsChecklistRow {
+  group: DnsRecordGroup | "tracking";
+  type: "MX" | "TXT" | "CNAME";
   name: string;
   value: string;
   priority?: number;
+  /** SES's verification of the row; `null` = SES never checks it (DMARC, tracking CNAME) or was not asked. */
   status: "verified" | "pending" | "failed" | null;
+  live?: LiveDnsStatus;
+  /** On a live mismatch: what the name answered instead, one answer per line. */
+  found?: string;
+  /** This name is empty but the parent record governs it (DMARC organizational-domain fallback). */
+  inherited?: { name: string; policy: DmarcPolicy };
+}
+
+/** A live verdict addressed to its checklist row by type, name and value. */
+export interface LiveDnsRow {
+  type: string;
+  name: string;
+  value: string;
+  status: LiveDnsStatus;
+  found?: string | undefined;
+  inherited?: { name: string; policy: DmarcPolicy } | undefined;
+}
+
+const rowKey = (row: { type: string; name: string; value: string }) =>
+  `${row.type}\t${row.name}\t${row.value}`;
+
+/**
+ * THE one place the DNS checklist is assembled, so the dashboard table, the
+ * public API and the verification pass describe a record identically.
+ * `verification` null = SES not asked (a create response). `live` rows are
+ * matched by type+name+value; a row with no entry carries no live verdict.
+ * `dmarc` is RFC 7489 discovery for the DMARC row and wins over a live entry
+ * for it. The tracking CNAME is app-layer (its target is per deployment and it
+ * never gates status), so the caller decides whether the row exists.
+ */
+export function dnsChecklist(input: {
+  domain: {
+    name: string;
+    region: string;
+    mailFromSubdomain: string;
+    dkimSelector: string | null;
+    dkimPublicKey: string | null;
+  };
+  verification: DomainVerification | null;
+  live?: LiveDnsRow[] | undefined;
+  dmarc?: DmarcLookup | undefined;
+  tracking?: { name: string; value: string } | null | undefined;
+}): DnsChecklistRow[] {
+  const { domain, verification, live = [], dmarc, tracking } = input;
+  const rows: DnsChecklistRow[] = dnsRecordsForDomain({
+    domain: domain.name,
+    // Columns are nullable only for bare fixture inserts; the create flow
+    // always sets both. Falling back keeps a half-inserted row from throwing.
+    dkimSelector: domain.dkimSelector ?? DKIM_SELECTOR,
+    dkimPublicKey: domain.dkimPublicKey ?? "",
+    mailFromSubdomain: domain.mailFromSubdomain,
+    region: domain.region,
+  }).map((record) => ({
+    ...record,
+    // DMARC is recommended-only: SES never checks it, so it carries no state.
+    status: !verification
+      ? null
+      : record.group === "verification"
+        ? recordCheck(verification.dkimStatus)
+        : record.group === "sending"
+          ? recordCheck(verification.mailFromStatus)
+          : null,
+  }));
+  if (tracking) {
+    rows.push({
+      group: "tracking",
+      type: "CNAME",
+      name: tracking.name,
+      value: tracking.value,
+      status: null,
+    });
+  }
+  const liveByKey = new Map(live.map((row) => [rowKey(row), row]));
+  return rows.map((row) => {
+    if (row.group === "dmarc" && dmarc) {
+      return {
+        ...row,
+        live: dmarc.status,
+        ...(dmarc.status === "found" && dmarc.name !== row.name
+          ? { inherited: { name: dmarc.name, policy: dmarc.policy } }
+          : {}),
+      };
+    }
+    const entry = liveByKey.get(rowKey(row));
+    if (!entry) return row;
+    return {
+      ...row,
+      live: entry.status,
+      ...(entry.found ? { found: entry.found } : {}),
+      ...(entry.inherited ? { inherited: entry.inherited } : {}),
+    };
+  });
 }
 
 export interface DomainVerificationResult {
   status: DomainStatus;
-  liveDns: {
-    type: string;
-    name: string;
-    value: string;
-    status: LiveDnsStatus;
-    /** On `mismatch`: what the name answered instead, one answer per line. */
-    found?: string;
-    /** The row's own name is empty but this parent record governs it (DMARC organizational-domain fallback). */
-    inherited?: { name: string; policy: DmarcPolicy };
-  }[];
-  records: TrackedDnsRecord[];
+  liveDns: LiveDnsRow[];
+  records: DnsChecklistRow[];
   /** SES's raw cached verification, so a caller can surface it without a second GetEmailIdentity. */
   verification: DomainVerification;
   /** Per-record live verdicts in the domains.dns_records snapshot shape. */
@@ -77,58 +163,44 @@ export async function computeDomainVerification(
   },
 ): Promise<DomainVerificationResult> {
   const verification = await getDomainVerification(sesClient, { domain: domain.name });
-  const records: TrackedDnsRecord[] = dnsRecordsForDomain({
-    domain: domain.name,
-    // Columns are nullable only for bare fixture inserts; the create flow always
-    // sets both. Falling back keeps a half-inserted row from throwing here.
-    dkimSelector: domain.dkimSelector ?? DKIM_SELECTOR,
-    dkimPublicKey: domain.dkimPublicKey ?? "",
-    mailFromSubdomain: domain.mailFromSubdomain,
-    region: domain.region,
-  }).map((record) => ({
-    ...record,
-    // DMARC is recommended-only: SES never checks it, so it carries no state.
-    status:
-      record.group === "verification"
-        ? recordCheck(verification.dkimStatus)
-        : record.group === "sending"
-          ? recordCheck(verification.mailFromStatus)
-          : null,
-  }));
-
   // DMARC skips the exact-name check and rides RFC 7489 §6.6.3 discovery
   // (send domain, then the organizational domain): a subdomain sender covered
   // by the apex record reads found, since that is the policy receivers apply
   // to it. One extra TXT query per verification, never per send — send-time
   // insights read the persisted snapshot instead.
-  const checked = records.filter((record) => record.group !== "dmarc");
-  const [checkedLive, dmarc] = await Promise.all([
+  const checked = dnsChecklist({ domain, verification }).filter((row) => row.group !== "dmarc");
+  const [checks, dmarc] = await Promise.all([
     checkDnsRecordsDetailed(checked, resolver),
     lookupDmarc(domain.name, registrableDomain(domain.name), resolver),
   ]);
-  const checks = records.map((record) =>
-    record.group === "dmarc" ? { status: dmarc.status } : checkedLive[checked.indexOf(record)],
-  );
-  const live = checks.map((check) => check?.status);
-  const liveDns = records.map((record, i) => ({
-    type: record.type,
-    name: record.name,
-    value: record.value,
-    status: live[i] ?? "missing",
-    ...(checks[i]?.found ? { found: checks[i].found } : {}),
-    ...(record.group === "dmarc" && dmarc.status === "found" && dmarc.name !== record.name
-      ? { inherited: { name: dmarc.name, policy: dmarc.policy } }
-      : {}),
+  const records = dnsChecklist({
+    domain,
+    verification,
+    dmarc,
+    live: checked.map((row, i) => ({
+      type: row.type,
+      name: row.name,
+      value: row.value,
+      ...(checks[i] ?? { status: "unknown" }),
+    })),
+  });
+  const liveDns = records.map(({ type, name, value, live, found, inherited }) => ({
+    type,
+    name,
+    value,
+    status: live ?? "missing",
+    ...(found ? { found } : {}),
+    ...(inherited ? { inherited } : {}),
   }));
-  const dnsRecords = records.map((record, i) => ({
-    group: record.group,
-    name: record.name,
-    type: record.type,
-    status: live[i] ?? "unknown",
+  const dnsRecords = records.map(({ group, name, type, live }) => ({
+    group,
+    name,
+    type,
+    status: live ?? "unknown",
   }));
   const status = strictDomainStatus(
     verification.dkimStatus,
-    records.map((record, i) => ({ status: record.status, live: live[i] })),
+    records.map(({ status, live }) => ({ status, live })),
   );
   return { status, liveDns, records, verification, dnsRecords, dmarc };
 }

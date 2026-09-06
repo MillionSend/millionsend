@@ -305,6 +305,9 @@ async function callApi(
 
 const idOrEmail = z.string().min(1).describe("Contact id or email address");
 const enc = encodeURIComponent;
+/** How to read records[] on a domain response; shared by get_domain and verify_domain. */
+const RECORD_STATUS_NOTE =
+  "Only the DKIM and MAIL FROM (SPF) rows gate sending. The DMARC row is recommended, and reads verified when a parent-domain policy covers the subdomain (see inherited_from and policy). Each record's live field says what public DNS answers now; detail explains a pending or failed row.";
 
 /**
  * Tools are registered read-only first and only for scopes the token
@@ -678,8 +681,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       "get_domain",
       "domains:read",
       {
-        description:
-          "Get one sending domain with its DNS records (DKIM, MAIL FROM, DMARC, and the Tracking CNAME once a tracking subdomain is set) and per-record status.",
+        description: `Get one sending domain with its DNS records (DKIM, MAIL FROM, DMARC, and the Tracking CNAME once a tracking subdomain is set) and per-record status. ${RECORD_STATUS_NOTE}`,
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
         readOnly: true,
       },
@@ -1154,8 +1156,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
       "verify_domain",
       "domains:write",
       {
-        description:
-          "Re-check a domain's DNS records and SES verification, returning fresh status.",
+        description: `Re-check a domain's DNS records and SES verification, returning the domain with fresh per-record status. ${RECORD_STATUS_NOTE}`,
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
       },
       ({ id }) => api("POST", `/domains/${enc(id)}/verify`),

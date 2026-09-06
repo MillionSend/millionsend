@@ -16,7 +16,6 @@ import {
   isReservedSenderDomain,
   PLAN_DOMAIN_LIMIT,
 } from "@millionsend/core";
-import { recordCheck } from "@millionsend/core/domain-status";
 import { registrableDomain } from "@millionsend/core/org-domain";
 import { type Db, schema } from "@millionsend/db";
 import {
@@ -28,7 +27,7 @@ import {
   type DnsResolver,
   deleteDomainIdentity,
   disassociateIdentity,
-  dnsRecordsForDomain,
+  dnsChecklist,
   generateDkimKeyPair,
   getDomainVerification,
   lookupDmarc,
@@ -140,67 +139,24 @@ async function detectProvider(
   return null;
 }
 
-/** DNS checklist rows plus the optional branded-tracking CNAME the UI table renders. */
-type TrackedDnsRecord = {
-  group: "verification" | "sending" | "dmarc" | "tracking";
-  type: string;
-  name: string;
-  value: string;
-  priority?: number;
-  status: "verified" | "pending" | "failed" | null;
-};
-
 /**
- * The domain's expected DNS checklist with each row's SES-derived status,
- * plus the branded-tracking CNAME once a subdomain is set. Shared by the
- * records query (what to add) and verify (what to live-check).
+ * The branded-tracking CNAME row once a subdomain is set. Engagement tracking
+ * is app-layer: WE rewrite links and inject the open pixel, so the CNAME points
+ * at THIS app (the /t/c and /t/o handlers serve on any host). A deployment that
+ * cannot serve customer hostnames stops advertising the record, so a value
+ * stored earlier no longer asks for DNS that buys nothing.
  */
-function buildTrackedRecords(
-  domain: {
-    name: string;
-    dkimSelector: string | null;
-    dkimPublicKey: string | null;
-    mailFromSubdomain: string;
-    region: string;
-    trackingSubdomain: string | null;
-  },
-  verification: { dkimStatus: string; mailFromStatus: string },
-): TrackedDnsRecord[] {
-  const records: TrackedDnsRecord[] = dnsRecordsForDomain({
-    domain: domain.name,
-    // The columns are nullable only for bare fixture inserts; every row
-    // created through this router carries both values.
-    dkimSelector: domain.dkimSelector ?? DKIM_SELECTOR,
-    dkimPublicKey: domain.dkimPublicKey ?? "",
-    mailFromSubdomain: domain.mailFromSubdomain,
-    region: domain.region,
-  }).map((record) => ({
-    ...record,
-    // DMARC is recommended-only: SES never checks it, so it carries no state.
-    status:
-      record.group === "verification"
-        ? recordCheck(verification.dkimStatus)
-        : record.group === "sending"
-          ? recordCheck(verification.mailFromStatus)
-          : null,
-  }));
-
-  // Engagement tracking is app-layer: WE rewrite links and inject the open
-  // pixel, so a branded tracking subdomain CNAMEs to THIS app (the /t/c and
-  // /t/o handlers serve on any host). SES never checks it, so it carries no
-  // SES status — like DMARC — but the live DNS check does resolve it. A
-  // deployment that cannot serve customer hostnames stops advertising the
-  // record, so a value stored earlier no longer asks for DNS that buys nothing.
-  if (domain.trackingSubdomain && trackingSubdomainsSupported()) {
-    records.push({
-      group: "tracking",
-      type: "CNAME",
-      name: `${domain.trackingSubdomain}.${domain.name}`,
-      value: trackingCnameTarget(resolveBaseUrl(env.APP_BASE_URL)),
-      status: null,
-    });
-  }
-  return records;
+function trackingCname(domain: {
+  name: string;
+  trackingSubdomain: string | null;
+}): { type: "CNAME"; name: string; value: string } | null {
+  return domain.trackingSubdomain && trackingSubdomainsSupported()
+    ? {
+        type: "CNAME",
+        name: `${domain.trackingSubdomain}.${domain.name}`,
+        value: trackingCnameTarget(resolveBaseUrl(env.APP_BASE_URL)),
+      }
+    : null;
 }
 
 async function requireDomain(db: Db, teamId: string, id: string) {
@@ -417,34 +373,27 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
       // The DKIM TXT derives from the stored selector + public key (BYODKIM
       // keys never rotate behind our back); SES is only asked for statuses.
-      const resolver = deps.dns ?? nodeDnsResolver;
-      const [verification, provider, dmarc] = await Promise.all([
-        getDomainVerification(deps.clientForRegion(domain.region), { domain: domain.name }),
-        detectProvider(deps.resolveNs, domain.name),
-        lookupDmarc(domain.name, registrableDomain(domain.name), resolver),
-      ]);
-      const records = buildTrackedRecords(domain, verification);
       // Rows SES never checks (DMARC, tracking CNAME) have no stored gate, so a
       // page open would read them Pending until a Check DNS ran. Their live
       // verdict is read here instead — DMARC with the same organizational-domain
       // fallback the verify pass applies, so a refresh agrees with the check.
-      const tracking = records.find((record) => record.group === "tracking");
-      const trackingLive = tracking ? (await checkDnsRecords([tracking], resolver))[0] : undefined;
+      const resolver = deps.dns ?? nodeDnsResolver;
+      const tracking = trackingCname(domain);
+      const [verification, provider, dmarc, trackingLive] = await Promise.all([
+        getDomainVerification(deps.clientForRegion(domain.region), { domain: domain.name }),
+        detectProvider(deps.resolveNs, domain.name),
+        lookupDmarc(domain.name, registrableDomain(domain.name), resolver),
+        tracking ? checkDnsRecords([tracking], resolver).then(([status]) => status) : undefined,
+      ]);
       return {
         provider,
-        records: records.map((record) =>
-          record.group === "dmarc"
-            ? {
-                ...record,
-                live: dmarc.status,
-                ...(dmarc.status === "found" && dmarc.name !== record.name
-                  ? { inherited: { name: dmarc.name, policy: dmarc.policy } }
-                  : {}),
-              }
-            : record.group === "tracking" && trackingLive
-              ? { ...record, live: trackingLive }
-              : record,
-        ),
+        records: dnsChecklist({
+          domain,
+          verification,
+          dmarc,
+          tracking,
+          live: tracking && trackingLive ? [{ ...tracking, status: trackingLive }] : [],
+        }),
       };
     }),
 
@@ -462,18 +411,11 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       // The branded tracking CNAME never gates status, so computeDomainVerification
       // omits it — live-check it here so its row badge still reflects real DNS.
       let trackingResolved = false;
-      if (domain.trackingSubdomain) {
-        const cname = buildTrackedRecords(domain, verification).find((r) => r.group === "tracking");
-        if (cname) {
-          const [live] = await checkDnsRecords([cname], resolver);
-          liveDns.push({
-            type: cname.type,
-            name: cname.name,
-            value: cname.value,
-            status: live ?? "missing",
-          });
-          trackingResolved = live === "found";
-        }
+      const cname = trackingCname(domain);
+      if (cname) {
+        const [live] = await checkDnsRecords([cname], resolver);
+        liveDns.push({ ...cname, status: live ?? "missing" });
+        trackingResolved = live === "found";
       }
       const now = new Date();
       await ctx.db

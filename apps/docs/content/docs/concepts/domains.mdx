@@ -24,6 +24,19 @@ Two verification signals are shown side by side:
 - **Live DNS check** — MillionSend resolves each record itself and reports
   Found / Missing / Mismatch immediately.
 
+The API (`GET /domains/{id}`, `POST /domains/{id}/verify`, and the `get_domain`
+/ `verify_domain` MCP tools) reports the same picture per record in `records[]`.
+`status` uses the Resend vocabulary: for DKIM and MAIL FROM it combines the live
+check with SES — found in DNS but not yet confirmed by SES reads `pending`, a
+different published value reads `failed`, no record reads `not_started`. Only
+those rows gate sending. The DMARC row follows RFC 7489 discovery: it reads
+`verified` when a policy covers the domain, including a parent domain's record
+for a subdomain sender — then `inherited_from` names the `_dmarc` record that
+answered and `policy` carries its `p=` value — and `not_started` when none does.
+Every record also carries `live` (`found`, `missing`, `mismatch` or `unknown`,
+what public DNS answers right now) and, when a row is not verified, a one-line
+`detail` saying why.
+
 ## Regions
 
 Each deployment provisions identities in a single SES region — its

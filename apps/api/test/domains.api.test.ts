@@ -524,23 +524,147 @@ describe("GET /domains", () => {
   });
 });
 
+type WireRecord = {
+  record: string;
+  name: string;
+  status: string;
+  live?: string;
+  detail?: string;
+  inherited_from?: string;
+  policy?: string;
+};
+
+/** A resolver publishing exactly the SES checklist for `domain`, plus any extra TXT answers. */
+function dnsFor(domain: string, dkimPublicKey: string, txt: Record<string, string[]> = {}) {
+  return fakeDns({
+    resolveTxt: async (name: string) => {
+      if (name in txt) return [txt[name] ?? []];
+      if (name === `millionsend._domainkey.${domain}`)
+        return [[`v=DKIM1; k=rsa; p=${dkimPublicKey}`]];
+      if (name === `send.${domain}`) return [["v=spf1 include:amazonses.com ~all"]];
+      return [];
+    },
+    resolveMx: async (name: string) =>
+      name === `send.${domain}`
+        ? [{ priority: 10, exchange: "feedback-smtp.sa-east-1.amazonses.com" }]
+        : [],
+  });
+}
+
+async function dkimKeyOf(id: string): Promise<string> {
+  const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+  return row?.dkimPublicKey ?? "";
+}
+
 describe("GET /domains/{id}", () => {
-  it("returns records with SES-derived statuses", async () => {
-    const app = makeApp(fakeSes({ dkimStatus: "SUCCESS", verifiedForSending: true }));
-    const { id } = await createDomain(app, "get.example.com");
+  async function getRecords(app: ReturnType<typeof createApi>, id: string) {
     const res = await call(app, fullKey, "GET", `/domains/${id}`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      object: string;
-      records: { record: string; status: string }[];
-    };
+    const body = (await res.json()) as { object: string; status: string; records: WireRecord[] };
     expect(body.object).toBe("domain");
-    expect(body.records.find((r) => r.record === "DKIM")?.status).toBe("verified");
-    expect(
-      body.records.filter((r) => r.record === "SPF").every((r) => r.status === "verified"),
-    ).toBe(true);
-    // SES never checks DMARC.
-    expect(body.records.find((r) => r.record === "DMARC")?.status).toBe("not_started");
+    return body;
+  }
+
+  it("combines SES with live DNS per record, the way the dashboard badge does", async () => {
+    const { id } = await createDomain(makeApp(fakeSes()), "get.example.com");
+    const app = makeApp({
+      client: fakeSes({ dkimStatus: "SUCCESS", verifiedForSending: true }).client,
+      dns: dnsFor("get.example.com", await dkimKeyOf(id)),
+    });
+    const { records, status } = await getRecords(app, id);
+    // A read reports, never persists: the stored status stays pending.
+    expect(status).toBe("pending");
+    expect(records.find((r) => r.record === "DKIM")).toMatchObject({
+      status: "verified",
+      live: "found",
+    });
+    expect(records.filter((r) => r.record === "SPF").every((r) => r.status === "verified")).toBe(
+      true,
+    );
+    expect(records.find((r) => r.record === "SPF")).not.toHaveProperty("detail");
+    // No DMARC anywhere: recommended, so not_started rather than failed.
+    expect(records.find((r) => r.record === "DMARC")).toEqual({
+      record: "DMARC",
+      name: "_dmarc.get.example.com",
+      type: "TXT",
+      ttl: "Auto",
+      status: "not_started",
+      value: '"v=DMARC1; p=none;"',
+      live: "missing",
+      detail:
+        "No DMARC policy at this name or at _dmarc.example.com; recommended, not required for sending.",
+    });
+  });
+
+  it("reads DMARC published only at the organizational domain as verified, naming the inherited record", async () => {
+    const { id } = await createDomain(makeApp(fakeSes()), "sub.example.com");
+    const app = makeApp({
+      client: fakeSes({ dkimStatus: "SUCCESS", verifiedForSending: true }).client,
+      dns: dnsFor("sub.example.com", await dkimKeyOf(id), {
+        "_dmarc.example.com": ["v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com"],
+      }),
+    });
+    const { records } = await getRecords(app, id);
+    expect(records.find((r) => r.record === "DMARC")).toMatchObject({
+      status: "verified",
+      live: "found",
+      inherited_from: "_dmarc.example.com",
+      policy: "quarantine",
+      detail:
+        "No record at this name; receivers apply _dmarc.example.com (p=quarantine), which covers this subdomain.",
+    });
+  });
+
+  it("an apex sender missing DMARC is told about its own name only", async () => {
+    const { id } = await createDomain(makeApp(fakeSes()), "apex-example.com");
+    const app = makeApp({
+      client: fakeSes().client,
+      dns: dnsFor("apex-example.com", await dkimKeyOf(id)),
+    });
+    const { records } = await getRecords(app, id);
+    expect(records.find((r) => r.record === "DMARC")).toMatchObject({
+      status: "not_started",
+      live: "missing",
+      detail: "No DMARC policy at this name; recommended, not required for sending.",
+    });
+  });
+
+  it("a DKIM record found in DNS while SES is still pending reads pending and says so", async () => {
+    const { id } = await createDomain(makeApp(fakeSes()), "waiting.example.com");
+    const app = makeApp({
+      client: fakeSes().client,
+      dns: dnsFor("waiting.example.com", await dkimKeyOf(id)),
+    });
+    const { records } = await getRecords(app, id);
+    expect(records.find((r) => r.record === "DKIM")).toMatchObject({
+      status: "pending",
+      live: "found",
+      detail:
+        "Record found in DNS; the provider has not confirmed it yet (usually minutes, up to 72 hours).",
+    });
+  });
+
+  it("a wrong published value reads failed and carries what DNS answered", async () => {
+    const { id } = await createDomain(makeApp(fakeSes()), "wrong.example.com");
+    const app = makeApp({
+      client: fakeSes({ dkimStatus: "SUCCESS", verifiedForSending: true }).client,
+      dns: dnsFor("wrong.example.com", await dkimKeyOf(id), {
+        "millionsend._domainkey.wrong.example.com": ["v=DKIM1; k=rsa; p=STALEKEY"],
+      }),
+    });
+    const { records } = await getRecords(app, id);
+    expect(records.find((r) => r.record === "DKIM")).toMatchObject({
+      status: "failed",
+      live: "mismatch",
+      detail: "A different value is published: v=DKIM1; k=rsa; p=STALEKEY",
+    });
+    // A record nobody published: not_started, no live-found note.
+    const missing = await getRecords(makeApp(fakeSes({ dkimStatus: "SUCCESS" })), id);
+    expect(missing.records.find((r) => r.record === "DKIM")).toMatchObject({
+      status: "not_started",
+      live: "missing",
+      detail: "No record at this name.",
+    });
   });
 
   it("404s a foreign team's domain", async () => {

@@ -13,20 +13,25 @@ import {
   PLAN_DOMAIN_LIMIT,
   recordAudit,
 } from "@millionsend/core";
-import { recordCheck } from "@millionsend/core/domain-status";
+import {
+  combineRecordStatus,
+  type RecordStatus,
+  sesGateFromRecordStatus,
+} from "@millionsend/core/domain-status";
+import { registrableDomain } from "@millionsend/core/org-domain";
 import { type Db, schema } from "@millionsend/db";
 import {
-  checkDnsRecords,
+  checkDnsRecordsDetailed,
   computeDomainVerification,
   createDomainIdentity,
   DKIM_SELECTOR,
+  type DmarcPolicy,
+  type DnsChecklistRow,
   type DnsResolver,
-  type DomainVerification,
   deleteDomainIdentity,
   disassociateIdentity,
-  dnsRecordsForDomain,
+  dnsChecklist,
   generateDkimKeyPair,
-  getDomainVerification,
   nodeDnsResolver,
   provisionDomainTenant,
   SES_REGIONS,
@@ -80,14 +85,103 @@ type DomainRow = typeof schema.domains.$inferSelect;
 const wireDomainStatus = (status: string): string =>
   status === "temporary_failure" ? "pending" : status;
 
-// SES-checklist group → the SDK's record discriminant. DMARC is a deliberate
-// superset: the SDK union omits it, but hiding a recommended record from API
-// consumers the dashboard shows would make the two surfaces disagree.
-const RECORD_KIND: Record<string, string> = {
+// SES-checklist group → the SDK's record discriminant. DMARC and Tracking are
+// a deliberate superset: the SDK union omits them, but hiding rows the
+// dashboard shows would make the two surfaces disagree.
+const RECORD_KIND: Record<DnsChecklistRow["group"], string> = {
   verification: "DKIM",
   sending: "SPF",
   dmarc: "DMARC",
+  tracking: "Tracking",
 };
+
+/** The dashboard badge's verdict in the SDK's record-status vocabulary. */
+const WIRE_RECORD_STATUS: Record<RecordStatus, string> = {
+  verified: "verified",
+  pending: "pending",
+  missing: "not_started",
+  mismatch: "failed",
+};
+
+type WireVerdict = {
+  status: string;
+  detail?: string | undefined;
+  inherited_from?: string;
+  policy?: DmarcPolicy;
+};
+
+const liveDetail = (row: DnsChecklistRow): string | undefined =>
+  row.live === "mismatch" && row.found
+    ? `A different value is published: ${row.found}`
+    : row.live === "missing"
+      ? "No record at this name."
+      : undefined;
+
+/**
+ * DKIM/MAIL FROM read exactly what the dashboard badge shows (live DNS gated
+ * by SES). DMARC and the tracking CNAME have no SES gate, so live DNS decides;
+ * DMARC found only at the organizational domain still reads verified, since
+ * that is the policy receivers apply, and names the record that answered.
+ */
+function wireVerdict(row: DnsChecklistRow, domainName: string): WireVerdict {
+  if (row.group === "dmarc") {
+    if (row.live === "found") {
+      return row.inherited
+        ? {
+            status: "verified",
+            inherited_from: row.inherited.name,
+            policy: row.inherited.policy,
+            detail: `No record at this name; receivers apply ${row.inherited.name} (p=${row.inherited.policy}), which covers this subdomain.`,
+          }
+        : { status: "verified" };
+    }
+    if (row.live === "unknown") return { status: "pending" };
+    const root = `_dmarc.${registrableDomain(domainName)}`;
+    return {
+      status: "not_started",
+      detail: `No DMARC policy at this name${root === row.name ? "" : ` or at ${root}`}; recommended, not required for sending.`,
+    };
+  }
+  if (row.group === "tracking") {
+    return { status: row.live === "found" ? "verified" : "pending", detail: liveDetail(row) };
+  }
+  const verdict = combineRecordStatus({
+    live: row.live,
+    sesGate: sesGateFromRecordStatus(row.status),
+  });
+  return {
+    status: WIRE_RECORD_STATUS[verdict],
+    detail:
+      verdict === "pending" && row.live === "found"
+        ? "Record found in DNS; the provider has not confirmed it yet (usually minutes, up to 72 hours)."
+        : liveDetail(row),
+  };
+}
+
+/**
+ * The domain's DNS checklist in the SDK's record shape. `checked` false = SES
+ * not asked and no DNS resolved (the create response): every row reads
+ * not_started with nothing to explain.
+ */
+function wireRecords(rows: DnsChecklistRow[], domainName: string, checked: boolean) {
+  return rows.map((row) => {
+    const { status, detail, ...inherited }: WireVerdict = checked
+      ? wireVerdict(row, domainName)
+      : { status: "not_started" };
+    return {
+      record: RECORD_KIND[row.group],
+      name: row.name,
+      type: row.type,
+      ttl: "Auto",
+      status,
+      value: row.value,
+      ...(row.priority !== undefined ? { priority: row.priority } : {}),
+      ...(checked && row.live ? { live: row.live } : {}),
+      ...(detail ? { detail } : {}),
+      ...inherited,
+    };
+  });
+}
 
 const toWire = (row: DomainRow) => ({
   id: row.id,
@@ -159,61 +253,6 @@ function trackingSettingsError(
 }
 
 /**
- * The domain's DNS checklist in the SDK's record shape. `verification` null =
- * SES not asked (create response): every row reads not_started. DMARC is never
- * checked by SES, so it always reads not_started; the tracking CNAME reads
- * pending until a verify or the reverify sweep sees it resolve, then verified.
- */
-function wireRecords(
-  domain: DomainRow,
-  verification: DomainVerification | null,
-  deps: Pick<ApiDeps, "appBaseUrl" | "trackingSubdomains">,
-) {
-  const status = (group: string): string => {
-    if (!verification) return "not_started";
-    if (group === "verification") return recordCheck(verification.dkimStatus);
-    if (group === "sending") return recordCheck(verification.mailFromStatus);
-    return "not_started";
-  };
-  const records = dnsRecordsForDomain({
-    domain: domain.name,
-    // Columns are nullable only for bare fixture inserts; the create flow
-    // always sets both.
-    dkimSelector: domain.dkimSelector ?? DKIM_SELECTOR,
-    dkimPublicKey: domain.dkimPublicKey ?? "",
-    mailFromSubdomain: domain.mailFromSubdomain,
-    region: domain.region,
-  }).map((r) => ({
-    record: RECORD_KIND[r.group] ?? r.group,
-    name: r.name,
-    type: r.type as string,
-    ttl: "Auto",
-    status: status(r.group),
-    value: r.value,
-    ...(r.priority !== undefined ? { priority: r.priority } : {}),
-  }));
-  // Engagement tracking is app-layer: the branded CNAME points at THIS app
-  // host, not SES — so it only exists once APP_BASE_URL names a real host, and
-  // only where this deployment can actually serve a customer hostname.
-  if (domain.trackingSubdomain && deps.appBaseUrl && deps.trackingSubdomains !== false) {
-    records.push({
-      record: "Tracking",
-      name: `${domain.trackingSubdomain}.${domain.name}`,
-      type: "CNAME",
-      ttl: "Auto",
-      // The 72h clock is cleared the first time the CNAME is seen to resolve.
-      status: !verification
-        ? "not_started"
-        : domain.trackingSubdomainSetAt
-          ? "pending"
-          : "verified",
-      value: trackingCnameTarget(deps.appBaseUrl),
-    });
-  }
-  return records;
-}
-
-/**
  * The one SES region this deployment provisions identities in — the same
  * value the dashboard form reads as system.features.region. The configuration
  * set, SNS topics and tenants are regional, so a domain anywhere else would
@@ -253,6 +292,50 @@ export function registerDomainRoutes(
   // cloud caps it per team so one tenant cannot burn the account's
   // CreateEmailIdentity throttle for everyone.
   const createLimited = createFixedWindowLimiter(DOMAIN_CREATE_LIMIT_PER_HOUR, 3_600_000);
+
+  // Engagement tracking is app-layer: the branded CNAME points at THIS app
+  // host, not SES — so it only exists once APP_BASE_URL names a real host, and
+  // only where this deployment can actually serve a customer hostname.
+  const trackingCname = (
+    domain: DomainRow,
+  ): { type: "CNAME"; name: string; value: string } | null =>
+    domain.trackingSubdomain && deps.appBaseUrl && deps.trackingSubdomains !== false
+      ? {
+          type: "CNAME",
+          name: `${domain.trackingSubdomain}.${domain.name}`,
+          value: trackingCnameTarget(deps.appBaseUrl),
+        }
+      : null;
+
+  /**
+   * The shared source of truth the dashboard verify and the worker cron also
+   * run — SES status + live DNS folded into the strict stored status — plus a
+   * live check of the tracking CNAME, which never gates status so
+   * computeDomainVerification omits it. Every single-domain read runs this, so
+   * the API describes each record the way the dashboard table does.
+   */
+  async function liveChecklist(domain: DomainRow) {
+    const resolver = ses.dns ?? nodeDnsResolver;
+    const tracking = trackingCname(domain);
+    const [result, trackingCheck] = await Promise.all([
+      computeDomainVerification(ses.clientForRegion(domain.region), resolver, domain),
+      tracking ? checkDnsRecordsDetailed([tracking], resolver).then(([check]) => check) : undefined,
+    ]);
+    const rows = dnsChecklist({
+      domain,
+      verification: result.verification,
+      tracking,
+      live:
+        tracking && trackingCheck
+          ? [...result.liveDns, { ...tracking, ...trackingCheck }]
+          : result.liveDns,
+    });
+    return {
+      result,
+      records: wireRecords(rows, domain.name, true),
+      trackingFound: trackingCheck?.status === "found",
+    };
+  }
 
   app.openapi(
     createRoute({
@@ -405,7 +488,17 @@ export function registerDomainRoutes(
         target: { type: "domain", id: row.id },
         metadata: { name: row.name, region },
       });
-      return c.json({ ...toWire(row), records: wireRecords(row, null, deps) }, 200);
+      return c.json(
+        {
+          ...toWire(row),
+          records: wireRecords(
+            dnsChecklist({ domain: row, verification: null, tracking: trackingCname(row) }),
+            row.name,
+            false,
+          ),
+        },
+        200,
+      );
     },
   );
 
@@ -472,19 +565,10 @@ export function registerDomainRoutes(
       const auth = c.get("auth");
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
-      // The DKIM TXT derives from the stored selector + public key; SES is
-      // only asked for the per-record verification statuses.
-      const verification = await getDomainVerification(ses.clientForRegion(domain.region), {
-        domain: domain.name,
-      });
-      return c.json(
-        {
-          object: "domain" as const,
-          ...toWire(domain),
-          records: wireRecords(domain, verification, deps),
-        },
-        200,
-      );
+      // A read: the fresh verdict is reported, never persisted — verify and
+      // the reverify sweep own the stored status.
+      const { records } = await liveChecklist(domain);
+      return c.json({ object: "domain" as const, ...toWire(domain), records }, 200);
     },
   );
 
@@ -505,37 +589,8 @@ export function registerDomainRoutes(
       const auth = c.get("auth");
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
-      // The shared source of truth the dashboard verify and the worker cron
-      // also run: SES status + live DNS folded into the strict stored status
-      // the send gate keys off.
-      const resolver = ses.dns ?? nodeDnsResolver;
-      const result = await computeDomainVerification(
-        ses.clientForRegion(domain.region),
-        resolver,
-        domain,
-      );
-      const { status, verification } = result;
-      // The branded tracking CNAME never gates status, so computeDomainVerification
-      // omits it. Seeing it resolve clears the 72h clock here, which is what lets
-      // the worker serve links through it without waiting for the reverify sweep.
-      const cnameFound =
-        domain.trackingSubdomain &&
-        domain.trackingSubdomainSetAt &&
-        deps.appBaseUrl &&
-        deps.trackingSubdomains !== false
-          ? (
-              await checkDnsRecords(
-                [
-                  {
-                    type: "CNAME",
-                    name: `${domain.trackingSubdomain}.${domain.name}`,
-                    value: trackingCnameTarget(deps.appBaseUrl),
-                  },
-                ],
-                resolver,
-              )
-            )[0] === "found"
-          : false;
+      const { result, records, trackingFound } = await liveChecklist(domain);
+      const { status } = result;
       const now = new Date();
       await db
         .update(d)
@@ -546,23 +601,22 @@ export function registerDomainRoutes(
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
-      // Scoped to the label that was checked: a subdomain changed while the DNS
-      // lookups ran has its own fresh clock, which this pass must not clear.
-      const trackingResolved =
-        cnameFound &&
-        (
-          await db
-            .update(d)
-            .set({ trackingSubdomainSetAt: null })
-            .where(
-              and(
-                eq(d.id, domain.id),
-                eq(d.teamId, auth.teamId),
-                eq(d.trackingSubdomain, domain.trackingSubdomain ?? ""),
-              ),
-            )
-            .returning({ id: d.id })
-        ).length > 0;
+      // Seeing the tracking CNAME resolve clears its 72h clock, which is what
+      // lets the worker serve links through it without waiting for the reverify
+      // sweep. Scoped to the label that was checked: a subdomain changed while
+      // the DNS lookups ran has its own fresh clock, which this pass must not clear.
+      if (trackingFound && domain.trackingSubdomainSetAt) {
+        await db
+          .update(d)
+          .set({ trackingSubdomainSetAt: null })
+          .where(
+            and(
+              eq(d.id, domain.id),
+              eq(d.teamId, auth.teamId),
+              eq(d.trackingSubdomain, domain.trackingSubdomain ?? ""),
+            ),
+          );
+      }
       if (status === "verified" && domain.status !== "verified") {
         await recordAudit(db, {
           teamId: auth.teamId,
@@ -574,20 +628,7 @@ export function registerDomainRoutes(
       }
       // Full object with per-record status — the promised "fresh status"
       // without a get_domain round-trip. Additive over the SDK's { id }.
-      const fresh = {
-        ...domain,
-        status,
-        verifiedAt: status === "verified" && !domain.verifiedAt ? now : domain.verifiedAt,
-        ...(trackingResolved ? { trackingSubdomainSetAt: null } : {}),
-      };
-      return c.json(
-        {
-          object: "domain" as const,
-          ...toWire(fresh),
-          records: wireRecords(fresh, verification, deps),
-        },
-        200,
-      );
+      return c.json({ object: "domain" as const, ...toWire({ ...domain, status }), records }, 200);
     },
   );
 
@@ -664,8 +705,8 @@ export function registerDomainRoutes(
           .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
       }
       // Full object so the caller sees the settings it just changed —
-      // additive over the SDK's { id }. Records come from SES's cached
-      // verification, same as GET.
+      // additive over the SDK's { id }. Records are read the same way GET
+      // reads them, for the subdomain that was just set.
       const updated = {
         ...domain,
         openTracking: set.openTracking ?? domain.openTracking,
@@ -677,17 +718,8 @@ export function registerDomainRoutes(
             ? set.trackingSubdomainSetAt
             : domain.trackingSubdomainSetAt,
       };
-      const verification = await getDomainVerification(ses.clientForRegion(domain.region), {
-        domain: domain.name,
-      });
-      return c.json(
-        {
-          object: "domain" as const,
-          ...toWire(updated),
-          records: wireRecords(updated, verification, deps),
-        },
-        200,
-      );
+      const { records } = await liveChecklist(updated);
+      return c.json({ object: "domain" as const, ...toWire(updated), records }, 200);
     },
   );
 

@@ -40,8 +40,10 @@ export {
 } from "./domain-identity.js";
 export {
   computeDomainVerification,
+  type DnsChecklistRow,
   type DomainVerificationResult,
-  type TrackedDnsRecord,
+  dnsChecklist,
+  type LiveDnsRow,
   verificationDbPatch,
 } from "./domain-verification.js";
 export { createKeyringFromEnv, type KeyringEnv } from "./kms.js";

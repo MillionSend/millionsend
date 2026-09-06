@@ -24,6 +24,20 @@ Dois sinais de verificação aparecem lado a lado:
 - **Checagem de DNS ao vivo** — o MillionSend resolve cada registro por conta
   própria e reporta Encontrado / Faltando / Divergente imediatamente.
 
+A API (`GET /domains/{id}`, `POST /domains/{id}/verify` e as ferramentas MCP
+`get_domain` / `verify_domain`) reporta o mesmo quadro por registro em
+`records[]`. O `status` usa o vocabulário do Resend: para DKIM e MAIL FROM ele
+combina a checagem ao vivo com o SES — encontrado no DNS mas ainda não
+confirmado pelo SES lê `pending`, um valor publicado diferente lê `failed`,
+nenhum registro lê `not_started`. Só essas linhas condicionam o envio. A linha
+DMARC segue a descoberta da RFC 7489: lê `verified` quando uma política cobre o
+domínio, inclusive o registro do domínio pai para um subdomínio remetente —
+nesse caso `inherited_from` nomeia o registro `_dmarc` que respondeu e `policy`
+traz o seu `p=` — e `not_started` quando nenhuma cobre. Todo registro também
+traz `live` (`found`, `missing`, `mismatch` ou `unknown`: o que o DNS público
+responde agora) e, quando a linha não está verificada, um `detail` de uma linha
+dizendo por quê.
+
 ## Regiões
 
 Cada instalação provisiona identidades em uma única região do SES — a sua
