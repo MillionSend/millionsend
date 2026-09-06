@@ -12,6 +12,7 @@ import { Select, type SelectOption } from "@/components/select";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { type BadgeTone, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { maskApiKey } from "@/lib/format";
 import { httpMethodTone } from "@/lib/http-method-tone";
@@ -145,6 +146,7 @@ export default function LogsPage() {
       label: key.name,
       hint: maskApiKey(key.tokenPrefix, key.last4),
       group: t("list.apiKeys"),
+      sub: true,
       ...(key.revoked ? { badge: { label: t("list.revoked"), tone: "neutral" as const } } : {}),
     })),
     {
@@ -156,6 +158,7 @@ export default function LogsPage() {
       value: encodeLogSource("mcp", app.clientId),
       label: app.name ?? app.clientId,
       group: t("list.sources.mcp"),
+      sub: true,
     })),
   ];
   const headers: [string, string, string, string, string] = [
@@ -282,14 +285,21 @@ export default function LogsPage() {
                     </Link>
                   </td>
                   <td>
-                    <span className="ms-badge ms-badge-neutral">
-                      {t(`list.sources.${row.apiKeyId ? "api_key" : "mcp"}`)}
-                    </span>
-                    {callerNames.has(row.apiKeyId ?? row.oauthClientId ?? "") ? (
-                      <span className="ms-log-caller">
-                        {callerNames.get(row.apiKeyId ?? row.oauthClientId ?? "")}
-                      </span>
-                    ) : null}
+                    {(() => {
+                      const pill = (
+                        <span className="ms-badge ms-badge-neutral">
+                          {t(`list.sources.${row.apiKeyId ? "api_key" : "mcp"}`)}
+                        </span>
+                      );
+                      const caller = callerNames.get(row.apiKeyId ?? row.oauthClientId ?? "");
+                      return caller ? (
+                        <Tooltip text={caller} inline>
+                          {pill}
+                        </Tooltip>
+                      ) : (
+                        pill
+                      );
+                    })()}
                   </td>
                   <td className="ms-mono">
                     <span style={{ color: statusCodeColor(row.statusCode) }}>{row.statusCode}</span>

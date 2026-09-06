@@ -18,6 +18,8 @@ export interface SelectOption {
   badge?: { label: string; tone: "success" | "info" | "warn" | "danger" | "neutral" };
   /** Section heading drawn above the first row of each run of options sharing it. */
   group?: string;
+  /** A member of its group rather than the group itself: indented and quieter, so "All API keys" reads as the parent of the keys under it. */
+  sub?: boolean;
 }
 
 /* Search input appears only when the list is long enough for scanning to hurt. */
@@ -387,7 +389,13 @@ export function SelectOptionList({
         role="option"
         aria-selected={option.value === value}
         tabIndex={-1}
-        className={index === activeIndex ? "ms-menu-item active" : "ms-menu-item"}
+        className={[
+          "ms-menu-item",
+          option.sub ? "ms-menu-item-sub" : "",
+          index === activeIndex ? "active" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         onMouseEnter={() => onHover(index)}
         onClick={() => onPick(option.value)}
       >
