@@ -102,7 +102,7 @@ describe("POST /api-keys", () => {
         .where(eq(schema.apiRequests.path, "/api-keys"));
       const created = logs.find((l) => l.method === "POST" && l.statusCode === 200);
       expect(created).toBeDefined();
-      expect(created?.responseBody).toBeNull();
+      expect(created?.responseBody).toMatchObject({ id: body.id, token: "[redacted]" });
       expect(JSON.stringify(logs)).not.toContain(body.token);
     });
   });

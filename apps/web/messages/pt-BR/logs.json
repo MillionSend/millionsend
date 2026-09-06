@@ -37,7 +37,9 @@
     "id": "ID",
     "request": "Requisição",
     "response": "Resposta",
-    "requestNotStored": "Corpos de requisição não são armazenados.",
-    "responseNotStored": "Só respostas de erro (4xx/5xx) são armazenadas."
+    "requestNotStored": "Nenhum corpo de requisição armazenado: a requisição não tinha corpo ou ele não era JSON.",
+    "responseNotStored": "Nenhum corpo de resposta armazenado: a resposta não tinha corpo ou ele não era JSON.",
+    "bodyTruncated": "Corpo acima de 64 KB não armazenado ({size}).",
+    "membersHint": "Requisição e resposta ficam visíveis só para proprietários e administradores."
   }
 }

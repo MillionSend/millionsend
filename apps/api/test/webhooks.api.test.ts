@@ -123,8 +123,7 @@ describe("POST /webhooks", () => {
         .where(eq(schema.apiRequests.path, "/webhooks"));
       const entry = logs.find((l) => l.method === "POST" && l.statusCode === 200);
       expect(entry).toBeDefined();
-      // Success responses are never stored, so the secret cannot land here.
-      expect(entry?.responseBody).toBeNull();
+      expect(entry?.responseBody).toMatchObject({ signing_secret: "[redacted]" });
       expect(JSON.stringify(logs)).not.toContain(created.signing_secret);
     });
   });

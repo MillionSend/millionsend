@@ -37,7 +37,9 @@
     "id": "ID",
     "request": "Request",
     "response": "Response",
-    "requestNotStored": "Request bodies are not stored.",
-    "responseNotStored": "Only error responses (4xx/5xx) are stored."
+    "requestNotStored": "No request body stored: the request had none, or it was not JSON.",
+    "responseNotStored": "No response body stored: the response had none, or it was not JSON.",
+    "bodyTruncated": "Body over 64 KB not stored ({size}).",
+    "membersHint": "Bodies are visible to owners and admins."
   }
 }

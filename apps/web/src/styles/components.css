@@ -1806,6 +1806,24 @@ summary:focus-visible,
 .ms-hl .hljs-tag .hljs-name {
   color: var(--ms-info);
 }
+/* Request inspector (components/json-view.tsx): ids that resolve to a
+   dashboard resource become chips; redaction placeholders recede. The focus
+   ring comes from the global a:focus-visible rule. */
+.ms-hl .ms-json-link {
+  padding: 1px 5px;
+  border-radius: var(--ms-r-chip);
+  background: color-mix(in srgb, var(--ms-bone) 7%, var(--ms-inset));
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  text-decoration: none;
+}
+.ms-hl .ms-json-link:hover {
+  text-decoration: underline;
+}
+.ms-hl .ms-json-marker {
+  color: var(--ms-faint);
+  font-style: italic;
+}
 
 /* One-shot attention pulse for a section the user was just navigated to. */
 .ms-attention {

@@ -426,15 +426,20 @@ describe("tools", () => {
     const list = resultJson(listed) as { data: Array<{ id: string }>; has_more: boolean };
     expect(list.data.map((e) => e.id)).toContain(id);
 
-    // The in-process REST call is logged like any API request: metadata
-    // only, no body, and no key to attribute (OAuth caller).
+    // The in-process REST call is logged like any API request: the tool's
+    // body, redacted, and no key to attribute (OAuth caller).
     await vi.waitFor(async () => {
       const logs = await db
         .select()
         .from(schema.apiRequests)
         .where(and(eq(schema.apiRequests.teamId, teamId), eq(schema.apiRequests.path, "/emails")));
       expect(logs.length).toBeGreaterThan(0);
-      expect(logs[0]).toMatchObject({ requestBody: null, apiKeyId: null, method: "POST" });
+      expect(logs[0]).toMatchObject({
+        requestBody: { to: ["delivered@example.com"], subject: "mcp hello", html: "[html, 9 B]" },
+        responseBody: { id },
+        apiKeyId: null,
+        method: "POST",
+      });
       expect(logs[0]?.durationMs).toBeGreaterThanOrEqual(0);
     });
     await client.close();

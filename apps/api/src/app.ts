@@ -82,6 +82,7 @@ import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { secureHeaders } from "hono/secure-headers";
 import { INTERNAL_AUTH, registerMcp } from "./mcp.js";
+import { loggedBody, maskEmailPathSegments } from "./request-log.js";
 import { registerApiKeyRoutes } from "./routes/api-keys.js";
 import { registerContactPropertyRoutes } from "./routes/contact-properties.js";
 import { type DomainsSesDeps, registerDomainRoutes } from "./routes/domains.js";
@@ -478,28 +479,6 @@ async function fetchSubscribeUrl(subscribeUrl: string): Promise<void> {
   if (!res.ok) throw new Error(`SNS subscription confirmation failed: ${res.status}`);
 }
 
-/**
- * Request logs store metadata only: the emails table encrypts content at
- * rest and contacts carry PII, so neither request nor success-response bodies
- * are kept. Error responses are the one body stored — they are the API's own
- * messages, never a copy of the payload — and email path segments
- * (/contacts/{email}) are masked.
- */
-function maskEmailPathSegments(path: string): string {
-  return path
-    .split("/")
-    .map((segment) => {
-      let decoded = segment;
-      try {
-        decoded = decodeURIComponent(segment);
-      } catch {
-        // Not percent-encoded; the raw segment is what gets inspected.
-      }
-      return decoded.includes("@") ? "[email]" : segment;
-    })
-    .join("/");
-}
-
 const RATE_WINDOW_MS = 60_000;
 const RATE_COUNTER_SWEEP_SIZE = 10_000;
 const AUTH_FAILURES_PER_MINUTE = 20;
@@ -540,21 +519,6 @@ function clientIp(c: Context, isCloud: boolean): string | null {
   } catch {
     return null;
   }
-}
-
-const LOGGED_JSON_MAX_BYTES = 16 * 1024;
-
-/** Oversized (or unserializable) payloads store a marker instead of the JSON. */
-function capLoggedJson(value: unknown): unknown {
-  if (value == null) return null;
-  try {
-    if (Buffer.byteLength(JSON.stringify(value), "utf8") > LOGGED_JSON_MAX_BYTES) {
-      return { truncated: true };
-    }
-  } catch {
-    return null;
-  }
-  return value;
 }
 
 /**
@@ -2980,7 +2944,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   // unauthenticated 401 has no team to attribute the row to. /ses/events is
   // excluded entirely (SNS traffic, not a customer API call). Fire-and-forget:
   // a logging failure must never fail or slow the response. Headers are never
-  // stored (Authorization included); see maskEmailPathSegments for what is.
+  // stored (Authorization included); see request-log.ts for what is.
   app.use("*", async (c, next) => {
     const startedAt = Date.now();
     await next();
@@ -2992,11 +2956,11 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const statusCode = c.res.status;
     const requestLength = c.req.header("content-length");
     const responseLength = c.res.headers.get("content-length");
-    // Cloned before the response is returned; the body read happens off the
-    // request's critical path.
-    const resClone = statusCode >= 400 ? c.res.clone() : null;
+    const responseType = c.res.headers.get("content-type");
+    // Cloned before the response is returned; both body reads happen off the
+    // request's critical path (the request body comes from Hono's parse cache).
+    const resClone = c.res.clone();
     void (async () => {
-      const errorResponse = resClone ? await resClone.json().catch(() => null) : null;
       await deps.db.insert(schema.apiRequests).values({
         teamId: auth.teamId,
         apiKeyId: auth.apiKeyId,
@@ -3006,8 +2970,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         durationMs,
         requestBytes: requestLength == null ? null : Number(requestLength),
         responseBytes: responseLength == null ? null : Number(responseLength),
-        requestBody: null,
-        responseBody: capLoggedJson(errorResponse),
+        requestBody: await loggedBody(path, c.req.header("content-type"), requestLength, () =>
+          c.req.json(),
+        ),
+        responseBody: await loggedBody(path, responseType, responseLength, () => resClone.json()),
       });
     })().catch((err) => console.error("api request log failed", err));
   });

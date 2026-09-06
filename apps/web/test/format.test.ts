@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   abbreviateDkim,
+  formatBytes,
   formatDayUtc,
   formatDurationShort,
   formatHoursMinutes,
@@ -22,6 +23,15 @@ describe("formatHoursMinutes", () => {
     expect(formatHoursMinutes(5 * 3_600_000 + 32 * 60_000)).toBe("5h 32m");
     expect(formatHoursMinutes(48 * 60_000)).toBe("48m");
     expect(formatHoursMinutes(0)).toBe("0m");
+  });
+});
+
+describe("formatBytes", () => {
+  it("picks B/KB/MB by magnitude and trims trailing zeros", () => {
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(12_698)).toBe("12.4 KB");
+    expect(formatBytes(65_536)).toBe("64 KB");
+    expect(formatBytes(1_258_291)).toBe("1.2 MB");
   });
 });
 

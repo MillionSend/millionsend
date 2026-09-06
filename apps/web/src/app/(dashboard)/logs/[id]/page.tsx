@@ -4,14 +4,15 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { CodeHighlight } from "@/components/code-highlight";
 import { CopyChip } from "@/components/copy-chip";
+import { JsonView } from "@/components/json-view";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton, SkeletonChip } from "@/components/skeleton";
-import { formatDayTime, formatUtcTimestampMs } from "@/lib/format";
+import { formatBytes, formatDayTime, formatUtcTimestampMs } from "@/lib/format";
 import { statusCodeColor } from "@/lib/status-code-color";
 import { useTRPC } from "@/lib/trpc";
+import { useTeamRole } from "@/lib/use-team-role";
 
 function Microlabel({ children }: { children: React.ReactNode }) {
   return (
@@ -21,8 +22,32 @@ function Microlabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** REQUEST/RESPONSE panel: pretty-printed JSON in a mono pre, scrolls inside. */
-function JsonSection({ label, value, noBody }: { label: string; value: unknown; noBody: string }) {
+/** Size of a body the API dropped for exceeding its cap ({ truncated: true, bytes }), else null. */
+function truncatedBytes(value: unknown): number | null {
+  const body = value as { truncated?: unknown; bytes?: unknown } | null;
+  return body?.truncated === true && typeof body.bytes === "number" ? body.bytes : null;
+}
+
+/** REQUEST/RESPONSE panel: the body as linked JSON, or one line saying why there is none. */
+function JsonSection({
+  label,
+  value,
+  requestPath,
+  noBody,
+}: {
+  label: string;
+  value: unknown;
+  requestPath: string;
+  noBody: string;
+}) {
+  const t = useTranslations("logs");
+  const bytes = truncatedBytes(value);
+  const message =
+    value == null
+      ? noBody
+      : bytes === null
+        ? null
+        : t("detail.bodyTruncated", { size: formatBytes(bytes) });
   return (
     <section style={{ marginTop: 26 }}>
       <div className="ms-microlabel">{label}</div>
@@ -35,7 +60,7 @@ function JsonSection({ label, value, noBody }: { label: string; value: unknown; 
           overflow: "hidden",
         }}
       >
-        {value == null ? (
+        {message !== null ? (
           <p
             style={{
               margin: 0,
@@ -44,7 +69,7 @@ function JsonSection({ label, value, noBody }: { label: string; value: unknown; 
               fontSize: "var(--ms-fs-ui)",
             }}
           >
-            {noBody}
+            {message}
           </p>
         ) : (
           <pre
@@ -59,7 +84,7 @@ function JsonSection({ label, value, noBody }: { label: string; value: unknown; 
               overflowWrap: "anywhere",
             }}
           >
-            <CodeHighlight code={JSON.stringify(value, null, 2)} language="json" />
+            <JsonView value={value} requestPath={requestPath} />
           </pre>
         )}
       </div>
@@ -166,6 +191,8 @@ export default function LogDetailPage() {
 
   const query = useQuery(trpc.logs.get.queryOptions({ id }, { retry: false }));
   const log = query.data;
+  // Members receive both bodies as null; the panels say why instead of "not stored".
+  const membersOnly = useTeamRole() === "member";
 
   if (query.isPending) {
     return <LogDetailSkeleton />;
@@ -237,12 +264,14 @@ export default function LogDetailPage() {
       <JsonSection
         label={t("detail.request")}
         value={log.requestBody}
-        noBody={t("detail.requestNotStored")}
+        requestPath={log.path}
+        noBody={t(membersOnly ? "detail.membersHint" : "detail.requestNotStored")}
       />
       <JsonSection
         label={t("detail.response")}
         value={log.responseBody}
-        noBody={t("detail.responseNotStored")}
+        requestPath={log.path}
+        noBody={t(membersOnly ? "detail.membersHint" : "detail.responseNotStored")}
       />
     </>
   );
