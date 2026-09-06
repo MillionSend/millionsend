@@ -217,8 +217,9 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
         allowDynamicClientRegistration: true,
         allowUnauthenticatedClientRegistration: true,
         // Access tokens are JWTs the API verifies offline, so revoking a grant
-        // only bites at the next refresh — keep that window short.
-        accessTokenExpiresIn: 15 * 60,
+        // only bites at the next refresh; an hour bounds that window while a
+        // client that cannot refresh still keeps a working session.
+        accessTokenExpiresIn: 60 * 60,
         // A retried refresh within this window gets the same rotated response
         // instead of tripping replay detection (MCP clients retry on network blips).
         refreshTokenReuseInterval: 30,

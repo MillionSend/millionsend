@@ -112,8 +112,9 @@ client's config.
   doesn't see the tools they cover.
 - Grants are listed under **Settings → Connected apps** in the dashboard.
   You can revoke your own grants; owners and admins can revoke anyone's.
-  Revocation takes effect at the client's next token refresh, within 15
-  minutes.
+  Revocation takes effect at the client's next token refresh, within an
+  hour. Clients receive a refresh token, so a working session does not end
+  when the access token does.
 - A member removed from the team loses MCP access immediately, even before
   their token expires.
 - Your team role applies: tools that manage domains, webhooks and API keys

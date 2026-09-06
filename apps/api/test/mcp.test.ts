@@ -164,7 +164,7 @@ describe("auth middleware", () => {
       expect(await res.json()).toEqual({
         resource,
         authorization_servers: [appBaseUrl],
-        scopes_supported: [...MCP_SCOPES],
+        scopes_supported: ["offline_access", ...MCP_SCOPES],
         bearer_methods_supported: ["header"],
       });
     }

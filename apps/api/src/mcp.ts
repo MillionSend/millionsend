@@ -1204,10 +1204,13 @@ export function registerMcp(app: OpenAPIHono<Env>, deps: ApiDeps, appBaseUrl: st
     },
     { onerror: (err) => console.error("mcp error", err) },
   );
+  // Clients request the scopes the resource advertises. offline_access is what
+  // makes the authorization server issue a refresh token; without it here, a
+  // client's session ends when the first access token expires.
   const metadata = {
     resource,
     authorization_servers: [appBaseUrl],
-    scopes_supported: [...MCP_SCOPES],
+    scopes_supported: ["offline_access", ...MCP_SCOPES],
     bearer_methods_supported: ["header"],
   };
   app.get("/.well-known/oauth-protected-resource", (c) => c.json(metadata));

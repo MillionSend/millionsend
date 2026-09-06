@@ -201,7 +201,7 @@ describe("OAuth authorization server", () => {
     const { status, body } = await authorize(clientId, cookie);
     expect(status).toBe(200);
     expect(body.token_type).toBe("Bearer");
-    expect(body.expires_in).toBe(15 * 60);
+    expect(body.expires_in).toBe(60 * 60);
     expect(typeof body.refresh_token).toBe("string");
     expect(body.scope).toBe(RESOURCE_SCOPE);
 

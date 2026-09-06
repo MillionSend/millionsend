@@ -15,7 +15,7 @@ import { useTRPC } from "@/lib/trpc";
 const ALL_TEAMS = "*";
 /**
  * Drives refresh-token issuance rather than a permission; declining it means
- * the app must re-authorize once the 15-minute access token expires.
+ * the app must re-authorize once the hour-long access token expires.
  */
 const OFFLINE_ACCESS = "offline_access";
 /**
