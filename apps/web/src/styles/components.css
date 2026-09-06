@@ -1971,11 +1971,6 @@ summary:focus-visible,
   margin-top: 8px;
 }
 
-/* Logs list — the caller's name (key or connected app) trails the Source
-   pill as a muted hint. It is the first thing to go at phone width, where
-   rows are already nowrap and tight. */
-@media (max-width: 639px) {
-}
 
 /* ============================================================================
    TEMPLATES — html-authored rows (templates/html-mode.tsx, components/code-editor.tsx).
