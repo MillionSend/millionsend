@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { pickActive } from "@/lib/nav";
+import { useActiveTabInView } from "@/lib/use-active-tab-in-view";
 
 const TABS = [
   { key: "contacts", href: "/audience" },
@@ -23,8 +24,9 @@ export function AudienceTabs() {
     pathname,
     TABS.map((tab) => tab.href),
   );
+  const tabsRef = useActiveTabInView(activeHref);
   return (
-    <div className="ms-tabs" style={{ marginBottom: 24 }}>
+    <div ref={tabsRef} className="ms-tabs" style={{ marginBottom: 24 }}>
       {TABS.map(({ key, href }) => (
         <button
           key={key}

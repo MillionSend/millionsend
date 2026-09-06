@@ -358,6 +358,17 @@
   background: var(--ms-danger);
 }
 
+/* Quota row (usage and billing cards): ring, label, figure pushed right. */
+.ms-quota-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.ms-quota-figure {
+  margin-left: auto;
+  text-align: right;
+}
+
 /* Table */
 table.ms-table {
   border-collapse: separate;
@@ -1689,6 +1700,15 @@ summary:focus-visible,
   .ms-kpi-row {
     flex-wrap: wrap;
     gap: 20px 32px !important;
+  }
+  /* Quota row: the figure drops under ring + label instead of sharing their line. */
+  .ms-quota-row {
+    flex-wrap: wrap;
+  }
+  .ms-quota-figure {
+    flex-basis: 100%;
+    margin-left: 0;
+    text-align: left;
   }
   /* Stepper rails: the add-domain rail is already swapped for the horizontal
      step bar at ≤899px; here the step-02 numbered marker rails shrink. */

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useTRPC } from "@/lib/trpc";
+import { useActiveTabInView } from "@/lib/use-active-tab-in-view";
 
 const TABS = [
   { key: "settings", href: "/settings" },
@@ -31,6 +32,7 @@ export function SettingsTabsNav({
   const t = useTranslations("settings.tabs");
   const router = useRouter();
   const pathname = usePathname();
+  const tabsRef = useActiveTabInView(pathname);
   const trpc = useTRPC();
   const { data: teamList } = useQuery(trpc.team.list.queryOptions());
   const role = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
@@ -43,7 +45,7 @@ export function SettingsTabsNav({
     audit: role === "owner" || role === "admin",
   };
   return (
-    <div className="ms-tabs" style={{ marginBottom: 24 }}>
+    <div ref={tabsRef} className="ms-tabs" style={{ marginBottom: 24 }}>
       {TABS.filter((tab) => visible[tab.key] ?? true).map(({ key, href }) => (
         <button
           key={key}

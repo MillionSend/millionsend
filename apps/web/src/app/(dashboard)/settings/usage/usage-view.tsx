@@ -69,13 +69,13 @@ export function QuotaRow({
   const locale = useLocale();
   const fmt = new Intl.NumberFormat(locale);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+    <div className="ms-quota-row">
       <ProgressRing used={used} limit={limit} />
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 14, color: "var(--ms-bone)" }}>{label}</div>
         <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>{hint}</div>
       </div>
-      <div style={{ marginLeft: "auto", textAlign: "right" }}>
+      <div className="ms-quota-figure">
         <div className="ms-digits" style={{ fontSize: 18, color: "var(--ms-bone)" }}>
           <Odometer formatted={fmt.format(used)} />
           <span style={{ color: "var(--ms-muted)", fontWeight: 500 }}>
@@ -120,7 +120,7 @@ function UsageSkeleton() {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       <section className="ms-card" style={{ padding: "20px 24px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <div className="ms-quota-row">
           <Skeleton width={RING_SIZE} height={RING_SIZE} radius="50%" />
           <div>
             <div style={{ fontSize: 14, display: "flex" }}>
@@ -130,7 +130,7 @@ function UsageSkeleton() {
               <Skeleton width={150} height="1lh" />
             </div>
           </div>
-          <div className="ms-digits" style={{ marginLeft: "auto", fontSize: 18, display: "flex" }}>
+          <div className="ms-digits ms-quota-figure" style={{ fontSize: 18, display: "flex" }}>
             <Skeleton width={90} height="1lh" />
           </div>
         </div>
