@@ -300,9 +300,12 @@ function RateCard(props: {
           <span
             style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--ms-faint)" }}
           />
-          {props.secondary.label}
-          <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
-            {props.secondary.note}
+          {/* Baseline-aligned pair: centering the boxes would float the smaller mono note above the label's x-height. */}
+          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 8 }}>
+            {props.secondary.label}
+            <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
+              {props.secondary.note}
+            </span>
           </span>
           <span style={{ marginLeft: "auto" }}>
             <span className="ms-digits" style={{ fontSize: 12.5, color: "var(--ms-faint)" }}>
