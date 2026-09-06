@@ -832,6 +832,55 @@ table.ms-table {
   color: var(--ms-neutral);
 }
 
+/* Notice strip — the toasts' tone border and bottom-left glow, stretched to a
+   full-width one-liner (global deliverability notices, the templates HTML banner). */
+.ms-notice-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  margin-bottom: 18px;
+  border-radius: var(--ms-r-input);
+  border: 1px solid;
+  background-color: var(--ms-ground);
+  background-repeat: no-repeat;
+  font-size: 13px;
+  line-height: 1.4;
+  text-decoration: none;
+}
+.ms-notice-strip-action {
+  margin-left: auto;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.ms-notice-strip-info {
+  color: var(--ms-info);
+  border-color: var(--ms-info-border);
+  background-image: radial-gradient(
+    130% 170% at 10% 130%,
+    color-mix(in srgb, var(--ms-info) 17%, transparent),
+    transparent 62%
+  );
+}
+.ms-notice-strip-warn {
+  color: var(--ms-warn);
+  border-color: var(--ms-warn-border);
+  background-image: radial-gradient(
+    130% 170% at 10% 130%,
+    color-mix(in srgb, var(--ms-warn) 17%, transparent),
+    transparent 62%
+  );
+}
+.ms-notice-strip-danger {
+  color: var(--ms-danger);
+  border-color: var(--ms-danger-border);
+  background-image: radial-gradient(
+    130% 170% at 10% 130%,
+    color-mix(in srgb, var(--ms-danger) 17%, transparent),
+    transparent 62%
+  );
+}
+
 /* Odometer — the product's only flourish; reduced-motion degrades to a plain swap */
 .ms-odometer {
   display: inline-flex;
@@ -1984,7 +2033,13 @@ summary:focus-visible,
   margin-bottom: 10px;
   border-radius: var(--ms-r-input);
   border: 1px solid var(--ms-info-border);
-  background: var(--ms-info-bg);
+  background-color: var(--ms-ground);
+  background-image: radial-gradient(
+    130% 170% at 10% 130%,
+    color-mix(in srgb, var(--ms-info) 17%, transparent),
+    transparent 62%
+  );
+  background-repeat: no-repeat;
   color: var(--ms-info);
   font-size: 13px;
   line-height: 1.4;
