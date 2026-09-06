@@ -2110,6 +2110,10 @@ summary:focus-visible,
 .ms-code-find input::placeholder {
   color: var(--ms-faint);
 }
+/* The frame shows the focus ring (:focus-within); the bare input must not add its own. */
+.ms-code-find input:focus-visible {
+  box-shadow: none;
+}
 .ms-code-find-count {
   flex: none;
   padding: 0 6px;

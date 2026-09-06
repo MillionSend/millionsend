@@ -365,6 +365,10 @@
 .ms-maily-picker-search input::placeholder {
   color: var(--ms-faint);
 }
+/* The popover is the focus surface; the global input ring would draw a box inside it. */
+.ms-maily-picker-search input:focus-visible {
+  box-shadow: none;
+}
 .ms-maily-picker-list {
   max-height: 320px;
   overflow-y: auto;
