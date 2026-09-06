@@ -36,14 +36,17 @@ export function isOnboardingSender(from: string, onboardingFrom: string | undefi
 
 export type OnboardingSenderVerdict =
   | { ok: true; domainId: null; address: string }
-  | { ok: false; reason: "recipient_not_member" };
+  | { ok: false; reason: "recipient_not_member" | "recipient_not_verified" };
 
 /**
  * The instance's shared onboarding sender (ONBOARDING_EMAIL_FROM): any team
  * may send from it without a verified domain, but only to its own members'
  * inboxes — so the first-email snippet runs as written and the shared
- * address can never reach a stranger. Null when `from` is not that sender;
- * callers then fall through to verifySenderDomain.
+ * address can never reach a stranger. Verified members only: an account is
+ * created with any address and no proof of ownership, so an unverified
+ * member's inbox may belong to someone else, and the body is the caller's.
+ * Null when `from` is not that sender; callers then fall through to
+ * verifySenderDomain.
  */
 export async function verifyOnboardingSender(
   db: Db,
@@ -54,16 +57,17 @@ export async function verifyOnboardingSender(
 ): Promise<OnboardingSenderVerdict | null> {
   if (!isOnboardingSender(from, onboardingFrom)) return null;
   const members = await db
-    .select({ email: schema.user.email })
+    .select({ email: schema.user.email, verified: schema.user.emailVerified })
     .from(schema.teamMembers)
     .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
     .where(eq(schema.teamMembers.teamId, teamId));
-  const allowed = new Set(members.map((m) => normalizeAddress(m.email)));
-  const strangers = recipients.some((r) => {
+  const allowed = new Map(members.map((m) => [normalizeAddress(m.email), m.verified]));
+  for (const r of recipients) {
     const address = extractAddrSpec(r);
-    return address === null || !allowed.has(normalizeAddress(address));
-  });
-  if (strangers) return { ok: false, reason: "recipient_not_member" };
+    const verified = address === null ? undefined : allowed.get(normalizeAddress(address));
+    if (verified === undefined) return { ok: false, reason: "recipient_not_member" };
+    if (!verified) return { ok: false, reason: "recipient_not_verified" };
+  }
   // parseSingleSender succeeded inside isOnboardingSender.
   return { ok: true, domainId: null, address: parseSingleSender(from)?.address ?? "" };
 }

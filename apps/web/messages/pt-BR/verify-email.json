@@ -1,0 +1,9 @@
+{
+  "subject": "Confirme seu e-mail do MillionSend",
+  "greeting": "Olá, {name},",
+  "body": "Confirme este endereço para concluir a configuração da sua conta. Clique no botão abaixo.",
+  "button": "Confirmar e-mail",
+  "linkFallback": "Ou copie este link no seu navegador:",
+  "expiry": "Este link expira em {minutes} minutos.",
+  "ignore": "Se você não criou uma conta no MillionSend, ignore este e-mail."
+}

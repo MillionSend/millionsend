@@ -9,6 +9,7 @@ import { authClient } from "@/lib/auth-client";
 import { safeNextPath } from "@/lib/nav";
 import { passwordStrength } from "@/lib/password-strength";
 import styles from "./auth.module.css";
+import { AuthScreen } from "./auth-screen";
 import { SilkCanvas } from "./silk-canvas";
 import { GitHubIcon, GoogleIcon } from "./social-icons";
 
@@ -77,6 +78,14 @@ export function AuthForm({
     socialFailed ? tSocial("error") : null,
   );
   const [pending, setPending] = useState<"email" | SocialProvider | null>(null);
+  // An instance that verifies addresses creates the account without a
+  // session; the form gives way to a notice until the emailed link is opened.
+  const [awaitingVerification, setAwaitingVerification] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [resent, setResent] = useState(false);
+  // Where the emailed verification link lands: a page that forwards the
+  // now signed-in visitor to `next`, or explains an expired link.
+  const verifyCallback = `/verify-email?next=${encodeURIComponent(next)}`;
   // Login is email-first: the password field appears on the first "Sign in",
   // so the common flow starts as a single field. Signup shows everything.
   const [passwordShown, setPasswordShown] = useState(mode === "signup");
@@ -101,11 +110,25 @@ export function AuthForm({
       return;
     }
     const fetchOptions = { headers: captchaHeaders(token) };
+    // Login passes no callbackURL: the client would navigate to it, and the
+    // re-sent verification link may land on the default just as well.
     const { data, error } =
       mode === "login"
         ? await authClient.signIn.email({ email, password, fetchOptions })
-        : await authClient.signUp.email({ name, email, password, fetchOptions });
+        : await authClient.signUp.email({
+            name,
+            email,
+            password,
+            callbackURL: verifyCallback,
+            fetchOptions,
+          });
     if (error) {
+      // The server re-sent the verification link with this attempt.
+      if (error.code === "EMAIL_NOT_VERIFIED") {
+        setNotice(t("unverified", { email }));
+        setPending(null);
+        return;
+      }
       // Signup shows server messages (e.g. the signup-disabled policy)
       // verbatim; login never echoes the server, only the catalog copy.
       setErrorMessage(
@@ -118,10 +141,30 @@ export function AuthForm({
     }
     // A sign-in that resumes a pending OAuth authorization answers with the
     // consent URL; the auth client has already navigated there.
-    const resumed = data as { redirect?: boolean; url?: string } | null;
+    const resumed = data as { redirect?: boolean; url?: string; token?: string | null } | null;
     if (resumed?.redirect && resumed.url) return;
+    // No session token: the address must be verified first.
+    if (mode === "signup" && !resumed?.token) {
+      setAwaitingVerification(email);
+      setPending(null);
+      return;
+    }
     // The dashboard layout guard bounces team-less users to /onboarding.
     router.push(next);
+  }
+
+  async function resendVerification() {
+    if (!awaitingVerification) return;
+    setPending("email");
+    setResent(false);
+    setNotice(null);
+    const { error } = await authClient.sendVerificationEmail({
+      email: awaitingVerification,
+      callbackURL: verifyCallback,
+    });
+    if (error) setNotice(t("error"));
+    else setResent(true);
+    setPending(null);
   }
 
   async function onSocial(provider: SocialProvider) {
@@ -145,6 +188,26 @@ export function AuthForm({
         ? `/login?next=${encodeURIComponent(next)}`
         : "/login";
   const anySocial = providers.google || providers.github;
+
+  if (awaitingVerification) {
+    return (
+      <AuthScreen title={t("verifyTitle")}>
+        <p className={styles.notice} aria-live="polite">
+          {t("verifySent", { email: awaitingVerification })}
+        </p>
+        <button
+          type="button"
+          className={`ms-btn ms-btn-secondary ${styles.button}`}
+          disabled={pending !== null}
+          onClick={resendVerification}
+        >
+          {t("resend")}
+        </button>
+        {resent ? <p className={styles.notice}>{t("resent")}</p> : null}
+        {notice ? <p className={styles.error}>{notice}</p> : null}
+      </AuthScreen>
+    );
+  }
 
   return (
     <main className={styles.screen}>
@@ -254,6 +317,11 @@ export function AuthForm({
             </div>
           ) : null}
           {errorMessage ? <p className={styles.error}>{errorMessage}</p> : null}
+          {notice ? (
+            <p className={styles.notice} aria-live="polite">
+              {notice}
+            </p>
+          ) : null}
           {turnstile.slot}
           <button
             type="submit"

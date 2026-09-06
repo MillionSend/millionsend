@@ -39,9 +39,15 @@ describe("verifyOnboardingSender", () => {
   it("only the shared sender qualifies, and only for the team's own members", async () => {
     await db
       .insert(schema.user)
-      .values({ id: "member-1", name: "Ada", email: "Ada@Example.com" })
+      .values([
+        { id: "member-1", name: "Ada", email: "Ada@Example.com", emailVerified: true },
+        { id: "member-2", name: "Bob", email: "bob@example.com" },
+      ])
       .onConflictDoNothing();
-    await db.insert(schema.teamMembers).values({ teamId, userId: "member-1", role: "owner" });
+    await db.insert(schema.teamMembers).values([
+      { teamId, userId: "member-1", role: "owner" },
+      { teamId, userId: "member-2", role: "member" },
+    ]);
 
     expect(
       await verifyOnboardingSender(db, teamId, "a@acme.dev", ["ada@example.com"], platform),
@@ -67,6 +73,10 @@ describe("verifyOnboardingSender", () => {
         platform,
       ),
     ).toEqual({ ok: false, reason: "recipient_not_member" });
+    // A member whose address was never verified may be anyone's inbox.
+    expect(
+      await verifyOnboardingSender(db, teamId, platform, ["bob@example.com"], platform),
+    ).toEqual({ ok: false, reason: "recipient_not_verified" });
   });
 });
 

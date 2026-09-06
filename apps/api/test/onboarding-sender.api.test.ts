@@ -24,19 +24,25 @@ function api(onboardingEmailFrom?: string) {
   });
 }
 
-async function send(app: ReturnType<typeof createApi>, to: string[]) {
+async function send(app: ReturnType<typeof createApi>, to: string[], from = PLATFORM) {
   return app.request("/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ from: PLATFORM, to, subject: "It works.", text: "hi" }),
+    body: JSON.stringify({ from, to, subject: "It works.", text: "hi" }),
   });
 }
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
   teamId = await createTeam(db, "onboarding-team");
-  await db.insert(schema.user).values({ id: "member-1", name: "Ada", email: "ada@example.com" });
-  await db.insert(schema.teamMembers).values({ teamId, userId: "member-1", role: "owner" });
+  await db.insert(schema.user).values([
+    { id: "member-1", name: "Ada", email: "ada@example.com", emailVerified: true },
+    { id: "member-2", name: "Bob", email: "bob@example.com" },
+  ]);
+  await db.insert(schema.teamMembers).values([
+    { teamId, userId: "member-1", role: "owner" },
+    { teamId, userId: "member-2", role: "member" },
+  ]);
   const key = generateApiKey();
   await db.insert(schema.apiKeys).values({
     teamId,
@@ -56,6 +62,20 @@ describe("POST /emails from the shared onboarding sender", () => {
     const { id } = (await res.json()) as { id: string };
     const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, id));
     expect(row).toMatchObject({ teamId, domainId: null, from: PLATFORM });
+  });
+
+  it("goes out exactly as configured, whatever display name the caller sent", async () => {
+    const res = await send(api(PLATFORM), ["ada@example.com"], "Security <onboarding@ms.example>");
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, id));
+    expect(row?.from).toBe(PLATFORM);
+  });
+
+  it("rejects a member who never verified their address", async () => {
+    const res = await send(api(PLATFORM), ["bob@example.com"]);
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { message: string }).message).toContain("verified");
   });
 
   it("rejects a recipient outside the team", async () => {

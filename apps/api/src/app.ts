@@ -3202,11 +3202,16 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         errorBody(
           422,
           "validation_error",
-          "The onboarding sender can only send to your team's own members",
+          onboarding.reason === "recipient_not_verified"
+            ? "The onboarding sender can only send to members who verified their email"
+            : "The onboarding sender can only send to your team's own members",
         ),
         422,
       );
     }
+    // The shared sender goes out exactly as configured: a caller's display
+    // name on the instance's own address would let it pose as the platform.
+    const from = onboarding ? (deps.onboardingEmailFrom ?? body.from) : body.from;
     const domain = onboarding ?? (await verifySenderDomain(deps.db, auth.teamId, body.from));
     if (!domain.ok) {
       return c.json(
@@ -3274,20 +3279,25 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         return c.json(paused, 403);
       }
-      const result = await acceptEmail(deps, auth, toAcceptPayload(body, domain.domainId), {
-        completeInTx: idemKey
-          ? async (tx, emailId) => {
-              const recorded = await completeIdempotent(tx, {
-                teamId: auth.teamId,
-                key: idemKey,
-                emailIds: [emailId],
-              });
-              // Another owner took over and recorded its own response:
-              // abort so this branch produces no second email.
-              if (!recorded) throw new IdempotencyTakeoverError();
-            }
-          : undefined,
-      });
+      const result = await acceptEmail(
+        deps,
+        auth,
+        toAcceptPayload({ ...body, from }, domain.domainId),
+        {
+          completeInTx: idemKey
+            ? async (tx, emailId) => {
+                const recorded = await completeIdempotent(tx, {
+                  teamId: auth.teamId,
+                  key: idemKey,
+                  emailIds: [emailId],
+                });
+                // Another owner took over and recorded its own response:
+                // abort so this branch produces no second email.
+                if (!recorded) throw new IdempotencyTakeoverError();
+              }
+            : undefined,
+        },
+      );
       if (!result.ok) {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         const rejection = acceptRejection(result);

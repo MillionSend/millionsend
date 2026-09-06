@@ -13,10 +13,13 @@ import { mcpResourceUrl, resolveBaseUrl } from "@/lib/api-base-url";
 import { httpOrigin } from "@/lib/http-url";
 import { getActiveMembership, listMemberships } from "./membership";
 import {
+  emailVerificationEnabled,
   passwordRecoveryEnabled,
   RESET_TOKEN_TTL_MINUTES,
   type SystemMailDeps,
   sendPasswordResetEmail,
+  sendVerificationEmail,
+  VERIFY_TOKEN_TTL_MINUTES,
 } from "./system-mail";
 import { trustedProxies } from "./trusted-proxies";
 
@@ -248,6 +251,11 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
       maxPasswordLength: 128,
       revokeSessionsOnPasswordReset: true,
       resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_MINUTES * 60,
+      // A password sign-up gets no session until its address is verified;
+      // an account from before this verifies at its next sign-in, where the
+      // link is re-sent (sendOnSignIn). Gated like recovery: an instance
+      // that cannot deliver the link cannot demand it.
+      requireEmailVerification: emailVerificationEnabled(),
       // Left unset when the instance cannot deliver the email, which keeps
       // Better Auth's own RESET_PASSWORD_DISABLED 400 on the endpoint — the
       // sign-in screen hides the link for the same reason.
@@ -266,6 +274,24 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
           }
         : {}),
     },
+    ...(emailVerificationEnabled()
+      ? {
+          emailVerification: {
+            sendVerificationEmail: async (
+              data: { user: { email: string; name: string }; url: string },
+              request?: Request,
+            ) => {
+              sendVerificationEmail(data, request, mail);
+            },
+            sendOnSignUp: true,
+            sendOnSignIn: true,
+            // The emailed link signs the visitor in, so the callback page
+            // can forward straight to where sign-up was headed.
+            autoSignInAfterVerification: true,
+            expiresIn: VERIFY_TOKEN_TTL_MINUTES * 60,
+          },
+        }
+      : {}),
     /**
      * Windows are seconds; storage is Better Auth's in-memory default
      * (per-process — fine for the single web replica this deploy runs).
@@ -277,6 +303,7 @@ export function createAuth(db: Db = getDb(), mail?: SystemMailDeps) {
     rateLimit: {
       customRules: {
         "/request-password-reset": { window: 15 * 60, max: 3 },
+        "/send-verification-email": { window: 15 * 60, max: 3 },
         "/reset-password": { window: 15 * 60, max: 5 },
         "/reset-password/*": { window: 15 * 60, max: 5 },
         "/oauth2/register": { window: 15 * 60, max: 10 },

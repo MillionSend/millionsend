@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import styles from "@/components/auth/auth.module.css";
-import { AuthScreen } from "@/components/auth/recovery-forms";
+import { AuthScreen } from "@/components/auth/auth-screen";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { authClient } from "@/lib/auth-client";
