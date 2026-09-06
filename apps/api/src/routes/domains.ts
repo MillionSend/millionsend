@@ -3,6 +3,7 @@ import { trackingCnameTarget } from "@millionsend/config";
 import {
   apiRequestActor,
   associateDomainTenant,
+  clearTrackingClock,
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
@@ -539,7 +540,14 @@ export function registerDomainRoutes(
             .limit(take),
       });
       if (page === "bad_cursor") {
-        return c.json(errorBody(422, "validation_error", "invalid pagination cursor"), 422);
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            "invalid pagination cursor: after and before take the id of an item this list returned",
+          ),
+          422,
+        );
       }
       return c.json(
         { object: "list" as const, data: page.rows.map(toWire), has_more: page.hasMore },
@@ -565,9 +573,12 @@ export function registerDomainRoutes(
       const auth = c.get("auth");
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
-      // A read: the fresh verdict is reported, never persisted — verify and
-      // the reverify sweep own the stored status.
-      const { records } = await liveChecklist(domain);
+      // A read reports the fresh verdict without persisting the domain status —
+      // verify and the reverify sweep own that. The tracking clock is the one
+      // exception: a CNAME seen live must open the branded-host gate, or the
+      // row reads verified while sends still ship untracked.
+      const { records, trackingFound } = await liveChecklist(domain);
+      if (trackingFound) await clearTrackingClock(db, domain);
       return c.json({ object: "domain" as const, ...toWire(domain), records }, 200);
     },
   );
@@ -601,22 +612,7 @@ export function registerDomainRoutes(
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(and(eq(d.id, domain.id), eq(d.teamId, auth.teamId)));
-      // Seeing the tracking CNAME resolve clears its 72h clock, which is what
-      // lets the worker serve links through it without waiting for the reverify
-      // sweep. Scoped to the label that was checked: a subdomain changed while
-      // the DNS lookups ran has its own fresh clock, which this pass must not clear.
-      if (trackingFound && domain.trackingSubdomainSetAt) {
-        await db
-          .update(d)
-          .set({ trackingSubdomainSetAt: null })
-          .where(
-            and(
-              eq(d.id, domain.id),
-              eq(d.teamId, auth.teamId),
-              eq(d.trackingSubdomain, domain.trackingSubdomain ?? ""),
-            ),
-          );
-      }
+      if (trackingFound) await clearTrackingClock(db, domain);
       if (status === "verified" && domain.status !== "verified") {
         await recordAudit(db, {
           teamId: auth.teamId,

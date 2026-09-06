@@ -597,6 +597,7 @@ it("fan-out personalizes merge fields per contact in html and text", async () =>
   const broadcastId = await insertBroadcast({
     teamId: mergeTeamId,
     from: "Acme <hi@merge.dev>",
+    subject: "{{{FIRST_NAME|there}}}, your {{{plan}}} plan{{{NOPE}}}",
     html: '<p>Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}} on {{{plan}}}</p>{{{NOPE}}}<a href="{{{UNSUBSCRIBE_URL}}}">bye</a>',
     text: "Hi {{{FIRST_NAME|there}}} {{{LAST_NAME|friend}}} on {{{plan}}} {{{NOPE}}}",
   });
@@ -622,6 +623,8 @@ it("fan-out personalizes merge fields per contact in html and text", async () =>
   expect(body.html).toContain(`${BASE_URL}/unsubscribe/`);
   expect(body.html).not.toContain("{{{UNSUBSCRIBE_URL}}}");
   expect(body.text).toBe("Hi <b>Ada</b> friend on <b>pro</b> ");
+  // The subject is a header, not markup: merged per recipient, never escaped.
+  expect(email.subject).toBe("<b>Ada</b>, your <b>pro</b> plan");
 });
 
 async function seedTopicTeam(

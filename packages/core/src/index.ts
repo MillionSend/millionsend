@@ -273,6 +273,7 @@ export {
   verifyClickToken,
   verifyOpenToken,
 } from "./tracking.js";
+export { clearTrackingClock } from "./tracking-clock.js";
 export {
   buildUnsubscribeHeaders,
   buildUnsubscribeUrl,

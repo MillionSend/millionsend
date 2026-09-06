@@ -7,6 +7,7 @@ import {
 } from "@millionsend/config";
 import {
   associateDomainTenant,
+  clearTrackingClock,
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
@@ -385,6 +386,9 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         lookupDmarc(domain.name, registrableDomain(domain.name), resolver),
         tracking ? checkDnsRecords([tracking], resolver).then(([status]) => status) : undefined,
       ]);
+      // A CNAME seen live opens the branded-host gate here too, or the row would
+      // read verified while sends still ship untracked.
+      if (trackingLive === "found") await clearTrackingClock(ctx.db, domain);
       return {
         provider,
         records: dnsChecklist({
@@ -427,22 +431,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(and(eq(schema.domains.id, domain.id), eq(schema.domains.teamId, ctx.teamId)));
-      // Seeing the tracking CNAME resolve clears its 72h clock, which is what
-      // lets the worker serve links through it without waiting for the reverify
-      // sweep. Scoped to the label that was checked: a subdomain changed while
-      // the DNS lookups ran has its own fresh clock, which this pass must not clear.
-      if (trackingResolved && domain.trackingSubdomainSetAt) {
-        await ctx.db
-          .update(schema.domains)
-          .set({ trackingSubdomainSetAt: null })
-          .where(
-            and(
-              eq(schema.domains.id, domain.id),
-              eq(schema.domains.teamId, ctx.teamId),
-              eq(schema.domains.trackingSubdomain, domain.trackingSubdomain ?? ""),
-            ),
-          );
-      }
+      if (trackingResolved) await clearTrackingClock(ctx.db, domain);
       if (status === "verified" && domain.status !== "verified") {
         await recordAudit(ctx, {
           action: "domain.verified",

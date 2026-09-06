@@ -840,3 +840,36 @@ describe("scoring", () => {
     expect(b).toEqual(a);
   });
 });
+
+describe("tracking_unbranded reasons", () => {
+  it("names a branded subdomain whose CNAME was still unconfirmed at send time", () => {
+    const pending = check(
+      input({
+        tracking: {
+          clickEnabled: true,
+          openEnabled: true,
+          brandedHostUsed: false,
+          sharedFallbackUsed: false,
+          shippedUntracked: true,
+          trackingPending: true,
+        },
+      }),
+      "tracking_unbranded",
+    );
+    expect(pending.status).toBe("fail");
+    expect(pending.detail?.reason).toBe("tracking_subdomain_pending");
+    const none = check(
+      input({
+        tracking: {
+          clickEnabled: true,
+          openEnabled: true,
+          brandedHostUsed: false,
+          sharedFallbackUsed: false,
+          shippedUntracked: true,
+        },
+      }),
+      "tracking_unbranded",
+    );
+    expect(none.detail?.reason).toBe("no_tracking_subdomain");
+  });
+});

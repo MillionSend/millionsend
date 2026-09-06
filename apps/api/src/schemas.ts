@@ -500,11 +500,18 @@ const listQueryFields = z.object({
     .max(100)
     .optional()
     .describe("Page size, 1-100 (default 20)"),
-  after: z.uuid().optional().describe("Cursor: id of the last item of the previous page"),
+  after: z
+    .uuid()
+    .optional()
+    .describe(
+      "Cursor: id of the last item of the previous page. Must be an id this list returned; there is no sentinel value.",
+    ),
   before: z
     .uuid()
     .optional()
-    .describe("Cursor: id of the first item of the next page (page backwards)"),
+    .describe(
+      "Cursor: id of the first item of the next page (page backwards); same rule as after.",
+    ),
 });
 const oneCursor = <T extends z.ZodObject>(fields: T) =>
   fields.refine((q) => !(q.after && q.before), {

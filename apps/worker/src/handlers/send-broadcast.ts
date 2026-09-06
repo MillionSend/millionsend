@@ -304,7 +304,7 @@ export async function sendBroadcast(
             from: broadcast.from,
             to: [contact.email],
             replyTo,
-            subject: broadcast.subject,
+            subject: applyMergeFields(broadcast.subject, contact, { html: false }),
             latestStatus: "queued",
             bodyCiphertext: encrypted.ciphertext,
             bodyIv: encrypted.iv,

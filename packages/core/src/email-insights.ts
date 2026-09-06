@@ -104,6 +104,8 @@ export interface EmailInsightsInput {
     brandedHostUsed: boolean;
     sharedFallbackUsed: boolean;
     shippedUntracked: boolean;
+    /** Untracked because the branded subdomain's CNAME was not yet confirmed at send time. */
+    trackingPending?: boolean | undefined;
   };
   domainSnapshot: {
     dmarcPolicy: "none" | "quarantine" | "reject" | null;
@@ -372,8 +374,14 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
         const t = input.tracking;
         if (!t.clickEnabled && !t.openEnabled)
           return { status: "pass", detail: { tracking: "off" } };
-        if (t.shippedUntracked)
-          return { status: "fail", detail: { reason: "no_tracking_subdomain" } };
+        if (t.shippedUntracked) {
+          return {
+            status: "fail",
+            detail: {
+              reason: t.trackingPending ? "tracking_subdomain_pending" : "no_tracking_subdomain",
+            },
+          };
+        }
         if (t.sharedFallbackUsed)
           return { status: "fail", detail: { reason: "shared_tracking_host" } };
         if (t.brandedHostUsed) return { status: "pass", detail: { tracking: "branded" } };

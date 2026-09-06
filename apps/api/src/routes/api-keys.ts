@@ -148,7 +148,14 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
             .limit(take),
       });
       if (page === "bad_cursor") {
-        return c.json(errorBody(422, "validation_error", "invalid pagination cursor"), 422);
+        return c.json(
+          errorBody(
+            422,
+            "validation_error",
+            "invalid pagination cursor: after and before take the id of an item this list returned",
+          ),
+          422,
+        );
       }
       return c.json(
         {

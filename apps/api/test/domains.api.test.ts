@@ -739,6 +739,26 @@ describe("POST /domains/{id}/verify", () => {
     expect(row?.trackingSubdomainSetAt).toBeNull();
   });
 
+  it("a plain GET that sees the CNAME resolve clears the clock too, so the row never reads verified while sends ship untracked", async () => {
+    const app = makeApp({
+      ...fakeSes(),
+      appBaseUrl: "https://app.example.dev",
+      dns: fakeDns({
+        resolveCname: async (name: string) =>
+          name === "links.readonly.example.com" ? ["app.example.dev"] : [],
+      }),
+    });
+    const { id } = await createDomain(app, "readonly.example.com");
+    await call(app, fullKey, "PATCH", `/domains/${id}`, { tracking_subdomain: "links" });
+    const res = await call(app, fullKey, "GET", `/domains/${id}`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { records: unknown[] }).records).toContainEqual(
+      expect.objectContaining({ record: "Tracking", status: "verified" }),
+    );
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.trackingSubdomainSetAt).toBeNull();
+  });
+
   it("leaves the clock armed and the Tracking row pending while the CNAME does not resolve", async () => {
     const app = makeApp({
       ...fakeSes(),

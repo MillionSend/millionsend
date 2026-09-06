@@ -474,6 +474,7 @@ export async function sendEmail(
   let brandedHostUsed = false;
   let sharedFallbackUsed = false;
   let shippedUntracked = false;
+  let trackingPending = false;
   // deps.tracking is always present in the running worker (the master key is
   // always available to derive the signing key); it is optional only so tests
   // that don't exercise tracking need not wire it, and its absence simply
@@ -493,6 +494,8 @@ export async function sendEmail(
     brandedHostUsed = brandedHost !== null;
     sharedFallbackUsed = brandedHost === null && trackingBaseUrl != null;
     shippedUntracked = !trackingBaseUrl;
+    trackingPending =
+      shippedUntracked && !!domain?.trackingSubdomain && !!domain.trackingSubdomainSetAt;
     // A custom subdomain is self-sufficient; without one the redirect host is
     // APP_BASE_URL. Missing it would ship links pointing nowhere, so fail loud
     // — except under requireBrandedHost, where untracked is the intended
@@ -710,6 +713,7 @@ export async function sendEmail(
           brandedHostUsed,
           sharedFallbackUsed,
           shippedUntracked,
+          trackingPending,
         },
         domainSnapshot: domain
           ? { dmarcPolicy: domain.dmarcPolicy, dmarcCheckedAt: domain.dmarcCheckedAt }
