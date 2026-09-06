@@ -134,17 +134,23 @@ export async function recordEngagement(
     const tx = txRaw as unknown as Db;
     let recorded: RecordedType = type;
     let data: Record<string, unknown>;
+    // A link a machine followed is no click either — security gateways and
+    // link previews fetch every URL seconds after delivery — so clicks pass
+    // through the same rules as the pixel and land as prefetches when they fail.
+    const verdict = classifyOpen({
+      userAgent: hit?.userAgent ?? null,
+      at: occurredAt,
+      anchor: await openAnchor(tx, email),
+      windowMs: prefetchWindowMs(),
+    });
+    if (verdict.prefetched) recorded = "prefetched";
+    const reason = verdict.prefetched ? { reason: verdict.reason } : {};
     if (type === "clicked") {
-      data = { click: { ...(hit?.link === undefined ? {} : { link: hit.link }), ...fetcher } };
+      data = {
+        click: { ...(hit?.link === undefined ? {} : { link: hit.link }), ...fetcher, ...reason },
+      };
     } else {
-      const verdict = classifyOpen({
-        userAgent: hit?.userAgent ?? null,
-        at: occurredAt,
-        anchor: await openAnchor(tx, email),
-        windowMs: prefetchWindowMs(),
-      });
-      if (verdict.prefetched) recorded = "prefetched";
-      data = { open: verdict.prefetched ? { ...fetcher, reason: verdict.reason } : fetcher };
+      data = { open: { ...fetcher, ...reason } };
     }
 
     const [newest] = await tx
@@ -165,6 +171,43 @@ export async function recordEngagement(
     // A prefetch is a fact about a machine, never about the recipient: the
     // status ladder moves only for a person.
     if (recorded !== "prefetched") await applyStatusCas(tx, email.id, recorded);
+
+    // A person cannot click a link in a message they never rendered, so a
+    // click on an email with no open yet is also its open — the only way one
+    // can ever be recorded for a reader whose client served the pixel from a
+    // cache (Apple Mail Privacy Protection). Stamped a millisecond earlier so
+    // the timeline reads open, then click; marked so consumers can tell it
+    // from a pixel fetch.
+    if (recorded === "clicked") {
+      const [opened] = await tx
+        .select({ id: schema.emailEvents.id })
+        .from(schema.emailEvents)
+        .where(and(eq(schema.emailEvents.emailId, email.id), eq(schema.emailEvents.type, "opened")))
+        .limit(1);
+      if (!opened) {
+        const openedAt = new Date(occurredAt.getTime() - 1);
+        const open = { ...fetcher, timestamp: openedAt.toISOString(), reason: "click" };
+        await tx
+          .insert(schema.emailEvents)
+          .values({ emailId: email.id, type: "opened", occurredAt: openedAt, data: { open } });
+        await enqueueWebhookDeliveries(tx, {
+          teamId: email.teamId,
+          email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
+          type: "email.opened",
+          occurredAt: openedAt,
+          extras: { open },
+          enqueue: async (rows) => {
+            deliveries.push(...rows);
+          },
+        });
+        await tx.execute(sql`
+          insert into ${schema.usageCounters} (team_id, day, opened)
+          values (${email.teamId}, ${utcDay(openedAt)}, 1)
+          on conflict (team_id, day) do update
+            set opened = ${schema.usageCounters}.opened + 1
+        `);
+      }
+    }
 
     // Fan every recorded event out to the team's webhook endpoints (damped
     // no-ops above never reach this): delivery rows join this transaction

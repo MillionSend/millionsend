@@ -96,7 +96,7 @@ describe("recordEngagement webhook fan-out", () => {
     const emailId = await seedEmail(teamId);
     const endpointId = await seedEndpoint(teamId, ["email.clicked"]);
 
-    await recordEngagement(db, emailId, "clicked");
+    await recordEngagement(db, emailId, "clicked", undefined, HUMAN);
 
     const rows = await deliveries(endpointId);
     expect(rows.map((r) => r.eventType)).toEqual(["email.clicked"]);

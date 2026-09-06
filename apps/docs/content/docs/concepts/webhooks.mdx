@@ -17,9 +17,9 @@ delivery log.
 | `email.delivery_delayed` | Delivery is being retried (e.g. mailbox full, greylisting). |
 | `email.bounced` | The message hard-bounced. The address is also [suppressed](/concepts/suppressions). |
 | `email.complained` | The recipient marked it as spam. Also suppressed. |
-| `email.opened` | A person loaded the tracking pixel (requires open tracking on the [domain](/concepts/domains)). `data.open` carries the fetch's `ipAddress`, `userAgent` and `timestamp`. |
-| `email.clicked` | A rewritten link was clicked (requires click tracking). `data.click` carries `link`, `ipAddress`, `userAgent` and `timestamp`, as Resend's does. |
-| `email.prefetched` | The pixel was fetched before anyone opened — by Apple Mail Privacy Protection, Gmail's prefetch, a security scanner, or within seconds of delivery; `data.open.reason` says which (see [open-rate accuracy](/concepts/domains#open-rate-accuracy)). Opt-in: delivered only to endpoints that name it, never to "all events". |
+| `email.opened` | A person loaded the tracking pixel (requires open tracking on the [domain](/concepts/domains)). `data.open` carries the fetch's `ipAddress`, `userAgent` and `timestamp`. A click on a message with no open yet also records one, with `data.open.reason: "click"`: a person cannot click what they never rendered, and for Apple Mail readers it is the only open that can ever be seen. |
+| `email.clicked` | A person clicked a rewritten link (requires click tracking). `data.click` carries `link`, `ipAddress`, `userAgent` and `timestamp`, as Resend's does. A link a machine followed — a security gateway, a link preview, a fetch seconds after delivery — is recorded as `email.prefetched` instead. |
+| `email.prefetched` | The pixel was fetched, or a link followed, before anyone opened — by Apple Mail Privacy Protection, Gmail's prefetch, a security scanner, or within seconds of delivery; `data.open.reason` or `data.click.reason` says which (see [open-rate accuracy](/concepts/domains#open-rate-accuracy)). Opt-in: delivered only to endpoints that name it, never to "all events". |
 
 Team-level events carry no email; `data` describes the team's standing instead:
 

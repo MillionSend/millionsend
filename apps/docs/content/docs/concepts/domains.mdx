@@ -89,9 +89,15 @@ shows on the email's timeline and as its own line under the open rate, but it
 never moves the status, never counts in the open rate, and never fires
 `email.opened` (endpoints can opt in to `email.prefetched`). The timing rule's
 window is `OPEN_PREFETCH_WINDOW_SECONDS` for self-hosters (default `10`; `0`
-keeps only the user-agent rules). One honest consequence: a recipient whose
-only opens come through Apple Mail never registers as opened, so Apple-heavy
-audiences read lower than they would elsewhere.
+keeps only the user-agent rules). Links go through the same rules: one a
+security gateway or a link preview followed is a prefetch, not a click.
+
+A click is also an open. A person cannot click a link in a message they never
+rendered, so a click on an email with no open yet records the open as well,
+stamped just before the click and marked `reason: "click"`. For a recipient
+whose images come through Apple Mail's cache this is the only open that can
+ever be recorded, so Apple-heavy audiences read lower on opens than they would
+elsewhere until they click.
 
 Opens are **under-counted** when the recipient's client blocks images, when the
 email has no HTML part (a plain-text send carries no pixel), or when Gmail clips

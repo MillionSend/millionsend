@@ -117,6 +117,74 @@ describe("click endpoint /t/c", () => {
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 2, counter: 1 });
   });
 
+  it("a click on a message with no open yet records the open too, marked as inferred", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = makeClickToken({ emailId, url: "https://shop.example.com/", secretKey });
+    await clickGet(...req(token));
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+    const rows = await db
+      .select({
+        type: schema.emailEvents.type,
+        occurredAt: schema.emailEvents.occurredAt,
+        data: schema.emailEvents.data,
+      })
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.emailId, emailId))
+      .orderBy(schema.emailEvents.occurredAt);
+    expect(rows.map((r) => r.type)).toEqual(["opened", "clicked"]);
+    expect(rows[0]?.data).toMatchObject({ open: { reason: "click", userAgent: IPHONE } });
+    // A second click adds no second open.
+    await backdateEvents(emailId, "clicked", 120_000);
+    await clickGet(...req(token));
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+  });
+
+  it("a click after a real open adds no open", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await openGet(...req(makeOpenToken({ emailId, secretKey })));
+    await clickGet(...req(makeClickToken({ emailId, url: "https://x.example.com/", secretKey })));
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+    const [open] = await db
+      .select({ data: schema.emailEvents.data })
+      .from(schema.emailEvents)
+      .where(and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "opened")));
+    expect((open?.data as { open?: { reason?: string } })?.open?.reason).toBeUndefined();
+  });
+
+  it("a link a security scanner follows is a prefetch, not a click, and still redirects", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const url = "https://shop.example.com/";
+    const token = makeClickToken({ emailId, url, secretKey });
+    const res = await clickGet(...req(token, { "user-agent": "Barracuda Sentinel (EE)" }));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(url);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 1, counter: 1 });
+    const [event] = await db
+      .select({ data: schema.emailEvents.data })
+      .from(schema.emailEvents)
+      .where(
+        and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "prefetched")),
+      );
+    expect(event?.data).toMatchObject({ click: { link: url, reason: "scanner" } });
+    const [row] = await db
+      .select({ status: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, emailId));
+    expect(row?.status).toBe("queued");
+  });
+
+  it("Apple Mail's prefetch followed by the reader's click yields the open and the click", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await openGet(...req(makeOpenToken({ emailId, secretKey }), { "user-agent": "Mozilla/5.0" }));
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
+    await clickGet(...req(makeClickToken({ emailId, url: "https://x.example.com/", secretKey })));
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+  });
+
   it("promotes the email status to clicked", async () => {
     const { emailId } = await seedEmail();
     const token = makeClickToken({ emailId, url: "https://x.example.com/", secretKey });

@@ -54,7 +54,8 @@
       "rendering_failure": "Rendering failure",
       "prefetched": "Prefetched"
     },
-    "prefetchedHint": "The tracking image was fetched by a mail client or security scanner before anyone opened the message. Not counted as an open.",
+    "prefetchedHint": "The tracking image or a link was fetched by a mail client or security scanner before anyone opened the message. Not counted as an open or a click.",
+    "openFromClick": "from click",
     "prefetchReason": {
       "apple_mpp": "Apple Mail privacy",
       "gmail_prefetch": "Gmail prefetch",

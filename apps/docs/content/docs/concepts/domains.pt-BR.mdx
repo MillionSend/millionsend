@@ -94,10 +94,16 @@ e-mail e como uma linha própria sob a taxa de abertura, mas nunca muda o status
 nunca entra na taxa de abertura e nunca dispara `email.opened` (endpoints podem
 optar por `email.prefetched`). A janela da regra de tempo é
 `OPEN_PREFETCH_WINDOW_SECONDS` em instâncias auto-hospedadas (padrão `10`; `0`
-mantém só as regras por user agent). Uma consequência honesta: um destinatário
-cujas únicas aberturas passam pelo Apple Mail nunca registra abertura, então
-públicos com muitos usuários de Apple Mail mostram uma taxa de abertura menor do
-que teriam em outra ferramenta.
+mantém só as regras por user agent). Links passam pelas mesmas regras: um que
+um gateway de segurança ou uma pré-visualização seguiu é pré-carregamento, não
+clique.
+
+Um clique também é uma abertura. Ninguém clica num link de uma mensagem que
+nunca renderizou, então um clique num e-mail ainda sem abertura registra também
+a abertura, marcada logo antes do clique e com `reason: "click"`. Para um
+destinatário cujas imagens vêm do cache do Apple Mail essa é a única abertura
+que pode ser registrada, então públicos com muitos usuários de Apple Mail
+mostram uma taxa de abertura menor até clicarem.
 
 As aberturas são **contadas a menos** quando o cliente do destinatário bloqueia
 imagens, quando o e-mail não tem parte HTML (um envio só-texto não carrega

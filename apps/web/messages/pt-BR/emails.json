@@ -54,7 +54,8 @@
       "rendering_failure": "Falha de renderização",
       "prefetched": "Pré-carregado"
     },
-    "prefetchedHint": "A imagem de rastreamento foi buscada por um cliente de email ou scanner de segurança antes de alguém abrir a mensagem. Não conta como abertura.",
+    "prefetchedHint": "A imagem de rastreamento ou um link foi buscado por um cliente de email ou scanner de segurança antes de alguém abrir a mensagem. Não conta como abertura nem como clique.",
+    "openFromClick": "pelo clique",
     "prefetchReason": {
       "apple_mpp": "privacidade do Apple Mail",
       "gmail_prefetch": "pré-carregamento do Gmail",

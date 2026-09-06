@@ -98,6 +98,10 @@ function openOf(data: EventData): { userAgent?: string; reason?: unknown } | nul
   const o = data?.open;
   return o && typeof o === "object" ? (o as { userAgent?: string; reason?: unknown }) : null;
 }
+/** Why a fetch was classed a prefetch: on the pixel's record, or on a link a machine followed. */
+function prefetchReasonOf(data: EventData): unknown {
+  return openOf(data)?.reason ?? (clickOf(data) as { reason?: unknown } | null)?.reason;
+}
 function complaintOf(data: EventData): { complaintFeedbackType?: string } | null {
   const c = data?.complaint;
   return c && typeof c === "object" ? (c as { complaintFeedbackType?: string }) : null;
@@ -560,7 +564,13 @@ export default function EmailDetailPage() {
     }
     if (type === "complained") return complaintOf(data)?.complaintFeedbackType ?? null;
     if (type === "suppressed") return t("detail.suppressedLine");
-    if (type === "prefetched") return prefetchReason(openOf(data)?.reason);
+    if (type === "prefetched") {
+      const link = clickOf(data)?.link;
+      return [prefetchReason(prefetchReasonOf(data)), link ? displayUrl(link) : null]
+        .filter(Boolean)
+        .join(" · ");
+    }
+    if (type === "opened" && openOf(data)?.reason === "click") return t("detail.openFromClick");
     return null;
   }
 
@@ -1040,7 +1050,14 @@ export default function EmailDetailPage() {
             // the pixel (a prefetch's reason, then the user agent).
             const line = link
               ? displayUrl(link)
-              : [prefetchReason(open?.reason), open?.userAgent].filter(Boolean).join(" · ");
+              : [
+                  open?.reason === "click"
+                    ? t("detail.openFromClick")
+                    : prefetchReason(prefetchReasonOf(event.data)),
+                  open?.userAgent,
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
             return (
               <div
                 key={event.id}
