@@ -111,60 +111,110 @@ describe("logs.list", () => {
 describe("logs.list filters", () => {
   const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
 
-  async function seed() {
-    const teamA = await createTeam(db, "team-a");
+  async function insertKey(teamId: string, name: string, revokedAt: Date | null = null) {
     const key = generateApiKey();
     const [k] = await db
       .insert(schema.apiKeys)
       .values({
-        teamId: teamA,
-        name: "k",
+        teamId,
+        name,
         tokenPrefix: key.tokenPrefix,
         keyHash: key.keyHash,
         last4: key.last4,
+        revokedAt,
       })
-      .returning({ id: schema.apiKeys.id });
+      .returning({ id: schema.apiKeys.id, last4: schema.apiKeys.last4 });
+    if (!k) throw new Error("api key insert failed");
+    return k;
+  }
+
+  async function seed() {
+    const teamA = await createTeam(db, "team-a");
+    const k = await insertKey(teamA, "k");
+    const old = await insertKey(teamA, "old", new Date("2026-01-01T00:00:00Z"));
+    await db.insert(schema.oauthClient).values({
+      id: "oc1",
+      clientId: "client-abc",
+      name: "Claude",
+      redirectUris: ["https://claude.ai/cb"],
+    });
     const byKey = await insertRequest({
       teamId: teamA,
       method: "GET",
       path: "/domains",
-      apiKeyId: k?.id,
+      apiKeyId: k.id,
       createdAt: hoursAgo(1),
+    });
+    const byOldKey = await insertRequest({
+      teamId: teamA,
+      method: "GET",
+      path: "/domains",
+      apiKeyId: old.id,
+      createdAt: hoursAgo(2),
     });
     const mcpBatch = await insertRequest({
       teamId: teamA,
       path: "/contacts/batch",
+      oauthClientId: "client-abc",
       createdAt: hoursAgo(72),
     });
     const underscore = await insertRequest({
       teamId: teamA,
       path: "/contacts/a_b",
       statusCode: 404,
+      oauthClientId: "client-gone",
       createdAt: hoursAgo(120),
     });
+    // An MCP row logged before the client id was recorded.
     const dash = await insertRequest({
       teamId: teamA,
       path: "/contacts/a-b",
       createdAt: hoursAgo(240),
     });
-    return { teamA, byKey, mcpBatch, underscore, dash };
+    return { teamA, k, old, byKey, byOldKey, mcpBatch, underscore, dash };
   }
 
   it("narrows by method, source and time window", async () => {
-    const { teamA, byKey, mcpBatch, underscore, dash } = await seed();
+    const { teamA, k, byKey, byOldKey, mcpBatch, underscore, dash } = await seed();
     const c = caller(teamA);
-    expect((await c.logs.list({ method: "GET" })).items.map((r) => r.id)).toEqual([byKey]);
-    expect((await c.logs.list({ source: "api_key" })).items.map((r) => r.id)).toEqual([byKey]);
-    expect((await c.logs.list({ source: "mcp" })).items.map((r) => r.id)).toEqual([
-      mcpBatch,
-      underscore,
-      dash,
-    ]);
-    expect((await c.logs.list({ since: hoursAgo(48) })).items.map((r) => r.id)).toEqual([byKey]);
+    const ids = async (input: Parameters<typeof c.logs.list>[0]) =>
+      (await c.logs.list(input)).items.map((r) => r.id);
+    expect(await ids({ method: "GET" })).toEqual([byKey, byOldKey]);
+    expect(await ids({ source: "api_key" })).toEqual([byKey, byOldKey]);
+    expect(await ids({ source: `api_key:${k.id}` })).toEqual([byKey]);
+    expect(await ids({ source: "mcp" })).toEqual([mcpBatch, underscore, dash]);
+    expect(await ids({ source: "mcp:client-abc" })).toEqual([mcpBatch]);
+    expect(await ids({ since: hoursAgo(48) })).toEqual([byKey, byOldKey]);
     // Filters compose with each other and with the status class.
     expect(
       (await c.logs.list({ source: "mcp", statusClass: "4xx" })).items.map((r) => r.id),
     ).toEqual([underscore]);
+  });
+
+  it("rejects a malformed source instead of passing it to postgres", async () => {
+    const { teamA } = await seed();
+    const c = caller(teamA);
+    for (const source of ["bogus", "api_key:", "api_key:not-a-uuid", "mcp:"]) {
+      await expect(c.logs.list({ source })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+  });
+
+  it("lists the team's keys (revoked flagged, last) and the clients seen in its log", async () => {
+    const { teamA, k, old } = await seed();
+    const teamB = await createTeam(db, "team-b");
+    await insertKey(teamB, "other-team");
+    await insertRequest({ teamId: teamB, oauthClientId: "client-elsewhere" });
+
+    const callers = await caller(teamA).logs.callers();
+    expect(callers.apiKeys).toEqual([
+      { id: k.id, name: "k", tokenPrefix: expect.any(String), last4: k.last4, revoked: false },
+      { id: old.id, name: "old", tokenPrefix: expect.any(String), last4: old.last4, revoked: true },
+    ]);
+    // A client whose registration is gone still appears, by id.
+    expect(callers.apps).toEqual([
+      { clientId: "client-abc", name: "Claude" },
+      { clientId: "client-gone", name: null },
+    ]);
   });
 
   it("searches the path as a literal substring, escaping LIKE wildcards", async () => {
@@ -200,6 +250,46 @@ describe("logs.get", () => {
     expect(row.responseBody).toEqual({ statusCode: 422, name: "validation_error" });
 
     await expect(caller(teamB).logs.get({ id })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("names the caller: key name and revocation, or the connected app", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const key = generateApiKey();
+    const [k] = await db
+      .insert(schema.apiKeys)
+      .values({
+        teamId: teamA,
+        name: "prod",
+        tokenPrefix: key.tokenPrefix,
+        keyHash: key.keyHash,
+        last4: key.last4,
+        revokedAt: new Date(),
+      })
+      .returning({ id: schema.apiKeys.id });
+    await db.insert(schema.oauthClient).values({
+      id: "oc1",
+      clientId: "client-abc",
+      name: "Claude",
+      redirectUris: ["https://claude.ai/cb"],
+    });
+    const c = caller(teamA);
+
+    const byKey = await c.logs.get({ id: await insertRequest({ teamId: teamA, apiKeyId: k?.id }) });
+    expect(byKey).toMatchObject({ apiKeyName: "prod", apiKeyRevoked: true, oauthClientName: null });
+
+    const byApp = await c.logs.get({
+      id: await insertRequest({ teamId: teamA, oauthClientId: "client-abc" }),
+    });
+    expect(byApp).toMatchObject({
+      apiKeyName: null,
+      apiKeyRevoked: false,
+      oauthClientName: "Claude",
+    });
+
+    const unknownApp = await c.logs.get({
+      id: await insertRequest({ teamId: teamA, oauthClientId: "client-gone" }),
+    });
+    expect(unknownApp.oauthClientName).toBeNull();
   });
 
   it("hides request/response bodies from role member, keeping the metadata", async () => {

@@ -1,0 +1,2 @@
+ALTER TABLE "api_requests" ADD COLUMN "oauth_client_id" text;--> statement-breakpoint
+CREATE INDEX "api_requests_team_oauth_client_idx" ON "api_requests" USING btree ("team_id","oauth_client_id") WHERE "api_requests"."oauth_client_id" is not null;

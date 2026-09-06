@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
@@ -16,6 +16,8 @@ export interface SelectOption {
   /** Status badge after the label — shown in the option row AND on the trigger
    * while the option is selected (e.g. a domain's Verified/Pending). */
   badge?: { label: string; tone: "success" | "info" | "warn" | "danger" | "neutral" };
+  /** Section heading drawn above the first row of each run of options sharing it. */
+  group?: string;
 }
 
 /* Search input appears only when the list is long enough for scanning to hurt. */
@@ -332,47 +334,14 @@ export function Select({
                     {t("noResults")}
                   </div>
                 ) : (
-                  filtered.map((option, index) => (
-                    <button
-                      key={option.value}
-                      id={`${listboxId}-${index}`}
-                      type="button"
-                      role="option"
-                      aria-selected={option.value === value}
-                      tabIndex={-1}
-                      className={index === activeIndex ? "ms-menu-item active" : "ms-menu-item"}
-                      onMouseEnter={() => setActiveIndex(index)}
-                      onClick={() => pick(option.value)}
-                    >
-                      <span
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          overflow: "hidden",
-                        }}
-                      >
-                        {option.adornment}
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {option.label}
-                          {option.hint !== undefined ? (
-                            <span style={{ color: "var(--ms-muted)", marginLeft: 8, fontSize: 12 }}>
-                              {option.hint}
-                            </span>
-                          ) : null}
-                        </span>
-                        {option.badge ? (
-                          <span
-                            className={`ms-badge ms-badge-${option.badge.tone}`}
-                            style={{ flexShrink: 0, fontSize: 10.5, padding: "1px 7px" }}
-                          >
-                            {option.badge.label}
-                          </span>
-                        ) : null}
-                      </span>
-                      {option.value === value ? <span aria-hidden="true">✓</span> : null}
-                    </button>
-                  ))
+                  <SelectOptionList
+                    options={filtered}
+                    value={value}
+                    activeIndex={activeIndex}
+                    listboxId={listboxId}
+                    onHover={setActiveIndex}
+                    onPick={pick}
+                  />
                 )}
               </div>
             </div>,
@@ -381,4 +350,75 @@ export function Select({
         : null}
     </div>
   );
+}
+
+/**
+ * The listbox rows. A group heading precedes the first row of each run of
+ * options sharing a `group`; headings are plain text, never options, so
+ * arrowing, Home/End and type-ahead (which walk `options`) skip them, and a
+ * search that empties a group takes its heading with it. Exported on its
+ * own because the popover mounts through a portal only once opened.
+ */
+export function SelectOptionList({
+  options,
+  value,
+  activeIndex,
+  listboxId,
+  onHover,
+  onPick,
+}: {
+  options: SelectOption[];
+  value: string;
+  activeIndex: number;
+  listboxId: string;
+  onHover: (index: number) => void;
+  onPick: (value: string) => void;
+}) {
+  return options.map((option, index) => (
+    <Fragment key={option.value}>
+      {option.group !== undefined && option.group !== options[index - 1]?.group ? (
+        <div className="ms-menu-label" role="presentation">
+          {option.group}
+        </div>
+      ) : null}
+      <button
+        id={`${listboxId}-${index}`}
+        type="button"
+        role="option"
+        aria-selected={option.value === value}
+        tabIndex={-1}
+        className={index === activeIndex ? "ms-menu-item active" : "ms-menu-item"}
+        onMouseEnter={() => onHover(index)}
+        onClick={() => onPick(option.value)}
+      >
+        <span
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            overflow: "hidden",
+          }}
+        >
+          {option.adornment}
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+            {option.label}
+            {option.hint !== undefined ? (
+              <span style={{ color: "var(--ms-muted)", marginLeft: 8, fontSize: 12 }}>
+                {option.hint}
+              </span>
+            ) : null}
+          </span>
+          {option.badge ? (
+            <span
+              className={`ms-badge ms-badge-${option.badge.tone}`}
+              style={{ flexShrink: 0, fontSize: 10.5, padding: "1px 7px" }}
+            >
+              {option.badge.label}
+            </span>
+          ) : null}
+        </span>
+        {option.value === value ? <span aria-hidden="true">✓</span> : null}
+      </button>
+    </Fragment>
+  ));
 }

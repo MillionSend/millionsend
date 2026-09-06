@@ -1,6 +1,6 @@
 "use client";
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -8,13 +8,15 @@ import { useDeferredValue, useMemo } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { RelativeTime } from "@/components/relative-time";
-import { Select } from "@/components/select";
+import { Select, type SelectOption } from "@/components/select";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { type BadgeTone, StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
+import { maskApiKey } from "@/lib/format";
 import { httpMethodTone } from "@/lib/http-method-tone";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
+import { encodeLogSource, parseLogSource } from "@/lib/log-source";
 import { statusCodeColor } from "@/lib/status-code-color";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
@@ -24,8 +26,6 @@ const STATUS_CLASSES = ["2xx", "4xx", "5xx"] as const;
 type StatusClass = (typeof STATUS_CLASSES)[number];
 const METHODS = ["GET", "POST", "PATCH", "DELETE"] as const;
 type Method = (typeof METHODS)[number];
-const SOURCES = ["api_key", "mcp"] as const;
-type Source = (typeof SOURCES)[number];
 const RANGE_KEYS: RangeKey[] = ["all", "h24", "d7", "d15", "d30"];
 
 // One tone per verb and status class colors both the filter dot and the row
@@ -38,7 +38,7 @@ const STATUS_CLASS_TONE: Record<StatusClass, BadgeTone> = {
 };
 const toneColor = (tone: string) => `var(--ms-${tone})`;
 
-const COL = { method: "12%", source: "11%", status: "10%", when: "14%" } as const;
+const COL = { method: "12%", source: "20%", status: "10%", when: "14%" } as const;
 
 /**
  * Ghost stand-in mirroring the loaded table: mono chip, mono path bar,
@@ -96,7 +96,8 @@ export default function LogsPage() {
   const [rangeParam, setRange] = useUrlState("range", "all");
   const statusClass: StatusClass | "all" = oneOf(STATUS_CLASSES, statusParam, "all");
   const method: Method | "all" = oneOf(METHODS, methodParam, "all");
-  const source: Source | "all" = oneOf(SOURCES, sourceParam, "all");
+  // A kind ("api_key" | "mcp") or one caller ("api_key:<uuid>" | "mcp:<client id>").
+  const source = parseLogSource(sourceParam) ? sourceParam : "all";
   const range: RangeKey = oneOf(RANGE_KEYS, rangeParam, "all");
   const deferredSearch = useDeferredValue(search.trim());
   const since = useMemo(() => rangeSince(range), [range]);
@@ -128,6 +129,35 @@ export default function LogsPage() {
     ),
   );
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const callers = useQuery(trpc.logs.callers.queryOptions());
+  // Caller names for the rows come from the same list that fills the filter.
+  const callerNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const key of callers.data?.apiKeys ?? []) names.set(key.id, key.name);
+    for (const app of callers.data?.apps ?? []) names.set(app.clientId, app.name ?? app.clientId);
+    return names;
+  }, [callers.data]);
+  const sourceOptions: SelectOption[] = [
+    { value: "all", label: t("list.allSources") },
+    { value: encodeLogSource("api_key"), label: t("list.allApiKeys"), group: t("list.apiKeys") },
+    ...(callers.data?.apiKeys ?? []).map((key) => ({
+      value: encodeLogSource("api_key", key.id),
+      label: key.name,
+      hint: maskApiKey(key.tokenPrefix, key.last4),
+      group: t("list.apiKeys"),
+      ...(key.revoked ? { badge: { label: t("list.revoked"), tone: "neutral" as const } } : {}),
+    })),
+    {
+      value: encodeLogSource("mcp"),
+      label: t("list.allConnectedApps"),
+      group: t("list.sources.mcp"),
+    },
+    ...(callers.data?.apps ?? []).map((app) => ({
+      value: encodeLogSource("mcp", app.clientId),
+      label: app.name ?? app.clientId,
+      group: t("list.sources.mcp"),
+    })),
+  ];
   const headers: [string, string, string, string, string] = [
     t("list.method"),
     t("list.path"),
@@ -171,10 +201,7 @@ export default function LogsPage() {
           onChange={setSource}
           width={160}
           ariaLabel={t("list.source")}
-          options={[
-            { value: "all", label: t("list.allSources") },
-            ...SOURCES.map((s) => ({ value: s, label: t(`list.sources.${s}`) })),
-          ]}
+          options={sourceOptions}
         />
         <Select
           value={statusClass}
@@ -258,6 +285,11 @@ export default function LogsPage() {
                     <span className="ms-badge ms-badge-neutral">
                       {t(`list.sources.${row.apiKeyId ? "api_key" : "mcp"}`)}
                     </span>
+                    {callerNames.has(row.apiKeyId ?? row.oauthClientId ?? "") ? (
+                      <span className="ms-log-caller">
+                        {callerNames.get(row.apiKeyId ?? row.oauthClientId ?? "")}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="ms-mono">
                     <span style={{ color: statusCodeColor(row.statusCode) }}>{row.statusCode}</span>

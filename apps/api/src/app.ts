@@ -2992,6 +2992,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       await deps.db.insert(schema.apiRequests).values({
         teamId: auth.teamId,
         apiKeyId: auth.apiKeyId,
+        oauthClientId: auth.oauthClientId ?? null,
         method,
         path,
         statusCode,

@@ -94,12 +94,13 @@ interface McpAuthExtra {
 /** Mirrors the dashboard's adminProcedure: members read, owners/admins manage. */
 const isAdmin = (role: TeamRole) => role !== "member";
 
-function teamAuth(team: McpTeam, userId: string): ApiKeyAuth {
+function teamAuth(team: McpTeam, userId: string, oauthClientId: string): ApiKeyAuth {
   return {
     teamId: team.teamId,
     plan: team.plan,
     apiKeyId: null,
     userId,
+    oauthClientId,
     permission: "full_access",
     domainId: null,
   };
@@ -212,7 +213,7 @@ function createTokenVerifier(
         const first = teams[0];
         if (!first) throw invalid("Token holder is no longer a member of any team");
         extra = {
-          auth: teamAuth(first, claims.data.sub),
+          auth: teamAuth(first, claims.data.sub, claims.data.client_id),
           userId: claims.data.sub,
           role: first.role,
           teams,
@@ -234,6 +235,7 @@ function createTokenVerifier(
             plan: effectivePlan(membership.plan, membership.currentPeriodEnd),
             apiKeyId: null,
             userId: claims.data.sub,
+            oauthClientId: claims.data.client_id,
             permission: "full_access",
             domainId: null,
           },
@@ -399,7 +401,9 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
             ),
           );
         }
-        return callTeam.run(teamAuth(team, userId), () => run(rest as z.output<S>));
+        return callTeam.run(teamAuth(team, userId, authInfo.clientId), () =>
+          run(rest as z.output<S>),
+        );
       }) as ToolCallback<S>,
     );
   };
@@ -1035,7 +1039,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     "templates:write",
     {
       description:
-        "Create an email template: name, html, optional subject, text and alias (a stable handle, unique per team). Live immediately. from, reply_to and variables are not supported yet; passing them is a 422.",
+        "Create an email template: name, html, optional subject, text and alias (a stable handle, unique per team). Live immediately. A template created with html opens in the dashboard's code mode and keeps its HTML byte for byte; converting it to blocks is the user's explicit choice there. from, reply_to and variables are not supported yet; passing them is a 422.",
       inputSchema: createTemplateRequestSchema,
     },
     (body) => api("POST", "/templates", body),
@@ -1045,7 +1049,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     "templates:write",
     {
       description:
-        "Change a template's name, subject, html, text or alias (null clears the alias). Omitted fields are left unchanged; the change is live immediately.",
+        "Change a template's name, subject, html, text or alias (null clears the alias). Omitted fields are left unchanged; the change is live immediately. Writing html makes the template html-authored: it opens in the dashboard's code mode and keeps its HTML byte for byte; converting it to blocks is the user's explicit choice there.",
       inputSchema: updateTemplateRequestSchema.extend({
         id: z.string().min(1).describe("Template id or alias"),
       }),

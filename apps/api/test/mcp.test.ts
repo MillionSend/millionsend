@@ -438,6 +438,7 @@ describe("tools", () => {
         requestBody: { to: ["delivered@example.com"], subject: "mcp hello", html: "[html, 9 B]" },
         responseBody: { id },
         apiKeyId: null,
+        oauthClientId: "client-abc",
         method: "POST",
       });
       expect(logs[0]?.durationMs).toBeGreaterThanOrEqual(0);

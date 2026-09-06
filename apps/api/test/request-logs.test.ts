@@ -6,6 +6,7 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
+import { INTERNAL_AUTH } from "../src/mcp.js";
 import { LOGGED_JSON_MAX_BYTES, redactLoggedBody } from "../src/request-log.js";
 
 let db: Db;
@@ -155,11 +156,38 @@ describe("api request logging", () => {
       statusCode: 200,
       requestBody: loggedValidBody,
       responseBody: { id },
+      oauthClientId: null,
     });
     // Neither the API key nor any content lands in the row.
     const serialized = JSON.stringify(row);
     expect(serialized).not.toContain(token);
     expect(serialized).not.toContain("secret");
+  });
+
+  it("names the OAuth client behind an MCP call, which has no key", async () => {
+    await db.delete(schema.apiRequests);
+    // MCP tools reach the REST handlers in process, authenticated by Request
+    // identity (INTERNAL_AUTH) with the auth the bearer token's claims built.
+    const req = new Request("http://mcp.internal/emails");
+    INTERNAL_AUTH.set(req, {
+      teamId,
+      plan: "free",
+      apiKeyId: null,
+      userId: "u1",
+      oauthClientId: "client-abc",
+      permission: "full_access",
+      domainId: null,
+    });
+    const res = await app.fetch(req);
+    expect(res.status).toBe(200);
+
+    const [row] = await waitForRows(1);
+    expect(row).toMatchObject({
+      teamId,
+      path: "/emails",
+      apiKeyId: null,
+      oauthClientId: "client-abc",
+    });
   });
 
   it("stores both bodies for failed requests too", async () => {

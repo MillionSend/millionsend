@@ -16,6 +16,10 @@
     "allMethods": "Todos os métodos",
     "source": "Origem",
     "allSources": "Todas as origens",
+    "apiKeys": "Chaves de API",
+    "allApiKeys": "Todas as chaves de API",
+    "allConnectedApps": "Todos os aplicativos conectados",
+    "revoked": "revogada",
     "sources": {
       "api_key": "Chave de API",
       "mcp": "MCP"
@@ -35,6 +39,9 @@
     "status": "Status",
     "when": "Quando",
     "id": "ID",
+    "source": "Origem",
+    "sourceApiKey": "Chave de API · {name}",
+    "sourceMcp": "MCP · {name}",
     "request": "Requisição",
     "response": "Resposta",
     "requestNotStored": "Nenhum corpo de requisição armazenado: a requisição não tinha corpo ou ele não era JSON.",

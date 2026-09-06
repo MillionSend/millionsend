@@ -175,6 +175,12 @@ function LogDetailSkeleton() {
             <SkeletonChip width={190} />
           </div>
         </div>
+        <div>
+          <Microlabel>{t("detail.source")}</Microlabel>
+          <div style={{ fontSize: 13, marginTop: 5, display: "flex" }}>
+            <Skeleton width={160} height="1lh" />
+          </div>
+        </div>
       </div>
 
       <JsonSectionSkeleton label={t("detail.request")} />
@@ -257,6 +263,25 @@ export default function LogDetailPage() {
           <Microlabel>{t("detail.id")}</Microlabel>
           <div style={{ marginTop: 4 }}>
             <CopyChip value={log.id} />
+          </div>
+        </div>
+        <div>
+          <Microlabel>{t("detail.source")}</Microlabel>
+          <div
+            style={{ fontSize: 13, marginTop: 5, display: "flex", alignItems: "center", gap: 8 }}
+          >
+            <Link href={log.apiKeyId ? "/api-keys" : "/settings/connected-apps"}>
+              {log.apiKeyId
+                ? t("detail.sourceApiKey", {
+                    name: log.apiKeyName ?? `…${log.apiKeyId.slice(-6)}`,
+                  })
+                : log.oauthClientName
+                  ? t("detail.sourceMcp", { name: log.oauthClientName })
+                  : t("list.sources.mcp")}
+            </Link>
+            {log.apiKeyRevoked ? (
+              <span className="ms-badge ms-badge-neutral">{t("list.revoked")}</span>
+            ) : null}
           </div>
         </div>
       </div>

@@ -16,6 +16,10 @@
     "allMethods": "All methods",
     "source": "Source",
     "allSources": "All sources",
+    "apiKeys": "API keys",
+    "allApiKeys": "All API keys",
+    "allConnectedApps": "All connected apps",
+    "revoked": "revoked",
     "sources": {
       "api_key": "API key",
       "mcp": "MCP"
@@ -35,6 +39,9 @@
     "status": "Status",
     "when": "When",
     "id": "ID",
+    "source": "Source",
+    "sourceApiKey": "API key · {name}",
+    "sourceMcp": "MCP · {name}",
     "request": "Request",
     "response": "Response",
     "requestNotStored": "No request body stored: the request had none, or it was not JSON.",

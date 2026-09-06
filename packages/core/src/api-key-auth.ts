@@ -12,6 +12,8 @@ export interface ApiKeyAuth {
   apiKeyId: string | null;
   /** The OAuth token's holder, so audit rows name the person behind an MCP call. */
   userId?: string;
+  /** The OAuth client (connected app) behind an MCP call, so the request log can name it. */
+  oauthClientId?: string;
   /**
    * SECURITY: the key's scope, enforced server-side. "sending_access" keys may
    * only reach the send surface; a non-null domainId restricts sends to that
