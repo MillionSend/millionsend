@@ -279,12 +279,19 @@ export async function acceptEmail(
   // queued_quota — still accepted, drained after the midnight rollover.
   // A scheduled send is charged to its delivery day, so a team cannot stack
   // many days of the cap onto one future instant.
-  const day = utcDay(payload.scheduledAt ?? new Date());
+  const deliveryAt = payload.scheduledAt ?? new Date();
+  const day = utcDay(deliveryAt);
   const runAccept = async (txDb: Db) => {
     const quota =
       opts.quota === "deferred"
         ? { reserved: true }
-        : await reserveDailyQuota(txDb, { teamId: auth.teamId, count: recipientCount, limit, day });
+        : await reserveDailyQuota(txDb, {
+            teamId: auth.teamId,
+            count: recipientCount,
+            limit,
+            day,
+            at: deliveryAt,
+          });
     if (!quota.reserved && limit !== null) {
       const [parked] = await txDb
         .select({ n: count() })

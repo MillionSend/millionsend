@@ -211,6 +211,13 @@
       "when": 1788741066088,
       "tag": "0029_unsubscribed_email_event",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788746114021,
+      "tag": "0030_usage_counters_hourly",
+      "breakpoints": true
     }
   ]
 }

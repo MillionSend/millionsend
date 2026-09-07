@@ -24,10 +24,7 @@
     "denominator": "of delivered"
   },
   "chart": {
-    "soFar": "so far",
-    "dayUtc": "{day} (UTC)",
-    "utcDays": "Days in UTC",
-    "sinceLocal": "since {time} your time"
+    "soFar": "so far"
   },
   "score": {
     "title": "Account score",

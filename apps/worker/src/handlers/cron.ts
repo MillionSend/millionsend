@@ -847,6 +847,19 @@ export async function stripExpiredEventPayloads(
 }
 
 /** Better Auth never deletes expired sessions; their IP/user-agent would otherwise sit forever. */
+/**
+ * The hourly counters feed only the 30-day Metrics chart; 45 days covers the
+ * window from any timezone. The daily table they mirror is kept forever.
+ */
+export async function purgeStaleHourlyUsage(db: Db, now = new Date()): Promise<number> {
+  const h = schema.usageCountersHourly;
+  const rows = await db
+    .delete(h)
+    .where(lt(h.hour, new Date(now.getTime() - 45 * DAY_MS)))
+    .returning({ teamId: h.teamId });
+  return rows.length;
+}
+
 export async function purgeExpiredSessions(db: Db, now = new Date()): Promise<number> {
   const rows = await db
     .delete(schema.session)

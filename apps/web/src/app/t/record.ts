@@ -1,6 +1,7 @@
 import { env, isCloudDeployment, OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT } from "@millionsend/config";
 import {
   applyStatusCas,
+  bumpHourlyUsage,
   classifyOpen,
   deriveTrackingKey,
   enqueueWebhookDeliveries,
@@ -206,6 +207,7 @@ export async function recordEngagement(
           on conflict (team_id, day) do update
             set opened = ${schema.usageCounters}.opened + 1
         `);
+        await bumpHourlyUsage(tx, { teamId: email.teamId, at: openedAt, counts: { opened: 1 } });
       }
     }
 
@@ -236,6 +238,11 @@ export async function recordEngagement(
         on conflict (team_id, day) do update
           set ${sql.raw(recorded)} = ${schema.usageCounters}.${sql.raw(recorded)} + 1
       `);
+      await bumpHourlyUsage(tx, {
+        teamId: email.teamId,
+        at: occurredAt,
+        counts: { [recorded]: 1 },
+      });
     }
   });
 

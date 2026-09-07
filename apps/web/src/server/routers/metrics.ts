@@ -14,8 +14,9 @@ import {
   WARN_COMPLAINT_RATE,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
-import { and, asc, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
+import { canonicalTimeZone } from "@/lib/time-zone";
 import { router, teamProcedure } from "../trpc";
 
 const COUNTS = {
@@ -31,32 +32,82 @@ const COUNTS = {
 };
 type Counts = typeof COUNTS;
 
+/** The calendar date an instant falls on in `tz`, as YYYY-MM-DD. */
+function localDay(at: number, tz: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(at);
+}
+
 export const metricsRouter = router({
+  /**
+   * One row per calendar day of the viewer's timezone, summed from the hourly
+   * counters: two teammates in different zones each see their own days from
+   * the same rows, and "today" is the viewer's today. Quota and the
+   * guardrails keep their UTC days; only this chart follows the viewer.
+   */
   window: teamProcedure
-    .input(z.object({ days: z.number().int().min(1).max(30).default(15) }).optional())
+    .input(
+      z
+        .object({
+          days: z.number().int().min(1).max(30).default(15),
+          tz: z
+            .string()
+            .default("UTC")
+            .transform((tz, ctx) => {
+              const canonical = canonicalTimeZone(tz);
+              if (canonical === null) ctx.addIssue({ code: "custom", message: "unknown timezone" });
+              return canonical ?? z.NEVER;
+            }),
+        })
+        .optional(),
+    )
     .query(async ({ ctx, input }) => {
       const windowDays = input?.days ?? 15;
+      const tz = input?.tz ?? "UTC";
       const now = Date.now();
-      const since = utcDay(now - (windowDays - 1) * DAY_MS);
+      const today = localDay(now, tz);
+      // Calendar days of the window, stepped as dates from the viewer's today
+      // (Date.parse of YYYY-MM-DD is UTC midnight, so this is pure calendar
+      // arithmetic): stepping 24h instants would skip a 23-hour DST day and
+      // list a 25-hour one twice.
+      const dayList = Array.from({ length: windowDays }, (_, i) =>
+        utcDay(Date.parse(today) - (windowDays - 1 - i) * DAY_MS),
+      );
+      const firstDay = dayList[0] ?? today;
 
+      const h = schema.usageCountersHourly;
       const c = schema.usageCounters;
+      // Grouped by position: the same expression bound twice would carry two
+      // parameter numbers and read as two different expressions.
+      const localDate = sql`((${h.hour} at time zone ${tz}::text)::date)::text`;
       const [rows, [allTime]] = await Promise.all([
         ctx.db
           .select({
-            day: c.day,
-            accepted: c.accepted,
-            sent: c.sent,
-            delivered: c.delivered,
-            bounced: c.bounced,
-            hardBounced: c.hardBounced,
-            complained: c.complained,
-            opened: c.opened,
-            clicked: c.clicked,
-            prefetched: c.prefetched,
+            day: sql<string>`${localDate}`,
+            accepted: sql<number>`sum(${h.accepted})::int`,
+            sent: sql<number>`sum(${h.sent})::int`,
+            delivered: sql<number>`sum(${h.delivered})::int`,
+            bounced: sql<number>`sum(${h.bounced})::int`,
+            hardBounced: sql<number>`sum(${h.hardBounced})::int`,
+            complained: sql<number>`sum(${h.complained})::int`,
+            opened: sql<number>`sum(${h.opened})::int`,
+            clicked: sql<number>`sum(${h.clicked})::int`,
+            prefetched: sql<number>`sum(${h.prefetched})::int`,
           })
-          .from(c)
-          .where(and(eq(c.teamId, ctx.teamId), gte(c.day, since)))
-          .orderBy(asc(c.day)),
+          .from(h)
+          .where(
+            and(
+              eq(h.teamId, ctx.teamId),
+              // From the first local day's midnight, as an instant.
+              gte(h.hour, sql`(${firstDay}::text::date::timestamp at time zone ${tz}::text)`),
+            ),
+          )
+          .groupBy(sql`1`)
+          .orderBy(sql`1`),
         // ::bigint — the all-time sum of int columns overflows int4 for large
         // senders. The driver returns bigint as a string; Number() below is
         // exact up to 2^53 deliveries.
@@ -68,10 +119,7 @@ export const metricsRouter = router({
 
       // Zero-fill so the chart always renders one bar per calendar day.
       const byDay = new Map(rows.map((r) => [r.day, r]));
-      const days = Array.from({ length: windowDays }, (_, i) => {
-        const day = utcDay(now - (windowDays - 1 - i) * DAY_MS);
-        return byDay.get(day) ?? { day, ...COUNTS };
-      });
+      const days = dayList.map((day) => byDay.get(day) ?? { day, ...COUNTS });
 
       const totals = days.reduce<Counts>(
         (acc, d) => ({
@@ -88,13 +136,13 @@ export const metricsRouter = router({
         { ...COUNTS },
       );
 
-      // The window always ends on the current UTC day, which is still being
-      // counted: charts draw it as in progress.
+      // The window always ends on the viewer's current day, which is still
+      // being counted: charts draw it as in progress.
       return {
         days,
         totals,
         allTimeDelivered: Number(allTime?.delivered ?? 0),
-        today: utcDay(now),
+        today,
       };
     }),
 

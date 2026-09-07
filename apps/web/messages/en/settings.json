@@ -254,7 +254,7 @@
     "unlimited": "Unlimited",
     "history": "Daily history",
     "empty": "0 days recorded.",
-    "day": "Day",
+    "day": "Day (UTC)",
     "sent": "Sent",
     "delivered": "Delivered",
     "bounced": "Bounced",

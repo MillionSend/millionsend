@@ -1,5 +1,7 @@
 import type { Db } from "@millionsend/db";
+import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { reserveDailyQuota } from "../src/quota.js";
 
@@ -21,6 +23,15 @@ describe("reserveDailyQuota", () => {
     expect(first).toEqual({ reserved: true, acceptedToday: 60 });
     const second = await reserveDailyQuota(db, { teamId, count: 40, limit: 100, day: DAY });
     expect(second).toEqual({ reserved: true, acceptedToday: 100 });
+    // The hourly mirror for the Metrics chart: a day-only reservation lands at that day's noon.
+    const hours = await db
+      .select({
+        hour: schema.usageCountersHourly.hour,
+        accepted: schema.usageCountersHourly.accepted,
+      })
+      .from(schema.usageCountersHourly)
+      .where(eq(schema.usageCountersHourly.teamId, teamId));
+    expect(hours).toEqual([{ hour: new Date(`${DAY}T12:00:00Z`), accepted: 100 }]);
   });
 
   it("rejects the reservation that would cross the tolerant ceiling, leaving the counter intact", async () => {

@@ -584,7 +584,9 @@ docker compose start millionsend smtp
   (api, worker, web) holds a pool of up to 24 connections, so separate containers
   and worker replicas fit without tuning.
 - To run processes in separate containers, set `PROCESS` to `api`, `worker`, or `web`
-  per container (default `all`).
+  per container (default `all`). Upgrade them in the same `up -d`: the Metrics chart
+  counts only what upgraded processes write, so a writer left on an older image during
+  the swap is missing from that day's chart (the daily usage figures are unaffected).
 - Email bodies are encrypted at rest with `MASTER_ENCRYPTION_KEY` and purged after
   the retention window. Back up the key with the database.
 - Webhook endpoints must be public `https://` hosts; loopback and private

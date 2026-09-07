@@ -2,7 +2,7 @@ import { utcDay as coreUtcDay, DAY_MS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCaller } from "@/server/routers";
 
 function utcDay(offsetDays: number): string {
@@ -29,22 +29,26 @@ function callerFor(teamId: string) {
   });
 }
 
-async function insertCounter(
-  teamId: string,
-  day: string,
-  counts: Partial<{
-    accepted: number;
-    sent: number;
-    delivered: number;
-    bounced: number;
-    hardBounced: number;
-    complained: number;
-    opened: number;
-    clicked: number;
-    prefetched: number;
-  }>,
-): Promise<void> {
+type Counts = Partial<{
+  accepted: number;
+  sent: number;
+  delivered: number;
+  bounced: number;
+  hardBounced: number;
+  complained: number;
+  opened: number;
+  clicked: number;
+  prefetched: number;
+}>;
+
+/** A day's counters as the writers leave them: the daily row plus one hourly row at noon UTC. */
+async function insertCounter(teamId: string, day: string, counts: Counts): Promise<void> {
   await db.insert(schema.usageCounters).values({ teamId, day, ...counts });
+  await insertHour(teamId, `${day}T12:00:00Z`, counts);
+}
+
+async function insertHour(teamId: string, hour: string, counts: Counts): Promise<void> {
+  await db.insert(schema.usageCountersHourly).values({ teamId, hour: new Date(hour), ...counts });
 }
 
 describe("metrics.window", () => {
@@ -94,6 +98,69 @@ describe("metrics.window", () => {
       clicked: 0,
       prefetched: 0,
     });
+  });
+
+  it("sums hours into the viewer's calendar days, so late-evening sends stay on the viewer's day", async () => {
+    const teamId = await createTeam(db, "acme");
+    // 00:30 UTC on the 7th is 21:30 on the 6th in São Paulo.
+    await insertHour(teamId, "2026-09-07T00:00:00Z", { sent: 7, delivered: 7 });
+    await insertHour(teamId, "2026-09-06T18:00:00Z", { sent: 3, delivered: 3 });
+
+    const utc = await callerFor(teamId).metrics.window({ days: 30, tz: "UTC" });
+    const saoPaulo = await callerFor(teamId).metrics.window({
+      days: 30,
+      tz: "America/Sao_Paulo",
+    });
+    const on = (r: typeof utc, day: string) => r.days.find((d) => d.day === day)?.sent ?? 0;
+    // Only meaningful while the window reaches these dates.
+    if (utc.days.some((d) => d.day === "2026-09-06")) {
+      expect(on(utc, "2026-09-06")).toBe(3);
+      expect(on(utc, "2026-09-07")).toBe(7);
+      expect(on(saoPaulo, "2026-09-06")).toBe(10);
+      expect(on(saoPaulo, "2026-09-07")).toBe(0);
+    }
+    expect(utc.totals.sent).toBe(saoPaulo.totals.sent);
+    expect(saoPaulo.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("refuses a timezone it does not know, and takes the names browsers actually send", async () => {
+    const teamId = await createTeam(db, "acme");
+    await expect(callerFor(teamId).metrics.window({ tz: "Mars/Olympus" })).rejects.toThrow();
+    // Current IANA names, fixed offsets and old aliases are absent from
+    // Intl.supportedValuesOf but every formatter accepts them.
+    for (const tz of ["Asia/Kolkata", "Etc/GMT+3", "US/Eastern", "UTC"]) {
+      expect((await callerFor(teamId).metrics.window({ tz })).days).toHaveLength(15);
+    }
+  });
+
+  it("steps calendar days, so a DST transition inside the window neither skips nor doubles a day", async () => {
+    const teamId = await createTeam(db, "acme");
+    const nowSpy = vi.spyOn(Date, "now");
+    try {
+      // 23:30 in New York on the night the clocks fell back: a 25-hour day.
+      nowSpy.mockReturnValue(Date.parse("2026-11-03T04:30:00Z"));
+      const fall = await callerFor(teamId).metrics.window({ days: 5, tz: "America/New_York" });
+      expect(fall.days.map((d) => d.day)).toEqual([
+        "2026-10-29",
+        "2026-10-30",
+        "2026-10-31",
+        "2026-11-01",
+        "2026-11-02",
+      ]);
+      // 00:30 the morning after the clocks sprang forward: a 23-hour day behind.
+      nowSpy.mockReturnValue(Date.parse("2026-03-09T04:30:00Z"));
+      const spring = await callerFor(teamId).metrics.window({ days: 5, tz: "America/New_York" });
+      expect(spring.days.map((d) => d.day)).toEqual([
+        "2026-03-05",
+        "2026-03-06",
+        "2026-03-07",
+        "2026-03-08",
+        "2026-03-09",
+      ]);
+      expect(spring.today).toBe("2026-03-09");
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("honors a custom window size", async () => {

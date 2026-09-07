@@ -3512,11 +3512,15 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         // team's counter rows in opposite orders.
         for (const day of [...new Set(out.map((o) => o.day))].sort()) {
           const items = out.filter((o) => o.day === day);
+          // Items in one day-group share a delivery day; the first one's
+          // instant places the hourly mirror like a single send's would.
+          const at = items[0]?.startAfter ?? new Date();
           const quota = await reserveDailyQuota(txDb, {
             teamId: auth.teamId,
             count: items.reduce((n, o) => n + o.recipientCount, 0),
             limit,
             day,
+            at,
           });
           if (quota.reserved) continue;
           // The whole batch did not fit: the longest run of items that does,
@@ -3538,6 +3542,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
                 count: sum,
                 limit,
                 day,
+                at,
               });
               if (head.reserved) toPark = items.slice(fit);
             }

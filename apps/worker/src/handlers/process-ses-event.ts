@@ -1,5 +1,6 @@
 import {
   applyStatusCas,
+  bumpHourlyUsage,
   type EmailStatus,
   emitSuppressionEvents,
   enqueueWebhookDeliveries,
@@ -214,6 +215,11 @@ export async function processSesEvent(
             sql`, `,
           )}
       `);
+      await bumpHourlyUsage(txDb, {
+        teamId: email.teamId,
+        at: new Date(event.occurredAt),
+        counts: Object.fromEntries(cols.map((col) => [col, 1])),
+      });
     }
 
     // Auto-suppression: permanent bounces and complaints, scoped to the

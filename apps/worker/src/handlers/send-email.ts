@@ -2,6 +2,7 @@ import {
   applyStatusCas,
   buildUnsubscribeHeaders,
   buildUnsubscribeUrl,
+  bumpHourlyUsage,
   decryptEmailBody,
   type EmailAttachment,
   type EmailBody,
@@ -681,13 +682,15 @@ export async function sendEmail(
     data: { source: "worker" },
   });
   const counter = schema.usageCounters;
+  const sentAt = new Date();
   await db
     .insert(counter)
-    .values({ teamId: email.teamId, day: utcDay(Date.now()), sent: 1 })
+    .values({ teamId: email.teamId, day: utcDay(sentAt), sent: 1 })
     .onConflictDoUpdate({
       target: [counter.teamId, counter.day],
       set: { sent: sql`${counter.sent} + 1` },
     });
+  await bumpHourlyUsage(db, { teamId: email.teamId, at: sentAt, counts: { sent: 1 } });
   // Account mail's body is gone the moment SES holds it: a reset link is a
   // live credential for thirty minutes, and the row's body is otherwise
   // readable by every member of the owning team, any full-access key and

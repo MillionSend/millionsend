@@ -34,6 +34,7 @@ import {
   purgeExpiredEmailBodies,
   purgeExpiredEmailMetadata,
   purgeExpiredSessions,
+  purgeStaleHourlyUsage,
   reapStaleTrackingSubdomains,
   reapUnverifiedDomains,
   reconcileBillingPlans,
@@ -357,9 +358,11 @@ await queue.scheduleCrons({
       deliveryRetentionDays: env.WEBHOOK_DELIVERY_RETENTION_DAYS,
     });
     const sessions = await purgeExpiredSessions(db);
+    const hourlyUsage = await purgeStaleHourlyUsage(db);
     const stripeEvents = await purgeStripeEvents(db);
     const counts = {
       purged,
+      hourlyUsage,
       apiRequests: requests,
       events: stripped.events,
       deliveries: stripped.deliveries,

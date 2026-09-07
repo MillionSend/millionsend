@@ -309,6 +309,7 @@ export {
   verifyUpdatesToken,
 } from "./updates-token.js";
 export { isLoopbackUrl } from "./url.js";
+export { bumpHourlyUsage, USAGE_COUNTERS, type UsageCounter, utcHour } from "./usage-hourly.js";
 export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
 export {
   buildWebhookPayload,

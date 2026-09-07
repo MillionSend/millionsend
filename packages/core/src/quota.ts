@@ -3,6 +3,7 @@ import { schema } from "@millionsend/db";
 import { sql } from "drizzle-orm";
 import { firstRow } from "./driver-result.js";
 import { QUOTA_TOLERANCE } from "./plans.js";
+import { bumpHourlyUsage } from "./usage-hourly.js";
 import { utcDay } from "./utc-day.js";
 
 export type QuotaResult =
@@ -28,11 +29,19 @@ export function dailyCeiling(limit: number): number {
 
 export async function reserveDailyQuota(
   db: Db,
-  params: { teamId: string; count: number; limit: number | null; day?: string },
+  params: {
+    teamId: string;
+    count: number;
+    limit: number | null;
+    day?: string;
+    /** The instant the sends count against (their delivery time); noon of `day` when only that is known. */
+    at?: Date;
+  },
 ): Promise<QuotaResult> {
   const { teamId, count, limit } = params;
   if (count <= 0) throw new Error("count must be positive");
   const day = params.day ?? utcDay();
+  const at = params.at ?? (params.day ? new Date(`${params.day}T12:00:00Z`) : new Date());
   const t = schema.usageCounters;
   const ceiling = limit === null ? null : dailyCeiling(limit);
 
@@ -55,7 +64,10 @@ export async function reserveDailyQuota(
   `);
 
   const row = firstRow<{ accepted: number }>(rows);
-  if (row) return { reserved: true, acceptedToday: Number(row.accepted) };
+  if (row) {
+    await bumpHourlyUsage(db, { teamId, at, counts: { accepted: count } });
+    return { reserved: true, acceptedToday: Number(row.accepted) };
+  }
 
   const existing = await db
     .select({ accepted: t.accepted })
@@ -70,14 +82,16 @@ export async function reserveDailyQuota(
  */
 export async function releaseDailyQuota(
   db: Db,
-  params: { teamId: string; count: number; day?: string },
+  params: { teamId: string; count: number; day?: string; at?: Date },
 ): Promise<void> {
   if (params.count <= 0) throw new Error("count must be positive");
   const day = params.day ?? utcDay();
+  const at = params.at ?? (params.day ? new Date(`${params.day}T12:00:00Z`) : new Date());
   const t = schema.usageCounters;
   await db.execute(sql`
     update ${t}
     set accepted = greatest(accepted - ${params.count}, 0)
     where ${t.teamId} = ${params.teamId} and ${t.day} = ${day}
   `);
+  await bumpHourlyUsage(db, { teamId: params.teamId, at, counts: { accepted: -params.count } });
 }

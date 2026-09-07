@@ -1,4 +1,4 @@
-import { date, integer, pgTable, primaryKey, uuid } from "drizzle-orm/pg-core";
+import { date, integer, pgTable, primaryKey, timestamp, uuid } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
 
 /**
@@ -33,4 +33,33 @@ export const usageCounters = pgTable(
     prefetched: integer("prefetched").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.day] })],
+);
+
+/**
+ * The same counters per UTC hour, for the Metrics chart only: hours sum into
+ * days in whichever timezone the viewer is in, so two teammates each see
+ * their own calendar days from one set of rows. Every writer of a daily
+ * counter bumps the hour as well; quota, the deliverability guardrail and the
+ * account score keep reading the daily table. Rows before the table existed
+ * were backfilled at noon UTC of their day, which is the same calendar date
+ * in every timezone between UTC-11 and UTC+11.
+ */
+export const usageCountersHourly = pgTable(
+  "usage_counters_hourly",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    hour: timestamp("hour", { withTimezone: true }).notNull(),
+    accepted: integer("accepted").notNull().default(0),
+    sent: integer("sent").notNull().default(0),
+    delivered: integer("delivered").notNull().default(0),
+    bounced: integer("bounced").notNull().default(0),
+    hardBounced: integer("hard_bounced").notNull().default(0),
+    complained: integer("complained").notNull().default(0),
+    opened: integer("opened").notNull().default(0),
+    clicked: integer("clicked").notNull().default(0),
+    prefetched: integer("prefetched").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.hour] })],
 );

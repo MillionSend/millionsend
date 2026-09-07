@@ -663,5 +663,9 @@ stored. **Settings → Instance** links to the same page.
 - Worker sizing: `SEND_CONCURRENCY` lanes (default 16, about 1.2 per message/second of SES rate) and `WORKER_REPLICAS` (default 1). The SES rate limiter lives in each worker process, so every worker divides the account's rate by `WORKER_REPLICAS`; set it to the number of worker containers you run.
 - To run processes in separate containers, set `PROCESS` to `api`, `worker`,
   `web`, `smtp`, or `docs` per container (default `all` = api + worker + web).
+  Upgrade them in the same `up -d`: the Metrics chart counts only what
+  upgraded processes write, so a writer left on an older image during the
+  swap is missing from that day's chart (the daily usage figures are
+  unaffected).
 - Email bodies are gzipped, then encrypted at rest with `MASTER_ENCRYPTION_KEY`,
   and purged after the retention window. Back up the key with the database.

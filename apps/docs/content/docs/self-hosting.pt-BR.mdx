@@ -692,7 +692,10 @@ de confirmação chega antes de qualquer coisa ser armazenada.
 - Dimensionamento do worker: `SEND_CONCURRENCY` pistas (padrão 16, cerca de 1,2 por mensagem/segundo da taxa do SES) e `WORKER_REPLICAS` (padrão 1). O limitador de taxa do SES vive em cada processo do worker, então cada worker divide a taxa da conta por `WORKER_REPLICAS`; defina-o como o número de contêineres de worker em execução.
 - Para rodar processos em contêineres separados, defina `PROCESS` como
   `api`, `worker`, `web`, `smtp` ou `docs` por contêiner (padrão `all` =
-  api + worker + web).
+  api + worker + web). Atualize todos no mesmo `up -d`: o gráfico de Métricas
+  só conta o que processos atualizados escrevem, então um processo deixado em
+  uma imagem antiga durante a troca some do gráfico daquele dia (os números de
+  uso diário não são afetados).
 - Os corpos dos emails são comprimidos com gzip, criptografados em repouso com
   `MASTER_ENCRYPTION_KEY` e expurgados após a janela de retenção. Faça backup
   da chave junto com o banco.

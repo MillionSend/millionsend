@@ -254,7 +254,7 @@
     "unlimited": "Ilimitado",
     "history": "Histórico diário",
     "empty": "0 dias registrados.",
-    "day": "Dia",
+    "day": "Dia (UTC)",
     "sent": "Enviados",
     "delivered": "Entregues",
     "bounced": "Devolvidos",

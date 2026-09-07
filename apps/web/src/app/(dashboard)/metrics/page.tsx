@@ -12,7 +12,7 @@ import { Select } from "@/components/select";
 import { Skeleton } from "@/components/skeleton";
 import { CircleInfoGlyph } from "@/components/tooltip";
 import { codeRichTags } from "@/lib/code-rich-tags";
-import { formatDayTime, formatDayUtc } from "@/lib/format";
+import { formatDayUtc } from "@/lib/format";
 import { BAND_TONE, formatScoreTenths } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
@@ -122,10 +122,8 @@ function RateCard(props: {
   risk?: { label: string; lineTop: number };
   // Engagement: neutral denominator note (no threshold — higher is better).
   note?: string;
-  // Tooltip suffix for a bar whose day is still being counted, and the line
-  // under it saying when that UTC day began for the viewer.
+  // Tooltip suffix for a bar whose day is still being counted.
   partialNote: string;
-  partialDetail: string | undefined;
   // Muted second footer row for what deliberately stays out of the headline.
   secondary?: { label: string; note: string; hint: string; count: string; pct: string } | undefined;
 }) {
@@ -227,11 +225,6 @@ function RateCard(props: {
               {hoveredBar.dayLabel}
               {hoveredBar.partial ? ` · ${props.partialNote}` : ""}
             </div>
-            {hoveredBar.partial && props.partialDetail ? (
-              <div className="ms-mono" style={{ fontSize: 11, color: "var(--ms-faint)" }}>
-                {props.partialDetail}
-              </div>
-            ) : null}
             <div
               className="ms-mono"
               style={{ fontSize: 12, color: "var(--ms-bone)", marginTop: 3 }}
@@ -447,22 +440,14 @@ export default function MetricsPage() {
   // The chart's risk line is drawn at a fixed height; its label carries the threshold the line stands for.
   const riskPct = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 2 });
   const trpc = useTRPC();
-  // Every bucket is a UTC day (the quota day). The axis and a caption say so
-  // once; only the in-progress day spells it out in its tooltip, with the
-  // moment that day began where the viewer sits — at 21:10 in São Paulo the
-  // chart has already moved to tomorrow's UTC date.
-  const tipDay = (day: string, today: string) =>
-    day === today
-      ? t("chart.dayUtc", { day: formatDayUtc(day, locale) })
-      : formatDayUtc(day, locale);
-  const sinceLocal = (today: string) =>
-    new Date().getTimezoneOffset() === 0
-      ? undefined
-      : t("chart.sinceLocal", { time: formatDayTime(`${today}T00:00:00Z`, locale) });
+  // Days are the viewer's calendar days: the server sums hourly counters in
+  // this zone, so the chart reads "today" wherever the viewer sits.
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const dayLabel = (day: string) => formatDayUtc(day, locale);
   const [rangeParam, setRangeParam] = useUrlState("range", "15");
   // URL input — anything but a known range key falls back to the default.
   const days: Range = RANGES.find((r) => String(r) === rangeParam) ?? 15;
-  const query = useQuery(trpc.metrics.window.queryOptions({ days }));
+  const query = useQuery(trpc.metrics.window.queryOptions({ days, tz }));
   const scoreQuery = useQuery(trpc.metrics.accountScore.queryOptions());
   const [scoreDetailsOpen, setScoreDetailsOpen] = useState(false);
   // Same glyph and trigger as the DNS tables' tooltip; here it opens the drawer.
@@ -536,11 +521,6 @@ export default function MetricsPage() {
               </KpiValue>
             </div>
             <div style={{ marginTop: 18 }}>
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
-                  {t("chart.utcDays")}
-                </span>
-              </div>
               <LineChart
                 days={data.days.map((d) => d.day)}
                 height={228}
@@ -549,11 +529,9 @@ export default function MetricsPage() {
                   label: common(`status.${s.key}`),
                   values: data.days.map((d) => d[s.key]),
                 }))}
-                formatDay={(day) => formatDayUtc(day, locale)}
-                formatTipDay={(day) => tipDay(day, data.today)}
+                formatDay={dayLabel}
                 formatValue={(value) => fmt.format(value)}
                 partialNote={t("chart.soFar")}
-                partialDetail={sinceLocal(data.today)}
               />
             </div>
           </div>
@@ -694,14 +672,13 @@ export default function MetricsPage() {
               }}
               color="var(--ms-danger)"
               partialNote={t("chart.soFar")}
-              partialDetail={sinceLocal(data.today)}
               bars={rateBars(
                 data.days,
                 (d) => d.hardBounced,
                 BOUNCE,
                 pct2,
                 fmt,
-                (day) => tipDay(day, data.today),
+                dayLabel,
                 data.today,
               )}
               rowLabel={t("bounce.bounced")}
@@ -721,14 +698,13 @@ export default function MetricsPage() {
               }}
               color="var(--ms-warn)"
               partialNote={t("chart.soFar")}
-              partialDetail={sinceLocal(data.today)}
               bars={rateBars(
                 data.days,
                 (d) => d.complained,
                 COMPLAINT,
                 pct2,
                 fmt,
-                (day) => tipDay(day, data.today),
+                dayLabel,
                 data.today,
               )}
               rowLabel={t("complaint.complained")}
@@ -750,15 +726,7 @@ export default function MetricsPage() {
               }
               color="var(--ms-info)"
               partialNote={t("chart.soFar")}
-              partialDetail={sinceLocal(data.today)}
-              bars={engagementBars(
-                data.days,
-                (d) => d.opened,
-                pct1,
-                fmt,
-                (day) => tipDay(day, data.today),
-                data.today,
-              )}
+              bars={engagementBars(data.days, (d) => d.opened, pct1, fmt, dayLabel, data.today)}
               rowLabel={t("open.opened")}
               secondary={
                 data.totals.prefetched > 0
@@ -791,15 +759,7 @@ export default function MetricsPage() {
               }
               color="var(--ms-info)"
               partialNote={t("chart.soFar")}
-              partialDetail={sinceLocal(data.today)}
-              bars={engagementBars(
-                data.days,
-                (d) => d.clicked,
-                pct1,
-                fmt,
-                (day) => tipDay(day, data.today),
-                data.today,
-              )}
+              bars={engagementBars(data.days, (d) => d.clicked, pct1, fmt, dayLabel, data.today)}
               rowLabel={t("click.clicked")}
               rowCount={fmt.format(data.totals.clicked)}
               rowPct={
