@@ -25,6 +25,7 @@ import {
   CreateConfigurationSetCommand,
   CreateConfigurationSetEventDestinationCommand,
   DeleteConfigurationSetCommand,
+  PutAccountSuppressionAttributesCommand,
   SESv2Client,
 } from "@aws-sdk/client-sesv2";
 import {
@@ -97,7 +98,8 @@ type SetupSqsCommand =
 type SetupSesCommand =
   | CreateConfigurationSetCommand
   | CreateConfigurationSetEventDestinationCommand
-  | DeleteConfigurationSetCommand;
+  | DeleteConfigurationSetCommand
+  | PutAccountSuppressionAttributesCommand;
 
 /**
  * Structural subsets of the AWS clients so tests inject fakes
@@ -403,6 +405,17 @@ export async function runEventsSetup(
       }),
     ),
     ["AlreadyExistsException"],
+  );
+
+  // SES's account-level suppression list is regional and shared by every
+  // team on the instance. A hard-bounced mailbox is dead for everyone, so
+  // SES may stop those account-wide; a spam report is about one sender's
+  // mail, and MillionSend already suppresses it for that team alone — left
+  // on the SES list it would also block an unrelated team's receipt or a
+  // password reset to the same person.
+  step("SES account-level suppression: bounces only (complaints are per team)");
+  await clients.ses.send(
+    new PutAccountSuppressionAttributesCommand({ SuppressedReasons: ["BOUNCE"] }),
   );
 
   return { topicArn, queueUrl };

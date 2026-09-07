@@ -19,6 +19,7 @@ import {
   CreateConfigurationSetCommand,
   CreateConfigurationSetEventDestinationCommand,
   DeleteConfigurationSetCommand,
+  PutAccountSuppressionAttributesCommand,
 } from "@aws-sdk/client-sesv2";
 import {
   CreateTopicCommand,
@@ -167,6 +168,7 @@ describe("runSetup", () => {
       SubscribeCommand,
       CreateConfigurationSetCommand,
       CreateConfigurationSetEventDestinationCommand,
+      PutAccountSuppressionAttributesCommand,
     ]);
     // The queue is always the transport; an https origin is pushed to as well.
     const subscribes = calls.filter((c) => c instanceof SubscribeCommand) as SubscribeCommand[];
@@ -200,6 +202,7 @@ describe("runSetup", () => {
       SubscribeCommand,
       CreateConfigurationSetCommand,
       CreateConfigurationSetEventDestinationCommand,
+      PutAccountSuppressionAttributesCommand,
     ]);
     const subscribe = calls.find((c) => c instanceof SubscribeCommand) as SubscribeCommand;
     expect(subscribe.input.Protocol).toBe("sqs");

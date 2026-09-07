@@ -249,6 +249,17 @@ no `.env` como `SES_CONFIGURATION_SET`. Reinicie depois de defini-los. Sem
 `SES_CONFIGURATION_SET`, os envios saem sem configuration set e não emitem
 eventos.
 
+O assistente também configura a lista de supressão da conta do SES para
+apenas bounces. Essa lista é por região e compartilhada por todos os times da
+instância: uma caixa que deu hard bounce está morta para todo mundo, então o
+SES pode barrá-la para a conta inteira, mas uma denúncia de spam diz respeito
+ao e-mail de um remetente — o MillionSend a suprime só para aquele time, e
+deixada na lista do SES ela bloquearia também o recibo de outro time ou uma
+redefinição de senha para a mesma pessoa. Se você provisionou à mão ou com o
+template do CloudFormation, ajuste você mesmo no console do SES (Suppression
+list → Account-level settings) ou com
+`aws sesv2 put-account-suppression-attributes --suppressed-reasons BOUNCE`.
+
 A assinatura SNS por HTTPS se confirma sozinha quando o app roda com
 `SNS_TOPIC_ARNS` definido; se ficar pendente, use "Request confirmation" nela
 no console do SNS. Assinaturas SQS na mesma conta não precisam de

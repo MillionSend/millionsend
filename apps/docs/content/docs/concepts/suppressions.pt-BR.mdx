@@ -51,6 +51,17 @@ souber que a causa foi corrigida (ex.: uma caixa que sempre existiu mas era
 rejeitada por um servidor mal configurado). A re-supressão é automática no
 próximo bounce ou reclamação.
 
+## A lista de supressão do próprio SES
+
+Além desta lista por time, o Amazon SES mantém uma lista de supressão da
+conta, por região, compartilhada por todos os times da instância. O
+assistente de configuração a define para apenas bounces: uma caixa que deu
+hard bounce está morta para todo mundo, então o SES pode recusá-la para a
+conta inteira, mas uma denúncia de spam diz respeito ao e-mail de um remetente
+e fica só na lista daquele time aqui. Um envio que o SES recusa por causa da
+própria lista aparece como bounce permanente com o subtipo
+`OnAccountSuppressionList`, e só o console do SES remove essa entrada.
+
 ## API
 
 Os endpoints `/suppressions` espelham a superfície `suppressions` do Resend,

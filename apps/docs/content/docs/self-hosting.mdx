@@ -240,6 +240,16 @@ engagement itself), its name in `.env` as `SES_CONFIGURATION_SET`. Restart
 after setting them. Without `SES_CONFIGURATION_SET`, sends go out without a
 configuration set and emit no events.
 
+The wizard also sets SES's account-level suppression list to bounces only.
+That list is per region and shared by every team on the instance: a
+hard-bounced mailbox is dead for everyone, so SES may stop it account-wide,
+but a spam report is about one sender's mail — MillionSend suppresses it for
+that team alone, and left on the SES list it would also block an unrelated
+team's receipt or a password reset to the same person. If you provisioned
+by hand or with the CloudFormation template, set it yourself in the SES
+console (Suppression list → Account-level settings) or with
+`aws sesv2 put-account-suppression-attributes --suppressed-reasons BOUNCE`.
+
 The HTTPS SNS subscription confirms itself once the app runs with
 `SNS_TOPIC_ARNS` set; if it stays pending, use "Request confirmation" on it in
 the SNS console. Same-account SQS subscriptions need no confirmation.

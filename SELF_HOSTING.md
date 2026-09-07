@@ -188,6 +188,12 @@ subscribe Open or Click: that makes SES rewrite every link and inject its own
 pixel, while MillionSend tracks engagement itself. Restart after setting them. Without `SES_CONFIGURATION_SET`, sends go out without
 a configuration set and emit no events.
 
+The wizard also sets SES's account-level suppression list (per region, shared by every
+team) to bounces only: a dead mailbox is dead for everyone, but a spam report is one
+sender's problem and MillionSend suppresses it per team — on the SES list it would block
+an unrelated team's mail to that person too. Provisioned by hand? Set it yourself:
+`aws sesv2 put-account-suppression-attributes --suppressed-reasons BOUNCE`.
+
 The https SNS subscription confirms itself once the app runs with
 `SNS_TOPIC_ARNS` set; if it stays pending, use "Request confirmation" on it in
 the SNS console. Same-account SQS subscriptions need no confirmation.

@@ -50,6 +50,16 @@ cause is fixed (e.g. a mailbox that existed all along but was rejected by a
 misconfigured server). Re-suppression is automatic on the next bounce or
 complaint.
 
+## SES's own suppression list
+
+Besides this per-team list, Amazon SES keeps an account-level suppression
+list per region, shared by every team on the instance. The setup wizard sets
+it to bounces only: a hard-bounced mailbox is dead for everyone, so SES may
+refuse it account-wide, but a spam report is about one sender's mail and
+stays on that team's list here. A send SES refuses because of its own list
+shows as a permanent bounce with the subtype `OnAccountSuppressionList`, and
+only the SES console can remove such an entry.
+
 ## API
 
 The `/suppressions` endpoints mirror Resend's `suppressions` surface, so the
