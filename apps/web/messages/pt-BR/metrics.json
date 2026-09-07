@@ -21,7 +21,9 @@
     "complained": "Reclamações"
   },
   "chart": {
-    "soFar": "até agora"
+    "soFar": "até agora",
+    "ofSent": "{count} de {sent} enviados",
+    "belowFloor": "abaixo do piso do guardrail · não avaliado"
   },
   "engagement": {
     "denominator": "das entregues"
@@ -76,5 +78,8 @@
     "clicked": "Cliques"
   },
   "empty": "Nenhuma métrica ainda.",
-  "emptyHint": "As métricas aparecem após o primeiro envio — <code>POST /emails</code>."
+  "emptyHint": "As métricas aparecem após o primeiro envio — <code>POST /emails</code>.",
+  "guardrail": {
+    "window": "últimos {days} dias"
+  }
 }

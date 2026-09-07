@@ -1,6 +1,12 @@
 "use client";
 
-import { WARN_BOUNCE_RATE, WARN_COMPLAINT_RATE } from "@millionsend/core/deliverability";
+import {
+  GUARDRAIL_WINDOW_DAYS,
+  MIN_GUARDRAIL_VOLUME,
+  MIN_WARN_COMPLAINTS,
+  WARN_BOUNCE_RATE,
+  WARN_COMPLAINT_RATE,
+} from "@millionsend/core/deliverability";
 import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useRef, useState } from "react";
@@ -45,7 +51,15 @@ const CHART_SERIES = [
   { key: "complained", color: "var(--ms-warn)" },
 ] as const;
 
-type Bar = { day: string; height: number; dayLabel: string; detail: string; partial: boolean };
+type Bar = {
+  day: string;
+  height: number;
+  dayLabel: string;
+  detail: string;
+  partial: boolean;
+  /** Under the guardrail's floor: a day this small could not trip the warning on its own. */
+  hollow: boolean;
+};
 type DayCounts = { day: string; sent: number; hardBounced: number; complained: number };
 type EngagementDay = { day: string; delivered: number; opened: number; clicked: number };
 
@@ -53,8 +67,10 @@ function rateBars(
   days: DayCounts[],
   count: (d: DayCounts) => number,
   geometry: { threshold: number; lineTop: number },
+  /** The guardrail's floor for one day's worth of this metric. */
+  belowFloor: (d: DayCounts, c: number) => boolean,
   fmtPct: Intl.NumberFormat,
-  fmt: Intl.NumberFormat,
+  ofSent: (count: number, sent: number) => string,
   formatDay: (day: string) => string,
   today: string,
 ): Bar[] {
@@ -66,8 +82,9 @@ function rateBars(
       day: d.day,
       height: Math.min(BAR_AREA, Math.round((rate / geometry.threshold) * pxPerThreshold)),
       dayLabel: formatDay(d.day),
-      detail: `${fmtPct.format(rate)} · ${fmt.format(c)}`,
+      detail: `${fmtPct.format(rate)} · ${ofSent(c, d.sent)}`,
       partial: d.day === today,
+      hollow: c > 0 && belowFloor(d, c),
     };
   });
 }
@@ -95,6 +112,7 @@ function engagementBars(
       dayLabel: formatDay(d.day),
       detail: `${fmtPct.format(rate)} · ${fmt.format(count(d))}`,
       partial: d.day === today,
+      hollow: false,
     };
   });
 }
@@ -124,6 +142,8 @@ function RateCard(props: {
   note?: string;
   // Tooltip suffix for a bar whose day is still being counted.
   partialNote: string;
+  // Tooltip line under a hollow bar: too small a day for the guardrail to judge.
+  floorNote?: string | undefined;
   // Muted second footer row for what deliberately stays out of the headline.
   secondary?: { label: string; note: string; hint: string; count: string; pct: string } | undefined;
 }) {
@@ -200,7 +220,11 @@ function RateCard(props: {
                 flex: "1 1 0",
                 // 2px floor keeps zero days visible as a baseline stub.
                 height: Math.max(2, bar.height),
-                background: props.color,
+                // A day under the guardrail's floor keeps its outline and
+                // loses its fill: the spike is visible, the alarm is not.
+                background: bar.hollow ? "transparent" : props.color,
+                boxSizing: "border-box",
+                border: bar.hollow ? `1px solid ${props.color}` : undefined,
                 // A day still being counted sits lighter than the settled ones.
                 opacity: bar.partial
                   ? hover?.index === index
@@ -231,6 +255,14 @@ function RateCard(props: {
             >
               {hoveredBar.detail}
             </div>
+            {hoveredBar.hollow && props.floorNote ? (
+              <div
+                className="ms-mono"
+                style={{ fontSize: 11, color: "var(--ms-faint)", marginTop: 3 }}
+              >
+                {props.floorNote}
+              </div>
+            ) : null}
           </ChartTip>
         ) : null}
         {props.risk ? (
@@ -444,6 +476,17 @@ export default function MetricsPage() {
   // this zone, so the chart reads "today" wherever the viewer sits.
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const dayLabel = (day: string) => formatDayUtc(day, locale);
+  // The headline of the two risk cards is the guardrail's own seven-day
+  // rate — the number that warns and pauses — never the chart window's.
+  const health = useQuery(trpc.metrics.health.queryOptions());
+  const guardrailRate = (rate: number | undefined, format: Intl.NumberFormat) =>
+    health.data === undefined
+      ? "…"
+      : health.data.sent > 0 && rate !== undefined
+        ? format.format(rate)
+        : "—";
+  const ofSent = (count: number, sent: number) =>
+    t("chart.ofSent", { count: fmt.format(count), sent: fmt.format(sent) });
   const [rangeParam, setRangeParam] = useUrlState("range", "15");
   // URL input — anything but a known range key falls back to the default.
   const days: Range = RANGES.find((r) => String(r) === rangeParam) ?? 15;
@@ -663,21 +706,22 @@ export default function MetricsPage() {
           <div className="ms-card-row" style={{ display: "flex", gap: 18, marginTop: 18 }}>
             <RateCard
               label={t("bounce.title")}
-              headline={
-                data.totals.sent > 0 ? pct1.format(data.totals.hardBounced / data.totals.sent) : "—"
-              }
+              note={t("guardrail.window", { days: GUARDRAIL_WINDOW_DAYS })}
+              headline={guardrailRate(health.data?.bounceRate, pct1)}
               risk={{
                 label: t("bounce.risk", { rate: riskPct.format(WARN_BOUNCE_RATE) }),
                 lineTop: BOUNCE.lineTop,
               }}
               color="var(--ms-danger)"
               partialNote={t("chart.soFar")}
+              floorNote={t("chart.belowFloor")}
               bars={rateBars(
                 data.days,
                 (d) => d.hardBounced,
                 BOUNCE,
+                (d) => d.sent < MIN_GUARDRAIL_VOLUME,
                 pct2,
-                fmt,
+                ofSent,
                 dayLabel,
                 data.today,
               )}
@@ -689,21 +733,22 @@ export default function MetricsPage() {
             />
             <RateCard
               label={t("complaint.title")}
-              headline={
-                data.totals.sent > 0 ? pct2.format(data.totals.complained / data.totals.sent) : "—"
-              }
+              note={t("guardrail.window", { days: GUARDRAIL_WINDOW_DAYS })}
+              headline={guardrailRate(health.data?.complaintRate, pct2)}
               risk={{
                 label: t("complaint.risk", { rate: riskPct.format(WARN_COMPLAINT_RATE) }),
                 lineTop: COMPLAINT.lineTop,
               }}
               color="var(--ms-warn)"
               partialNote={t("chart.soFar")}
+              floorNote={t("chart.belowFloor")}
               bars={rateBars(
                 data.days,
                 (d) => d.complained,
                 COMPLAINT,
+                (d, c) => d.sent < MIN_GUARDRAIL_VOLUME || c < MIN_WARN_COMPLAINTS,
                 pct2,
-                fmt,
+                ofSent,
                 dayLabel,
                 data.today,
               )}

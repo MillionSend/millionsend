@@ -24,7 +24,9 @@
     "denominator": "of delivered"
   },
   "chart": {
-    "soFar": "so far"
+    "soFar": "so far",
+    "ofSent": "{count} of {sent} sent",
+    "belowFloor": "below the guardrail's floor · not judged"
   },
   "score": {
     "title": "Account score",
@@ -76,5 +78,8 @@
     "clicked": "Clicked"
   },
   "empty": "No metrics yet.",
-  "emptyHint": "Metrics appear after your first send — <code>POST /emails</code>."
+  "emptyHint": "Metrics appear after your first send — <code>POST /emails</code>.",
+  "guardrail": {
+    "window": "last {days} days"
+  }
 }
