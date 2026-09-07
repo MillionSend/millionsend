@@ -52,7 +52,8 @@
     "eventsStalled": "No other events will show — SES can only push delivery events to a public https URL, and this deployment doesn't have one. Re-run setup to create the SQS events queue the worker polls instead; new emails then get events within seconds. Emails sent before that stay as they are.",
     "event": {
       "rendering_failure": "Rendering failure",
-      "prefetched": "Prefetched"
+      "prefetched": "Prefetched",
+      "unsubscribed": "Unsubscribed"
     },
     "prefetchedHint": "The tracking image or a link was fetched by a mail client or security scanner before anyone opened the message. Not counted as an open or a click.",
     "openFromClick": "from click",
@@ -230,7 +231,8 @@
       "addresses": "Email addresses",
       "hint": "Register every domain and subdomain you send from, and every From address, exactly as used. Relay addresses only accept mail from registered senders.",
       "article": "How to stop bounces to @privaterelay.appleid.com recipients"
-    }
+    },
+    "acceptedThenBounced": "The recipient's server accepted this message first (see the delivered event) and returned it afterwards from inside its own system — a forward, a full mailbox or an auto-reply read as a bounce. Nothing retries it."
   },
   "occurrencesDrawer": {
     "title": "{label} — {count, plural, one {# event} other {# events}}",
@@ -307,5 +309,19 @@
     "batch": "Send batch emails",
     "retrieve": "Retrieve email",
     "keyHint": "Replace ms_xxxxxxxxx with an API key from the API Keys page. Every SDK also honors the MILLIONSEND_API_KEY and MILLIONSEND_BASE_URL environment variables."
+  },
+  "unsubscribedDrawer": {
+    "title": "Unsubscribed details",
+    "scope": "Scope",
+    "global": "All emails",
+    "topic": "Topic",
+    "via": "Via",
+    "source": {
+      "one_click": "One-click header (List-Unsubscribe)",
+      "hosted_page": "Hosted unsubscribe page"
+    },
+    "when": "When",
+    "recipient": "Recipient",
+    "note": "The recipient opted out using this email's unsubscribe link. Account messages still arrive; broadcasts to this scope stop."
   }
 }

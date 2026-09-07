@@ -154,6 +154,7 @@ it("a broadcast with no segment or topic fans out to ALL subscribed team contact
   expect(verifyUnsubscribeToken(match?.[1] ?? "", secretKey)).toEqual({
     contactId: first.contactId,
     topicId: null,
+    emailId: first.id,
   });
 });
 
@@ -187,6 +188,7 @@ it("substitutes the {{{RESEND_UNSUBSCRIBE_URL}}} alias in html and text", async 
   expect(verifyUnsubscribeToken(match?.[1] ?? "", secretKey)).toEqual({
     contactId: ids["al@example.com"],
     topicId: null,
+    emailId: expect.any(String),
   });
 });
 
@@ -680,6 +682,7 @@ it("opt-in topic: default (no row) and explicit-in send; explicit opt-out is ski
   expect(verifyUnsubscribeToken(token, secretKey)).toEqual({
     contactId: first.contactId,
     topicId,
+    emailId: first.id,
   });
 });
 

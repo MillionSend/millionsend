@@ -125,5 +125,6 @@ it("fans out with a real per-contact unsubscribe URL, never the literal placehol
   expect(verifyUnsubscribeToken(token ?? "", unsubscribeSecretKey)).toEqual({
     contactId: contact.data?.id,
     topicId: null,
+    emailId: expect.any(String),
   });
 });

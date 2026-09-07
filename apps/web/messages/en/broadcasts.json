@@ -97,7 +97,8 @@
       "clicked": "Clicked",
       "prefetched": "{count} prefetched · not counted",
       "bounced": "Bounced",
-      "complaints": "Complaints"
+      "complaints": "Complaints",
+      "unsubscribed": "Unsubscribed"
     },
     "content": "Content",
     "noContent": "No content.",

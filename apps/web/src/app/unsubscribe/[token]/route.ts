@@ -4,11 +4,52 @@ import {
   hashRecipient,
   recordContactActivity,
 } from "@millionsend/core";
-import { getDb, schema } from "@millionsend/db";
-import { eq, sql } from "drizzle-orm";
+import { type Db, getDb, schema } from "@millionsend/db";
+import { and, eq, sql } from "drizzle-orm";
 import { appBaseUrl } from "@/lib/api-base-url";
 import { enqueueWebhookDeliveries } from "@/server/queue";
-import { postUnsubscribeLocation, preferenceTopics, targetForToken } from "../lookup";
+import {
+  postUnsubscribeLocation,
+  preferenceTopics,
+  targetForToken,
+  type UnsubscribeTarget,
+} from "../lookup";
+
+/**
+ * The opt-out on the email whose link was used, so its timeline and the
+ * broadcast's stats show it. Only when the token names an email and that
+ * row still exists on the contact's team (metadata retention purges rows;
+ * a foreign team's id could only arrive with a forged signature), and only
+ * for the email's own scope: a preference tweak on an unrelated topic
+ * leaves the recipient in this email's audience. Callers guard repeats the
+ * way the contact timeline does, so a scanner re-hit records nothing twice.
+ */
+async function recordEmailUnsubscribe(
+  db: Db,
+  target: UnsubscribeTarget,
+  data: {
+    scope: "global" | "topic";
+    topicId?: string;
+    topicName?: string;
+    source: ContactEventContext["source"];
+  },
+): Promise<void> {
+  if (!target.emailId) return;
+  if (data.scope === "topic" && data.topicId !== target.topic?.id) return;
+  const e = schema.emails;
+  const [row] = await db
+    .select({ id: e.id })
+    .from(e)
+    .where(and(eq(e.id, target.emailId), eq(e.teamId, target.teamId)))
+    .limit(1);
+  if (!row) return;
+  await db.insert(schema.emailEvents).values({
+    emailId: row.id,
+    type: "unsubscribed",
+    occurredAt: new Date(),
+    data,
+  });
+}
 
 /**
  * Public unsubscribe endpoint — the signed token is the only credential, and
@@ -73,18 +114,26 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
         });
       // Timeline: only the topics whose effective state actually flipped —
       // re-saving unchanged preferences records nothing.
+      const flipped = topics.filter((topic) => topic.subscribed !== checked.has(topic.id));
       await recordContactActivity(
         db,
-        topics
-          .filter((topic) => topic.subscribed !== checked.has(topic.id))
-          .map((topic) => ({
-            teamId: target.teamId,
-            contactId: target.contactId,
-            type: checked.has(topic.id) ? ("topic_opt_in" as const) : ("topic_opt_out" as const),
-            data: { topicId: topic.id, name: topic.name },
-          })),
+        flipped.map((topic) => ({
+          teamId: target.teamId,
+          contactId: target.contactId,
+          type: checked.has(topic.id) ? ("topic_opt_in" as const) : ("topic_opt_out" as const),
+          data: { topicId: topic.id, name: topic.name },
+        })),
         events,
       );
+      for (const topic of flipped) {
+        if (checked.has(topic.id)) continue;
+        await recordEmailUnsubscribe(db, target, {
+          scope: "topic",
+          topicId: topic.id,
+          topicName: topic.name,
+          source: events.source,
+        });
+      }
     }
     return Response.redirect(
       new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}?saved=1`, appBaseUrl()),
@@ -115,6 +164,12 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
         },
         events,
       );
+      await recordEmailUnsubscribe(db, target, {
+        scope: "topic",
+        topicId: target.topic.id,
+        topicName: target.topic.name,
+        source: events.source,
+      });
     }
   } else {
     await db
@@ -165,6 +220,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
         },
         events,
       );
+      await recordEmailUnsubscribe(db, target, { scope: "global", source: events.source });
     }
   }
 

@@ -204,6 +204,13 @@
       "when": 1788715992083,
       "tag": "0028_api_request_oauth_client",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788741066088,
+      "tag": "0029_unsubscribed_email_event",
+      "breakpoints": true
     }
   ]
 }

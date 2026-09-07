@@ -33,6 +33,19 @@ const ACTIVITY_TYPES = [
 ] as const;
 type KnownActivityType = (typeof ACTIVITY_TYPES)[number];
 
+/* Dot tone per kind: joining reads as success, leaving as danger, bookkeeping
+   stays neutral. The rail between dots belongs to neither, so it keeps the
+   line token. */
+const ACTIVITY_DOT: Record<KnownActivityType, string> = {
+  contact_created: "var(--ms-neutral)",
+  topic_opt_in: "var(--ms-success)",
+  resubscribed: "var(--ms-success)",
+  topic_opt_out: "var(--ms-danger)",
+  unsubscribed: "var(--ms-danger)",
+  segment_added: "var(--ms-neutral)",
+  segment_removed: "var(--ms-neutral)",
+};
+
 function EmptyValue() {
   return <span style={{ color: "var(--ms-faint)" }}>—</span>;
 }
@@ -467,6 +480,7 @@ export default function ContactDetailPage() {
               {activities.map((activity, index) => {
                 const activityName =
                   typeof activity.data?.name === "string" ? activity.data.name : "";
+                const dot = ACTIVITY_DOT[activity.type as KnownActivityType];
                 return (
                   <div key={activity.id} style={{ display: "flex", gap: 12 }}>
                     <div
@@ -495,8 +509,8 @@ export default function ContactDetailPage() {
                           flex: "none",
                           boxSizing: "border-box",
                           ...(activity.type === "contact_created"
-                            ? { border: "1.5px solid var(--ms-line-strong)" }
-                            : { background: "var(--ms-line-strong)" }),
+                            ? { border: `1.5px solid ${dot}` }
+                            : { background: dot }),
                         }}
                       />
                       <span

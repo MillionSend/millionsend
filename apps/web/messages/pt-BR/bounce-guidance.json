@@ -59,8 +59,8 @@
     },
     "greylisted": {
       "title": "Greylisting ou limite de taxa",
-      "body": "O servidor do destinatário adiou a mensagem temporariamente e espera uma nova tentativa.",
-      "action": "Nenhuma ação necessária; a entrega é tentada de novo automaticamente."
+      "body": "O servidor do destinatário adiou a mensagem temporariamente. O SES tentou de novo enquanto pôde e depois reportou este bounce.",
+      "action": "Nada tenta de novo depois disso. Envie de novo; uma tentativa mais tarde costuma passar."
     }
   },
   "subtype": {
@@ -86,8 +86,8 @@
     },
     "transientGeneral": {
       "title": "Bounce temporário",
-      "body": "O servidor do destinatário adiou a mensagem por um motivo temporário.",
-      "action": "A entrega é tentada de novo automaticamente; nenhuma ação necessária."
+      "body": "O servidor do destinatário continuou adiando a mensagem; o SES tentou de novo por um tempo e depois desistiu.",
+      "action": "Nada tenta de novo depois disso. Envie de novo mais tarde se a mensagem ainda importar — o endereço não é suprimido e isto não conta na sua taxa de bounce."
     },
     "mailboxFull": {
       "title": "Caixa postal cheia",
@@ -123,8 +123,8 @@
     },
     "transient": {
       "title": "Bounce temporário",
-      "body": "O servidor do destinatário adiou a mensagem por um motivo temporário.",
-      "action": "A entrega é tentada de novo automaticamente; nenhuma ação necessária."
+      "body": "O servidor do destinatário continuou adiando a mensagem; o SES tentou de novo por um tempo e depois desistiu.",
+      "action": "Nada tenta de novo depois disso. Envie de novo mais tarde se a mensagem ainda importar — o endereço não é suprimido e isto não conta na sua taxa de bounce."
     },
     "undetermined": {
       "title": "Motivo do bounce indeterminado",

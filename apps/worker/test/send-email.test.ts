@@ -211,6 +211,7 @@ it("a broadcast send carries the RFC bulk-mail headers", async () => {
   expect(verifyUnsubscribeToken(token, unsubscribeSecret)).toEqual({
     contactId,
     topicId: topic.id,
+    emailId,
   });
 });
 
@@ -247,6 +248,7 @@ it("a topic send to a contact substitutes both unsubscribe tokens and carries RF
     expect(verifyUnsubscribeToken(t ?? "", unsubscribeSecret)).toEqual({
       contactId,
       topicId: topic.id,
+      emailId,
     });
   }
   // Topic sends are transactional: no bulk-mail class headers.

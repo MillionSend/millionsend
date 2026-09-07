@@ -50,7 +50,9 @@ export const emailStatusEnum = pgEnum("email_status", [
  * status ladder above. "prefetched" is a tracking-image fetch a machine made
  * before anyone opened (Apple Mail Privacy Protection, Gmail's prefetch, a
  * security scanner): kept as its own type so it never lifts the status and so
- * the record outlives the purge that nulls event payloads.
+ * the record outlives the purge that nulls event payloads. "unsubscribed" is
+ * an opt-out made through this email's unsubscribe link (scope and method in
+ * the payload); an outcome for the audience, never a status of the delivery.
  */
 export const emailEventTypeEnum = pgEnum("email_event_type", [
   "queued",
@@ -66,6 +68,7 @@ export const emailEventTypeEnum = pgEnum("email_event_type", [
   "rendering_failure",
   "failed",
   "prefetched",
+  "unsubscribed",
 ]);
 
 /**

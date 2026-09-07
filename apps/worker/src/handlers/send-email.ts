@@ -460,6 +460,7 @@ export async function sendEmail(
       topicUnsubscribeToken = makeUnsubscribeToken({
         contactId: contact.id,
         topicId: email.topicId,
+        emailId: email.id,
         secretKey: deps.unsubscribe.secretKey,
       });
     }
@@ -551,6 +552,7 @@ export async function sendEmail(
         makeUnsubscribeToken({
           contactId: email.contactId,
           topicId: eligibility.topicId,
+          emailId: email.id,
           secretKey: deps.unsubscribe.secretKey,
         }),
       ),

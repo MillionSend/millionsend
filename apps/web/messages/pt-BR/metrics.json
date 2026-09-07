@@ -21,7 +21,10 @@
     "complained": "Reclamações"
   },
   "chart": {
-    "soFar": "até agora"
+    "soFar": "até agora",
+    "dayUtc": "{day} (UTC)",
+    "utcDays": "Dias em UTC",
+    "sinceLocal": "desde {time} no seu horário"
   },
   "engagement": {
     "denominator": "das entregues"

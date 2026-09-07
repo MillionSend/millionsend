@@ -286,9 +286,10 @@ describe("catalog parity", () => {
       const catalog = load(locale);
       for (const key of BOUNCE_GUIDANCE_KEYS) {
         for (const field of ["title", "body", "action"]) {
-          expect(at(catalog, `${key}.${field}`), `${locale} missing ${key}.${field}`).toBeTypeOf(
-            "string",
-          );
+          const value = at(catalog, `${key}.${field}`);
+          expect(value, `${locale} missing ${key}.${field}`).toBeTypeOf("string");
+          // A bounce is SES giving up; nothing in the product retries after it.
+          expect(value).not.toMatch(/retried automatically|tentada de novo automaticamente/i);
         }
       }
     });

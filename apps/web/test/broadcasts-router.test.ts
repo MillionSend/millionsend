@@ -108,6 +108,7 @@ describe("broadcasts.create / get / list", () => {
         prefetched: 0,
         bounced: 0,
         complained: 0,
+        unsubscribed: 0,
       },
     });
 
@@ -553,6 +554,7 @@ describe("delivery stats", () => {
       prefetched: 0,
       bounced: 1,
       complained: 1,
+      unsubscribed: 0,
     });
 
     const { items } = await caller.broadcasts.list({});

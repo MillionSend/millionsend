@@ -32,6 +32,8 @@ export interface UnsubscribeTarget {
   email: string;
   /** null = global unsubscribe; set = topic-scoped. */
   topic: { id: string; name: string } | null;
+  /** The email whose link was used, when the token carries one. */
+  emailId: string | null;
   /** Already unsubscribed from this scope — the confirm page reads as done. */
   alreadyDone: boolean;
   /** The contact's team's customization for the confirm page. */
@@ -98,11 +100,12 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
   const key = deriveUnsubscribeKey(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64"));
   const parsed = verifyUnsubscribeToken(token, key);
   if (!parsed) return null;
-  const { contactId, topicId } = parsed;
+  const { contactId, topicId, emailId } = parsed;
   // Non-uuid payloads can't be minted by us, but a raw string must never
   // reach a uuid column — Postgres would 500 instead of rendering neutral.
   if (!z.uuid().safeParse(contactId).success) return null;
   if (topicId !== null && !z.uuid().safeParse(topicId).success) return null;
+  if (emailId !== null && !z.uuid().safeParse(emailId).success) return null;
 
   const c = schema.contacts;
   const tm = schema.teams;
@@ -150,6 +153,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
       contactId: contact.id,
       teamId: contact.teamId,
       email: contact.email,
+      emailId,
       topic: null,
       alreadyDone: contact.unsubscribed,
       customization,
@@ -178,6 +182,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
     contactId: contact.id,
     teamId: contact.teamId,
     email: contact.email,
+    emailId,
     topic: { id: topic.id, name: topic.name },
     alreadyDone: !effective,
     customization,

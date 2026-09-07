@@ -189,7 +189,9 @@ export default function BroadcastDetailPage() {
         className="ms-meta-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(6, 1fr)",
+          // Seven stats wrap by content rather than crush at laptop widths; the
+          // narrow-screen rules still force two and one columns.
+          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
           gap: 22,
           padding: "20px 0",
           borderTop: "1px solid var(--ms-line)",
@@ -225,6 +227,10 @@ export default function BroadcastDetailPage() {
         <StatBlock
           label={t("detail.stats.complaints")}
           value={broadcast ? nf.format(broadcast.stats.complained) : null}
+        />
+        <StatBlock
+          label={t("detail.stats.unsubscribed")}
+          value={broadcast ? engagement(broadcast.stats.unsubscribed) : null}
         />
       </div>
 

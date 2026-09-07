@@ -262,9 +262,13 @@ export async function sendBroadcast(
       ) {
         continue;
       }
+      // The row id is minted before the body so the unsubscribe link can name
+      // the email it sits in.
+      const emailId = randomUUID();
       const token = makeUnsubscribeToken({
         contactId: contact.id,
         topicId: broadcast.topicId,
+        emailId,
         secretKey: deps.unsubscribeSecretKey,
       });
       const headers = buildUnsubscribeHeaders(deps.appBaseUrl, token);
@@ -277,7 +281,6 @@ export async function sendBroadcast(
         s === null
           ? null
           : applyMergeFields(substituteUnsubscribeUrl(s, unsubscribeUrl), contact, opts);
-      const emailId = randomUUID();
       const encrypted = await encryptEmailBody(
         {
           html: personalize(baseHtml, { html: true }),

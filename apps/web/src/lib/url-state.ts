@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 
 /**
  * One filter/search/range value mirrored into the URL query string so list
@@ -11,12 +11,26 @@ import { useCallback } from "react";
  * The default value is represented by the param's absence; values arriving
  * from the URL are untrusted, so callers with enum-like params must validate
  * and fall back to the default.
+ *
+ * Local state is the source of truth while typing and the URL is its mirror:
+ * Next applies a replaceState to useSearchParams inside a transition, so an
+ * input bound straight to the param is reset to the stale value by React's
+ * controlled-input restore after every keystroke — which aborts a dead-key
+ * composition ("´" then "e" typed "´e") and jumps the caret. The URL value is
+ * adopted whenever it changes underneath (a same-route link, back/forward).
  */
 export function useUrlState(name: string, defaultValue = ""): [string, (value: string) => void] {
   const params = useSearchParams();
-  const value = params.get(name) ?? defaultValue;
+  const fromUrl = params.get(name) ?? defaultValue;
+  const [value, setValue] = useState(fromUrl);
+  const [adopted, setAdopted] = useState(fromUrl);
+  if (fromUrl !== adopted) {
+    setAdopted(fromUrl);
+    setValue(fromUrl);
+  }
   const set = useCallback(
     (next: string) => {
+      setValue(next);
       const query = new URLSearchParams(window.location.search);
       if (next === defaultValue || next === "") query.delete(name);
       else query.set(name, next);

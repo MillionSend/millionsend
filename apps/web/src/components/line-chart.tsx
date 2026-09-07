@@ -90,20 +90,26 @@ export function LineChart({
   series,
   height = 228,
   formatDay,
+  formatTipDay = formatDay,
   formatValue,
   partialNote,
+  partialDetail,
 }: {
   days: string[];
   series: LineChartSeries[];
   height?: number;
   /** Localized short-day label for the axis and tooltip (UTC-pinned). */
   formatDay: (day: string) => string;
+  /** Tooltip title override; the axis keeps formatDay (no room for a suffix per tick). */
+  formatTipDay?: ((day: string) => string) | undefined;
   formatValue: (value: number) => string;
   /**
    * Set when the newest day is still in progress: its segment draws dashed
    * and the tooltip's day label carries this note ("so far").
    */
   partialNote?: string | undefined;
+  /** A second tooltip line under the in-progress day (when that day began for the viewer). */
+  partialDetail?: string | undefined;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -283,9 +289,17 @@ export function LineChart({
             className="ms-mono"
             style={{ fontSize: 11, color: "var(--ms-muted)", marginBottom: 4 }}
           >
-            {formatDay(days[hover.index] ?? "")}
+            {formatTipDay(days[hover.index] ?? "")}
             {partialNote && hover.index === n - 1 ? ` · ${partialNote}` : ""}
           </div>
+          {partialDetail && hover.index === n - 1 ? (
+            <div
+              className="ms-mono"
+              style={{ fontSize: 11, color: "var(--ms-faint)", margin: "-2px 0 4px" }}
+            >
+              {partialDetail}
+            </div>
+          ) : null}
           {series.map((s) => (
             <div
               key={s.key}

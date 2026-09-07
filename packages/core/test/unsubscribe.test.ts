@@ -17,20 +17,37 @@ const topicId = "1e2d3c4b-5a69-4788-9900-aabbccddeeff";
 describe("unsubscribe tokens", () => {
   it("round-trips a contactId with no topic (null topicId)", () => {
     const token = makeUnsubscribeToken({ contactId, secretKey: key });
-    expect(verifyUnsubscribeToken(token, key)).toEqual({ contactId, topicId: null });
+    expect(verifyUnsubscribeToken(token, key)).toEqual({ contactId, topicId: null, emailId: null });
   });
 
   it("round-trips a contactId and topicId when topic-scoped", () => {
     const token = makeUnsubscribeToken({ contactId, topicId, secretKey: key });
-    expect(verifyUnsubscribeToken(token, key)).toEqual({ contactId, topicId });
+    expect(verifyUnsubscribeToken(token, key)).toEqual({ contactId, topicId, emailId: null });
   });
 
   it("treats a null/empty topicId as a global token", () => {
     const token = makeUnsubscribeToken({ contactId, topicId: null, secretKey: key });
-    expect(verifyUnsubscribeToken(token, key)).toEqual({ contactId, topicId: null });
+    expect(verifyUnsubscribeToken(token, key)).toEqual({ contactId, topicId: null, emailId: null });
     // A topic-scoped token's mac must not verify against the global variant.
     const scoped = makeUnsubscribeToken({ contactId, topicId, secretKey: key });
     expect(scoped).not.toBe(token);
+  });
+
+  it("carries the email whose link it is, with or without a topic", () => {
+    const emailId = "9d154aab-6058-446e-b6b8-01db8ac2138d";
+    expect(
+      verifyUnsubscribeToken(makeUnsubscribeToken({ contactId, emailId, secretKey: key }), key),
+    ).toEqual({ contactId, topicId: null, emailId });
+    expect(
+      verifyUnsubscribeToken(
+        makeUnsubscribeToken({ contactId, topicId, emailId, secretKey: key }),
+        key,
+      ),
+    ).toEqual({ contactId, topicId, emailId });
+    // Tokens minted before the email segment existed are byte-identical.
+    expect(makeUnsubscribeToken({ contactId, emailId: null, secretKey: key })).toBe(
+      makeUnsubscribeToken({ contactId, secretKey: key }),
+    );
   });
 
   it("rejects a tampered payload", () => {

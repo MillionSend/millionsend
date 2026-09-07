@@ -19,6 +19,7 @@ export function emailStatusColor(status: string): string {
     case "rendering_failure":
       return "var(--ms-danger)";
     case "complained":
+    case "unsubscribed":
       return "var(--ms-warn)";
     case "delivery_delayed":
       return "var(--ms-neutral)";
@@ -119,6 +120,16 @@ export function EventGlyph({ type, size = 15 }: { type: string; size?: number })
         <svg {...common} aria-hidden="true">
           <rect x="1.5" y="3.2" width="13" height="9.6" rx="1.8" strokeDasharray="2.2 1.6" />
           <path d="M8 5.2v5M6 8.2l2 2 2-2" />
+        </svg>
+      );
+    case "unsubscribed":
+      // An envelope the recipient walked out of: the flap, and an arrow leaving.
+      return (
+        <svg {...common} aria-hidden="true">
+          <path d="M1.5 4.7a1.6 1.6 0 0 1 1.6-1.6h9.8a1.6 1.6 0 0 1 1.6 1.6v3.1" />
+          <path d="M1.5 5.2 8 9.4l6.5-4.2" />
+          <path d="M1.5 4.7v6.4a1.6 1.6 0 0 0 1.6 1.6H7" />
+          <path d="M10 12.2h4.5M12.6 10.3l1.9 1.9-1.9 1.9" />
         </svg>
       );
     case "delivery_delayed":

@@ -214,6 +214,7 @@ describe("POST /contacts/{id}/preferences-link", () => {
     expect(verifyUnsubscribeToken(token, deriveUnsubscribeKey(masterKey))).toEqual({
       contactId: contact.id,
       topicId: null,
+      emailId: null,
     });
     // By email too, like every other contact route.
     expect((await call("POST", "/contacts/prefs@example.com/preferences-link")).status).toBe(200);

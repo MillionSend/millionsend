@@ -3,8 +3,11 @@ import { createHmac, hkdfSync, timingSafeEqual } from "node:crypto";
 /**
  * Signed one-click unsubscribe tokens (RFC 8058). Token format:
  * `base64url(payload).base64url(HMAC-SHA256(base64url(payload)))` where the raw
- * payload is `contactId` (global unsubscribe) or `contactId.topicId`
- * (topic-scoped). Both are UUIDs, so a single "." separates them unambiguously.
+ * payload is `contactId[.topicId][.emailId]`: a global unsubscribe has an
+ * empty topic segment, and the email segment names the message whose link
+ * was used so the opt-out can be recorded on it. Trailing empty segments are
+ * dropped, so a token without them is the original `contactId` /
+ * `contactId.topicId`. All UUIDs, so "." separates unambiguously.
  * Self-contained: no DB lookup needed to authenticate the link.
  */
 
@@ -24,21 +27,25 @@ function sign(payload: string, secretKey: Buffer): Buffer {
 export function makeUnsubscribeToken(params: {
   contactId: string;
   topicId?: string | null;
+  /** The email carrying the link, when there is one (a preferences link has none). */
+  emailId?: string | null;
   secretKey: Buffer;
 }): string {
-  const raw = params.topicId ? `${params.contactId}.${params.topicId}` : params.contactId;
+  const raw = [params.contactId, params.topicId ?? "", params.emailId ?? ""]
+    .join(".")
+    .replace(/\.+$/, "");
   const payload = Buffer.from(raw, "utf8").toString("base64url");
   return `${payload}.${sign(payload, params.secretKey).toString("base64url")}`;
 }
 
 /**
- * @returns the signed contactId and optional topicId, or null for any
- * malformed/tampered token.
+ * @returns the signed contactId and optional topicId and emailId, or null
+ * for any malformed/tampered token.
  */
 export function verifyUnsubscribeToken(
   token: string,
   secretKey: Buffer,
-): { contactId: string; topicId: string | null } | null {
+): { contactId: string; topicId: string | null; emailId: string | null } | null {
   const dot = token.indexOf(".");
   if (dot < 1) return null;
   const payload = token.slice(0, dot);
@@ -50,8 +57,8 @@ export function verifyUnsubscribeToken(
   if (mac.length !== expected.length || !timingSafeEqual(mac, expected)) return null;
   const parts = Buffer.from(payload, "base64url").toString("utf8").split(".");
   const contactId = parts[0] ?? "";
-  if (contactId.length === 0 || parts.length > 2) return null;
-  return { contactId, topicId: parts[1] || null };
+  if (contactId.length === 0 || parts.length > 3) return null;
+  return { contactId, topicId: parts[1] || null, emailId: parts[2] || null };
 }
 
 /**

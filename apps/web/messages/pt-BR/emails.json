@@ -52,7 +52,8 @@
     "eventsStalled": "Nenhum outro evento vai aparecer — o SES só consegue enviar eventos de entrega para uma URL https pública, e esta instalação não tem uma. Rode o setup novamente para criar a fila de eventos (SQS) que o worker consulta; novos e-mails passam a ter eventos em segundos. E-mails enviados antes disso permanecem como estão.",
     "event": {
       "rendering_failure": "Falha de renderização",
-      "prefetched": "Pré-carregado"
+      "prefetched": "Pré-carregado",
+      "unsubscribed": "Descadastrado"
     },
     "prefetchedHint": "A imagem de rastreamento ou um link foi buscado por um cliente de email ou scanner de segurança antes de alguém abrir a mensagem. Não conta como abertura nem como clique.",
     "openFromClick": "pelo clique",
@@ -230,7 +231,8 @@
       "addresses": "Endereços de e-mail",
       "hint": "Registre todo domínio e subdomínio de envio, e todo endereço De, exatamente como usados. Endereços do relay só aceitam remetentes registrados.",
       "article": "Como parar os bounces para destinatários @privaterelay.appleid.com"
-    }
+    },
+    "acceptedThenBounced": "O servidor do destinatário aceitou esta mensagem primeiro (veja o evento entregue) e a devolveu depois de dentro do próprio sistema — um encaminhamento, uma caixa cheia ou uma resposta automática lida como bounce. Nada tenta de novo."
   },
   "occurrencesDrawer": {
     "title": "{label} — {count, plural, one {# evento} other {# eventos}}",
@@ -307,5 +309,19 @@
     "batch": "Enviar emails em lote",
     "retrieve": "Consultar email",
     "keyHint": "Substitua ms_xxxxxxxxx por uma chave da página de Chaves de API. Todos os SDKs também aceitam as variáveis de ambiente MILLIONSEND_API_KEY e MILLIONSEND_BASE_URL."
+  },
+  "unsubscribedDrawer": {
+    "title": "Detalhes do descadastro",
+    "scope": "Escopo",
+    "global": "Todos os e-mails",
+    "topic": "Tópico",
+    "via": "Via",
+    "source": {
+      "one_click": "Cabeçalho one-click (List-Unsubscribe)",
+      "hosted_page": "Página de descadastro"
+    },
+    "when": "Quando",
+    "recipient": "Destinatário",
+    "note": "O destinatário se descadastrou pelo link deste e-mail. Mensagens de conta continuam chegando; broadcasts para este escopo param."
   }
 }

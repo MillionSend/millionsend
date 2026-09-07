@@ -59,8 +59,8 @@
     },
     "greylisted": {
       "title": "Greylisted or rate-limited",
-      "body": "The recipient server temporarily deferred the message and expects a retry.",
-      "action": "No action needed; delivery is retried automatically."
+      "body": "The recipient server temporarily deferred the message. SES retried for as long as it could, then reported this bounce.",
+      "action": "Nothing retries after this. Send it again; a later attempt usually goes through."
     }
   },
   "subtype": {
@@ -86,8 +86,8 @@
     },
     "transientGeneral": {
       "title": "Temporary bounce",
-      "body": "The recipient server deferred the message for a temporary reason.",
-      "action": "Delivery is retried automatically; no action needed."
+      "body": "The recipient server kept deferring the message; SES retried for a while and then gave up.",
+      "action": "Nothing retries after this. Send again later if the message still matters — the address is not suppressed and this does not count against your bounce rate."
     },
     "mailboxFull": {
       "title": "Mailbox full",
@@ -123,8 +123,8 @@
     },
     "transient": {
       "title": "Temporary bounce",
-      "body": "The recipient server deferred the message for a temporary reason.",
-      "action": "Delivery is retried automatically; no action needed."
+      "body": "The recipient server kept deferring the message; SES retried for a while and then gave up.",
+      "action": "Nothing retries after this. Send again later if the message still matters — the address is not suppressed and this does not count against your bounce rate."
     },
     "undetermined": {
       "title": "Bounce reason undetermined",

@@ -236,6 +236,8 @@ export const broadcastsRouter = router({
         prefetched: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ev.emailId} = ${e.id} and ${ev.type} = 'prefetched'))::int`,
         bounced: sql<number>`count(*) filter (where ${e.latestStatus} = 'bounced')::int`,
         complained: sql<number>`count(*) filter (where ${e.latestStatus} = 'complained')::int`,
+        // Recipients who opted out through this email's link, from everything or from its topic.
+        unsubscribed: sql<number>`count(*) filter (where exists (select 1 from ${ev} where ${ev.emailId} = ${e.id} and ${ev.type} = 'unsubscribed'))::int`,
       })
       .from(e)
       .where(and(eq(e.broadcastId, row.id), eq(e.teamId, ctx.teamId)));
@@ -258,6 +260,7 @@ export const broadcastsRouter = router({
         prefetched: live?.prefetched ?? (row.recipientCount ? null : 0),
         bounced: live?.bounced ?? row.bouncedCount ?? 0,
         complained: live?.complained ?? row.complainedCount ?? 0,
+        unsubscribed: live?.unsubscribed ?? (row.recipientCount ? null : 0),
       },
       insights: emailInsightsView(await fetchBroadcastInsights(ctx.db, ctx.teamId, row.id)),
     };

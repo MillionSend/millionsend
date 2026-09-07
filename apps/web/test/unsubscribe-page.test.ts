@@ -121,6 +121,68 @@ describe("/unsubscribe/[token] route", () => {
       .where(eq(schema.contacts.id, contactId));
     expect(contact?.unsubscribed).toBe(true);
   });
+
+  it("records the opt-out on the email whose link was used, once", async () => {
+    vi.stubEnv("APP_BASE_URL", APP);
+    const teamId = await createTeam(db, "acme");
+    const contactId = await seedContact(teamId);
+    const [email] = await db
+      .insert(schema.emails)
+      .values({ teamId, from: "a@acme.dev", to: ["ada@x.com"], subject: "hi" })
+      .returning({ id: schema.emails.id });
+    const token = makeUnsubscribeToken({ contactId, emailId: email?.id ?? null, secretKey });
+
+    expect((await call("POST", token, "List-Unsubscribe=One-Click")).status).toBe(200);
+    expect((await call("POST", token, "List-Unsubscribe=One-Click")).status).toBe(200);
+
+    const events = await db
+      .select({ type: schema.emailEvents.type, data: schema.emailEvents.data })
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.emailId, email?.id ?? ""));
+    expect(events).toEqual([
+      { type: "unsubscribed", data: { scope: "global", source: "one_click" } },
+    ]);
+  });
+
+  it("a preference tweak on a topic the email was not about is not the email's opt-out", async () => {
+    vi.stubEnv("APP_BASE_URL", APP);
+    const teamId = await createTeam(db, "acme");
+    const contactId = await seedContact(teamId);
+    const [other] = await db
+      .insert(schema.topics)
+      .values({ teamId, name: "Other", defaultSubscribed: true, visibility: "public" })
+      .returning({ id: schema.topics.id });
+    const [email] = await db
+      .insert(schema.emails)
+      .values({ teamId, from: "a@acme.dev", to: ["ada@x.com"], subject: "hi" })
+      .returning({ id: schema.emails.id });
+    // A global (all-contacts) link: the preferences form unchecks an unrelated topic.
+    const token = makeUnsubscribeToken({ contactId, emailId: email?.id ?? null, secretKey });
+    expect((await call("POST", token, "prefs=1")).status).toBe(303);
+    const activities = await db
+      .select({ type: schema.contactActivities.type })
+      .from(schema.contactActivities)
+      .where(eq(schema.contactActivities.contactId, contactId));
+    expect(activities).toEqual([{ type: "topic_opt_out" }]);
+    expect(await db.select().from(schema.emailEvents)).toHaveLength(0);
+    expect(other?.id).toBeTruthy();
+  });
+
+  it("an email the token names on another team, or none at all, records nothing", async () => {
+    vi.stubEnv("APP_BASE_URL", APP);
+    const teamId = await createTeam(db, "acme");
+    const otherTeam = await createTeam(db, "other");
+    const contactId = await seedContact(teamId);
+    const [foreign] = await db
+      .insert(schema.emails)
+      .values({ teamId: otherTeam, from: "x@other.dev", to: ["ada@x.com"], subject: "hi" })
+      .returning({ id: schema.emails.id });
+    for (const emailId of [foreign?.id ?? null, "4b3a9b0e-0000-4000-8000-000000000000"]) {
+      const token = makeUnsubscribeToken({ contactId, emailId, secretKey });
+      expect((await call("POST", token, "List-Unsubscribe=One-Click")).status).toBe(200);
+    }
+    expect(await db.select().from(schema.emailEvents)).toHaveLength(0);
+  });
 });
 
 describe("targetForToken customization", () => {

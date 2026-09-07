@@ -41,7 +41,8 @@ type EventType =
   | "suppressed"
   | "rendering_failure"
   | "failed"
-  | "prefetched";
+  | "prefetched"
+  | "unsubscribed";
 
 /**
  * Ledger word color per the canvas: sent stays muted (it's the baseline,
@@ -63,6 +64,8 @@ const EVENT_COLOR: Record<EventType, string> = {
   failed: "var(--ms-danger)",
   // A machine's fetch, not an outcome: the same muted tone as sent.
   prefetched: "var(--ms-muted)",
+  // An opt-out through this email's link: a warning-tone outcome, like a complaint.
+  unsubscribed: "var(--ms-warn)",
 };
 
 const PREFETCH_REASONS = [
@@ -83,11 +86,15 @@ type EventData = Record<string, unknown> | null;
 type BounceData = {
   bounceType?: string;
   bounceSubType?: string;
-  bouncedRecipients?: Array<{ diagnosticCode?: string; status?: string }>;
+  bouncedRecipients?: Array<{ emailAddress?: string; diagnosticCode?: string; status?: string }>;
 };
 function bounceOf(data: EventData): BounceData | null {
   const b = data?.bounce;
   return b && typeof b === "object" ? (b as BounceData) : null;
+}
+function deliveryOf(data: EventData): { recipients?: string[] } | null {
+  const d = data?.delivery;
+  return d && typeof d === "object" ? (d as { recipients?: string[] }) : null;
 }
 function clickOf(data: EventData): { link?: string } | null {
   const c = data?.click;
@@ -105,6 +112,11 @@ function prefetchReasonOf(data: EventData): unknown {
 function complaintOf(data: EventData): { complaintFeedbackType?: string } | null {
   const c = data?.complaint;
   return c && typeof c === "object" ? (c as { complaintFeedbackType?: string }) : null;
+}
+/** The opt-out recorded by the unsubscribe route (flat payload). */
+type UnsubscribeData = { scope?: string; topicId?: string; topicName?: string; source?: string };
+function unsubscribeOf(data: EventData): UnsubscribeData | null {
+  return data && typeof data.scope === "string" ? (data as UnsubscribeData) : null;
 }
 /** "550 5.1.1" out of an SMTP diagnostic string, or null. */
 function smtpCode(diagnostic: string | undefined): string | null {
@@ -432,7 +444,7 @@ export default function EmailDetailPage() {
   const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [drawer, setDrawer] = useState<"bounced" | "suppressed" | null>(null);
+  const [drawer, setDrawer] = useState<"bounced" | "suppressed" | "unsubscribed" | null>(null);
   // Identifies an occurrence group by its first event's id — type alone is
   // ambiguous now that each local day gets its own node per type.
   const [groupDrawer, setGroupDrawer] = useState<string | null>(null);
@@ -498,11 +510,13 @@ export default function EmailDetailPage() {
   // "sent" can ever arrive — the timeline says so instead of silently stalling.
   // A prefetch is a machine's fetch, not something SES pushed, so it does
   // not count as an event that arrived after "sent".
+  // An opt-out is recorded by this app too, so it says nothing about SES.
   const eventsStalled =
     sesEnv.data?.snsTopicsConfigured === false &&
-    events.filter((event) => event.type !== "prefetched").at(-1)?.type === "sent";
+    events.filter((event) => event.type !== "prefetched" && event.type !== "unsubscribed").at(-1)
+      ?.type === "sent";
   const eventLabel = (type: EventType) =>
-    type === "rendering_failure" || type === "prefetched"
+    type === "rendering_failure" || type === "prefetched" || type === "unsubscribed"
       ? t(`detail.event.${type}`)
       : common(`status.${type}`);
   const prefetchReason = (reason: unknown) =>
@@ -522,6 +536,38 @@ export default function EmailDetailPage() {
   const bounceDiag = bounce?.bouncedRecipients?.[0]?.diagnosticCode;
   const bounceCode = smtpCode(bounceDiag) ?? bounce?.bouncedRecipients?.[0]?.status ?? null;
   const hardBounced = bounce?.bounceType === "Permanent";
+  // A bounce after a delivery is the receiving server returning a message it
+  // had accepted (a forward, a full mailbox, an auto-reply read as a bounce).
+  // The delivery must name the bounced address: a multi-recipient email gets
+  // one SES Delivery per recipient, and another address's delivery says
+  // nothing about this one. email.events is ascending.
+  const bouncedAddresses = new Set(
+    (bounce?.bouncedRecipients ?? []).flatMap((r) =>
+      r.emailAddress ? [r.emailAddress.toLowerCase()] : [],
+    ),
+  );
+  const acceptedThenBounced =
+    lastBounce !== undefined &&
+    email.events.some(
+      (event) =>
+        event.type === "delivered" &&
+        new Date(event.occurredAt).getTime() <= new Date(lastBounce.occurredAt).getTime() &&
+        (deliveryOf(event.data)?.recipients ?? []).some((r) =>
+          bouncedAddresses.has(r.toLowerCase()),
+        ),
+    );
+  // Every opt-out through this email's link: a preferences save can leave
+  // several topics at once, and the drawer names them all.
+  const unsubscribes = email.events
+    .filter((event) => event.type === "unsubscribed")
+    .map((event) => ({ at: event.occurredAt, data: unsubscribeOf(event.data) }));
+  const lastUnsubscribe = unsubscribes.at(-1);
+  const unsubscribeScope = (data: UnsubscribeData | null) =>
+    data?.scope === "topic"
+      ? (data.topicName ?? t("unsubscribedDrawer.topic"))
+      : data
+        ? t("unsubscribedDrawer.global")
+        : "—";
   const bounceGuidance = resolveBounceGuidance({
     bounceType: bounce?.bounceType ?? null,
     bounceSubType: bounce?.bounceSubType ?? null,
@@ -564,6 +610,10 @@ export default function EmailDetailPage() {
     }
     if (type === "complained") return complaintOf(data)?.complaintFeedbackType ?? null;
     if (type === "suppressed") return t("detail.suppressedLine");
+    if (type === "unsubscribed") {
+      const names = unsubscribes.flatMap((u) => (u.data?.topicName ? [u.data.topicName] : []));
+      return names.length > 0 ? names.join(" · ") : null;
+    }
     if (type === "prefetched") {
       const link = clickOf(data)?.link;
       return [prefetchReason(prefetchReasonOf(data)), link ? displayUrl(link) : null]
@@ -716,7 +766,7 @@ export default function EmailDetailPage() {
               // dedicated drawers explain the terminal fact); repeat-prone
               // types stamp the node with the group's latest occurrence.
               const stamped =
-                type === "bounced" || type === "suppressed"
+                type === "bounced" || type === "suppressed" || type === "unsubscribed"
                   ? first
                   : (group.occurrences[count - 1] ?? first);
               const detail = eventDetail(type, first.data);
@@ -725,9 +775,11 @@ export default function EmailDetailPage() {
                   ? ("bounced" as const)
                   : type === "suppressed"
                     ? ("suppressed" as const)
-                    : count > 1
-                      ? ("group" as const)
-                      : null;
+                    : type === "unsubscribed"
+                      ? ("unsubscribed" as const)
+                      : count > 1
+                        ? ("group" as const)
+                        : null;
               // Icon-tile node: glyph tile, status pill, timestamp, detail —
               // the connector line meets the tiles at their vertical center.
               const card = (
@@ -948,6 +1000,13 @@ export default function EmailDetailPage() {
         <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>
           {t("bouncedDrawer.whatToDo")}
         </div>
+        {acceptedThenBounced ? (
+          <div
+            style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.55, marginBottom: 10 }}
+          >
+            {t("bouncedDrawer.acceptedThenBounced")}
+          </div>
+        ) : null}
         <GuidanceBlock guidanceKey={bounceGuidance.key} />
         {bounceGuidance.key === "provider.apple" ? (
           <ApplePrivateRelaySteps from={email.from} />
@@ -960,6 +1019,51 @@ export default function EmailDetailPage() {
             <CopyChip value={recipient} />
           </>
         ) : null}
+      </Drawer>
+
+      <Drawer
+        open={drawer === "unsubscribed"}
+        onClose={() => setDrawer(null)}
+        title={t("unsubscribedDrawer.title")}
+      >
+        <div className="ms-wrap-row" style={{ display: "flex", gap: 32, marginTop: 16 }}>
+          <div>
+            <Microlabel>{t("unsubscribedDrawer.scope")}</Microlabel>
+            <div style={{ fontSize: 14, marginTop: 4 }}>
+              {unsubscribes.length > 0
+                ? [...new Set(unsubscribes.map((u) => unsubscribeScope(u.data)))].map((scope) => (
+                    <div key={scope}>{scope}</div>
+                  ))
+                : "—"}
+            </div>
+          </div>
+          <div>
+            <Microlabel>{t("unsubscribedDrawer.via")}</Microlabel>
+            <div style={{ fontSize: 14, marginTop: 4 }}>
+              {lastUnsubscribe?.data?.source === "one_click" ||
+              lastUnsubscribe?.data?.source === "hosted_page"
+                ? t(`unsubscribedDrawer.source.${lastUnsubscribe.data.source}`)
+                : "—"}
+            </div>
+          </div>
+          <div>
+            <Microlabel>{t("unsubscribedDrawer.when")}</Microlabel>
+            <div style={{ fontSize: 14, marginTop: 4 }}>
+              {lastUnsubscribe ? formatRelative(lastUnsubscribe.at, locale) : "—"}
+            </div>
+          </div>
+        </div>
+        {recipient ? (
+          <div style={{ marginTop: 12 }}>
+            <Microlabel>{t("unsubscribedDrawer.recipient")}</Microlabel>
+            <div className="ms-mono" style={{ fontSize: 13, marginTop: 5 }}>
+              {recipient}
+            </div>
+          </div>
+        ) : null}
+        <div style={{ fontSize: 13, color: "var(--ms-muted)", lineHeight: 1.6, marginTop: 14 }}>
+          {t("unsubscribedDrawer.note")}
+        </div>
       </Drawer>
 
       <Drawer

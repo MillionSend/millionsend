@@ -16,6 +16,8 @@ import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
+import { formatRelative } from "@/lib/format";
 import { type BuilderRow, buildSegmentFilter, type MatchMode } from "@/lib/segment-builder";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
@@ -69,22 +71,6 @@ function SegmentsSkeleton() {
         ))}
       </tbody>
     </Table>
-  );
-}
-
-/**
- * The list shows stored counts (refreshed on edit and by a periodic recount),
- * so each row says how fresh its numbers are; a never-counted segment is
- * still waiting on its first recount.
- */
-function CountedHint({ countedAt }: { countedAt: Date | null }) {
-  const t = useTranslations("audience.segments");
-  return (
-    <div style={{ fontSize: 11, color: "var(--ms-faint)", marginTop: 2 }}>
-      {countedAt === null
-        ? t("counting")
-        : t.rich("countedAt", { time: () => <RelativeTime date={countedAt} /> })}
-    </div>
   );
 }
 
@@ -277,10 +263,21 @@ export default function SegmentsPage() {
                     </div>
                   </td>
                   <td className="right">
-                    <span className="ms-mono">
-                      {row.contactCount === null ? "—" : nf.format(row.contactCount)}
-                    </span>
-                    <CountedHint countedAt={row.countedAt} />
+                    {/* Stored counts, refreshed on edit and by a periodic recount; the
+                        tooltip says how fresh. A never-counted segment is still
+                        waiting on its first recount. */}
+                    <Tooltip
+                      inline
+                      text={
+                        row.countedAt === null
+                          ? t("counting")
+                          : t("countedAt", { time: formatRelative(row.countedAt, locale) })
+                      }
+                    >
+                      <span className="ms-mono">
+                        {row.contactCount === null ? "—" : nf.format(row.contactCount)}
+                      </span>
+                    </Tooltip>
                   </td>
                   <td className="right ms-mono" style={{ color: "var(--ms-muted)" }}>
                     {row.unsubscribedCount === null ? "—" : nf.format(row.unsubscribedCount)}

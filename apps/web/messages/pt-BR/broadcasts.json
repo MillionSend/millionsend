@@ -97,7 +97,8 @@
       "clicked": "Clicados",
       "prefetched": "{count} pré-carregados · não contados",
       "bounced": "Devolvidos",
-      "complaints": "Reclamações"
+      "complaints": "Reclamações",
+      "unsubscribed": "Descadastrados"
     },
     "content": "Conteúdo",
     "noContent": "Sem conteúdo.",
