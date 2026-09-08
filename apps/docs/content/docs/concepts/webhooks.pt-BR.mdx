@@ -135,8 +135,8 @@ curl -X POST "https://api.millionsend.com/webhooks/{id}/rotate" \
 ## Entrega
 
 Uma entrega é bem-sucedida em qualquer resposta 2xx. Cada endpoint tem a
-própria fila, drenada em ordem com até oito requisições em voo a até **50
-requisições por segundo**; uma rajada de eventos espera na fila em vez de
+própria fila, iniciada na ordem de vencimento com até oito requisições em
+voo a até **50 requisições por segundo**; uma rajada de eventos espera na fila em vez de
 atingir o receptor de uma vez.
 
 Uma tentativa que falha (não-2xx, timeout, erro de conexão) é repetida em um

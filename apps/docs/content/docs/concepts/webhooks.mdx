@@ -135,8 +135,8 @@ curl -X POST "https://api.millionsend.com/webhooks/{id}/rotate" \
 ## Delivery
 
 A delivery is successful on any 2xx response. Each endpoint has its own
-queue, drained in order with up to eight requests in flight at up to **50
-requests per second**; a burst of events waits in the queue rather than
+queue, started in due order with up to eight requests in flight at up to
+**50 requests per second**; a burst of events waits in the queue rather than
 hitting the receiver all at once.
 
 A failed attempt (non-2xx, timeout, connection error) is retried on a fixed

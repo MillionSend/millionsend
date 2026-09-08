@@ -260,10 +260,17 @@ export async function drainWebhookEndpoint(
     const signing = secrets;
     // Workers take rows synchronously and in due order, so a pass that ends
     // early hands back exactly the rows nobody took; a row already taken but
-    // not yet posted goes back too.
+    // not yet posted goes back too. When several workers end the pass at
+    // once, a tripped breaker outranks a 429, which outranks the budget, and
+    // among 429s the latest Retry-After wins: the receiver's request to wait
+    // must survive a sibling's earlier stop.
     type Stop = { reason: "budget" | "throttled" | "disabled"; until: Date };
     let stop = null as Stop | null;
+    // Read through a call: TypeScript narrows the closure's `stop` to null
+    // after an early return and does not see a sibling worker's assignment.
+    const endedBy = (): Stop | null => stop;
     let cursor = 0;
+    const handedBack: ClaimedRow[] = [];
     const worker = async (): Promise<void> => {
       for (;;) {
         if (stop) return;
@@ -288,7 +295,7 @@ export async function drainWebhookEndpoint(
         const at = now();
         if (!stop && overBudget(at)) stop = { reason: "budget", until: at };
         if (stop) {
-          await release(db, [row], stop.until);
+          handedBack.push(row);
           return;
         }
         const body = JSON.stringify(row.payload);
@@ -316,7 +323,7 @@ export async function drainWebhookEndpoint(
         if (status === 429) {
           // The receiver is asking for room, not failing: no attempt is
           // charged, and the endpoint waits out its Retry-After. The
-          // successor is parked at that instant; one a fan-out armed during
+          // successor is parked at that instant; once a fan-out armed during
           // this pass runs at once instead, posts a few rows, meets the 429
           // again and re-parks, so the receiver sees at most one probe per
           // in-flight slot per overlap.
@@ -330,7 +337,10 @@ export async function drainWebhookEndpoint(
               nextAttemptAt: until,
             })
             .where(eq(d.id, row.id));
-          stop ??= { reason: "throttled", until };
+          const ended = endedBy();
+          if (!ended || (ended.reason !== "disabled" && ended.until < until)) {
+            stop = { reason: "throttled", until };
+          }
           return;
         }
 
@@ -355,17 +365,21 @@ export async function drainWebhookEndpoint(
         if (exhausted) {
           outcome.exhausted += 1;
           if (await autoDisableIfDead(db, endpointId)) {
-            stop ??= { reason: "disabled", until: at };
+            if (endedBy()?.reason !== "disabled") stop = { reason: "disabled", until: at };
             return;
           }
         }
       }
     };
-    await Promise.all(
+    // allSettled: a worker that throws must not leave its siblings running
+    // detached beside the retry pg-boss starts for the failed pass.
+    const settled = await Promise.allSettled(
       Array.from({ length: Math.min(WEBHOOK_POST_CONCURRENCY, page.length) }, worker),
     );
+    const failed = settled.find((r) => r.status === "rejected");
+    if (failed) throw failed.reason;
     if (stop) {
-      await release(db, page.slice(cursor), stop.until);
+      await release(db, [...handedBack, ...page.slice(cursor)], stop.until);
       if (stop.reason === "throttled") {
         outcome.rearmAt = stop.until;
         await deps.rearm(endpointId, stop.until);

@@ -406,6 +406,78 @@ it("429: honours Retry-After without charging an attempt, parks the page, pauses
   expect([throttled, handedBack]).toEqual([8, 4]);
 });
 
+it("a 429 that lands after a sibling ran out the budget still pauses the endpoint", async () => {
+  const endpointId = await insertEndpoint();
+  const base = Date.now();
+  const okRow = await insertDelivery(endpointId, { nextAttemptAt: new Date(base - 2_000) });
+  const throttledRow = await insertDelivery(endpointId, { nextAttemptAt: new Date(base - 1_000) });
+  let t = base;
+  let calls = 0;
+  const deps = fakeDeps(
+    async () => {
+      calls += 1;
+      if (calls === 1) {
+        // The first response takes the whole budget and lands after the
+        // sibling's request has already gone out; the sibling's answer is a 429.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        t += 30_000;
+        return { status: 200, body: "ok" };
+      }
+      return { status: 429, body: "slow down", retryAfter: "120" };
+    },
+    () => new Date(t),
+  );
+
+  const outcome = await drainWebhookEndpoint(db, deps, { endpointId });
+  expect(outcome.posted).toBe(2);
+  expect(outcome.rearmAt?.getTime()).toBe(base + 120_000);
+  expect(deps.rearmed).toEqual([{ endpointId, at: new Date(base + 120_000) }]);
+  expect((await deliveryRow(okRow)).status).toBe("success");
+  const parked = await deliveryRow(throttledRow);
+  expect(parked.attempts).toBe(0);
+  expect(parked.nextAttemptAt?.getTime()).toBe(base + 120_000);
+});
+
+it("a breaker trip mid-page hands the untaken rows back due now", async () => {
+  const endpointId = await insertEndpoint();
+  for (let i = 0; i < WEBHOOK_AUTO_DISABLE_AFTER - 1; i += 1) {
+    await insertDelivery(endpointId, {
+      status: "exhausted",
+      attempts: WEBHOOK_MAX_ATTEMPTS,
+      nextAttemptAt: null,
+    });
+  }
+  // Twelve due rows on their last rung: the first exhaustion trips the breaker
+  // while four rows are still untaken.
+  const due = await Promise.all(
+    Array.from({ length: 12 }, () =>
+      insertDelivery(endpointId, { status: "failed", attempts: WEBHOOK_MAX_ATTEMPTS - 1 }),
+    ),
+  );
+  const deps = fakeDeps(async () => ({ status: 503, body: "down" }));
+
+  const before = Date.now();
+  const outcome = await drainWebhookEndpoint(db, deps, { endpointId });
+  expect(await endpointStatus(endpointId)).toBe("auto_disabled");
+  expect(outcome.posted).toBe(8);
+  let untaken = 0;
+  for (const id of due) {
+    const row = await deliveryRow(id);
+    if (row.status === "failed") {
+      untaken += 1;
+      expect(row.attempts).toBe(WEBHOOK_MAX_ATTEMPTS - 1);
+      expect(row.lastResponseCode).toBeNull();
+      expect(row.nextAttemptAt?.getTime()).toBeLessThanOrEqual(Date.now());
+    } else {
+      expect(row.status).toBe("exhausted");
+    }
+  }
+  expect(untaken).toBe(4);
+  // Due now, so the successor is armed at once and settles them for the disabled endpoint.
+  expect(deps.rearmed).toHaveLength(1);
+  expect(deps.rearmed[0]?.at.getTime()).toBeGreaterThanOrEqual(before - 1);
+});
+
 it("an open row older than a day is exhausted without a request", async () => {
   const endpointId = await insertEndpoint();
   const stale = await insertDelivery(endpointId, {
