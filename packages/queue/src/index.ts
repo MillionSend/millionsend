@@ -198,14 +198,34 @@ export interface JobContext {
 
 type JobHandler<N extends JobName> = (payload: JobPayloads[N], ctx: JobContext) => Promise<void>;
 
+/**
+ * pg-boss migrates its schema on start under an advisory lock with a 30 s
+ * lock_timeout. A process booting beside the one migrating loses that race
+ * with an error, and every process here boots at once, so a start that
+ * fails is retried for a while instead of taking the process down.
+ */
+const START_ATTEMPTS = 12;
+const START_RETRY_MS = 5_000;
+
 async function startBoss(options: ConstructorParameters<typeof PgBoss>[0]): Promise<PgBoss> {
-  const boss = new PgBoss(options);
-  boss.on("error", (err: Error) => console.error("pg-boss error", err));
-  boss.on("warning", (warning: { message: string; data: object }) =>
-    console.warn("pg-boss warning", warning.message, warning.data),
-  );
-  await boss.start();
-  return boss;
+  for (let attempt = 1; ; attempt += 1) {
+    const boss = new PgBoss(options);
+    boss.on("error", (err: Error) => console.error("pg-boss error", err));
+    boss.on("warning", (warning: { message: string; data: object }) =>
+      console.warn("pg-boss warning", warning.message, warning.data),
+    );
+    try {
+      await boss.start();
+      return boss;
+    } catch (err) {
+      if (attempt >= START_ATTEMPTS) throw err;
+      console.warn(
+        `pg-boss start failed (attempt ${attempt}/${START_ATTEMPTS}), retrying in ${START_RETRY_MS / 1000}s:`,
+        err instanceof Error ? err.message : err,
+      );
+      await new Promise((resolve) => setTimeout(resolve, START_RETRY_MS));
+    }
+  }
 }
 
 export class Queue {

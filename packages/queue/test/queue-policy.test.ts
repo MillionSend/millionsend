@@ -18,6 +18,8 @@ const scheduled: string[] = [];
 const bosses: { options: Record<string, unknown>; events: string[]; stopped: boolean }[] = [];
 // Shutdown ordering as seen from the mock: "stop:<boss index>" plus whatever a test pushes.
 const order: string[] = [];
+// How many upcoming start() calls fail, as a process losing the migration race does.
+let failStarts = 0;
 let createQueueError: Error | undefined;
 
 vi.mock("pg-boss", () => ({
@@ -29,7 +31,12 @@ vi.mock("pg-boss", () => ({
     on(event: string): void {
       bosses[this.#index]?.events.push(event);
     }
-    async start(): Promise<void> {}
+    async start(): Promise<void> {
+      if (failStarts > 0) {
+        failStarts -= 1;
+        throw new Error("canceling statement due to lock timeout");
+      }
+    }
     async stop(opts?: { graceful?: boolean }): Promise<void> {
       const boss = bosses[this.#index];
       if (boss) boss.stopped = true;
@@ -76,6 +83,7 @@ vi.mock("pg-boss", () => ({
 }));
 
 beforeEach(() => {
+  failStarts = 0;
   queues.clear();
   sent.length = 0;
   workers.length = 0;
@@ -392,4 +400,21 @@ it("arms one drain per distinct endpoint, keyed and grouped by the endpoint so a
 
   await queue.drainWebhookEndpoints([]);
   expect(inserted).toHaveLength(2);
+});
+
+it("retries pg-boss start while another process holds the schema migration", async () => {
+  vi.useFakeTimers();
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    failStarts = 1;
+    const pending = Queue.start("postgres://unused");
+    await vi.advanceTimersByTimeAsync(5_000);
+    await pending;
+    // One instance failed to start, the next one succeeded.
+    expect(bosses).toHaveLength(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+  } finally {
+    warn.mockRestore();
+    vi.useRealTimers();
+  }
 });
