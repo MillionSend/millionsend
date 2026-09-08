@@ -20,6 +20,40 @@ describe("forwardedClientIp", () => {
     ).toBeNull();
   });
 
+  it("on the cloud, a declared proxy behind Cloudflare yields the client it forwarded", () => {
+    // The tracking edge proxies branded links through Cloudflare, which then
+    // names the edge as its peer and appends it to x-forwarded-for.
+    const viaEdge = { cloud: true, trustedProxies: ["198.51.100.7"] };
+    expect(
+      forwardedClientIp(
+        headers({
+          "cf-connecting-ip": "198.51.100.7",
+          "x-forwarded-for": "203.0.113.9, 198.51.100.7",
+        }),
+        viaEdge,
+      ),
+    ).toBe("203.0.113.9");
+    // A chain the client itself started still resolves to the hop the edge saw.
+    expect(
+      forwardedClientIp(
+        headers({
+          "cf-connecting-ip": "198.51.100.7",
+          "x-forwarded-for": "10.9.9.9, 203.0.113.9, 198.51.100.7",
+        }),
+        viaEdge,
+      ),
+    ).toBe("203.0.113.9");
+    // The edge alone, with no chain behind it, names nobody.
+    expect(forwardedClientIp(headers({ "cf-connecting-ip": "198.51.100.7" }), viaEdge)).toBeNull();
+    // A direct visitor is still Cloudflare's peer, whatever x-forwarded-for says.
+    expect(
+      forwardedClientIp(
+        headers({ "cf-connecting-ip": "203.0.113.9", "x-forwarded-for": "10.9.9.9" }),
+        viaEdge,
+      ),
+    ).toBe("203.0.113.9");
+  });
+
   it("walks x-forwarded-for from the right past the declared proxies", () => {
     expect(
       forwardedClientIp(
