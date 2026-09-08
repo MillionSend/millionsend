@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, eq, exists, gt, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import { segmentContactsWhere } from "./segment-filter.js";
 
 export interface SegmentCounts {
@@ -91,19 +91,12 @@ export async function recountStaleSegments(
   // a timestamp before counted_at; compared strictly it would be missed
   // until the next write to the team.
   const grace = sql`${s.countedAt} - interval '5 minutes'`;
+  // max() rather than exists(): the planner serves it as a backward index
+  // walk that stops at one row, where an exists() over a segment holding most
+  // of the members table turns into a scan of it.
   const changedSince = or(
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(c)
-        .where(and(eq(c.teamId, s.teamId), gt(c.updatedAt, grace))),
-    ),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(m)
-        .where(and(eq(m.segmentId, s.id), gt(m.createdAt, grace))),
-    ),
+    gt(sql`(select max(${c.updatedAt}) from ${c} where ${c.teamId} = ${s.teamId})`, grace),
+    gt(sql`(select max(${m.createdAt}) from ${m} where ${m.segmentId} = ${s.id})`, grace),
   );
   const stale = await db
     .select({ id: s.id, teamId: s.teamId, filter: s.filter })

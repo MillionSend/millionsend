@@ -82,10 +82,15 @@ export const webhookDeliveries = pgTable(
     index("webhook_deliveries_due_idx")
       .on(t.endpointId, t.nextAttemptAt, t.id)
       .where(sql`${t.status} in ('pending', 'failed')`),
-    // The auto-disable breaker reads an endpoint's latest settled rows.
+    // The breaker and the failing mail read an endpoint's latest settled rows
+    // that say something about the receiver. Mirrors COUNTED_SETTLED_SQL in
+    // apps/worker/src/handlers/deliver-webhook.ts (6 = WEBHOOK_MAX_ATTEMPTS in
+    // packages/core); a query must spell the predicate the same way to use it.
     index("webhook_deliveries_endpoint_settled_idx")
       .on(t.endpointId, t.createdAt.desc(), t.id.desc())
-      .where(sql`${t.status} in ('success', 'exhausted')`),
+      .where(
+        sql`${t.status} = 'success' or (${t.status} = 'exhausted' and (${t.attempts} >= 6 or ${t.lastResponseCode} = 429))`,
+      ),
     // The retention strip visits only rows that still carry content.
     index("webhook_deliveries_unstripped_idx")
       .on(t.createdAt)

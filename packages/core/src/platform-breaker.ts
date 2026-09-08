@@ -54,9 +54,9 @@ const complaintFilter = sql`${schema.emailEvents.type} = 'complained'`;
  */
 export async function regionWindowCounts(
   db: Db,
-  opts: { now: Date; hours: number; teamIds?: string[] },
+  opts: { now: Date; hours: number; teamIds?: string[]; since?: Date },
 ): Promise<Map<string, RegionWindowCounts>> {
-  const since = new Date(opts.now.getTime() - opts.hours * HOUR_MS);
+  const since = opts.since ?? new Date(opts.now.getTime() - opts.hours * HOUR_MS);
   const teamFilter = opts.teamIds ? inArray(schema.emails.teamId, opts.teamIds) : undefined;
   const out = new Map<string, RegionWindowCounts>();
   const sent = await db
@@ -154,6 +154,8 @@ export async function regionCounterTotals(
     const raw = await regionWindowCounts(db, {
       now: opts.now,
       hours: opts.days * 24,
+      // Same span as the counters: whole UTC days, not a trailing window.
+      since: new Date(`${since}T00:00:00Z`),
       teamIds: multiRegion,
     });
     for (const [region, counts] of raw) {

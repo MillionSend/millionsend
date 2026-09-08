@@ -37,6 +37,8 @@ export interface DrainDeps {
   /** Queue this endpoint's next drain pass, to start no earlier than `at`. */
   rearm: (endpointId: string, at: Date) => Promise<void>;
   now?: () => Date;
+  /** Ends the pass at the next row once aborted (queue shutdown or job expiry). */
+  signal?: AbortSignal | undefined;
 }
 
 export interface DrainOutcome {
@@ -69,13 +71,14 @@ const OPEN_STATUSES = ["pending", "failed"] as const;
 export const WEBHOOK_AUTO_DISABLE_AFTER = 20;
 
 /**
- * A settled row that says something about the receiver: a success, or a
- * failure that ran out of retries. Rows exhausted by age or by a disable
- * carry attempts short of the cap and never posted, so they count for
- * neither the breaker nor the failing mail. Sits inside the settled index's
- * predicate (status in success, exhausted).
+ * A settled row that says something about the receiver: a success, a failure
+ * that ran out of retries, or a row the receiver throttled (429) until it
+ * aged out. Rows exhausted by age or by a disable without ever being posted
+ * count for neither the breaker nor the failing mail. This is also the
+ * settled index's predicate (packages/db/src/schema/webhooks.ts), spelled
+ * with literals the same way so the planner can match the two.
  */
-export const COUNTED_SETTLED_SQL = sql`(${schema.webhookDeliveries.status} = 'success' or ${schema.webhookDeliveries.attempts} >= ${WEBHOOK_MAX_ATTEMPTS})`;
+export const COUNTED_SETTLED_SQL = sql`(${schema.webhookDeliveries.status} = 'success' or (${schema.webhookDeliveries.status} = 'exhausted' and (${schema.webhookDeliveries.attempts} >= ${sql.raw(String(WEBHOOK_MAX_ATTEMPTS))} or ${schema.webhookDeliveries.lastResponseCode} = 429)))`;
 
 /** Exhausts open rows matching `condition` in bounded batches; returns how many. */
 export async function exhaustOpenDeliveries(db: Db, condition: SQL, order?: SQL): Promise<number> {
@@ -91,7 +94,8 @@ export async function exhaustOpenDeliveries(db: Db, condition: SQL, order?: SQL)
           db
             .select({ id: d.id })
             .from(d)
-            .where(and(inArray(d.status, OPEN_STATUSES), condition))
+            // A null clock is a row settled by hand (a failed test delivery): not open work.
+            .where(and(inArray(d.status, OPEN_STATUSES), isNotNull(d.nextAttemptAt), condition))
             .orderBy(...(order ? [order] : []))
             .limit(SETTLE_BATCH),
         ),
@@ -113,13 +117,7 @@ async function autoDisableIfDead(db: Db, endpointId: string): Promise<boolean> {
   const recent = db
     .select({ status: d.status })
     .from(d)
-    .where(
-      and(
-        eq(d.endpointId, endpointId),
-        inArray(d.status, ["success", "exhausted"]),
-        COUNTED_SETTLED_SQL,
-      ),
-    )
+    .where(and(eq(d.endpointId, endpointId), COUNTED_SETTLED_SQL))
     // Spelled out so it matches the settled index; a bare desc reads nulls first.
     .orderBy(sql`${d.createdAt} desc nulls last`, sql`${d.id} desc nulls last`)
     .limit(WEBHOOK_AUTO_DISABLE_AFTER)
@@ -231,10 +229,12 @@ export async function drainWebhookEndpoint(
   // Decrypted on the first non-empty page: an idle re-arm pass never calls KMS.
   let secrets: string[] | null = null;
   // ponytail: the bucket is per pass. The queue runs one pass per endpoint
-  // at a time, so two only overlap after a crash left a lease behind; a
-  // process-wide bucket per endpoint is the upgrade if that ever matters.
+  // at a time; two overlap only briefly when a retry job and a fresh one are
+  // fetched by two lanes at once, and the row lease keeps them on disjoint
+  // rows. A process-wide bucket per endpoint is the upgrade.
   const bucket = createTokenBucket(WEBHOOK_MAX_RATE_PER_SECOND);
-  const overBudget = (at: Date) => at.getTime() - started.getTime() >= DRAIN_BUDGET_MS;
+  const overBudget = (at: Date) =>
+    deps.signal?.aborted === true || at.getTime() - started.getTime() >= DRAIN_BUDGET_MS;
 
   pass: while (!overBudget(now())) {
     const page = await claimDue(db, endpointId, now());
@@ -292,10 +292,10 @@ export async function drainWebhookEndpoint(
 
       if (status === 429) {
         // The receiver is asking for room, not failing: no attempt is
-        // charged, and the whole endpoint waits out its Retry-After. The
-        // successor is parked at that instant on purpose: as the endpoint's
-        // queued singleton it swallows every re-arm a fresh insert tries
-        // until then, so nothing else posts to the receiver meanwhile.
+        // charged, and the endpoint waits out its Retry-After. The successor
+        // is parked at that instant; one a fan-out armed during this pass
+        // runs at once instead, posts one row, meets the 429 again and
+        // re-parks, so the receiver sees at most one probe per overlap.
         const until = new Date(at.getTime() + retryAfterMs(retryAfter, at));
         await db
           .update(d)

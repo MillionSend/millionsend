@@ -36,7 +36,8 @@ export async function applyStatusCas(db: Db, emailId: string, next: EmailStatus)
 /**
  * Exact-guard transition for queue-internal states (e.g. the midnight drain's
  * queued_quota → queued, or accept-time parking queued → queued_quota).
- * Never overwrites an email that has already entered the event ladder.
+ * Never overwrites an email that has already entered the event ladder, nor
+ * one a send lane has claimed (sent_at set): its quota is spent either way.
  */
 export async function transitionQueueState(
   db: Db,
@@ -49,6 +50,7 @@ export async function transitionQueueState(
     set latest_status = ${params.to}
     where ${t.id} = ${emailId}
       and ${t.latestStatus} = ${params.from}
+      and ${t.sentAt} is null
     returning id
   `);
   return firstRow<{ id: string }>(rows) !== undefined;

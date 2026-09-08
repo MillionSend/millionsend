@@ -475,6 +475,55 @@ it("rows expired by age never trip the breaker", async () => {
   expect(await endpointStatus(endpointId)).toBe("enabled");
 });
 
+it("rows the receiver throttled until they aged out do count against it", async () => {
+  const endpointId = await insertEndpoint();
+  for (let i = 0; i < WEBHOOK_AUTO_DISABLE_AFTER; i += 1) {
+    await insertDelivery(endpointId, {
+      status: "exhausted",
+      attempts: 0,
+      lastResponseCode: 429,
+      nextAttemptAt: null,
+    });
+  }
+  const id = await insertDelivery(endpointId, {
+    status: "failed",
+    attempts: WEBHOOK_MAX_ATTEMPTS - 1,
+  });
+  const deps = fakeDeps(async () => ({ status: 503, body: "down" }));
+
+  await drainWebhookEndpoint(db, deps, { endpointId });
+  expect((await deliveryRow(id)).status).toBe("exhausted");
+  expect(await endpointStatus(endpointId)).toBe("auto_disabled");
+});
+
+it("an aborted signal ends the pass at the next row and releases the rest as due now", async () => {
+  const endpointId = await insertEndpoint();
+  const [first, second] = await Promise.all([
+    insertDelivery(endpointId),
+    insertDelivery(endpointId, { nextAttemptAt: new Date(Date.now() - 500) }),
+  ]);
+  const controller = new AbortController();
+  const deps = {
+    ...fakeDeps(async () => {
+      controller.abort();
+      return { status: 200, body: "ok" };
+    }),
+    signal: controller.signal,
+  };
+
+  const before = Date.now();
+  const outcome = await drainWebhookEndpoint(db, deps, { endpointId });
+  expect(outcome.posted).toBe(1);
+  expect(deps.posts).toHaveLength(1);
+  expect((await deliveryRow(first)).status).toBe("success");
+  const released = await deliveryRow(second);
+  expect(released.status).toBe("pending");
+  expect(released.attempts).toBe(0);
+  expect(released.nextAttemptAt?.getTime()).toBeLessThanOrEqual(Date.now());
+  expect(deps.rearmed).toHaveLength(1);
+  expect(deps.rearmed[0]?.at.getTime()).toBeGreaterThanOrEqual(before - 1);
+});
+
 it("rows exhausted by a disable do not count once the endpoint is enabled again", async () => {
   const endpointId = await insertEndpoint({ status: "disabled" });
   for (let i = 0; i < WEBHOOK_AUTO_DISABLE_AFTER; i += 1) await insertDelivery(endpointId);

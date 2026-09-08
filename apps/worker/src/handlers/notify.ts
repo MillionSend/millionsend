@@ -107,8 +107,7 @@ async function endpointStandings(db: Db): Promise<EndpointStanding[]> {
           select ${d.status} as status,
                  row_number() over (order by ${d.createdAt} desc nulls last, ${d.id} desc nulls last) as rn
           from ${d}
-          where ${d.endpointId} = ${e.id} and ${d.status} in ('success', 'exhausted')
-            and ${COUNTED_SETTLED_SQL}
+          where ${d.endpointId} = ${e.id} and ${COUNTED_SETTLED_SQL}
           order by ${d.createdAt} desc nulls last, ${d.id} desc nulls last
           limit ${WEBHOOK_FAILING_STREAK}
         ) r

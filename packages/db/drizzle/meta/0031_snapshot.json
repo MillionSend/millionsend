@@ -1,5 +1,5 @@
 {
-  "id": "f5796796-4a89-45a5-8c96-edc02e095373",
+  "id": "714348f1-3e1f-4004-9b0b-560838ef07bd",
   "prevId": "31a5f6c6-37cc-4c90-8319-e03939585d5d",
   "version": "7",
   "dialect": "postgresql",
@@ -3388,6 +3388,28 @@
           "method": "btree",
           "with": {}
         },
+        "emails_quota_parked_created_idx": {
+          "name": "emails_quota_parked_created_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"emails\".\"latest_status\" = 'queued_quota'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "emails_queued_created_idx": {
           "name": "emails_queued_created_idx",
           "columns": [
@@ -3736,6 +3758,27 @@
           "columns": [
             {
               "expression": "contact_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "segment_members_segment_created_idx": {
+          "name": "segment_members_segment_created_idx",
+          "columns": [
+            {
+              "expression": "segment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5121,7 +5164,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"webhook_deliveries\".\"status\" in ('success', 'exhausted')",
+          "where": "\"webhook_deliveries\".\"status\" = 'success' or (\"webhook_deliveries\".\"status\" = 'exhausted' and (\"webhook_deliveries\".\"attempts\" >= 6 or \"webhook_deliveries\".\"last_response_code\" = 429))",
           "concurrently": false,
           "method": "btree",
           "with": {}

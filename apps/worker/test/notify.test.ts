@@ -275,7 +275,7 @@ async function setEndpointStatus(status: "enabled" | "disabled" | "auto_disabled
  */
 async function delivery(
   status: "pending" | "success" | "failed" | "exhausted",
-  opts: { nextAttemptAt?: Date; count?: number; attempts?: number } = {},
+  opts: { nextAttemptAt?: Date; count?: number; attempts?: number; lastResponseCode?: number } = {},
 ) {
   const endpointId = await endpoint();
   const [{ n } = { n: 0 }] = await db
@@ -290,6 +290,7 @@ async function delivery(
       payload: {},
       status,
       attempts: opts.attempts ?? (status === "exhausted" ? WEBHOOK_MAX_ATTEMPTS : 0),
+      lastResponseCode: opts.lastResponseCode ?? null,
       nextAttemptAt: opts.nextAttemptAt ?? null,
       createdAt: new Date(base + (n + i) * 1000),
     })),
@@ -358,6 +359,12 @@ it("a deep backlog that is keeping up is not an alarm", async () => {
   `);
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
   expect(sends).toHaveLength(0);
+});
+
+it("rows the receiver throttled until they aged out read as a failing endpoint", async () => {
+  await delivery("exhausted", { count: 10, attempts: 0, lastResponseCode: 429 });
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
+  expect(sends).toHaveLength(1);
 });
 
 it("rows exhausted without running out of retries do not read as a failing endpoint", async () => {

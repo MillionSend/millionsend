@@ -443,7 +443,7 @@ if (env.SQS_QUEUE_URL) {
 
 await queue.work(
   "webhook.drain",
-  async ({ endpointId }) => {
+  async ({ endpointId }, ctx) => {
     await drainWebhookEndpoint(
       db,
       {
@@ -451,6 +451,7 @@ await queue.work(
         post: (url, body, headers) =>
           postJson(url, { body, headers, allowLocalhost: env.WEBHOOK_ALLOW_LOCALHOST }),
         rearm: (id, at) => queue.drainWebhookEndpoints([id], at),
+        signal: ctx.signal,
       },
       { endpointId },
     );

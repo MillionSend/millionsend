@@ -314,8 +314,9 @@ export class Queue {
    * onto an endpoint whose drain is already created into no insert; a drain
    * that is running (or waiting in retry) gets a successor. The group is the
    * endpoint too: the webhook.drain worker runs with groupConcurrency 1, so
-   * that successor is not fetched until the running pass has finished, and
-   * two passes never post the same endpoint's rows side by side.
+   * that successor is not fetched until the running pass has finished. Two
+   * passes overlap only briefly when a retry job and a fresh one are fetched
+   * by two lanes at once; the row lease keeps them on disjoint rows.
    */
   async drainWebhookEndpoints(endpointIds: readonly string[], startAfter?: Date): Promise<void> {
     await this.sendMany(

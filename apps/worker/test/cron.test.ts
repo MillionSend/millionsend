@@ -158,6 +158,29 @@ it("a failed page enqueue never refunds a row a racing send lane already claimed
   expect(counter?.accepted).toBe(1);
 });
 
+it("a failed page enqueue leaves a row a send lane has claimed but not yet sent alone", async () => {
+  const a = await insertParked(new Date("2026-08-13T01:00:00Z"));
+
+  await expect(
+    drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async () => {
+        // The lane's claim: sent_at set while SES is still being called.
+        await db.update(schema.emails).set({ sentAt: new Date() }).where(eq(schema.emails.id, a));
+        throw new Error("queue down");
+      },
+    }),
+  ).rejects.toThrow("1 email(s) failed");
+
+  // Not re-parked under the lane, and its reservation stays charged.
+  expect(await statusOf(a)).toBe("queued");
+  const [counter] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(counter?.accepted).toBe(1);
+});
+
 it("a failed page enqueue ends the run instead of walking the remaining pages", async () => {
   const base = Date.parse("2026-08-13T00:00:00Z");
   // One row more than a page, so a second page exists to be skipped.
