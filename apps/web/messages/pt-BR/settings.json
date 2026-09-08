@@ -55,6 +55,7 @@
     "preview": "Pré-visualização",
     "previewPreferences": "Preferências",
     "previewSuccess": "Sucesso",
+    "previewLanguage": "Idioma da pré-visualização",
     "redirectUrl": "URL de redirecionamento",
     "redirectUrlNote": "Para onde enviar os destinatários após o cancelamento. Deixe em branco para mantê-los na página de confirmação.",
     "redirectUrlInvalid": "Informe uma URL http(s).",

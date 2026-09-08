@@ -1,8 +1,7 @@
 import { getDb } from "@millionsend/db";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import en from "../../../../../messages/en/unsubscribe.json";
-import ptBR from "../../../../../messages/pt-BR/unsubscribe.json";
+import { pickUnsubscribeLocale, UNSUBSCRIBE_LOCALES } from "@/lib/unsubscribe-locales";
 import { preferenceTopics, targetForToken } from "../../lookup";
 import {
   EMPTY_UNSUBSCRIBE_CUSTOMIZATION,
@@ -12,22 +11,6 @@ import {
 
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 
-const MESSAGES = { en, "pt-BR": ptBR } as const;
-
-/**
- * Public page: locale comes from Accept-Language, never from the dashboard's
- * locale cookie — recipients are not dashboard users. First recognized tag
- * wins; anything that isn't Portuguese reads English.
- */
-function pickMessages(acceptLanguage: string | null): (typeof MESSAGES)[keyof typeof MESSAGES] {
-  for (const part of (acceptLanguage ?? "").toLowerCase().split(",")) {
-    const tag = part.trim();
-    if (tag.startsWith("pt")) return MESSAGES["pt-BR"];
-    if (tag.startsWith("en")) return MESSAGES.en;
-  }
-  return MESSAGES.en;
-}
-
 export default async function UnsubscribeConfirmPage({
   params,
   searchParams,
@@ -36,7 +19,10 @@ export default async function UnsubscribeConfirmPage({
   searchParams: Promise<{ done?: string; saved?: string }>;
 }) {
   const [{ token }, query, headerList] = await Promise.all([params, searchParams, headers()]);
-  const m = pickMessages(headerList.get("accept-language"));
+  // Public page: the locale comes from Accept-Language, never from the
+  // dashboard's locale cookie — recipients are not dashboard users.
+  const locale = pickUnsubscribeLocale(headerList.get("accept-language"));
+  const m = UNSUBSCRIBE_LOCALES[locale].messages;
   const db = getDb();
   const target = await targetForToken(db, token);
   const saved = target !== null && query.saved === "1";
@@ -48,7 +34,7 @@ export default async function UnsubscribeConfirmPage({
     target === null ? "invalid" : saved ? "saved" : done ? "done" : "confirm";
 
   return (
-    <main>
+    <main lang={locale}>
       <UnsubscribePageView
         m={m}
         state={state}

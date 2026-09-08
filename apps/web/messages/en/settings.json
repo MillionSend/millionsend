@@ -55,6 +55,7 @@
     "preview": "Preview",
     "previewPreferences": "Preferences",
     "previewSuccess": "Success",
+    "previewLanguage": "Preview language",
     "redirectUrl": "Redirect URL",
     "redirectUrlNote": "Where to send recipients after they unsubscribe. Leave blank to keep them on the confirmation page.",
     "redirectUrlInvalid": "Enter an http(s) URL.",

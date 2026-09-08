@@ -1,0 +1,13 @@
+{
+  "confirm": "Annulla iscrizione",
+  "confirmPrefs": "Gestisci le preferenze",
+  "confirmTopic": "Annulla l'iscrizione a {topic}",
+  "button": "Annulla iscrizione",
+  "preferences": "Scegli quali email vuoi ricevere:",
+  "save": "Salva le preferenze",
+  "saved": "Le tue preferenze email sono state aggiornate.",
+  "done": "Iscrizione annullata.",
+  "doneDetail": "Non riceverai più email di marketing. I messaggi relativi al tuo account, come ricevute e reimpostazione della password, continueranno ad arrivare.",
+  "doneDetailTopic": "Non riceverai più le email di {topic}.",
+  "invalid": "Questo link non è valido."
+}

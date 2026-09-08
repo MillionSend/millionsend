@@ -6,7 +6,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_UNSUBSCRIBE_CUSTOMIZATION, UnsubscribePageView } from "@/app/unsubscribe/page-view";
-import en from "../messages/en/unsubscribe.json";
+import en from "../messages/unsubscribe/en.json";
 
 // A known 32-byte master key so lookup derives the same key we sign with.
 const KEY_B64 = "dOdpMPArQsV3KWv5I+kizDihKLus3uMLev4DODaFnOQ=";
@@ -287,5 +287,27 @@ describe("UnsubscribePageView logo", () => {
     expect(render("gentle")).toContain("border-radius:8px");
     expect(render("rounded")).toContain("border-radius:16px");
     expect(render("circle")).toContain("border-radius:50%");
+  });
+});
+
+describe("UnsubscribePageView layout", () => {
+  const out = renderToStaticMarkup(
+    createElement(UnsubscribePageView, {
+      m: en,
+      state: "confirm",
+      topicName: "Product news",
+      topics: [{ id: "t1", name: "Product news", subscribed: true }],
+      customization: EMPTY_UNSUBSCRIBE_CUSTOMIZATION,
+    }),
+  );
+
+  it("sizes the card and the page by their borders, so a narrow screen never scrolls sideways", () => {
+    expect(out).toMatch(/class="ms-card" style="[^"]*box-sizing:border-box/);
+    expect(out).toMatch(/min-height:100dvh[^"]*box-sizing:border-box/);
+  });
+
+  it("sets the topic's name in the heading's own type", () => {
+    expect(out).toContain("Unsubscribe from <span");
+    expect(out).not.toContain("ms-mono");
   });
 });

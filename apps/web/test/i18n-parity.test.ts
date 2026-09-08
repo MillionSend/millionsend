@@ -27,3 +27,20 @@ describe("i18n catalog parity", () => {
     });
   }
 });
+
+describe("hosted unsubscribe catalogs", () => {
+  const dir = join(root, "unsubscribe");
+  const load = (file: string): Record<string, string> =>
+    JSON.parse(readFileSync(join(dir, file), "utf8"));
+  const en = load("en.json");
+
+  for (const file of readdirSync(dir).filter((f) => f !== "en.json")) {
+    it(`${file}: carries the English keys, slots included`, () => {
+      const catalog = load(file);
+      expect(Object.keys(catalog).sort()).toEqual(Object.keys(en).sort());
+      for (const [key, value] of Object.entries(en)) {
+        if (value.includes("{topic}")) expect(catalog[key], key).toContain("{topic}");
+      }
+    });
+  }
+});

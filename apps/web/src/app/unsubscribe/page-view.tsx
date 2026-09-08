@@ -1,13 +1,12 @@
+import type { UnsubscribeMessages } from "@/lib/unsubscribe-locales";
 import {
   UNSUBSCRIBE_LOGO_RADIUS,
   type UnsubscribeLogoRadius,
   unsubscribeAccentStyle,
   unsubscribeThemeStyle,
 } from "@/lib/unsubscribe-theme";
-import type en from "../../../messages/en/unsubscribe.json";
 
-/** Recipient-facing catalog shape (en and pt-BR are structurally identical). */
-export type UnsubscribeMessages = typeof en;
+export type { UnsubscribeMessages };
 
 export type UnsubscribeViewState = "invalid" | "confirm" | "saved" | "done";
 
@@ -40,7 +39,7 @@ export const EMPTY_UNSUBSCRIBE_CUSTOMIZATION: UnsubscribeViewCustomization = {
   accentColor: null,
 };
 
-/** "{topic}" slot → mono span, keeping the catalog's sentence order. */
+/** "{topic}" slot → the name, allowed to wrap anywhere, keeping the catalog's sentence order. */
 function fillSlots(template: string, slots: Record<string, string>) {
   // One split per slot, in the order they appear — the catalog never repeats a
   // slot, so a single pass keeps the surrounding text intact.
@@ -52,7 +51,7 @@ function fillSlots(template: string, slots: Record<string, string>) {
   while (match) {
     parts.push(rest.slice(0, match.index));
     parts.push(
-      <span key={key++} className="ms-mono" style={{ overflowWrap: "anywhere" }}>
+      <span key={key++} style={{ overflowWrap: "anywhere" }}>
         {slots[match[1] as "topic"]}
       </span>,
     );
@@ -157,6 +156,7 @@ export function UnsubscribePageView({
         justifyContent: "center",
         gap: 28,
         padding: 24,
+        boxSizing: "border-box",
         ...theme,
       }}
     >
@@ -180,7 +180,13 @@ export function UnsubscribePageView({
       )}
       <div
         className="ms-card"
-        style={{ padding: "28px 32px", width: "100%", maxWidth: 420, textAlign: "center" }}
+        style={{
+          padding: "28px 32px",
+          width: "100%",
+          maxWidth: 420,
+          boxSizing: "border-box",
+          textAlign: "center",
+        }}
       >
         {customization.message ? (
           <p style={{ margin: "0 0 16px", fontSize: 15, color: "var(--ms-muted)" }}>

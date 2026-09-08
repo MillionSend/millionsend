@@ -1,0 +1,13 @@
+{
+  "confirm": "Afmelden",
+  "confirmPrefs": "Voorkeuren beheren",
+  "confirmTopic": "Afmelden voor {topic}",
+  "button": "Afmelden",
+  "preferences": "Kies welke e-mails je wilt ontvangen:",
+  "save": "Voorkeuren opslaan",
+  "saved": "Je e-mailvoorkeuren zijn bijgewerkt.",
+  "done": "Je bent afgemeld.",
+  "doneDetail": "Je ontvangt geen marketing-e-mails meer. Berichten over je account, zoals betalingsbewijzen en wachtwoordresets, blijf je wel ontvangen.",
+  "doneDetailTopic": "Je ontvangt geen e-mails meer over {topic}.",
+  "invalid": "Deze link is niet geldig."
+}

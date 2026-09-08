@@ -1,0 +1,13 @@
+{
+  "confirm": "退订",
+  "confirmPrefs": "管理邮件偏好",
+  "confirmTopic": "退订“{topic}”",
+  "button": "退订",
+  "preferences": "选择你想接收的邮件：",
+  "save": "保存偏好",
+  "saved": "你的邮件偏好已更新。",
+  "done": "已退订。",
+  "doneDetail": "你将不再收到营销邮件。与账户相关的邮件，例如收据和密码重置，仍会正常送达。",
+  "doneDetailTopic": "你将不再收到“{topic}”邮件。",
+  "invalid": "此链接无效。"
+}

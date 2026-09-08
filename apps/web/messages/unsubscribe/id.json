@@ -1,0 +1,13 @@
+{
+  "confirm": "Berhenti berlangganan",
+  "confirmPrefs": "Atur preferensi",
+  "confirmTopic": "Berhenti berlangganan {topic}",
+  "button": "Berhenti berlangganan",
+  "preferences": "Pilih email mana yang ingin kamu terima:",
+  "save": "Simpan preferensi",
+  "saved": "Preferensi email kamu telah diperbarui.",
+  "done": "Kamu telah berhenti berlangganan.",
+  "doneDetail": "Kamu tidak akan menerima email pemasaran lagi. Pesan tentang akun kamu, seperti tanda terima dan pengaturan ulang kata sandi, akan tetap kamu terima.",
+  "doneDetailTopic": "Kamu tidak akan menerima email {topic} lagi.",
+  "invalid": "Tautan ini tidak valid."
+}
