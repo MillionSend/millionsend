@@ -34,11 +34,11 @@ exact URL under **Settings → MCP**.
 <Tab value="Claude Code">
 
 ```sh
-claude mcp add --transport http --scope user millionsend https://api.millionsend.com/mcp
+claude mcp add --transport http millionsend https://api.millionsend.com/mcp
 ```
 
-`--scope user` registers the server for every project on your machine; without
-it, `claude mcp add` defaults to the `local` scope — this project only.
+That registers the server for the current project only; add `--scope user` to
+make it available in every project on your machine.
 
 Then run `/mcp` inside Claude Code and pick `millionsend` to sign in.
 

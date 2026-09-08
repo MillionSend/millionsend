@@ -35,11 +35,11 @@ exata em **Configurações → MCP**.
 <Tab value="Claude Code">
 
 ```sh
-claude mcp add --transport http --scope user millionsend https://api.millionsend.com/mcp
+claude mcp add --transport http millionsend https://api.millionsend.com/mcp
 ```
 
-`--scope user` registra o servidor para todos os projetos da sua máquina; sem
-ele, `claude mcp add` usa o escopo `local` — só o projeto atual.
+Isso registra o servidor só no projeto atual; adicione `--scope user` para
+deixá-lo disponível em todos os projetos da sua máquina.
 
 Depois rode `/mcp` dentro do Claude Code e escolha `millionsend` para entrar.
 
