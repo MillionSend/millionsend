@@ -9,5 +9,6 @@
   "done": "Du bist abgemeldet.",
   "doneDetail": "Du erhältst keine Marketing-E-Mails mehr. Nachrichten zu deinem Konto, etwa Belege oder E-Mails zum Zurücksetzen deines Passworts, bekommst du weiterhin.",
   "doneDetailTopic": "Du erhältst keine E-Mails zum Thema {topic} mehr.",
-  "invalid": "Dieser Link ist ungültig."
+  "invalid": "Dieser Link ist ungültig.",
+  "poweredBy": "Bereitgestellt von {brand}"
 }

@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { UnsubscribeMessages } from "@/lib/unsubscribe-locales";
 import {
   UNSUBSCRIBE_LOGO_RADIUS,
@@ -26,6 +27,7 @@ export interface UnsubscribeViewCustomization {
   backgroundColor: string | null;
   textColor: string | null;
   accentColor: string | null;
+  poweredBy: boolean;
 }
 
 export const EMPTY_UNSUBSCRIBE_CUSTOMIZATION: UnsubscribeViewCustomization = {
@@ -37,29 +39,70 @@ export const EMPTY_UNSUBSCRIBE_CUSTOMIZATION: UnsubscribeViewCustomization = {
   backgroundColor: null,
   textColor: null,
   accentColor: null,
+  poweredBy: true,
 };
 
-/** "{topic}" slot → the name, allowed to wrap anywhere, keeping the catalog's sentence order. */
-function fillSlots(template: string, slots: Record<string, string>) {
+/** A catalog slot ("{topic}", "{brand}") → its element, keeping the catalog's word order. */
+function fillSlots(template: string, slots: Record<string, React.ReactNode>) {
   // One split per slot, in the order they appear — the catalog never repeats a
   // slot, so a single pass keeps the surrounding text intact.
   const parts: React.ReactNode[] = [];
   let rest = template;
   let key = 0;
-  const re = /\{(topic)\}/;
+  const re = /\{(topic|brand)\}/;
   let match = re.exec(rest);
   while (match) {
     parts.push(rest.slice(0, match.index));
-    parts.push(
-      <span key={key++} style={{ overflowWrap: "anywhere" }}>
-        {slots[match[1] as "topic"]}
-      </span>,
-    );
+    parts.push(<Fragment key={key++}>{slots[match[1] as string]}</Fragment>);
     rest = rest.slice(match.index + match[0].length);
     match = re.exec(rest);
   }
   parts.push(rest);
   return <>{parts}</>;
+}
+
+/** The sender's topic name inside a heading, allowed to wrap anywhere. */
+function TopicName({ name }: { name: string }) {
+  return <span style={{ overflowWrap: "anywhere" }}>{name}</span>;
+}
+
+const BRAND_MARK_URL = "/logo/millionsend-favicon.svg";
+
+/** "Powered by MillionSend", under the card, linking to the site. */
+function PoweredBy({ template }: { template: string }) {
+  return (
+    <a
+      href="https://millionsend.com"
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 13,
+        color: "var(--ms-muted)",
+        textDecoration: "none",
+      }}
+    >
+      {fillSlots(template, {
+        brand: (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              color: "var(--ms-bone)",
+              fontWeight: 500,
+            }}
+          >
+            {/* biome-ignore lint/performance/noImgElement: static pre-sized svg, nothing for next/image to optimize */}
+            <img src={BRAND_MARK_URL} alt="" width={16} height={16} style={{ borderRadius: 4 }} />
+            MillionSend
+          </span>
+        ),
+      })}
+    </a>
+  );
 }
 
 /** Circled check above the success headings; palette and pop match ms-badge-success / ms-copy-mark. */
@@ -138,12 +181,13 @@ export function UnsubscribePageView({
 }) {
   const theme = unsubscribeThemeStyle(customization);
   const accent = unsubscribeAccentStyle(customization.accentColor);
-  const confirmText = topicName
-    ? fillSlots(m.confirmTopic, { topic: topicName })
+  const topicSlot = topicName ? { topic: <TopicName name={topicName} /> } : null;
+  const confirmText = topicSlot
+    ? fillSlots(m.confirmTopic, topicSlot)
     : topics.length > 0
       ? m.confirmPrefs
       : m.confirm;
-  const doneText = topicName ? fillSlots(m.doneDetailTopic, { topic: topicName }) : m.doneDetail;
+  const doneText = topicSlot ? fillSlots(m.doneDetailTopic, topicSlot) : m.doneDetail;
   const successHeading = customization.successMessage;
 
   return (
@@ -231,14 +275,17 @@ export function UnsubscribePageView({
                   <p style={{ margin: "0 0 10px", fontSize: 15, color: "var(--ms-muted)" }}>
                     {m.preferences}
                   </p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {/* A real checkbox posts with the form (the page ships no
+                        JS); the switch beside it is what the eye sees. */}
                     {topics.map((topic) => (
                       <label
                         key={topic.id}
                         style={{
+                          position: "relative",
                           display: "flex",
                           alignItems: "center",
-                          gap: 8,
+                          gap: 10,
                           fontSize: 15.5,
                           color: "var(--ms-bone)",
                           cursor: "pointer",
@@ -246,11 +293,14 @@ export function UnsubscribePageView({
                       >
                         <input
                           type="checkbox"
-                          className="ms-checkbox"
+                          className="ms-switch-input"
                           name="topic"
                           value={topic.id}
                           defaultChecked={topic.subscribed}
                         />
+                        <span className="ms-switch" aria-hidden="true">
+                          <span />
+                        </span>
                         {topic.name}
                       </label>
                     ))}
@@ -286,6 +336,7 @@ export function UnsubscribePageView({
           </>
         )}
       </div>
+      {customization.poweredBy ? <PoweredBy template={m.poweredBy} /> : null}
     </div>
   );
 }

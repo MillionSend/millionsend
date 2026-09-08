@@ -225,6 +225,13 @@
       "when": 1788894598519,
       "tag": "0031_shocking_captain_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788908199501,
+      "tag": "0032_unsubscribe_powered_by",
+      "breakpoints": true
     }
   ]
 }

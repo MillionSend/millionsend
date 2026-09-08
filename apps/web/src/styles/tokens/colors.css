@@ -1,7 +1,9 @@
 /* MillionSend colors — canonical values from design-system/tokens.css ("Rollover").
-   Dark is the default (no data-theme attribute); :root[data-theme="light"] below
-   redefines the full set. */
-:root {
+   Dark is the default (no data-theme attribute); the light set below redefines
+   the full set. Either set also applies from any element carrying the
+   attribute, so a preview frame can show the other scheme inside the app. */
+:root,
+[data-theme="dark"] {
   /* Ground & surfaces — separation comes from darkness + 1px lines, plus a
      subtle edge-lit lift on floating/card surfaces (--ms-shadow-card below) */
   --ms-void: #000000; /* app/page ground */
@@ -74,7 +76,8 @@
    Status text holds ≥4.5:1 on its tinted background. The attribute is set
    pre-paint by the inline script in the root layout (explicit toggle only —
    system preference is not followed). */
-:root[data-theme="light"] {
+:root[data-theme="light"],
+[data-theme="light"] {
   --ms-void: #faf8f4;
   --ms-ground: #f4f1ea;
   --ms-panel: #fffefb;

@@ -1,6 +1,7 @@
 import { getDb } from "@millionsend/db";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { DEVICE_THEME_SCRIPT } from "@/lib/theme";
 import { pickUnsubscribeLocale, UNSUBSCRIBE_LOCALES } from "@/lib/unsubscribe-locales";
 import { preferenceTopics, targetForToken } from "../../lookup";
 import {
@@ -35,6 +36,8 @@ export default async function UnsubscribeConfirmPage({
 
   return (
     <main lang={locale}>
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static theme bootstrap, no user input */}
+      <script dangerouslySetInnerHTML={{ __html: DEVICE_THEME_SCRIPT }} />
       <UnsubscribePageView
         m={m}
         state={state}

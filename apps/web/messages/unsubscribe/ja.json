@@ -9,5 +9,6 @@
   "done": "配信を停止しました。",
   "doneDetail": "今後、マーケティングメールは届きません。領収書やパスワードの再設定など、アカウントに関するメールは引き続き届きます。",
   "doneDetailTopic": "今後、{topic}のメールは届きません。",
-  "invalid": "このリンクは無効です。"
+  "invalid": "このリンクは無効です。",
+  "poweredBy": "Powered by {brand}"
 }

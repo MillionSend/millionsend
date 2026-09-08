@@ -9,5 +9,6 @@
   "done": "Suscripción cancelada.",
   "doneDetail": "Ya no recibirás correos de marketing. Los mensajes sobre tu cuenta, como recibos y restablecimientos de contraseña, seguirán llegando.",
   "doneDetailTopic": "Ya no recibirás correos de {topic}.",
-  "invalid": "Este enlace no es válido."
+  "invalid": "Este enlace no es válido.",
+  "poweredBy": "Con tecnología de {brand}"
 }

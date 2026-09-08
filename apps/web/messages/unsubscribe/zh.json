@@ -9,5 +9,6 @@
   "done": "已退订。",
   "doneDetail": "你将不再收到营销邮件。与账户相关的邮件，例如收据和密码重置，仍会正常送达。",
   "doneDetailTopic": "你将不再收到“{topic}”邮件。",
-  "invalid": "此链接无效。"
+  "invalid": "此链接无效。",
+  "poweredBy": "由 {brand} 提供技术支持"
 }

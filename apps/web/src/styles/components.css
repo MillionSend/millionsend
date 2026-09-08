@@ -667,6 +667,30 @@ table.ms-table {
     transition: none;
   }
 }
+/* The same switch drawn over a real checkbox, for a page that ships no JS
+   (the hosted unsubscribe page): the input stays in the form and in the tab
+   order, visually replaced by the .ms-switch span that follows it. */
+.ms-switch-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.ms-switch-input + .ms-switch {
+  display: block;
+  box-sizing: border-box;
+}
+.ms-switch-input:checked + .ms-switch {
+  background: var(--ms-success);
+}
+.ms-switch-input:checked + .ms-switch span {
+  transform: translateX(18px);
+}
+.ms-switch-input:focus-visible + .ms-switch {
+  box-shadow: var(--ms-focus-ring);
+}
 
 /* Checkbox — bulk row selection. Checked/indeterminate fill with bone and draw
    the glyph in ground (the primary-button pairing); the glyph is an inline SVG
@@ -697,10 +721,10 @@ table.ms-table {
 .ms-checkbox:indeterminate {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 6h6' fill='none' stroke='%23050505' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E");
 }
-:root[data-theme="light"] .ms-checkbox:checked {
+[data-theme="light"] .ms-checkbox:checked {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.5l2.5 2.5 4.5-5' fill='none' stroke='%23f4f1ea' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
-:root[data-theme="light"] .ms-checkbox:indeterminate {
+[data-theme="light"] .ms-checkbox:indeterminate {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 6h6' fill='none' stroke='%23f4f1ea' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E");
 }
 .ms-checkbox:focus-visible {
@@ -1568,27 +1592,32 @@ summary:focus-visible,
   padding: 18px 20px;
   max-width: 460px;
 }
-:root[data-theme="light"] .ms-mail-preview {
+[data-theme="light"] .ms-mail-preview {
   --ms-mp-bg: #ffffff;
 }
 
 /* Wordmark — the SVG's fills are bone-on-transparent, invisible on paper;
    light theme swaps in the ink variant of the same lockup. */
-:root[data-theme="light"] .ms-wordmark {
+[data-theme="light"] .ms-wordmark {
   content: url("/logo/millionsend-wordmark-light.svg");
 }
 
 /* Theme-scoped visibility — elements that ship one render per theme (e.g. the
    empty-state tiles). Both stay in the DOM; display alone flips so a theme
-   toggle swaps them with no fetch or reflow of siblings. */
-.ms-light-only {
+   toggle swaps them with no fetch or reflow of siblings. The nearest scheme
+   wins: a dark preview frame inside the light app shows its dark render. */
+.ms-light-only,
+[data-theme="light"] .ms-dark-only {
   display: none;
 }
-:root[data-theme="light"] .ms-light-only {
+[data-theme="light"] .ms-light-only {
   display: block;
 }
-:root[data-theme="light"] .ms-dark-only {
+[data-theme="light"] [data-theme="dark"] .ms-light-only {
   display: none;
+}
+[data-theme="light"] [data-theme="dark"] .ms-dark-only {
+  display: block;
 }
 
 /* Inline code pill — method/env names inside running copy (t.rich code tag) */

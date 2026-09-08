@@ -215,7 +215,24 @@ describe("targetForToken customization", () => {
       backgroundColor: "#000000",
       textColor: "#ffffff",
       accentColor: "#46a3f9",
+      poweredBy: true,
     });
+  });
+
+  it("shows Powered by for a free cloud team even when turned off, and honours a paid team's choice", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const teamId = await createTeam(db, "acme");
+    await db
+      .update(schema.teams)
+      .set({ unsubscribePoweredBy: false })
+      .where(eq(schema.teams.id, teamId));
+    const token = makeUnsubscribeToken({ contactId: await seedContact(teamId), secretKey });
+    expect((await targetForToken(db, token))?.customization.poweredBy).toBe(true);
+    await db
+      .update(schema.teams)
+      .set({ plan: "pro", currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) })
+      .where(eq(schema.teams.id, teamId));
+    expect((await targetForToken(db, token))?.customization.poweredBy).toBe(false);
   });
 
   it("defaults a never-customized team to its own name as the brand", async () => {
@@ -235,6 +252,7 @@ describe("targetForToken customization", () => {
       backgroundColor: null,
       textColor: null,
       accentColor: null,
+      poweredBy: true,
     });
   });
 
@@ -309,5 +327,26 @@ describe("UnsubscribePageView layout", () => {
   it("sets the topic's name in the heading's own type", () => {
     expect(out).toContain("Unsubscribe from <span");
     expect(out).not.toContain("ms-mono");
+  });
+
+  it("draws each topic as a switch over a real checkbox the form posts", () => {
+    expect(out).toMatch(
+      /<input type="checkbox" class="ms-switch-input" name="topic" checked="" value="t1"\/><span class="ms-switch" aria-hidden="true"><span><\/span><\/span>Product news/,
+    );
+    expect(out).not.toContain("ms-checkbox");
+  });
+
+  it("credits MillionSend under the card unless the team turned it off", () => {
+    expect(out).toMatch(
+      /Powered by <span[^>]*><img[^>]*millionsend-favicon\.svg[^>]*\/>MillionSend<\/span><\/a>/,
+    );
+    const off = renderToStaticMarkup(
+      createElement(UnsubscribePageView, {
+        m: en,
+        state: "confirm",
+        customization: { ...EMPTY_UNSUBSCRIBE_CUSTOMIZATION, poweredBy: false },
+      }),
+    );
+    expect(off).not.toContain("Powered by");
   });
 });

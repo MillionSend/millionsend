@@ -205,6 +205,7 @@ export {
   PLAN_GRACE_DAYS,
   PLAN_TEAM_LIMIT,
   type Plan,
+  planCanHidePoweredBy,
   QUOTA_TOLERANCE,
   raisesDailyLimit,
 } from "./plans.js";

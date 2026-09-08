@@ -9,5 +9,6 @@
   "done": "Je bent afgemeld.",
   "doneDetail": "Je ontvangt geen marketing-e-mails meer. Berichten over je account, zoals betalingsbewijzen en wachtwoordresets, blijf je wel ontvangen.",
   "doneDetailTopic": "Je ontvangt geen e-mails meer over {topic}.",
-  "invalid": "Deze link is niet geldig."
+  "invalid": "Deze link is niet geldig.",
+  "poweredBy": "Mogelijk gemaakt door {brand}"
 }

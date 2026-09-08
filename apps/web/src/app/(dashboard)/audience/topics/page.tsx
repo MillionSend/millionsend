@@ -8,6 +8,7 @@ import { useCallback, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
+import { GlobeIcon, LockIcon } from "@/components/icons/visibility-icons";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { PageHeader } from "@/components/page-header";
@@ -246,10 +247,25 @@ export default function TopicsPage() {
                             {row.defaultSubscribed ? t("optIn") : t("optOut")}
                           </span>
                         </td>
-                        <td style={{ color: "var(--ms-muted)" }}>
-                          {row.visibility === "public"
-                            ? t("visibilityPublic")
-                            : t("visibilityPrivate")}
+                        <td>
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              color:
+                                row.visibility === "public" ? "var(--ms-bone)" : "var(--ms-muted)",
+                            }}
+                          >
+                            {row.visibility === "public" ? (
+                              <GlobeIcon size={14} />
+                            ) : (
+                              <LockIcon size={14} />
+                            )}
+                            {row.visibility === "public"
+                              ? t("visibilityPublic")
+                              : t("visibilityPrivate")}
+                          </span>
                         </td>
                         <td className="right" style={{ color: "var(--ms-muted)" }}>
                           <RelativeTime date={row.createdAt} />
@@ -339,6 +355,7 @@ export default function TopicsPage() {
                 backgroundColor: unsubSettings.data.backgroundColor,
                 textColor: unsubSettings.data.textColor,
                 accentColor: unsubSettings.data.accentColor,
+                poweredBy: unsubSettings.data.poweredBy,
               }}
             />
           ) : (

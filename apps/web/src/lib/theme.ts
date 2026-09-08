@@ -26,4 +26,10 @@ export function currentTheme(): Theme {
 /* Inlined in the root layout so it runs before first paint. localStorage is
    the source of truth; the SSR cookie only pre-seeds the attribute, so a
    stale cookie gets corrected here before anything renders. */
+/* Inlined on the public pages recipients reach from an email: they are not
+   dashboard users, so the page follows the device instead of the account
+   toggle, and any dashboard cookie the root layout painted is overridden
+   before first paint. */
+export const DEVICE_THEME_SCRIPT = `try{if(matchMedia("(prefers-color-scheme: light)").matches)document.documentElement.setAttribute("data-theme","light");else document.documentElement.removeAttribute("data-theme")}catch(e){}`;
+
 export const THEME_INIT_SCRIPT = `try{var t=localStorage.getItem("${THEME_KEY}");if(t==="light")document.documentElement.setAttribute("data-theme","light");else if(t==="dark")document.documentElement.removeAttribute("data-theme")}catch(e){}`;

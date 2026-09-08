@@ -10,6 +10,7 @@ import { and, asc, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { appBaseUrl } from "@/lib/api-base-url";
 import type { UnsubscribeLogoRadius } from "@/lib/unsubscribe-theme";
+import { poweredByLocked } from "@/server/powered-by";
 import { uploadsEnabled } from "@/server/storage";
 
 /** Per-team customization the hosted confirm page applies; all fields optional. */
@@ -24,6 +25,8 @@ export interface UnsubscribeCustomization {
   backgroundColor: string | null;
   textColor: string | null;
   accentColor: string | null;
+  /** The "Powered by MillionSend" line: the team's choice, or forced by its plan. */
+  poweredBy: boolean;
 }
 
 export interface UnsubscribeTarget {
@@ -126,6 +129,9 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
       hideBranding: tm.unsubscribeHideBranding,
       logoRadius: tm.unsubscribeLogoRadius,
       logoUrl: tm.logoUrl,
+      poweredBy: tm.unsubscribePoweredBy,
+      plan: tm.plan,
+      currentPeriodEnd: tm.currentPeriodEnd,
     })
     .from(c)
     .innerJoin(tm, eq(tm.id, c.teamId))
@@ -146,6 +152,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
     backgroundColor: contact.backgroundColor,
     textColor: contact.textColor,
     accentColor: contact.accentColor,
+    poweredBy: contact.poweredBy || poweredByLocked(contact),
   };
 
   if (topicId === null) {

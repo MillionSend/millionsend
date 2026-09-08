@@ -9,5 +9,6 @@
   "done": "Wypisaliśmy Cię.",
   "doneDetail": "Nie będziesz już otrzymywać e-maili marketingowych. Wiadomości dotyczące Twojego konta, takie jak potwierdzenia płatności czy resetowanie hasła, nadal będą przychodzić.",
   "doneDetailTopic": "Nie będziesz już otrzymywać e-maili z „{topic}”.",
-  "invalid": "Ten link jest nieprawidłowy."
+  "invalid": "Ten link jest nieprawidłowy.",
+  "poweredBy": "Obsługiwane przez {brand}"
 }

@@ -9,5 +9,6 @@
   "done": "Abonelikten çıktınız.",
   "doneDetail": "Artık pazarlama e-postaları almayacaksınız. Makbuzlar ve parola sıfırlama gibi hesabınızla ilgili mesajlar gelmeye devam edecek.",
   "doneDetailTopic": "Artık {topic} e-postalarını almayacaksınız.",
-  "invalid": "Bu bağlantı geçerli değil."
+  "invalid": "Bu bağlantı geçerli değil.",
+  "poweredBy": "{brand} altyapısıyla"
 }

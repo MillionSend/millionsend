@@ -8,12 +8,14 @@ import {
   type UnsubscribeViewState,
   type UnsubscribeViewTopic,
 } from "@/app/unsubscribe/page-view";
+import { PreviewSchemePills } from "@/components/preview-scheme-pills";
 import { Select } from "@/components/select";
 import {
   pickUnsubscribeLocale,
   UNSUBSCRIBE_LOCALES,
   type UnsubscribeLocale,
 } from "@/lib/unsubscribe-locales";
+import { usePreviewScheme } from "@/lib/use-preview-scheme";
 
 /** topics.list rows → the page's preferences list: public topics only, each
  * defaulting to its opt-in state, oldest-first as the hosted page orders them
@@ -30,8 +32,9 @@ export function toPreviewTopics(
 /**
  * Scaled-down, inert live render of the hosted unsubscribe page — the one
  * preview frame, shared by the settings editor and the topics tab. It opens
- * in the dashboard's language and switches to any the page speaks (the
- * public page itself picks from Accept-Language).
+ * in the dashboard's language and theme and switches to any language the
+ * page speaks and either scheme (the public page itself picks the language
+ * from Accept-Language and the scheme from the device).
  */
 export function UnsubscribePreview({
   state = "confirm",
@@ -47,6 +50,7 @@ export function UnsubscribePreview({
   const [locale, setLocale] = useState<UnsubscribeLocale>(() =>
     pickUnsubscribeLocale(dashboardLocale),
   );
+  const [scheme, setScheme] = usePreviewScheme();
   return (
     <div>
       <div
@@ -55,15 +59,22 @@ export function UnsubscribePreview({
           borderRadius: "var(--ms-r-card)",
           overflow: "hidden",
           height: 420,
-          background: "var(--ms-void)",
         }}
       >
         {/* inert: the preview renders the page's real forms; nothing may submit. */}
         {/* scale × minHeight = the frame's 420px, so the page centers exactly. */}
+        {/* data-theme rescopes the color tokens to the scheme being previewed. */}
         <div
           inert
           lang={locale}
-          style={{ transform: "scale(0.8)", transformOrigin: "top left", width: "125%" }}
+          data-theme={scheme}
+          style={{
+            transform: "scale(0.8)",
+            transformOrigin: "top left",
+            width: "125%",
+            background: "var(--ms-void)",
+            colorScheme: scheme,
+          }}
         >
           <UnsubscribePageView
             m={UNSUBSCRIBE_LOCALES[locale].messages}
@@ -74,7 +85,16 @@ export function UnsubscribePreview({
           />
         </div>
       </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 10,
+          marginTop: 8,
+        }}
+      >
+        <PreviewSchemePills scheme={scheme} onChange={setScheme} />
         <Select
           value={locale}
           onChange={(value) => setLocale(value as UnsubscribeLocale)}

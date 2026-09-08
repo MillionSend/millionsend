@@ -39,7 +39,7 @@ describe("hosted unsubscribe catalogs", () => {
       const catalog = load(file);
       expect(Object.keys(catalog).sort()).toEqual(Object.keys(en).sort());
       for (const [key, value] of Object.entries(en)) {
-        if (value.includes("{topic}")) expect(catalog[key], key).toContain("{topic}");
+        for (const slot of value.match(/\{\w+\}/g) ?? []) expect(catalog[key], key).toContain(slot);
       }
     });
   }
