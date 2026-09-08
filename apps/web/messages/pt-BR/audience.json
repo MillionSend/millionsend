@@ -232,7 +232,7 @@
     "visibilityLabel": "Visibilidade",
     "visibilityPrivate": "Privado",
     "visibilityPublic": "Público",
-    "visibilityTooltip": "Tópicos públicos aparecem na página hospedada de cancelamento de inscrição, onde contatos gerenciam suas inscrições. Tópicos privados não aparecem.",
+    "visibilityTooltip": "Tópicos públicos aparecem na página hospedada de cancelamento de inscrição, onde contatos gerenciam suas inscrições.\n\nTópicos privados não aparecem.",
     "createConfirm": "Criar",
     "createError": "Não foi possível criar o tópico. Tente de novo.",
     "editTitle": "Editar tópico",
