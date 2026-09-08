@@ -36,7 +36,7 @@ export interface BroadcastDeps {
   /** HMAC key for unsubscribe tokens (deriveUnsubscribeKey(masterKey)). */
   unsubscribeSecretKey: Buffer;
   /** Public base URL hosting /unsubscribe/<token>; absent → fan-out refuses. */
-  appBaseUrl: string | undefined;
+  unsubscribeBaseUrl: string | undefined;
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
   /** One call per contact page; the wiring sets the bulk priority. */
@@ -87,11 +87,11 @@ export async function sendBroadcast(
     await deps.reschedule?.(broadcast.id, broadcast.scheduledAt);
     return "deferred";
   }
-  if (!deps.appBaseUrl) {
+  if (!deps.unsubscribeBaseUrl) {
     // Loud failure: the job retries and logs. Never silently send a
     // broadcast without its unsubscribe URL and headers.
     throw new Error(
-      `broadcast ${broadcast.id}: APP_BASE_URL is required for unsubscribe links; refusing to send`,
+      `broadcast ${broadcast.id}: APP_BASE_URL (or UNSUBSCRIBE_BASE_URL) is required for unsubscribe links; refusing to send`,
     );
   }
   // Resolve the sender's verified domain (region + configuration set for the
@@ -284,7 +284,7 @@ export async function sendBroadcast(
         emailId,
         secretKey: deps.unsubscribeSecretKey,
       });
-      const headers = buildUnsubscribeHeaders(deps.appBaseUrl, token);
+      const headers = buildUnsubscribeHeaders(deps.unsubscribeBaseUrl, token);
       // "<url>" → url; reusing the header builder keeps link and header
       // pointing at the exact same page.
       const unsubscribeUrl = headers["List-Unsubscribe"].slice(1, -1);

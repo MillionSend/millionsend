@@ -100,7 +100,7 @@ it("fans out with a real per-contact unsubscribe URL, never the literal placehol
     {
       keyring,
       unsubscribeSecretKey,
-      appBaseUrl: APP_BASE_URL,
+      unsubscribeBaseUrl: APP_BASE_URL,
       isCloud: false,
       enqueueEmailSends: async (batch) => {
         queuedEmailIds.push(...batch.map((job) => job.emailId));

@@ -8,7 +8,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, or } from "drizzle-orm";
 import { z } from "zod";
-import { appBaseUrl } from "@/lib/api-base-url";
+import { unsubscribeBaseUrl } from "@/lib/api-base-url";
 import type { UnsubscribeLogoRadius } from "@/lib/unsubscribe-theme";
 import { poweredByLocked } from "@/server/powered-by";
 import { uploadsEnabled } from "@/server/storage";
@@ -81,14 +81,14 @@ export async function preferenceTopics(
 /**
  * Where the browser lands after a (non-one-click) unsubscribe POST: the team's
  * configured redirect when set, else the in-place done state. Absolute string
- * (on APP_BASE_URL, never the request's Host) so it can go straight into a
- * Location header.
+ * (on the unsubscribe host, never the request's Host) so it can go straight
+ * into a Location header.
  */
 export function postUnsubscribeLocation(token: string, redirectUrl: string | null): string {
   if (redirectUrl) return redirectUrl;
   return new URL(
     `/unsubscribe/confirm/${encodeURIComponent(token)}?done=1`,
-    appBaseUrl(),
+    unsubscribeBaseUrl(),
   ).toString();
 }
 

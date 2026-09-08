@@ -80,6 +80,24 @@ describe("/unsubscribe/[token] route", () => {
       { params: Promise.resolve({ token }) },
     );
 
+  it("redirects on the unsubscribe host when the pages have their own", async () => {
+    vi.stubEnv("APP_BASE_URL", APP);
+    vi.stubEnv("UNSUBSCRIBE_BASE_URL", "https://unsubscribe.example.com");
+    const teamId = await createTeam(db, "acme");
+    const token = makeUnsubscribeToken({ contactId: await seedContact(teamId), secretKey });
+    const get = await call("GET", token);
+    expect(new URL(get.headers.get("location") ?? "").origin).toBe(
+      "https://unsubscribe.example.com",
+    );
+    const post = await call("POST", token);
+    expect(new URL(post.headers.get("location") ?? "").origin).toBe(
+      "https://unsubscribe.example.com",
+    );
+    expect(postUnsubscribeLocation("tok", null)).toBe(
+      "https://unsubscribe.example.com/unsubscribe/confirm/tok?done=1",
+    );
+  });
+
   it("redirects on APP_BASE_URL regardless of the request host", async () => {
     vi.stubEnv("APP_BASE_URL", APP);
     const teamId = await createTeam(db, "acme");

@@ -46,6 +46,11 @@ In `.env` (everything else defaults to a working local setup):
 - `APP_BASE_URL` — the URL you open the dashboard at. The default
   `http://localhost:3000` works locally; set your real `https://` URL when exposing
   it, or sign-in is rejected as an untrusted origin.
+- `UNSUBSCRIBE_BASE_URL` — optional own host for the hosted unsubscribe pages
+  (`https://unsubscribe.example.com`, pointed at the same web process). Links in
+  mail and the page's redirects use it, and that host serves the unsubscribe
+  flow only, keeping link scanners off the dashboard's origin. Unset:
+  `APP_BASE_URL`.
 - `PUBLIC_API_URL` — only behind a reverse proxy that serves the API on its own
   hostname (the nginx section below); otherwise the API is assumed at port 3001
   of the dashboard host.
