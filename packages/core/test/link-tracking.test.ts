@@ -31,6 +31,12 @@ describe("rewriteForTracking — click", () => {
       emailId,
       url: "https://acme.example/welcome",
     });
+    // The signed destination is the URL a browser would follow: the
+    // attribute's "&amp;" is one "&", not a second query parameter named "amp;y".
+    expect(verifyClickToken(tokens[1] as string, key)).toEqual({
+      emailId,
+      url: "https://acme.example/docs?x=1&y=2",
+    });
     // The raw destination is gone from the body — the redirect owns it now.
     expect(out).not.toContain('href="https://acme.example/welcome"');
   });
@@ -49,6 +55,15 @@ describe("rewriteForTracking — click", () => {
     const out = rewriteForTracking(src, opts({ click: true }));
     expect(out).toContain('href="{{{UNSUBSCRIBE_URL}}}"');
     expect(out).toContain("/t/c/");
+  });
+
+  it("matches skipHrefPrefix against the decoded href", () => {
+    const unsub = "https://app.example.com/unsubscribe/abc.def?scope=all&amp;topic=1";
+    const out = rewriteForTracking(
+      `<a href="${unsub}">unsub</a>`,
+      opts({ click: true, skipHrefPrefix: "https://app.example.com/unsubscribe/" }),
+    );
+    expect(out).toBe(`<a href="${unsub}">unsub</a>`);
   });
 
   it("leaves an already-expanded unsubscribe link under skipHrefPrefix un-wrapped, still wrapping ordinary links", () => {

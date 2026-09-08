@@ -1,3 +1,4 @@
+import { unescapeHtml } from "./html.js";
 import { makeClickToken, makeOpenToken } from "./tracking.js";
 
 /**
@@ -50,7 +51,10 @@ export function rewriteForTracking(html: string, opts: RewriteOptions): string {
   let out = html;
 
   if (opts.click) {
-    out = out.replace(ANCHOR_HREF, (match, prefix: string, quote: string, url: string) => {
+    out = out.replace(ANCHOR_HREF, (match, prefix: string, quote: string, raw: string) => {
+      // The attribute is HTML: "&amp;" between query parameters is one "&" to
+      // the browser, and the redirect must follow the URL the browser would.
+      const url = unescapeHtml(raw);
       if (!isTrackableHref(url)) return match;
       if (opts.skipHrefPrefix && url.startsWith(opts.skipHrefPrefix)) return match;
       const token = makeClickToken({ emailId: opts.emailId, url, secretKey: opts.secretKey });

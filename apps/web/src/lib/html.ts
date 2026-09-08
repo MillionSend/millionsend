@@ -1,15 +1,4 @@
-export { escapeHtml } from "@millionsend/core/html";
-
-/** Inverse of escapeHtml: decode the five entities it emits. Ampersand last so
- * `&amp;lt;` decodes to the literal `&lt;`, not `<`. */
-export function unescapeHtml(value: string): string {
-  return value
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#39;", "'")
-    .replaceAll("&amp;", "&");
-}
+export { escapeHtml, unescapeHtml } from "@millionsend/core/html";
 
 const VOID_ELEMENTS = new Set([
   "area",
