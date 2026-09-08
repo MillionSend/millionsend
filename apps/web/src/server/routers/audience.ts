@@ -27,10 +27,10 @@ const emailSchema = z.string().trim().pipe(z.email()).pipe(z.string().max(320));
 // "" clears the field — stored as null, never as an empty string.
 const personName = z.string().trim().max(200);
 // Resend-style custom fields: a flat map of string→string. Non-string
-// values are rejected at the boundary.
+// values and empty keys are rejected at the boundary.
 const propertiesSchema = z
   .record(
-    z.string().max(CONTACT_PROPERTY_KEY_MAX_LENGTH),
+    z.string().min(1).max(CONTACT_PROPERTY_KEY_MAX_LENGTH),
     z.string().max(CONTACT_PROPERTY_VALUE_MAX_LENGTH),
   )
   .refine((map) => Object.keys(map).length <= CONTACT_PROPERTY_MAX_KEYS, {

@@ -99,9 +99,14 @@ describe("official resend SDK: top-level /contacts", () => {
     await resend.contacts.remove(id);
   });
 
-  it("422s properties over 100 keys, 200-char keys, or 1000-char values", async () => {
+  it("422s properties over 100 keys, empty or 200-char keys, or 1000-char values", async () => {
     const tooMany = Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`k${i}`, "v"]));
-    for (const properties of [tooMany, { ["k".repeat(201)]: "v" }, { k: "v".repeat(1001) }]) {
+    for (const properties of [
+      tooMany,
+      { "": "v" },
+      { ["k".repeat(201)]: "v" },
+      { k: "v".repeat(1001) },
+    ]) {
       const res = await resend.contacts.create({ email: "cap@example.com", properties });
       expect(res.data).toBeNull();
       expect(res.error?.statusCode).toBe(422);

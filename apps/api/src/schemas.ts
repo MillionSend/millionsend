@@ -564,8 +564,9 @@ const subscriptionEnum = z.enum(["opt_in", "opt_out"]);
 
 // Kept as unknown values so the handler can coerce scalars to strings and
 // reject nested objects/arrays (and over-long values) with a precise 422.
+// An empty key is refused here: nothing could ever address it.
 const contactPropertiesInputSchema = z
-  .record(z.string().max(CONTACT_PROPERTY_KEY_MAX_LENGTH), z.unknown())
+  .record(z.string().min(1).max(CONTACT_PROPERTY_KEY_MAX_LENGTH), z.unknown())
   .refine((map) => Object.keys(map).length <= CONTACT_PROPERTY_MAX_KEYS, {
     message: `at most ${CONTACT_PROPERTY_MAX_KEYS} properties`,
   });
