@@ -72,19 +72,21 @@ const SCANNER_TOKENS = [
 ] as const;
 
 /**
- * Chrome's user-agent reduction (from Chrome 107 on desktop, 110 on Android)
- * froze the minor.build.patch to 0.0.0: the full build now travels only in
- * client hints. A desktop Chrome user agent that still carries one is a
- * string copied from a fingerprint list, which is how security gateways'
- * link scanners present themselves. The margin above 107 covers the staged
- * rollout. Electron apps keep the full build and name themselves.
+ * Chrome's user-agent reduction zeroed the minor.build.patch from Chrome 101
+ * on desktop (110 on Android): the full build now travels only in client
+ * hints. A desktop Chrome user agent that still carries one is a string
+ * copied from a fingerprint list, which is how security gateways' link
+ * scanners present themselves. The margin above 101 covers the staged
+ * rollout. Embedded engines that keep the full build name themselves.
  */
 const REDUCED_UA_FROM_MAJOR = 113;
 const DESKTOP_PLATFORM = /\b(?:Windows NT|Macintosh|X11)\b/;
 const CHROME_FULL_BUILD = /\bChrome\/(\d+)\.(\d+\.\d+\.\d+)\b/;
+const EMBEDDED_ENGINES = ["Electron/", "QtWebEngine/"] as const;
 
 function isSpoofedDesktopChrome(userAgent: string): boolean {
-  if (!DESKTOP_PLATFORM.test(userAgent) || userAgent.includes("Electron/")) return false;
+  if (!DESKTOP_PLATFORM.test(userAgent)) return false;
+  if (EMBEDDED_ENGINES.some((engine) => userAgent.includes(engine))) return false;
   const match = CHROME_FULL_BUILD.exec(userAgent);
   if (!match) return false;
   return Number(match[1]) >= REDUCED_UA_FROM_MAJOR && match[2] !== "0.0.0";

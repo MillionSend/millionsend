@@ -91,8 +91,8 @@ never moves the status, never counts in the open rate, and never fires
 window is `OPEN_PREFETCH_WINDOW_SECONDS` for self-hosters (default `10`; `0`
 keeps only the user-agent rules). Links go through the same rules, plus two
 of their own: a desktop Chrome that reports a build number no browser has sent
-since Chrome's user-agent reduction, and every link of a message hit within a
-second, are a machine's whatever they call themselves. A click recorded before
+since Chrome's user-agent reduction, and two links of a message hit within a
+quarter of a second, are a machine's whatever they call themselves. A click recorded before
 the rest of its burst arrived is taken back — row, inferred open, counters,
 status and any delivery not yet posted.
 

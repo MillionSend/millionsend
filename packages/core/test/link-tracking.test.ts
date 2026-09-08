@@ -57,6 +57,16 @@ describe("rewriteForTracking — click", () => {
     expect(out).toContain("/t/c/");
   });
 
+  it("decodes the numeric references template engines emit", () => {
+    const src = '<a href="https://acme.example/go?a&#x3D;1&amp;b&#61;2&#x27;">go</a>';
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const token = out.match(/t\/c\/([^"']+)/)?.[1];
+    expect(verifyClickToken(token as string, key)).toEqual({
+      emailId,
+      url: "https://acme.example/go?a=1&b=2'",
+    });
+  });
+
   it("matches skipHrefPrefix against the decoded href", () => {
     const unsub = "https://app.example.com/unsubscribe/abc.def?scope=all&amp;topic=1";
     const out = rewriteForTracking(

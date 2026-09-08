@@ -89,9 +89,9 @@ function deliveryOf(data: EventData): { recipients?: string[] } | null {
   const d = data?.delivery;
   return d && typeof d === "object" ? (d as { recipients?: string[] }) : null;
 }
-function clickOf(data: EventData): { link?: string } | null {
+function clickOf(data: EventData): { link?: string; userAgent?: string } | null {
   const c = data?.click;
-  return c && typeof c === "object" ? (c as { link?: string }) : null;
+  return c && typeof c === "object" ? (c as { link?: string; userAgent?: string }) : null;
 }
 /** The pixel fetch's identity (opened and prefetched events share the shape). */
 function openOf(data: EventData): { userAgent?: string; reason?: unknown } | null {
@@ -1141,20 +1141,23 @@ export default function EmailDetailPage() {
         <div style={{ display: "flex", flexDirection: "column" }}>
           {[...groupOccurrences].reverse().map((event, index) => {
             const sinceSend = new Date(event.occurredAt).getTime() - new Date(sendAt).getTime();
-            const link = openGroup?.type === "clicked" ? clickOf(event.data)?.link : undefined;
-            const open = openGroup?.type === "clicked" ? null : openOf(event.data);
-            // One mono line per row: the click's destination, or who fetched
-            // the pixel (a prefetch's reason, then the user agent).
-            const line = link
-              ? displayUrl(link)
-              : [
-                  open?.reason === "click"
-                    ? t("detail.openFromClick")
-                    : prefetchReason(prefetchReasonOf(event.data)),
-                  open?.userAgent,
-                ]
-                  .filter(Boolean)
-                  .join(" · ");
+            const click = clickOf(event.data);
+            const open = click ? null : openOf(event.data);
+            // One mono line per row: a click's destination; otherwise why a
+            // fetch was a prefetch, the link when one was followed, then who
+            // fetched.
+            const line =
+              openGroup?.type === "clicked" && click?.link
+                ? displayUrl(click.link)
+                : [
+                    open?.reason === "click"
+                      ? t("detail.openFromClick")
+                      : prefetchReason(prefetchReasonOf(event.data)),
+                    click?.link ? displayUrl(click.link) : null,
+                    (click ?? open)?.userAgent,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
             return (
               <div
                 key={event.id}

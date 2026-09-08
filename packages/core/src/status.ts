@@ -62,14 +62,7 @@ export async function transitionQueueState(
  * when none of the types is a status.
  */
 export function highestStatus(types: readonly string[]): EmailStatus | null {
-  const order: readonly string[] = schema.emailStatusEnum.enumValues;
-  let best: EmailStatus | null = null;
-  for (const type of types) {
-    if (!order.includes(type)) continue;
-    const status = type as EmailStatus;
-    if (best === null || compareStatus(status, best) > 0) best = status;
-  }
-  return best;
+  return schema.emailStatusEnum.enumValues.findLast((status) => types.includes(status)) ?? null;
 }
 
 function compareStatus(a: EmailStatus, b: EmailStatus): number {

@@ -9,10 +9,11 @@ import {
   highestStatus,
   type QueuedWebhookDelivery,
   utcDay,
+  type WebhookEmailFacts,
   type WebhookEnqueue,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
-import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { trustedProxies } from "../../server/trusted-proxies";
 
@@ -55,139 +56,13 @@ const DAMP_WINDOW_MS = 60_000;
 
 /**
  * Two different links of one message hit this close together were fetched
- * by a machine walking the message, whatever it calls itself: a person
- * reads before the next click. The gateways seen so far fan out in under
- * thirty milliseconds.
+ * by a machine walking the message, whatever it calls itself: a gateway
+ * fans out in tens of milliseconds, a person's fastest second click takes
+ * a few hundred.
  */
-const BURST_WINDOW_MS = 1_000;
+const BURST_WINDOW_MS = 250;
 
 type RecordedType = "opened" | "clicked" | "prefetched";
-
-interface EmailFacts {
-  id: string;
-  teamId: string;
-  from: string;
-  to: string[];
-  subject: string;
-}
-
-interface FoldedClick {
-  id: string;
-  occurredAt: Date;
-  data: Record<string, unknown> | null;
-}
-
-const earliest = (rows: readonly { occurredAt: Date }[]) =>
-  new Date(Math.min(...rows.map((row) => row.occurredAt.getTime())));
-
-/** Takes back a unique counter on the day and hour its first event advanced. */
-async function retractCounter(
-  tx: Db,
-  teamId: string,
-  counter: "opened" | "clicked",
-  at: Date,
-): Promise<void> {
-  await tx.execute(sql`
-    update ${schema.usageCounters}
-    set ${sql.raw(counter)} = ${schema.usageCounters}.${sql.raw(counter)} - 1
-    where team_id = ${teamId} and day = ${utcDay(at)}
-  `);
-  await bumpHourlyUsage(tx, { teamId, at, counts: { [counter]: -1 } });
-}
-
-/**
- * A click recorded before the burst around it could be seen was a
- * machine's after all. The row becomes a prefetch, the open inferred from
- * it goes, and what the click advanced — status, unique counters,
- * deliveries not yet posted — is taken back. A delivery already posted
- * stays posted: the opt-in `email.prefetched` that follows carries the
- * click's own timestamp, which is how a consumer learns it was retracted.
- */
-async function foldBurst(
-  tx: Db,
-  email: EmailFacts,
-  folded: readonly FoldedClick[],
-  deliveries: QueuedWebhookDelivery[],
-): Promise<void> {
-  await tx
-    .update(schema.emailEvents)
-    .set({
-      type: "prefetched",
-      data: sql`jsonb_set(${schema.emailEvents.data}, '{click,reason}', '"burst"')`,
-    })
-    .where(
-      inArray(
-        schema.emailEvents.id,
-        folded.map((row) => row.id),
-      ),
-    );
-  // The open inferred from a click is stamped one millisecond before it.
-  const removedOpens = await tx
-    .delete(schema.emailEvents)
-    .where(
-      and(
-        eq(schema.emailEvents.emailId, email.id),
-        eq(schema.emailEvents.type, "opened"),
-        sql`${schema.emailEvents.data}->'open'->>'reason' = 'click'`,
-        inArray(
-          schema.emailEvents.occurredAt,
-          folded.map((row) => new Date(row.occurredAt.getTime() - 1)),
-        ),
-      ),
-    )
-    .returning({ occurredAt: schema.emailEvents.occurredAt });
-  await tx.delete(schema.webhookDeliveries).where(
-    and(
-      eq(schema.webhookDeliveries.emailId, email.id),
-      eq(schema.webhookDeliveries.status, "pending"),
-      eq(schema.webhookDeliveries.attempts, 0),
-      inArray(schema.webhookDeliveries.eventType, ["email.clicked", "email.opened"]),
-      inArray(
-        sql`${schema.webhookDeliveries.payload}->>'created_at'`,
-        [...folded, ...removedOpens].map((row) => row.occurredAt.toISOString()),
-      ),
-    ),
-  );
-  const remaining = (
-    await tx
-      .selectDistinct({ type: schema.emailEvents.type })
-      .from(schema.emailEvents)
-      .where(eq(schema.emailEvents.emailId, email.id))
-  ).map((row) => row.type);
-  // A unique counter advanced on the email's first event of its type; with
-  // none left, that event was among the ones taken back.
-  if (!remaining.includes("clicked")) {
-    await retractCounter(tx, email.teamId, "clicked", earliest(folded));
-  }
-  if (removedOpens.length > 0 && !remaining.includes("opened")) {
-    await retractCounter(tx, email.teamId, "opened", earliest(removedOpens));
-  }
-  // The status stood on a person's click; the remaining events say what it
-  // is. A tracking token only exists in a message that was sent, so that is
-  // the least the row can say once older events have aged out.
-  await tx
-    .update(schema.emails)
-    .set({ latestStatus: highestStatus(remaining) ?? "sent" })
-    .where(
-      and(
-        eq(schema.emails.id, email.id),
-        inArray(schema.emails.latestStatus, ["opened", "clicked"]),
-      ),
-    );
-  for (const row of folded) {
-    const click = { ...(row.data?.click as Record<string, unknown>), reason: "burst" };
-    await enqueueWebhookDeliveries(tx, {
-      teamId: email.teamId,
-      email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
-      type: "email.prefetched",
-      occurredAt: row.occurredAt,
-      extras: { click },
-      enqueue: async (rows) => {
-        deliveries.push(...rows);
-      },
-    });
-  }
-}
 
 /** Under SKIP_ENV_VALIDATION the env proxy carries the raw string, not the parsed number. */
 function prefetchWindowMs(): number {
@@ -216,6 +91,132 @@ async function openAnchor(
     .limit(1);
   if (delivered) return { at: delivered.occurredAt, delivered: true };
   return email.sentAt ? { at: email.sentAt, delivered: false } : null;
+}
+
+/** Takes back a unique counter on the day and hour its first event advanced. */
+async function retractCounter(
+  tx: Db,
+  teamId: string,
+  counter: "opened" | "clicked",
+  at: Date,
+): Promise<void> {
+  await tx.execute(sql`
+    update ${schema.usageCounters}
+    set ${sql.raw(counter)} = ${schema.usageCounters}.${sql.raw(counter)} - 1
+    where team_id = ${teamId} and day = ${utcDay(at)}
+  `);
+  await bumpHourlyUsage(tx, { teamId, at, counts: { [counter]: -1 } });
+}
+
+interface FoldedClick {
+  id: string;
+  occurredAt: Date;
+  data: Record<string, unknown> | null;
+}
+
+/**
+ * A click recorded before the burst around it could be seen was a
+ * machine's after all. The row becomes a prefetch, the open inferred from
+ * it goes, and what the click advanced — status, unique counters,
+ * deliveries no drain pass holds yet — is taken back. A delivery already
+ * posted or leased stays: the opt-in `email.prefetched` that follows
+ * carries the click's own timestamp, which is how a consumer learns it was
+ * retracted. `folded` is ordered oldest first.
+ */
+async function foldBurst(
+  tx: Db,
+  teamId: string,
+  email: WebhookEmailFacts,
+  folded: readonly FoldedClick[],
+  deliveries: QueuedWebhookDelivery[],
+): Promise<void> {
+  const [first] = folded;
+  if (!first) return;
+  await tx
+    .update(schema.emailEvents)
+    .set({
+      type: "prefetched",
+      data: sql`jsonb_set(${schema.emailEvents.data}, '{click,reason}', '"burst"')`,
+    })
+    .where(
+      inArray(
+        schema.emailEvents.id,
+        folded.map((row) => row.id),
+      ),
+    );
+  // The open inferred from a click is stamped one millisecond before it,
+  // and there is never more than one: it is only written while no open
+  // exists.
+  const [removedOpen] = await tx
+    .delete(schema.emailEvents)
+    .where(
+      and(
+        eq(schema.emailEvents.emailId, email.emailId),
+        eq(schema.emailEvents.type, "opened"),
+        sql`${schema.emailEvents.data}->'open'->>'reason' = 'click'`,
+        inArray(
+          schema.emailEvents.occurredAt,
+          folded.map((row) => new Date(row.occurredAt.getTime() - 1)),
+        ),
+      ),
+    )
+    .returning({ occurredAt: schema.emailEvents.occurredAt });
+  // A row a drain pass has leased carries a due instant ahead of the clock
+  // and will be posted; only rows still waiting are dropped.
+  await tx.delete(schema.webhookDeliveries).where(
+    and(
+      eq(schema.webhookDeliveries.emailId, email.emailId),
+      eq(schema.webhookDeliveries.status, "pending"),
+      lte(schema.webhookDeliveries.nextAttemptAt, sql`clock_timestamp()`),
+      inArray(schema.webhookDeliveries.eventType, ["email.clicked", "email.opened"]),
+      inArray(
+        sql`${schema.webhookDeliveries.payload}->>'created_at'`,
+        [...folded, ...(removedOpen ? [removedOpen] : [])].map((row) =>
+          row.occurredAt.toISOString(),
+        ),
+      ),
+    ),
+  );
+  const remaining = (
+    await tx
+      .selectDistinct({ type: schema.emailEvents.type })
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.emailId, email.emailId))
+  ).map((row) => row.type);
+  // A unique counter advanced on the email's first event of its type; with
+  // none left, that event was among the ones taken back. The earlier
+  // bucket first, the order every increment takes them in.
+  if (removedOpen && !remaining.includes("opened")) {
+    await retractCounter(tx, teamId, "opened", removedOpen.occurredAt);
+  }
+  if (!remaining.includes("clicked")) {
+    await retractCounter(tx, teamId, "clicked", first.occurredAt);
+  }
+  // The status stood on a person's click; the remaining events say what it
+  // is. A tracking token only exists in a message that was sent, so that is
+  // the least the row can say once older events have aged out.
+  await tx
+    .update(schema.emails)
+    .set({ latestStatus: highestStatus(remaining) ?? "sent" })
+    .where(
+      and(
+        eq(schema.emails.id, email.emailId),
+        inArray(schema.emails.latestStatus, ["opened", "clicked"]),
+      ),
+    );
+  for (const row of folded) {
+    const click = { ...(row.data?.click as Record<string, unknown>), reason: "burst" };
+    await enqueueWebhookDeliveries(tx, {
+      teamId,
+      email,
+      type: "email.prefetched",
+      occurredAt: row.occurredAt,
+      extras: { click },
+      enqueue: async (rows) => {
+        deliveries.push(...rows);
+      },
+    });
+  }
 }
 
 /**
@@ -272,6 +273,12 @@ export async function recordEngagement(
       .limit(1)
       .for("update");
     if (!email) return;
+    const facts: WebhookEmailFacts = {
+      emailId: email.id,
+      from: email.from,
+      to: email.to,
+      subject: email.subject,
+    };
 
     let recorded: RecordedType = type;
     let data: Record<string, unknown>;
@@ -284,9 +291,9 @@ export async function recordEngagement(
       anchor: await openAnchor(tx, email),
       windowMs: prefetchWindowMs(),
     });
-    // The other links of this message hit within the burst window. One is
-    // enough: this hit is a machine's whatever it calls itself, and any of
-    // those siblings still standing as a click is folded into a prefetch.
+    // The other links of this message hit within the burst window, oldest
+    // first. One is enough: this hit is a machine's whatever it calls
+    // itself, and any of those siblings still standing as a click is folded.
     const siblings =
       type === "clicked" && hit?.link !== undefined
         ? await tx
@@ -305,6 +312,7 @@ export async function recordEngagement(
                 gt(schema.emailEvents.occurredAt, new Date(occurredAt.getTime() - BURST_WINDOW_MS)),
               ),
             )
+            .orderBy(asc(schema.emailEvents.occurredAt))
         : [];
     if (verdict.prefetched || siblings.length > 0) recorded = "prefetched";
     const reason =
@@ -336,14 +344,15 @@ export async function recordEngagement(
       )
       .orderBy(desc(schema.emailEvents.occurredAt))
       .limit(1);
-    if (newest && occurredAt.getTime() - newest.occurredAt.getTime() < DAMP_WINDOW_MS) return;
     const [prior] = await tx
       .select({ id: schema.emailEvents.id })
       .from(schema.emailEvents)
       .where(and(eq(schema.emailEvents.emailId, email.id), eq(schema.emailEvents.type, recorded)))
       .limit(1);
+    // Before the damping: a repeat hit still exposes the burst it belongs to.
     const folded = siblings.filter((row) => row.type === "clicked");
-    if (folded.length > 0) await foldBurst(tx, email, folded, deliveries);
+    if (folded.length > 0) await foldBurst(tx, email.teamId, facts, folded, deliveries);
+    if (newest && occurredAt.getTime() - newest.occurredAt.getTime() < DAMP_WINDOW_MS) return;
 
     await tx
       .insert(schema.emailEvents)
@@ -372,7 +381,7 @@ export async function recordEngagement(
           .values({ emailId: email.id, type: "opened", occurredAt: openedAt, data: { open } });
         await enqueueWebhookDeliveries(tx, {
           teamId: email.teamId,
-          email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
+          email: facts,
           type: "email.opened",
           occurredAt: openedAt,
           extras: { open },
@@ -396,7 +405,7 @@ export async function recordEngagement(
     // send happens after commit.
     await enqueueWebhookDeliveries(tx, {
       teamId: email.teamId,
-      email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
+      email: facts,
       type: `email.${recorded}`,
       occurredAt,
       extras: data,

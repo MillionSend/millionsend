@@ -108,6 +108,11 @@ describe("classifyOpen", () => {
       delivered(45),
     ],
     [
+      "a QtWebEngine mail client, which keeps the full build",
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) QtWebEngine/6.7.2 Chrome/118.0.5993.220 Safari/537.36",
+      delivered(45),
+    ],
+    [
       "a phone's Chrome, which was never reduced on Android 6",
       "Mozilla/5.0 (Linux; Android 6.0.1; SM-G920F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.5249.126 Mobile Safari/537.36",
       delivered(45),

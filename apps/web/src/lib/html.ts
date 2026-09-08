@@ -1,4 +1,4 @@
-export { escapeHtml, unescapeHtml } from "@millionsend/core/html";
+export { escapeHtml } from "@millionsend/core/html";
 
 const VOID_ELEMENTS = new Set([
   "area",

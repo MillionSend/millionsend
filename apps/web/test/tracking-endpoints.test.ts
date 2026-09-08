@@ -156,7 +156,8 @@ describe("click endpoint /t/c", () => {
       .from(schema.emailEvents)
       .where(
         and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "prefetched")),
-      );
+      )
+      .orderBy(schema.emailEvents.occurredAt);
     expect(
       rows.map((r) => r.data as { open?: { reason?: string }; click?: { reason?: string } }),
     ).toEqual([
@@ -295,6 +296,16 @@ describe("click bursts", () => {
   const click = (emailId: string, name: string, headers = human) =>
     clickGet(...req(makeClickToken({ emailId, url: link(name), secretKey }), headers));
 
+  // The clock stands still so a burst's hits share one instant, however
+  // long each request takes here; time moves only when a test says so.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const advance = (ms: number) => vi.setSystemTime(Date.now() + ms);
+
   async function seedDelivered(emailId: string, agoMs = 40_000) {
     await db
       .insert(schema.emailEvents)
@@ -328,7 +339,7 @@ describe("click bursts", () => {
       .orderBy(schema.webhookDeliveries.createdAt);
   }
 
-  it("every link hit within a second is a machine's: no click, no open, one prefetch, status untouched", async () => {
+  it("every link hit at once is a machine's: no click, no open, one prefetch, status untouched", async () => {
     const { emailId, teamId } = await seedEmail();
     await seedDelivered(emailId);
     for (const name of ["a", "b", "c", "d"]) {
@@ -357,11 +368,9 @@ describe("click bursts", () => {
       "email.clicked",
       "email.opened",
     ]);
-    const [clickedRow] = await db
-      .select({ occurredAt: schema.emailEvents.occurredAt })
-      .from(schema.emailEvents)
-      .where(and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "clicked")));
+    const clickedAt = new Date().toISOString();
 
+    advance(10);
     await click(emailId, "b");
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
     expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
@@ -377,14 +386,43 @@ describe("click bursts", () => {
       retractions.map((d) => (d.payload as { data: { click: { link: string } } }).data.click.link),
     ).toEqual([link("a"), link("b")]);
     expect(retractions[0]?.payload).toMatchObject({
-      created_at: clickedRow?.occurredAt.toISOString(),
-      data: { click: { reason: "burst", timestamp: clickedRow?.occurredAt.toISOString() } },
+      created_at: clickedAt,
+      data: { click: { reason: "burst", timestamp: clickedAt } },
     });
     const [hour] = await db
       .select()
       .from(schema.usageCountersHourly)
       .where(eq(schema.usageCountersHourly.teamId, teamId));
     expect(hour).toMatchObject({ clicked: 0, opened: 0, prefetched: 1 });
+  });
+
+  it("a delivery a drain pass already holds is left to post", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await seedDelivered(emailId);
+    const everything = await createWebhookEndpoint(db, teamId, null);
+    await click(emailId, "a");
+    // A lease pushes the due instant ahead of the clock, as claimDue does.
+    await db
+      .update(schema.webhookDeliveries)
+      .set({ nextAttemptAt: new Date(Date.now() + 60_000) })
+      .where(eq(schema.webhookDeliveries.eventType, "email.clicked"));
+    advance(10);
+    await click(emailId, "b");
+    expect((await deliveriesOf(everything)).map((d) => d.eventType)).toEqual(["email.clicked"]);
+  });
+
+  it("a second pass over the same links, inside the damping window, still folds its first hit", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await seedDelivered(emailId);
+    for (const name of ["a", "b", "c", "d"]) await click(emailId, name);
+    advance(30_000);
+    for (const name of ["a", "b", "c", "d"]) await click(emailId, name);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
+    // Four from the first pass, plus the second pass's first hit, folded;
+    // its other three were repeats inside the damping window.
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 5, counter: 1 });
+    expect(await status(emailId)).toBe("delivered");
   });
 
   it("a person's real open stands through a burst on the links", async () => {
@@ -403,7 +441,7 @@ describe("click bursts", () => {
     const { emailId, teamId } = await seedEmail();
     await seedDelivered(emailId, 120_000);
     await click(emailId, "a");
-    await backdateEvents(emailId, "clicked", 90_000);
+    advance(90_000);
     await click(emailId, "b");
     await click(emailId, "c");
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
@@ -412,11 +450,11 @@ describe("click bursts", () => {
     expect(await status(emailId)).toBe("clicked");
   });
 
-  it("two links two seconds apart are two clicks", async () => {
+  it("two links half a second apart are two clicks", async () => {
     const { emailId, teamId } = await seedEmail();
     await seedDelivered(emailId);
     await click(emailId, "a");
-    await backdateEvents(emailId, "clicked", 2_000);
+    advance(500);
     await click(emailId, "b");
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 2, counter: 1 });
     expect(await status(emailId)).toBe("clicked");

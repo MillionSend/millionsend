@@ -65,7 +65,7 @@
       "spoofed_ua": "navegador forjado",
       "before_delivery": "antes da entrega",
       "timing": "segundos após a entrega",
-      "burst": "todos os links em um segundo"
+      "burst": "dois links em um quarto de segundo"
     },
     "suppressedLine": "envios futuros bloqueados",
     "bounceBanner": {

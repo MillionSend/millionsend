@@ -65,7 +65,7 @@
       "spoofed_ua": "spoofed browser",
       "before_delivery": "before delivery",
       "timing": "seconds after delivery",
-      "burst": "every link within a second"
+      "burst": "two links within a quarter second"
     },
     "suppressedLine": "future sends blocked",
     "bounceBanner": {
