@@ -894,7 +894,7 @@ describe("recipient erasure", () => {
     return { to: row?.to, suppressionEmail: suppression?.email, requests: requests.length };
   };
 
-  it("contact delete scrubs the address everywhere but keeps the suppression hash", async () => {
+  it("contact delete keeps the trail; eraseRecipient scrubs it but keeps the suppression hash", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
     const email = "gone@example.com";
@@ -904,6 +904,13 @@ describe("recipient erasure", () => {
     await caller.audience.contacts.delete({ id });
 
     expect(await contactRow(id)).toBeNull();
+    expect(await trailOf(emailId, teamId, email)).toEqual({
+      to: [email, "keep@example.com"],
+      suppressionEmail: email,
+      requests: 1,
+    });
+
+    await caller.audience.eraseRecipient({ email });
     expect(await trailOf(emailId, teamId, email)).toEqual({
       to: ["[erased]", "keep@example.com"],
       suppressionEmail: null,

@@ -802,18 +802,23 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     "delete_contact",
     "audience:write",
     {
-      description: "Delete a contact and its segment memberships. This cannot be undone.",
-      inputSchema: z.object({ id: idOrEmail }),
+      description:
+        "Delete a contact and its segment memberships; its emails stay in the log. Pass erase=true to also scrub the address from email history, event payloads and API logs (GDPR/LGPD). This cannot be undone.",
+      inputSchema: z.object({
+        id: idOrEmail,
+        erase: z.boolean().optional().describe("Also erase the address from email history"),
+      }),
       destructive: true,
     },
-    ({ id }) => api("DELETE", `/contacts/${enc(id)}`),
+    ({ id, erase }) =>
+      api("DELETE", withQuery(`/contacts/${enc(id)}`, erase ? { erase: "true" } : {})),
   );
   tool(
     "delete_contacts",
     "audience:write",
     {
       description:
-        "Delete up to 1000 contacts in one call, by ids or by email addresses (exactly one of the two). Returns the contacts actually deleted; unknown ones are skipped. Each deletion erases the address from email history like delete_contact. This cannot be undone.",
+        "Delete up to 1000 contacts in one call, by ids or by email addresses (exactly one of the two). Returns the contacts actually deleted; unknown ones are skipped. Emails stay in the log; erase=true also scrubs each address from email history, like delete_contact. This cannot be undone.",
       inputSchema: batchRemoveContactsRequestSchema,
       destructive: true,
     },

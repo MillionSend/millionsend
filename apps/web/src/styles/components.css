@@ -478,6 +478,65 @@ table.ms-table {
   color: var(--ms-muted);
   max-width: 100%;
 }
+/* Segment condition pill: the chip box, holding the button that opens the
+   condition's editor and the ✕ that removes it. */
+.ms-pill {
+  display: inline-flex;
+  align-items: stretch;
+  height: 28px;
+  background: color-mix(in srgb, var(--ms-bone) 5%, var(--ms-inset));
+  border: 1px solid var(--ms-line-strong);
+  border-radius: var(--ms-r-chip);
+  font-family: var(--ms-font-mono);
+  font-size: var(--ms-fs-badge);
+  color: var(--ms-bone);
+  box-sizing: border-box;
+  max-width: 100%;
+  transition: border-color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-pill > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 10px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  /* Rounds the global focus ring to the chip. */
+  border-radius: var(--ms-r-chip);
+}
+.ms-pill .txt {
+  /* A long value ends in an ellipsis instead of widening the row. */
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-pill .sans,
+.ms-pill .op {
+  font-family: var(--ms-font-sans);
+  font-size: 12.5px;
+}
+.ms-pill .op {
+  color: var(--ms-muted);
+}
+.ms-pill:hover,
+.ms-pill.open {
+  border-color: color-mix(in srgb, var(--ms-bone) 25%, var(--ms-line-strong));
+}
+.ms-pill > .ms-pill-x {
+  padding: 0 7px 0 2px;
+  color: var(--ms-faint);
+  font: 600 12px var(--ms-font-sans);
+}
+.ms-pill > .ms-pill-x:hover {
+  color: var(--ms-bone);
+}
+
 /* Shared copy→check swap (components/copy-chip.tsx CopyMark). Mirrors the
    LP's .lp-copy pop; keep the two in step. */
 .ms-copy-mark {
@@ -987,10 +1046,25 @@ table.ms-table {
   border: 1px solid var(--ms-line-strong);
   border-radius: var(--ms-r-modal);
   box-shadow: var(--ms-shadow-card);
-  padding: 28px;
+  /* The bottom edge is supplied by .ms-modal-footer, which every dialog ends with. */
+  padding: 28px 28px 0;
   width: 480px;
   max-width: calc(100vw - 48px);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
   animation: ms-fade var(--ms-dur-drawer) var(--ms-ease);
+}
+/* Pinned to the bottom while a tall dialog scrolls, opaque so rows slide
+   under it; its 28px bottom padding is the panel's, so at rest the buttons
+   sit exactly where a short dialog puts them. */
+.ms-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  position: sticky;
+  bottom: 0;
+  padding: 22px 0 28px;
+  background: var(--ms-panel);
 }
 .ms-modal h2 {
   font-family: var(--ms-font-sans);

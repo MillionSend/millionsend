@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
 import { ChevronGlyph, PlusGlyph } from "@/components/icons/nav-icons";
 import { Modal } from "@/components/modal";
-import { ConfirmKeycap } from "@/components/modal-footer";
+import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { useDismiss } from "@/components/popover-menu";
 import { BtnSpinner } from "@/components/spinner";
 import { TeamLogo } from "@/components/team-logo";
@@ -248,7 +248,7 @@ export function TeamSwitcher({
               {createTeam.error.data?.code === "FORBIDDEN" ? t("limit") : t("error")}
             </p>
           ) : null}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <ModalFooter>
             <button type="button" className="ms-btn ms-btn-secondary" onClick={closeCreate}>
               {tCommon("cancel")} <span className="ms-keycap">Esc</span>
             </button>
@@ -256,7 +256,7 @@ export function TeamSwitcher({
               <BtnSpinner on={createTeam.isPending} />
               {t("submit")} <ConfirmKeycap />
             </button>
-          </div>
+          </ModalFooter>
         </form>
       </Modal>
     </div>

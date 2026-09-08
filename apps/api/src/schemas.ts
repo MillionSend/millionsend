@@ -685,6 +685,12 @@ export const batchRemoveContactsRequestSchema = z
       .max(1000)
       .optional()
       .describe("Contact email addresses to delete, up to 1000; matched case-insensitively"),
+    erase: z
+      .boolean()
+      .optional()
+      .describe(
+        "Also erase each address from email history, event payloads and API logs (GDPR/LGPD); by default the send log is kept",
+      ),
   })
   .refine((v) => (v.ids === undefined) !== (v.emails === undefined), {
     message: "provide exactly one of ids or emails",

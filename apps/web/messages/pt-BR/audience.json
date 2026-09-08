@@ -118,7 +118,7 @@
     "importError": "Não foi possível importar os contatos.",
     "importDone": "Concluir",
     "deleteTitle": "Excluir contato",
-    "deleteBody": "{email} será removido dos seus contatos e apagado do histórico de emails e dos logs de API.",
+    "deleteBody": "{email} será removido dos seus contatos. E-mails já enviados continuam no log.",
     "deleteConfirm": "Excluir contato",
     "erase": "Apagar endereço",
     "eraseTitle": "Apagar um endereço",
@@ -147,7 +147,7 @@
       "subscribeTopicsBody": "{count, plural, one {# contato é inscrito} other {# contatos são inscritos}} em cada tópico escolhido.",
       "subscribeTopicsConfirm": "Inscrever",
       "deleteTitle": "Excluir contatos",
-      "deleteBody": "{count, plural, one {# contato é removido} other {# contatos são removidos}} permanentemente dos seus contatos e apagados do histórico de emails e dos logs de API.",
+      "deleteBody": "{count, plural, one {# contato é removido} other {# contatos são removidos}} permanentemente dos seus contatos. E-mails já enviados continuam no log.",
       "deleteConfirm": "Excluir contatos",
       "error": "Não foi possível aplicar a alteração. Tente de novo."
     },
@@ -326,6 +326,12 @@
       "valuePlaceholder": "Valor",
       "noValue": "Nenhum valor necessário",
       "removeRow": "Remover condição",
+      "matchLabel": "Correspondência",
+      "editCondition": "Editar condição",
+      "apply": "Aplicar",
+      "add": "Adicionar",
+      "groupContact": "Contato",
+      "groupProperties": "Propriedades",
       "match": {
         "all": "Corresponder a tudo",
         "any": "Corresponder a qualquer"
@@ -358,7 +364,7 @@
       "filterTitle": "Filtro",
       "saveFilter": "Salvar alterações",
       "manualTitle": "Composição",
-      "manualBody": "Este é um segmento manual: contatos são adicionados e removidos individualmente pela API, não correspondidos por um filtro.",
+      "manualBody": "Este é um segmento manual: contatos são adicionados e removidos um a um — pela lista de contatos ou pela página do contato, pela API ou pelo MCP — não correspondidos por um filtro.",
       "notFound": "Segmento não encontrado."
     }
   }

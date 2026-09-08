@@ -78,7 +78,8 @@ export async function confirmSystemContact(
 /**
  * The account is gone: drop its contact row in the account-mail team and
  * scrub the address from that team's history (emails, events, deliveries,
- * request log), the same erasure a dashboard contact delete performs.
+ * request log), the same erasure the dashboard's admin erase action and
+ * `DELETE /contacts/{id}?erase=true` perform.
  * Suppression hashes survive, so a later do-not-contact still holds. The
  * erasure is injectable: the web tier hands it to the worker queue.
  */

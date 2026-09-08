@@ -27,7 +27,8 @@ function CloseGlyph({ onClose }: { onClose: () => void }) {
   );
 }
 
-const FOCUSABLE =
+/** Tab stops inside a panel that runs its own focus loop (dialogs, anchored editors). */
+export const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Modal({

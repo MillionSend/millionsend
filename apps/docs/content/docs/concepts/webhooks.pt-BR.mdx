@@ -43,7 +43,7 @@ extensões do MillionSend.
 | --- | --- | --- |
 | `contact.created` | Um contato foi adicionado: API, lote, importação CSV ou painel. | |
 | `contact.updated` | Nome, propriedades ou o flag de descadastro mudaram pela API ou pelo painel. | |
-| `contact.deleted` | Um contato foi excluído. Excluir é um apagamento, então `email` vem como `[erased]`; use o `id`. | |
+| `contact.deleted` | Um contato foi excluído. Depois de um apagamento (`erase=true` na API, ou a ação de apagar do dashboard) o `email` guardado vem como `[erased]`; use o `id`. | |
 | `contact.unsubscribed` | O contato saiu de todo e-mail de marketing. | |
 | `contact.resubscribed` | Uma reinscrição explícita (`unsubscribed: false`). | |
 | `contact.topic_opt_in` / `contact.topic_opt_out` | A inscrição efetiva do contato em um tópico mudou. | `topic_id`, `topic_name` |

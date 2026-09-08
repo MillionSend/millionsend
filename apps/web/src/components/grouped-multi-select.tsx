@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useAnchoredPanel } from "./anchored-panel";
 import { ChevronGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
 
@@ -21,11 +23,6 @@ export interface OptionGroup {
   key: string;
   label: string;
 }
-
-/* Popover placement mirrors Select: room to the viewport edge and the minimum
-   below-space worth keeping before flipping the panel above the trigger. */
-const VIEWPORT_MARGIN = 16;
-const FLIP_THRESHOLD = 200;
 
 /**
  * Multi-select sibling of <Select>: a searchable .ms-menu popover whose rows
@@ -71,9 +68,13 @@ export function GroupedMultiSelect({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const [placement, setPlacement] = useState({ above: false, maxHeight: 264 });
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const dismissRefs = useMemo(() => [rootRef, menuRef], []);
+  // Portaled and fixed under the trigger: inside a dialog (a scroll
+  // container) an in-flow panel would be clipped at the dialog's edge.
+  const panelStyle = useAnchoredPanel(open ? rootRef.current : null);
   const listboxId = useId();
 
   // Filter, then flatten in group order so keyboard nav and rendering agree.
@@ -87,7 +88,7 @@ export function GroupedMultiSelect({
   const allOffset = allOption ? 1 : 0;
   const rowCount = allOffset + orderedFiltered.length;
 
-  useDismiss(rootRef, open, () => setOpen(false));
+  useDismiss(dismissRefs, open, () => setOpen(false));
 
   // Keep the highlighted row visible while arrowing through a scrolled list.
   useEffect(() => {
@@ -99,13 +100,6 @@ export function GroupedMultiSelect({
     if (disabled) return;
     setQuery("");
     setActiveIndex(0);
-    const rect = triggerRef.current?.getBoundingClientRect();
-    if (rect) {
-      const below = window.innerHeight - rect.bottom - VIEWPORT_MARGIN;
-      const above = rect.top - VIEWPORT_MARGIN;
-      const flip = below < FLIP_THRESHOLD && above > below;
-      setPlacement({ above: flip, maxHeight: Math.max(120, flip ? above : below) });
-    }
     setOpen(true);
   }
 
@@ -273,90 +267,94 @@ export function GroupedMultiSelect({
           <ChevronGlyph />
         </span>
       </button>
-      {open ? (
-        <div
-          className="ms-menu"
-          style={{
-            position: "absolute",
-            ...(placement.above ? { bottom: "calc(100% + 6px)" } : { top: "calc(100% + 6px)" }),
-            left: 0,
-            minWidth: "100%",
-            width: "max-content",
-            maxWidth: 320,
-            padding: 0,
-            overflow: "hidden",
-          }}
-        >
-          <input
-            className="ms-menu-search"
-            style={{ width: "100%", margin: 0 }}
-            // Search is the typing surface while the popover is open.
-            // biome-ignore lint/a11y/noAutofocus: focus moves into the popover by design, Esc restores the trigger
-            autoFocus
-            value={query}
-            placeholder={searchPlaceholder}
-            aria-label={searchPlaceholder}
-            {...(activeId !== undefined ? { "aria-activedescendant": activeId } : {})}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setActiveIndex(0);
-            }}
-            onKeyDown={onKeyDown}
-          />
-          <div
-            id={listboxId}
-            role="listbox"
-            aria-multiselectable="true"
-            aria-label={ariaLabel}
-            style={{
-              maxHeight: placement.maxHeight - 40,
-              overflowY: "auto",
-              padding: 4,
-              boxSizing: "border-box",
-            }}
-          >
-            {allOption ? (
-              <Row
-                index={0}
-                checked={allOption.selected}
-                onClick={() => activate(0)}
-                label={allOption.label}
+      {open
+        ? createPortal(
+            <div
+              ref={menuRef}
+              className="ms-menu"
+              style={{
+                ...panelStyle,
+                width: "max-content",
+                maxWidth: "min(320px, calc(100vw - 32px))",
+                padding: 0,
+                overflow: "hidden",
+                zIndex: "var(--ms-z-menu)",
+              }}
+            >
+              <input
+                className="ms-menu-search"
+                style={{ width: "100%", margin: 0 }}
+                // Search is the typing surface while the popover is open.
+                // biome-ignore lint/a11y/noAutofocus: focus moves into the popover by design, Esc restores the trigger
+                autoFocus
+                value={query}
+                placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
+                {...(activeId !== undefined ? { "aria-activedescendant": activeId } : {})}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setActiveIndex(0);
+                }}
+                onKeyDown={onKeyDown}
               />
-            ) : null}
-            {orderedFiltered.length === 0 ? (
-              <div style={{ padding: "7px 12px", fontSize: 13, color: "var(--ms-muted)" }}>
-                {noResultsLabel}
-              </div>
-            ) : (
-              groups.map((group) => {
-                const rows = orderedFiltered.filter((o) => o.group === group.key);
-                if (rows.length === 0) return null;
-                return (
-                  <div key={group.key}>
-                    <div className="ms-menu-label">{group.label}</div>
-                    {rows.map((option) => {
-                      const index = allOffset + orderedFiltered.indexOf(option);
-                      return (
-                        <Row
-                          key={option.value}
-                          index={index}
-                          checked={rowChecked(option)}
-                          onClick={() => activate(index)}
-                          {...(option.adornment !== undefined
-                            ? { adornment: option.adornment }
-                            : {})}
-                          {...(option.hint !== undefined ? { hint: option.hint } : {})}
-                          label={option.label}
-                        />
-                      );
-                    })}
+              <div
+                id={listboxId}
+                role="listbox"
+                aria-multiselectable="true"
+                aria-label={ariaLabel}
+                style={{
+                  // The search row takes the top of the panel's height budget.
+                  maxHeight:
+                    (typeof panelStyle.maxHeight === "number" ? panelStyle.maxHeight : 264) - 40,
+                  overflowY: "auto",
+                  padding: 4,
+                  boxSizing: "border-box",
+                }}
+              >
+                {allOption ? (
+                  <Row
+                    index={0}
+                    checked={allOption.selected}
+                    onClick={() => activate(0)}
+                    label={allOption.label}
+                  />
+                ) : null}
+                {orderedFiltered.length === 0 ? (
+                  <div style={{ padding: "7px 12px", fontSize: 13, color: "var(--ms-muted)" }}>
+                    {noResultsLabel}
                   </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      ) : null}
+                ) : (
+                  groups.map((group) => {
+                    const rows = orderedFiltered.filter((o) => o.group === group.key);
+                    if (rows.length === 0) return null;
+                    return (
+                      <div key={group.key}>
+                        <div className="ms-menu-label">{group.label}</div>
+                        {rows.map((option) => {
+                          const index = allOffset + orderedFiltered.indexOf(option);
+                          return (
+                            <Row
+                              key={option.value}
+                              index={index}
+                              checked={rowChecked(option)}
+                              onClick={() => activate(index)}
+                              {...(option.adornment !== undefined
+                                ? { adornment: option.adornment }
+                                : {})}
+                              {...(option.hint !== undefined ? { hint: option.hint } : {})}
+                              label={option.label}
+                            />
+                          );
+                        })}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

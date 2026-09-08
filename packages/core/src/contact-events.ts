@@ -89,6 +89,8 @@ export interface ContactEvent {
   type: WebhookEventType;
   contact: ContactSnapshot;
   extras?: Record<string, unknown> | undefined;
+  /** A `contact.deleted` that is also an erasure: its payload never carries the address. */
+  erased?: boolean | undefined;
 }
 
 /**
@@ -113,11 +115,12 @@ export async function emitContactEvents(
       events: params.events.map((event) => ({
         type: event.type,
         occurredAt,
-        // Deleting a contact is an erasure, so the deleted event never carries
-        // the address; receivers key on the id.
+        // An erasure's deleted event never carries the address, nor the name
+        // (personal data on its own); receivers key on the id. A plain delete
+        // keeps both like every other event.
         data: contactEventData(
-          event.type === "contact.deleted"
-            ? { ...event.contact, email: ERASED_TOMBSTONE }
+          event.type === "contact.deleted" && event.erased === true
+            ? { ...event.contact, email: ERASED_TOMBSTONE, firstName: null, lastName: null }
             : event.contact,
           { source: params.ctx.source, ...event.extras },
         ),

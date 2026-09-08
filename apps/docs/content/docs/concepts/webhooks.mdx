@@ -42,7 +42,7 @@ changed it. `data` carries the contact in Resend's shape — `id`, `email`,
 | --- | --- | --- |
 | `contact.created` | A contact was added: API, batch, CSV import or dashboard. | |
 | `contact.updated` | Name, properties or the unsubscribed flag changed through the API or the dashboard. | |
-| `contact.deleted` | A contact was deleted. Deleting is an erasure, so `email` reads `[erased]`; key on `id`. | |
+| `contact.deleted` | A contact was deleted. After an erasure (`erase=true` on the API, or the dashboard's erase action) the stored `email` reads `[erased]`; key on `id`. | |
 | `contact.unsubscribed` | The contact opted out of all marketing email. | |
 | `contact.resubscribed` | An explicit re-subscribe (`unsubscribed: false`). | |
 | `contact.topic_opt_in` / `contact.topic_opt_out` | The contact's effective subscription to a topic flipped. | `topic_id`, `topic_name` |

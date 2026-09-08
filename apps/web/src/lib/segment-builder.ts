@@ -72,6 +72,15 @@ export function propertyKey(field: string): string {
   return isProperty(field) ? field.slice(PROPERTY_PREFIX.length) : "";
 }
 
+/**
+ * The field picker's value for a row: a field or a named property is its own
+ * entry; a property with no key yet is the free-form "property" entry, whose
+ * key input shows.
+ */
+export function fieldPickerValue(field: string): string {
+  return isProperty(field) && propertyKey(field) === "" ? "property" : field;
+}
+
 /** A row is complete enough to translate: a real field, and a value when the op needs one. */
 export function rowComplete(row: BuilderRow): boolean {
   if (isProperty(row.field) && propertyKey(row.field).trim() === "") return false;

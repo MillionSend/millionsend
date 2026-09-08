@@ -312,7 +312,7 @@ await queue.work(
 );
 
 // Erasure scans a team's whole history; it runs here so the request that
-// deleted the contact returns at once.
+// asked for it returns at once.
 await queue.work("recipient.erase", async ({ teamId, address }) => {
   await eraseRecipient(db, teamId, address);
 });

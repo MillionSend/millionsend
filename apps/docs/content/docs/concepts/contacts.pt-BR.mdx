@@ -68,10 +68,12 @@ Toda mudança em um contato publica um
 `POST /contacts/batch/remove` exclui até 1.000 contatos em uma requisição, por
 `ids` ou por `emails` (exatamente um dos dois; a comparação de email não
 diferencia maiúsculas), e retorna as linhas de fato excluídas — entradas
-desconhecidas são ignoradas. Cada exclusão é o mesmo apagamento de
-`DELETE /contacts/{id}`: o endereço some do histórico de e-mails, dos payloads
-de eventos e dos logs da API. O Resend não tem exclusão em massa; é uma
-extensão do MillionSend, também exposta como a ferramenta MCP `delete_contacts`.
+desconhecidas são ignoradas. Excluir mantém os e-mails do contato no log, onde
+expiram com a janela de retenção do time; `erase: true` também apaga cada
+endereço do histórico de e-mails, dos payloads de eventos e dos logs da API,
+igual a `DELETE /contacts/{id}?erase=true`. O Resend não tem exclusão em
+massa; é uma extensão do MillionSend, também exposta como a ferramenta MCP
+`delete_contacts`.
 
 ```sh
 curl -X POST "https://api.millionsend.com/contacts/batch/remove" \

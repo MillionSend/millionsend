@@ -1,13 +1,21 @@
 "use client";
 
 import { useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useAnchoredPanel } from "./anchored-panel";
 import { useDismiss } from "./popover-menu";
+
+/** The suggestion list's own height cap, under the viewport gap it gets. */
+const LIST_MAX_HEIGHT = 220;
 
 /**
  * Token input: selected options render as removable chips inside one
  * input-styled frame, and typing filters the remaining options into an
  * .ms-menu suggestion list. Enter/click adds, Backspace on an empty input
  * removes the last chip. Controlled: `value` is the selected option values.
+ *
+ * The list is portaled to <body> and fixed under the frame: inside a dialog
+ * (a scroll container) an in-flow panel would be clipped at the dialog's edge.
  */
 export function ChipMultiSelect({
   value,
@@ -34,7 +42,9 @@ export function ChipMultiSelect({
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dismissRefs = useMemo(() => [rootRef, menuRef], []);
   const listboxId = useId();
 
   const chips = value
@@ -46,7 +56,7 @@ export function ChipMultiSelect({
     return options.filter((o) => !value.includes(o.value) && o.label.toLowerCase().includes(q));
   }, [options, value, query]);
 
-  useDismiss(rootRef, open, () => setOpen(false));
+  useDismiss(dismissRefs, open, () => setOpen(false));
 
   function add(optionValue: string) {
     onChange([...value, optionValue]);
@@ -96,9 +106,12 @@ export function ChipMultiSelect({
 
   const showMenu = open && suggestions.length > 0 && !disabled;
   const activeId = showMenu ? `${listboxId}-${activeIndex}` : undefined;
+  const panelStyle = useAnchoredPanel(showMenu ? rootRef.current : null, {
+    maxHeight: LIST_MAX_HEIGHT,
+  });
 
   return (
-    <div ref={rootRef} style={{ position: "relative" }}>
+    <div ref={rootRef}>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: click just forwards focus to the input inside */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users focus the inner input directly; the click only forwards focus */}
       <div
@@ -162,38 +175,35 @@ export function ChipMultiSelect({
           }}
         />
       </div>
-      {showMenu ? (
-        <div
-          id={listboxId}
-          role="listbox"
-          aria-label={ariaLabel}
-          className="ms-menu"
-          style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            left: 0,
-            minWidth: "100%",
-            maxHeight: 220,
-            overflowY: "auto",
-          }}
-        >
-          {suggestions.map((option, index) => (
-            <button
-              key={option.value}
-              id={`${listboxId}-${index}`}
-              type="button"
-              role="option"
-              aria-selected={false}
-              tabIndex={-1}
-              className={index === activeIndex ? "ms-menu-item active" : "ms-menu-item"}
-              onMouseEnter={() => setActiveIndex(index)}
-              onClick={() => add(option.value)}
+      {showMenu
+        ? createPortal(
+            <div
+              ref={menuRef}
+              id={listboxId}
+              role="listbox"
+              aria-label={ariaLabel}
+              className="ms-menu"
+              style={{ ...panelStyle, overflowY: "auto", zIndex: "var(--ms-z-menu)" }}
             >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
+              {suggestions.map((option, index) => (
+                <button
+                  key={option.value}
+                  id={`${listboxId}-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  tabIndex={-1}
+                  className={index === activeIndex ? "ms-menu-item active" : "ms-menu-item"}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onClick={() => add(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

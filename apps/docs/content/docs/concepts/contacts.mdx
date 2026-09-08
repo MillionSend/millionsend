@@ -65,10 +65,11 @@ each with the `source` that made the change.
 `POST /contacts/batch/remove` deletes up to 1,000 contacts in one request, by
 `ids` or by `emails` (exactly one of the two; email matching is
 case-insensitive), and returns the rows actually deleted — unknown entries are
-skipped. Each deletion is the same erasure as `DELETE /contacts/{id}`: the
-address disappears from email history, event payloads and API logs. Resend
-has no bulk deletion; this is a MillionSend extension, also exposed as the
-`delete_contacts` MCP tool.
+skipped. Deleting keeps the contact's emails in the log, where they age out
+with the team's retention window; `erase: true` also scrubs each address from
+email history, event payloads and API logs, the same as
+`DELETE /contacts/{id}?erase=true`. Resend has no bulk deletion; this is a
+MillionSend extension, also exposed as the `delete_contacts` MCP tool.
 
 ```sh
 curl -X POST "https://api.millionsend.com/contacts/batch/remove" \

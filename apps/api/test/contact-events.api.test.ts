@@ -145,8 +145,12 @@ describe("audience webhook events", () => {
     expect((await call("DELETE", `/contacts/${id}`)).status).toBe(200);
     rows = await deliveries();
     expect(rows[0]?.eventType).toBe("contact.deleted");
-    // Deleting is an erasure: the stored payload no longer carries the address.
-    expect(rows[0]?.data).toMatchObject({ id, email: "[erased]", source: "api" });
+    // A plain delete keeps the address: the payload and the send log stay readable.
+    expect(rows[0]?.data).toMatchObject({
+      id,
+      email: expect.stringMatching(/^ana@example\.com$/i),
+      source: "api",
+    });
   });
 
   it("publish topic opt-outs with the topic named", async () => {
@@ -251,13 +255,20 @@ describe("GET /contacts/{id}/topics", () => {
 });
 
 describe("deleting a contact", () => {
-  it("hands the history scrub to the queue and returns as soon as the row is gone", async () => {
-    const contact = (await (
-      await call("POST", "/contacts", { email: "gone@example.com" })
+  it("keeps the send log; erase=true hands the history scrub to the queue", async () => {
+    const kept = (await (
+      await call("POST", "/contacts", { email: "kept@example.com" })
     ).json()) as { id: string };
     erasures.length = 0;
-    expect((await call("DELETE", `/contacts/${contact.id}`)).status).toBe(200);
+    expect((await call("DELETE", `/contacts/${kept.id}`)).status).toBe(200);
+    expect(erasures).toEqual([]);
+    expect((await call("GET", `/contacts/${kept.id}`)).status).toBe(404);
+
+    const gone = (await (
+      await call("POST", "/contacts", { email: "gone@example.com" })
+    ).json()) as { id: string };
+    expect((await call("DELETE", `/contacts/${gone.id}?erase=true`)).status).toBe(200);
     expect(erasures).toEqual([{ teamId, address: "gone@example.com" }]);
-    expect((await call("GET", `/contacts/${contact.id}`)).status).toBe(404);
+    expect((await call("GET", `/contacts/${gone.id}`)).status).toBe(404);
   });
 });

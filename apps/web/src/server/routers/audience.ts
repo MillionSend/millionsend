@@ -71,23 +71,6 @@ async function assertContacts(
   return unique;
 }
 
-/**
- * A deleted contact's address is scrubbed from the team's history by the
- * worker, so the request returns as soon as the row is gone; without the
- * queue seam (tests) the scrub runs inline.
- */
-const eraseDeletedContact = async (
-  ctx: {
-    db: Db;
-    teamId: string;
-    enqueueRecipientErase?: ((teamId: string, address: string) => Promise<void>) | undefined;
-  },
-  email: string,
-): Promise<void> => {
-  if (ctx.enqueueRecipientErase) await ctx.enqueueRecipientErase(ctx.teamId, email);
-  else await eraseRecipient(ctx.db, ctx.teamId, email);
-};
-
 /** Dashboard-made changes publish with this provenance; the enqueue is absent in tests. */
 const dashboardEvents = (ctx: {
   enqueueWebhookDeliveries?: WebhookEnqueue | undefined;
@@ -473,8 +456,8 @@ export const audienceRouter = router({
         return row;
       }),
 
-    /** Deleting a contact is an erasure: the address is scrubbed from email
-     * history, event/webhook payloads and API logs, not just the row. */
+    /** Removes the contact; its emails stay in the log. Scrubbing the address
+     * from history is the separate, admin-only eraseRecipient. */
     delete: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
       const t = schema.contacts;
       const [row] = await ctx.db
@@ -487,7 +470,6 @@ export const audienceRouter = router({
         events: [{ type: "contact.deleted", contact: row }],
         ctx: dashboardEvents(ctx),
       });
-      await eraseDeletedContact(ctx, row.email);
       return { id: row.id };
     }),
 
@@ -625,9 +607,6 @@ export const audienceRouter = router({
           events: deleted.map((contact) => ({ type: "contact.deleted" as const, contact })),
           ctx: dashboardEvents(ctx),
         });
-        // ponytail: one cross-table scan per address; fold the batch into one
-        // regex alternation if bulk deletes get slow.
-        for (const row of deleted) await eraseDeletedContact(ctx, row.email);
         return { deleted: deleted.length };
       }),
 
@@ -798,7 +777,11 @@ export const audienceRouter = router({
         .returning(contactSnapshotColumns);
       await emitContactEvents(ctx.db, {
         teamId: ctx.teamId,
-        events: deleted.map((contact) => ({ type: "contact.deleted" as const, contact })),
+        events: deleted.map((contact) => ({
+          type: "contact.deleted" as const,
+          contact,
+          erased: true,
+        })),
         ctx: dashboardEvents(ctx),
       });
       const erased = await eraseRecipient(ctx.db, ctx.teamId, input.email);
@@ -837,6 +820,29 @@ export const audienceRouter = router({
       const rows = resultRows<{ key: string; contactCount: number; sampleValue: string }>(result);
       return rows.map((r) => ({ ...r, totalContacts }));
     }),
+
+    /**
+     * A property's most common values with how many contacts carry each —
+     * the segment builder's suggestions. The key is a bound parameter.
+     */
+    values: teamProcedure
+      // Bound verbatim (no trim): keys are stored as written, so " plan" and
+      // "plan" are two properties, as they are to segmentWhere.
+      .input(z.object({ key: z.string().min(1).max(CONTACT_PROPERTY_KEY_MAX_LENGTH) }))
+      .query(async ({ ctx, input }) => {
+        const c = schema.contacts;
+        // ponytail: one scan of the team's contacts per key; keep per-key
+        // stats if audiences grow past a few million rows.
+        const result = await ctx.db.execute(sql`
+          select c.properties ->> ${input.key} as value, count(*)::int as "contactCount"
+          from ${c} c
+          where c.team_id = ${ctx.teamId} and coalesce(c.properties ->> ${input.key}, '') <> ''
+          group by 1
+          order by count(*) desc, 1 asc
+          limit 8
+        `);
+        return resultRows<{ value: string; contactCount: number }>(result);
+      }),
 
     /** The team's typed property DEFINITIONS, newest first. */
     defineList: teamProcedure.query(async ({ ctx }) => {

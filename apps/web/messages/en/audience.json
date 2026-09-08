@@ -118,7 +118,7 @@
     "importError": "Could not import contacts.",
     "importDone": "Done",
     "deleteTitle": "Delete contact",
-    "deleteBody": "{email} is removed from your contacts and scrubbed from email history and API logs.",
+    "deleteBody": "{email} is removed from your contacts. Emails already sent stay in the log.",
     "deleteConfirm": "Delete contact",
     "erase": "Erase address",
     "eraseTitle": "Erase an address",
@@ -147,7 +147,7 @@
       "subscribeTopicsBody": "{count, plural, one {# contact is} other {# contacts are}} subscribed to every chosen topic.",
       "subscribeTopicsConfirm": "Subscribe",
       "deleteTitle": "Delete contacts",
-      "deleteBody": "{count, plural, one {# contact is} other {# contacts are}} permanently removed from your contacts and scrubbed from email history and API logs.",
+      "deleteBody": "{count, plural, one {# contact is} other {# contacts are}} permanently removed from your contacts. Emails already sent stay in the log.",
       "deleteConfirm": "Delete contacts",
       "error": "Could not apply the change. Try again."
     },
@@ -326,6 +326,12 @@
       "valuePlaceholder": "Value",
       "noValue": "No value needed",
       "removeRow": "Remove condition",
+      "matchLabel": "Match",
+      "editCondition": "Edit condition",
+      "apply": "Apply",
+      "add": "Add",
+      "groupContact": "Contact",
+      "groupProperties": "Properties",
       "match": {
         "all": "Match all",
         "any": "Match any"
@@ -358,7 +364,7 @@
       "filterTitle": "Filter",
       "saveFilter": "Save changes",
       "manualTitle": "Membership",
-      "manualBody": "This is a manual segment: contacts are added and removed individually via the API, not matched by a filter.",
+      "manualBody": "This is a manual segment: contacts are added and removed one by one — from the contacts list or a contact's page, via the API, or through MCP — not matched by a filter.",
       "notFound": "Segment not found."
     }
   }

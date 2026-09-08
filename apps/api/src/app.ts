@@ -708,6 +708,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     );
 
   const idParam = z.object({ id: z.string().min(1) });
+  const eraseQuery = z.object({
+    erase: z
+      .enum(["true", "false"])
+      .optional()
+      .describe(
+        "MillionSend extension. `true` also erases the address from email history, event payloads and API logs (a GDPR/LGPD erasure); by default the send log is kept and ages out with the team's retention window",
+      ),
+  });
   const membershipParams = z.object({ id: z.string().min(1), segmentId: z.uuid() });
   const audienceParams = z.object({ audienceId: z.uuid() });
   const audienceContactParams = z.object({ audienceId: z.uuid(), id: z.string().min(1) });
@@ -721,8 +729,9 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     source: "api",
     enqueue: deps.enqueueWebhookDeliveries,
   };
-  // Deleting a contact is an erasure: the address must not survive in email
-  // history, event payloads or API logs. The scan is the worker's when a
+  // A delete keeps the send log (it ages out with the team's retention window);
+  // `erase=true` is the GDPR/LGPD path that also scrubs the address from email
+  // history, event payloads and API logs. The scan is the worker's when a
   // queue is wired, so the request returns as soon as the row is gone.
   const eraseDeletedContact = async (teamId: string, address: string): Promise<void> => {
     if (deps.enqueueRecipientErase) await deps.enqueueRecipientErase(teamId, address);
@@ -1238,7 +1247,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     return row;
   };
 
-  const deleteContactOp = async (teamId: string, idOrEmail: string) => {
+  const deleteContactOp = async (teamId: string, idOrEmail: string, erase: boolean) => {
     const row = (
       await db
         .delete(t)
@@ -1248,10 +1257,10 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     if (row) {
       await emitContactEvents(db, {
         teamId,
-        events: [{ type: "contact.deleted", contact: row }],
+        events: [{ type: "contact.deleted", contact: row, erased: erase }],
         ctx: contactEvents,
       });
-      await eraseDeletedContact(teamId, row.email);
+      if (erase) await eraseDeletedContact(teamId, row.email);
     }
     return row;
   };
@@ -1353,8 +1362,8 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       description:
         "MillionSend extension (Resend deletes contacts one at a time): deletes up to 1000 contacts " +
         "by id or by email address in one request and lists the rows actually deleted; unknown ids " +
-        "or addresses are skipped. Each deletion is the same erasure as DELETE /contacts/{id}: the " +
-        "address is removed from email history, event payloads and API logs.",
+        "or addresses are skipped. Emails stay in the log; `erase: true` also scrubs each address " +
+        "from email history, event payloads and API logs, like DELETE /contacts/{id}?erase=true.",
       request: {
         body: { content: { "application/json": { schema: batchRemoveContactsRequestSchema } } },
       },
@@ -1382,10 +1391,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         .returning(contactSnapshotColumns);
       await emitContactEvents(db, {
         teamId: auth.teamId,
-        events: rows.map((contact) => ({ type: "contact.deleted" as const, contact })),
+        events: rows.map((contact) => ({
+          type: "contact.deleted" as const,
+          contact,
+          erased: body.erase === true,
+        })),
         ctx: contactEvents,
       });
-      for (const row of rows) await eraseDeletedContact(auth.teamId, row.email);
+      if (body.erase) for (const row of rows) await eraseDeletedContact(auth.teamId, row.email);
       return c.json(
         {
           data: rows.map((r) => ({
@@ -1589,7 +1602,9 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "delete",
       path: "/contacts/{id}",
-      request: { params: idParam },
+      description:
+        "Deletes the contact and its segment memberships. Its emails stay in the log; pass `erase=true` to also scrub the address from email history, event payloads and API logs.",
+      request: { params: idParam, query: eraseQuery },
       responses: {
         200: {
           content: { "application/json": { schema: removeContactResponseSchema } },
@@ -1600,7 +1615,11 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     }),
     async (c) => {
       const auth = c.get("auth");
-      const row = await deleteContactOp(auth.teamId, c.req.valid("param").id);
+      const row = await deleteContactOp(
+        auth.teamId,
+        c.req.valid("param").id,
+        c.req.valid("query").erase === "true",
+      );
       if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       return c.json({ object: "contact" as const, contact: row.id, deleted: true as const }, 200);
     },
@@ -1948,7 +1967,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     createRoute({
       method: "delete",
       path: "/audiences/{audienceId}/contacts/{id}",
-      request: { params: audienceContactParams },
+      request: { params: audienceContactParams, query: eraseQuery },
       responses: {
         200: {
           content: { "application/json": { schema: removeContactResponseSchema } },
@@ -1963,7 +1982,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       if (!(await ownsSegments(auth.teamId, [audienceId]))) {
         return c.json(errorBody(404, "not_found", "Audience not found"), 404);
       }
-      const row = await deleteContactOp(auth.teamId, id);
+      const row = await deleteContactOp(auth.teamId, id, c.req.valid("query").erase === "true");
       if (!row) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       return c.json({ object: "contact" as const, contact: row.id, deleted: true as const }, 200);
     },
