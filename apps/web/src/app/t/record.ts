@@ -92,10 +92,11 @@ async function openAnchor(
  * `prefetched` event, which is kept and fanned out (opt-in) but never lifts
  * the status or the opened counter. Every verified hit records an event row
  * (and fans out webhooks), damped to at most one per minute per (email,
- * type). The daily usage counter still advances only on the FIRST event of
- * its type for this email — open/click RATES stay unique-based, mirroring the
- * old SES OPEN/CLICK path. Both endpoints are public, so a missing/foreign/
- * non-uuid emailId returns silently.
+ * type, link): a person who clicks a second link a moment later made a
+ * second click. The daily usage counter still advances only on the FIRST
+ * event of its type for this email — open/click RATES stay unique-based,
+ * mirroring the old SES OPEN/CLICK path. Both endpoints are public, so a
+ * missing/foreign/non-uuid emailId returns silently.
  */
 export async function recordEngagement(
   db: Db,
@@ -106,20 +107,6 @@ export async function recordEngagement(
 ): Promise<void> {
   // A raw non-uuid string must never reach a uuid column — Postgres would 500.
   if (!z.uuid().safeParse(emailId).success) return;
-
-  const [email] = await db
-    .select({
-      id: schema.emails.id,
-      teamId: schema.emails.teamId,
-      from: schema.emails.from,
-      to: schema.emails.to,
-      subject: schema.emails.subject,
-      sentAt: schema.emails.sentAt,
-    })
-    .from(schema.emails)
-    .where(eq(schema.emails.id, emailId))
-    .limit(1);
-  if (!email) return;
 
   const occurredAt = new Date();
   // The fetcher's identity in SES's shape — the object Resend's email.clicked
@@ -133,6 +120,24 @@ export async function recordEngagement(
   const deliveries: QueuedWebhookDelivery[] = [];
   await db.transaction(async (txRaw) => {
     const tx = txRaw as unknown as Db;
+    // The email row is held for the whole record: a gateway fetches every
+    // link of a message at once, and each hit must see the rows the one
+    // before it wrote before it damps, counts or lifts the status.
+    const [email] = await tx
+      .select({
+        id: schema.emails.id,
+        teamId: schema.emails.teamId,
+        from: schema.emails.from,
+        to: schema.emails.to,
+        subject: schema.emails.subject,
+        sentAt: schema.emails.sentAt,
+      })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, emailId))
+      .limit(1)
+      .for("update");
+    if (!email) return;
+
     let recorded: RecordedType = type;
     let data: Record<string, unknown>;
     // A link a machine followed is no click either — security gateways and
@@ -154,17 +159,31 @@ export async function recordEngagement(
       data = { open: { ...fetcher, ...reason } };
     }
 
+    // Damping compares like with like: a link against earlier hits on that
+    // same link, the pixel against earlier pixel fetches. Prefetched rows
+    // hold either shape, so the shape is part of the match.
+    const sameHit =
+      type === "clicked"
+        ? sql`${schema.emailEvents.data}->'click'->>'link' = ${hit?.link ?? ""}`
+        : sql`${schema.emailEvents.data} ? 'open'`;
     const [newest] = await tx
       .select({ occurredAt: schema.emailEvents.occurredAt })
       .from(schema.emailEvents)
-      .where(and(eq(schema.emailEvents.emailId, email.id), eq(schema.emailEvents.type, recorded)))
+      .where(
+        and(
+          eq(schema.emailEvents.emailId, email.id),
+          eq(schema.emailEvents.type, recorded),
+          sameHit,
+        ),
+      )
       .orderBy(desc(schema.emailEvents.occurredAt))
       .limit(1);
-    // ponytail: two concurrent identical hits could both miss `newest` and
-    // slip the damping window — same race the SES path carries. A slightly-
-    // high engagement event count is not a correctness/security concern; add
-    // row locking if it ever matters.
     if (newest && occurredAt.getTime() - newest.occurredAt.getTime() < DAMP_WINDOW_MS) return;
+    const [prior] = await tx
+      .select({ id: schema.emailEvents.id })
+      .from(schema.emailEvents)
+      .where(and(eq(schema.emailEvents.emailId, email.id), eq(schema.emailEvents.type, recorded)))
+      .limit(1);
 
     await tx
       .insert(schema.emailEvents)
@@ -231,7 +250,7 @@ export async function recordEngagement(
     // engaged, not engagement hits. Last in the transaction: this row is
     // shared by every send and event of the team, so its lock is held for
     // one statement and the commit, not across the fan-out above.
-    if (!newest) {
+    if (!prior) {
       await tx.execute(sql`
         insert into ${schema.usageCounters} (team_id, day, ${sql.raw(recorded)})
         values (${email.teamId}, ${utcDay(occurredAt)}, 1)

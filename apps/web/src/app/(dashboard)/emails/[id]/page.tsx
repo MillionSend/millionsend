@@ -1,6 +1,7 @@
 "use client";
 
 import { parseSmtpDiagnostic, resolveBounceGuidance } from "@millionsend/core/bounce-guidance";
+import { PREFETCH_REASONS, type PrefetchReason } from "@millionsend/core/open-classifier";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -68,14 +69,6 @@ const EVENT_COLOR: Record<EventType, string> = {
   unsubscribed: "var(--ms-warn)",
 };
 
-const PREFETCH_REASONS = [
-  "apple_mpp",
-  "gmail_prefetch",
-  "scanner",
-  "before_delivery",
-  "timing",
-] as const;
-type PrefetchReason = (typeof PREFETCH_REASONS)[number];
 function isPrefetchReason(value: unknown): value is PrefetchReason {
   return typeof value === "string" && (PREFETCH_REASONS as readonly string[]).includes(value);
 }

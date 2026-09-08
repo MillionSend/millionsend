@@ -117,6 +117,63 @@ describe("click endpoint /t/c", () => {
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 2, counter: 1 });
   });
 
+  it("a person who clicks a second link within a minute has both clicks recorded, counted once", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await clickGet(
+      ...req(makeClickToken({ emailId, url: "https://shop.example.com/a", secretKey })),
+    );
+    await clickGet(
+      ...req(makeClickToken({ emailId, url: "https://shop.example.com/b", secretKey })),
+    );
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 2, counter: 1 });
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+  });
+
+  it("a desktop Chrome reporting a build number no browser sends is a prefetch, on the pixel and on a link", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const spoofed = {
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.163 Safari/537.36",
+    };
+    await db
+      .insert(schema.emailEvents)
+      .values({ emailId, type: "delivered", occurredAt: new Date(Date.now() - 45_000) });
+    await openGet(...req(makeOpenToken({ emailId, secretKey }), spoofed));
+    const url = "https://shop.example.com/";
+    const res = await clickGet(...req(makeClickToken({ emailId, url, secretKey }), spoofed));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(url);
+    // Two prefetch rows (the pixel, the link), one email prefetched.
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 2, counter: 1 });
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+    const rows = await db
+      .select({ data: schema.emailEvents.data })
+      .from(schema.emailEvents)
+      .where(
+        and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "prefetched")),
+      );
+    expect(
+      rows.map((r) => r.data as { open?: { reason?: string }; click?: { reason?: string } }),
+    ).toEqual([
+      { open: expect.objectContaining({ reason: "spoofed_ua" }) },
+      { click: expect.objectContaining({ reason: "spoofed_ua", link: url }) },
+    ]);
+    const [row] = await db
+      .select({ status: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, emailId));
+    expect(row?.status).toBe("queued");
+    // The person on a current Chrome, later, is a click.
+    await clickGet(
+      ...req(makeClickToken({ emailId, url, secretKey }), {
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+      }),
+    );
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+  });
+
   it("a click on a message with no open yet records the open too, marked as inferred", async () => {
     const { emailId, teamId } = await seedEmail();
     const token = makeClickToken({ emailId, url: "https://shop.example.com/", secretKey });

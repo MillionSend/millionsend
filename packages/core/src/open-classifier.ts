@@ -8,12 +8,20 @@
  * they count as people unless the timing says otherwise.
  */
 
-export type PrefetchReason =
-  | "apple_mpp"
-  | "gmail_prefetch"
-  | "scanner"
-  | "before_delivery"
-  | "timing";
+/**
+ * Why a fetch was classed a prefetch. "burst" is applied by the click
+ * recorder, which sees the other links of the message; the rest here.
+ */
+export const PREFETCH_REASONS = [
+  "apple_mpp",
+  "gmail_prefetch",
+  "scanner",
+  "spoofed_ua",
+  "before_delivery",
+  "timing",
+  "burst",
+] as const;
+export type PrefetchReason = (typeof PREFETCH_REASONS)[number];
 
 export type OpenVerdict = { prefetched: false } | { prefetched: true; reason: PrefetchReason };
 
@@ -63,6 +71,25 @@ const SCANNER_TOKENS = [
   "facebookexternalhit",
 ] as const;
 
+/**
+ * Chrome's user-agent reduction (from Chrome 107 on desktop, 110 on Android)
+ * froze the minor.build.patch to 0.0.0: the full build now travels only in
+ * client hints. A desktop Chrome user agent that still carries one is a
+ * string copied from a fingerprint list, which is how security gateways'
+ * link scanners present themselves. The margin above 107 covers the staged
+ * rollout. Electron apps keep the full build and name themselves.
+ */
+const REDUCED_UA_FROM_MAJOR = 113;
+const DESKTOP_PLATFORM = /\b(?:Windows NT|Macintosh|X11)\b/;
+const CHROME_FULL_BUILD = /\bChrome\/(\d+)\.(\d+\.\d+\.\d+)\b/;
+
+function isSpoofedDesktopChrome(userAgent: string): boolean {
+  if (!DESKTOP_PLATFORM.test(userAgent) || userAgent.includes("Electron/")) return false;
+  const match = CHROME_FULL_BUILD.exec(userAgent);
+  if (!match) return false;
+  return Number(match[1]) >= REDUCED_UA_FROM_MAJOR && match[2] !== "0.0.0";
+}
+
 export function classifyOpen(hit: {
   userAgent: string | null;
   at: Date;
@@ -84,6 +111,7 @@ export function classifyOpen(hit: {
   if (userAgent === "" || SCANNER_TOKENS.some((token) => lower.includes(token))) {
     return { prefetched: true, reason: "scanner" };
   }
+  if (isSpoofedDesktopChrome(userAgent)) return { prefetched: true, reason: "spoofed_ua" };
   if (hit.anchor) {
     const delta = hit.at.getTime() - hit.anchor.at.getTime();
     if (hit.anchor.delivered && delta < 0) return { prefetched: true, reason: "before_delivery" };

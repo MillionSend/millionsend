@@ -62,8 +62,10 @@
       "apple_mpp": "Apple Mail privacy",
       "gmail_prefetch": "Gmail prefetch",
       "scanner": "security scanner",
+      "spoofed_ua": "spoofed browser",
       "before_delivery": "before delivery",
-      "timing": "seconds after delivery"
+      "timing": "seconds after delivery",
+      "burst": "every link within a second"
     },
     "suppressedLine": "future sends blocked",
     "bounceBanner": {
