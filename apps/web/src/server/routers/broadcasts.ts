@@ -173,6 +173,44 @@ function assertDraft(row: BroadcastRow): void {
   }
 }
 
+/**
+ * How many contacts a send would email right now. A topicId narrows the
+ * count to that topic's subscribers per the SUBSCRIPTION RULE (globally
+ * subscribed AND topic-subscribed), matching the worker's topic-scoped
+ * fan-out; without one it is every non-unsubscribed contact.
+ */
+async function countAudience(
+  ctx: { db: Db; teamId: string },
+  input: { topicId?: string | null | undefined; segmentId?: string | null | undefined },
+): Promise<number> {
+  const c = schema.contacts;
+  const base = [eq(c.teamId, ctx.teamId), eq(c.unsubscribed, false)];
+  // A segment narrows recipients via the shared resolver (filter matches
+  // plus manual members), AND'd on top of the global-unsubscribe and
+  // topic rules — the same predicate the worker fan-out targets.
+  if (input.segmentId) {
+    const segment = await assertSegment(ctx, input.segmentId);
+    base.push(savedSegmentPredicate(segment));
+  }
+  if (!input.topicId) {
+    const [row] = await ctx.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(c)
+      .where(and(...base));
+    return row?.count ?? 0;
+  }
+  await assertTopic(ctx, input.topicId);
+  const t = schema.topics;
+  const s = schema.contactTopicSubscriptions;
+  const [row] = await ctx.db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(c)
+    .innerJoin(t, eq(t.id, input.topicId))
+    .leftJoin(s, and(eq(s.topicId, input.topicId), eq(s.contactId, c.id)))
+    .where(and(...base, topicMembershipSql(s, t)));
+  return row?.count ?? 0;
+}
+
 export const broadcastsRouter = router({
   list: teamProcedure
     .input(
@@ -195,6 +233,8 @@ export const broadcastsRouter = router({
           name: b.name,
           subject: b.subject,
           status: b.status,
+          segmentId: b.segmentId,
+          topicId: b.topicId,
           segmentName: sg.name,
           recipients: recipientsSql(b),
           scheduledAt: b.scheduledAt,
@@ -207,7 +247,20 @@ export const broadcastsRouter = router({
         .where(and(...filters))
         .orderBy(desc(b.createdAt), desc(b.id))
         .limit(input.limit + 1);
-      return paginate(rows, input.limit);
+      const page = paginate(rows, input.limit);
+      return {
+        ...page,
+        items: await Promise.all(
+          page.items.map(async (row) => ({
+            ...row,
+            // Progress denominator while the fan-out runs: the audience it
+            // walks, counted like the composer's guard. Suppressed rows still
+            // drop out of the walk, so the final count can land a little under.
+            audience:
+              row.status === "sending" ? await countAudience(ctx, row).catch(() => null) : null,
+          })),
+        ),
+      };
     }),
 
   /** Detail surface: full content plus the stat strip's aggregate over fanned-out emails. */
@@ -568,32 +621,5 @@ export const broadcastsRouter = router({
         segmentId: z.uuid().nullable().optional(),
       }),
     )
-    .query(async ({ ctx, input }) => {
-      const c = schema.contacts;
-      const base = [eq(c.teamId, ctx.teamId), eq(c.unsubscribed, false)];
-      // A segment narrows recipients via the shared resolver (filter matches
-      // plus manual members), AND'd on top of the global-unsubscribe and
-      // topic rules — the same predicate the worker fan-out targets.
-      if (input.segmentId) {
-        const segment = await assertSegment(ctx, input.segmentId);
-        base.push(savedSegmentPredicate(segment));
-      }
-      if (!input.topicId) {
-        const [row] = await ctx.db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(c)
-          .where(and(...base));
-        return { count: row?.count ?? 0 };
-      }
-      await assertTopic(ctx, input.topicId);
-      const t = schema.topics;
-      const s = schema.contactTopicSubscriptions;
-      const [row] = await ctx.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(c)
-        .innerJoin(t, eq(t.id, input.topicId))
-        .leftJoin(s, and(eq(s.topicId, input.topicId), eq(s.contactId, c.id)))
-        .where(and(...base, topicMembershipSql(s, t)));
-      return { count: row?.count ?? 0 };
-    }),
+    .query(async ({ ctx, input }) => ({ count: await countAudience(ctx, input) })),
 });

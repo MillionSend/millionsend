@@ -194,7 +194,15 @@ export default function BroadcastsPage() {
                     </td>
                     <td>{row.segmentName ?? t("composer.segmentNone")}</td>
                     <td className="right ms-digits">
-                      {row.recipients > 0 ? (
+                      {row.audience != null ? (
+                        <>
+                          {nf.format(row.recipients)}
+                          <span style={{ color: "var(--ms-faint)" }}>
+                            {" / "}
+                            {nf.format(row.audience)}
+                          </span>
+                        </>
+                      ) : row.recipients > 0 ? (
                         nf.format(row.recipients)
                       ) : (
                         <span style={{ color: "var(--ms-faint)" }}>—</span>

@@ -10,6 +10,7 @@ import { EmailsTable } from "@/components/emails-table";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
 import { PageHeader } from "@/components/page-header";
+import { GroupedMultiSelect } from "@/components/grouped-multi-select";
 import { Select } from "@/components/select";
 import { StatusDot } from "@/components/status-badge";
 import { codeRichTags } from "@/lib/code-rich-tags";
@@ -17,6 +18,7 @@ import { formatHoursMinutes } from "@/lib/format";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { manyOf } from "@/lib/list-param";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "./list-parts";
 
@@ -36,8 +38,6 @@ const STATUSES = [
   "failed",
 ] as const;
 
-type EmailStatus = (typeof STATUSES)[number];
-
 const RANGE_KEYS: RangeKey[] = ["h24", "d7", "d15", "d30", "all"];
 
 /** ms until the daily quota resets (midnight UTC). */
@@ -48,6 +48,7 @@ function msToUtcMidnight(now = new Date()): number {
 export default function EmailsPage() {
   const t = useTranslations("emails");
   const common = useTranslations("common");
+  const select = useTranslations("common.select");
   const locale = useLocale();
   const trpc = useTRPC();
   const _router = useRouter();
@@ -59,7 +60,12 @@ export default function EmailsPage() {
   const [apiKeyId, setApiKeyId] = useUrlState("key", "all");
   const [domainId, setDomainId] = useUrlState("domain", "all");
   const [limit, setLimit] = useState(40);
-  const status: EmailStatus | "all" = oneOf(STATUSES, statusParam, "all");
+  // Any subset of statuses, "all" (the default) meaning no status filter.
+  const statuses = useMemo(() => manyOf(STATUSES, statusParam), [statusParam]);
+  const setStatuses = (next: readonly string[]) => {
+    const picked = STATUSES.filter((s) => next.includes(s));
+    setStatus(picked.length === 0 ? "all" : picked.join(","));
+  };
   const range: RangeKey = oneOf(RANGE_KEYS, rangeParam, "d15");
   const deferredSearch = useDeferredValue(search.trim());
   const since = useMemo(() => rangeSince(range), [range]);
@@ -68,7 +74,7 @@ export default function EmailsPage() {
     trpc.emails.list.infiniteQueryOptions(
       {
         limit,
-        ...(status !== "all" ? { status } : {}),
+        ...(statuses.length > 0 ? { status: statuses } : {}),
         ...(deferredSearch ? { search: deferredSearch } : {}),
         ...(apiKeyId !== "all" ? { apiKeyId } : {}),
         ...(domainId !== "all" ? { domainId } : {}),
@@ -93,7 +99,7 @@ export default function EmailsPage() {
 
   const hasFilters =
     deferredSearch !== "" ||
-    status !== "all" ||
+    statuses.length > 0 ||
     apiKeyId !== "all" ||
     domainId !== "all" ||
     range !== "all";
@@ -115,7 +121,7 @@ export default function EmailsPage() {
 
   const exportParams = new URLSearchParams();
   if (deferredSearch) exportParams.set("search", deferredSearch);
-  if (status !== "all") exportParams.set("status", status);
+  if (statuses.length > 0) exportParams.set("status", statuses.join(","));
   if (apiKeyId !== "all") exportParams.set("apiKeyId", apiKeyId);
   if (domainId !== "all") exportParams.set("domainId", domainId);
   if (since) exportParams.set("since", since.toISOString());
@@ -123,7 +129,13 @@ export default function EmailsPage() {
 
   const filterSummary = [
     ...(deferredSearch ? [`"${deferredSearch}"`] : []),
-    ...(status !== "all" ? [t("list.statusFilter", { status: common(`status.${status}`) })] : []),
+    ...(statuses.length > 0
+      ? [
+          t("list.statusFilter", {
+            status: statuses.map((s) => common(`status.${s}`)).join(", "),
+          }),
+        ]
+      : []),
     ...(range !== "all" ? [t(`list.range.${range}`)] : []),
   ].join(" · ");
 
@@ -200,19 +212,50 @@ export default function EmailsPage() {
           ariaLabel={t(`list.range.${range}`)}
           options={RANGE_KEYS.map((key) => ({ value: key, label: t(`list.range.${key}`) }))}
         />
-        <Select
-          value={status}
-          onChange={setStatus}
+        <GroupedMultiSelect
+          value={statuses}
+          onChange={setStatuses}
           width={156}
           ariaLabel={t("list.status")}
-          options={[
-            { value: "all", label: t("list.allStatuses"), adornment: <StatusDot /> },
-            ...STATUSES.map((s) => ({
-              value: s,
-              label: common(`status.${s}`),
-              adornment: <StatusDot status={s} />,
-            })),
-          ]}
+          summary={
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              {statuses.length === 0 ? (
+                <StatusDot />
+              ) : (
+                <span style={{ display: "inline-flex", gap: 3 }}>
+                  {statuses.map((s) => (
+                    <StatusDot key={s} status={s} />
+                  ))}
+                </span>
+              )}
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                {statuses.length === 0
+                  ? t("list.allStatuses")
+                  : statuses.length === 1
+                    ? common(`status.${statuses[0]}`)
+                    : t("list.statusCount", { count: statuses.length })}
+              </span>
+            </span>
+          }
+          searchPlaceholder={select("searchPlaceholder")}
+          noResultsLabel={select("noResults")}
+          allOption={{
+            label: t("list.allStatuses"),
+            adornment: <StatusDot />,
+            selected: statuses.length === 0,
+            exclusive: true,
+            // Unchecking "all" with nothing else picked would filter to nothing; it stays on.
+            onToggle: (selected) => {
+              if (selected) setStatuses([]);
+            },
+          }}
+          groups={[{ key: "status", label: "" }]}
+          options={STATUSES.map((s) => ({
+            value: s,
+            label: common(`status.${s}`),
+            group: "status",
+            adornment: <StatusDot status={s} />,
+          }))}
         />
         <Select
           value={apiKeyId}
