@@ -94,9 +94,13 @@ e-mail e como uma linha própria sob a taxa de abertura, mas nunca muda o status
 nunca entra na taxa de abertura e nunca dispara `email.opened` (endpoints podem
 optar por `email.prefetched`). A janela da regra de tempo é
 `OPEN_PREFETCH_WINDOW_SECONDS` em instâncias auto-hospedadas (padrão `10`; `0`
-mantém só as regras por user agent). Links passam pelas mesmas regras: um que
-um gateway de segurança ou uma pré-visualização seguiu é pré-carregamento, não
-clique.
+mantém só as regras por user agent). Links passam pelas mesmas regras, mais
+duas só deles: um Chrome de desktop que informa um número de build que nenhum
+navegador envia desde a redução de user agent do Chrome, e todos os links de
+uma mensagem acessados em um segundo, são de uma máquina, seja lá como ela se
+apresente. Um clique registrado antes de o resto da rajada chegar é desfeito —
+linha, abertura inferida, contadores, status e qualquer entrega ainda não
+enviada.
 
 Um clique também é uma abertura. Ninguém clica num link de uma mensagem que
 nunca renderizou, então um clique num e-mail ainda sem abertura registra também

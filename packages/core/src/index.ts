@@ -250,7 +250,12 @@ export {
   postFailureCode,
   postJson,
 } from "./ssrf.js";
-export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";
+export {
+  applyStatusCas,
+  type EmailStatus,
+  highestStatus,
+  transitionQueueState,
+} from "./status.js";
 export {
   clearUnsubscribeSuppression,
   extractAddrSpec,

@@ -1,6 +1,6 @@
 import { deriveTrackingKey, makeClickToken, makeOpenToken } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,8 @@ vi.mock("@millionsend/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@millionsend/db")>();
   return { ...actual, getDb: () => h.db };
 });
+// Delivery rows are asserted on directly; nothing here drains them.
+vi.mock("@/server/queue", () => ({ enqueueWebhookDeliveries: async () => {} }));
 
 const { GET: clickGet } = await import("@/app/t/c/[token]/route");
 const { GET: openGet } = await import("@/app/t/o/[token]/route");
@@ -122,6 +124,8 @@ describe("click endpoint /t/c", () => {
     await clickGet(
       ...req(makeClickToken({ emailId, url: "https://shop.example.com/a", secretKey })),
     );
+    // Seconds later: past the burst window, inside the damping one.
+    await backdateEvents(emailId, "clicked", 5_000);
     await clickGet(
       ...req(makeClickToken({ emailId, url: "https://shop.example.com/b", secretKey })),
     );
@@ -280,6 +284,154 @@ describe("click endpoint /t/c", () => {
     const res = await clickGet(...req(token));
     expect(res.status).toBe(404);
     expect(res.headers.get("location")).toBeNull();
+  });
+});
+
+describe("click bursts", () => {
+  const DESKTOP =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
+  const human = { "user-agent": DESKTOP };
+  const link = (name: string) => `https://shop.example.com/${name}`;
+  const click = (emailId: string, name: string, headers = human) =>
+    clickGet(...req(makeClickToken({ emailId, url: link(name), secretKey }), headers));
+
+  async function seedDelivered(emailId: string, agoMs = 40_000) {
+    await db
+      .insert(schema.emailEvents)
+      .values({ emailId, type: "delivered", occurredAt: new Date(Date.now() - agoMs) });
+  }
+  async function status(emailId: string) {
+    const [row] = await db
+      .select({ status: schema.emails.latestStatus })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, emailId));
+    return row?.status;
+  }
+  async function reasons(emailId: string) {
+    const rows = await db
+      .select({ data: schema.emailEvents.data })
+      .from(schema.emailEvents)
+      .where(
+        and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "prefetched")),
+      )
+      .orderBy(schema.emailEvents.occurredAt);
+    return rows.map((row) => (row.data as { click?: { reason?: string } }).click?.reason);
+  }
+  async function deliveriesOf(endpointId: string) {
+    return db
+      .select({
+        eventType: schema.webhookDeliveries.eventType,
+        payload: schema.webhookDeliveries.payload,
+      })
+      .from(schema.webhookDeliveries)
+      .where(eq(schema.webhookDeliveries.endpointId, endpointId))
+      .orderBy(schema.webhookDeliveries.createdAt);
+  }
+
+  it("every link hit within a second is a machine's: no click, no open, one prefetch, status untouched", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await seedDelivered(emailId);
+    for (const name of ["a", "b", "c", "d"]) {
+      const res = await click(emailId, name);
+      expect(res.status).toBe(302);
+      expect(res.headers.get("location")).toBe(link(name));
+    }
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 4, counter: 1 });
+    expect(await reasons(emailId)).toEqual(["burst", "burst", "burst", "burst"]);
+    expect(await status(emailId)).toBe("delivered");
+  });
+
+  it("a click promoted before its burst was visible is taken back: row, inferred open, counters, status, pending deliveries", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await seedDelivered(emailId);
+    const everything = await createWebhookEndpoint(db, teamId, null);
+    const optIn = await createWebhookEndpoint(db, teamId, ["email.prefetched"]);
+
+    await click(emailId, "a");
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+    expect(await status(emailId)).toBe("clicked");
+    expect((await deliveriesOf(everything)).map((d) => d.eventType).sort()).toEqual([
+      "email.clicked",
+      "email.opened",
+    ]);
+    const [clickedRow] = await db
+      .select({ occurredAt: schema.emailEvents.occurredAt })
+      .from(schema.emailEvents)
+      .where(and(eq(schema.emailEvents.emailId, emailId), eq(schema.emailEvents.type, "clicked")));
+
+    await click(emailId, "b");
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 2, counter: 1 });
+    expect(await reasons(emailId)).toEqual(["burst", "burst"]);
+    expect(await status(emailId)).toBe("delivered");
+    // The unposted click and open never leave; the retraction reaches only
+    // endpoints that opted into prefetches, stamped with the click's own time.
+    expect(await deliveriesOf(everything)).toEqual([]);
+    const retractions = await deliveriesOf(optIn);
+    expect(retractions.map((d) => d.eventType)).toEqual(["email.prefetched", "email.prefetched"]);
+    expect(
+      retractions.map((d) => (d.payload as { data: { click: { link: string } } }).data.click.link),
+    ).toEqual([link("a"), link("b")]);
+    expect(retractions[0]?.payload).toMatchObject({
+      created_at: clickedRow?.occurredAt.toISOString(),
+      data: { click: { reason: "burst", timestamp: clickedRow?.occurredAt.toISOString() } },
+    });
+    const [hour] = await db
+      .select()
+      .from(schema.usageCountersHourly)
+      .where(eq(schema.usageCountersHourly.teamId, teamId));
+    expect(hour).toMatchObject({ clicked: 0, opened: 0, prefetched: 1 });
+  });
+
+  it("a person's real open stands through a burst on the links", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await seedDelivered(emailId, 120_000);
+    await openGet(...req(makeOpenToken({ emailId, secretKey })));
+    await click(emailId, "a");
+    await click(emailId, "b");
+    expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 2, counter: 1 });
+    expect(await status(emailId)).toBe("opened");
+  });
+
+  it("an earlier click by a person stands when a machine bursts later", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await seedDelivered(emailId, 120_000);
+    await click(emailId, "a");
+    await backdateEvents(emailId, "clicked", 90_000);
+    await click(emailId, "b");
+    await click(emailId, "c");
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+    expect(await counts(emailId, teamId, "prefetched")).toEqual({ events: 2, counter: 1 });
+    expect(await reasons(emailId)).toEqual(["burst", "burst"]);
+    expect(await status(emailId)).toBe("clicked");
+  });
+
+  it("two links two seconds apart are two clicks", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await seedDelivered(emailId);
+    await click(emailId, "a");
+    await backdateEvents(emailId, "clicked", 2_000);
+    await click(emailId, "b");
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 2, counter: 1 });
+    expect(await status(emailId)).toBe("clicked");
+  });
+
+  it("a machine that also names itself keeps its own reason, and folds the clean hit before it", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await seedDelivered(emailId);
+    await click(emailId, "a");
+    await click(emailId, "b", {
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.163 Safari/537.36",
+    });
+    expect(await reasons(emailId)).toEqual(["burst", "spoofed_ua"]);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
   });
 });
 

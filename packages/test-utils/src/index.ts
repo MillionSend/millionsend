@@ -38,3 +38,30 @@ export async function createTeam(db: Db, slug = "acme"): Promise<string> {
   if (!team) throw new Error("team insert failed");
   return team.id;
 }
+
+/**
+ * An enabled webhook endpoint for fan-out tests. The secret columns hold a
+ * placeholder byte: enqueueing reads only id, events, teamId and status.
+ */
+export async function createWebhookEndpoint(
+  db: Db,
+  teamId: string,
+  events: string[] | null,
+): Promise<string> {
+  const dummy = Buffer.alloc(1);
+  const [row] = await db
+    .insert(schema.webhookEndpoints)
+    .values({
+      teamId,
+      url: "https://hook.example.com/in",
+      secretCiphertext: dummy,
+      secretIv: dummy,
+      secretWrappedDek: dummy,
+      secretKeyVersion: 1,
+      secretLast4: "abcd",
+      events,
+    })
+    .returning({ id: schema.webhookEndpoints.id });
+  if (!row) throw new Error("webhook endpoint insert failed");
+  return row.id;
+}
