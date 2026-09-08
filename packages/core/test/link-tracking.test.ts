@@ -41,6 +41,25 @@ describe("rewriteForTracking — click", () => {
     expect(out).not.toContain('href="https://acme.example/welcome"');
   });
 
+  it("takes single-quoted hrefs and a quote of the other kind inside the value", () => {
+    const src = `<a href='https://acme.example/a'>a</a><a href="https://acme.example/?q=it's">b</a>`;
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const tokens = [...out.matchAll(/t\/c\/([^"']+)/g)].map((m) => m[1] as string);
+    expect(tokens.map((token) => verifyClickToken(token, key)?.url)).toEqual([
+      "https://acme.example/a",
+      "https://acme.example/?q=it's",
+    ]);
+    // Each rewritten attribute keeps the quote it was written with.
+    expect(out).toMatch(/<a href='https:\/\/track\.example\.com\/t\/c\/[^']+'>a<\/a>/);
+    expect(out).toMatch(/<a href="https:\/\/track\.example\.com\/t\/c\/[^"]+">b<\/a>/);
+  });
+
+  it("walks a crafted body of repeated unclosed hrefs in linear time", () => {
+    // The vitest timeout is the guard: a backtracking regex takes seconds here.
+    const src = `<a${' href="='.repeat(20_000)}`;
+    expect(rewriteForTracking(src, opts({ click: true }))).toBe(src);
+  });
+
   it("leaves mailto:, tel:, relative, and unexpanded {{{...}}} hrefs intact", () => {
     const src =
       '<a href="mailto:a@b.com">m</a><a href="tel:+15551234">t</a>' +

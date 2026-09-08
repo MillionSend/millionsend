@@ -31,8 +31,23 @@ export interface RewriteOptions {
 // ponytail: naive attribute regex — a quoted `>` inside an <a> tag would fool
 // it, but that does not occur in real email HTML. Upgrade to a parser only if a
 // broken template surfaces it. Shared with email-insights so both sides see
-// the exact same set of anchors.
-export const ANCHOR_HREF = /(<a\b[^>]*?\shref=)(["'])(.*?)\2/gi;
+// the exact same set of anchors. The value is matched per quote kind rather
+// than lazily up to a backreference: the html is the customer's, and the
+// lazy form backtracks polynomially on a crafted body.
+export const ANCHOR_HREF = /(<a\b[^>]*?\shref=)(?:(")([^"]*)"|(')([^']*)')/gi;
+
+/** An ANCHOR_HREF match taken apart: the tag up to the quote, the quote, the raw value. */
+export function anchorHrefParts(m: readonly (string | undefined)[]): {
+  prefix: string;
+  quote: string;
+  value: string;
+} {
+  return {
+    prefix: m[1] as string,
+    quote: (m[2] ?? m[4]) as string,
+    value: (m[3] ?? m[5]) as string,
+  };
+}
 
 /**
  * Only sign absolute http(s) destinations. mailto:/tel:/relative links have no
@@ -51,10 +66,11 @@ export function rewriteForTracking(html: string, opts: RewriteOptions): string {
   let out = html;
 
   if (opts.click) {
-    out = out.replace(ANCHOR_HREF, (match, prefix: string, quote: string, raw: string) => {
+    out = out.replace(ANCHOR_HREF, (match: string, ...groups: (string | undefined)[]) => {
+      const { prefix, quote, value } = anchorHrefParts([match, ...groups]);
       // The attribute is HTML: "&amp;" between query parameters is one "&" to
       // the browser, and the redirect must follow the URL the browser would.
-      const url = unescapeHtml(raw);
+      const url = unescapeHtml(value);
       if (!isTrackableHref(url)) return match;
       if (opts.skipHrefPrefix && url.startsWith(opts.skipHrefPrefix)) return match;
       const token = makeClickToken({ emailId: opts.emailId, url, secretKey: opts.secretKey });
