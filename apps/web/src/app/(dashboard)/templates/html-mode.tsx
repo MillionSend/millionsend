@@ -33,12 +33,15 @@ const emptyStyle = {
  * toolbar row over a body of the shared height, so the two line up.
  */
 export function HtmlCodeMode({
+  id = "tpl-html",
   html,
   onChange,
   mergeFields,
   previewSamples,
   hasText,
 }: {
+  /** The source textarea's id, for the field label. */
+  id?: string;
   html: string;
   onChange: (html: string) => void;
   mergeFields: MergeFieldOption[];
@@ -204,7 +207,7 @@ export function HtmlCodeMode({
             </span>
           </div>
           <CodeEditor
-            id="tpl-html"
+            id={id}
             ref={editor}
             value={html}
             onChange={onChange}
@@ -308,31 +311,36 @@ export function HtmlAuthoredBanner({
 }
 
 /**
- * The guarded html→blocks conversion: duplicating (primary, the original
- * untouched) or converting this template in place (destructive tone — the
- * stored html changes on the next save).
+ * The guarded html→blocks conversion. A row that can be copied (a template)
+ * offers duplicating as the primary path, the original untouched, beside
+ * converting in place; a one-off body (a broadcast) only converts in place.
+ * In place is destructive in tone — the stored html changes on the next save.
  */
 export function ConvertBlocksDialog({
   open,
-  busy,
+  busy = false,
   onClose,
   onDuplicate,
   onConvertInPlace,
+  inPlaceLabel,
 }: {
   open: boolean;
-  busy: boolean;
+  busy?: boolean;
   onClose: () => void;
-  onDuplicate: () => void;
+  onDuplicate?: () => void;
   onConvertInPlace: () => void;
+  /** Names what converts in place: this template, this broadcast. */
+  inPlaceLabel: string;
 }) {
   const t = useTranslations("templates");
   const common = useTranslations("common");
   // Same guard as the primary button — Modal's ⌘↵ path routes through here too.
-  const duplicate = () => {
-    if (!busy) onDuplicate();
+  const primary = onDuplicate ?? onConvertInPlace;
+  const confirm = () => {
+    if (!busy) primary();
   };
   return (
-    <Modal open={open} onClose={onClose} onConfirm={duplicate} title={t("html.convertTitle")}>
+    <Modal open={open} onClose={onClose} onConfirm={confirm} title={t("html.convertTitle")}>
       <p style={{ margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
         {t("html.convertBody")}
       </p>
@@ -347,17 +355,25 @@ export function ConvertBlocksDialog({
             disabled={busy}
             onClick={onConvertInPlace}
           >
-            {t("html.convertInPlace")}
+            {onDuplicate ? (
+              inPlaceLabel
+            ) : (
+              <>
+                {inPlaceLabel} <ConfirmKeycap />
+              </>
+            )}
           </button>
-          <button
-            type="button"
-            className="ms-btn ms-btn-primary"
-            disabled={busy}
-            onClick={duplicate}
-          >
-            <BtnSpinner on={busy} />
-            {t("html.convertCopy")} <ConfirmKeycap />
-          </button>
+          {onDuplicate ? (
+            <button
+              type="button"
+              className="ms-btn ms-btn-primary"
+              disabled={busy}
+              onClick={confirm}
+            >
+              <BtnSpinner on={busy} />
+              {t("html.convertCopy")} <ConfirmKeycap />
+            </button>
+          ) : null}
         </span>
       </ModalFooter>
     </Modal>

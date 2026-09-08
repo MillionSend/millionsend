@@ -44,6 +44,7 @@
     "editTab": "Edit",
     "previewTab": "Preview",
     "noHtml": "No HTML yet.",
+    "convertInPlace": "Convert this broadcast",
     "textToggleShow": "Plain-text fallback",
     "textToggleHide": "Hide plain-text fallback",
     "textLabel": "Plain text",

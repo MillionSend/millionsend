@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { blocksCopyName, templateEditorMode, templateSaveInput } from "@/lib/template-mode";
+import { blocksCopyName, bodyEditorMode, templateSaveInput } from "@/lib/template-mode";
 
 // The editor pages are client components; a static render with the data hooks
 // stubbed is enough to see which editor mounts and what the row shows.
@@ -89,12 +89,13 @@ describe("template editor mode", () => {
     expect(out).toMatch(/class="ms-tpl-meta"[^>]*>.*id="tpl-name".*id="tpl-subject"/);
   });
 
-  it("derives code mode for anything but a Maily document, unless converting", () => {
-    expect(templateEditorMode({ isNew: false, document: null })).toBe("code");
-    expect(templateEditorMode({ isNew: false, document: { version: 2, blocks: [] } })).toBe("code");
-    expect(templateEditorMode({ isNew: false, document: MAILY_DOC })).toBe("blocks");
-    expect(templateEditorMode({ isNew: true, document: null })).toBe("blocks");
-    expect(templateEditorMode({ isNew: false, document: null, converting: true })).toBe("blocks");
+  it("derives code mode for html without a Maily document, unless converting or empty", () => {
+    const html = "<p>x</p>";
+    expect(bodyEditorMode({ document: null, html })).toBe("code");
+    expect(bodyEditorMode({ document: { version: 2, blocks: [] }, html })).toBe("code");
+    expect(bodyEditorMode({ document: MAILY_DOC, html })).toBe("blocks");
+    expect(bodyEditorMode({ document: null, html: "  " })).toBe("blocks");
+    expect(bodyEditorMode({ document: null, html, converting: true })).toBe("blocks");
   });
 });
 
@@ -168,6 +169,7 @@ describe("convert-to-blocks dialog", () => {
         onClose: () => {},
         onDuplicate: () => {},
         onConvertInPlace: () => {},
+        inPlaceLabel: "templates.html.convertInPlace",
       }),
     );
     expect(out).toContain("templates.html.convertTitle");
@@ -179,6 +181,20 @@ describe("convert-to-blocks dialog", () => {
     expect(out.indexOf("ms-btn-destructive")).toBeLessThan(out.indexOf("ms-btn-primary"));
   });
 
+  it("without a duplicate path, converting in place is the only, confirmable action", () => {
+    const out = renderToStaticMarkup(
+      createElement(ConvertBlocksDialog, {
+        open: true,
+        onClose: () => {},
+        onConvertInPlace: () => {},
+        inPlaceLabel: "broadcasts.composer.convertInPlace",
+      }),
+    );
+    expect(out).not.toContain("ms-btn-primary");
+    expect(out).not.toContain("templates.html.convertCopy");
+    expect(out).toMatch(/ms-btn-destructive"[^>]*>broadcasts\.composer\.convertInPlace /);
+  });
+
   it("renders nothing while closed", () => {
     const out = renderToStaticMarkup(
       createElement(ConvertBlocksDialog, {
@@ -187,6 +203,7 @@ describe("convert-to-blocks dialog", () => {
         onClose: () => {},
         onDuplicate: () => {},
         onConvertInPlace: () => {},
+        inPlaceLabel: "templates.html.convertInPlace",
       }),
     );
     expect(out).toBe("");

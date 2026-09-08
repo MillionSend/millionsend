@@ -17,6 +17,7 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
+import { Tooltip } from "@/components/tooltip";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, StateCard } from "../emails/list-parts";
 import { type BroadcastStatus, PILL_VARIANT, StatusPill } from "./parts";
@@ -86,6 +87,7 @@ function NewBroadcastButton() {
 
 export default function BroadcastsPage() {
   const t = useTranslations("broadcasts");
+  const tTemplates = useTranslations("templates");
   const common = useTranslations("common");
   const locale = useLocale();
   const trpc = useTRPC();
@@ -187,6 +189,16 @@ export default function BroadcastsPage() {
                         >
                           {label}
                         </Link>
+                        {row.htmlAuthored ? (
+                          <Tooltip inline text={tTemplates("list.htmlChipHint")}>
+                            <span
+                              className="ms-chip"
+                              style={{ fontSize: 10.5, padding: "1px 7px" }}
+                            >
+                              HTML
+                            </span>
+                          </Tooltip>
+                        ) : null}
                       </span>
                     </td>
                     <td>
