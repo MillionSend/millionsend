@@ -3,6 +3,7 @@ import { EnvKeyring, generateApiKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi } from "../src/app.js";
 
@@ -108,6 +109,26 @@ describe("segments API (/segments)", () => {
     // Empty conditions => every contact of the team (2 contacts).
     const got = await json(await call(tokenA, "GET", `/segments/${segmentId}`));
     expect(got.contact_count).toBe(2);
+  });
+
+  it("a filter change flags the segment for a recount; a rename leaves the count alone", async () => {
+    const countedAt = new Date("2026-09-04T12:00:00Z");
+    const stored = async () =>
+      (
+        await db
+          .select({ countedAt: schema.segments.countedAt })
+          .from(schema.segments)
+          .where(eq(schema.segments.id, segmentId))
+      )[0]?.countedAt;
+    await db.update(schema.segments).set({ countedAt }).where(eq(schema.segments.id, segmentId));
+    expect((await call(tokenA, "PATCH", `/segments/${segmentId}`, { name: "again" })).status).toBe(
+      200,
+    );
+    expect(await stored()).toEqual(countedAt);
+    expect(
+      (await call(tokenA, "PATCH", `/segments/${segmentId}`, { filter: proFilter })).status,
+    ).toBe(200);
+    expect(await stored()).toBeNull();
   });
 
   it("422s a malformed filter (unknown field) and never stores it", async () => {

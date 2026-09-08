@@ -9,7 +9,7 @@ import {
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, gte, ilike, lt, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, ilike, inArray, lt, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
@@ -95,7 +95,8 @@ export const emailsRouter = router({
   list: teamProcedure
     .input(
       z.object({
-        status: emailStatus.optional(),
+        // One status or any subset of them.
+        status: z.union([emailStatus, z.array(emailStatus).min(1)]).optional(),
         search: z.string().trim().max(200).optional(),
         apiKeyId: z.uuid().optional(),
         domainId: z.uuid().optional(),
@@ -110,7 +111,13 @@ export const emailsRouter = router({
     .query(async ({ ctx, input }) => {
       const t = schema.emails;
       const filters: (SQL | undefined)[] = [eq(t.teamId, ctx.teamId)];
-      if (input.status) filters.push(eq(t.latestStatus, input.status));
+      if (input.status) {
+        filters.push(
+          Array.isArray(input.status)
+            ? inArray(t.latestStatus, input.status)
+            : eq(t.latestStatus, input.status),
+        );
+      }
       if (input.search) {
         const pattern = `%${escapeLike(input.search)}%`;
         filters.push(or(ilike(t.subject, pattern), sql`${t.to}::text ilike ${pattern}`));

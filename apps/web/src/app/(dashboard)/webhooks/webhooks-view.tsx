@@ -30,7 +30,7 @@ import {
   WebhookEditModal,
   WebhookRotateModal,
 } from "./webhook-dialogs";
-import { ENDPOINT_VARIANTS, WebhookStatusBadge } from "./webhook-status-badge";
+import { ENDPOINT_VARIANTS, QueueLine, WebhookStatusBadge } from "./webhook-status-badge";
 
 /** Mirrors the loaded table: mono URL, events chip, badge, rate, time, menu. */
 function WebhooksSkeleton() {
@@ -242,6 +242,7 @@ export function WebhooksView() {
                         {displayUrl(webhook.url)}
                       </Link>
                     </span>
+                    <QueueLine queued={webhook.queued} oldestQueuedAt={webhook.oldestQueuedAt} />
                   </td>
                   <td>
                     {webhook.eventTypes === null || webhook.eventTypes.length === 0 ? (

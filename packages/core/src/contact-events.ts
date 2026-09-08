@@ -32,6 +32,17 @@ export type ContactSnapshot = Pick<
   "id" | "email" | "firstName" | "lastName" | "unsubscribed" | "createdAt" | "updatedAt"
 >;
 
+/** The select/returning shape that yields a ContactSnapshot. */
+export const contactSnapshotColumns = {
+  id: schema.contacts.id,
+  email: schema.contacts.email,
+  firstName: schema.contacts.firstName,
+  lastName: schema.contacts.lastName,
+  unsubscribed: schema.contacts.unsubscribed,
+  createdAt: schema.contacts.createdAt,
+  updatedAt: schema.contacts.updatedAt,
+};
+
 /** Resend's contact event `data`, plus whatever the event adds (source, topic). */
 export function contactEventData(
   contact: ContactSnapshot,
@@ -69,19 +80,10 @@ export async function loadContactSnapshots(
   ids: readonly string[],
 ): Promise<Map<string, ContactSnapshot>> {
   if (ids.length === 0) return new Map();
-  const c = schema.contacts;
   const rows = await db
-    .select({
-      id: c.id,
-      email: c.email,
-      firstName: c.firstName,
-      lastName: c.lastName,
-      unsubscribed: c.unsubscribed,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-    })
-    .from(c)
-    .where(inArray(c.id, [...ids]));
+    .select(contactSnapshotColumns)
+    .from(schema.contacts)
+    .where(inArray(schema.contacts.id, [...ids]));
   return new Map(rows.map((row) => [row.id, row]));
 }
 

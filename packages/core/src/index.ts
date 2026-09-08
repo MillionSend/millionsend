@@ -70,6 +70,7 @@ export {
   type ContactEventSource,
   type ContactSnapshot,
   contactEventData,
+  contactSnapshotColumns,
   emitActivityEvents,
   emitContactEvents,
   emitSuppressionEvents,
@@ -81,6 +82,7 @@ export {
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
+  contactPropertiesChange,
 } from "./contact-properties.js";
 export {
   BOUND_ENVELOPE_VERSION_OFFSET,
@@ -225,6 +227,7 @@ export {
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
 export {
   countSegment,
+  markSegmentsStale,
   recountSegment,
   recountStaleSegments,
   type SegmentCounts,
@@ -313,6 +316,7 @@ export { bumpHourlyUsage, USAGE_COUNTERS, type UsageCounter, utcHour } from "./u
 export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
 export {
   buildWebhookPayload,
+  clearWebhookEndpointNotifications,
   decryptWebhookSecret,
   decryptWebhookSigningSecrets,
   encryptWebhookSecret,
@@ -323,13 +327,19 @@ export {
   isWebhookEventType,
   parseWebhookSecret,
   type QueuedWebhookDelivery,
+  retryAfterMs,
   rotatedWebhookSecretColumns,
   rotationOverlapEnd,
   signWebhook,
   type TeamWebhookEvent,
   verifyWebhookSignature,
+  WEBHOOK_BACKLOG_AGE_MS,
+  WEBHOOK_BACKLOG_COUNT,
   WEBHOOK_EVENT_TYPES,
+  WEBHOOK_FAILING_STREAK,
+  WEBHOOK_MAX_AGE_MS,
   WEBHOOK_MAX_ATTEMPTS,
+  WEBHOOK_MAX_RATE_PER_SECOND,
   WEBHOOK_RETRY_SCHEDULE_MS,
   WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
   WEBHOOK_ROTATION_MAX_OVERLAP_HOURS,

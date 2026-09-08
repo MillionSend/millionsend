@@ -64,6 +64,13 @@
     "disabled": "Desativado",
     "auto_disabled": "Desativado automaticamente"
   },
+  "queue": {
+    "queued": "{count} na fila",
+    "oldest": "mais antiga",
+    "next": "próxima tentativa",
+    "stale": "{count} entregas aguardando; a mais antiga está vencida há {age}. O receptor está lento ou falhando.",
+    "autoDisabled": "Desativado automaticamente após falhas repetidas. Corrija o receptor e ative-o de novo; os eventos do intervalo não são reenviados."
+  },
   "enable": "Ativar",
   "disable": "Desativar",
   "delete": "Excluir",

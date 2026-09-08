@@ -60,5 +60,7 @@ export const segmentMembers = pgTable(
     primaryKey({ columns: [t.segmentId, t.contactId] }),
     // Reverse lookup: "which segments is this contact in" (contacts.segments.list).
     index("segment_members_contact_idx").on(t.contactId),
+    // The recount sweep asks "any member added since this segment was counted".
+    index("segment_members_segment_created_idx").on(t.segmentId, t.createdAt),
   ],
 );

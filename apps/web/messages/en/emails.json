@@ -5,6 +5,7 @@
     "apiDocs": "Emails API",
     "searchPlaceholder": "Search…",
     "allStatuses": "All statuses",
+    "statusCount": "{count} statuses",
     "allApiKeys": "All API keys",
     "range": {
       "h24": "Last 24 hours",

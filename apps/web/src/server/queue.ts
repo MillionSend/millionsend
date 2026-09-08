@@ -29,22 +29,13 @@ export async function enqueueEmailSend(emailId: string): Promise<void> {
 }
 
 /**
- * Enqueue webhook.deliver jobs from the web tier in one statement (the worker
- * owns the matching seam in its server bootstrap). dedupeKey collapses a
- * redelivery of the same delivery row onto one queued job; the endpoint is
- * the fairness group the delivery lanes cap.
+ * Arm the drain of every endpoint the written rows belong to, from the web
+ * tier (the worker owns the matching seam in its server bootstrap).
  */
 export const enqueueWebhookDeliveries: WebhookEnqueue = async (deliveries) => {
   if (deliveries.length === 0) return;
   const queue = await getQueue();
-  await queue.sendMany(
-    "webhook.deliver",
-    deliveries.map((d) => ({
-      payload: { deliveryId: d.id },
-      dedupeKey: d.id,
-      group: d.endpointId,
-    })),
-  );
+  await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
 };
 
 /** Scrub one address from the team's history in the worker, after its contact row is gone. */

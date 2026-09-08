@@ -42,7 +42,7 @@ extensões do MillionSend.
 | Evento | Disparado quando | `data` extra |
 | --- | --- | --- |
 | `contact.created` | Um contato foi adicionado: API, lote, importação CSV ou painel. | |
-| `contact.updated` | Nome, propriedades ou o flag de descadastro mudaram pela API ou pelo painel. | |
+| `contact.updated` | Nome, propriedades ou o flag de descadastro mudaram pela API ou pelo painel. Uma escrita que repete os valores já guardados (uma reimportação completa, por exemplo) não emite nada e deixa `updated_at` intacto. | |
 | `contact.deleted` | Um contato foi excluído. Depois de um apagamento (`erase=true` na API, ou a ação de apagar do dashboard) o `email` guardado vem como `[erased]`; use o `id`. | |
 | `contact.unsubscribed` | O contato saiu de todo e-mail de marketing. | |
 | `contact.resubscribed` | Uma reinscrição explícita (`unsubscribed: false`). | |
@@ -132,12 +132,35 @@ curl -X POST "https://api.millionsend.com/webhooks/{id}/rotate" \
   -d '{ "overlap_hours": 24 }'
 ```
 
-## Entrega e novas tentativas
+## Entrega
 
-Uma entrega é considerada bem-sucedida em qualquer resposta 2xx. Falhas são
-repetidas com backoff exponencial (começando em segundos, limitado a horas,
-até 6 tentativas). Um job de reconciliação redespacha entregas perdidas em
-quedas, então a entrega é pelo-menos-uma-vez — torne seus handlers
-idempotentes, chaveados por `webhook-id`.
-As linhas de entrega (payload, resposta, tentativas) são mantidas por
-`WEBHOOK_DELIVERY_RETENTION_DAYS` (padrão 30) e depois expurgadas.
+Uma entrega é bem-sucedida em qualquer resposta 2xx. Cada endpoint tem a
+própria fila, drenada em ordem a até **20 requisições por segundo**; uma
+rajada de eventos espera na fila em vez de atingir o receptor de uma vez.
+
+Uma tentativa que falha (não-2xx, timeout, erro de conexão) é repetida em um
+cronograma fixo: **5 s, 5 min, 30 min, 2 h, 5 h, 10 h** — seis tentativas em
+cerca de 18 horas. Um `429` com header `Retry-After` é respeitado (até uma
+hora) e não conta como tentativa: é o receptor pedindo espaço, não falhando.
+Um evento ainda não entregue **24 horas** depois de enfileirado é descartado
+como `exhausted`, sem nova tentativa.
+
+Após **20 entregas esgotadas consecutivas** o endpoint é desativado
+automaticamente e não recebe mais nada até você reativá-lo na página dele;
+os eventos do intervalo não são reenviados. Os donos do time recebem um
+e-mail quando as entregas de um endpoint começam a falhar (as últimas dez
+entregas encerradas todas esgotadas), quando ele é desativado e — no máximo
+uma vez por dia — quando a fila dele tem mais de uma hora de atraso. O painel
+mostra a profundidade da fila de cada endpoint e há quanto tempo a entrega
+mais antiga espera.
+
+Um job de reconciliação rearma filas perdidas em quedas, então a entrega é
+pelo-menos-uma-vez — torne seus handlers idempotentes, chaveados por
+`webhook-id`. As linhas de entrega (payload, resposta, tentativas) são
+mantidas por `WEBHOOK_DELIVERY_RETENTION_DAYS` (padrão 30) e depois
+expurgadas.
+
+Inscreva cada endpoint só nos eventos de que ele precisa. Uma reimportação
+completa de contatos não emite nada para os contatos que não mudaram, mas
+cada contato novo é uma entrega `contact.created` — um endpoint inscrito em
+"todos os eventos" recebe todas elas.

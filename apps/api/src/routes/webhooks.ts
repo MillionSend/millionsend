@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  clearWebhookEndpointNotifications,
   decryptWebhookSecret,
   encryptWebhookSecret,
   generateWebhookSecret,
@@ -325,6 +326,7 @@ export function registerWebhookRoutes(app: OpenAPIHono<Env>, db: Db, keyring: Ke
         .where(and(eq(w.id, c.req.valid("param").id), eq(w.teamId, auth.teamId)))
         .returning({ id: w.id });
       if (!row) return c.json(errorBody(404, "not_found", "Webhook not found"), 404);
+      await clearWebhookEndpointNotifications(db, { teamId: auth.teamId, endpointId: row.id });
       return c.json({ object: "webhook" as const, id: row.id, deleted: true as const }, 200);
     },
   );

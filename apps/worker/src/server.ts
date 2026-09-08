@@ -19,7 +19,12 @@ import {
   sesEventsHealth,
 } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
-import { EMAIL_SEND_PRIORITY, type EmailSendPriority, Queue } from "@millionsend/queue";
+import {
+  EMAIL_SEND_PRIORITY,
+  type EmailSendPriority,
+  type EnqueueEmailSends,
+  Queue,
+} from "@millionsend/queue";
 import {
   createKeyringFromEnv,
   createSesAccountClient,
@@ -44,7 +49,7 @@ import {
   reverifyDomains,
   stripExpiredEventPayloads,
 } from "./handlers/cron.js";
-import { abandonWebhookDelivery, deliverWebhook } from "./handlers/deliver-webhook.js";
+import { drainWebhookEndpoint } from "./handlers/deliver-webhook.js";
 import { sweepNotifications } from "./handlers/notify.js";
 import { runPlatformBreaker } from "./handlers/platform-breaker.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
@@ -133,21 +138,24 @@ const sesQuota = createSesQuotaGate(async () => (await getAccountOverview(accoun
 await sesQuota.refresh();
 setInterval(() => void sesQuota.refresh(), 60_000).unref();
 
-const queue = await Queue.start(env.DATABASE_URL);
+const queue = await Queue.start(env.DATABASE_URL, { workers: true });
 
 // Everything the worker itself enqueues is bulk unless the caller says
 // otherwise: broadcast fan-out always, drained or reconciled rows by origin.
-const enqueueSend = async (
-  emailId: string,
-  startAfter?: Date,
-  priority: EmailSendPriority = EMAIL_SEND_PRIORITY.bulk,
-): Promise<void> => {
-  await queue.send(
+// A page of sends is one statement; a single send is a page of one.
+const enqueueSends: EnqueueEmailSends = async (batch) => {
+  await queue.sendMany(
     "email.send",
-    { emailId },
-    { dedupeKey: emailId, priority, ...(startAfter ? { startAfter } : {}) },
+    batch.map(({ emailId, startAfter, priority }) => ({
+      payload: { emailId },
+      dedupeKey: emailId,
+      priority: priority ?? EMAIL_SEND_PRIORITY.bulk,
+      startAfter,
+    })),
   );
 };
+const enqueueSend = (emailId: string, startAfter?: Date, priority?: EmailSendPriority) =>
+  enqueueSends([{ emailId, startAfter, priority }]);
 
 // Account mail rides the pipeline, so the mailer needs the queue it enqueues into.
 const mailer = createSystemMailer({ db, keyring, enqueueSend });
@@ -171,52 +179,11 @@ const SEND_BATCH = 2;
 const EVENT_CONCURRENCY = 4;
 const EVENT_BATCH = 10;
 
-// One statement per fan-out, each job in its endpoint's fairness group so a
-// stalled receiver only ever holds its own lanes.
-const enqueueWebhook = async (
-  deliveries: readonly QueuedWebhookDelivery[],
-  startAfter?: Date,
-): Promise<void> => {
-  await queue.sendMany(
-    "webhook.deliver",
-    deliveries.map((d) => ({
-      payload: { deliveryId: d.id },
-      dedupeKey: d.id,
-      group: d.endpointId,
-      ...(startAfter ? { startAfter } : {}),
-    })),
-  );
+// Whatever rows a fan-out wrote, one drain job per distinct endpoint:
+// webhook_deliveries is the backlog, the job only names the endpoint to walk.
+const enqueueWebhook = async (deliveries: readonly QueuedWebhookDelivery[]): Promise<void> => {
+  await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
 };
-
-await queue.work(
-  "email.send",
-  async (payload) => {
-    await sendEmail(
-      db,
-      {
-        keyring,
-        ses,
-        defaultConfigurationSet: env.SES_CONFIGURATION_SET,
-        onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
-        throttle: () => bucket.take(),
-        reschedule: (emailId, at, priority) => enqueueSend(emailId, at, priority),
-        sesQuota,
-        enqueueWebhookDelivery: enqueueWebhook,
-        tracking,
-        ...(unsubscribe ? { unsubscribe } : {}),
-      },
-      payload,
-    );
-  },
-  { concurrency: SEND_CONCURRENCY, batchSize: SEND_BATCH },
-);
-
-// Retries exhausted: the row must not stay "queued" for the reconcile sweep
-// to resurrect forever.
-await queue.workDeadLetter("email.send", async ({ emailId }) => {
-  const failed = await failQueuedEmail(db, emailId, "retries_exhausted");
-  console.error(`email.send: dead-lettered ${emailId} (marked failed=${failed})`);
-});
 
 const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise<void> => {
   await queue.send(
@@ -226,121 +193,19 @@ const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise
   );
 };
 
-await queue.work(
-  "broadcast.send",
-  async (payload) => {
-    await sendBroadcast(
-      db,
-      {
-        keyring,
-        unsubscribeSecretKey,
-        appBaseUrl: env.APP_BASE_URL,
-        isCloud: env.IS_CLOUD,
-        enqueueEmailSend: enqueueSend,
-        reschedule: (broadcastId, at) => enqueueBroadcast(broadcastId, at),
-      },
-      payload,
-    );
-  },
-  // Two broadcasts fired together fan out side by side instead of the
-  // second waiting for the first's whole walk.
-  { concurrency: 2 },
-);
-
-await queue.work(
-  "ses.event",
-  async (payload) => {
-    await processSesEvent(db, payload.event, {
-      snsMessageId: payload.snsMessageId,
-      enqueueWebhookDelivery: enqueueWebhook,
-    });
-  },
-  { concurrency: EVENT_CONCURRENCY, batchSize: EVENT_BATCH },
-);
-
-// SES events over SQS for deployments without a public https URL. The topic
-// allowlist gates it exactly like the https endpoint — a queue URL without
-// the allowlist stays inert instead of accepting arbitrary payloads.
-if (env.SQS_QUEUE_URL) {
-  const allowedTopicArns = env.SNS_TOPIC_ARNS ?? [];
-  if (allowedTopicArns.length === 0) {
-    console.warn("SQS_QUEUE_URL is set but SNS_TOPIC_ARNS is empty — SQS event polling disabled");
-  } else {
-    startSqsPoller({
-      sqs: new SQSClient({
-        region: env.AWS_REGION,
-        ...(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
-          ? {
-              credentials: {
-                accessKeyId: env.AWS_ACCESS_KEY_ID,
-                secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-              },
-            }
-          : {}),
-      }),
-      queueUrl: env.SQS_QUEUE_URL,
-      allowedTopicArns,
-      concurrency: env.SQS_POLL_CONCURRENCY,
-      enqueueSesEvent: async (event, snsMessageId) => {
-        await queue.send("ses.event", { event, snsMessageId }, { dedupeKey: snsMessageId });
-      },
-      log: (line) => console.warn(line),
-    });
-    console.log(`sqs poller: long-polling ${env.SQS_QUEUE_URL}`);
-  }
-}
-
-await queue.work(
-  "webhook.deliver",
-  async (payload) => {
-    await deliverWebhook(
-      db,
-      {
-        keyring,
-        post: (url, body, headers) =>
-          postJson(url, { body, headers, allowLocalhost: env.WEBHOOK_ALLOW_LOCALHOST }),
-        reenqueue: (delivery, at) => enqueueWebhook([delivery], at),
-      },
-      payload,
-    );
-  },
-  // Receivers are tenant-controlled and can stall for the full timeout. Each
-  // job carries its endpoint as a fairness group capped at two in flight, so
-  // a dead receiver holds two lanes and the other fourteen keep draining
-  // everyone else; batches of two keep the fetch continuous under a backlog.
-  { concurrency: 16, batchSize: 2, groupConcurrency: 2 },
-);
-
-// Erasure scans a team's whole history; it runs here so the request that
-// asked for it returns at once.
-await queue.work("recipient.erase", async ({ teamId, address }) => {
-  await eraseRecipient(db, teamId, address);
-});
-// An erasure that exhausted its retries must not vanish: the log names the
-// team and the address's hash (never the address, which is what is being
-// erased) so an operator can re-run it from Audience → Erase recipient.
-await queue.workDeadLetter("recipient.erase", async ({ teamId, address }) => {
-  console.error(
-    `recipient.erase: dead-lettered team=${teamId} recipient=${hashRecipient(address)}; re-run it from Audience → Erase recipient`,
-  );
-});
-
-await queue.workDeadLetter("webhook.deliver", async ({ deliveryId }) => {
-  const abandoned = await abandonWebhookDelivery(db, deliveryId);
-  console.error(`webhook.deliver: dead-lettered ${deliveryId} (marked exhausted=${abandoned})`);
-});
-
+// Crons and dead-letter workers first: they poll slowly and must never wait
+// behind the send lanes' registration on a backlog.
 await queue.scheduleCrons({
   "quota.drain": async () => {
     const result = await drainQuotaParked(db, {
       isCloud: env.IS_CLOUD,
-      enqueueSend,
+      enqueueSends,
       sesQuotaExhausted: () => sesQuota.exhausted(),
     });
     console.log(`quota.drain: drained=${result.drained} stillParked=${result.stillParked}`);
   },
   "sends.reconcile": async () => {
-    const requeued = await reconcileStalledSends(db, { enqueueSend });
+    const requeued = await reconcileStalledSends(db, { enqueueSends });
     if (requeued > 0) console.log(`sends.reconcile: requeued=${requeued}`);
   },
   "retention.purge": async () => {
@@ -391,8 +256,8 @@ await queue.scheduleCrons({
     await purgeExpiredIdempotencyKeys(db);
   },
   "webhooks.reconcile": async () => {
-    const requeued = await reconcileWebhookDeliveries(db, { enqueue: enqueueWebhook });
-    if (requeued > 0) console.log(`webhooks.reconcile: requeued=${requeued}`);
+    const armed = await reconcileWebhookDeliveries(db, { enqueue: enqueueWebhook });
+    if (armed > 0) console.log(`webhooks.reconcile: armed=${armed}`);
   },
   "broadcasts.reconcile": async () => {
     const requeued = await reconcileStalledBroadcasts(db, {
@@ -466,6 +331,147 @@ await queue.scheduleCrons({
   },
 });
 
+// Retries exhausted: the row must not stay "queued" for the reconcile sweep
+// to resurrect forever.
+await queue.workDeadLetter("email.send", async ({ emailId }) => {
+  const failed = await failQueuedEmail(db, emailId, "retries_exhausted");
+  console.error(`email.send: dead-lettered ${emailId} (marked failed=${failed})`);
+});
+
+// An erasure that exhausted its retries must not vanish: the log names the
+// team and the address's hash (never the address, which is what is being
+// erased) so an operator can re-run it from Audience → Erase recipient.
+await queue.workDeadLetter("recipient.erase", async ({ teamId, address }) => {
+  console.error(
+    `recipient.erase: dead-lettered team=${teamId} recipient=${hashRecipient(address)}; re-run it from Audience → Erase recipient`,
+  );
+});
+
+// A drain that kept throwing: its rows stay open and the reconcile sweep
+// arms a fresh pass once they read as stale.
+await queue.workDeadLetter("webhook.drain", async ({ endpointId }) => {
+  console.error(`webhook.drain: dead-lettered endpoint ${endpointId}`);
+});
+
+await queue.work(
+  "email.send",
+  async (payload) => {
+    await sendEmail(
+      db,
+      {
+        keyring,
+        ses,
+        defaultConfigurationSet: env.SES_CONFIGURATION_SET,
+        onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
+        throttle: () => bucket.take(),
+        reschedule: (emailId, at, priority) => enqueueSend(emailId, at, priority),
+        sesQuota,
+        enqueueWebhookDelivery: enqueueWebhook,
+        tracking,
+        ...(unsubscribe ? { unsubscribe } : {}),
+      },
+      payload,
+    );
+  },
+  { concurrency: SEND_CONCURRENCY, batchSize: SEND_BATCH },
+);
+
+await queue.work(
+  "broadcast.send",
+  async (payload, ctx) => {
+    await sendBroadcast(
+      db,
+      {
+        keyring,
+        unsubscribeSecretKey,
+        appBaseUrl: env.APP_BASE_URL,
+        isCloud: env.IS_CLOUD,
+        enqueueEmailSends: enqueueSends,
+        reschedule: (broadcastId, at) => enqueueBroadcast(broadcastId, at),
+        signal: ctx.signal,
+      },
+      payload,
+    );
+  },
+  // Two broadcasts fired together fan out side by side instead of the
+  // second waiting for the first's whole walk.
+  { concurrency: 2 },
+);
+
+await queue.work(
+  "ses.event",
+  async (payload) => {
+    await processSesEvent(db, payload.event, {
+      snsMessageId: payload.snsMessageId,
+      enqueueWebhookDelivery: enqueueWebhook,
+    });
+  },
+  { concurrency: EVENT_CONCURRENCY, batchSize: EVENT_BATCH },
+);
+
+// SES events over SQS for deployments without a public https URL. The topic
+// allowlist gates it exactly like the https endpoint — a queue URL without
+// the allowlist stays inert instead of accepting arbitrary payloads.
+if (env.SQS_QUEUE_URL) {
+  const allowedTopicArns = env.SNS_TOPIC_ARNS ?? [];
+  if (allowedTopicArns.length === 0) {
+    console.warn("SQS_QUEUE_URL is set but SNS_TOPIC_ARNS is empty — SQS event polling disabled");
+  } else {
+    startSqsPoller({
+      sqs: new SQSClient({
+        region: env.AWS_REGION,
+        ...(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
+          ? {
+              credentials: {
+                accessKeyId: env.AWS_ACCESS_KEY_ID,
+                secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+              },
+            }
+          : {}),
+      }),
+      queueUrl: env.SQS_QUEUE_URL,
+      allowedTopicArns,
+      concurrency: env.SQS_POLL_CONCURRENCY,
+      enqueueSesEvent: async (event, snsMessageId) => {
+        await queue.send("ses.event", { event, snsMessageId }, { dedupeKey: snsMessageId });
+      },
+      log: (line) => console.warn(line),
+    });
+    console.log(`sqs poller: long-polling ${env.SQS_QUEUE_URL}`);
+  }
+}
+
+await queue.work(
+  "webhook.drain",
+  async ({ endpointId }, ctx) => {
+    await drainWebhookEndpoint(
+      db,
+      {
+        keyring,
+        post: (url, body, headers) =>
+          postJson(url, { body, headers, allowLocalhost: env.WEBHOOK_ALLOW_LOCALHOST }),
+        rearm: (id, at) => queue.drainWebhookEndpoints([id], at),
+        signal: ctx.signal,
+      },
+      { endpointId },
+    );
+  },
+  // The group is the endpoint and one pass per group runs at a time, so a
+  // successor armed mid-pass waits for the pass to end; a pass is time-boxed,
+  // so a stalled receiver holds one of these lanes for at most a budget
+  // before its successor queues behind everyone else's.
+  { concurrency: 8, batchSize: 1, groupConcurrency: 1 },
+);
+
+// Erasure scans a team's whole history; it runs here so the request that
+// asked for it returns at once.
+await queue.work(
+  "recipient.erase",
+  async ({ teamId, address }) => {
+    await eraseRecipient(db, teamId, address);
+  },
+  { pollingIntervalSeconds: 30 },
+);
 console.log("millionsend worker running");
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

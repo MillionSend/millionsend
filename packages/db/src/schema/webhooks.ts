@@ -62,6 +62,11 @@ export const webhookDeliveries = pgTable(
     lastResponseCode: integer("last_response_code"),
     // Truncated snippet for debugging; the delivery client caps reads anyway.
     lastResponseBody: text("last_response_body"),
+    // Due/lease clock of an open (pending, failed) row: the instant the
+    // endpoint's drain may post it. Set to the insert time on write, to the
+    // ladder on a failure, to Retry-After on a 429, and pushed a lease ahead
+    // while a drain holds the row so a crashed pass releases it by itself.
+    // Null on a settled row.
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -73,5 +78,22 @@ export const webhookDeliveries = pgTable(
     index("webhook_deliveries_open_idx")
       .on(t.createdAt)
       .where(sql`${t.status} in ('pending', 'failed')`),
+    // The drain claims an endpoint's due rows in due order.
+    index("webhook_deliveries_due_idx")
+      .on(t.endpointId, t.nextAttemptAt, t.id)
+      .where(sql`${t.status} in ('pending', 'failed')`),
+    // The breaker and the failing mail read an endpoint's latest settled rows
+    // that say something about the receiver. Mirrors COUNTED_SETTLED_SQL in
+    // apps/worker/src/handlers/deliver-webhook.ts (6 = WEBHOOK_MAX_ATTEMPTS in
+    // packages/core); a query must spell the predicate the same way to use it.
+    index("webhook_deliveries_endpoint_settled_idx")
+      .on(t.endpointId, t.createdAt.desc(), t.id.desc())
+      .where(
+        sql`${t.status} = 'success' or (${t.status} = 'exhausted' and (${t.attempts} >= 6 or ${t.lastResponseCode} = 429))`,
+      ),
+    // The retention strip visits only rows that still carry content.
+    index("webhook_deliveries_unstripped_idx")
+      .on(t.createdAt)
+      .where(sql`${t.payload} ? 'data' or ${t.lastResponseBody} is not null`),
   ],
 );

@@ -11,7 +11,7 @@ export interface SelectOption {
   label: string;
   /** Muted trailing detail shown after the label in the option row. */
   hint?: string;
-  /** Leading adornment in the option row, e.g. a <StatusDot>. */
+  /** Leading adornment in the option row AND on the trigger while selected, e.g. a <StatusDot>. */
   adornment?: React.ReactNode;
   /** Status badge after the label — shown in the option row AND on the trigger
    * while the option is selected (e.g. a domain's Verified/Pending). */
@@ -265,6 +265,7 @@ export function Select({
             minWidth: 0,
           }}
         >
+          {selected?.adornment}
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {selected?.label ?? ""}
           </span>

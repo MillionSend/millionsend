@@ -79,7 +79,7 @@ export interface SendDeps {
     | undefined;
   /** SES's 24-hour quota; absent in tests that never reach it. */
   sesQuota?: SesQuotaGate | undefined;
-  /** Enqueue a webhook.deliver job; email.sent webhooks are skipped when absent. */
+  /** Arms the webhook drain for the endpoints written; email.sent webhooks are skipped when absent. */
   enqueueWebhookDelivery?: WebhookEnqueue | undefined;
   /**
    * RFC 8058 one-click unsubscribe config for broadcast emails. Broadcast

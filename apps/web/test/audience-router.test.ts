@@ -44,6 +44,20 @@ async function contactRow(id: string) {
   return row ?? null;
 }
 
+const countedAt = async (segmentId: string) =>
+  (
+    await db
+      .select({ countedAt: schema.segments.countedAt })
+      .from(schema.segments)
+      .where(eq(schema.segments.id, segmentId))
+  )[0]?.countedAt;
+
+const markCounted = (segmentId: string) =>
+  db
+    .update(schema.segments)
+    .set({ countedAt: new Date() })
+    .where(eq(schema.segments.id, segmentId));
+
 describe("audience.contacts.stats", () => {
   it("counts the team's contacts and unsubscribed for the stat strip", async () => {
     const teamId = await createTeam(db, "team-a");
@@ -446,14 +460,19 @@ describe("audience.contacts.addSegment / removeSegment", () => {
       added: false,
     });
 
+    await markCounted(segmentId);
     expect(await caller.audience.contacts.removeSegment({ contactId, segmentId })).toEqual({
       removed: true,
     });
     expect(await caller.audience.contacts.segments({ contactId })).toEqual([]);
-    // Re-remove: no-op, no phantom timeline row.
+    // The removal leaves no newer row, so it flags the segment for a recount.
+    expect(await countedAt(segmentId)).toBeNull();
+    // Re-remove: no-op, no phantom timeline row, no flag.
+    await markCounted(segmentId);
     expect(await caller.audience.contacts.removeSegment({ contactId, segmentId })).toEqual({
       removed: false,
     });
+    expect(await countedAt(segmentId)).not.toBeNull();
 
     const rows = await activityRows(contactId);
     const segmentRows = rows.filter((r) => r.type.startsWith("segment_"));
@@ -462,6 +481,66 @@ describe("audience.contacts.addSegment / removeSegment", () => {
     expect(segmentRows.every((r) => r.data && (r.data as { name: string }).name === "VIP")).toBe(
       true,
     );
+  });
+
+  it("bulk leave flags the segment only when a member actually left", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: contactId } = await caller.audience.contacts.add({ email: "ada@x.com" });
+    const { id: segmentId } = await caller.segments.create({
+      name: "VIP",
+      filter: { match: "all", conditions: [] },
+    });
+    await caller.audience.contacts.addSegment({ contactId, segmentId });
+
+    await markCounted(segmentId);
+    expect(
+      await caller.audience.contacts.bulkRemoveSegment({ contactIds: [contactId], segmentId }),
+    ).toEqual({ removed: 1 });
+    expect(await countedAt(segmentId)).toBeNull();
+
+    await markCounted(segmentId);
+    expect(
+      await caller.audience.contacts.bulkRemoveSegment({ contactIds: [contactId], segmentId }),
+    ).toEqual({ removed: 0 });
+    expect(await countedAt(segmentId)).not.toBeNull();
+  });
+});
+
+describe("contact deletes flag the team's segments for a recount", () => {
+  it("on delete, bulkDelete and eraseRecipient, never for another team", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: segmentId } = await caller.segments.create({
+      name: "VIP",
+      filter: { match: "all", conditions: [] },
+    });
+    const otherTeam = await createTeam(db, "team-b");
+    const { id: foreign } = await callerFor(otherTeam).segments.create({
+      name: "B",
+      filter: { match: "all", conditions: [] },
+    });
+    const { id: a } = await caller.audience.contacts.add({ email: "a@x.com" });
+    const { id: b } = await caller.audience.contacts.add({ email: "b@x.com" });
+    await caller.audience.contacts.add({ email: "c@x.com" });
+
+    await Promise.all([markCounted(segmentId), markCounted(foreign)]);
+    await caller.audience.contacts.delete({ id: a });
+    expect(await countedAt(segmentId)).toBeNull();
+    expect(await countedAt(foreign)).not.toBeNull();
+
+    await markCounted(segmentId);
+    expect(await caller.audience.contacts.bulkDelete({ contactIds: [b] })).toEqual({ deleted: 1 });
+    expect(await countedAt(segmentId)).toBeNull();
+
+    await markCounted(segmentId);
+    expect((await caller.audience.eraseRecipient({ email: "c@x.com" })).contact).toBe(true);
+    expect(await countedAt(segmentId)).toBeNull();
+
+    // Erasing an address that has no contact row flags nothing.
+    await markCounted(segmentId);
+    expect((await caller.audience.eraseRecipient({ email: "nobody@x.com" })).contact).toBe(false);
+    expect(await countedAt(segmentId)).not.toBeNull();
   });
 
   it("rejects a foreign contact and a foreign segment", async () => {
@@ -594,6 +673,42 @@ describe("audience.contacts.update", () => {
     // An explicit empty map clears it.
     await caller.audience.contacts.update({ id, properties: {} });
     expect((await contactRow(id))?.properties).toEqual({});
+  });
+});
+
+describe("audience.contacts.update no-op", () => {
+  it("restating the stored values writes nothing: updated_at stays, no contact.updated", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await caller.webhooks.create({
+      url: "https://example.com/hooks",
+      eventTypes: ["contact.updated"],
+    });
+    const deliveries = async () =>
+      (await db.select({ id: schema.webhookDeliveries.id }).from(schema.webhookDeliveries)).length;
+    const { id } = await caller.audience.contacts.add({
+      email: "ada@example.com",
+      firstName: "Ada",
+      properties: { plan: "pro" },
+    });
+    const before = await contactRow(id);
+
+    await caller.audience.contacts.update({
+      id,
+      firstName: "Ada",
+      lastName: "",
+      unsubscribed: false,
+      properties: { plan: "pro" },
+    });
+    expect(await contactRow(id)).toEqual(before);
+    expect(await deliveries()).toBe(0);
+
+    // Replace semantics: the same values under a different key set is a change.
+    await caller.audience.contacts.update({ id, properties: { plan: "pro", city: "London" } });
+    expect(await deliveries()).toBe(1);
+    expect((await contactRow(id))?.updatedAt.getTime()).toBeGreaterThan(
+      before?.updatedAt.getTime() ?? 0,
+    );
   });
 });
 

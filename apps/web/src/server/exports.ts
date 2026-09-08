@@ -1,10 +1,11 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gte, ilike, isNull, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
 import { CONTACT_STATUSES, type ContactStatus } from "@/lib/contact-status";
 import { type CsvColumn, toCsv } from "@/lib/csv-export";
+import { manyOf } from "@/lib/list-param";
 import { escapeLike } from "@/lib/sql";
 import { assertSegment, segmentPredicate } from "./routers/segments";
 import { assertTopic, topicMembershipSql } from "./routers/topics";
@@ -120,8 +121,9 @@ export function emailRowsForExport(
 ): Promise<EmailExportRow[]> {
   const t = schema.emails;
   const conds: SQL[] = [eq(t.teamId, teamId)];
-  const status = schema.emailStatusEnum.enumValues.find((s) => s === filters.status);
-  if (status) conds.push(eq(t.latestStatus, status));
+  // Comma-separated, the list page's own URL param.
+  const statuses = manyOf(schema.emailStatusEnum.enumValues, filters.status ?? "");
+  if (statuses.length > 0) conds.push(inArray(t.latestStatus, statuses));
   if (filters.search) {
     const pattern = `%${escapeLike(filters.search)}%`;
     const match = or(ilike(t.subject, pattern), sql`${t.to}::text ilike ${pattern}`);

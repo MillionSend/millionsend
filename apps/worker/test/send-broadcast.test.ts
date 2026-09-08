@@ -10,6 +10,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import type { EmailSendRequest } from "@millionsend/queue";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -71,20 +72,26 @@ function makeDeps(overrides: Partial<BroadcastDeps> = {}): {
   deps: BroadcastDeps;
   enqueued: string[];
   startAfters: (Date | undefined)[];
+  batches: EmailSendRequest[][];
 } {
   const enqueued: string[] = [];
   const startAfters: (Date | undefined)[] = [];
+  const batches: EmailSendRequest[][] = [];
   return {
     enqueued,
     startAfters,
+    batches,
     deps: {
       keyring,
       unsubscribeSecretKey: secretKey,
       appBaseUrl: BASE_URL,
       isCloud: false,
-      enqueueEmailSend: async (emailId, startAfter) => {
-        enqueued.push(emailId);
-        startAfters.push(startAfter);
+      enqueueEmailSends: async (batch) => {
+        batches.push([...batch]);
+        for (const job of batch) {
+          enqueued.push(job.emailId);
+          startAfters.push(job.startAfter);
+        }
       },
       // Batch of 1 exercises the keyset pagination.
       batchSize: 1,
@@ -397,17 +404,20 @@ async function seedThrottleTeam(
   return { broadcastId };
 }
 
-it("throttles the fan-out drip when the team is over the risk line", async () => {
+it("throttles the fan-out drip when the team is over the risk line, one enqueue per page", async () => {
   // 90/2000 = 4.5% hard bounces: over WARN (4%), under PAUSE (5%), volume >= floor.
   const { broadcastId } = await seedThrottleTeam("bc-throttle", {
     sent: 2000,
     bounced: 90,
     hardBounced: 90,
   });
-  const { deps, startAfters } = makeDeps();
+  const { deps, startAfters, batches } = makeDeps({ batchSize: 2 });
 
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
 
+  // Three contacts over pages of two: one statement per page, the drip
+  // running on across the page boundary.
+  expect(batches.map((b) => b.length)).toEqual([2, 1]);
   expect(startAfters).toHaveLength(3);
   expect(startAfters.every((d) => d instanceof Date)).toBe(true);
   const [t0, t1, t2] = startAfters.map((d) => (d as Date).getTime());
@@ -418,6 +428,10 @@ it("throttles the fan-out drip when the team is over the risk line", async () =>
   // absolute base (wall clock) is never asserted.
   expect(t1 - t0).toBe(spacing);
   expect(t2 - t1).toBe(spacing);
+  // The drip is persisted on each row, so the send handler defers to it and
+  // the reconcile sweep leaves not-yet-due rows alone.
+  const rows = await emailsOf(broadcastId);
+  expect(rows.map((r) => r.scheduledAt?.getTime()).sort()).toEqual([t0, t1, t2].sort());
 });
 
 it("fans out at full rate (no startAfter) when the team is ok", async () => {
@@ -432,6 +446,42 @@ it("fans out at full rate (no startAfter) when the team is ok", async () => {
 
   expect(startAfters).toHaveLength(3);
   expect(startAfters.every((d) => d === undefined)).toBe(true);
+  expect((await emailsOf(broadcastId)).every((r) => r.scheduledAt === null)).toBe(true);
+});
+
+it("an aborted signal fails the walk at the next page so the job retries; the resumed walk skips fanned-out contacts and keeps its drip tight", async () => {
+  const { broadcastId } = await seedThrottleTeam("bc-resume", {
+    sent: 2000,
+    bounced: 90,
+    hardBounced: 90,
+  });
+  const ac = new AbortController();
+  const first = makeDeps({ signal: ac.signal });
+  // The signal flips inside the first page's enqueue, like a shutdown
+  // landing mid-walk: that page completes, the next one is never read.
+  const firstEnqueue = first.deps.enqueueEmailSends;
+  first.deps.enqueueEmailSends = async (batch) => {
+    await firstEnqueue(batch);
+    ac.abort();
+  };
+  await expect(sendBroadcast(db, first.deps, { broadcastId })).rejects.toThrow(/fan-out aborted/);
+  expect(first.enqueued).toHaveLength(1);
+  const [row] = await db
+    .select({ status: schema.broadcasts.status })
+    .from(schema.broadcasts)
+    .where(eq(schema.broadcasts.id, broadcastId));
+  expect(row?.status).toBe("sending");
+
+  const second = makeDeps();
+  expect(await sendBroadcast(db, second.deps, { broadcastId })).toBe("sent");
+  expect(await emailsOf(broadcastId)).toHaveLength(3);
+  // The conflicted contact enqueues nothing and leaves no gap in the drip:
+  // the two new rows sit one spacing apart from the resumed walk's base.
+  expect(second.enqueued).not.toContain(first.enqueued[0]);
+  expect(second.batches.every((b) => b.length === 1)).toBe(true);
+  const [t0, t1] = second.startAfters.map((d) => (d as Date).getTime());
+  if (t0 === undefined || t1 === undefined) throw new Error("missing startAfter");
+  expect(t1 - t0).toBe(broadcastSendSpacingMs("warning"));
 });
 
 it("defers a not-yet-due scheduled broadcast back to the queue", async () => {

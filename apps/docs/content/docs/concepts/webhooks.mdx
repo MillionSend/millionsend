@@ -41,7 +41,7 @@ changed it. `data` carries the contact in Resend's shape — `id`, `email`,
 | Event | Fired when | Extra `data` |
 | --- | --- | --- |
 | `contact.created` | A contact was added: API, batch, CSV import or dashboard. | |
-| `contact.updated` | Name, properties or the unsubscribed flag changed through the API or the dashboard. | |
+| `contact.updated` | Name, properties or the unsubscribed flag changed through the API or the dashboard. A write that restates the stored values (a full re-import, say) emits nothing and leaves `updated_at` untouched. | |
 | `contact.deleted` | A contact was deleted. After an erasure (`erase=true` on the API, or the dashboard's erase action) the stored `email` reads `[erased]`; key on `id`. | |
 | `contact.unsubscribed` | The contact opted out of all marketing email. | |
 | `contact.resubscribed` | An explicit re-subscribe (`unsubscribed: false`). | |
@@ -132,11 +132,33 @@ curl -X POST "https://api.millionsend.com/webhooks/{id}/rotate" \
 # → { "object": "webhook", "id": "...", "signing_secret": "whsec_...", "previous_secret_expires_at": "..." }
 ```
 
-## Delivery and retries
+## Delivery
 
-A delivery is considered successful on any 2xx response. Failures are retried
-with exponential backoff (starting at seconds, capped at hours, up to 6
-attempts). A reconcile job re-dispatches deliveries lost to crashes, so
-delivery is at-least-once — make handlers idempotent, keyed on `webhook-id`.
-Delivery rows (payload, response, attempts) are kept for
+A delivery is successful on any 2xx response. Each endpoint has its own
+queue, drained in order at up to **20 requests per second**; a burst of
+events waits in the queue rather than hitting the receiver all at once.
+
+A failed attempt (non-2xx, timeout, connection error) is retried on a fixed
+schedule: **5 s, 5 min, 30 min, 2 h, 5 h, 10 h** — six attempts over about
+18 hours. A `429` with a `Retry-After` header is honoured (up to an hour)
+and does not count as an attempt: it is the receiver asking for room, not
+failing. An event still undelivered **24 hours** after it was queued is
+dropped as `exhausted` without another attempt.
+
+After **20 consecutive exhausted deliveries** the endpoint is disabled
+automatically and receives nothing further until you re-enable it from its
+page; events that happen in the meantime are not replayed. Team owners are
+emailed when an endpoint's deliveries start failing (the last ten settled
+deliveries all exhausted), when it is disabled, and — at most once a day —
+when its backlog is more than an hour old. The dashboard shows each
+endpoint's queue depth and how long its oldest delivery has been waiting.
+
+A reconcile job re-arms queues lost to crashes, so delivery is
+at-least-once — make handlers idempotent, keyed on `webhook-id`. Delivery
+rows (payload, response, attempts) are kept for
 `WEBHOOK_DELIVERY_RETENTION_DAYS` (default 30) and then purged.
+
+Subscribe each endpoint only to the events it needs. A full contact
+re-import emits nothing for contacts that did not change, but every new
+contact is one `contact.created` delivery — an endpoint subscribed to "all
+events" receives all of them.

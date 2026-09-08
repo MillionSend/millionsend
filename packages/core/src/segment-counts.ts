@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import { segmentContactsWhere } from "./segment-filter.js";
 
 export interface SegmentCounts {
@@ -55,8 +55,28 @@ export async function recountSegment(
 }
 
 /**
+ * Marks a team's segments (or one segment) as never counted so the next
+ * recount pass refreshes them. Contact deletes and manual-member removals
+ * must call this: they leave no newer row for recountStaleSegments to see.
+ * The stored counts stay readable until then.
+ */
+export async function markSegmentsStale(
+  db: Db,
+  scope: { teamId: string } | { segmentId: string },
+): Promise<void> {
+  const s = schema.segments;
+  await db
+    .update(s)
+    .set({ countedAt: null })
+    .where("teamId" in scope ? eq(s.teamId, scope.teamId) : eq(s.id, scope.segmentId));
+}
+
+/**
  * Refreshes segments never counted or counted before `olderThanMs` ago, one
  * statement per segment so no single query grows with the number of segments.
+ * A stale segment is skipped while no contact of its team and no manual
+ * member was written since it was counted (index lookups, never a scan), so
+ * an idle team's segments cost nothing between imports.
  */
 export async function recountStaleSegments(
   db: Db,
@@ -65,10 +85,23 @@ export async function recountStaleSegments(
   const now = opts.now ?? new Date();
   const before = new Date(now.getTime() - opts.olderThanMs);
   const s = schema.segments;
+  const c = schema.contacts;
+  const m = schema.segmentMembers;
+  // Grace window: a write that committed after the count's snapshot carries
+  // a timestamp before counted_at; compared strictly it would be missed
+  // until the next write to the team.
+  const grace = sql`${s.countedAt} - interval '5 minutes'`;
+  // max() rather than exists(): the planner serves it as a backward index
+  // walk that stops at one row, where an exists() over a segment holding most
+  // of the members table turns into a scan of it.
+  const changedSince = or(
+    gt(sql`(select max(${c.updatedAt}) from ${c} where ${c.teamId} = ${s.teamId})`, grace),
+    gt(sql`(select max(${m.createdAt}) from ${m} where ${m.segmentId} = ${s.id})`, grace),
+  );
   const stale = await db
     .select({ id: s.id, teamId: s.teamId, filter: s.filter })
     .from(s)
-    .where(or(isNull(s.countedAt), lt(s.countedAt, before)))
+    .where(or(isNull(s.countedAt), and(lt(s.countedAt, before), changedSince)))
     .orderBy(asc(s.countedAt))
     .limit(opts.limit ?? 200);
   for (const segment of stale) {

@@ -48,6 +48,7 @@ async function endpointRow(id: string) {
 async function insertDelivery(
   endpointId: string,
   status: "pending" | "success" | "failed" | "exhausted",
+  nextAttemptAt: Date | null = null,
 ) {
   const [row] = await db
     .insert(schema.webhookDeliveries)
@@ -57,6 +58,7 @@ async function insertDelivery(
       eventType: "email.delivered",
       payload: { type: "email.delivered" },
       status,
+      nextAttemptAt,
     })
     .returning({ id: schema.webhookDeliveries.id });
   if (!row) throw new Error("delivery insert failed");
@@ -208,6 +210,29 @@ describe("webhooks.delete", () => {
       .where(eq(schema.webhookDeliveries.endpointId, id));
     expect(remaining).toEqual([]);
   });
+
+  it("forgets the endpoint's notification claims and keeps every other claim", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id } = await caller.webhooks.create({ url: "https://example.com/hooks" });
+    const other = await caller.webhooks.create({ url: "https://example.com/other" });
+    await db.insert(schema.teamNotifications).values([
+      { teamId, kind: `webhook.failing:${id}`, periodKey: "episode" },
+      { teamId, kind: `webhook.auto_disabled:${id}`, periodKey: "episode" },
+      { teamId, kind: `webhook.backlog:${id}`, periodKey: "2026-01-01" },
+      { teamId, kind: `webhook.failing:${other.id}`, periodKey: "episode" },
+      { teamId, kind: "quota.warning", periodKey: "2026-01-01" },
+    ]);
+
+    await caller.webhooks.delete({ id });
+    const left = await db
+      .select({ kind: schema.teamNotifications.kind })
+      .from(schema.teamNotifications)
+      .where(eq(schema.teamNotifications.teamId, teamId));
+    expect(left.map((r) => r.kind).sort()).toEqual(
+      [`webhook.failing:${other.id}`, "quota.warning"].sort(),
+    );
+  });
 });
 
 describe("webhooks.list success rate", () => {
@@ -228,6 +253,39 @@ describe("webhooks.list success rate", () => {
   });
 });
 
+describe("webhooks queue depth", () => {
+  it("counts open rows with a due clock and reports the oldest due instant", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id } = await caller.webhooks.create({ url: "https://example.com/a" });
+    const idle = await caller.webhooks.create({ url: "https://example.com/b" });
+    const overdue = new Date(Date.now() - 2 * 3_600_000);
+    const soon = new Date(Date.now() + 10 * 60_000);
+    await insertDelivery(id, "pending", overdue);
+    await insertDelivery(id, "failed", soon);
+    await insertDelivery(id, "failed", new Date(Date.now() + 3_600_000));
+    // Settled rows and a failed test fire (no due clock) are not queued.
+    await insertDelivery(id, "success");
+    await insertDelivery(id, "exhausted");
+    await insertDelivery(id, "failed");
+
+    const got = await caller.webhooks.get({ id });
+    expect(got.queued).toBe(3);
+    expect(got.oldestQueuedAt).toEqual(overdue);
+    expect(got).not.toHaveProperty("nextAttemptAt");
+
+    const listed = await caller.webhooks.list();
+    expect(listed.find((w) => w.id === id)).toMatchObject({
+      queued: 3,
+      oldestQueuedAt: overdue,
+    });
+    expect(listed.find((w) => w.id === idle.id)).toMatchObject({
+      queued: 0,
+      oldestQueuedAt: null,
+    });
+  });
+});
+
 describe("webhooks.testDelivery", () => {
   it("delivers the test event synchronously and records the outcome", async () => {
     const teamId = await createTeam(db, "team-a");
@@ -244,6 +302,8 @@ describe("webhooks.testDelivery", () => {
     expect(result.ok).toBe(false);
     const delivery = await caller.webhooks.deliveries.get({ id: result.id });
     expect(delivery.status).toBe("failed");
+    // Settled synchronously, so the due clock the insert set is cleared again.
+    expect(delivery.nextAttemptAt).toBeNull();
     expect(delivery.eventType).toBe("email.sent");
     expect(delivery.attempts).toBe(1);
     expect(delivery.payload).toMatchObject({ type: "email.sent", test: true });

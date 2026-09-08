@@ -34,7 +34,9 @@ export interface OptionGroup {
  * `allOption` models an "everything" toggle distinct from the value array
  * (e.g. webhook endpoints where an empty subscription list means all events):
  * while it is on, every row reads as checked, and picking one row switches
- * "all" off and narrows to just that row.
+ * "all" off and narrows to just that row. `exclusive` keeps the member rows
+ * unchecked under it, for a filter where "all" means "no filter" rather than
+ * "each of these". A group with an empty label draws no heading.
  */
 export function GroupedMultiSelect({
   value,
@@ -59,7 +61,13 @@ export function GroupedMultiSelect({
   summary: React.ReactNode;
   searchPlaceholder: string;
   noResultsLabel: string;
-  allOption?: { label: string; selected: boolean; onToggle: (selected: boolean) => void };
+  allOption?: {
+    label: string;
+    selected: boolean;
+    onToggle: (selected: boolean) => void;
+    adornment?: React.ReactNode;
+    exclusive?: boolean;
+  };
   width?: number | string;
   disabled?: boolean;
   /** Forwarded to the trigger so an ms-field <label htmlFor> can target it. */
@@ -185,7 +193,8 @@ export function GroupedMultiSelect({
 
   const activeId = open && activeIndex < rowCount ? `${listboxId}-${activeIndex}` : undefined;
   const rowChecked = (option: GroupedOption) =>
-    (allOption?.selected === true && !option.excludedFromAll) || value.includes(option.value);
+    (allOption?.selected === true && !allOption.exclusive && !option.excludedFromAll) ||
+    value.includes(option.value);
 
   function Row({
     index,
@@ -316,6 +325,9 @@ export function GroupedMultiSelect({
                     index={0}
                     checked={allOption.selected}
                     onClick={() => activate(0)}
+                    {...(allOption.adornment !== undefined
+                      ? { adornment: allOption.adornment }
+                      : {})}
                     label={allOption.label}
                   />
                 ) : null}
@@ -329,7 +341,7 @@ export function GroupedMultiSelect({
                     if (rows.length === 0) return null;
                     return (
                       <div key={group.key}>
-                        <div className="ms-menu-label">{group.label}</div>
+                        {group.label ? <div className="ms-menu-label">{group.label}</div> : null}
                         {rows.map((option) => {
                           const index = allOffset + orderedFiltered.indexOf(option);
                           return (

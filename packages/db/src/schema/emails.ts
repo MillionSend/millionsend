@@ -129,6 +129,10 @@ export const emails = pgTable(
     index("emails_team_quota_parked_idx")
       .on(t.teamId)
       .where(sql`${t.latestStatus} = 'queued_quota'`),
+    // The quota drain pages parked rows oldest first over (created_at, id).
+    index("emails_quota_parked_created_idx")
+      .on(t.createdAt, t.id)
+      .where(sql`${t.latestStatus} = 'queued_quota'`),
     // The send reconcile sweep walks queued rows oldest first every 15
     // minutes; without this it reads the whole table twice per run.
     index("emails_queued_created_idx").on(t.createdAt).where(sql`${t.latestStatus} = 'queued'`),

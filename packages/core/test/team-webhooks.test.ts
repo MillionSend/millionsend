@@ -5,10 +5,12 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import {
+  clearWebhookEndpointNotifications,
   encryptWebhookSecret,
   enqueueTeamWebhookDeliveries,
   enqueueTeamWebhookEvents,
   generateWebhookSecret,
+  retryAfterMs,
 } from "../src/webhooks.js";
 
 let db: Db;
@@ -66,7 +68,43 @@ it("fans a team-level event out to subscribed endpoints with no email attached",
       data: { used: 80, limit: 100 },
     },
   });
+  // Due at once: the drain claims on nextAttemptAt, which a column default never sets.
+  expect(rows[0]?.nextAttemptAt).toBeInstanceOf(Date);
   expect(enqueued).toEqual([rows[0]?.id]);
+});
+
+it("reads Retry-After as delta-seconds or an HTTP-date, a minute by default, an hour at most", () => {
+  const now = new Date("2026-01-01T00:00:00Z");
+  expect(retryAfterMs("30", now)).toBe(30_000);
+  expect(retryAfterMs("Thu, 01 Jan 2026 00:00:45 GMT", now)).toBe(45_000);
+  expect(retryAfterMs(undefined, now)).toBe(60_000);
+  expect(retryAfterMs("soon", now)).toBe(60_000);
+  expect(retryAfterMs("86400", now)).toBe(3_600_000);
+});
+
+it("floors Retry-After at a second: zero or a past date must not re-arm in a hot loop", () => {
+  const now = new Date("2026-01-01T00:00:00Z");
+  expect(retryAfterMs("0", now)).toBe(1_000);
+  expect(retryAfterMs("-5", now)).toBe(1_000);
+  expect(retryAfterMs("Wed, 31 Dec 2025 23:00:00 GMT", now)).toBe(1_000);
+});
+
+it("deleting an endpoint forgets its notification claims and no other endpoint's", async () => {
+  const gone = await endpoint(null);
+  const kept = await endpoint(null);
+  await db.insert(schema.teamNotifications).values([
+    { teamId, kind: `webhook.failing:${gone}`, periodKey: "episode" },
+    { teamId, kind: `webhook.backlog:${gone}`, periodKey: "2026-01-01" },
+    { teamId, kind: `webhook.failing:${kept}`, periodKey: "episode" },
+    { teamId, kind: "quota.warning", periodKey: "2026-01-01" },
+  ]);
+  await clearWebhookEndpointNotifications(db, { teamId, endpointId: gone });
+  const left = await db
+    .select({ kind: schema.teamNotifications.kind })
+    .from(schema.teamNotifications);
+  expect(left.map((r) => r.kind).sort()).toEqual(
+    [`webhook.failing:${kept}`, "quota.warning"].sort(),
+  );
 });
 
 it("fans a bulk event set out in slices that stay under the driver's bind-parameter cap", async () => {

@@ -10,6 +10,7 @@ import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
+import { NoticeStrip } from "@/components/notice-strip";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
 import { RelativeTime } from "@/components/relative-time";
@@ -17,12 +18,18 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { codeRichTags } from "@/lib/code-rich-tags";
-import { displayUrl } from "@/lib/format";
+import { displayUrl, formatDurationShort } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { maskWebhookSecret, WEBHOOK_EVENT_META, type WebhookEventType } from "@/lib/webhook-events";
+import { BACKLOG_AGE_MS } from "@/lib/webhook-queue";
 import { ListFooter, PAGE_SIZES } from "../../emails/list-parts";
 import { type EditableWebhook, WebhookEditModal, WebhookRotateModal } from "../webhook-dialogs";
-import { DeliveryStatusBadge, WebhookStatusBadge } from "../webhook-status-badge";
+import {
+  DeliveryStatusBadge,
+  QueueLine,
+  queuedLabel,
+  WebhookStatusBadge,
+} from "../webhook-status-badge";
 
 function DeliveriesTableHead() {
   const t = useTranslations("webhooks");
@@ -333,6 +340,7 @@ export function WebhookDetail({ id }: { id: string }) {
   const data = webhook.data;
   const pageItems = deliveries.data?.items ?? [];
   const hasMore = deliveries.data?.hasMore ?? false;
+  const backlogMs = data.oldestQueuedAt ? Date.now() - new Date(data.oldestQueuedAt).getTime() : 0;
 
   return (
     <>
@@ -403,6 +411,33 @@ export function WebhookDetail({ id }: { id: string }) {
         }
       />
 
+      {data.status === "auto_disabled" ? (
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", maxWidth: 1000 }}>
+          <div style={{ flex: 1 }}>
+            <NoticeStrip tone="warn" text={t("queue.autoDisabled")} />
+          </div>
+          <button
+            type="button"
+            className="ms-btn ms-btn-secondary"
+            disabled={updateMutation.isPending}
+            onClick={() => void toggleEnabled(data)}
+          >
+            <BtnSpinner on={updateMutation.isPending} />
+            {t("enable")}
+          </button>
+        </div>
+      ) : backlogMs > BACKLOG_AGE_MS ? (
+        <div style={{ maxWidth: 1000 }}>
+          <NoticeStrip
+            tone="warn"
+            text={t("queue.stale", {
+              count: queuedLabel(data.queued),
+              age: formatDurationShort(backlogMs),
+            })}
+          />
+        </div>
+      ) : null}
+
       <div
         className="ms-meta-grid"
         style={{
@@ -466,6 +501,7 @@ export function WebhookDetail({ id }: { id: string }) {
         </div>
         <MetaItem label={t("detail.status")}>
           <WebhookStatusBadge status={data.status} />
+          <QueueLine queued={data.queued} oldestQueuedAt={data.oldestQueuedAt} />
         </MetaItem>
         <MetaItem label={t("detail.created")}>
           <RelativeTime date={data.createdAt} />

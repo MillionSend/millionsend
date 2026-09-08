@@ -104,6 +104,8 @@ export interface PostJsonResult {
   status: number;
   /** Response body, truncated to maxResponseBytes. */
   body: string;
+  /** The receiver's Retry-After header, verbatim, when it sent one. */
+  retryAfter?: string;
 }
 
 export type PostFailureCode =
@@ -208,7 +210,12 @@ export async function postJson(rawUrl: string, opts: PostJsonOptions): Promise<P
         const chunks: Buffer[] = [];
         let received = 0;
         const finish = (): void => {
-          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") });
+          const retryAfter = res.headers["retry-after"];
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+            ...(typeof retryAfter === "string" ? { retryAfter } : {}),
+          });
         };
         res.on("data", (chunk: Buffer) => {
           if (received >= maxBytes) return;

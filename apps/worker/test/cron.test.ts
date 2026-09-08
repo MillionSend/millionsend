@@ -10,6 +10,7 @@ import {
   purgeExpiredEmailBodies,
   purgeExpiredEmailMetadata,
   purgeExpiredSessions,
+  purgeStaleHourlyUsage,
   reconcileBillingPlans,
   reconcileStalledSends,
   stripExpiredEventPayloads,
@@ -70,8 +71,8 @@ it("drain reserves against the NEW day's cap — parking is not a quota bypass",
   const enqueued: string[] = [];
   const result = await drainQuotaParked(db, {
     isCloud: true,
-    enqueueSend: async (id) => {
-      enqueued.push(id);
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
     },
   });
 
@@ -94,8 +95,8 @@ it("self-host drain (no caps) releases everything", async () => {
   const enqueued: string[] = [];
   const result = await drainQuotaParked(db, {
     isCloud: false,
-    enqueueSend: async (id) => {
-      enqueued.push(id);
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
     },
   });
 
@@ -103,29 +104,117 @@ it("self-host drain (no caps) releases everything", async () => {
   expect(enqueued).toEqual([a, b]);
 });
 
-it("one enqueue failure re-parks that email, releases its reservation, and does NOT block the rest", async () => {
-  const failing = await insertParked(new Date("2026-08-13T01:00:00Z"));
-  const healthy = await insertParked(new Date("2026-08-13T02:00:00Z"));
+it("a failed page enqueue re-parks that whole page and releases its reservations, then rethrows", async () => {
+  const a = await insertParked(new Date("2026-08-13T01:00:00Z"));
+  const b = await insertParked(new Date("2026-08-13T02:00:00Z"));
 
-  const enqueued: string[] = [];
+  const batches: string[][] = [];
   await expect(
     drainQuotaParked(db, {
       isCloud: true,
-      enqueueSend: async (id) => {
-        if (id === failing) throw new Error("queue down");
-        enqueued.push(id);
+      enqueueSends: async (batch) => {
+        batches.push(batch.map((j) => j.emailId));
+        throw new Error("queue down");
       },
     }),
   ).rejects.toThrow("1 email(s) failed");
 
-  expect(await statusOf(failing)).toBe("queued_quota");
-  expect(await statusOf(healthy)).toBe("queued");
-  expect(enqueued).toEqual([healthy]);
+  // Both rows moved in one page, so one statement carried both and both go back.
+  expect(batches).toEqual([[a, b]]);
+  expect(await statusOf(a)).toBe("queued_quota");
+  expect(await statusOf(b)).toBe("queued_quota");
+  const [counter] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(counter?.accepted).toBe(0);
+});
+
+it("a failed page enqueue never refunds a row a racing send lane already claimed", async () => {
+  const a = await insertParked(new Date("2026-08-13T01:00:00Z"));
+  const b = await insertParked(new Date("2026-08-13T02:00:00Z"));
+
+  await expect(
+    drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async () => {
+        // A send lane picked `a` up between the move and the enqueue failure.
+        await db
+          .update(schema.emails)
+          .set({ latestStatus: "sent", sentAt: new Date() })
+          .where(eq(schema.emails.id, a));
+        throw new Error("queue down");
+      },
+    }),
+  ).rejects.toThrow("1 email(s) failed");
+
+  expect(await statusOf(a)).toBe("sent");
+  expect(await statusOf(b)).toBe("queued_quota");
+  // Only b's reservation goes back; a's send happened and stays charged.
   const [counter] = await db
     .select()
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, teamId));
   expect(counter?.accepted).toBe(1);
+});
+
+it("a failed page enqueue leaves a row a send lane has claimed but not yet sent alone", async () => {
+  const a = await insertParked(new Date("2026-08-13T01:00:00Z"));
+
+  await expect(
+    drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async () => {
+        // The lane's claim: sent_at set while SES is still being called.
+        await db.update(schema.emails).set({ sentAt: new Date() }).where(eq(schema.emails.id, a));
+        throw new Error("queue down");
+      },
+    }),
+  ).rejects.toThrow("1 email(s) failed");
+
+  // Not re-parked under the lane, and its reservation stays charged.
+  expect(await statusOf(a)).toBe("queued");
+  const [counter] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(counter?.accepted).toBe(1);
+});
+
+// A full page of 500 parked rows each moves through its own transaction:
+// slow on PGlite under a loaded CI runner, so this one gets a longer budget.
+it("a failed page enqueue ends the run instead of walking the remaining pages", {
+  timeout: 60_000,
+}, async () => {
+  const base = Date.parse("2026-08-13T00:00:00Z");
+  // One row more than a page, so a second page exists to be skipped.
+  await db.insert(schema.emails).values(
+    Array.from({ length: 501 }, (_, i) => ({
+      teamId,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: `parked ${i}`,
+      latestStatus: "queued_quota" as const,
+      createdAt: new Date(base + i * 1000),
+    })),
+  );
+
+  let calls = 0;
+  await expect(
+    drainQuotaParked(db, {
+      isCloud: false,
+      enqueueSends: async () => {
+        calls += 1;
+        throw new Error("queue down");
+      },
+    }),
+  ).rejects.toThrow("1 email(s) failed");
+  expect(calls).toBe(1);
+  const [parked] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.emails)
+    .where(eq(schema.emails.latestStatus, "queued_quota"));
+  expect(parked?.n).toBe(501);
 });
 
 it("drain passes a scheduled email's due time through to the queue", async () => {
@@ -146,8 +235,10 @@ it("drain passes a scheduled email's due time through to the queue", async () =>
   const enqueued: { id: string; startAfter?: Date }[] = [];
   await drainQuotaParked(db, {
     isCloud: false,
-    enqueueSend: async (id, startAfter) => {
-      enqueued.push({ id, ...(startAfter ? { startAfter } : {}) });
+    enqueueSends: async (batch) => {
+      for (const j of batch) {
+        enqueued.push({ id: j.emailId, ...(j.startAfter ? { startAfter: j.startAfter } : {}) });
+      }
     },
   });
   expect(enqueued).toEqual([{ id: row.id, startAfter: due }]);
@@ -178,16 +269,55 @@ it("reconcile re-enqueues stale queued emails but never claimed or fresh ones", 
   await db
     .insert(schema.emails)
     .values({ ...base, latestStatus: "queued_quota" as const, createdAt: old(30) });
+  // Scheduled for later: waiting by design, its job is due with it.
+  await db.insert(schema.emails).values({
+    ...base,
+    latestStatus: "queued" as const,
+    createdAt: old(30),
+    scheduledAt: old(-60),
+  });
+  // Scheduled for a time that has passed: lost like any other stale row.
+  const [due] = await db
+    .insert(schema.emails)
+    .values({ ...base, latestStatus: "queued" as const, createdAt: old(45), scheduledAt: old(5) })
+    .returning({ id: schema.emails.id });
 
   const enqueued: string[] = [];
   const count = await reconcileStalledSends(db, {
-    enqueueSend: async (id) => {
-      enqueued.push(id);
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
     },
     now,
   });
-  expect(count).toBe(1);
-  expect(enqueued).toEqual([stale?.id]);
+  expect(count).toBe(2);
+  expect(enqueued).toEqual([due?.id, stale?.id]);
+});
+
+it("reconcile pages through a backlog larger than one batch, each row once, one enqueue per page", async () => {
+  const now = new Date();
+  const createdAt = new Date(now.getTime() - 30 * 60 * 1000);
+  await db.insert(schema.emails).values(
+    Array.from({ length: 1001 }, (_, i) => ({
+      teamId,
+      from: "a@acme.dev",
+      to: [`r${i}@example.com`],
+      subject: "s",
+      latestStatus: "queued" as const,
+      createdAt,
+    })),
+  );
+  const enqueued: string[] = [];
+  const pages: number[] = [];
+  const count = await reconcileStalledSends(db, {
+    enqueueSends: async (batch) => {
+      pages.push(batch.length);
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+    now,
+  });
+  expect(count).toBe(1001);
+  expect(new Set(enqueued).size).toBe(1001);
+  expect(pages).toEqual([1000, 1]);
 });
 
 it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async () => {
@@ -334,7 +464,7 @@ it("reconcile fails a claim that never reached SES (worker killed mid-send) with
     .returning({ id: schema.emails.id });
   if (!interrupted || !inFlight) throw new Error("insert failed");
 
-  await reconcileStalledSends(db, { enqueueSend: async () => {}, now });
+  await reconcileStalledSends(db, { enqueueSends: async () => {}, now });
 
   expect(await statusOf(interrupted.id)).toBe("failed");
   expect(await statusOf(inFlight.id)).toBe("queued");
@@ -519,8 +649,8 @@ it("holds every parked email while SES's own 24-hour quota is full", async () =>
   const enqueued: string[] = [];
   const result = await drainQuotaParked(db, {
     isCloud: true,
-    enqueueSend: async (id) => {
-      enqueued.push(id);
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
     },
     sesQuotaExhausted: () => true,
   });
@@ -644,6 +774,61 @@ it("drain terminates when an exhausted team's parked rows share one created_at",
   // Rows written by one statement share one now(); PGlite's now() is
   // millisecond-only, so the microsecond fraction is pinned by hand.
   await db.execute(sql`update ${schema.emails} set created_at = '2026-08-13T01:00:00.000123Z'`);
-  const result = await drainQuotaParked(db, { isCloud: true, enqueueSend: async () => {} });
+  const result = await drainQuotaParked(db, { isCloud: true, enqueueSends: async () => {} });
   expect(result).toEqual({ drained: 0, stillParked: 2 });
+});
+
+it("drain keeps releasing other teams' rows once one team is found exhausted", async () => {
+  await db.insert(schema.usageCounters).values({ teamId, day: today(), accepted: FREE_CEILING });
+  const other = await createTeam(db, "cron-other");
+  const at = (h: number) => new Date(`2026-08-13T0${h}:00:00Z`);
+  await insertParked(at(1));
+  await db.insert(schema.emails).values([
+    {
+      teamId: other,
+      from: "b@other.dev",
+      to: ["r@example.com"],
+      subject: "s",
+      latestStatus: "queued_quota",
+      createdAt: at(2),
+    },
+    {
+      teamId: other,
+      from: "b@other.dev",
+      to: ["r@example.com"],
+      subject: "s",
+      latestStatus: "queued_quota",
+      createdAt: at(4),
+    },
+  ]);
+  await insertParked(at(3));
+  const enqueued: string[] = [];
+  const result = await drainQuotaParked(db, {
+    isCloud: true,
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  });
+  expect(result).toEqual({ drained: 2, stillParked: 2 });
+  const released = await db
+    .select({ teamId: schema.emails.teamId })
+    .from(schema.emails)
+    .where(eq(schema.emails.latestStatus, "queued"));
+  expect(released.map((r) => r.teamId)).toEqual([other, other]);
+});
+
+it("hourly usage purge drops rows older than 45 days in batches and reports the driver's count", async () => {
+  const now = new Date("2026-09-08T12:00:00Z");
+  const stale = new Date(now.getTime() - 46 * DAY_MS);
+  const rows = Array.from({ length: 1001 }, (_, i) => ({
+    teamId,
+    hour: new Date(stale.getTime() - i * 60 * 60 * 1000),
+    sent: 1,
+  }));
+  rows.push({ teamId, hour: new Date(now.getTime() - 44 * DAY_MS), sent: 1 });
+  await db.insert(schema.usageCountersHourly).values(rows);
+  expect(await purgeStaleHourlyUsage(db, now)).toBe(1001);
+  expect(await purgeStaleHourlyUsage(db, now)).toBe(0);
+  const left = await db.select().from(schema.usageCountersHourly);
+  expect(left).toHaveLength(1);
 });

@@ -12,14 +12,18 @@ import {
   PAUSE_COMPLAINT_RATE,
   PLAN_DAILY_LIMIT,
   QUOTA_TOLERANCE,
+  resultRows,
   utcDay,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
+  WEBHOOK_BACKLOG_AGE_MS,
+  WEBHOOK_BACKLOG_COUNT,
+  WEBHOOK_FAILING_STREAK,
   type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, gt, gte, sql } from "drizzle-orm";
+import { and, eq, gt, gte, like, lt, or, sql } from "drizzle-orm";
 import {
   deliverabilityPausedMail,
   deliverabilityWarningMail,
@@ -27,8 +31,12 @@ import {
   quotaPausedMail,
   quotaReachedMail,
   quotaWarningMail,
+  webhookAutoDisabledMail,
+  webhookBacklogMail,
+  webhookFailingMail,
 } from "../notifications/templates.js";
 import type { SystemMailer } from "../system-mail.js";
+import { COUNTED_SETTLED_SQL, WEBHOOK_AUTO_DISABLE_AFTER } from "./deliver-webhook.js";
 
 export interface NotifyDeps {
   isCloud: boolean;
@@ -46,6 +54,81 @@ export const QUOTA_WARNING_RATIO = 0.8;
  * re-notified on every crossing, one sweep apart.
  */
 export const DELIVERABILITY_CLEAR_RATIO = 0.9;
+
+type NotificationType =
+  | "quota.warning"
+  | "quota.reached"
+  | "quota.paused"
+  | "deliverability.warning"
+  | "deliverability.paused"
+  | "webhook.failing"
+  | "webhook.auto_disabled"
+  | "webhook.backlog";
+
+interface EndpointStanding {
+  id: string;
+  url: string;
+  status: "enabled" | "auto_disabled";
+  team_id: string;
+  team: string;
+  settled: number;
+  succeeded: number;
+  newest_ok: boolean;
+  queued: number;
+  oldest_ms: number | null;
+}
+
+/**
+ * Every live endpoint with the two facts the webhook notifications judge:
+ * its last WEBHOOK_FAILING_STREAK counted settled deliveries (off the
+ * settled index; see COUNTED_SETTLED_SQL) and its open backlog, counted no
+ * further than WEBHOOK_BACKLOG_COUNT + 1 rows down the due index for the
+ * mail's figure. One statement for the whole sweep.
+ * ponytail: unpaged; page by endpoint id if endpoints ever number in the
+ * tens of thousands.
+ */
+async function endpointStandings(db: Db): Promise<EndpointStanding[]> {
+  const d = schema.webhookDeliveries;
+  const e = schema.webhookEndpoints;
+  const t = schema.teams;
+  return resultRows<EndpointStanding>(
+    await db.execute(sql`
+      select ${e.id} as id, ${e.url} as url, ${e.status} as status,
+             ${e.teamId} as team_id, ${t.name} as team,
+             recent.settled, recent.succeeded, recent.newest_ok,
+             open.queued, open.oldest_ms
+      from ${e}
+      inner join ${t} on ${t.id} = ${e.teamId}
+      cross join lateral (
+        select count(*)::int as settled,
+               count(*) filter (where r.status = 'success')::int as succeeded,
+               coalesce(bool_or(r.status = 'success' and r.rn = 1), false) as newest_ok
+        from (
+          select ${d.status} as status,
+                 row_number() over (order by ${d.createdAt} desc nulls last, ${d.id} desc nulls last) as rn
+          from ${d}
+          where ${d.endpointId} = ${e.id} and ${COUNTED_SETTLED_SQL}
+          order by ${d.createdAt} desc nulls last, ${d.id} desc nulls last
+          limit ${WEBHOOK_FAILING_STREAK}
+        ) r
+      ) recent
+      cross join lateral (
+        select count(*)::int as queued,
+               (extract(epoch from min(q.at)) * 1000)::float8 as oldest_ms
+        from (
+          select ${d.nextAttemptAt} as at
+          from ${d}
+          where ${d.endpointId} = ${e.id}
+            and ${d.status} in ('pending', 'failed')
+            and ${d.nextAttemptAt} is not null
+          order by ${d.nextAttemptAt}
+          limit ${WEBHOOK_BACKLOG_COUNT + 1}
+        ) q
+      ) open
+      where ${e.status} in ('enabled', 'auto_disabled')
+    `),
+  );
+}
 
 const lineFor = (r: DeliverabilityReason): number =>
   r.tier === "paused"
@@ -68,28 +151,36 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
   const base = deps.appBaseUrl ?? "";
   let sent = 0;
 
+  // The claim is already taken, so a failing side effect is logged and
+  // skipped rather than retried: at-most-once, and one team's broken mail
+  // never stops the sweep for the others.
+  const attempt = async (
+    teamId: string,
+    type: NotificationType,
+    what: string,
+    fn: () => Promise<void>,
+  ) => {
+    try {
+      await fn();
+    } catch (err) {
+      console.error(`notifications.sweep: ${type} for team ${teamId} failed (${what})`, err);
+    }
+  };
+  const mailOwners = async (teamId: string, type: NotificationType, mail: MailContent) => {
+    for (const owner of await listTeamOwners(db, teamId)) {
+      await attempt(teamId, type, `mail to ${owner.email}`, () =>
+        deps.mailer.send(owner.email, { ...mail, kind: type }),
+      );
+    }
+    sent += 1;
+  };
   const notify = async (
     teamId: string,
-    type:
-      | "quota.warning"
-      | "quota.reached"
-      | "quota.paused"
-      | "deliverability.warning"
-      | "deliverability.paused",
+    type: Exclude<NotificationType, `webhook.${string}`>,
     data: Record<string, unknown>,
     mail: MailContent,
   ) => {
-    // The claim is already taken, so a failing side effect is logged and
-    // skipped rather than retried: at-most-once, and one team's broken mail
-    // never stops the sweep for the others.
-    const attempt = async (what: string, fn: () => Promise<void>) => {
-      try {
-        await fn();
-      } catch (err) {
-        console.error(`notifications.sweep: ${type} for team ${teamId} failed (${what})`, err);
-      }
-    };
-    await attempt("webhook", () =>
+    await attempt(teamId, type, "webhook", () =>
       enqueueTeamWebhookDeliveries(db, {
         teamId,
         type,
@@ -98,16 +189,83 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
         enqueue: deps.enqueueWebhook,
       }),
     );
-    for (const owner of await listTeamOwners(db, teamId)) {
-      await attempt(`mail to ${owner.email}`, () =>
-        deps.mailer.send(owner.email, { ...mail, kind: type }),
-      );
-    }
-    sent += 1;
+    await mailOwners(teamId, type, mail);
   };
 
+  // Webhook trouble goes out by mail only: the endpoint in trouble is the one
+  // that would have received the event.
+  const today = utcDay(now.getTime());
+  // Backlog claims are per UTC day and nothing else clears them.
+  await db
+    .delete(schema.teamNotifications)
+    .where(
+      and(
+        like(schema.teamNotifications.kind, "webhook.backlog:%"),
+        lt(schema.teamNotifications.periodKey, today),
+      ),
+    );
+  const webhookClaims = new Set(
+    (
+      await db
+        .select({ teamId: schema.teamNotifications.teamId, kind: schema.teamNotifications.kind })
+        .from(schema.teamNotifications)
+        .where(
+          or(
+            like(schema.teamNotifications.kind, "webhook.failing:%"),
+            like(schema.teamNotifications.kind, "webhook.auto_disabled:%"),
+          ),
+        )
+    ).map((c) => `${c.teamId}:${c.kind}`),
+  );
+  const clearIfClaimed = async (teamId: string, kind: string) => {
+    if (webhookClaims.has(`${teamId}:${kind}`)) await clearNotifications(db, { teamId, kind });
+  };
+  for (const e of await endpointStandings(db)) {
+    const teamId = e.team_id;
+    const input = { team: e.team, endpoint: e.url, url: `${base}/webhooks/${e.id}` };
+    const failingKind = `webhook.failing:${e.id}`;
+    const disabledKind = `webhook.auto_disabled:${e.id}`;
+    if (e.status === "auto_disabled") {
+      if (await claimNotification(db, { teamId, kind: disabledKind, periodKey: "episode" })) {
+        await mailOwners(
+          teamId,
+          "webhook.auto_disabled",
+          webhookAutoDisabledMail({ ...input, after: WEBHOOK_AUTO_DISABLE_AFTER }),
+        );
+      }
+      continue;
+    }
+    await clearIfClaimed(teamId, disabledKind);
+    if (e.newest_ok) await clearIfClaimed(teamId, failingKind);
+    if (
+      e.settled >= WEBHOOK_FAILING_STREAK &&
+      e.succeeded === 0 &&
+      (await claimNotification(db, { teamId, kind: failingKind, periodKey: "episode" }))
+    ) {
+      await mailOwners(
+        teamId,
+        "webhook.failing",
+        webhookFailingMail({
+          ...input,
+          streak: WEBHOOK_FAILING_STREAK,
+          disableAfter: WEBHOOK_AUTO_DISABLE_AFTER,
+        }),
+      );
+    }
+    const oldestAgeMs = e.oldest_ms === null ? 0 : now.getTime() - e.oldest_ms;
+    if (
+      oldestAgeMs > WEBHOOK_BACKLOG_AGE_MS &&
+      (await claimNotification(db, { teamId, kind: `webhook.backlog:${e.id}`, periodKey: today }))
+    ) {
+      await mailOwners(
+        teamId,
+        "webhook.backlog",
+        webhookBacklogMail({ ...input, queued: e.queued, cap: WEBHOOK_BACKLOG_COUNT, oldestAgeMs }),
+      );
+    }
+  }
+
   if (deps.isCloud) {
-    const today = utcDay(now.getTime());
     const rows = await db
       .select({
         teamId: schema.usageCounters.teamId,
