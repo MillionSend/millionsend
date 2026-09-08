@@ -181,7 +181,11 @@ it("a failed page enqueue leaves a row a send lane has claimed but not yet sent 
   expect(counter?.accepted).toBe(1);
 });
 
-it("a failed page enqueue ends the run instead of walking the remaining pages", async () => {
+// A full page of 500 parked rows each moves through its own transaction:
+// slow on PGlite under a loaded CI runner, so this one gets a longer budget.
+it("a failed page enqueue ends the run instead of walking the remaining pages", {
+  timeout: 60_000,
+}, async () => {
   const base = Date.parse("2026-08-13T00:00:00Z");
   // One row more than a page, so a second page exists to be skipped.
   await db.insert(schema.emails).values(
