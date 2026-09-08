@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, gt, isNull, lt, or, sql } from "drizzle-orm";
 import { segmentContactsWhere } from "./segment-filter.js";
 
 export interface SegmentCounts {
@@ -55,8 +55,20 @@ export async function recountSegment(
 }
 
 /**
+ * A count this old is refreshed even when nothing looks changed: contact
+ * deletes and manual-member removals leave no newer row behind, so the
+ * change checks below cannot see them.
+ * ponytail: bounded staleness instead of a signal; have those paths null
+ * segments.counted_at for the team and drop this ceiling.
+ */
+const RECOUNT_CEILING_MS = 24 * 60 * 60 * 1000;
+
+/**
  * Refreshes segments never counted or counted before `olderThanMs` ago, one
  * statement per segment so no single query grows with the number of segments.
+ * A stale segment is skipped while no contact of its team and no manual
+ * member was written since it was counted (index lookups, never a scan), so
+ * an idle team's segments cost nothing between imports.
  */
 export async function recountStaleSegments(
   db: Db,
@@ -64,11 +76,30 @@ export async function recountStaleSegments(
 ): Promise<number> {
   const now = opts.now ?? new Date();
   const before = new Date(now.getTime() - opts.olderThanMs);
+  const ceiling = new Date(now.getTime() - RECOUNT_CEILING_MS);
   const s = schema.segments;
+  const c = schema.contacts;
+  const m = schema.segmentMembers;
+  const changedSince = or(
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(c)
+        .where(and(eq(c.teamId, s.teamId), gt(c.updatedAt, s.countedAt))),
+    ),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(m)
+        .where(and(eq(m.segmentId, s.id), gt(m.createdAt, s.countedAt))),
+    ),
+  );
   const stale = await db
     .select({ id: s.id, teamId: s.teamId, filter: s.filter })
     .from(s)
-    .where(or(isNull(s.countedAt), lt(s.countedAt, before)))
+    .where(
+      or(isNull(s.countedAt), lt(s.countedAt, ceiling), and(lt(s.countedAt, before), changedSince)),
+    )
     .orderBy(asc(s.countedAt))
     .limit(opts.limit ?? 200);
   for (const segment of stale) {

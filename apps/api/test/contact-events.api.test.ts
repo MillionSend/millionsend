@@ -153,6 +153,36 @@ describe("audience webhook events", () => {
     });
   });
 
+  it("stay silent on a PATCH that restates the current values, leaving updated_at alone", async () => {
+    const contact = (await (
+      await call("POST", "/contacts", {
+        email: "same@example.com",
+        first_name: "Same",
+        properties: { plan: "free" },
+      })
+    ).json()) as { id: string };
+    const stored = async () =>
+      (await db.select().from(schema.contacts).where(eq(schema.contacts.id, contact.id)))[0];
+    const before = await stored();
+    const count = (await deliveries()).length;
+
+    const res = await call("PATCH", `/contacts/${contact.id}`, {
+      first_name: "Same",
+      last_name: null,
+      unsubscribed: false,
+      properties: { plan: "free", missing: null },
+    });
+    expect(res.status).toBe(200);
+    expect(await stored()).toEqual(before);
+    expect((await deliveries()).length).toBe(count);
+
+    expect((await call("PATCH", `/contacts/${contact.id}`, { last_name: "Changed" })).status).toBe(
+      200,
+    );
+    expect((await deliveries())[0]?.eventType).toBe("contact.updated");
+    expect((await stored())?.updatedAt.getTime()).toBeGreaterThan(before?.updatedAt.getTime() ?? 0);
+  });
+
   it("publish topic opt-outs with the topic named", async () => {
     const topic = (await (
       await call("POST", "/topics", { name: "Digest", default_subscription: "opt_in" })

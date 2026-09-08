@@ -81,7 +81,7 @@ it("forwards a job priority so transactional sends fetch ahead of bulk ones", as
 it("fetches bursty queues continuously: a batch above one turns burst mode on, a batch of one leaves it off", async () => {
   const queue = await Queue.start("postgres://unused");
   await queue.work("ses.event", async () => {}, { batchSize: 10, concurrency: 4 });
-  await queue.work("webhook.deliver", async () => {}, {
+  await queue.work("webhook.drain", async () => {}, {
     concurrency: 8,
     pollingIntervalSeconds: 1,
   });
@@ -91,7 +91,7 @@ it("fetches bursty queues continuously: a batch above one turns burst mode on, a
       opts: { batchSize: 10, localConcurrency: 4, burstWhenBatchFull: true },
     },
     {
-      name: "webhook.deliver",
+      name: "webhook.drain",
       opts: {
         batchSize: 1,
         localConcurrency: 8,
@@ -104,7 +104,7 @@ it("fetches bursty queues continuously: a batch above one turns burst mode on, a
 
 it("caps a fairness group per process when asked", async () => {
   const queue = await Queue.start("postgres://unused");
-  await queue.work("webhook.deliver", async () => {}, {
+  await queue.work("ses.event", async () => {}, {
     concurrency: 16,
     batchSize: 2,
     groupConcurrency: 2,
@@ -119,21 +119,21 @@ it("caps a fairness group per process when asked", async () => {
 
 it("sends many jobs in one statement with the same policy as single sends, plus group and expiry", async () => {
   const queue = await Queue.start("postgres://unused");
-  await queue.sendMany("webhook.deliver", [
-    { payload: { deliveryId: "d1" }, dedupeKey: "d1", group: "endpoint-a" },
+  await queue.sendMany("recipient.erase", [
+    { payload: { teamId: "t", address: "a" }, dedupeKey: "t:a", group: "team-a" },
     {
-      payload: { deliveryId: "d2" },
-      dedupeKey: "d2",
-      group: "endpoint-b",
+      payload: { teamId: "t", address: "b" },
+      dedupeKey: "t:b",
+      group: "team-b",
       startAfter: new Date(0),
     },
   ]);
-  expect(inserted.map((i) => i.name)).toEqual(["webhook.deliver", "webhook.deliver"]);
+  expect(inserted.map((i) => i.name)).toEqual(["recipient.erase", "recipient.erase"]);
   expect(inserted[0]?.job).toMatchObject({
-    data: { deliveryId: "d1" },
-    singletonKey: "d1",
-    group: { id: "endpoint-a" },
-    deadLetter: "webhook.deliver.dead",
+    data: { teamId: "t", address: "a" },
+    singletonKey: "t:a",
+    group: { id: "team-a" },
+    deadLetter: "recipient.erase.dead",
     deleteAfterSeconds: 3600,
     retryLimit: 10,
   });
@@ -145,4 +145,26 @@ it("sends many jobs in one statement with the same policy as single sends, plus 
   expect(sent.at(-1)?.opts).toMatchObject({ expireInSeconds: 6 * 3600, deleteAfterSeconds: 3600 });
   await queue.send("email.send", { emailId: "e" }, { dedupeKey: "e" });
   expect(sent.at(-1)?.opts).not.toHaveProperty("expireInSeconds");
+});
+
+it("arms one drain per distinct endpoint, keyed by the endpoint so a queued one absorbs the rest", async () => {
+  const queue = await Queue.start("postgres://unused");
+  const at = new Date(0);
+  await queue.drainWebhookEndpoints(["ep-a", "ep-b", "ep-a", "ep-a"], at);
+  expect(inserted.map((i) => i.name)).toEqual(["webhook.drain", "webhook.drain"]);
+  expect(inserted.map((i) => i.job)).toEqual([
+    expect.objectContaining({
+      data: { endpointId: "ep-a" },
+      singletonKey: "ep-a",
+      startAfter: at,
+      deadLetter: "webhook.drain.dead",
+    }),
+    expect.objectContaining({ data: { endpointId: "ep-b" }, singletonKey: "ep-b" }),
+  ]);
+  expect(inserted[0]?.job).not.toHaveProperty("group");
+  expect(inserted[0]?.job).not.toHaveProperty("priority");
+  expect(queues.get("webhook.drain")).toEqual({ policy: "short" });
+
+  await queue.drainWebhookEndpoints([]);
+  expect(inserted).toHaveLength(2);
 });

@@ -2,34 +2,64 @@ import {
   decryptWebhookSigningSecrets,
   type Keyring,
   type PostJsonResult,
-  type QueuedWebhookDelivery,
+  retryAfterMs,
   signWebhook,
+  WEBHOOK_MAX_AGE_MS,
   WEBHOOK_MAX_ATTEMPTS,
+  WEBHOOK_MAX_RATE_PER_SECOND,
   WEBHOOK_RETRY_SCHEDULE_MS,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lte, type SQL, sql } from "drizzle-orm";
+import { createTokenBucket } from "./send-email.js";
 
 /**
- * Delivers one webhook. The job payload carries only the deliveryId; every
- * fact (endpoint, secret, payload) is re-read from the database. Safe under
- * redelivery: terminal rows are skipped, and a retry job re-signs with a
- * fresh timestamp but the same webhook-id, so receivers can dedupe.
+ * Drains one endpoint's due deliveries. The job payload carries only the
+ * endpointId; webhook_deliveries is the backlog and every fact (endpoint,
+ * secret, payload) is re-read from it. A pass claims due rows in pages
+ * under a lease on next_attempt_at, posts them in order at the platform
+ * rate, and re-arms itself for the endpoint's next due instant, so a slow
+ * receiver's backlog lives in its own rows and never in the job table.
  */
 
-export interface DeliverDeps {
+export interface DrainDeps {
   keyring: Keyring;
-  /** SSRF-guarded POST (production: core's postJson; tests: a fake). */
-  post: (url: string, body: string, headers: Record<string, string>) => Promise<PostJsonResult>;
-  /** Re-enqueue this delivery for its next attempt, in its endpoint's fairness group. */
-  reenqueue: (delivery: QueuedWebhookDelivery, at: Date) => Promise<void>;
+  /**
+   * SSRF-guarded POST (production: core's postJson; tests: a fake).
+   * `retryAfter` is the receiver's raw Retry-After header when it sent one.
+   */
+  post: (
+    url: string,
+    body: string,
+    headers: Record<string, string>,
+  ) => Promise<PostJsonResult & { retryAfter?: string | null }>;
+  /** Queue this endpoint's next drain pass, to start no earlier than `at`. */
+  rearm: (endpointId: string, at: Date) => Promise<void>;
   now?: () => Date;
 }
 
-export type DeliverOutcome = "success" | "retry" | "exhausted" | "skipped";
+export interface DrainOutcome {
+  posted: number;
+  exhausted: number;
+  rearmAt: Date | null;
+}
 
+/** Wall-clock budget of one pass; whatever is left waits for the re-armed successor. */
+const DRAIN_BUDGET_MS = 20_000;
+const DRAIN_PAGE = 50;
+/** How far a claim pushes next_attempt_at: a pass that dies mid-page releases its rows by itself. */
+const LEASE_MS = 60_000;
+/**
+ * Longest a re-arm may park. A queued drain job is the endpoint's singleton
+ * (short policy), so one parked further out would swallow the job a fresh
+ * insert tries to arm and delay that row until the park ends.
+ */
+const DRAIN_IDLE_POLL_MS = 60_000;
+const SETTLE_BATCH = 1000;
 const RESPONSE_SNIPPET_CHARS = 1024;
+
+const OPEN_STATUSES = ["pending", "failed"] as const;
 
 /**
  * Circuit breaker: once this many of an endpoint's most recent settled
@@ -38,19 +68,29 @@ const RESPONSE_SNIPPET_CHARS = 1024;
  */
 export const WEBHOOK_AUTO_DISABLE_AFTER = 20;
 
-/** Terminal abandon for a delivery whose job will never run again. */
-export async function abandonWebhookDelivery(db: Db, deliveryId: string): Promise<boolean> {
-  const [row] = await db
-    .update(schema.webhookDeliveries)
-    .set({ status: "exhausted", nextAttemptAt: null })
-    .where(
-      and(
-        eq(schema.webhookDeliveries.id, deliveryId),
-        inArray(schema.webhookDeliveries.status, ["pending", "failed"]),
-      ),
-    )
-    .returning({ id: schema.webhookDeliveries.id });
-  return row !== undefined;
+/** Exhausts open rows matching `condition` in bounded batches; returns how many. */
+export async function exhaustOpenDeliveries(db: Db, condition: SQL): Promise<number> {
+  const d = schema.webhookDeliveries;
+  let total = 0;
+  for (;;) {
+    const batch = await db
+      .update(d)
+      .set({ status: "exhausted", nextAttemptAt: null })
+      .where(
+        inArray(
+          d.id,
+          db
+            .select({ id: d.id })
+            .from(d)
+            .where(and(inArray(d.status, OPEN_STATUSES), condition))
+            .limit(SETTLE_BATCH),
+        ),
+      )
+      .returning({ id: d.id });
+    total += batch.length;
+    if (batch.length < SETTLE_BATCH) break;
+  }
+  return total;
 }
 
 /**
@@ -85,99 +125,202 @@ async function autoDisableIfDead(db: Db, endpointId: string): Promise<boolean> {
     )
     .returning({ id: schema.webhookEndpoints.id });
   if (row)
-    console.warn(`webhook.deliver: endpoint ${endpointId} auto-disabled after repeated failures`);
+    console.warn(`webhook.drain: endpoint ${endpointId} auto-disabled after repeated failures`);
   return row !== undefined;
 }
 
-export async function deliverWebhook(
-  db: Db,
-  deps: DeliverDeps,
-  payload: { deliveryId: string },
-): Promise<DeliverOutcome> {
-  const [row] = await db
-    .select({ delivery: schema.webhookDeliveries, endpoint: schema.webhookEndpoints })
-    .from(schema.webhookDeliveries)
-    .innerJoin(
-      schema.webhookEndpoints,
-      eq(schema.webhookDeliveries.endpointId, schema.webhookEndpoints.id),
+/**
+ * One statement claims the endpoint's due rows in due order and leases
+ * them: SKIP LOCKED keeps two passes on one endpoint (a successor armed
+ * while this one runs) off the same rows. RETURNING reads the pre-lease due
+ * instant off the locked subquery so the page can be posted in that order.
+ */
+async function claimDue(db: Db, endpointId: string, now: Date) {
+  const d = schema.webhookDeliveries;
+  const due = db
+    .select({ id: d.id, dueAt: d.nextAttemptAt })
+    .from(d)
+    .where(
+      and(
+        eq(d.endpointId, endpointId),
+        inArray(d.status, OPEN_STATUSES),
+        lte(d.nextAttemptAt, now),
+      ),
     )
-    .where(eq(schema.webhookDeliveries.id, payload.deliveryId));
-  if (!row) return "skipped";
-  const { delivery, endpoint } = row;
-  if (delivery.status === "success" || delivery.status === "exhausted") return "skipped";
-  if (endpoint.status !== "enabled") {
-    // Endpoint turned off after the delivery was queued: abandon, don't stall
-    // the retry sweep on a row that will never send.
-    await abandonWebhookDelivery(db, delivery.id);
-    return "skipped";
-  }
-  // How many deliveries of one endpoint run at once is the queue's job
-  // (each job carries the endpoint as its fairness group), so a stalled
-  // receiver holds its own two lanes and no one else's.
-  const now = deps.now?.() ?? new Date();
-  return attemptDelivery(db, deps, delivery, endpoint, now);
+    .orderBy(asc(d.nextAttemptAt), asc(d.id))
+    .limit(DRAIN_PAGE)
+    .for("update", { skipLocked: true })
+    .as("due");
+  const rows = await db
+    .update(d)
+    .set({ nextAttemptAt: new Date(now.getTime() + LEASE_MS) })
+    .from(due)
+    .where(eq(d.id, due.id))
+    .returning({
+      id: d.id,
+      messageId: d.messageId,
+      payload: d.payload,
+      attempts: d.attempts,
+      createdAt: d.createdAt,
+      dueAt: due.dueAt,
+    });
+  return rows.sort(
+    (a, b) => (a.dueAt?.getTime() ?? 0) - (b.dueAt?.getTime() ?? 0) || a.id.localeCompare(b.id),
+  );
 }
 
-async function attemptDelivery(
-  db: Db,
-  deps: DeliverDeps,
-  delivery: typeof schema.webhookDeliveries.$inferSelect,
-  endpoint: typeof schema.webhookEndpoints.$inferSelect,
-  now: Date,
-): Promise<DeliverOutcome> {
-  const secrets = await decryptWebhookSigningSecrets(endpoint, deps.keyring, now);
+type ClaimedRow = Awaited<ReturnType<typeof claimDue>>[number];
 
-  const body = JSON.stringify(delivery.payload);
-  const headers = signWebhook(secrets, {
-    msgId: delivery.messageId,
-    timestamp: Math.floor(now.getTime() / 1000),
-    payload: body,
-  });
-
-  let status: number | null = null;
-  let snippet: string;
-  try {
-    const res = await deps.post(endpoint.url, body, { ...headers });
-    status = res.status;
-    snippet = res.body.slice(0, RESPONSE_SNIPPET_CHARS);
-  } catch (err) {
-    snippet = (err instanceof Error ? err.message : String(err)).slice(0, RESPONSE_SNIPPET_CHARS);
-  }
-
-  const attempts = delivery.attempts + 1;
-  const ok = status !== null && status >= 200 && status < 300;
-  if (ok) {
-    await db
-      .update(schema.webhookDeliveries)
-      .set({
-        status: "success",
-        attempts,
-        lastAttemptAt: now,
-        lastResponseCode: status,
-        lastResponseBody: snippet,
-        nextAttemptAt: null,
-      })
-      .where(eq(schema.webhookDeliveries.id, delivery.id));
-    return "success";
-  }
-
-  const exhausted = attempts >= WEBHOOK_MAX_ATTEMPTS;
-  const nextAttemptAt = exhausted
-    ? null
-    : new Date(now.getTime() + (WEBHOOK_RETRY_SCHEDULE_MS[attempts - 1] ?? 0));
+/** Hands leased rows back: due again at `at`, for the next pass to claim. */
+async function release(db: Db, rows: readonly ClaimedRow[], at: Date): Promise<void> {
+  if (rows.length === 0) return;
   await db
     .update(schema.webhookDeliveries)
-    .set({
-      status: exhausted ? "exhausted" : "failed",
-      attempts,
-      lastAttemptAt: now,
-      lastResponseCode: status,
-      lastResponseBody: snippet,
-      nextAttemptAt,
-    })
-    .where(eq(schema.webhookDeliveries.id, delivery.id));
-  if (nextAttemptAt)
-    await deps.reenqueue({ id: delivery.id, endpointId: endpoint.id }, nextAttemptAt);
-  if (exhausted) await autoDisableIfDead(db, endpoint.id);
-  return exhausted ? "exhausted" : "retry";
+    .set({ nextAttemptAt: at })
+    .where(
+      inArray(
+        schema.webhookDeliveries.id,
+        rows.map((r) => r.id),
+      ),
+    );
+}
+
+export async function drainWebhookEndpoint(
+  db: Db,
+  deps: DrainDeps,
+  payload: { endpointId: string },
+): Promise<DrainOutcome> {
+  const { endpointId } = payload;
+  const now = deps.now ?? (() => new Date());
+  const outcome: DrainOutcome = { posted: 0, exhausted: 0, rearmAt: null };
+  const d = schema.webhookDeliveries;
+  const [endpoint] = await db
+    .select()
+    .from(schema.webhookEndpoints)
+    .where(eq(schema.webhookEndpoints.id, endpointId));
+  if (!endpoint) return outcome;
+  if (endpoint.status !== "enabled") {
+    // Turned off with rows still open: settle them rather than leave a
+    // backlog nobody will ever post.
+    outcome.exhausted = await exhaustOpenDeliveries(db, eq(d.endpointId, endpointId));
+    return outcome;
+  }
+
+  const started = now();
+  const secrets = await decryptWebhookSigningSecrets(endpoint, deps.keyring, started);
+  // ponytail: the bucket is per pass, so a successor pass armed while this
+  // one runs shares nothing with it; a process-wide bucket per endpoint is
+  // the upgrade if two passes on one endpoint ever overlap for long.
+  const bucket = createTokenBucket(WEBHOOK_MAX_RATE_PER_SECOND);
+  const overBudget = (at: Date) => at.getTime() - started.getTime() >= DRAIN_BUDGET_MS;
+
+  pass: while (!overBudget(now())) {
+    const page = await claimDue(db, endpointId, now());
+    if (page.length === 0) break;
+    for (let i = 0; i < page.length; i += 1) {
+      const row = page[i] as ClaimedRow;
+      const rest = page.slice(i + 1);
+      const at = now();
+      if (overBudget(at)) {
+        await release(db, page.slice(i), at);
+        break pass;
+      }
+      if (at.getTime() - row.createdAt.getTime() >= WEBHOOK_MAX_AGE_MS) {
+        await db
+          .update(d)
+          .set({ status: "exhausted", nextAttemptAt: null })
+          .where(eq(d.id, row.id));
+        outcome.exhausted += 1;
+        if (await autoDisableIfDead(db, endpointId)) {
+          await release(db, rest, at);
+          break pass;
+        }
+        continue;
+      }
+
+      await bucket.take();
+      const body = JSON.stringify(row.payload);
+      const headers = signWebhook(secrets, {
+        msgId: row.messageId,
+        timestamp: Math.floor(at.getTime() / 1000),
+        payload: body,
+      });
+      let status: number | null = null;
+      let snippet: string;
+      let retryAfter: string | null | undefined;
+      try {
+        const res = await deps.post(endpoint.url, body, { ...headers });
+        status = res.status;
+        snippet = res.body.slice(0, RESPONSE_SNIPPET_CHARS);
+        retryAfter = res.retryAfter;
+      } catch (err) {
+        snippet = (err instanceof Error ? err.message : String(err)).slice(
+          0,
+          RESPONSE_SNIPPET_CHARS,
+        );
+      }
+      outcome.posted += 1;
+
+      if (status === 429) {
+        // The receiver is asking for room, not failing: no attempt is
+        // charged, and the whole page waits out its Retry-After.
+        const until = new Date(at.getTime() + retryAfterMs(retryAfter, at));
+        await db
+          .update(d)
+          .set({
+            lastAttemptAt: at,
+            lastResponseCode: status,
+            lastResponseBody: snippet,
+            nextAttemptAt: until,
+          })
+          .where(eq(d.id, row.id));
+        await release(db, rest, until);
+        break pass;
+      }
+
+      const attempts = row.attempts + 1;
+      const ok = status !== null && status >= 200 && status < 300;
+      const exhausted = !ok && attempts >= WEBHOOK_MAX_ATTEMPTS;
+      const nextAttemptAt =
+        ok || exhausted
+          ? null
+          : new Date(at.getTime() + (WEBHOOK_RETRY_SCHEDULE_MS[attempts - 1] ?? 0));
+      await db
+        .update(d)
+        .set({
+          status: ok ? "success" : exhausted ? "exhausted" : "failed",
+          attempts,
+          lastAttemptAt: at,
+          lastResponseCode: status,
+          lastResponseBody: snippet,
+          nextAttemptAt,
+        })
+        .where(eq(d.id, row.id));
+      if (exhausted) {
+        outcome.exhausted += 1;
+        if (await autoDisableIfDead(db, endpointId)) {
+          await release(db, rest, at);
+          break pass;
+        }
+      }
+    }
+  }
+
+  const [next] = await db
+    .select({ at: d.nextAttemptAt })
+    .from(d)
+    .where(
+      and(
+        eq(d.endpointId, endpointId),
+        inArray(d.status, OPEN_STATUSES),
+        isNotNull(d.nextAttemptAt),
+      ),
+    )
+    .orderBy(asc(d.nextAttemptAt))
+    .limit(1);
+  if (next?.at) {
+    outcome.rearmAt = new Date(Math.min(next.at.getTime(), now().getTime() + DRAIN_IDLE_POLL_MS));
+    await deps.rearm(endpointId, outcome.rearmAt);
+  }
+  return outcome;
 }

@@ -42,7 +42,7 @@ extensões do MillionSend.
 | Evento | Disparado quando | `data` extra |
 | --- | --- | --- |
 | `contact.created` | Um contato foi adicionado: API, lote, importação CSV ou painel. | |
-| `contact.updated` | Nome, propriedades ou o flag de descadastro mudaram pela API ou pelo painel. | |
+| `contact.updated` | Nome, propriedades ou o flag de descadastro mudaram pela API ou pelo painel. Uma escrita que repete os valores já guardados (uma reimportação completa, por exemplo) não emite nada e deixa `updated_at` intacto. | |
 | `contact.deleted` | Um contato foi excluído. Depois de um apagamento (`erase=true` na API, ou a ação de apagar do dashboard) o `email` guardado vem como `[erased]`; use o `id`. | |
 | `contact.unsubscribed` | O contato saiu de todo e-mail de marketing. | |
 | `contact.resubscribed` | Uma reinscrição explícita (`unsubscribed: false`). | |

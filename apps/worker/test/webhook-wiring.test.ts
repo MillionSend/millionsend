@@ -9,7 +9,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { reconcileWebhookDeliveries } from "../src/handlers/cron.js";
 import { processSesEvent } from "../src/handlers/process-ses-event.js";
@@ -51,11 +51,11 @@ async function insertEndpoint(
   return row.id;
 }
 
-async function insertSentEmail(sesMessageId: string): Promise<string> {
+async function insertSentEmail(sesMessageId: string, ownerTeamId = teamId): Promise<string> {
   const [row] = await db
     .insert(schema.emails)
     .values({
-      teamId,
+      teamId: ownerTeamId,
       from: "a@acme.dev",
       to: ["r@example.com"],
       subject: "s",
@@ -222,10 +222,43 @@ it("endpoint row stores no plaintext secret", async () => {
   expect(row.secretLast4.length).toBeLessThan(8);
 });
 
-it("reconcile sweep re-enqueues only well-overdue deliveries", async () => {
-  const endpointId = await insertEndpoint(teamId, null);
-  const old = new Date(Date.now() - 60 * 60 * 1000);
+it("fan-out hands every written row to the seam, one call per insert slice", async () => {
+  const fanTeamId = await createTeam(db, "fanout-team");
+  const a = await insertEndpoint(fanTeamId, null);
+  const b = await insertEndpoint(fanTeamId, null);
+  await insertSentEmail("wh-mid-fan", fanTeamId);
+  const calls: { id: string; endpointId: string }[][] = [];
+  await processSesEvent(
+    db,
+    {
+      eventType: "Delivery",
+      sesMessageId: "wh-mid-fan",
+      occurredAt: "2026-08-14T12:00:00.000Z",
+      data: { eventType: "Delivery" },
+    },
+    {
+      snsMessageId: "sns-wh-fan",
+      enqueueWebhookDelivery: async (rows) => {
+        calls.push(rows.map((r) => ({ id: r.id, endpointId: r.endpointId })));
+      },
+    },
+  );
+  expect(calls).toHaveLength(1);
+  expect(new Set(calls[0]?.map((r) => r.endpointId))).toEqual(new Set([a, b]));
+  // A freshly written row is due at once: the drain's clock is set on insert.
+  const rows = await deliveriesFor([a, b]);
+  expect(rows).toHaveLength(2);
+  for (const row of rows) expect(row.nextAttemptAt).toBeInstanceOf(Date);
+});
+
+it("reconcile sweep arms one drain per endpoint with rows nobody claimed, and expires day-old rows", async () => {
+  const now = new Date();
+  const stale = new Date(now.getTime() - 60 * 60 * 1000);
+  const quiet = await insertEndpoint(teamId, null);
+  const stuck = await insertEndpoint(teamId, null);
+  const alsoStuck = await insertEndpoint(teamId, null);
   const values = (
+    endpointId: string,
     overrides: Partial<typeof schema.webhookDeliveries.$inferInsert>,
   ): typeof schema.webhookDeliveries.$inferInsert => ({
     endpointId,
@@ -237,81 +270,93 @@ it("reconcile sweep re-enqueues only well-overdue deliveries", async () => {
   const inserted = await db
     .insert(schema.webhookDeliveries)
     .values([
-      values({ status: "pending", createdAt: old }),
-      values({ status: "failed", nextAttemptAt: old }),
-      values({ status: "pending" }), // fresh — a live job owns it
-      values({ status: "failed", nextAttemptAt: new Date(Date.now() + 60_000) }), // not due
-      values({ status: "exhausted", createdAt: old }),
+      // quiet: a live drain owns these (due just now / parked on the ladder).
+      values(quiet, { status: "pending", nextAttemptAt: now }),
+      values(quiet, { status: "failed", nextAttemptAt: new Date(now.getTime() + 60_000) }),
+      values(quiet, { status: "exhausted", createdAt: stale }),
+      // stuck: several stale rows still arm a single drain.
+      values(stuck, { status: "pending", nextAttemptAt: stale }),
+      values(stuck, { status: "failed", nextAttemptAt: stale }),
+      values(stuck, { status: "pending", nextAttemptAt: now }),
+      values(alsoStuck, { status: "failed", nextAttemptAt: stale }),
+      // a day-old open row is exhausted before anything is armed.
+      values(alsoStuck, {
+        status: "pending",
+        nextAttemptAt: stale,
+        createdAt: new Date(now.getTime() - 25 * 60 * 60 * 1000),
+      }),
     ])
-    .returning({ id: schema.webhookDeliveries.id });
+    .returning({
+      id: schema.webhookDeliveries.id,
+      endpointId: schema.webhookDeliveries.endpointId,
+    });
 
-  const enqueued: string[] = [];
+  const enqueued: { id: string; endpointId: string }[] = [];
   const count = await reconcileWebhookDeliveries(db, {
+    now,
     enqueue: async (rows) => {
-      enqueued.push(...rows.map((r) => r.id));
+      enqueued.push(...rows.map((r) => ({ id: r.id, endpointId: r.endpointId })));
     },
   });
   expect(count).toBe(2);
-  expect(new Set(enqueued)).toEqual(new Set([inserted[0]?.id, inserted[1]?.id]));
+  expect(enqueued.map((r) => r.endpointId).sort()).toEqual([stuck, alsoStuck].sort());
+  // Each id is a real open row of that endpoint, so the seam derives the endpoint from it.
+  for (const row of enqueued) {
+    expect(inserted.find((i) => i.id === row.id)?.endpointId).toBe(row.endpointId);
+  }
+  const expired = inserted.at(-1);
+  if (!expired) throw new Error("no rows");
+  const [expiredRow] = await db
+    .select({
+      status: schema.webhookDeliveries.status,
+      next: schema.webhookDeliveries.nextAttemptAt,
+    })
+    .from(schema.webhookDeliveries)
+    .where(eq(schema.webhookDeliveries.id, expired.id));
+  expect(expiredRow).toEqual({ status: "exhausted", next: null });
 });
 
-it("reconcile sweep pages through every overdue delivery in bounded statements", async () => {
-  const endpointId = await insertEndpoint(teamId, null);
-  const old = new Date(Date.now() - 60 * 60 * 1000);
-  const inserted = await db
-    .insert(schema.webhookDeliveries)
-    .values(
-      Array.from({ length: 1050 }, (_, i) => ({
-        endpointId,
-        messageId: `msg_bulk_${i}`,
-        eventType: "email.delivered",
-        payload: {},
-        status: "pending" as const,
-        createdAt: new Date(old.getTime() - i * 1000),
-      })),
-    )
-    .returning({ id: schema.webhookDeliveries.id });
-  const seen: string[] = [];
-  const pages: number[] = [];
-  const total = await reconcileWebhookDeliveries(db, {
-    enqueue: async (rows) => {
-      pages.push(rows.length);
-      seen.push(...rows.map((r) => r.id));
+it("reconcile sweep flags an endpoint whose backlog is deep or has been due for over an hour", async () => {
+  const now = new Date();
+  const lagging = await insertEndpoint(teamId, null);
+  const healthy = await insertEndpoint(teamId, null);
+  await db.insert(schema.webhookDeliveries).values([
+    {
+      endpointId: lagging,
+      messageId: "msg_lagging",
+      eventType: "email.delivered",
+      payload: {},
+      status: "pending",
+      nextAttemptAt: new Date(now.getTime() - 61 * 60 * 1000),
     },
-  });
-  // Every overdue row in one run, handed over one bounded page at a time.
-  expect(total).toBeGreaterThanOrEqual(1050);
-  expect(new Set(seen)).toEqual(expect.objectContaining({ size: new Set(seen).size }));
-  for (const row of inserted) expect(seen).toContain(row.id);
-  expect(Math.max(...pages)).toBeLessThanOrEqual(1000);
-});
-
-it("reconcile sweep terminates when more than a page of overdue deliveries share one created_at", async () => {
-  const endpointId = await insertEndpoint(teamId, null);
-  const inserted = await db
-    .insert(schema.webhookDeliveries)
-    .values(
-      Array.from({ length: 1001 }, (_, i) => ({
-        endpointId,
-        messageId: `msg_same_${i}`,
-        eventType: "email.delivered",
-        payload: {},
-        status: "pending" as const,
-      })),
-    )
-    .returning({ id: schema.webhookDeliveries.id });
-  // Rows written by one statement share one now(); PGlite's now() is
-  // millisecond-only, so the microsecond fraction is pinned by hand.
-  await db.execute(
-    sql`update ${schema.webhookDeliveries} set created_at = '2020-01-01T00:00:00.000123Z' where ${schema.webhookDeliveries.messageId} like 'msg_same_%'`,
-  );
-  const seen: string[] = [];
-  await reconcileWebhookDeliveries(db, {
-    enqueue: async (rows) => {
-      seen.push(...rows.map((r) => r.id));
+    {
+      endpointId: healthy,
+      messageId: "msg_healthy",
+      eventType: "email.delivered",
+      payload: {},
+      status: "pending",
+      nextAttemptAt: new Date(now.getTime() - 20 * 60 * 1000),
     },
-  });
-  const distinct = new Set(seen);
-  expect(distinct.size).toBe(seen.length);
-  for (const row of inserted) expect(distinct.has(row.id)).toBe(true);
+  ]);
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (line: string) => {
+    warnings.push(line);
+  };
+  try {
+    const armed: string[] = [];
+    await reconcileWebhookDeliveries(db, {
+      now,
+      enqueue: async (rows) => {
+        armed.push(...rows.map((r) => r.endpointId));
+      },
+    });
+    // Both are stale (nobody claimed them for 15 min); only one is an alarm.
+    expect(armed).toContain(lagging);
+    expect(armed).toContain(healthy);
+  } finally {
+    console.warn = warn;
+  }
+  expect(warnings.filter((w) => w.includes(lagging))).toHaveLength(1);
+  expect(warnings.filter((w) => w.includes(healthy))).toHaveLength(0);
 });

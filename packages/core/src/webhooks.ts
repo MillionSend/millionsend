@@ -210,6 +210,36 @@ export const WEBHOOK_RETRY_SCHEDULE_MS = [
 
 export const WEBHOOK_MAX_ATTEMPTS = WEBHOOK_RETRY_SCHEDULE_MS.length;
 
+/** An open delivery this old is exhausted without an attempt: a day-old event is stale news. */
+export const WEBHOOK_MAX_AGE_MS = 24 * 3_600_000;
+
+/**
+ * Posts per second the drain paces one endpoint at.
+ * ponytail: one platform-wide constant; a per-endpoint column is the upgrade
+ * when a receiver asks for more or less.
+ */
+export const WEBHOOK_MAX_RATE_PER_SECOND = 20;
+
+const RETRY_AFTER_DEFAULT_MS = 60_000;
+const RETRY_AFTER_MAX_MS = 3_600_000;
+
+/**
+ * Milliseconds a 429's Retry-After asks for (delta-seconds or HTTP-date),
+ * a minute when absent or unreadable, never more than an hour so a receiver
+ * cannot park its own backlog past the deliveries' hard expiry.
+ */
+export function retryAfterMs(header: string | null | undefined, now = new Date()): number {
+  const value = header?.trim();
+  let ms = RETRY_AFTER_DEFAULT_MS;
+  if (value) {
+    const seconds = Number(value);
+    const date = Date.parse(value);
+    if (Number.isFinite(seconds)) ms = seconds * 1000;
+    else if (Number.isFinite(date)) ms = date - now.getTime();
+  }
+  return Math.min(Math.max(ms, 0), RETRY_AFTER_MAX_MS);
+}
+
 export async function encryptWebhookSecret(
   secret: string,
   keyring: Keyring,
@@ -335,16 +365,16 @@ export async function decryptWebhookSigningSecrets(
   return secrets;
 }
 
-/** A delivery row just written, with the endpoint it belongs to (the queue's fairness group). */
+/** A delivery row just written, with the endpoint whose drain job it wakes. */
 export interface QueuedWebhookDelivery {
   id: string;
   endpointId: string;
 }
 
 /**
- * Hands freshly written delivery rows to the queue: one call per fan-out
- * however many endpoints matched, so a burst is one statement, not one per
- * endpoint.
+ * Hands freshly written delivery rows to the queue, which arms one drain
+ * job per distinct endpoint: one call per fan-out however many endpoints
+ * matched, so a burst is one statement, not one per row.
  */
 export type WebhookEnqueue = (deliveries: readonly QueuedWebhookDelivery[]) => Promise<void>;
 
@@ -357,7 +387,7 @@ const INSERT_CHUNK = 2000;
 
 /**
  * Fan an email event out to the owning team's enabled endpoints: one
- * delivery row + one job per matching endpoint. Callers invoke this exactly
+ * delivery row per matching endpoint. Callers invoke this exactly
  * once per event fact (the SNS dedupe / send claim already gate that), so no
  * extra idempotency key is needed here. Endpoints are matched strictly by
  * the email's own teamId — never by anything event-supplied.
@@ -444,16 +474,21 @@ export async function enqueueTeamWebhookEvents(
 
 type DeliveryInsert = typeof schema.webhookDeliveries.$inferInsert;
 
-/** Writes delivery rows in bounded slices and hands each slice to the queue. */
+/**
+ * Writes delivery rows in bounded slices and hands each slice to the queue.
+ * A new row is due at once: nextAttemptAt is the drain's clock, so it is
+ * set here rather than left to a column default.
+ */
 async function insertDeliveryRows(
   db: Db,
   values: DeliveryInsert[],
   enqueue: WebhookEnqueue,
 ): Promise<void> {
+  const now = new Date();
   for (let i = 0; i < values.length; i += INSERT_CHUNK) {
     const rows = await db
       .insert(schema.webhookDeliveries)
-      .values(values.slice(i, i + INSERT_CHUNK))
+      .values(values.slice(i, i + INSERT_CHUNK).map((v) => ({ nextAttemptAt: now, ...v })))
       .returning({
         id: schema.webhookDeliveries.id,
         endpointId: schema.webhookDeliveries.endpointId,

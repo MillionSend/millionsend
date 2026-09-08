@@ -597,6 +597,42 @@ describe("audience.contacts.update", () => {
   });
 });
 
+describe("audience.contacts.update no-op", () => {
+  it("restating the stored values writes nothing: updated_at stays, no contact.updated", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    await caller.webhooks.create({
+      url: "https://example.com/hooks",
+      eventTypes: ["contact.updated"],
+    });
+    const deliveries = async () =>
+      (await db.select({ id: schema.webhookDeliveries.id }).from(schema.webhookDeliveries)).length;
+    const { id } = await caller.audience.contacts.add({
+      email: "ada@example.com",
+      firstName: "Ada",
+      properties: { plan: "pro" },
+    });
+    const before = await contactRow(id);
+
+    await caller.audience.contacts.update({
+      id,
+      firstName: "Ada",
+      lastName: "",
+      unsubscribed: false,
+      properties: { plan: "pro" },
+    });
+    expect(await contactRow(id)).toEqual(before);
+    expect(await deliveries()).toBe(0);
+
+    // Replace semantics: the same values under a different key set is a change.
+    await caller.audience.contacts.update({ id, properties: { plan: "pro", city: "London" } });
+    expect(await deliveries()).toBe(1);
+    expect((await contactRow(id))?.updatedAt.getTime()).toBeGreaterThan(
+      before?.updatedAt.getTime() ?? 0,
+    );
+  });
+});
+
 describe("audience.properties.list", () => {
   it("derives distinct keys with coverage counts and a sample value", async () => {
     const teamId = await createTeam(db, "team-a");

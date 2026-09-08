@@ -10,6 +10,7 @@ import {
   purgeExpiredEmailBodies,
   purgeExpiredEmailMetadata,
   purgeExpiredSessions,
+  purgeStaleHourlyUsage,
   reconcileBillingPlans,
   reconcileStalledSends,
   stripExpiredEventPayloads,
@@ -178,6 +179,18 @@ it("reconcile re-enqueues stale queued emails but never claimed or fresh ones", 
   await db
     .insert(schema.emails)
     .values({ ...base, latestStatus: "queued_quota" as const, createdAt: old(30) });
+  // Scheduled for later: waiting by design, its job is due with it.
+  await db.insert(schema.emails).values({
+    ...base,
+    latestStatus: "queued" as const,
+    createdAt: old(30),
+    scheduledAt: old(-60),
+  });
+  // Scheduled for a time that has passed: lost like any other stale row.
+  const [due] = await db
+    .insert(schema.emails)
+    .values({ ...base, latestStatus: "queued" as const, createdAt: old(45), scheduledAt: old(5) })
+    .returning({ id: schema.emails.id });
 
   const enqueued: string[] = [];
   const count = await reconcileStalledSends(db, {
@@ -186,8 +199,32 @@ it("reconcile re-enqueues stale queued emails but never claimed or fresh ones", 
     },
     now,
   });
-  expect(count).toBe(1);
-  expect(enqueued).toEqual([stale?.id]);
+  expect(count).toBe(2);
+  expect(enqueued).toEqual([due?.id, stale?.id]);
+});
+
+it("reconcile pages through a backlog larger than one batch, each row once", async () => {
+  const now = new Date();
+  const createdAt = new Date(now.getTime() - 30 * 60 * 1000);
+  await db.insert(schema.emails).values(
+    Array.from({ length: 1001 }, (_, i) => ({
+      teamId,
+      from: "a@acme.dev",
+      to: [`r${i}@example.com`],
+      subject: "s",
+      latestStatus: "queued" as const,
+      createdAt,
+    })),
+  );
+  const enqueued: string[] = [];
+  const count = await reconcileStalledSends(db, {
+    enqueueSend: async (id) => {
+      enqueued.push(id);
+    },
+    now,
+  });
+  expect(count).toBe(1001);
+  expect(new Set(enqueued).size).toBe(1001);
 });
 
 it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async () => {
@@ -646,4 +683,59 @@ it("drain terminates when an exhausted team's parked rows share one created_at",
   await db.execute(sql`update ${schema.emails} set created_at = '2026-08-13T01:00:00.000123Z'`);
   const result = await drainQuotaParked(db, { isCloud: true, enqueueSend: async () => {} });
   expect(result).toEqual({ drained: 0, stillParked: 2 });
+});
+
+it("drain keeps releasing other teams' rows once one team is found exhausted", async () => {
+  await db.insert(schema.usageCounters).values({ teamId, day: today(), accepted: FREE_CEILING });
+  const other = await createTeam(db, "cron-other");
+  const at = (h: number) => new Date(`2026-08-13T0${h}:00:00Z`);
+  await insertParked(at(1));
+  await db.insert(schema.emails).values([
+    {
+      teamId: other,
+      from: "b@other.dev",
+      to: ["r@example.com"],
+      subject: "s",
+      latestStatus: "queued_quota",
+      createdAt: at(2),
+    },
+    {
+      teamId: other,
+      from: "b@other.dev",
+      to: ["r@example.com"],
+      subject: "s",
+      latestStatus: "queued_quota",
+      createdAt: at(4),
+    },
+  ]);
+  await insertParked(at(3));
+  const enqueued: string[] = [];
+  const result = await drainQuotaParked(db, {
+    isCloud: true,
+    enqueueSend: async (id) => {
+      enqueued.push(id);
+    },
+  });
+  expect(result).toEqual({ drained: 2, stillParked: 2 });
+  const released = await db
+    .select({ teamId: schema.emails.teamId })
+    .from(schema.emails)
+    .where(eq(schema.emails.latestStatus, "queued"));
+  expect(released.map((r) => r.teamId)).toEqual([other, other]);
+});
+
+it("hourly usage purge drops rows older than 45 days in batches and reports the driver's count", async () => {
+  const now = new Date("2026-09-08T12:00:00Z");
+  const stale = new Date(now.getTime() - 46 * DAY_MS);
+  const rows = Array.from({ length: 1001 }, (_, i) => ({
+    teamId,
+    hour: new Date(stale.getTime() - i * 60 * 60 * 1000),
+    sent: 1,
+  }));
+  rows.push({ teamId, hour: new Date(now.getTime() - 44 * DAY_MS), sent: 1 });
+  await db.insert(schema.usageCountersHourly).values(rows);
+  expect(await purgeStaleHourlyUsage(db, now)).toBe(1001);
+  expect(await purgeStaleHourlyUsage(db, now)).toBe(0);
+  const left = await db.select().from(schema.usageCountersHourly);
+  expect(left).toHaveLength(1);
 });

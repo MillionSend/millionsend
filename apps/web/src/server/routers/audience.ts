@@ -4,6 +4,8 @@ import {
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   type ContactEventContext,
   clearUnsubscribeSuppression,
+  contactPropertiesChange,
+  contactSnapshotColumns,
   emitContactEvents,
   emitSuppressionEvents,
   eraseRecipient,
@@ -75,16 +77,6 @@ async function assertContacts(
 const dashboardEvents = (ctx: {
   enqueueWebhookDeliveries?: WebhookEnqueue | undefined;
 }): ContactEventContext => ({ source: "dashboard", enqueue: ctx.enqueueWebhookDeliveries });
-
-const contactSnapshotColumns = {
-  id: schema.contacts.id,
-  email: schema.contacts.email,
-  firstName: schema.contacts.firstName,
-  lastName: schema.contacts.lastName,
-  unsubscribed: schema.contacts.unsubscribed,
-  createdAt: schema.contacts.createdAt,
-  updatedAt: schema.contacts.updatedAt,
-};
 
 export const audienceRouter = router({
   contacts: router({
@@ -397,33 +389,47 @@ export const audienceRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const t = schema.contacts;
-        // Read the flag before writing so the timeline records only real
-        // flips — an update restating the current state stays silent.
-        const [before] =
-          input.unsubscribed === undefined
-            ? []
-            : await ctx.db
-                .select({ unsubscribed: t.unsubscribed })
-                .from(t)
-                .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)));
+        // Read the row first: a save restating the current state is not
+        // written, so updated_at stays put, no contact.updated fires and the
+        // timeline only records real flips.
+        const [before] = await ctx.db
+          .select({ ...contactSnapshotColumns, properties: t.properties })
+          .from(t)
+          .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)));
+        if (!before) throw new TRPCError({ code: "NOT_FOUND" });
         // properties REPLACES the whole map when provided (not a merge);
         // omitting it leaves the stored map unchanged.
-        const [row] = await ctx.db
-          .update(t)
-          .set({
-            ...(input.firstName !== undefined ? { firstName: input.firstName || null } : {}),
-            ...(input.lastName !== undefined ? { lastName: input.lastName || null } : {}),
-            ...(input.unsubscribed !== undefined
-              ? {
-                  unsubscribed: input.unsubscribed,
-                  unsubscribedAt: input.unsubscribed ? new Date() : null,
-                }
-              : {}),
-            ...(input.properties !== undefined ? { properties: input.properties } : {}),
-            updatedAt: new Date(),
-          })
-          .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
-          .returning(contactSnapshotColumns);
+        const next = input.properties;
+        const dirty =
+          (input.firstName !== undefined && (input.firstName || null) !== before.firstName) ||
+          (input.lastName !== undefined && (input.lastName || null) !== before.lastName) ||
+          (input.unsubscribed !== undefined && input.unsubscribed !== before.unsubscribed) ||
+          (next !== undefined &&
+            contactPropertiesChange(
+              before.properties,
+              next,
+              Object.keys(before.properties).filter((key) => !(key in next)),
+            ));
+        const row = dirty
+          ? (
+              await ctx.db
+                .update(t)
+                .set({
+                  ...(input.firstName !== undefined ? { firstName: input.firstName || null } : {}),
+                  ...(input.lastName !== undefined ? { lastName: input.lastName || null } : {}),
+                  ...(input.unsubscribed !== undefined
+                    ? {
+                        unsubscribed: input.unsubscribed,
+                        unsubscribedAt: input.unsubscribed ? new Date() : null,
+                      }
+                    : {}),
+                  ...(input.properties !== undefined ? { properties: input.properties } : {}),
+                  updatedAt: new Date(),
+                })
+                .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
+                .returning(contactSnapshotColumns)
+            )[0]
+          : before;
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
         // Only this explicit re-subscribe lifts the retained one-click opt-out;
         // add/addMany of the same address leave it in place.
@@ -437,7 +443,7 @@ export const audienceRouter = router({
             enqueue: ctx.enqueueWebhookDeliveries,
           });
         }
-        if (before && before.unsubscribed !== row.unsubscribed) {
+        if (before.unsubscribed !== row.unsubscribed) {
           await recordContactActivity(
             ctx.db,
             {
@@ -448,11 +454,13 @@ export const audienceRouter = router({
             dashboardEvents(ctx),
           );
         }
-        await emitContactEvents(ctx.db, {
-          teamId: ctx.teamId,
-          events: [{ type: "contact.updated", contact: row }],
-          ctx: dashboardEvents(ctx),
-        });
+        if (dirty) {
+          await emitContactEvents(ctx.db, {
+            teamId: ctx.teamId,
+            events: [{ type: "contact.updated", contact: row }],
+            ctx: dashboardEvents(ctx),
+          });
+        }
         return row;
       }),
 

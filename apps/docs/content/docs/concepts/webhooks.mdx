@@ -41,7 +41,7 @@ changed it. `data` carries the contact in Resend's shape — `id`, `email`,
 | Event | Fired when | Extra `data` |
 | --- | --- | --- |
 | `contact.created` | A contact was added: API, batch, CSV import or dashboard. | |
-| `contact.updated` | Name, properties or the unsubscribed flag changed through the API or the dashboard. | |
+| `contact.updated` | Name, properties or the unsubscribed flag changed through the API or the dashboard. A write that restates the stored values (a full re-import, say) emits nothing and leaves `updated_at` untouched. | |
 | `contact.deleted` | A contact was deleted. After an erasure (`erase=true` on the API, or the dashboard's erase action) the stored `email` reads `[erased]`; key on `id`. | |
 | `contact.unsubscribed` | The contact opted out of all marketing email. | |
 | `contact.resubscribed` | An explicit re-subscribe (`unsubscribed: false`). | |

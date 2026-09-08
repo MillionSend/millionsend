@@ -250,7 +250,7 @@ export async function recordEngagement(
     try {
       await enqueueWebhookDeliveriesFn(deliveries);
     } catch (err) {
-      console.error("webhook.deliver enqueue failed; reconcile sweep will recover", err);
+      console.error("webhook drain enqueue failed; reconcile sweep will recover", err);
     }
   }
 }

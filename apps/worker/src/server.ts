@@ -44,7 +44,7 @@ import {
   reverifyDomains,
   stripExpiredEventPayloads,
 } from "./handlers/cron.js";
-import { abandonWebhookDelivery, deliverWebhook } from "./handlers/deliver-webhook.js";
+import { drainWebhookEndpoint } from "./handlers/deliver-webhook.js";
 import { sweepNotifications } from "./handlers/notify.js";
 import { runPlatformBreaker } from "./handlers/platform-breaker.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
@@ -171,21 +171,10 @@ const SEND_BATCH = 2;
 const EVENT_CONCURRENCY = 4;
 const EVENT_BATCH = 10;
 
-// One statement per fan-out, each job in its endpoint's fairness group so a
-// stalled receiver only ever holds its own lanes.
-const enqueueWebhook = async (
-  deliveries: readonly QueuedWebhookDelivery[],
-  startAfter?: Date,
-): Promise<void> => {
-  await queue.sendMany(
-    "webhook.deliver",
-    deliveries.map((d) => ({
-      payload: { deliveryId: d.id },
-      dedupeKey: d.id,
-      group: d.endpointId,
-      ...(startAfter ? { startAfter } : {}),
-    })),
-  );
+// Whatever rows a fan-out wrote, one drain job per distinct endpoint:
+// webhook_deliveries is the backlog, the job only names the endpoint to walk.
+const enqueueWebhook = async (deliveries: readonly QueuedWebhookDelivery[]): Promise<void> => {
+  await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
 };
 
 await queue.work(
@@ -291,24 +280,23 @@ if (env.SQS_QUEUE_URL) {
 }
 
 await queue.work(
-  "webhook.deliver",
-  async (payload) => {
-    await deliverWebhook(
+  "webhook.drain",
+  async ({ endpointId }) => {
+    await drainWebhookEndpoint(
       db,
       {
         keyring,
         post: (url, body, headers) =>
           postJson(url, { body, headers, allowLocalhost: env.WEBHOOK_ALLOW_LOCALHOST }),
-        reenqueue: (delivery, at) => enqueueWebhook([delivery], at),
+        rearm: (id, at) => queue.drainWebhookEndpoints([id], at),
       },
-      payload,
+      { endpointId },
     );
   },
-  // Receivers are tenant-controlled and can stall for the full timeout. Each
-  // job carries its endpoint as a fairness group capped at two in flight, so
-  // a dead receiver holds two lanes and the other fourteen keep draining
-  // everyone else; batches of two keep the fetch continuous under a backlog.
-  { concurrency: 16, batchSize: 2, groupConcurrency: 2 },
+  // One pass per endpoint at a time and a pass is time-boxed, so a stalled
+  // receiver holds one of these lanes for at most a budget before its
+  // successor queues behind everyone else's.
+  { concurrency: 8, batchSize: 1 },
 );
 
 // Erasure scans a team's whole history; it runs here so the request that
@@ -325,9 +313,10 @@ await queue.workDeadLetter("recipient.erase", async ({ teamId, address }) => {
   );
 });
 
-await queue.workDeadLetter("webhook.deliver", async ({ deliveryId }) => {
-  const abandoned = await abandonWebhookDelivery(db, deliveryId);
-  console.error(`webhook.deliver: dead-lettered ${deliveryId} (marked exhausted=${abandoned})`);
+// A drain that kept throwing: its rows stay open and the reconcile sweep
+// arms a fresh pass once they read as stale.
+await queue.workDeadLetter("webhook.drain", async ({ endpointId }) => {
+  console.error(`webhook.drain: dead-lettered endpoint ${endpointId}`);
 });
 
 await queue.scheduleCrons({

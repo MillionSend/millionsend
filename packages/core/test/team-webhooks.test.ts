@@ -9,6 +9,7 @@ import {
   enqueueTeamWebhookDeliveries,
   enqueueTeamWebhookEvents,
   generateWebhookSecret,
+  retryAfterMs,
 } from "../src/webhooks.js";
 
 let db: Db;
@@ -66,7 +67,19 @@ it("fans a team-level event out to subscribed endpoints with no email attached",
       data: { used: 80, limit: 100 },
     },
   });
+  // Due at once: the drain claims on nextAttemptAt, which a column default never sets.
+  expect(rows[0]?.nextAttemptAt).toBeInstanceOf(Date);
   expect(enqueued).toEqual([rows[0]?.id]);
+});
+
+it("reads Retry-After as delta-seconds or an HTTP-date, a minute by default, an hour at most", () => {
+  const now = new Date("2026-01-01T00:00:00Z");
+  expect(retryAfterMs("30", now)).toBe(30_000);
+  expect(retryAfterMs("Thu, 01 Jan 2026 00:00:45 GMT", now)).toBe(45_000);
+  expect(retryAfterMs("Wed, 31 Dec 2025 23:00:00 GMT", now)).toBe(0);
+  expect(retryAfterMs(undefined, now)).toBe(60_000);
+  expect(retryAfterMs("soon", now)).toBe(60_000);
+  expect(retryAfterMs("86400", now)).toBe(3_600_000);
 });
 
 it("fans a bulk event set out in slices that stay under the driver's bind-parameter cap", async () => {

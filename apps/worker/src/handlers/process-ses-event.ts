@@ -80,7 +80,7 @@ export async function processSesEvent(
   event: SerializedSesEvent,
   opts: {
     snsMessageId?: string;
-    /** Enqueue a webhook.deliver job; deliveries are skipped when absent. */
+    /** Arms the webhook drain for the endpoints written; deliveries are skipped when absent. */
     enqueueWebhookDelivery?: WebhookEnqueue;
   } = {},
 ): Promise<void> {
@@ -279,7 +279,7 @@ export async function processSesEvent(
     try {
       await enqueueDelivery(deliveries);
     } catch (err) {
-      console.error("webhook.deliver enqueue failed; reconcile sweep will recover", err);
+      console.error("webhook drain enqueue failed; reconcile sweep will recover", err);
     }
   }
 }

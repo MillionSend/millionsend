@@ -58,14 +58,7 @@ const app = createApi({
   publicApiUrl: env.PUBLIC_API_URL,
   unsubscribeSecretKey: deriveUnsubscribeKey(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64")),
   enqueueWebhookDeliveries: async (deliveries) => {
-    await queue.sendMany(
-      "webhook.deliver",
-      deliveries.map((d) => ({
-        payload: { deliveryId: d.id },
-        dedupeKey: d.id,
-        group: d.endpointId,
-      })),
-    );
+    await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
   },
   enqueueRecipientErase: async (teamId, address) => {
     await queue.send(

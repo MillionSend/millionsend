@@ -1,4 +1,4 @@
-import { date, integer, pgTable, primaryKey, timestamp, uuid } from "drizzle-orm/pg-core";
+import { date, index, integer, pgTable, primaryKey, timestamp, uuid } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
 
 /**
@@ -32,7 +32,12 @@ export const usageCounters = pgTable(
     // email like `opened`, kept apart so open rates count people only.
     prefetched: integer("prefetched").notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.teamId, t.day] })],
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.day] }),
+    // Cross-team reads by day alone: the notification sweep and the platform
+    // breaker's weekly window.
+    index("usage_counters_day_idx").on(t.day),
+  ],
 );
 
 /**
@@ -61,5 +66,9 @@ export const usageCountersHourly = pgTable(
     clicked: integer("clicked").notNull().default(0),
     prefetched: integer("prefetched").notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.teamId, t.hour] })],
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.hour] }),
+    // The retention purge deletes by hour across every team.
+    index("usage_counters_hourly_hour_idx").on(t.hour),
+  ],
 );

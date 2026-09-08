@@ -13,7 +13,9 @@ export interface JobPayloads {
   // snsMessageId rides along for durable idempotency in the handler; queue
   // dedupe alone cannot cover an SNS redelivery after the job completed.
   "ses.event": { event: SerializedSesEvent; snsMessageId: string };
-  "webhook.deliver": { deliveryId: string };
+  // One self-rescheduling drain per endpoint: webhook_deliveries is the
+  // backlog, so the job table never grows with a slow receiver's queue.
+  "webhook.drain": { endpointId: string };
   // Cross-table scrub of one address after its contact was deleted; too slow
   // for a request on a large team, so it runs here.
   "recipient.erase": { teamId: string; address: string };
@@ -70,7 +72,7 @@ const JOB_QUEUE_POLICY = "short" as const;
  */
 export const DEAD_LETTER_QUEUES = {
   "email.send": "email.send.dead",
-  "webhook.deliver": "webhook.deliver.dead",
+  "webhook.drain": "webhook.drain.dead",
   "recipient.erase": "recipient.erase.dead",
 } as const;
 
@@ -204,6 +206,23 @@ export class Queue {
   ): Promise<string | null> {
     const deadLetter = await this.#prepare(name);
     return this.#boss.send(name, payload, this.#jobOptions(name, opts, deadLetter));
+  }
+
+  /**
+   * Arm the drain of each endpoint, at most one queued job per endpoint:
+   * the key is the endpoint id, so a fan-out of any size onto an endpoint
+   * whose drain is already queued inserts nothing, and one that is running
+   * gets a successor that picks up whatever it leaves behind.
+   */
+  async drainWebhookEndpoints(endpointIds: readonly string[], startAfter?: Date): Promise<void> {
+    await this.sendMany(
+      "webhook.drain",
+      [...new Set(endpointIds)].map((endpointId) => ({
+        payload: { endpointId },
+        dedupeKey: endpointId,
+        startAfter,
+      })),
+    );
   }
 
   /**

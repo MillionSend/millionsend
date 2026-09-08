@@ -43,5 +43,8 @@ export const contacts = pgTable(
     index("contacts_team_created_idx").on(t.teamId, t.createdAt, t.id),
     // The broadcast fan-out walks a team's contacts by id in keyset pages.
     index("contacts_team_id_idx").on(t.teamId, t.id),
+    // "Did any contact of this team change since T?" — the segment recount
+    // answers it with one EXISTS before scanning the team.
+    index("contacts_team_updated_idx").on(t.teamId, t.updatedAt),
   ],
 );

@@ -1,8 +1,10 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { RegionBreakerReason } from "@millionsend/db/schema";
-import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { MIN_PAUSE_COMPLAINTS, MIN_PAUSE_HARD_BOUNCES } from "./deliverability.js";
+import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
  * SES enforces bounce/complaint rates on the whole account per region: one
@@ -76,6 +78,55 @@ export async function regionWindowCounts(
   for (const row of events) {
     const counts = out.get(row.region) ?? { sent: 0, hardBounced: 0, complained: 0 };
     out.set(row.region, { ...counts, hardBounced: row.hardBounced, complained: row.complained });
+  }
+  return out;
+}
+
+/**
+ * The same totals over the trailing `days` UTC days (today included) from
+ * usage_counters, which the send and SES-event paths bump alongside the
+ * rows the raw scan reads: `sent` per accepted send, `hard_bounced` per
+ * Permanent bounce, `complained` per complaint. Counters carry no domain,
+ * so a team's traffic goes to the region of its most recently verified
+ * domain — a team's verified domains share one region in practice, and a
+ * team spanning two is attributed whole to the newer one.
+ */
+export async function regionCounterTotals(
+  db: Db,
+  opts: { now: Date; days: number },
+): Promise<Map<string, RegionWindowCounts>> {
+  const since = utcDay(opts.now.getTime() - (opts.days - 1) * DAY_MS);
+  const c = schema.usageCounters;
+  const d = schema.domains;
+  const teamRegion = db
+    .selectDistinctOn([d.teamId], { teamId: d.teamId, region: d.region })
+    .from(d)
+    .orderBy(asc(d.teamId), sql`${d.verifiedAt} desc nulls last`, desc(d.createdAt))
+    .as("team_region");
+  // ::bigint — a region's weekly sum can overflow int4; the driver returns
+  // bigint as a string, exact through Number() up to 2^53.
+  const total = (col: AnyPgColumn) => sql<string>`coalesce(sum(${col}), 0)::bigint`;
+  const rows = await db
+    .select({
+      region: teamRegion.region,
+      sent: total(c.sent),
+      hardBounced: total(c.hardBounced),
+      complained: total(c.complained),
+    })
+    .from(c)
+    .innerJoin(teamRegion, eq(teamRegion.teamId, c.teamId))
+    .where(gte(c.day, since))
+    .groupBy(teamRegion.region);
+  const out = new Map<string, RegionWindowCounts>();
+  for (const row of rows) {
+    const counts = {
+      sent: Number(row.sent),
+      hardBounced: Number(row.hardBounced),
+      complained: Number(row.complained),
+    };
+    if (counts.sent > 0 || counts.hardBounced > 0 || counts.complained > 0) {
+      out.set(row.region, counts);
+    }
   }
   return out;
 }
@@ -156,12 +207,14 @@ export async function evaluateRegionBreakers(
   opts: { now?: Date } = {},
 ): Promise<RegionDecision[]> {
   const now = opts.now ?? new Date();
-  const windows = await Promise.all(
-    BREAKER_WINDOWS_HOURS.map(async (hours) => ({
-      hours,
-      counts: await regionWindowCounts(db, { now, hours }),
-    })),
-  );
+  // The day window reads raw rows to the minute; the week window reads the
+  // daily counters (seven UTC days including today, the guardrail's own
+  // convention) so a week of email_events is never re-scanned per run.
+  const [dayHours, weekHours] = BREAKER_WINDOWS_HOURS;
+  const windows = [
+    { hours: dayHours, counts: await regionWindowCounts(db, { now, hours: dayHours }) },
+    { hours: weekHours, counts: await regionCounterTotals(db, { now, days: weekHours / 24 }) },
+  ];
   // Paused regions stay in the set even with no traffic in either window:
   // a decision with nothing tripping is what lets them resume.
   const paused = await db

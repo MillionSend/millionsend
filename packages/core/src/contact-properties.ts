@@ -6,3 +6,19 @@
 export const CONTACT_PROPERTY_MAX_KEYS = 100;
 export const CONTACT_PROPERTY_KEY_MAX_LENGTH = 200;
 export const CONTACT_PROPERTY_VALUE_MAX_LENGTH = 1000;
+
+/**
+ * Whether writing `incoming` over `current` (a jsonb `||` merge) and dropping
+ * `removed` would change the stored map. No-op writes are skipped upstream so
+ * a full re-upsert neither moves `updated_at` nor fires `contact.updated`.
+ */
+export function contactPropertiesChange(
+  current: Record<string, string>,
+  incoming: Record<string, string>,
+  removed: readonly string[] = [],
+): boolean {
+  return (
+    Object.entries(incoming).some(([key, value]) => current[key] !== value) ||
+    removed.some((key) => key in current)
+  );
+}

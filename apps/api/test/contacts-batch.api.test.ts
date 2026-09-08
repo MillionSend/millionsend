@@ -341,6 +341,46 @@ describe("on_conflict", () => {
   });
 });
 
+describe("no-op upsert", () => {
+  it("restating stored values reports updated but writes nothing: updated_at stays, no contact.updated", async () => {
+    const hook = await call(tokenA, "POST", "/webhooks", {
+      endpoint: "https://example.com/hooks/batch",
+      events: ["contact.updated"],
+    });
+    const endpointId = (await json(hook)).id as string;
+    const deliveries = async () =>
+      (
+        await db
+          .select({ id: schema.webhookDeliveries.id })
+          .from(schema.webhookDeliveries)
+          .where(eq(schema.webhookDeliveries.endpointId, endpointId))
+      ).length;
+    const topic = await createTopic(tokenA, "noop-topic");
+    const item = {
+      email: "noop@example.com",
+      first_name: "Same",
+      properties: { plan: "free", seats: 3 },
+      topics: [{ id: topic, subscription: "opt_out" }],
+    };
+    const seed = (await (await batch([item])).json()) as BatchBody;
+    const id = seed.data[0]?.id as string;
+    const before = await contactByEmail(item.email);
+
+    const res = (await (await batch([item], { onConflict: "upsert" })).json()) as BatchBody;
+    expect(res.data).toEqual([{ object: "contact", index: 0, id, status: "updated" }]);
+    expect(await contactByEmail(item.email)).toEqual(before);
+    expect(await deliveries()).toBe(0);
+    expect(await topicSubs(id)).toEqual({ [topic]: false });
+
+    // A real change still writes and publishes.
+    await batch([{ ...item, properties: { seats: 4 } }], { onConflict: "upsert" });
+    const after = await contactByEmail(item.email);
+    expect(after?.properties).toEqual({ plan: "free", seats: "4" });
+    expect(after?.updatedAt.getTime()).toBeGreaterThan(before?.updatedAt.getTime() ?? 0);
+    expect(await deliveries()).toBe(1);
+  });
+});
+
 describe("intra-batch duplicates (case-insensitive)", () => {
   it("error: the later occurrence fails", async () => {
     const strict = await batch([{ email: "twice@example.com" }, { email: "TWICE@example.com" }]);

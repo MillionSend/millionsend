@@ -11,6 +11,7 @@ import {
   releaseDailyQuota,
   reserveDailyQuota,
   transitionQueueState,
+  WEBHOOK_MAX_AGE_MS,
   type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -26,45 +27,73 @@ import {
   type SesIdentityClient,
   verificationDbPatch,
 } from "@millionsend/ses";
-import { and, asc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
+import { exhaustOpenDeliveries } from "./deliver-webhook.js";
 
 /**
- * Safety net for webhook.deliver jobs lost between the delivery-row insert
- * and the enqueue (or a dropped retry). Only rows well past due are touched;
- * queue dedupe per deliveryId collapses any overlap with a live job, and the
- * delivery handler skips terminal rows, so a stray extra job is harmless.
+ * Open rows past this many is an operator alert: the receiver is not keeping
+ * up with the team's event volume at the platform rate.
+ */
+const WEBHOOK_BACKLOG_ALARM_ROWS = 10_000;
+
+/**
+ * Safety net for a lost webhook.drain job (worker died mid-pass, enqueue
+ * failed after the rows were written). Day-old open rows are exhausted
+ * first. Then, per endpoint, a row due for a quarter hour that no pass
+ * claimed means the endpoint has no live drain: its stalest row goes
+ * through the fan-out seam, which arms one drain per endpoint. An endpoint
+ * whose backlog is deep or whose oldest due row is over an hour old is
+ * logged as an alert. Every probe is one index lookup per endpoint; the
+ * backlog itself is never walked.
+ *
+ * ponytail: the alert is a warn line in the container log; a customer
+ * notification is the upgrade, on the alarmed ids this computes.
  */
 export async function reconcileWebhookDeliveries(
   db: Db,
   deps: { enqueue: WebhookEnqueue; now?: Date },
 ): Promise<number> {
   const now = deps.now ?? new Date();
-  const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
   const d = schema.webhookDeliveries;
-  const stale = or(
-    and(eq(d.status, "pending"), lt(d.createdAt, staleBefore)),
-    and(eq(d.status, "failed"), lt(d.nextAttemptAt, staleBefore)),
+  const e = schema.webhookEndpoints;
+  await exhaustOpenDeliveries(db, lt(d.createdAt, new Date(now.getTime() - WEBHOOK_MAX_AGE_MS)));
+
+  const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
+  const alarmBefore = new Date(now.getTime() - 60 * 60 * 1000);
+  const open = sql`${d.endpointId} = ${e.id} and ${d.status} in ('pending', 'failed')`;
+  const endpoints = await db
+    .select({
+      endpointId: e.id,
+      staleId: sql<
+        string | null
+      >`(select ${d.id} from ${d} where ${open} and ${d.nextAttemptAt} < ${staleBefore} order by ${d.nextAttemptAt}, ${d.id} limit 1)`,
+      alarmed: sql<boolean>`exists (select 1 from ${d} where ${open} and ${d.nextAttemptAt} < ${alarmBefore}) or (select count(*) from (select 1 from ${d} where ${open} limit ${WEBHOOK_BACKLOG_ALARM_ROWS + 1}) c) > ${WEBHOOK_BACKLOG_ALARM_ROWS}`,
+    })
+    .from(e);
+  const stale = endpoints.flatMap((row) =>
+    row.staleId ? [{ id: row.staleId, endpointId: row.endpointId }] : [],
   );
-  // Keyset pages over (createdAt, id): every overdue row is re-enqueued each
-  // run, one bounded statement and one queue insert per page, so a slow
-  // endpoint's backlog never starves a lost delivery behind it.
-  let cursorId: string | undefined;
-  let requeued = 0;
-  for (;;) {
-    const page = await db
-      .select({ id: d.id, endpointId: d.endpointId })
-      .from(d)
-      .where(and(stale, cursorId ? keysetCursorWhere(d.createdAt, d.id, cursorId) : undefined))
-      .orderBy(asc(d.createdAt), asc(d.id))
-      .limit(RECONCILE_BATCH);
-    const last = page.at(-1);
-    if (!last) break;
-    cursorId = last.id;
-    await deps.enqueue(page.map(({ id, endpointId }) => ({ id, endpointId })));
-    requeued += page.length;
-    if (page.length < RECONCILE_BATCH) break;
+  if (stale.length > 0) await deps.enqueue(stale);
+  for (const row of endpoints) {
+    if (row.alarmed)
+      console.warn(
+        `webhooks.reconcile: endpoint ${row.endpointId} backlog exceeds ${WEBHOOK_BACKLOG_ALARM_ROWS} open rows or has a delivery due for over an hour`,
+      );
   }
-  return requeued;
+  return stale.length;
 }
 
 /**
@@ -117,6 +146,8 @@ class DrainRaced extends Error {}
 
 /** Parked rows loaded per page; the backlog is unbounded (see acceptEmail). */
 const DRAIN_PAGE = 500;
+/** Rows released per run; the rest wait for the next drain rather than one run owning the cron slot. */
+const DRAIN_MAX_PER_RUN = 10_000;
 
 /**
  * Drain of quota-parked emails, every 15 minutes (which covers the UTC
@@ -139,9 +170,11 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
   let drained = 0;
   // Keyset pages over (createdAt, id): global oldest-first order keeps the
   // per-team fairness, and a row that stays parked (exhausted team, failed
-  // enqueue) can never be re-read into an infinite loop.
+  // enqueue) can never be re-read into an infinite loop. Teams found
+  // exhausted leave the page query, so one capped team's backlog is never
+  // walked row by row.
   let cursorId: string | undefined;
-  for (;;) {
+  while (drained < DRAIN_MAX_PER_RUN) {
     const page = await db
       .select({
         id: schema.emails.id,
@@ -159,6 +192,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       .where(
         and(
           eq(schema.emails.latestStatus, "queued_quota"),
+          exhausted.size > 0 ? notInArray(schema.emails.teamId, [...exhausted]) : undefined,
           cursorId
             ? keysetCursorWhere(schema.emails.createdAt, schema.emails.id, cursorId)
             : undefined,
@@ -170,6 +204,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
     if (!last) break;
     cursorId = last.id;
     for (const email of page) {
+      if (drained >= DRAIN_MAX_PER_RUN) break;
       drained += await drainOne(db, deps, email, exhausted, failures);
     }
   }
@@ -249,8 +284,10 @@ async function drainOne(
   }
 }
 
-/** Re-enqueues per sweep; a larger backlog waits for the next run. */
+/** Rows per page in the reconcile sweeps. */
 const RECONCILE_BATCH = 1000;
+/** Sends re-enqueued per sweep; a larger backlog waits for the next run. */
+const RECONCILE_MAX_PER_RUN = 20_000;
 
 /**
  * Safety net for the enqueue-after-commit gap: an accepted email whose
@@ -300,26 +337,36 @@ export async function reconcileStalledSends(
       })),
     );
   }
-  const stalled = await db
-    .select({
-      id: schema.emails.id,
-      broadcastId: schema.emails.broadcastId,
-      scheduledAt: schema.emails.scheduledAt,
-    })
-    .from(schema.emails)
-    .where(
-      and(
-        eq(schema.emails.latestStatus, "queued"),
-        isNull(schema.emails.sentAt),
-        lt(schema.emails.createdAt, staleBefore),
-      ),
-    )
-    .orderBy(asc(schema.emails.createdAt))
-    .limit(RECONCILE_BATCH);
-  for (const email of stalled) {
-    await deps.enqueueSend(email.id, email.scheduledAt ?? undefined, emailSendPriority(email));
+  const e = schema.emails;
+  // A row scheduled for later is waiting by design, not lost; its job is due
+  // with it and would only be re-enqueued every sweep until then.
+  const stalled = and(
+    eq(e.latestStatus, "queued"),
+    isNull(e.sentAt),
+    lt(e.createdAt, staleBefore),
+    or(isNull(e.scheduledAt), lte(e.scheduledAt, now)),
+  );
+  // Keyset pages over (createdAt, id), capped per run.
+  // ponytail: one enqueue per row; the queue rewrite batches these.
+  let cursorId: string | undefined;
+  let requeued = 0;
+  while (requeued < RECONCILE_MAX_PER_RUN) {
+    const page = await db
+      .select({ id: e.id, broadcastId: e.broadcastId, scheduledAt: e.scheduledAt })
+      .from(e)
+      .where(and(stalled, cursorId ? keysetCursorWhere(e.createdAt, e.id, cursorId) : undefined))
+      .orderBy(asc(e.createdAt), asc(e.id))
+      .limit(Math.min(RECONCILE_BATCH, RECONCILE_MAX_PER_RUN - requeued));
+    const last = page.at(-1);
+    if (!last) break;
+    cursorId = last.id;
+    for (const email of page) {
+      await deps.enqueueSend(email.id, email.scheduledAt ?? undefined, emailSendPriority(email));
+    }
+    requeued += page.length;
+    if (page.length < RECONCILE_BATCH) break;
   }
-  return stalled.length;
+  return requeued;
 }
 
 /**
@@ -853,11 +900,33 @@ export async function stripExpiredEventPayloads(
  */
 export async function purgeStaleHourlyUsage(db: Db, now = new Date()): Promise<number> {
   const h = schema.usageCountersHourly;
-  const rows = await db
-    .delete(h)
-    .where(lt(h.hour, new Date(now.getTime() - 45 * DAY_MS)))
-    .returning({ teamId: h.teamId });
-  return rows.length;
+  const cutoff = new Date(now.getTime() - 45 * DAY_MS);
+  let purged = 0;
+  for (;;) {
+    const batch = affectedRows(
+      await db
+        .delete(h)
+        .where(
+          inArray(
+            sql`(${h.teamId}, ${h.hour})`,
+            db
+              .select({ teamId: h.teamId, hour: h.hour })
+              .from(h)
+              .where(lt(h.hour, cutoff))
+              .limit(PURGE_BATCH),
+          ),
+        ),
+    );
+    purged += batch;
+    if (batch < PURGE_BATCH) break;
+  }
+  return purged;
+}
+
+/** Rows a statement touched, from the driver's own count: postgres-js `count`, PGlite `affectedRows`. */
+function affectedRows(result: unknown): number {
+  const r = result as { count?: number; affectedRows?: number };
+  return r.count ?? r.affectedRows ?? 0;
 }
 
 export async function purgeExpiredSessions(db: Db, now = new Date()): Promise<number> {

@@ -218,6 +218,13 @@
       "when": 1788746114021,
       "tag": "0030_usage_counters_hourly",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788889529435,
+      "tag": "0031_faulty_vertigo",
+      "breakpoints": true
     }
   ]
 }

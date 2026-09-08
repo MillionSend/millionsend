@@ -16,6 +16,8 @@ import {
   canonicalBodyHash,
   clearUnsubscribeSuppression,
   completeIdempotent,
+  contactPropertiesChange,
+  contactSnapshotColumns,
   DAY_MS,
   dailyCeiling,
   decryptEmailBody,
@@ -737,16 +739,6 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     if (deps.enqueueRecipientErase) await deps.enqueueRecipientErase(teamId, address);
     else await eraseRecipient(db, teamId, address);
   };
-  const contactSnapshotColumns = {
-    id: t.id,
-    email: t.email,
-    firstName: t.firstName,
-    lastName: t.lastName,
-    unsubscribed: t.unsubscribed,
-    createdAt: t.createdAt,
-    updatedAt: t.updatedAt,
-  };
-
   const contactDetailWire = (
     contact: typeof schema.contacts.$inferSelect,
     types: ContactPropertyTypes,
@@ -957,7 +949,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         pending.length === 0
           ? []
           : await db
-              .select({ id: t.id, email: t.email, unsubscribed: t.unsubscribed })
+              .select({
+                id: t.id,
+                email: t.email,
+                firstName: t.firstName,
+                lastName: t.lastName,
+                unsubscribed: t.unsubscribed,
+                properties: t.properties,
+              })
               .from(t)
               .where(
                 and(
@@ -1019,6 +1018,16 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             // opted-out contact is ignored, and the retained one-click
             // suppression stays. Re-subscribing is the explicit PATCH.
             const unsubscribe = row.unsubscribed === true && !found.unsubscribed;
+            idByKey.set(row.key, found.id);
+            // A row restating what is stored is not written: updated_at stays,
+            // no contact.updated fires. The item still reports "updated" and
+            // its segments/topics are still applied below.
+            const dirty =
+              (row.firstName !== undefined && row.firstName !== found.firstName) ||
+              (row.lastName !== undefined && row.lastName !== found.lastName) ||
+              unsubscribe ||
+              contactPropertiesChange(found.properties, row.properties);
+            if (!dirty) continue;
             const [snapshot] = await tx
               .update(t)
               .set({
@@ -1033,7 +1042,6 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
               .where(and(eq(t.id, found.id), eq(t.teamId, teamId)))
               .returning(contactSnapshotColumns);
             if (snapshot) updatedSnapshots.push(snapshot);
-            idByKey.set(row.key, found.id);
           }
           const writtenRows = [...inserts, ...updates.map((u) => u.row)].map((row) => {
             const id = idByKey.get(row.key);
@@ -1084,6 +1092,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
               .onConflictDoUpdate({
                 target: [s.contactId, s.topicId],
                 set: { subscribed: sql`excluded.subscribed`, updatedAt: new Date() },
+                setWhere: sql`${s.subscribed} is distinct from excluded.subscribed`,
               });
           }
           return { writtenRows, added, prior, updatedSnapshots };
@@ -1170,18 +1179,17 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       if (!coerced.ok) return { invalid: coerced.message };
       incoming = coerced;
     }
-    // Read the flag before writing so the timeline records only real flips —
-    // a PATCH restating the current state stays silent. Properties are
-    // merged, so the stored-map cap is checked against the merged key set.
-    const [before] =
-      body.unsubscribed === undefined && incoming === undefined
-        ? []
-        : await db
-            .select({ unsubscribed: t.unsubscribed, properties: t.properties })
-            .from(t)
-            .where(teamContactWhere(teamId, idOrEmail));
+    // Read the row first: a PATCH restating the current state is not written,
+    // so updated_at stays put, no contact.updated fires and the timeline only
+    // records real flips. Properties are merged, so the stored-map cap is
+    // checked against the merged key set.
+    const [before] = await db
+      .select({ ...contactSnapshotColumns, properties: t.properties })
+      .from(t)
+      .where(teamContactWhere(teamId, idOrEmail));
+    if (!before) return undefined;
     let properties: SQL | undefined;
-    if (incoming && before) {
+    if (incoming) {
       const keys = new Set(Object.keys(before.properties));
       for (const key of incoming.removed) keys.delete(key);
       for (const key of Object.keys(incoming.properties)) keys.add(key);
@@ -1193,22 +1201,32 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         for (const key of incoming.removed) properties = sql`${properties} - ${key}::text`;
       }
     }
-    const [row] = await db
-      .update(t)
-      .set({
-        updatedAt: new Date(),
-        ...(body.first_name !== undefined ? { firstName: body.first_name } : {}),
-        ...(body.last_name !== undefined ? { lastName: body.last_name } : {}),
-        ...(body.unsubscribed !== undefined
-          ? {
-              unsubscribed: body.unsubscribed,
-              unsubscribedAt: body.unsubscribed ? new Date() : null,
-            }
-          : {}),
-        ...(properties !== undefined ? { properties } : {}),
-      })
-      .where(teamContactWhere(teamId, idOrEmail))
-      .returning(contactSnapshotColumns);
+    const dirty =
+      (body.first_name !== undefined && body.first_name !== before.firstName) ||
+      (body.last_name !== undefined && body.last_name !== before.lastName) ||
+      (body.unsubscribed !== undefined && body.unsubscribed !== before.unsubscribed) ||
+      (incoming !== undefined &&
+        contactPropertiesChange(before.properties, incoming.properties, incoming.removed));
+    const row = dirty
+      ? (
+          await db
+            .update(t)
+            .set({
+              updatedAt: new Date(),
+              ...(body.first_name !== undefined ? { firstName: body.first_name } : {}),
+              ...(body.last_name !== undefined ? { lastName: body.last_name } : {}),
+              ...(body.unsubscribed !== undefined
+                ? {
+                    unsubscribed: body.unsubscribed,
+                    unsubscribedAt: body.unsubscribed ? new Date() : null,
+                  }
+                : {}),
+              ...(properties !== undefined ? { properties } : {}),
+            })
+            .where(teamContactWhere(teamId, idOrEmail))
+            .returning(contactSnapshotColumns)
+        )[0]
+      : before;
     // Only this explicit re-subscribe lifts the retained one-click opt-out;
     // creating or importing the address again leaves it in place.
     if (row && body.unsubscribed === false) {
@@ -1221,12 +1239,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         enqueue: contactEvents.enqueue,
       });
     }
-    if (
-      row &&
-      before &&
-      body.unsubscribed !== undefined &&
-      before.unsubscribed !== body.unsubscribed
-    ) {
+    if (row && body.unsubscribed !== undefined && before.unsubscribed !== body.unsubscribed) {
       await recordContactActivity(
         db,
         {
@@ -1237,7 +1250,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         contactEvents,
       );
     }
-    if (row) {
+    if (row && dirty) {
       await emitContactEvents(db, {
         teamId,
         events: [{ type: "contact.updated", contact: row }],
