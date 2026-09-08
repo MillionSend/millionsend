@@ -948,6 +948,31 @@ table.ms-table {
 .ms-odometer .ms-odo-col {
   height: 1em;
   overflow: hidden;
+  /* The roll's motion blur bleeds past the glyph's 1em line box, and a bare
+     clip would cut it to a hard edge. Headroom above and below (pulled back
+     with negative margins so the column still sits on a 1em line) fades to
+     transparent, so the blur dissolves — the LP hero's masked wheels. Each
+     ramp must lie in the gap between one digit's ink and the next's, or a
+     settled digit fades and its strip neighbours show through: across the
+     system stack at the sizes in use (18–40px) digit ink spans roughly
+     0.10–0.95em of its line. Below ~14px the snapped baseline moves the ink
+     up and the ramps need retuning. */
+  padding: 0.18em 0;
+  margin: -0.18em 0;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0.13em,
+    #000 0.27em,
+    #000 calc(100% - 0.23em),
+    transparent calc(100% - 0.11em)
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0.13em,
+    #000 0.27em,
+    #000 calc(100% - 0.23em),
+    transparent calc(100% - 0.11em)
+  );
 }
 .ms-odometer .ms-odo-strip {
   display: block;
