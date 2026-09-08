@@ -316,7 +316,7 @@ it("reconcile sweep arms one drain per endpoint with rows nobody claimed, and ex
   expect(expiredRow).toEqual({ status: "exhausted", next: null });
 });
 
-it("reconcile sweep flags an endpoint with a delivery due for over an hour, by age alone", async () => {
+it("reconcile sweep flags an endpoint with a delivery due for over six hours, by age alone", async () => {
   const now = new Date();
   const lagging = await insertEndpoint(teamId, null);
   const healthy = await insertEndpoint(teamId, null);
@@ -327,7 +327,7 @@ it("reconcile sweep flags an endpoint with a delivery due for over an hour, by a
       eventType: "email.delivered",
       payload: {},
       status: "pending",
-      nextAttemptAt: new Date(now.getTime() - 61 * 60 * 1000),
+      nextAttemptAt: new Date(now.getTime() - 361 * 60 * 1000),
     },
     {
       endpointId: healthy,

@@ -334,14 +334,14 @@ it("an auto-disabled endpoint mails once until it is enabled again", async () =>
   expect(enqueued).toHaveLength(0);
 });
 
-it("a backlog older than an hour mails once per UTC day; yesterday's claim is swept away", async () => {
+it("a backlog older than six hours mails once per UTC day; yesterday's claim is swept away", async () => {
   await delivery("pending", { nextAttemptAt: new Date(Date.now() - 5 * 60_000) });
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
-  await delivery("failed", { nextAttemptAt: new Date(Date.now() - 2 * 3_600_000) });
+  await delivery("failed", { nextAttemptAt: new Date(Date.now() - 7 * 3_600_000) });
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
   expect(sends[0]?.subject).toContain("backing up");
   expect(sends[0]?.text).toContain("2 deliveries to https://receiver.example.com/hook are waiting");
-  expect(sends[0]?.text).toContain("due for 2 h");
+  expect(sends[0]?.text).toContain("due for 7 h");
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
   const tomorrow = new Date(Date.now() + 24 * 3_600_000);
   expect(await sweepNotifications(db, deps(false, tomorrow))).toEqual({ sent: 1 });

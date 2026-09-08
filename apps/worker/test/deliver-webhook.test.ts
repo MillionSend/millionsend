@@ -374,9 +374,12 @@ it("the time budget ends a pass mid-page and releases the rest as due now", asyn
 it("429: honours Retry-After without charging an attempt, parks the page, pauses the endpoint", async () => {
   const endpointId = await insertEndpoint();
   const base = Date.now();
-  const first = await insertDelivery(endpointId, { nextAttemptAt: new Date(base - 2_000) });
-  const rest = await Promise.all(
-    [1, 2].map(() => insertDelivery(endpointId, { nextAttemptAt: new Date(base - 1_000) })),
+  // More due rows than requests in flight: the first eight are posted and
+  // throttled, the rest are handed back without ever reaching the receiver.
+  const due = await Promise.all(
+    Array.from({ length: 12 }, (_, i) =>
+      insertDelivery(endpointId, { nextAttemptAt: new Date(base - 2_000 + i) }),
+    ),
   );
   // Due before Retry-After ends and never claimed: it still waits, because
   // the pause is the endpoint's, not the page's.
@@ -387,20 +390,20 @@ it("429: honours Retry-After without charging an attempt, parks the page, pauses
   );
 
   const outcome = await drainWebhookEndpoint(db, deps, { endpointId });
-  expect(outcome).toEqual({ posted: 1, exhausted: 0, rearmAt: new Date(base + 120_000) });
+  expect(outcome).toEqual({ posted: 8, exhausted: 0, rearmAt: new Date(base + 120_000) });
   expect(deps.rearmed).toEqual([{ endpointId, at: new Date(base + 120_000) }]);
   expect((await deliveryRow(soon)).nextAttemptAt?.getTime()).toBe(base + 10_000);
-  const throttled = await deliveryRow(first);
-  expect(throttled.status).toBe("pending");
-  expect(throttled.attempts).toBe(0);
-  expect(throttled.lastResponseCode).toBe(429);
-  expect(throttled.nextAttemptAt?.getTime()).toBe(base + 120_000);
-  for (const id of rest) {
+  let throttled = 0;
+  let handedBack = 0;
+  for (const id of due) {
     const row = await deliveryRow(id);
+    expect(row.status).toBe("pending");
     expect(row.attempts).toBe(0);
-    expect(row.lastResponseCode).toBeNull();
     expect(row.nextAttemptAt?.getTime()).toBe(base + 120_000);
+    if (row.lastResponseCode === 429) throttled += 1;
+    else if (row.lastResponseCode === null) handedBack += 1;
   }
+  expect([throttled, handedBack]).toEqual([8, 4]);
 });
 
 it("an open row older than a day is exhausted without a request", async () => {

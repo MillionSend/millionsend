@@ -135,8 +135,9 @@ curl -X POST "https://api.millionsend.com/webhooks/{id}/rotate" \
 ## Entrega
 
 Uma entrega é bem-sucedida em qualquer resposta 2xx. Cada endpoint tem a
-própria fila, drenada em ordem a até **20 requisições por segundo**; uma
-rajada de eventos espera na fila em vez de atingir o receptor de uma vez.
+própria fila, drenada em ordem com até oito requisições em voo a até **50
+requisições por segundo**; uma rajada de eventos espera na fila em vez de
+atingir o receptor de uma vez.
 
 Uma tentativa que falha (não-2xx, timeout, erro de conexão) é repetida em um
 cronograma fixo: **5 s, 5 min, 30 min, 2 h, 5 h, 10 h** — seis tentativas em
@@ -150,7 +151,7 @@ automaticamente e não recebe mais nada até você reativá-lo na página dele;
 os eventos do intervalo não são reenviados. Os donos do time recebem um
 e-mail quando as entregas de um endpoint começam a falhar (as últimas dez
 entregas encerradas todas esgotadas), quando ele é desativado e — no máximo
-uma vez por dia — quando a fila dele tem mais de uma hora de atraso. O painel
+uma vez por dia — quando a fila dele tem mais de seis horas de atraso. O painel
 mostra a profundidade da fila de cada endpoint e há quanto tempo a entrega
 mais antiga espera.
 

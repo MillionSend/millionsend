@@ -50,6 +50,13 @@ export interface DrainOutcome {
 /** Wall-clock budget of one pass; whatever is left waits for the re-armed successor. */
 const DRAIN_BUDGET_MS = 20_000;
 const DRAIN_PAGE = 50;
+/**
+ * Requests in flight to one receiver at a time. One at a time bounds a pass
+ * by the receiver's round trip (a few per second across an ocean), far under
+ * the rate cap, and a broadcast's events then pile up behind a healthy
+ * receiver; the bucket still caps the rate.
+ */
+const WEBHOOK_POST_CONCURRENCY = 8;
 /** How far a claim pushes next_attempt_at: a pass that dies mid-page releases its rows by itself. */
 const LEASE_MS = 60_000;
 /**
@@ -236,7 +243,7 @@ export async function drainWebhookEndpoint(
   const overBudget = (at: Date) =>
     deps.signal?.aborted === true || at.getTime() - started.getTime() >= DRAIN_BUDGET_MS;
 
-  pass: while (!overBudget(now())) {
+  while (!overBudget(now())) {
     const page = await claimDue(db, endpointId, now());
     if (page.length === 0) break;
     const [current] = await db
@@ -250,93 +257,121 @@ export async function drainWebhookEndpoint(
       break;
     }
     secrets ??= await decryptWebhookSigningSecrets(endpoint, deps.keyring, started);
-    for (let i = 0; i < page.length; i += 1) {
-      const row = page[i] as ClaimedRow;
-      const rest = page.slice(i + 1);
-      const at = now();
-      if (overBudget(at)) {
-        await release(db, page.slice(i), at);
-        break pass;
-      }
-      if (at.getTime() - row.createdAt.getTime() >= WEBHOOK_MAX_AGE_MS) {
-        await db
-          .update(d)
-          .set({ status: "exhausted", nextAttemptAt: null })
-          .where(eq(d.id, row.id));
-        outcome.exhausted += 1;
-        continue;
-      }
+    const signing = secrets;
+    // Workers take rows synchronously and in due order, so a pass that ends
+    // early hands back exactly the rows nobody took; a row already taken but
+    // not yet posted goes back too.
+    type Stop = { reason: "budget" | "throttled" | "disabled"; until: Date };
+    let stop = null as Stop | null;
+    let cursor = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        if (stop) return;
+        const claimedAt = now();
+        if (overBudget(claimedAt)) {
+          stop = { reason: "budget", until: claimedAt };
+          return;
+        }
+        if (cursor >= page.length) return;
+        const row = page[cursor] as ClaimedRow;
+        cursor += 1;
+        if (claimedAt.getTime() - row.createdAt.getTime() >= WEBHOOK_MAX_AGE_MS) {
+          await db
+            .update(d)
+            .set({ status: "exhausted", nextAttemptAt: null })
+            .where(eq(d.id, row.id));
+          outcome.exhausted += 1;
+          continue;
+        }
 
-      await bucket.take();
-      const body = JSON.stringify(row.payload);
-      const headers = signWebhook(secrets, {
-        msgId: row.messageId,
-        timestamp: Math.floor(at.getTime() / 1000),
-        payload: body,
-      });
-      let status: number | null = null;
-      let snippet: string;
-      let retryAfter: string | null | undefined;
-      try {
-        const res = await deps.post(endpoint.url, body, { ...headers });
-        status = res.status;
-        snippet = res.body.slice(0, RESPONSE_SNIPPET_CHARS);
-        retryAfter = res.retryAfter;
-      } catch (err) {
-        snippet = (err instanceof Error ? err.message : String(err)).slice(
-          0,
-          RESPONSE_SNIPPET_CHARS,
-        );
-      }
-      outcome.posted += 1;
+        await bucket.take();
+        const at = now();
+        if (!stop && overBudget(at)) stop = { reason: "budget", until: at };
+        if (stop) {
+          await release(db, [row], stop.until);
+          return;
+        }
+        const body = JSON.stringify(row.payload);
+        const headers = signWebhook(signing, {
+          msgId: row.messageId,
+          timestamp: Math.floor(at.getTime() / 1000),
+          payload: body,
+        });
+        let status: number | null = null;
+        let snippet: string;
+        let retryAfter: string | null | undefined;
+        try {
+          const res = await deps.post(endpoint.url, body, { ...headers });
+          status = res.status;
+          snippet = res.body.slice(0, RESPONSE_SNIPPET_CHARS);
+          retryAfter = res.retryAfter;
+        } catch (err) {
+          snippet = (err instanceof Error ? err.message : String(err)).slice(
+            0,
+            RESPONSE_SNIPPET_CHARS,
+          );
+        }
+        outcome.posted += 1;
 
-      if (status === 429) {
-        // The receiver is asking for room, not failing: no attempt is
-        // charged, and the endpoint waits out its Retry-After. The successor
-        // is parked at that instant; one a fan-out armed during this pass
-        // runs at once instead, posts one row, meets the 429 again and
-        // re-parks, so the receiver sees at most one probe per overlap.
-        const until = new Date(at.getTime() + retryAfterMs(retryAfter, at));
+        if (status === 429) {
+          // The receiver is asking for room, not failing: no attempt is
+          // charged, and the endpoint waits out its Retry-After. The
+          // successor is parked at that instant; one a fan-out armed during
+          // this pass runs at once instead, posts a few rows, meets the 429
+          // again and re-parks, so the receiver sees at most one probe per
+          // in-flight slot per overlap.
+          const until = new Date(at.getTime() + retryAfterMs(retryAfter, at));
+          await db
+            .update(d)
+            .set({
+              lastAttemptAt: at,
+              lastResponseCode: status,
+              lastResponseBody: snippet,
+              nextAttemptAt: until,
+            })
+            .where(eq(d.id, row.id));
+          stop ??= { reason: "throttled", until };
+          return;
+        }
+
+        const attempts = row.attempts + 1;
+        const ok = status !== null && status >= 200 && status < 300;
+        const exhausted = !ok && attempts >= WEBHOOK_MAX_ATTEMPTS;
+        const nextAttemptAt =
+          ok || exhausted
+            ? null
+            : new Date(at.getTime() + (WEBHOOK_RETRY_SCHEDULE_MS[attempts - 1] ?? 0));
         await db
           .update(d)
           .set({
+            status: ok ? "success" : exhausted ? "exhausted" : "failed",
+            attempts,
             lastAttemptAt: at,
             lastResponseCode: status,
             lastResponseBody: snippet,
-            nextAttemptAt: until,
+            nextAttemptAt,
           })
           .where(eq(d.id, row.id));
-        await release(db, rest, until);
-        outcome.rearmAt = until;
-        await deps.rearm(endpointId, until);
-        return outcome;
-      }
-
-      const attempts = row.attempts + 1;
-      const ok = status !== null && status >= 200 && status < 300;
-      const exhausted = !ok && attempts >= WEBHOOK_MAX_ATTEMPTS;
-      const nextAttemptAt =
-        ok || exhausted
-          ? null
-          : new Date(at.getTime() + (WEBHOOK_RETRY_SCHEDULE_MS[attempts - 1] ?? 0));
-      await db
-        .update(d)
-        .set({
-          status: ok ? "success" : exhausted ? "exhausted" : "failed",
-          attempts,
-          lastAttemptAt: at,
-          lastResponseCode: status,
-          lastResponseBody: snippet,
-          nextAttemptAt,
-        })
-        .where(eq(d.id, row.id));
-      if (exhausted) {
-        outcome.exhausted += 1;
-        if (await autoDisableIfDead(db, endpointId)) {
-          await release(db, rest, at);
-          break pass;
+        if (exhausted) {
+          outcome.exhausted += 1;
+          if (await autoDisableIfDead(db, endpointId)) {
+            stop ??= { reason: "disabled", until: at };
+            return;
+          }
         }
       }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(WEBHOOK_POST_CONCURRENCY, page.length) }, worker),
+    );
+    if (stop) {
+      await release(db, page.slice(cursor), stop.until);
+      if (stop.reason === "throttled") {
+        outcome.rearmAt = stop.until;
+        await deps.rearm(endpointId, stop.until);
+        return outcome;
+      }
+      break;
     }
   }
 

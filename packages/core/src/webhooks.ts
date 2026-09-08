@@ -218,16 +218,18 @@ export const WEBHOOK_MAX_AGE_MS = 24 * 3_600_000;
  * ponytail: one platform-wide constant; a per-endpoint column is the upgrade
  * when a receiver asks for more or less.
  */
-export const WEBHOOK_MAX_RATE_PER_SECOND = 20;
+export const WEBHOOK_MAX_RATE_PER_SECOND = 50;
 
 /** Settled deliveries in a row with no success before owners hear an endpoint is failing. */
 export const WEBHOOK_FAILING_STREAK = 10;
 /**
- * An open delivery due this long ago is a backlog worth telling the team
- * about. Depth alone is not: ten thousand rows is eight minutes of healthy
- * draining at the platform rate.
+ * How long the oldest open delivery may be overdue before the team hears
+ * about it by mail. Hours, not minutes: a receiver that lags a few minutes
+ * behind a broadcast is a dashboard number (the endpoint page shows its
+ * queue), while one hours behind is heading for the 24 h drop. Depth alone
+ * is never an alarm: ten thousand rows is minutes of healthy draining.
  */
-export const WEBHOOK_BACKLOG_AGE_MS = 3_600_000;
+export const WEBHOOK_BACKLOG_AGE_MS = 6 * 3_600_000;
 /**
  * Where the dashboard and the backlog mail stop counting a queue; past it
  * the figure reads "10k+" (mirrored client-side in apps/web/src/lib/webhook-queue.ts).

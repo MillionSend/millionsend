@@ -93,7 +93,7 @@ export async function reconcileWebhookDeliveries(
   for (const row of endpoints) {
     if (row.alarmed)
       console.warn(
-        `webhooks.reconcile: endpoint ${row.endpointId} has a delivery due for over ${WEBHOOK_BACKLOG_AGE_MS / 60_000} minutes`,
+        `webhooks.reconcile: endpoint ${row.endpointId} has a delivery due for over ${WEBHOOK_BACKLOG_AGE_MS / 3_600_000} hours`,
       );
   }
   return stale.length;

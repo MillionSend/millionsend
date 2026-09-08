@@ -135,8 +135,9 @@ curl -X POST "https://api.millionsend.com/webhooks/{id}/rotate" \
 ## Delivery
 
 A delivery is successful on any 2xx response. Each endpoint has its own
-queue, drained in order at up to **20 requests per second**; a burst of
-events waits in the queue rather than hitting the receiver all at once.
+queue, drained in order with up to eight requests in flight at up to **50
+requests per second**; a burst of events waits in the queue rather than
+hitting the receiver all at once.
 
 A failed attempt (non-2xx, timeout, connection error) is retried on a fixed
 schedule: **5 s, 5 min, 30 min, 2 h, 5 h, 10 h** — six attempts over about
@@ -150,7 +151,7 @@ automatically and receives nothing further until you re-enable it from its
 page; events that happen in the meantime are not replayed. Team owners are
 emailed when an endpoint's deliveries start failing (the last ten settled
 deliveries all exhausted), when it is disabled, and — at most once a day —
-when its backlog is more than an hour old. The dashboard shows each
+when its backlog is more than six hours old. The dashboard shows each
 endpoint's queue depth and how long its oldest delivery has been waiting.
 
 A reconcile job re-arms queues lost to crashes, so delivery is
