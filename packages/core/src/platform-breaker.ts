@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { RegionBreakerReason } from "@millionsend/db/schema";
-import { and, asc, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { MIN_PAUSE_COMPLAINTS, MIN_PAUSE_HARD_BOUNCES } from "./deliverability.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
@@ -48,18 +48,22 @@ const HOUR_MS = 60 * 60 * 1000;
 const hardBounceFilter = sql`${schema.emailEvents.type} = 'bounced' and coalesce(${schema.emailEvents.bounceType}, ${schema.emailEvents.data}->'bounce'->>'bounceType') = 'Permanent'`;
 const complaintFilter = sql`${schema.emailEvents.type} = 'complained'`;
 
-/** Sends and SES-reported hard bounces/complaints per region over the trailing window. */
+/**
+ * Sends and SES-reported hard bounces/complaints per region over the trailing
+ * window, from the rows themselves; `teamIds` narrows the scan to those teams.
+ */
 export async function regionWindowCounts(
   db: Db,
-  opts: { now: Date; hours: number },
+  opts: { now: Date; hours: number; teamIds?: string[] },
 ): Promise<Map<string, RegionWindowCounts>> {
   const since = new Date(opts.now.getTime() - opts.hours * HOUR_MS);
+  const teamFilter = opts.teamIds ? inArray(schema.emails.teamId, opts.teamIds) : undefined;
   const out = new Map<string, RegionWindowCounts>();
   const sent = await db
     .select({ region: schema.domains.region, n: sql<number>`count(*)::int` })
     .from(schema.emails)
     .innerJoin(schema.domains, eq(schema.domains.id, schema.emails.domainId))
-    .where(gte(schema.emails.sentAt, since))
+    .where(and(gte(schema.emails.sentAt, since), teamFilter))
     .groupBy(schema.domains.region);
   for (const row of sent) out.set(row.region, { sent: row.n, hardBounced: 0, complained: 0 });
   const events = await db
@@ -72,7 +76,11 @@ export async function regionWindowCounts(
     .innerJoin(schema.emails, eq(schema.emails.id, schema.emailEvents.emailId))
     .innerJoin(schema.domains, eq(schema.domains.id, schema.emails.domainId))
     .where(
-      and(gte(schema.emailEvents.createdAt, since), isNotNull(schema.emailEvents.snsMessageId)),
+      and(
+        gte(schema.emailEvents.createdAt, since),
+        isNotNull(schema.emailEvents.snsMessageId),
+        teamFilter,
+      ),
     )
     .groupBy(schema.domains.region);
   for (const row of events) {
@@ -88,8 +96,9 @@ export async function regionWindowCounts(
  * rows the raw scan reads: `sent` per accepted send, `hard_bounced` per
  * Permanent bounce, `complained` per complaint. Counters carry no domain,
  * so a team's traffic goes to the region of its most recently verified
- * domain — a team's verified domains share one region in practice, and a
- * team spanning two is attributed whole to the newer one.
+ * domain. A team whose verified domains span more than one region cannot
+ * be attributed that way: it is left out of the counters and its window is
+ * read from the rows over the same span (bounded: only those teams' rows).
  */
 export async function regionCounterTotals(
   db: Db,
@@ -98,6 +107,14 @@ export async function regionCounterTotals(
   const since = utcDay(opts.now.getTime() - (opts.days - 1) * DAY_MS);
   const c = schema.usageCounters;
   const d = schema.domains;
+  const multiRegion = (
+    await db
+      .select({ teamId: d.teamId })
+      .from(d)
+      .where(eq(d.status, "verified"))
+      .groupBy(d.teamId)
+      .having(sql`count(distinct ${d.region}) > 1`)
+  ).map((r) => r.teamId);
   const teamRegion = db
     .selectDistinctOn([d.teamId], { teamId: d.teamId, region: d.region })
     .from(d)
@@ -115,7 +132,12 @@ export async function regionCounterTotals(
     })
     .from(c)
     .innerJoin(teamRegion, eq(teamRegion.teamId, c.teamId))
-    .where(gte(c.day, since))
+    .where(
+      and(
+        gte(c.day, since),
+        multiRegion.length > 0 ? notInArray(c.teamId, multiRegion) : undefined,
+      ),
+    )
     .groupBy(teamRegion.region);
   const out = new Map<string, RegionWindowCounts>();
   for (const row of rows) {
@@ -126,6 +148,21 @@ export async function regionCounterTotals(
     };
     if (counts.sent > 0 || counts.hardBounced > 0 || counts.complained > 0) {
       out.set(row.region, counts);
+    }
+  }
+  if (multiRegion.length > 0) {
+    const raw = await regionWindowCounts(db, {
+      now: opts.now,
+      hours: opts.days * 24,
+      teamIds: multiRegion,
+    });
+    for (const [region, counts] of raw) {
+      const base = out.get(region) ?? { sent: 0, hardBounced: 0, complained: 0 };
+      out.set(region, {
+        sent: base.sent + counts.sent,
+        hardBounced: base.hardBounced + counts.hardBounced,
+        complained: base.complained + counts.complained,
+      });
     }
   }
   return out;
@@ -209,7 +246,9 @@ export async function evaluateRegionBreakers(
   const now = opts.now ?? new Date();
   // The day window reads raw rows to the minute; the week window reads the
   // daily counters (seven UTC days including today, the guardrail's own
-  // convention) so a week of email_events is never re-scanned per run.
+  // convention; reported as 168 hours) so a week of email_events is never
+  // re-scanned per run, except for the few multi-region teams the counters
+  // cannot place, whose rows are read over the trailing 168 hours.
   const [dayHours, weekHours] = BREAKER_WINDOWS_HOURS;
   const windows = [
     { hours: dayHours, counts: await regionWindowCounts(db, { now, hours: dayHours }) },

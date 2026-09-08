@@ -455,10 +455,11 @@ await queue.work(
       { endpointId },
     );
   },
-  // One pass per endpoint at a time and a pass is time-boxed, so a stalled
-  // receiver holds one of these lanes for at most a budget before its
-  // successor queues behind everyone else's.
-  { concurrency: 8, batchSize: 1 },
+  // The group is the endpoint and one pass per group runs at a time, so a
+  // successor armed mid-pass waits for the pass to end; a pass is time-boxed,
+  // so a stalled receiver holds one of these lanes for at most a budget
+  // before its successor queues behind everyone else's.
+  { concurrency: 8, batchSize: 1, groupConcurrency: 1 },
 );
 
 // Erasure scans a team's whole history; it runs here so the request that

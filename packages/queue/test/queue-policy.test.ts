@@ -16,6 +16,8 @@ const inserted: { name: string; job: Record<string, unknown> }[] = [];
 const updated: { name: string; opts: Record<string, unknown> }[] = [];
 const scheduled: string[] = [];
 const bosses: { options: Record<string, unknown>; events: string[]; stopped: boolean }[] = [];
+// Shutdown ordering as seen from the mock: "stop:<boss index>" plus whatever a test pushes.
+const order: string[] = [];
 let createQueueError: Error | undefined;
 
 vi.mock("pg-boss", () => ({
@@ -28,9 +30,10 @@ vi.mock("pg-boss", () => ({
       bosses[this.#index]?.events.push(event);
     }
     async start(): Promise<void> {}
-    async stop(): Promise<void> {
+    async stop(opts?: { graceful?: boolean }): Promise<void> {
       const boss = bosses[this.#index];
       if (boss) boss.stopped = true;
+      order.push(`stop:${this.#index}${opts?.graceful ? ":graceful" : ""}`);
     }
     async createQueue(
       name: string,
@@ -80,6 +83,7 @@ beforeEach(() => {
   updated.length = 0;
   scheduled.length = 0;
   bosses.length = 0;
+  order.length = 0;
   createQueueError = undefined;
 });
 
@@ -143,6 +147,27 @@ it("work() registers on the consumer, sends go through the producer, and stop() 
   expect(sent).toHaveLength(1);
   await queue.stop();
   expect(bosses.map((b) => b.stopped)).toEqual([true, true]);
+});
+
+it("stop() aborts every handler's signal before the consumer stops and before the producer pool closes", async () => {
+  const queue = await startWorker();
+  await queue.work("broadcast.send", async (_payload, ctx) => {
+    ctx.signal.addEventListener("abort", () => order.push("handler-aborted"));
+  });
+  await queue.workDeadLetter("email.send", async (_payload, ctx) => {
+    ctx.signal.addEventListener("abort", () => order.push("dead-letter-aborted"));
+  });
+  await workers[0]?.handler([
+    { data: { broadcastId: "b1" }, signal: new AbortController().signal },
+  ]);
+  await workers[1]?.handler([{ data: { emailId: "e1" }, signal: new AbortController().signal }]);
+  await queue.stop();
+  expect(order).toEqual([
+    "handler-aborted",
+    "dead-letter-aborted",
+    "stop:0:graceful",
+    "stop:1:graceful",
+  ]);
 });
 
 it("turns notify on for a queue that predates the flag, and never for the ones that only poll", async () => {
@@ -238,7 +263,12 @@ it("fetches bursty queues continuously: a batch above one turns burst mode on, a
   expect(workers.map((w) => ({ name: w.name, opts: w.opts }))).toEqual([
     {
       name: "ses.event",
-      opts: { batchSize: 10, localConcurrency: 4, burstWhenBatchFull: true },
+      opts: {
+        batchSize: 10,
+        localConcurrency: 4,
+        burstWhenBatchFull: true,
+        notifyPollingIntervalSeconds: 2,
+      },
     },
     {
       name: "webhook.drain",
@@ -247,9 +277,24 @@ it("fetches bursty queues continuously: a batch above one turns burst mode on, a
         localConcurrency: 8,
         burstWhenBatchFull: false,
         pollingIntervalSeconds: 1,
+        notifyPollingIntervalSeconds: 1,
       },
     },
   ]);
+});
+
+it("NOTIFY only shortens latency: the notify backstop poll never relaxes past the base interval, so a deferred job is seen within it", async () => {
+  const queue = await startWorker();
+  await queue.work("email.send", async () => {});
+  await queue.work("webhook.drain", async () => {}, { pollingIntervalSeconds: 5 });
+  // pg-boss defaults notifyPollingIntervalSeconds to max(30, base) on a notify
+  // queue and asserts an explicit one is >= pollingIntervalSeconds.
+  expect(workers[0]?.opts).toMatchObject({ notifyPollingIntervalSeconds: 2 });
+  expect(workers[0]?.opts).not.toHaveProperty("pollingIntervalSeconds");
+  expect(workers[1]?.opts).toMatchObject({
+    pollingIntervalSeconds: 5,
+    notifyPollingIntervalSeconds: 5,
+  });
 });
 
 it("caps a fairness group per process when asked", async () => {
@@ -263,6 +308,7 @@ it("caps a fairness group per process when asked", async () => {
     batchSize: 2,
     localConcurrency: 16,
     burstWhenBatchFull: true,
+    notifyPollingIntervalSeconds: 2,
     groupConcurrency: 2,
   });
 });
@@ -322,7 +368,7 @@ it("a batch of sends carries the same options as a single send: key, priority, d
   expect(inserted[0]?.job).not.toHaveProperty("startAfter");
 });
 
-it("arms one drain per distinct endpoint, keyed by the endpoint so a queued one absorbs the rest", async () => {
+it("arms one drain per distinct endpoint, keyed and grouped by the endpoint so a created one absorbs the rest and passes run one at a time", async () => {
   const queue = await Queue.start("postgres://unused");
   const at = new Date(0);
   await queue.drainWebhookEndpoints(["ep-a", "ep-b", "ep-a", "ep-a"], at);
@@ -331,12 +377,16 @@ it("arms one drain per distinct endpoint, keyed by the endpoint so a queued one 
     expect.objectContaining({
       data: { endpointId: "ep-a" },
       singletonKey: "ep-a",
+      group: { id: "ep-a" },
       startAfter: at,
       deadLetter: "webhook.drain.dead",
     }),
-    expect.objectContaining({ data: { endpointId: "ep-b" }, singletonKey: "ep-b" }),
+    expect.objectContaining({
+      data: { endpointId: "ep-b" },
+      singletonKey: "ep-b",
+      group: { id: "ep-b" },
+    }),
   ]);
-  expect(inserted[0]?.job).not.toHaveProperty("group");
   expect(inserted[0]?.job).not.toHaveProperty("priority");
   expect(queues.get("webhook.drain")).toEqual({ policy: "short", notify: true });
 

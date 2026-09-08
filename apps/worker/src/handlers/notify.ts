@@ -23,7 +23,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, gt, gte, like, sql } from "drizzle-orm";
+import { and, eq, gt, gte, like, lt, or, sql } from "drizzle-orm";
 import {
   deliverabilityPausedMail,
   deliverabilityWarningMail,
@@ -36,7 +36,7 @@ import {
   webhookFailingMail,
 } from "../notifications/templates.js";
 import type { SystemMailer } from "../system-mail.js";
-import { WEBHOOK_AUTO_DISABLE_AFTER } from "./deliver-webhook.js";
+import { COUNTED_SETTLED_SQL, WEBHOOK_AUTO_DISABLE_AFTER } from "./deliver-webhook.js";
 
 export interface NotifyDeps {
   isCloud: boolean;
@@ -80,9 +80,10 @@ interface EndpointStanding {
 
 /**
  * Every live endpoint with the two facts the webhook notifications judge:
- * its last WEBHOOK_FAILING_STREAK settled deliveries (off the settled index)
- * and its open backlog, counted no further than WEBHOOK_BACKLOG_COUNT + 1
- * rows down the due index. One statement for the whole sweep.
+ * its last WEBHOOK_FAILING_STREAK counted settled deliveries (off the
+ * settled index; see COUNTED_SETTLED_SQL) and its open backlog, counted no
+ * further than WEBHOOK_BACKLOG_COUNT + 1 rows down the due index for the
+ * mail's figure. One statement for the whole sweep.
  * ponytail: unpaged; page by endpoint id if endpoints ever number in the
  * tens of thousands.
  */
@@ -107,6 +108,7 @@ async function endpointStandings(db: Db): Promise<EndpointStanding[]> {
                  row_number() over (order by ${d.createdAt} desc nulls last, ${d.id} desc nulls last) as rn
           from ${d}
           where ${d.endpointId} = ${e.id} and ${d.status} in ('success', 'exhausted')
+            and ${COUNTED_SETTLED_SQL}
           order by ${d.createdAt} desc nulls last, ${d.id} desc nulls last
           limit ${WEBHOOK_FAILING_STREAK}
         ) r
@@ -193,12 +195,27 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
 
   // Webhook trouble goes out by mail only: the endpoint in trouble is the one
   // that would have received the event.
+  const today = utcDay(now.getTime());
+  // Backlog claims are per UTC day and nothing else clears them.
+  await db
+    .delete(schema.teamNotifications)
+    .where(
+      and(
+        like(schema.teamNotifications.kind, "webhook.backlog:%"),
+        lt(schema.teamNotifications.periodKey, today),
+      ),
+    );
   const webhookClaims = new Set(
     (
       await db
         .select({ teamId: schema.teamNotifications.teamId, kind: schema.teamNotifications.kind })
         .from(schema.teamNotifications)
-        .where(like(schema.teamNotifications.kind, "webhook.%"))
+        .where(
+          or(
+            like(schema.teamNotifications.kind, "webhook.failing:%"),
+            like(schema.teamNotifications.kind, "webhook.auto_disabled:%"),
+          ),
+        )
     ).map((c) => `${c.teamId}:${c.kind}`),
   );
   const clearIfClaimed = async (teamId: string, kind: string) => {
@@ -238,12 +255,8 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
     }
     const oldestAgeMs = e.oldest_ms === null ? 0 : now.getTime() - e.oldest_ms;
     if (
-      (e.queued > WEBHOOK_BACKLOG_COUNT || oldestAgeMs > WEBHOOK_BACKLOG_AGE_MS) &&
-      (await claimNotification(db, {
-        teamId,
-        kind: `webhook.backlog:${e.id}`,
-        periodKey: utcDay(now.getTime()),
-      }))
+      oldestAgeMs > WEBHOOK_BACKLOG_AGE_MS &&
+      (await claimNotification(db, { teamId, kind: `webhook.backlog:${e.id}`, periodKey: today }))
     ) {
       await mailOwners(
         teamId,
@@ -254,7 +267,6 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
   }
 
   if (deps.isCloud) {
-    const today = utcDay(now.getTime());
     const rows = await db
       .select({
         teamId: schema.usageCounters.teamId,

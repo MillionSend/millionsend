@@ -316,6 +316,7 @@ export { bumpHourlyUsage, USAGE_COUNTERS, type UsageCounter, utcHour } from "./u
 export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
 export {
   buildWebhookPayload,
+  clearWebhookEndpointNotifications,
   decryptWebhookSecret,
   decryptWebhookSigningSecrets,
   encryptWebhookSecret,

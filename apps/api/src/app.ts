@@ -2445,6 +2445,7 @@ function registerSegmentRoutes(app: OpenAPIHono<Env>, db: Db): void {
         .where(and(eq(s.id, id), eq(s.teamId, auth.teamId)))
         .returning();
       if (!row) return c.json(errorBody(404, "not_found", "Segment not found"), 404);
+      if (filter !== undefined) await markSegmentsStale(db, { segmentId: id });
       return c.json(toWire(row), 200);
     },
   );

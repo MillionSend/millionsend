@@ -371,20 +371,25 @@ it("the time budget ends a pass mid-page and releases the rest as due now", asyn
   expect(outcome.rearmAt?.getTime()).toBe(t);
 });
 
-it("429: honours Retry-After without charging an attempt, parks the page, ends the pass", async () => {
+it("429: honours Retry-After without charging an attempt, parks the page, pauses the endpoint", async () => {
   const endpointId = await insertEndpoint();
   const base = Date.now();
   const first = await insertDelivery(endpointId, { nextAttemptAt: new Date(base - 2_000) });
   const rest = await Promise.all(
     [1, 2].map(() => insertDelivery(endpointId, { nextAttemptAt: new Date(base - 1_000) })),
   );
+  // Due before Retry-After ends and never claimed: it still waits, because
+  // the pause is the endpoint's, not the page's.
+  const soon = await insertDelivery(endpointId, { nextAttemptAt: new Date(base + 10_000) });
   const deps = fakeDeps(
     async () => ({ status: 429, body: "slow down", retryAfter: "120" }),
     () => new Date(base),
   );
 
   const outcome = await drainWebhookEndpoint(db, deps, { endpointId });
-  expect(outcome).toEqual({ posted: 1, exhausted: 0, rearmAt: new Date(base + 60_000) });
+  expect(outcome).toEqual({ posted: 1, exhausted: 0, rearmAt: new Date(base + 120_000) });
+  expect(deps.rearmed).toEqual([{ endpointId, at: new Date(base + 120_000) }]);
+  expect((await deliveryRow(soon)).nextAttemptAt?.getTime()).toBe(base + 10_000);
   const throttled = await deliveryRow(first);
   expect(throttled.status).toBe("pending");
   expect(throttled.attempts).toBe(0);
@@ -433,4 +438,90 @@ it("decrypts the signing secret once per pass however many rows it posts", async
 
   expect((await drainWebhookEndpoint(db, deps, { endpointId })).posted).toBe(3);
   expect(unwraps).toBe(1);
+});
+
+it("an idle re-arm pass never touches KMS", async () => {
+  const endpointId = await insertEndpoint();
+  await insertDelivery(endpointId, { nextAttemptAt: new Date(Date.now() + 30_000) });
+  let unwraps = 0;
+  const counting: Keyring = {
+    wrapDek: (dek) => keyring.wrapDek(dek),
+    unwrapDek: (wrapped, keyVersion) => {
+      unwraps += 1;
+      return keyring.unwrapDek(wrapped, keyVersion);
+    },
+  };
+  const deps = { ...fakeDeps(async () => ({ status: 200, body: "ok" })), keyring: counting };
+
+  const outcome = await drainWebhookEndpoint(db, deps, { endpointId });
+  expect(outcome.posted).toBe(0);
+  expect(outcome.rearmAt).not.toBeNull();
+  expect(unwraps).toBe(0);
+});
+
+it("rows expired by age never trip the breaker", async () => {
+  const endpointId = await insertEndpoint();
+  const ids = await Promise.all(
+    Array.from({ length: WEBHOOK_AUTO_DISABLE_AFTER }, () =>
+      insertDelivery(endpointId, { createdAt: new Date(Date.now() - 25 * 3_600_000) }),
+    ),
+  );
+  const deps = fakeDeps(async () => ({ status: 200, body: "ok" }));
+
+  const outcome = await drainWebhookEndpoint(db, deps, { endpointId });
+  expect(outcome).toEqual({ posted: 0, exhausted: WEBHOOK_AUTO_DISABLE_AFTER, rearmAt: null });
+  expect(deps.posts).toHaveLength(0);
+  for (const id of ids) expect((await deliveryRow(id)).status).toBe("exhausted");
+  expect(await endpointStatus(endpointId)).toBe("enabled");
+});
+
+it("rows exhausted by a disable do not count once the endpoint is enabled again", async () => {
+  const endpointId = await insertEndpoint({ status: "disabled" });
+  for (let i = 0; i < WEBHOOK_AUTO_DISABLE_AFTER; i += 1) await insertDelivery(endpointId);
+  const deps = fakeDeps(async () => ({ status: 503, body: "down" }));
+  expect((await drainWebhookEndpoint(db, deps, { endpointId })).exhausted).toBe(
+    WEBHOOK_AUTO_DISABLE_AFTER,
+  );
+
+  await db
+    .update(schema.webhookEndpoints)
+    .set({ status: "enabled" })
+    .where(eq(schema.webhookEndpoints.id, endpointId));
+  const id = await insertDelivery(endpointId, {
+    status: "failed",
+    attempts: WEBHOOK_MAX_ATTEMPTS - 1,
+  });
+  expect((await drainWebhookEndpoint(db, deps, { endpointId })).exhausted).toBe(1);
+  expect((await deliveryRow(id)).status).toBe("exhausted");
+  expect(await endpointStatus(endpointId)).toBe("enabled");
+});
+
+it("an endpoint disabled mid-pass stops at the next page, which is handed back untouched", async () => {
+  const endpointId = await insertEndpoint();
+  // One more than a page: the second page is where the re-check bites.
+  const ids = await Promise.all(Array.from({ length: 51 }, () => insertDelivery(endpointId)));
+  const base = Date.now();
+  const deps = fakeDeps(
+    async () => {
+      await db
+        .update(schema.webhookEndpoints)
+        .set({ status: "disabled" })
+        .where(eq(schema.webhookEndpoints.id, endpointId));
+      return { status: 200, body: "ok" };
+    },
+    () => new Date(base),
+  );
+
+  const outcome = await drainWebhookEndpoint(db, deps, { endpointId });
+  expect(outcome.posted).toBe(50);
+  const rows = await db
+    .select()
+    .from(schema.webhookDeliveries)
+    .where(inArray(schema.webhookDeliveries.id, ids));
+  expect(rows.filter((r) => r.status === "success")).toHaveLength(50);
+  const [left] = rows.filter((r) => r.status === "pending");
+  expect(left?.attempts).toBe(0);
+  expect(left?.nextAttemptAt?.getTime()).toBe(base);
+  // Released as due now, so the successor runs at once and settles it.
+  expect(outcome.rearmAt?.getTime()).toBe(base);
 });

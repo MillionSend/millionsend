@@ -68,6 +68,15 @@ const OPEN_STATUSES = ["pending", "failed"] as const;
  */
 export const WEBHOOK_AUTO_DISABLE_AFTER = 20;
 
+/**
+ * A settled row that says something about the receiver: a success, or a
+ * failure that ran out of retries. Rows exhausted by age or by a disable
+ * carry attempts short of the cap and never posted, so they count for
+ * neither the breaker nor the failing mail. Sits inside the settled index's
+ * predicate (status in success, exhausted).
+ */
+export const COUNTED_SETTLED_SQL = sql`(${schema.webhookDeliveries.status} = 'success' or ${schema.webhookDeliveries.attempts} >= ${WEBHOOK_MAX_ATTEMPTS})`;
+
 /** Exhausts open rows matching `condition` in bounded batches; returns how many. */
 export async function exhaustOpenDeliveries(db: Db, condition: SQL, order?: SQL): Promise<number> {
   const d = schema.webhookDeliveries;
@@ -104,7 +113,13 @@ async function autoDisableIfDead(db: Db, endpointId: string): Promise<boolean> {
   const recent = db
     .select({ status: d.status })
     .from(d)
-    .where(and(eq(d.endpointId, endpointId), inArray(d.status, ["success", "exhausted"])))
+    .where(
+      and(
+        eq(d.endpointId, endpointId),
+        inArray(d.status, ["success", "exhausted"]),
+        COUNTED_SETTLED_SQL,
+      ),
+    )
     // Spelled out so it matches the settled index; a bare desc reads nulls first.
     .orderBy(sql`${d.createdAt} desc nulls last`, sql`${d.id} desc nulls last`)
     .limit(WEBHOOK_AUTO_DISABLE_AFTER)
@@ -204,21 +219,37 @@ export async function drainWebhookEndpoint(
   if (endpoint.status !== "enabled") {
     // Turned off with rows still open: settle them rather than leave a
     // backlog nobody will ever post.
-    outcome.exhausted = await exhaustOpenDeliveries(db, eq(d.endpointId, endpointId));
+    outcome.exhausted = await exhaustOpenDeliveries(
+      db,
+      eq(d.endpointId, endpointId),
+      sql`${d.nextAttemptAt} asc, ${d.id} asc`,
+    );
     return outcome;
   }
 
   const started = now();
-  const secrets = await decryptWebhookSigningSecrets(endpoint, deps.keyring, started);
-  // ponytail: the bucket is per pass, so a successor pass armed while this
-  // one runs shares nothing with it; a process-wide bucket per endpoint is
-  // the upgrade if two passes on one endpoint ever overlap for long.
+  // Decrypted on the first non-empty page: an idle re-arm pass never calls KMS.
+  let secrets: string[] | null = null;
+  // ponytail: the bucket is per pass. The queue runs one pass per endpoint
+  // at a time, so two only overlap after a crash left a lease behind; a
+  // process-wide bucket per endpoint is the upgrade if that ever matters.
   const bucket = createTokenBucket(WEBHOOK_MAX_RATE_PER_SECOND);
   const overBudget = (at: Date) => at.getTime() - started.getTime() >= DRAIN_BUDGET_MS;
 
   pass: while (!overBudget(now())) {
     const page = await claimDue(db, endpointId, now());
     if (page.length === 0) break;
+    const [current] = await db
+      .select({ status: schema.webhookEndpoints.status })
+      .from(schema.webhookEndpoints)
+      .where(eq(schema.webhookEndpoints.id, endpointId));
+    if (current?.status !== "enabled") {
+      // Turned off since the pass began: the successor sees the disabled
+      // endpoint and settles what this hands back.
+      await release(db, page, now());
+      break;
+    }
+    secrets ??= await decryptWebhookSigningSecrets(endpoint, deps.keyring, started);
     for (let i = 0; i < page.length; i += 1) {
       const row = page[i] as ClaimedRow;
       const rest = page.slice(i + 1);
@@ -233,10 +264,6 @@ export async function drainWebhookEndpoint(
           .set({ status: "exhausted", nextAttemptAt: null })
           .where(eq(d.id, row.id));
         outcome.exhausted += 1;
-        if (await autoDisableIfDead(db, endpointId)) {
-          await release(db, rest, at);
-          break pass;
-        }
         continue;
       }
 
@@ -265,7 +292,10 @@ export async function drainWebhookEndpoint(
 
       if (status === 429) {
         // The receiver is asking for room, not failing: no attempt is
-        // charged, and the whole page waits out its Retry-After.
+        // charged, and the whole endpoint waits out its Retry-After. The
+        // successor is parked at that instant on purpose: as the endpoint's
+        // queued singleton it swallows every re-arm a fresh insert tries
+        // until then, so nothing else posts to the receiver meanwhile.
         const until = new Date(at.getTime() + retryAfterMs(retryAfter, at));
         await db
           .update(d)
@@ -277,7 +307,9 @@ export async function drainWebhookEndpoint(
           })
           .where(eq(d.id, row.id));
         await release(db, rest, until);
-        break pass;
+        outcome.rearmAt = until;
+        await deps.rearm(endpointId, until);
+        return outcome;
       }
 
       const attempts = row.attempts + 1;

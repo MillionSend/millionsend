@@ -11,6 +11,7 @@ import {
   releaseDailyQuota,
   reserveDailyQuota,
   transitionQueueState,
+  WEBHOOK_BACKLOG_AGE_MS,
   WEBHOOK_MAX_AGE_MS,
   type WebhookEnqueue,
 } from "@millionsend/core";
@@ -44,19 +45,15 @@ import {
 import { exhaustOpenDeliveries } from "./deliver-webhook.js";
 
 /**
- * Open rows past this many is an operator alert: the receiver is not keeping
- * up with the team's event volume at the platform rate.
- */
-const WEBHOOK_BACKLOG_ALARM_ROWS = 10_000;
-
-/**
  * Safety net for a lost webhook.drain job (worker died mid-pass, enqueue
  * failed after the rows were written). Day-old open rows are exhausted
  * first. Then, per endpoint, a row due for a quarter hour that no pass
- * claimed means the endpoint has no live drain: its stalest row goes
- * through the fan-out seam, which arms one drain per endpoint. An endpoint
- * whose backlog is deep or whose oldest due row is over an hour old is
- * logged as an alert. Every probe is one index lookup per endpoint; the
+ * claimed goes through the fan-out seam, which arms one drain per
+ * endpoint; the queue's singleton and the group lane serialise that pass
+ * behind any live one, so arming is safe even when a drain is alive. An
+ * endpoint whose oldest due row is over WEBHOOK_BACKLOG_AGE_MS old is
+ * logged as an alert (depth alone is not: ten thousand rows is minutes of
+ * healthy draining). Every probe is one index lookup per endpoint; the
  * backlog itself is never walked.
  *
  * ponytail: the alert is a warn line in the container log; a customer
@@ -76,7 +73,7 @@ export async function reconcileWebhookDeliveries(
   );
 
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
-  const alarmBefore = new Date(now.getTime() - 60 * 60 * 1000);
+  const alarmBefore = new Date(now.getTime() - WEBHOOK_BACKLOG_AGE_MS);
   const open = sql`${d.endpointId} = ${e.id} and ${d.status} in ('pending', 'failed')`;
   const endpoints = await db
     .select({
@@ -86,7 +83,7 @@ export async function reconcileWebhookDeliveries(
       >`(select ${d.id} from ${d} where ${open} and ${d.nextAttemptAt} < ${staleBefore} order by ${d.nextAttemptAt}, ${d.id} limit 1)`,
       // min() over the due index rather than exists(): the planner turns a
       // correlated exists into a heap scan per endpoint when the backlog is deep.
-      alarmed: sql<boolean>`(select min(${d.nextAttemptAt}) from ${d} where ${open}) < ${alarmBefore} or (select count(*) from (select 1 from ${d} where ${open} limit ${WEBHOOK_BACKLOG_ALARM_ROWS + 1}) c) > ${WEBHOOK_BACKLOG_ALARM_ROWS}`,
+      alarmed: sql<boolean>`(select min(${d.nextAttemptAt}) from ${d} where ${open}) < ${alarmBefore}`,
     })
     .from(e);
   const stale = endpoints.flatMap((row) =>
@@ -96,7 +93,7 @@ export async function reconcileWebhookDeliveries(
   for (const row of endpoints) {
     if (row.alarmed)
       console.warn(
-        `webhooks.reconcile: endpoint ${row.endpointId} backlog exceeds ${WEBHOOK_BACKLOG_ALARM_ROWS} open rows or has a delivery due for over an hour`,
+        `webhooks.reconcile: endpoint ${row.endpointId} has a delivery due for over ${WEBHOOK_BACKLOG_AGE_MS / 60_000} minutes`,
       );
   }
   return stale.length;
@@ -231,9 +228,13 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       // re-park them so the drain retry handles them sooner.
       failures.push(err);
       for (const m of moved) {
-        await transitionQueueState(db, m.id, { from: "queued", to: "queued_quota" });
-        await releaseDailyQuota(db, { teamId: m.teamId, count: m.units });
+        // A row a racing send lane already claimed keeps its reservation:
+        // refunding it here would credit the team for a send that happened.
+        if (await transitionQueueState(db, m.id, { from: "queued", to: "queued_quota" })) {
+          await releaseDailyQuota(db, { teamId: m.teamId, count: m.units });
+        }
       }
+      break;
     }
   }
   if (failures.length > 0) {

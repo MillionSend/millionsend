@@ -68,8 +68,12 @@ export type EnqueueEmailSends = (batch: readonly EmailSendRequest[]) => Promise<
  * Job queues use the "short" policy: pg-boss only enforces singletonKey
  * uniqueness under short/singleton/stately/exclusive policies — on the
  * default "standard" policy the key is silently ignored and dedupe would be
- * a no-op. "short" + a key on every send = at most one QUEUED job per key
- * (unlimited active), which is exactly the redelivery-collapse semantic.
+ * a no-op. "short" + a key on every send = at most one CREATED job per key
+ * (job_i1 is partial on state = created): an active job, or one waiting in
+ * retry state, does not block a fresh insert. Dedupe therefore collapses
+ * redeliveries only; anything that must run one at a time per key (a
+ * webhook endpoint's drain passes) gets a `group` and a groupConcurrency 1
+ * worker, which is what serialises them.
  */
 const JOB_QUEUE_POLICY = "short" as const;
 
@@ -208,6 +212,10 @@ export class Queue {
   #producer: PgBoss;
   #consumer: PgBoss | undefined;
   #created = new Set<string>();
+  // pg-boss's graceful stop waits for running handlers without aborting
+  // their signal (it only aborts after failing them at the timeout), so a
+  // long walk would never learn it should stop before the pools close.
+  #shutdown = new AbortController();
 
   private constructor(producer: PgBoss, consumer?: PgBoss) {
     this.#producer = producer;
@@ -228,8 +236,11 @@ export class Queue {
     if (!opts.workers) {
       return new Queue(await startBoss({ ...base, supervise: false, schedule: false, max: 2 }));
     }
-    // Maintenance every 10 minutes deletes finished jobs in small slices
-    // instead of one daily statement; the queue monitor counts every five.
+    // Maintenance every 10 minutes: pg-boss 12.30 runs one DELETE per chunk
+    // of up to 100 queue names, unbounded by row count, so the pass stays
+    // small only because retention does — finished jobs live an hour
+    // (DELETE_AFTER_SECONDS), never-fetched ones pg-boss's 14-day default.
+    // The queue monitor counts every five.
     const consumer = await startBoss({
       ...base,
       max: 8,
@@ -299,10 +310,12 @@ export class Queue {
   }
 
   /**
-   * Arm the drain of each endpoint, at most one queued job per endpoint:
-   * the key is the endpoint id, so a fan-out of any size onto an endpoint
-   * whose drain is already queued inserts nothing, and one that is running
-   * gets a successor that picks up whatever it leaves behind.
+   * Arm the drain of each endpoint. The key collapses a fan-out of any size
+   * onto an endpoint whose drain is already created into no insert; a drain
+   * that is running (or waiting in retry) gets a successor. The group is the
+   * endpoint too: the webhook.drain worker runs with groupConcurrency 1, so
+   * that successor is not fetched until the running pass has finished, and
+   * two passes never post the same endpoint's rows side by side.
    */
   async drainWebhookEndpoints(endpointIds: readonly string[], startAfter?: Date): Promise<void> {
     await this.sendMany(
@@ -310,6 +323,7 @@ export class Queue {
       [...new Set(endpointIds)].map((endpointId) => ({
         payload: { endpointId },
         dedupeKey: endpointId,
+        group: endpointId,
         startAfter,
       })),
     );
@@ -366,6 +380,12 @@ export class Queue {
    * two seconds however long the backlog. Queues that see bursts fetch a
    * `batchSize` above one, which turns on continuous fetching while the
    * backlog lasts; the handler still runs the batch one job at a time.
+   *
+   * On a notify queue pg-boss relaxes the poll to a 30 s backstop by default,
+   * and NOTIFY fires only on insert: a job that becomes due later (a drip
+   * startAfter, a retry backoff, a drain re-arm) would wait up to 30 s. The
+   * notify interval is pinned to the base interval so NOTIFY only ever
+   * shortens latency.
    */
   async work<N extends JobName>(
     name: N,
@@ -394,14 +414,21 @@ export class Queue {
         ...(opts.pollingIntervalSeconds !== undefined
           ? { pollingIntervalSeconds: opts.pollingIntervalSeconds }
           : {}),
+        notifyPollingIntervalSeconds: opts.pollingIntervalSeconds ?? 2,
         ...(opts.groupConcurrency !== undefined ? { groupConcurrency: opts.groupConcurrency } : {}),
       },
-      async (jobs: { data: JobPayloads[N]; signal: AbortSignal }[]) => {
-        for (const job of jobs) {
-          await handler(job.data, { signal: job.signal });
-        }
-      },
+      (jobs: { data: JobPayloads[N]; signal: AbortSignal }[]) => this.#run(handler, jobs),
     );
+  }
+
+  /** Runs a batch one job at a time; the signal aborts on the job's own signal or on stop(). */
+  async #run<N extends JobName>(
+    handler: JobHandler<N>,
+    jobs: { data: JobPayloads[N]; signal: AbortSignal }[],
+  ): Promise<void> {
+    for (const job of jobs) {
+      await handler(job.data, { signal: AbortSignal.any([job.signal, this.#shutdown.signal]) });
+    }
   }
 
   /** Handles jobs that exhausted their retries on `name` (payload unchanged). */
@@ -414,11 +441,7 @@ export class Queue {
     await this.#workers.work<JobPayloads[N]>(
       deadLetter,
       { batchSize: 1, pollingIntervalSeconds: SLOW_POLL_SECONDS },
-      async (jobs: { data: JobPayloads[N]; signal: AbortSignal }[]) => {
-        for (const job of jobs) {
-          await handler(job.data, { signal: job.signal });
-        }
-      },
+      (jobs: { data: JobPayloads[N]; signal: AbortSignal }[]) => this.#run(handler, jobs),
     );
   }
 
@@ -446,8 +469,13 @@ export class Queue {
     await this.#producer.send(name, {});
   }
 
-  /** Consumer first: a handler finishing its page can still enqueue through the producer. */
+  /**
+   * Handlers learn first, so a walk can end at its next page instead of
+   * running into pg-boss's stop timeout; then the consumer drains, and the
+   * producer closes last so a handler finishing its page can still enqueue.
+   */
   async stop(): Promise<void> {
+    this.#shutdown.abort();
     await this.#consumer?.stop({ graceful: true });
     await this.#producer.stop({ graceful: true });
   }

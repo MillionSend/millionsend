@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import {
   decryptPayload,
@@ -223,20 +223,27 @@ export const WEBHOOK_MAX_RATE_PER_SECOND = 20;
 /** Settled deliveries in a row with no success before owners hear an endpoint is failing. */
 export const WEBHOOK_FAILING_STREAK = 10;
 /**
- * An open delivery due this long ago, or this many open ones, is a backlog
- * worth telling the team about. The count is also where the dashboard stops
- * counting a queue (mirrored client-side in apps/web/src/lib/webhook-queue.ts).
+ * An open delivery due this long ago is a backlog worth telling the team
+ * about. Depth alone is not: ten thousand rows is eight minutes of healthy
+ * draining at the platform rate.
  */
 export const WEBHOOK_BACKLOG_AGE_MS = 3_600_000;
+/**
+ * Where the dashboard and the backlog mail stop counting a queue; past it
+ * the figure reads "10k+" (mirrored client-side in apps/web/src/lib/webhook-queue.ts).
+ */
 export const WEBHOOK_BACKLOG_COUNT = 10_000;
 
 const RETRY_AFTER_DEFAULT_MS = 60_000;
+/** A Retry-After of 0 or a past date would re-arm the drain in a hot loop. */
+const RETRY_AFTER_MIN_MS = 1_000;
 const RETRY_AFTER_MAX_MS = 3_600_000;
 
 /**
  * Milliseconds a 429's Retry-After asks for (delta-seconds or HTTP-date),
- * a minute when absent or unreadable, never more than an hour so a receiver
- * cannot park its own backlog past the deliveries' hard expiry.
+ * a minute when absent or unreadable, never under a second and never more
+ * than an hour so a receiver cannot park its own backlog past the
+ * deliveries' hard expiry.
  */
 export function retryAfterMs(header: string | null | undefined, now = new Date()): number {
   const value = header?.trim();
@@ -247,7 +254,26 @@ export function retryAfterMs(header: string | null | undefined, now = new Date()
     if (Number.isFinite(seconds)) ms = seconds * 1000;
     else if (Number.isFinite(date)) ms = date - now.getTime();
   }
-  return Math.min(Math.max(ms, 0), RETRY_AFTER_MAX_MS);
+  return Math.min(Math.max(ms, RETRY_AFTER_MIN_MS), RETRY_AFTER_MAX_MS);
+}
+
+/**
+ * Forgets an endpoint's notification claims (failing, auto-disabled,
+ * backlog) when the endpoint goes: the ledger keys them by endpoint id,
+ * which nothing else would ever clear.
+ */
+export async function clearWebhookEndpointNotifications(
+  db: Db,
+  params: { teamId: string; endpointId: string },
+): Promise<void> {
+  await db
+    .delete(schema.teamNotifications)
+    .where(
+      and(
+        eq(schema.teamNotifications.teamId, params.teamId),
+        like(schema.teamNotifications.kind, `webhook.%:${params.endpointId}`),
+      ),
+    );
 }
 
 export async function encryptWebhookSecret(

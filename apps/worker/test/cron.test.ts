@@ -130,6 +130,66 @@ it("a failed page enqueue re-parks that whole page and releases its reservations
   expect(counter?.accepted).toBe(0);
 });
 
+it("a failed page enqueue never refunds a row a racing send lane already claimed", async () => {
+  const a = await insertParked(new Date("2026-08-13T01:00:00Z"));
+  const b = await insertParked(new Date("2026-08-13T02:00:00Z"));
+
+  await expect(
+    drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async () => {
+        // A send lane picked `a` up between the move and the enqueue failure.
+        await db
+          .update(schema.emails)
+          .set({ latestStatus: "sent", sentAt: new Date() })
+          .where(eq(schema.emails.id, a));
+        throw new Error("queue down");
+      },
+    }),
+  ).rejects.toThrow("1 email(s) failed");
+
+  expect(await statusOf(a)).toBe("sent");
+  expect(await statusOf(b)).toBe("queued_quota");
+  // Only b's reservation goes back; a's send happened and stays charged.
+  const [counter] = await db
+    .select()
+    .from(schema.usageCounters)
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(counter?.accepted).toBe(1);
+});
+
+it("a failed page enqueue ends the run instead of walking the remaining pages", async () => {
+  const base = Date.parse("2026-08-13T00:00:00Z");
+  // One row more than a page, so a second page exists to be skipped.
+  await db.insert(schema.emails).values(
+    Array.from({ length: 501 }, (_, i) => ({
+      teamId,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: `parked ${i}`,
+      latestStatus: "queued_quota" as const,
+      createdAt: new Date(base + i * 1000),
+    })),
+  );
+
+  let calls = 0;
+  await expect(
+    drainQuotaParked(db, {
+      isCloud: false,
+      enqueueSends: async () => {
+        calls += 1;
+        throw new Error("queue down");
+      },
+    }),
+  ).rejects.toThrow("1 email(s) failed");
+  expect(calls).toBe(1);
+  const [parked] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.emails)
+    .where(eq(schema.emails.latestStatus, "queued_quota"));
+  expect(parked?.n).toBe(501);
+});
+
 it("drain passes a scheduled email's due time through to the queue", async () => {
   const due = new Date(Date.now() + DAY_MS);
   const [row] = await db

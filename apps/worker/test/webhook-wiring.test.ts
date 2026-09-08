@@ -9,7 +9,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SerializedSesEvent } from "@millionsend/queue";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { reconcileWebhookDeliveries } from "../src/handlers/cron.js";
 import { processSesEvent } from "../src/handlers/process-ses-event.js";
@@ -316,7 +316,7 @@ it("reconcile sweep arms one drain per endpoint with rows nobody claimed, and ex
   expect(expiredRow).toEqual({ status: "exhausted", next: null });
 });
 
-it("reconcile sweep flags an endpoint whose backlog is deep or has been due for over an hour", async () => {
+it("reconcile sweep flags an endpoint with a delivery due for over an hour, by age alone", async () => {
   const now = new Date();
   const lagging = await insertEndpoint(teamId, null);
   const healthy = await insertEndpoint(teamId, null);
@@ -338,6 +338,13 @@ it("reconcile sweep flags an endpoint whose backlog is deep or has been due for 
       nextAttemptAt: new Date(now.getTime() - 20 * 60 * 1000),
     },
   ]);
+  // Deep but keeping up: many rows, none due long, is no alarm.
+  const deep = await insertEndpoint(teamId, null);
+  await db.execute(sql`
+    insert into ${schema.webhookDeliveries} (endpoint_id, message_id, event_type, payload, status, next_attempt_at)
+    select ${deep}::uuid, 'msg_deep_' || g, 'email.delivered', '{}'::jsonb, 'pending', ${new Date(now.getTime() - 20 * 60 * 1000)}
+    from generate_series(1, 10001) g
+  `);
   const warnings: string[] = [];
   const warn = console.warn;
   console.warn = (line: string) => {
@@ -359,4 +366,5 @@ it("reconcile sweep flags an endpoint whose backlog is deep or has been due for 
   }
   expect(warnings.filter((w) => w.includes(lagging))).toHaveLength(1);
   expect(warnings.filter((w) => w.includes(healthy))).toHaveLength(0);
+  expect(warnings.filter((w) => w.includes(deep))).toHaveLength(0);
 });

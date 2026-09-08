@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { env } from "@millionsend/config";
 import {
+  clearWebhookEndpointNotifications,
   decryptWebhookSigningSecrets,
   encryptWebhookSecret,
   generateWebhookSecret,
@@ -81,23 +82,16 @@ interface EndpointStats {
   successRate: number | null;
   queued: number;
   oldestQueuedAt: Date | null;
-  nextAttemptAt: Date | null;
 }
 
-const NO_STATS: EndpointStats = {
-  successRate: null,
-  queued: 0,
-  oldestQueuedAt: null,
-  nextAttemptAt: null,
-};
+const NO_STATS: EndpointStats = { successRate: null, queued: 0, oldestQueuedAt: null };
 
 /**
  * Per-endpoint standing in one statement. successRate is success / settled
  * over the last SUCCESS_RATE_WINDOW deliveries (pending rows are still in
  * flight and count for neither side), null when nothing has settled yet.
  * queued counts open rows down the due index, stopping at WEBHOOK_BACKLOG_COUNT + 1;
- * oldestQueuedAt and nextAttemptAt are the first due instant overall and the
- * first still ahead. One LATERAL per endpoint reads exactly the window off
+ * oldestQueuedAt is the first due instant. One LATERAL per endpoint reads exactly the window off
  * the (endpoint_id, created_at) index; a window function over every
  * delivery row would read the endpoint's whole history.
  */
@@ -116,19 +110,17 @@ async function endpointStats(db: Db, endpointIds: string[]): Promise<Map<string,
     succeeded: number;
     queued: number;
     oldest_ms: number | null;
-    next_ms: number | null;
   }>(
     await db.execute(sql`
       select e.id,
              count(*) filter (where recent.status in ('success', 'failed', 'exhausted'))::int as settled,
              count(*) filter (where recent.status = 'success')::int as succeeded,
              (select count(*)::int from (
-                select 1 from ${d} where ${d.endpointId} = e.id and ${open} limit ${WEBHOOK_BACKLOG_COUNT + 1}
+                select 1 from ${d} where ${d.endpointId} = e.id and ${open}
+                order by ${d.nextAttemptAt} limit ${WEBHOOK_BACKLOG_COUNT + 1}
               ) q) as queued,
              (select (extract(epoch from min(${d.nextAttemptAt})) * 1000)::float8
-                from ${d} where ${d.endpointId} = e.id and ${open}) as oldest_ms,
-             (select (extract(epoch from min(${d.nextAttemptAt})) * 1000)::float8
-                from ${d} where ${d.endpointId} = e.id and ${open} and ${d.nextAttemptAt} > now()) as next_ms
+                from ${d} where ${d.endpointId} = e.id and ${open}) as oldest_ms
       from unnest(array[${ids}]) as e(id)
       left join lateral (
         select ${d.status} as status
@@ -145,7 +137,6 @@ async function endpointStats(db: Db, endpointIds: string[]): Promise<Map<string,
       successRate: row.settled > 0 ? Math.round((100 * row.succeeded) / row.settled) : null,
       queued: row.queued,
       oldestQueuedAt: row.oldest_ms === null ? null : new Date(row.oldest_ms),
-      nextAttemptAt: row.next_ms === null ? null : new Date(row.next_ms),
     });
   }
   return stats;
@@ -365,6 +356,7 @@ export const webhooksRouter = router({
       .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
       .returning({ id: t.id, url: t.url });
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    await clearWebhookEndpointNotifications(ctx.db, { teamId: ctx.teamId, endpointId: row.id });
     await recordAudit(ctx, {
       action: "webhook.deleted",
       target: { type: "webhook", id: row.id },
@@ -403,6 +395,9 @@ export const webhooksRouter = router({
           messageId,
           eventType: "email.sent",
           payload,
+          // Due at once: a crash between here and the settle below leaves a
+          // row the drain can still claim rather than one open forever.
+          nextAttemptAt: new Date(),
         })
         .returning({ id: schema.webhookDeliveries.id });
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });

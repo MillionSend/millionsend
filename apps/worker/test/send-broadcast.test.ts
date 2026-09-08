@@ -428,6 +428,10 @@ it("throttles the fan-out drip when the team is over the risk line, one enqueue 
   // absolute base (wall clock) is never asserted.
   expect(t1 - t0).toBe(spacing);
   expect(t2 - t1).toBe(spacing);
+  // The drip is persisted on each row, so the send handler defers to it and
+  // the reconcile sweep leaves not-yet-due rows alone.
+  const rows = await emailsOf(broadcastId);
+  expect(rows.map((r) => r.scheduledAt?.getTime()).sort()).toEqual([t0, t1, t2].sort());
 });
 
 it("fans out at full rate (no startAfter) when the team is ok", async () => {
@@ -442,9 +446,10 @@ it("fans out at full rate (no startAfter) when the team is ok", async () => {
 
   expect(startAfters).toHaveLength(3);
   expect(startAfters.every((d) => d === undefined)).toBe(true);
+  expect((await emailsOf(broadcastId)).every((r) => r.scheduledAt === null)).toBe(true);
 });
 
-it("an aborted signal ends the walk at the next page as deferred; the resumed walk skips fanned-out contacts and keeps its drip tight", async () => {
+it("an aborted signal fails the walk at the next page so the job retries; the resumed walk skips fanned-out contacts and keeps its drip tight", async () => {
   const { broadcastId } = await seedThrottleTeam("bc-resume", {
     sent: 2000,
     bounced: 90,
@@ -459,7 +464,7 @@ it("an aborted signal ends the walk at the next page as deferred; the resumed wa
     await firstEnqueue(batch);
     ac.abort();
   };
-  expect(await sendBroadcast(db, first.deps, { broadcastId })).toBe("deferred");
+  await expect(sendBroadcast(db, first.deps, { broadcastId })).rejects.toThrow(/fan-out aborted/);
   expect(first.enqueued).toHaveLength(1);
   const [row] = await db
     .select({ status: schema.broadcasts.status })

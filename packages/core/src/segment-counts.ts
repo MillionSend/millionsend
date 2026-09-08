@@ -87,18 +87,22 @@ export async function recountStaleSegments(
   const s = schema.segments;
   const c = schema.contacts;
   const m = schema.segmentMembers;
+  // Grace window: a write that committed after the count's snapshot carries
+  // a timestamp before counted_at; compared strictly it would be missed
+  // until the next write to the team.
+  const grace = sql`${s.countedAt} - interval '5 minutes'`;
   const changedSince = or(
     exists(
       db
         .select({ one: sql`1` })
         .from(c)
-        .where(and(eq(c.teamId, s.teamId), gt(c.updatedAt, s.countedAt))),
+        .where(and(eq(c.teamId, s.teamId), gt(c.updatedAt, grace))),
     ),
     exists(
       db
         .select({ one: sql`1` })
         .from(m)
-        .where(and(eq(m.segmentId, s.id), gt(m.createdAt, s.countedAt))),
+        .where(and(eq(m.segmentId, s.id), gt(m.createdAt, grace))),
     ),
   );
   const stale = await db

@@ -44,10 +44,11 @@ export interface BroadcastDeps {
   /** Re-enqueue a not-yet-due scheduled broadcast at its due time. */
   reschedule?: ((broadcastId: string, at: Date) => Promise<void>) | undefined;
   /**
-   * The job's abort signal: pg-boss aborts it on shutdown and when the job
+   * The job's abort signal: aborted on worker shutdown and when the job
    * expires under a walk that is still running. Checked once per page, so
-   * either ends the walk within a page; the job is retried (or the
-   * broadcasts.reconcile sweep re-arms it), so nothing is re-enqueued here.
+   * either ends the walk within a page by throwing, which fails the job into
+   * pg-boss's retry so the next boot resumes it (the broadcasts.reconcile
+   * sweep is the backstop); nothing is re-enqueued here.
    */
   signal?: AbortSignal | undefined;
   batchSize?: number | undefined;
@@ -204,7 +205,8 @@ export async function sendBroadcast(
   // whole team.
   let cursor: string | null = null;
   for (;;) {
-    if (deps.signal?.aborted) return "deferred";
+    // Checked after the previous page's enqueue, so no enqueued page is lost.
+    if (deps.signal?.aborted) throw new Error(`broadcast ${broadcast.id}: fan-out aborted`);
     const contacts = await db
       .select({
         id: schema.contacts.id,
@@ -300,6 +302,10 @@ export async function sendBroadcast(
         deps.keyring,
         { teamId: broadcast.teamId, rowId: emailId },
       );
+      // Only rows this run actually enqueues advance the drip — re-run
+      // conflicts (accepted === null) don't, so a resumed fan-out keeps
+      // spacing tight instead of leaving gaps for already-queued contacts.
+      const startAfter = spacingMs > 0 ? new Date(startMs + emitted * spacingMs) : undefined;
       // Quota reservation and email insert commit atomically (the quota
       // contract), same as the API accept path — a broadcast must not
       // bypass the plan's daily cap.
@@ -320,6 +326,10 @@ export async function sendBroadcast(
             replyTo,
             subject: applyMergeFields(broadcast.subject, contact, { html: false }),
             latestStatus: "queued",
+            // The drip lives on the row: the send handler defers to it and
+            // the reconcile sweep leaves a not-yet-due row alone instead of
+            // re-enqueueing every throttled send each pass.
+            scheduledAt: startAfter ?? null,
             bodyCiphertext: encrypted.ciphertext,
             bodyIv: encrypted.iv,
             bodyWrappedDek: encrypted.wrappedDek,
@@ -349,10 +359,6 @@ export async function sendBroadcast(
       // null → this contact was fanned out by a previous run; its job is
       // already queued (or the sends.reconcile sweep recovers it).
       if (accepted && !accepted.parked) {
-        // Only rows this run actually enqueues advance the drip — re-run
-        // conflicts (accepted === null) don't, so a resumed fan-out keeps
-        // spacing tight instead of leaving gaps for already-queued contacts.
-        const startAfter = spacingMs > 0 ? new Date(startMs + emitted * spacingMs) : undefined;
         emitted += 1;
         batch.push({ emailId: accepted.id, startAfter });
       }

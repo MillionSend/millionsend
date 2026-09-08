@@ -18,7 +18,8 @@ export function contactPropertiesChange(
   removed: readonly string[] = [],
 ): boolean {
   return (
-    Object.entries(incoming).some(([key, value]) => current[key] !== value) ||
-    removed.some((key) => key in current)
+    Object.entries(incoming).some(
+      ([key, value]) => !Object.hasOwn(current, key) || current[key] !== value,
+    ) || removed.some((key) => Object.hasOwn(current, key))
   );
 }

@@ -240,32 +240,30 @@ it("hard bounces still count after the retention purge strips event payloads", a
   });
 });
 
-it("the week window reads the daily counters: seven UTC days including today, attributed to the team's newest verified domain", async () => {
+it("the week window reads the daily counters: seven UTC days including today (reported as 168h), attributed to the team's verified domain, never a pending one", async () => {
   await clearTraffic();
   await db.delete(schema.regionBreakers);
   const teamD = await createTeam(db, "breaker-d");
-  await db.insert(schema.domains).values([
-    {
-      teamId: teamD,
-      name: "old.dev",
-      region: "eu-west-1",
-      status: "verified",
-      verifiedAt: hoursAgo(48),
-    },
-    {
-      teamId: teamD,
-      name: "new.dev",
-      region: "ap-south-1",
-      status: "verified",
-      verifiedAt: hoursAgo(24),
-    },
-    { teamId: teamD, name: "never.dev", region: "us-east-1", status: "pending" },
-  ]);
+  const [dom] = await db
+    .insert(schema.domains)
+    .values([
+      {
+        teamId: teamD,
+        name: "d.dev",
+        region: "ap-south-1",
+        status: "verified",
+        verifiedAt: hoursAgo(24),
+      },
+      { teamId: teamD, name: "never.dev", region: "us-east-1", status: "pending" },
+    ])
+    .returning({ id: schema.domains.id });
+  if (!dom) throw new Error("seed failed");
   const day = (n: number) => utcDay(NOW.getTime() - n * DAY_MS);
-  // Seven days ago is inside the window; eight days ago is out — with it
-  // in, 5 complaints over 10000 sends would sit under the line.
+  // Six days ago is the oldest day inside the window; seven days ago is out —
+  // with it in, 5 complaints over 10000 sends would sit under the line.
   await bumpCounters(teamD, day(7), { sent: 9000 });
-  await bumpCounters(teamD, day(6), { sent: 600, complained: 5 });
+  // The tripping day's rows exist too (seedTraffic bumps its counters).
+  await seedTraffic(teamD, dom.id, 600, [{ type: "complained", n: 5 }], hoursAgo(6 * 24));
   await bumpCounters(teamD, day(0), { sent: 400 });
   expect(await regionCounterTotals(db, { now: NOW, days: 7 })).toEqual(
     new Map([["ap-south-1", { sent: 1000, hardBounced: 0, complained: 5 }]]),
@@ -275,7 +273,48 @@ it("the week window reads the daily counters: seven UTC days including today, at
   expect(decisions[0]).toMatchObject({
     trip: true,
     reason: { metric: "complaint", windowHours: 168, sent: 1000, events: 5 },
-    // Contributors come from the rows, and no row was written here.
-    contributors: [],
   });
+  expect(decisions[0]?.contributors.map((c) => [c.teamId, c.complained])).toEqual([[teamD, 5]]);
+});
+
+it("a team whose verified domains span regions is read from its rows, not the counters, so its week lands in the right region", async () => {
+  await clearTraffic();
+  await db.delete(schema.regionBreakers);
+  const teamE = await createTeam(db, "breaker-e");
+  const [eu] = await db
+    .insert(schema.domains)
+    .values([
+      {
+        teamId: teamE,
+        name: "old.dev",
+        region: "eu-west-1",
+        status: "verified",
+        verifiedAt: hoursAgo(48),
+      },
+      {
+        teamId: teamE,
+        name: "new.dev",
+        region: "ap-south-1",
+        status: "verified",
+        verifiedAt: hoursAgo(24),
+      },
+    ])
+    .returning({ id: schema.domains.id });
+  if (!eu) throw new Error("seed failed");
+  // The bad week went out through the OLDER domain's region. Counters alone
+  // would credit the newer domain's region with it.
+  await seedTraffic(teamE, eu.id, 1000, [{ type: "complained", n: 5 }], hoursAgo(72));
+  // Counter-only volume (no rows) is ignored for this team: through the
+  // counters it would dilute the rate far under the line.
+  await bumpCounters(teamE, utcDay(NOW), { sent: 100_000 });
+  expect(await regionCounterTotals(db, { now: NOW, days: 7 })).toEqual(
+    new Map([["eu-west-1", { sent: 1000, hardBounced: 0, complained: 5 }]]),
+  );
+  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  expect(decisions.map((d) => d.region)).toEqual(["eu-west-1"]);
+  expect(decisions[0]).toMatchObject({
+    trip: true,
+    reason: { metric: "complaint", windowHours: 168, sent: 1000, events: 5 },
+  });
+  expect(decisions[0]?.contributors.map((c) => [c.teamId, c.complained])).toEqual([[teamE, 5]]);
 });
