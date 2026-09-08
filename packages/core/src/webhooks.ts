@@ -220,6 +220,16 @@ export const WEBHOOK_MAX_AGE_MS = 24 * 3_600_000;
  */
 export const WEBHOOK_MAX_RATE_PER_SECOND = 20;
 
+/** Settled deliveries in a row with no success before owners hear an endpoint is failing. */
+export const WEBHOOK_FAILING_STREAK = 10;
+/**
+ * An open delivery due this long ago, or this many open ones, is a backlog
+ * worth telling the team about. The count is also where the dashboard stops
+ * counting a queue (mirrored client-side in apps/web/src/lib/webhook-queue.ts).
+ */
+export const WEBHOOK_BACKLOG_AGE_MS = 3_600_000;
+export const WEBHOOK_BACKLOG_COUNT = 10_000;
+
 const RETRY_AFTER_DEFAULT_MS = 60_000;
 const RETRY_AFTER_MAX_MS = 3_600_000;
 

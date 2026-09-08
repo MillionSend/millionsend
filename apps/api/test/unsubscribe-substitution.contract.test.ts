@@ -102,8 +102,8 @@ it("fans out with a real per-contact unsubscribe URL, never the literal placehol
       unsubscribeSecretKey,
       appBaseUrl: APP_BASE_URL,
       isCloud: false,
-      enqueueEmailSend: async (emailId) => {
-        queuedEmailIds.push(emailId);
+      enqueueEmailSends: async (batch) => {
+        queuedEmailIds.push(...batch.map((job) => job.emailId));
       },
     },
     { broadcastId },

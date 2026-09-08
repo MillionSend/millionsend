@@ -64,6 +64,13 @@
     "disabled": "Disabled",
     "auto_disabled": "Auto-disabled"
   },
+  "queue": {
+    "queued": "{count} queued",
+    "oldest": "oldest",
+    "next": "next attempt",
+    "stale": "{count} deliveries are waiting; the oldest has been due for {age}. The receiver is slow or failing.",
+    "autoDisabled": "Disabled automatically after repeated failures. Fix the receiver, then enable it again; events in the meantime are not replayed."
+  },
   "enable": "Enable",
   "disable": "Disable",
   "delete": "Delete",

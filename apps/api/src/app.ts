@@ -34,6 +34,7 @@ import {
   type Keyring,
   MAX_ATTACHMENT_BYTES,
   makeUnsubscribeToken,
+  markSegmentsStale,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   PLAN_DAILY_LIMIT,
@@ -1268,6 +1269,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         .returning(contactSnapshotColumns)
     )[0];
     if (row) {
+      await markSegmentsStale(db, { teamId });
       await emitContactEvents(db, {
         teamId,
         events: [{ type: "contact.deleted", contact: row, erased: erase }],
@@ -1402,6 +1404,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         .delete(t)
         .where(and(eq(t.teamId, auth.teamId), match))
         .returning(contactSnapshotColumns);
+      if (rows.length > 0) await markSegmentsStale(db, { teamId: auth.teamId });
       await emitContactEvents(db, {
         teamId: auth.teamId,
         events: rows.map((contact) => ({
@@ -1863,6 +1866,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       if (!removed) {
         return c.json(errorBody(404, "not_found", "Contact is not a member of this segment"), 404);
       }
+      await markSegmentsStale(db, { segmentId });
       // A membership row existed, so the segment is the team's own (rows only
       // ever link same-team pairs); fetch its name for the timeline snapshot.
       const [segment] = await db

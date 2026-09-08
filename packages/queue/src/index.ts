@@ -54,6 +54,16 @@ export type EmailSendPriority = (typeof EMAIL_SEND_PRIORITY)[keyof typeof EMAIL_
 export const emailSendPriority = (email: { broadcastId: string | null }): EmailSendPriority =>
   email.broadcastId ? EMAIL_SEND_PRIORITY.bulk : EMAIL_SEND_PRIORITY.transactional;
 
+/** One email.send in a batch enqueue; the wiring supplies the default priority. */
+export interface EmailSendRequest {
+  emailId: string;
+  startAfter?: Date | undefined;
+  priority?: EmailSendPriority | undefined;
+}
+
+/** The worker's seam for enqueueing a page of sends in one statement. */
+export type EnqueueEmailSends = (batch: readonly EmailSendRequest[]) => Promise<void>;
+
 /**
  * Job queues use the "short" policy: pg-boss only enforces singletonKey
  * uniqueness under short/singleton/stately/exclusive policies — on the
@@ -77,6 +87,30 @@ export const DEAD_LETTER_QUEUES = {
 } as const;
 
 export type DeadLetteredJobName = keyof typeof DEAD_LETTER_QUEUES;
+
+const JOB_QUEUES = [
+  "email.send",
+  "broadcast.send",
+  "ses.event",
+  "webhook.drain",
+  "recipient.erase",
+] as const;
+// Compile-time check that every JobPayloads key is listed above.
+const _everyJobQueueListed: Record<Exclude<JobName, (typeof JOB_QUEUES)[number]>, never> = {};
+void _everyJobQueueListed;
+
+/**
+ * Queues whose inserts NOTIFY the worker so a job runs the moment it lands;
+ * polling stays on as the backstop. Erasure and the cron and dead-letter
+ * queues are rare and never latency-sensitive, so they only poll, slowly.
+ */
+const NOTIFY_QUEUES: ReadonlySet<string> = new Set<JobName>([
+  "email.send",
+  "broadcast.send",
+  "ses.event",
+  "webhook.drain",
+]);
+const SLOW_POLL_SECONDS = 30;
 
 /**
  * Jobs allowed to stay active longer than pg-boss's 15-minute default before
@@ -153,32 +187,83 @@ export interface JobSendOptions {
   group?: string | undefined;
 }
 
+/** What a handler learns about its job: pg-boss aborts the signal on shutdown and on expiry. */
+export interface JobContext {
+  signal: AbortSignal;
+}
+
+type JobHandler<N extends JobName> = (payload: JobPayloads[N], ctx: JobContext) => Promise<void>;
+
+async function startBoss(options: ConstructorParameters<typeof PgBoss>[0]): Promise<PgBoss> {
+  const boss = new PgBoss(options);
+  boss.on("error", (err: Error) => console.error("pg-boss error", err));
+  boss.on("warning", (warning: { message: string; data: object }) =>
+    console.warn("pg-boss warning", warning.message, warning.data),
+  );
+  await boss.start();
+  return boss;
+}
+
 export class Queue {
-  #boss: PgBoss;
+  #producer: PgBoss;
+  #consumer: PgBoss | undefined;
   #created = new Set<string>();
 
-  private constructor(boss: PgBoss) {
-    this.#boss = boss;
+  private constructor(producer: PgBoss, consumer?: PgBoss) {
+    this.#producer = producer;
+    this.#consumer = consumer;
   }
 
-  static async start(databaseUrl: string): Promise<Queue> {
+  /**
+   * A producer-only process (api, smtp, web) holds two connections and never
+   * supervises, schedules or polls; whichever process boots first migrates
+   * (pg-boss holds an advisory lock around it). With `workers` the worker
+   * gets two instances on one schema: the consumer owns every polling lane
+   * plus maintenance and the cron clock, the producer owns every enqueue, so
+   * a send never waits behind a fetch. Every static queue is created before
+   * the first work() so registration never waits behind a backlog.
+   */
+  static async start(databaseUrl: string, opts: { workers?: boolean } = {}): Promise<Queue> {
+    const base = { connectionString: databaseUrl, schema: "pgboss" };
+    if (!opts.workers) {
+      return new Queue(await startBoss({ ...base, supervise: false, schedule: false, max: 2 }));
+    }
     // Maintenance every 10 minutes deletes finished jobs in small slices
-    // instead of one daily statement; four connections cover every fetch and
-    // completion, which are millisecond statements.
-    const boss = new PgBoss({
-      connectionString: databaseUrl,
-      schema: "pgboss",
+    // instead of one daily statement; the queue monitor counts every five.
+    const consumer = await startBoss({
+      ...base,
+      max: 8,
       maintenanceIntervalSeconds: 600,
+      monitorIntervalSeconds: 300,
+      useListenNotify: true,
+    });
+    const producer = await startBoss({
+      ...base,
+      supervise: false,
+      schedule: false,
+      migrate: false,
       max: 4,
     });
-    boss.on("error", (err: Error) => console.error("pg-boss error", err));
-    await boss.start();
-    return new Queue(boss);
+    const queue = new Queue(producer, consumer);
+    for (const name of JOB_QUEUES) await queue.#prepare(name);
+    for (const name of Object.keys(CRON_JOBS)) await queue.#ensureQueue(name);
+    return queue;
+  }
+
+  get #workers(): PgBoss {
+    if (!this.#consumer) {
+      throw new Error("Queue.start(url, { workers: true }) is required before work()");
+    }
+    return this.#consumer;
   }
 
   async #ensureQueue(name: string, policy?: typeof JOB_QUEUE_POLICY): Promise<void> {
     if (this.#created.has(name)) return;
-    await this.#boss.createQueue(name, policy ? { policy } : undefined).catch(() => {});
+    const notify = NOTIFY_QUEUES.has(name);
+    await this.#producer.createQueue(name, {
+      ...(policy ? { policy } : {}),
+      ...(notify ? { notify } : {}),
+    });
     if (policy) {
       // createQueue is INSERT ... ON CONFLICT DO NOTHING: a pre-existing
       // queue keeps its stored policy, and pg-boss 12 cannot converge it —
@@ -186,13 +271,18 @@ export class Queue {
       // (its UpdateQueueOptions omits `policy`). A queue left on "standard"
       // silently ignores singletonKey, turning dedupe into duplicate sends,
       // so a mismatch must fail loudly instead of degrading silently.
-      const existing = await this.#boss.getQueue(name);
+      const existing = await this.#producer.getQueue(name);
       if (existing && existing.policy !== policy) {
         throw new Error(
           `queue "${name}" has policy "${existing.policy}" but "${policy}" is required for ` +
             `singletonKey dedupe; pg-boss cannot change a queue's policy after creation — ` +
             `delete and recreate the queue`,
         );
+      }
+      // The notify flag, unlike the policy, can be converged on a queue
+      // created before it existed.
+      if (existing && notify && !existing.notify) {
+        await this.#producer.updateQueue(name, { notify });
       }
     }
     this.#created.add(name);
@@ -205,7 +295,7 @@ export class Queue {
     opts: JobSendOptions,
   ): Promise<string | null> {
     const deadLetter = await this.#prepare(name);
-    return this.#boss.send(name, payload, this.#jobOptions(name, opts, deadLetter));
+    return this.#producer.send(name, payload, this.#jobOptions(name, opts, deadLetter));
   }
 
   /**
@@ -227,7 +317,7 @@ export class Queue {
 
   /**
    * Enqueue many jobs of one queue in a single statement: a webhook fan-out
-   * writes one job per endpoint, and a bulk import many per contact.
+   * writes one job per endpoint, and a broadcast one per contact page.
    */
   async sendMany<N extends JobName>(
     name: N,
@@ -235,7 +325,7 @@ export class Queue {
   ): Promise<void> {
     if (jobs.length === 0) return;
     const deadLetter = await this.#prepare(name);
-    await this.#boss.insert(
+    await this.#producer.insert(
       name,
       jobs.map(({ payload, ...opts }) => ({
         data: payload,
@@ -279,7 +369,7 @@ export class Queue {
    */
   async work<N extends JobName>(
     name: N,
-    handler: (payload: JobPayloads[N]) => Promise<void>,
+    handler: JobHandler<N>,
     opts: {
       batchSize?: number;
       concurrency?: number;
@@ -295,7 +385,7 @@ export class Queue {
   ): Promise<void> {
     await this.#ensureQueue(name, JOB_QUEUE_POLICY);
     const batchSize = opts.batchSize ?? 1;
-    await this.#boss.work<JobPayloads[N]>(
+    await this.#workers.work<JobPayloads[N]>(
       name,
       {
         batchSize,
@@ -306,9 +396,9 @@ export class Queue {
           : {}),
         ...(opts.groupConcurrency !== undefined ? { groupConcurrency: opts.groupConcurrency } : {}),
       },
-      async (jobs: { data: JobPayloads[N] }[]) => {
+      async (jobs: { data: JobPayloads[N]; signal: AbortSignal }[]) => {
         for (const job of jobs) {
-          await handler(job.data);
+          await handler(job.data, { signal: job.signal });
         }
       },
     );
@@ -317,16 +407,16 @@ export class Queue {
   /** Handles jobs that exhausted their retries on `name` (payload unchanged). */
   async workDeadLetter<N extends DeadLetteredJobName>(
     name: N,
-    handler: (payload: JobPayloads[N]) => Promise<void>,
+    handler: JobHandler<N>,
   ): Promise<void> {
     const deadLetter = DEAD_LETTER_QUEUES[name];
     await this.#ensureQueue(deadLetter);
-    await this.#boss.work<JobPayloads[N]>(
+    await this.#workers.work<JobPayloads[N]>(
       deadLetter,
-      { batchSize: 1 },
-      async (jobs: { data: JobPayloads[N] }[]) => {
+      { batchSize: 1, pollingIntervalSeconds: SLOW_POLL_SECONDS },
+      async (jobs: { data: JobPayloads[N]; signal: AbortSignal }[]) => {
         for (const job of jobs) {
-          await handler(job.data);
+          await handler(job.data, { signal: job.signal });
         }
       },
     );
@@ -335,10 +425,14 @@ export class Queue {
   async scheduleCrons(handlers: Record<CronJobName, () => Promise<void>>): Promise<void> {
     for (const [name, cron] of Object.entries(CRON_JOBS) as [CronJobName, string][]) {
       await this.#ensureQueue(name);
-      await this.#boss.schedule(name, cron, {}, { tz: "UTC" });
-      await this.#boss.work(name, { batchSize: 1 }, async () => {
-        await handlers[name]();
-      });
+      await this.#producer.schedule(name, cron, {}, { tz: "UTC" });
+      await this.#workers.work(
+        name,
+        { batchSize: 1, pollingIntervalSeconds: SLOW_POLL_SECONDS },
+        async () => {
+          await handlers[name]();
+        },
+      );
     }
   }
 
@@ -349,10 +443,12 @@ export class Queue {
    */
   async runCronNow(name: CronJobName): Promise<void> {
     await this.#ensureQueue(name);
-    await this.#boss.send(name, {});
+    await this.#producer.send(name, {});
   }
 
+  /** Consumer first: a handler finishing its page can still enqueue through the producer. */
   async stop(): Promise<void> {
-    await this.#boss.stop({ graceful: true });
+    await this.#consumer?.stop({ graceful: true });
+    await this.#producer.stop({ graceful: true });
   }
 }

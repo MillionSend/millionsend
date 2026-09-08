@@ -9,7 +9,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sweepNotifications } from "../src/handlers/notify.js";
 import { createSystemMailer } from "../src/system-mail.js";
@@ -171,6 +171,9 @@ it("a quiet week ends the episode even though the team is never observed healthy
   // Eight days later the last sending day has left the window: no health to
   // judge, so the claims go. A fresh bad episode then notifies again.
   const later = new Date(Date.now() + 8 * 24 * 3_600_000);
+  // The drain would have settled the pause's own delivery row long before;
+  // left open it would read as a week-old webhook backlog.
+  await db.update(schema.webhookDeliveries).set({ status: "success", nextAttemptAt: null });
   expect(await sweepNotifications(db, deps(true, later))).toEqual({ sent: 0 });
   await counters({ sent: 200, complained: 3 }, utcDay(later.getTime()));
   expect(await sweepNotifications(db, deps(true, later))).toEqual({ sent: 1 });
@@ -250,4 +253,84 @@ it("owners of the team are the recipients; members are not", async () => {
     .from(schema.teamNotifications)
     .where(eq(schema.teamNotifications.teamId, teamId));
   expect(team).toMatchObject({ kind: "quota.reached", periodKey: utcDay() });
+});
+
+async function endpoint() {
+  const [row] = await db
+    .select({ id: schema.webhookEndpoints.id })
+    .from(schema.webhookEndpoints)
+    .where(eq(schema.webhookEndpoints.teamId, teamId));
+  if (!row) throw new Error("endpoint missing");
+  return row.id;
+}
+
+async function setEndpointStatus(status: "enabled" | "disabled" | "auto_disabled") {
+  await db.update(schema.webhookEndpoints).set({ status });
+}
+
+/** Settled/open rows, each a second newer than the last so the settled order is fixed. */
+async function delivery(
+  status: "pending" | "success" | "failed" | "exhausted",
+  opts: { nextAttemptAt?: Date; count?: number } = {},
+) {
+  const endpointId = await endpoint();
+  const [{ n } = { n: 0 }] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.webhookDeliveries);
+  const base = Date.now() - 3_600_000;
+  await db.insert(schema.webhookDeliveries).values(
+    Array.from({ length: opts.count ?? 1 }, (_, i) => ({
+      endpointId,
+      messageId: `msg_${randomUUID()}`,
+      eventType: "email.sent",
+      payload: {},
+      status,
+      nextAttemptAt: opts.nextAttemptAt ?? null,
+      createdAt: new Date(base + (n + i) * 1000),
+    })),
+  );
+}
+
+it("a failing endpoint mails once per episode; a success ends it", async () => {
+  await delivery("exhausted", { count: 9 });
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+  await delivery("exhausted");
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
+  expect(sends[0]?.subject).toContain("receiver.example.com are failing");
+  expect(sends[0]?.text).toContain(`https://app.example.test/webhooks/${await endpoint()}`);
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+
+  await delivery("success");
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+  await delivery("exhausted", { count: 10 });
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
+  expect(sends).toHaveLength(2);
+});
+
+it("an auto-disabled endpoint mails once until it is enabled again", async () => {
+  await setEndpointStatus("auto_disabled");
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
+  expect(sends[0]?.subject).toContain("disabled after repeated failures");
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+  await setEndpointStatus("enabled");
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+  await setEndpointStatus("auto_disabled");
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
+  expect(sends).toHaveLength(2);
+  // No webhook fan-out for webhook trouble: the endpoint is the broken one.
+  expect(enqueued).toHaveLength(0);
+});
+
+it("a backlog older than an hour mails once per UTC day", async () => {
+  await delivery("pending", { nextAttemptAt: new Date(Date.now() - 5 * 60_000) });
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+  await delivery("failed", { nextAttemptAt: new Date(Date.now() - 2 * 3_600_000) });
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
+  expect(sends[0]?.subject).toContain("backing up");
+  expect(sends[0]?.text).toContain("2 deliveries to https://receiver.example.com/hook are waiting");
+  expect(sends[0]?.text).toContain("due for 2 h");
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+  const tomorrow = new Date(Date.now() + 24 * 3_600_000);
+  expect(await sweepNotifications(db, deps(false, tomorrow))).toEqual({ sent: 1 });
+  expect(sends).toHaveLength(2);
 });

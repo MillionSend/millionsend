@@ -9,6 +9,7 @@ import {
   emitContactEvents,
   emitSuppressionEvents,
   eraseRecipient,
+  markSegmentsStale,
   recordContactActivity,
   resultRows,
   type WebhookEnqueue,
@@ -473,6 +474,7 @@ export const audienceRouter = router({
         .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
         .returning(contactSnapshotColumns);
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      await markSegmentsStale(ctx.db, { teamId: ctx.teamId });
       await emitContactEvents(ctx.db, {
         teamId: ctx.teamId,
         events: [{ type: "contact.deleted", contact: row }],
@@ -526,6 +528,7 @@ export const audienceRouter = router({
           .delete(m)
           .where(and(eq(m.segmentId, segment.id), inArray(m.contactId, contactIds)))
           .returning({ contactId: m.contactId });
+        if (removed.length > 0) await markSegmentsStale(ctx.db, { segmentId: segment.id });
         await recordContactActivity(
           ctx.db,
           removed.map((row) => ({
@@ -610,6 +613,7 @@ export const audienceRouter = router({
           .delete(t)
           .where(and(inArray(t.id, contactIds), eq(t.teamId, ctx.teamId)))
           .returning(contactSnapshotColumns);
+        if (deleted.length > 0) await markSegmentsStale(ctx.db, { teamId: ctx.teamId });
         await emitContactEvents(ctx.db, {
           teamId: ctx.teamId,
           events: deleted.map((contact) => ({ type: "contact.deleted" as const, contact })),
@@ -698,6 +702,7 @@ export const audienceRouter = router({
           .where(and(eq(m.segmentId, input.segmentId), eq(m.contactId, input.contactId)))
           .returning({ segmentId: m.segmentId });
         if (removed) {
+          await markSegmentsStale(ctx.db, { segmentId: segment.id });
           await recordContactActivity(
             ctx.db,
             {
@@ -783,6 +788,7 @@ export const audienceRouter = router({
         .delete(t)
         .where(and(eq(t.teamId, ctx.teamId), sql`lower(${t.email}) = ${input.email.toLowerCase()}`))
         .returning(contactSnapshotColumns);
+      if (deleted.length > 0) await markSegmentsStale(ctx.db, { teamId: ctx.teamId });
       await emitContactEvents(ctx.db, {
         teamId: ctx.teamId,
         events: deleted.map((contact) => ({

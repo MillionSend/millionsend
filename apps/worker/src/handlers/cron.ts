@@ -15,8 +15,8 @@ import {
   type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
-import { keysetCursorWhere, schema } from "@millionsend/db";
-import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
+import { affectedRows, keysetCursorWhere, schema } from "@millionsend/db";
+import { type EnqueueEmailSends, emailSendPriority } from "@millionsend/queue";
 import {
   checkDnsRecords,
   computeDomainVerification,
@@ -69,7 +69,11 @@ export async function reconcileWebhookDeliveries(
   const now = deps.now ?? new Date();
   const d = schema.webhookDeliveries;
   const e = schema.webhookEndpoints;
-  await exhaustOpenDeliveries(db, lt(d.createdAt, new Date(now.getTime() - WEBHOOK_MAX_AGE_MS)));
+  await exhaustOpenDeliveries(
+    db,
+    lt(d.createdAt, new Date(now.getTime() - WEBHOOK_MAX_AGE_MS)),
+    asc(d.createdAt),
+  );
 
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
   const alarmBefore = new Date(now.getTime() - 60 * 60 * 1000);
@@ -80,7 +84,9 @@ export async function reconcileWebhookDeliveries(
       staleId: sql<
         string | null
       >`(select ${d.id} from ${d} where ${open} and ${d.nextAttemptAt} < ${staleBefore} order by ${d.nextAttemptAt}, ${d.id} limit 1)`,
-      alarmed: sql<boolean>`exists (select 1 from ${d} where ${open} and ${d.nextAttemptAt} < ${alarmBefore}) or (select count(*) from (select 1 from ${d} where ${open} limit ${WEBHOOK_BACKLOG_ALARM_ROWS + 1}) c) > ${WEBHOOK_BACKLOG_ALARM_ROWS}`,
+      // min() over the due index rather than exists(): the planner turns a
+      // correlated exists into a heap scan per endpoint when the backlog is deep.
+      alarmed: sql<boolean>`(select min(${d.nextAttemptAt}) from ${d} where ${open}) < ${alarmBefore} or (select count(*) from (select 1 from ${d} where ${open} limit ${WEBHOOK_BACKLOG_ALARM_ROWS + 1}) c) > ${WEBHOOK_BACKLOG_ALARM_ROWS}`,
     })
     .from(e);
   const stale = endpoints.flatMap((row) =>
@@ -130,8 +136,8 @@ export async function reconcileStalledBroadcasts(
 
 export interface DrainDeps {
   isCloud: boolean;
-  /** startAfter defers the job for emails scheduled beyond the drain time; priority keeps transactional rows ahead of broadcast ones. */
-  enqueueSend: (emailId: string, startAfter?: Date, priority?: EmailSendPriority) => Promise<void>;
+  /** One call per page; startAfter defers emails scheduled beyond the drain time, priority keeps transactional rows ahead of broadcast ones. */
+  enqueueSends: EnqueueEmailSends;
   /** SES's own 24-hour quota is full: releasing anything would only park it again. */
   sesQuotaExhausted?: (() => boolean) | undefined;
 }
@@ -203,9 +209,31 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
     const last = page.at(-1);
     if (!last) break;
     cursorId = last.id;
+    const moved: MovedEmail[] = [];
     for (const email of page) {
-      if (drained >= DRAIN_MAX_PER_RUN) break;
-      drained += await drainOne(db, deps, email, exhausted, failures);
+      if (drained + moved.length >= DRAIN_MAX_PER_RUN) break;
+      const released = await releaseParked(db, deps, email, exhausted, failures);
+      if (released) moved.push(released);
+    }
+    if (moved.length === 0) continue;
+    try {
+      await deps.enqueueSends(
+        moved.map((m) => ({
+          emailId: m.id,
+          startAfter: m.scheduledAt ?? undefined,
+          priority: emailSendPriority(m),
+        })),
+      );
+      drained += moved.length;
+    } catch (err) {
+      // The page's enqueue is one statement, so it failed whole: "queued"
+      // emails with no job would only be picked up by the reconcile sweep;
+      // re-park them so the drain retry handles them sooner.
+      failures.push(err);
+      for (const m of moved) {
+        await transitionQueueState(db, m.id, { from: "queued", to: "queued_quota" });
+        await releaseDailyQuota(db, { teamId: m.teamId, count: m.units });
+      }
     }
   }
   if (failures.length > 0) {
@@ -222,8 +250,17 @@ async function countParked(db: Db): Promise<number> {
   return rest?.n ?? 0;
 }
 
-/** Returns 1 when the email moved to queued and its job was enqueued, else 0. */
-async function drainOne(
+/** A row moved to "queued" with the reservation it holds, awaiting its job. */
+interface MovedEmail {
+  id: string;
+  teamId: string;
+  broadcastId: string | null;
+  scheduledAt: Date | null;
+  units: number;
+}
+
+/** Reserves quota and moves the email to queued; null when it stays parked. */
+async function releaseParked(
   db: Db,
   deps: DrainDeps,
   email: {
@@ -239,8 +276,8 @@ async function drainOne(
   },
   exhausted: Set<string>,
   failures: unknown[],
-): Promise<number> {
-  if (exhausted.has(email.teamId)) return 0;
+): Promise<MovedEmail | null> {
+  if (exhausted.has(email.teamId)) return null;
   const limit = deps.isCloud
     ? PLAN_DAILY_LIMIT[effectivePlan(email.plan, email.currentPeriodEnd)]
     : null;
@@ -265,22 +302,14 @@ async function drainOne(
       });
     if (outcome === "exhausted") {
       exhausted.add(email.teamId);
-      return 0;
+      return null;
     }
-    if (outcome === "raced") return 0;
-    try {
-      await deps.enqueueSend(email.id, email.scheduledAt ?? undefined, emailSendPriority(email));
-    } catch (err) {
-      // A "queued" email with no job would only be picked up by the
-      // reconcile sweep; re-park it so the drain retry handles it sooner.
-      await transitionQueueState(db, email.id, { from: "queued", to: "queued_quota" });
-      await releaseDailyQuota(db, { teamId: email.teamId, count: units });
-      throw err;
-    }
-    return 1;
+    if (outcome === "raced") return null;
+    const { id, teamId, broadcastId, scheduledAt } = email;
+    return { id, teamId, broadcastId, scheduledAt, units };
   } catch (err) {
     failures.push(err);
-    return 0;
+    return null;
   }
 }
 
@@ -304,14 +333,7 @@ const RECONCILE_MAX_PER_RUN = 20_000;
  */
 export async function reconcileStalledSends(
   db: Db,
-  deps: {
-    enqueueSend: (
-      emailId: string,
-      startAfter?: Date,
-      priority?: EmailSendPriority,
-    ) => Promise<void>;
-    now?: Date;
-  },
+  deps: { enqueueSends: EnqueueEmailSends; now?: Date },
 ): Promise<number> {
   const now = deps.now ?? new Date();
   const staleBefore = new Date(now.getTime() - 15 * 60 * 1000);
@@ -346,8 +368,7 @@ export async function reconcileStalledSends(
     lt(e.createdAt, staleBefore),
     or(isNull(e.scheduledAt), lte(e.scheduledAt, now)),
   );
-  // Keyset pages over (createdAt, id), capped per run.
-  // ponytail: one enqueue per row; the queue rewrite batches these.
+  // Keyset pages over (createdAt, id), capped per run, one enqueue per page.
   let cursorId: string | undefined;
   let requeued = 0;
   while (requeued < RECONCILE_MAX_PER_RUN) {
@@ -360,9 +381,13 @@ export async function reconcileStalledSends(
     const last = page.at(-1);
     if (!last) break;
     cursorId = last.id;
-    for (const email of page) {
-      await deps.enqueueSend(email.id, email.scheduledAt ?? undefined, emailSendPriority(email));
-    }
+    await deps.enqueueSends(
+      page.map((email) => ({
+        emailId: email.id,
+        startAfter: email.scheduledAt ?? undefined,
+        priority: emailSendPriority(email),
+      })),
+    );
     requeued += page.length;
     if (page.length < RECONCILE_BATCH) break;
   }
@@ -393,28 +418,30 @@ export async function purgeExpiredEmailBodies(
   // worker outage) must not become one statement returning millions of ids.
   let purged = 0;
   for (;;) {
-    const batch = await db
-      .update(e)
-      .set(purgedEmailBodyColumns(now))
-      .where(
-        inArray(
-          e.id,
-          db
-            .select({ id: e.id })
-            .from(e)
-            .where(
-              and(
-                lt(e.createdAt, cutoff),
-                isNull(e.bodyPurgedAt),
-                or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff)),
-              ),
-            )
-            .limit(PURGE_BATCH),
+    const batch = affectedRows(
+      await db
+        .update(e)
+        .set(purgedEmailBodyColumns(now))
+        .where(
+          inArray(
+            e.id,
+            db
+              .select({ id: e.id })
+              .from(e)
+              .where(
+                and(
+                  lt(e.createdAt, cutoff),
+                  isNull(e.bodyPurgedAt),
+                  or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff)),
+                ),
+              )
+              .orderBy(asc(e.createdAt))
+              .limit(PURGE_BATCH),
+          ),
         ),
-      )
-      .returning({ id: e.id });
-    purged += batch.length;
-    if (batch.length < PURGE_BATCH) break;
+    );
+    purged += batch;
+    if (batch < PURGE_BATCH) break;
   }
   return purged;
 }
@@ -435,17 +462,23 @@ export async function purgeExpiredApiRequests(
   const r = schema.apiRequests;
   let purged = 0;
   for (;;) {
-    const batch = await db
-      .delete(r)
-      .where(
-        inArray(
-          r.id,
-          db.select({ id: r.id }).from(r).where(lt(r.createdAt, cutoff)).limit(PURGE_BATCH),
+    const batch = affectedRows(
+      await db
+        .delete(r)
+        .where(
+          inArray(
+            r.id,
+            db
+              .select({ id: r.id })
+              .from(r)
+              .where(lt(r.createdAt, cutoff))
+              .orderBy(asc(r.createdAt))
+              .limit(PURGE_BATCH),
+          ),
         ),
-      )
-      .returning({ id: r.id });
-    purged += batch.length;
-    if (batch.length < PURGE_BATCH) break;
+    );
+    purged += batch;
+    if (batch < PURGE_BATCH) break;
   }
   return purged;
 }
@@ -763,7 +796,8 @@ export async function purgeExpiredEmailMetadata(
   // days of slack cover a fan-out that ran past its sent_at.
   const b = schema.broadcasts;
   const freezeBefore = new Date(cutoff.getTime() + 2 * DAY_MS);
-  const frozen = await db.execute(sql`
+  const broadcasts = affectedRows(
+    await db.execute(sql`
     update ${b} set
       recipient_count = coalesce(${b.recipientCount}, s.total),
       delivered_count = s.delivered,
@@ -784,18 +818,12 @@ export async function purgeExpiredEmailMetadata(
       group by ${e.broadcastId}
     ) s
     where ${b.id} = s.broadcast_id
-    returning ${b.id}
-  `);
-  // postgres-js hands back the returned rows as the result; other drivers
-  // wrap them in { rows }.
-  const broadcasts = (
-    Array.isArray(frozen) ? frozen : ((frozen as { rows?: unknown[] }).rows ?? [])
-  ).length;
+  `),
+  );
   let emails = 0;
   for (;;) {
-    const batch = await db
-      .delete(e)
-      .where(
+    const batch = affectedRows(
+      await db.delete(e).where(
         inArray(
           e.id,
           db
@@ -804,27 +832,34 @@ export async function purgeExpiredEmailMetadata(
             .where(
               and(lt(e.createdAt, cutoff), or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff))),
             )
+            .orderBy(asc(e.createdAt))
             .limit(PURGE_BATCH),
         ),
-      )
-      .returning({ id: e.id });
-    emails += batch.length;
-    if (batch.length < PURGE_BATCH) break;
+      ),
+    );
+    emails += batch;
+    if (batch < PURGE_BATCH) break;
   }
   const d = schema.webhookDeliveries;
   let deliveries = 0;
   for (;;) {
-    const batch = await db
-      .delete(d)
-      .where(
-        inArray(
-          d.id,
-          db.select({ id: d.id }).from(d).where(lt(d.createdAt, deliveryCutoff)).limit(PURGE_BATCH),
+    const batch = affectedRows(
+      await db
+        .delete(d)
+        .where(
+          inArray(
+            d.id,
+            db
+              .select({ id: d.id })
+              .from(d)
+              .where(lt(d.createdAt, deliveryCutoff))
+              .orderBy(asc(d.createdAt))
+              .limit(PURGE_BATCH),
+          ),
         ),
-      )
-      .returning({ id: d.id });
-    deliveries += batch.length;
-    if (batch.length < PURGE_BATCH) break;
+    );
+    deliveries += batch;
+    if (batch < PURGE_BATCH) break;
   }
   return { emails, deliveries, broadcasts };
 }
@@ -848,47 +883,51 @@ export async function stripExpiredEventPayloads(
   const ev = schema.emailEvents;
   let events = 0;
   for (;;) {
-    const batch = await db
-      .update(ev)
-      .set({ data: null })
-      .where(
-        inArray(
-          ev.id,
-          db
-            .select({ id: ev.id })
-            .from(ev)
-            .where(and(lt(ev.occurredAt, cutoff), isNotNull(ev.data)))
-            .limit(PURGE_BATCH),
+    const batch = affectedRows(
+      await db
+        .update(ev)
+        .set({ data: null })
+        .where(
+          inArray(
+            ev.id,
+            db
+              .select({ id: ev.id })
+              .from(ev)
+              .where(and(lt(ev.occurredAt, cutoff), isNotNull(ev.data)))
+              .orderBy(asc(ev.occurredAt))
+              .limit(PURGE_BATCH),
+          ),
         ),
-      )
-      .returning({ id: ev.id });
-    events += batch.length;
-    if (batch.length < PURGE_BATCH) break;
+    );
+    events += batch;
+    if (batch < PURGE_BATCH) break;
   }
   const d = schema.webhookDeliveries;
   let deliveries = 0;
   for (;;) {
-    const batch = await db
-      .update(d)
-      .set({ payload: sql`${d.payload} - 'data'`, lastResponseBody: null })
-      .where(
-        inArray(
-          d.id,
-          db
-            .select({ id: d.id })
-            .from(d)
-            .where(
-              and(
-                lt(d.createdAt, cutoff),
-                or(sql`${d.payload} ? 'data'`, isNotNull(d.lastResponseBody)),
-              ),
-            )
-            .limit(PURGE_BATCH),
+    const batch = affectedRows(
+      await db
+        .update(d)
+        .set({ payload: sql`${d.payload} - 'data'`, lastResponseBody: null })
+        .where(
+          inArray(
+            d.id,
+            db
+              .select({ id: d.id })
+              .from(d)
+              .where(
+                and(
+                  lt(d.createdAt, cutoff),
+                  or(sql`${d.payload} ? 'data'`, isNotNull(d.lastResponseBody)),
+                ),
+              )
+              .orderBy(asc(d.createdAt))
+              .limit(PURGE_BATCH),
+          ),
         ),
-      )
-      .returning({ id: d.id });
-    deliveries += batch.length;
-    if (batch.length < PURGE_BATCH) break;
+    );
+    deliveries += batch;
+    if (batch < PURGE_BATCH) break;
   }
   return { events, deliveries };
 }
@@ -913,6 +952,7 @@ export async function purgeStaleHourlyUsage(db: Db, now = new Date()): Promise<n
               .select({ teamId: h.teamId, hour: h.hour })
               .from(h)
               .where(lt(h.hour, cutoff))
+              .orderBy(asc(h.hour))
               .limit(PURGE_BATCH),
           ),
         ),
@@ -923,18 +963,8 @@ export async function purgeStaleHourlyUsage(db: Db, now = new Date()): Promise<n
   return purged;
 }
 
-/** Rows a statement touched, from the driver's own count: postgres-js `count`, PGlite `affectedRows`. */
-function affectedRows(result: unknown): number {
-  const r = result as { count?: number; affectedRows?: number };
-  return r.count ?? r.affectedRows ?? 0;
-}
-
 export async function purgeExpiredSessions(db: Db, now = new Date()): Promise<number> {
-  const rows = await db
-    .delete(schema.session)
-    .where(lt(schema.session.expiresAt, now))
-    .returning({ id: schema.session.id });
-  return rows.length;
+  return affectedRows(await db.delete(schema.session).where(lt(schema.session.expiresAt, now)));
 }
 
 /**

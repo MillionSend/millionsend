@@ -2,7 +2,12 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { countSegment, recountSegment, recountStaleSegments } from "../src/segment-counts.js";
+import {
+  countSegment,
+  markSegmentsStale,
+  recountSegment,
+  recountStaleSegments,
+} from "../src/segment-counts.js";
 
 let db: Awaited<ReturnType<typeof createTestDb>>["db"];
 let close: () => Promise<void>;
@@ -75,7 +80,35 @@ it("counts members and unsubscribed members, stores them, and refreshes only sta
     .values({ segmentId: segment.id, contactId: third.id, createdAt: afterIdle });
   expect(await recountStaleSegments(db, { olderThanMs: 30 * 60_000, now: afterIdle })).toBe(1);
   expect(await countSegment(db, segment)).toEqual({ count: 3, unsubscribedCount: 2 });
-  // A day-old count is refreshed regardless: deletes leave no newer row.
+  // Age alone never triggers a recount: deletes signal through markSegmentsStale.
   const dayLater = new Date(afterIdle.getTime() + 25 * 60 * 60_000);
+  expect(await recountStaleSegments(db, { olderThanMs: 30 * 60_000, now: dayLater })).toBe(0);
+  const storedCountedAt = async () =>
+    (
+      await db
+        .select({ countedAt: schema.segments.countedAt })
+        .from(schema.segments)
+        .where(eq(schema.segments.id, segment.id))
+    )[0]?.countedAt;
+  await markSegmentsStale(db, { teamId });
+  expect(await storedCountedAt()).toBeNull();
   expect(await recountStaleSegments(db, { olderThanMs: 30 * 60_000, now: dayLater })).toBe(1);
+  expect(await storedCountedAt()).toEqual(dayLater);
+  await markSegmentsStale(db, { segmentId: segment.id });
+  expect(await recountStaleSegments(db, { olderThanMs: 30 * 60_000, now: dayLater })).toBe(1);
+  // Another team's segments are untouched by a team-scoped mark.
+  const otherTeam = await createTeam(db, "segment-counts-other");
+  const [other] = await db
+    .insert(schema.segments)
+    .values({ teamId: otherTeam, name: "Other", filter: null, countedAt: dayLater })
+    .returning({ id: schema.segments.id });
+  await markSegmentsStale(db, { teamId });
+  expect(
+    (
+      await db
+        .select({ countedAt: schema.segments.countedAt })
+        .from(schema.segments)
+        .where(eq(schema.segments.id, other?.id ?? ""))
+    )[0]?.countedAt,
+  ).toEqual(dayLater);
 });

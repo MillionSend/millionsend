@@ -10,6 +10,7 @@ import {
   rotatedWebhookSecretColumns,
   rotationOverlapEnd,
   signWebhook,
+  WEBHOOK_BACKLOG_COUNT,
   WEBHOOK_EVENT_TYPES,
   WEBHOOK_ROTATION_DEFAULT_OVERLAP_HOURS,
   WEBHOOK_ROTATION_MAX_OVERLAP_HOURS,
@@ -76,41 +77,78 @@ function toEnabled(status: (typeof schema.webhookEndpoints.$inferSelect)["status
   return status === "enabled";
 }
 
+interface EndpointStats {
+  successRate: number | null;
+  queued: number;
+  oldestQueuedAt: Date | null;
+  nextAttemptAt: Date | null;
+}
+
+const NO_STATS: EndpointStats = {
+  successRate: null,
+  queued: 0,
+  oldestQueuedAt: null,
+  nextAttemptAt: null,
+};
+
 /**
- * Per-endpoint success rate over the last SUCCESS_RATE_WINDOW deliveries:
- * success / settled (pending rows are still in flight and count for neither
- * side). Null when nothing has settled yet. One LATERAL per endpoint reads
- * exactly the window off the (endpoint_id, created_at) index; a window
- * function over every delivery row would read the endpoint's whole history.
+ * Per-endpoint standing in one statement. successRate is success / settled
+ * over the last SUCCESS_RATE_WINDOW deliveries (pending rows are still in
+ * flight and count for neither side), null when nothing has settled yet.
+ * queued counts open rows down the due index, stopping at WEBHOOK_BACKLOG_COUNT + 1;
+ * oldestQueuedAt and nextAttemptAt are the first due instant overall and the
+ * first still ahead. One LATERAL per endpoint reads exactly the window off
+ * the (endpoint_id, created_at) index; a window function over every
+ * delivery row would read the endpoint's whole history.
  */
-async function successRates(db: Db, endpointIds: string[]): Promise<Map<string, number | null>> {
-  const rates = new Map<string, number | null>(endpointIds.map((id) => [id, null]));
-  if (endpointIds.length === 0) return rates;
+async function endpointStats(db: Db, endpointIds: string[]): Promise<Map<string, EndpointStats>> {
+  const stats = new Map<string, EndpointStats>(endpointIds.map((id) => [id, NO_STATS]));
+  if (endpointIds.length === 0) return stats;
   const d = schema.webhookDeliveries;
   const ids = sql.join(
     endpointIds.map((id) => sql`${id}::uuid`),
     sql`, `,
   );
-  const stats = resultRows<{ id: string; settled: number; succeeded: number }>(
+  const open = sql`${d.status} in ('pending', 'failed') and ${d.nextAttemptAt} is not null`;
+  const rows = resultRows<{
+    id: string;
+    settled: number;
+    succeeded: number;
+    queued: number;
+    oldest_ms: number | null;
+    next_ms: number | null;
+  }>(
     await db.execute(sql`
       select e.id,
              count(*) filter (where recent.status in ('success', 'failed', 'exhausted'))::int as settled,
-             count(*) filter (where recent.status = 'success')::int as succeeded
+             count(*) filter (where recent.status = 'success')::int as succeeded,
+             (select count(*)::int from (
+                select 1 from ${d} where ${d.endpointId} = e.id and ${open} limit ${WEBHOOK_BACKLOG_COUNT + 1}
+              ) q) as queued,
+             (select (extract(epoch from min(${d.nextAttemptAt})) * 1000)::float8
+                from ${d} where ${d.endpointId} = e.id and ${open}) as oldest_ms,
+             (select (extract(epoch from min(${d.nextAttemptAt})) * 1000)::float8
+                from ${d} where ${d.endpointId} = e.id and ${open} and ${d.nextAttemptAt} > now()) as next_ms
       from unnest(array[${ids}]) as e(id)
-      cross join lateral (
+      left join lateral (
         select ${d.status} as status
         from ${d}
         where ${d.endpointId} = e.id
         order by ${d.createdAt} desc, ${d.id} desc
         limit ${SUCCESS_RATE_WINDOW}
-      ) recent
+      ) recent on true
       group by e.id
     `),
   );
-  for (const row of stats) {
-    rates.set(row.id, row.settled > 0 ? Math.round((100 * row.succeeded) / row.settled) : null);
+  for (const row of rows) {
+    stats.set(row.id, {
+      successRate: row.settled > 0 ? Math.round((100 * row.succeeded) / row.settled) : null,
+      queued: row.queued,
+      oldestQueuedAt: row.oldest_ms === null ? null : new Date(row.oldest_ms),
+      nextAttemptAt: row.next_ms === null ? null : new Date(row.next_ms),
+    });
   }
-  return rates;
+  return stats;
 }
 
 const deliveryListColumns = {
@@ -149,7 +187,7 @@ export const webhooksRouter = router({
       .from(t)
       .where(eq(t.teamId, ctx.teamId))
       .orderBy(desc(t.createdAt));
-    const rates = await successRates(
+    const stats = await endpointStats(
       ctx.db,
       endpoints.map((e) => e.id),
     );
@@ -161,7 +199,7 @@ export const webhooksRouter = router({
       enabled: toEnabled(e.status),
       status: e.status,
       createdAt: e.createdAt,
-      successRate: rates.get(e.id) ?? null,
+      ...(stats.get(e.id) ?? NO_STATS),
     }));
   }),
 
@@ -224,6 +262,7 @@ export const webhooksRouter = router({
       .from(t)
       .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    const stats = (await endpointStats(ctx.db, [row.id])).get(row.id) ?? NO_STATS;
     return {
       id: row.id,
       url: row.url,
@@ -233,6 +272,7 @@ export const webhooksRouter = router({
       status: row.status,
       createdAt: row.createdAt,
       secretLast4: row.secretLast4,
+      ...stats,
       // Set while a rotation's overlap is open: deliveries carry both signatures.
       previousSecretExpiresAt:
         row.prevSecretExpiresAt && row.prevSecretExpiresAt > new Date()

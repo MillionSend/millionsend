@@ -118,16 +118,58 @@ describe("segment membership (POST/DELETE /contacts/{id}/segments/{segmentId})",
   });
 
   it("removes a member and returns the wire shape; a non-member is 404", async () => {
+    await markCounted(segmentId);
     const res = await call(tokenA, "DELETE", `/contacts/${contactId}/segments/${segmentId}`);
     expect(res.status).toBe(200);
     expect(await json(res)).toEqual({ id: contactId, audienceId: segmentId, deleted: true });
     expect(await segmentEmails(tokenA, segmentId)).toEqual([]);
+    // The removal leaves no newer row, so it flags the segment for a recount.
+    expect(await countedAt(segmentId)).toBeNull();
 
+    await markCounted(segmentId);
     const again = await call(tokenA, "DELETE", `/contacts/${contactId}/segments/${segmentId}`);
     expect(again.status).toBe(404);
     expect((await json(again)).name).toBe("not_found");
+    expect(await countedAt(segmentId)).not.toBeNull();
+  });
+
+  it("deleting a contact, singly or in bulk, flags the team's segments for a recount", async () => {
+    const other = (await createSegment(tokenA, { name: "other" })).id as string;
+    const foreign = (await createSegment(tokenB, { name: "b-keep" })).id as string;
+    const a = (await json(await createContact(tokenA, { email: "gone-a@example.com" }))).id;
+    const b = (await json(await createContact(tokenA, { email: "gone-b@example.com" }))).id;
+
+    await Promise.all([segmentId, other, foreign].map(markCounted));
+    expect((await call(tokenA, "DELETE", `/contacts/${a}`)).status).toBe(200);
+    expect(await countedAt(segmentId)).toBeNull();
+    expect(await countedAt(other)).toBeNull();
+    expect(await countedAt(foreign)).not.toBeNull();
+
+    await markCounted(segmentId);
+    expect((await call(tokenA, "POST", "/contacts/batch/remove", { ids: [b] })).status).toBe(200);
+    expect(await countedAt(segmentId)).toBeNull();
+
+    // A delete that removes nothing flags nothing.
+    await markCounted(segmentId);
+    expect((await call(tokenA, "DELETE", `/contacts/${a}`)).status).toBe(404);
+    expect((await call(tokenA, "POST", "/contacts/batch/remove", { ids: [b] })).status).toBe(200);
+    expect(await countedAt(segmentId)).not.toBeNull();
   });
 });
+
+const countedAt = async (segmentId: string) =>
+  (
+    await db
+      .select({ countedAt: schema.segments.countedAt })
+      .from(schema.segments)
+      .where(eq(schema.segments.id, segmentId))
+  )[0]?.countedAt;
+
+const markCounted = (segmentId: string) =>
+  db
+    .update(schema.segments)
+    .set({ countedAt: new Date() })
+    .where(eq(schema.segments.id, segmentId));
 
 describe("POST /contacts with segments and topics", () => {
   it("creates the contact with memberships and topic subscriptions atomically", async () => {

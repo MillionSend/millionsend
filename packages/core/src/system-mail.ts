@@ -23,6 +23,9 @@ export type SystemMailKind =
   | "deliverability.paused"
   | "region.paused"
   | "region.resumed"
+  | "webhook.failing"
+  | "webhook.auto_disabled"
+  | "webhook.backlog"
   | "updates.confirm";
 
 export interface SystemMailMessage {

@@ -11,7 +11,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, asc, desc, eq, inArray, isNotNull, lte, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lte, type SQL, sql } from "drizzle-orm";
 import { createTokenBucket } from "./send-email.js";
 
 /**
@@ -69,7 +69,7 @@ const OPEN_STATUSES = ["pending", "failed"] as const;
 export const WEBHOOK_AUTO_DISABLE_AFTER = 20;
 
 /** Exhausts open rows matching `condition` in bounded batches; returns how many. */
-export async function exhaustOpenDeliveries(db: Db, condition: SQL): Promise<number> {
+export async function exhaustOpenDeliveries(db: Db, condition: SQL, order?: SQL): Promise<number> {
   const d = schema.webhookDeliveries;
   let total = 0;
   for (;;) {
@@ -83,6 +83,7 @@ export async function exhaustOpenDeliveries(db: Db, condition: SQL): Promise<num
             .select({ id: d.id })
             .from(d)
             .where(and(inArray(d.status, OPEN_STATUSES), condition))
+            .orderBy(...(order ? [order] : []))
             .limit(SETTLE_BATCH),
         ),
       )
@@ -104,7 +105,8 @@ async function autoDisableIfDead(db: Db, endpointId: string): Promise<boolean> {
     .select({ status: d.status })
     .from(d)
     .where(and(eq(d.endpointId, endpointId), inArray(d.status, ["success", "exhausted"])))
-    .orderBy(desc(d.createdAt), desc(d.id))
+    // Spelled out so it matches the settled index; a bare desc reads nulls first.
+    .orderBy(sql`${d.createdAt} desc nulls last`, sql`${d.id} desc nulls last`)
     .limit(WEBHOOK_AUTO_DISABLE_AFTER)
     .as("recent");
   const [stats] = await db

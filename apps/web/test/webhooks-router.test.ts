@@ -48,6 +48,7 @@ async function endpointRow(id: string) {
 async function insertDelivery(
   endpointId: string,
   status: "pending" | "success" | "failed" | "exhausted",
+  nextAttemptAt: Date | null = null,
 ) {
   const [row] = await db
     .insert(schema.webhookDeliveries)
@@ -57,6 +58,7 @@ async function insertDelivery(
       eventType: "email.delivered",
       payload: { type: "email.delivered" },
       status,
+      nextAttemptAt,
     })
     .returning({ id: schema.webhookDeliveries.id });
   if (!row) throw new Error("delivery insert failed");
@@ -225,6 +227,41 @@ describe("webhooks.list success rate", () => {
     // 3 success / 4 settled — the pending row counts for neither side.
     expect(listed.find((w) => w.id === withStats.id)?.successRate).toBe(75);
     expect(listed.find((w) => w.id === fresh.id)?.successRate).toBeNull();
+  });
+});
+
+describe("webhooks queue depth", () => {
+  it("counts open rows with a due clock and reports the oldest and the next due instant", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id } = await caller.webhooks.create({ url: "https://example.com/a" });
+    const idle = await caller.webhooks.create({ url: "https://example.com/b" });
+    const overdue = new Date(Date.now() - 2 * 3_600_000);
+    const soon = new Date(Date.now() + 10 * 60_000);
+    await insertDelivery(id, "pending", overdue);
+    await insertDelivery(id, "failed", soon);
+    await insertDelivery(id, "failed", new Date(Date.now() + 3_600_000));
+    // Settled rows and a failed test fire (no due clock) are not queued.
+    await insertDelivery(id, "success");
+    await insertDelivery(id, "exhausted");
+    await insertDelivery(id, "failed");
+
+    const got = await caller.webhooks.get({ id });
+    expect(got.queued).toBe(3);
+    expect(got.oldestQueuedAt).toEqual(overdue);
+    expect(got.nextAttemptAt).toEqual(soon);
+
+    const listed = await caller.webhooks.list();
+    expect(listed.find((w) => w.id === id)).toMatchObject({
+      queued: 3,
+      oldestQueuedAt: overdue,
+      nextAttemptAt: soon,
+    });
+    expect(listed.find((w) => w.id === idle.id)).toMatchObject({
+      queued: 0,
+      oldestQueuedAt: null,
+      nextAttemptAt: null,
+    });
   });
 });
 

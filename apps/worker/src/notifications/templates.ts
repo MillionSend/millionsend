@@ -174,3 +174,68 @@ export function regionResumedMail(input: { region: string; url: string }): MailC
     footnote: "Sent to the instance operator when a region breaker clears.",
   });
 }
+
+const host = (endpoint: string) => new URL(endpoint).host;
+const age = (ms: number) =>
+  ms >= 3_600_000
+    ? `${Math.floor(ms / 3_600_000)} h`
+    : `${Math.max(1, Math.floor(ms / 60_000))} min`;
+
+export function webhookFailingMail(input: {
+  team: string;
+  endpoint: string;
+  streak: number;
+  disableAfter: number;
+  url: string;
+}): MailContent {
+  return layout({
+    subject: `${input.team}: webhook deliveries to ${host(input.endpoint)} are failing`,
+    paragraphs: [
+      `The last ${input.streak} deliveries to ${input.endpoint} failed on every retry, so ${input.team} is missing events.`,
+      `Check that the receiver is up, answers 2xx quickly, and verifies with the current signing secret. Retries continue on their own; after ${input.disableAfter} failed deliveries in a row the endpoint is disabled.`,
+    ],
+    button: { label: "Open the endpoint", url: input.url },
+    footnote: "You get this once per episode; it clears when a delivery succeeds again.",
+  });
+}
+
+export function webhookAutoDisabledMail(input: {
+  team: string;
+  endpoint: string;
+  after: number;
+  url: string;
+}): MailContent {
+  return layout({
+    subject: `${input.team}: webhook ${host(input.endpoint)} disabled after repeated failures`,
+    paragraphs: [
+      `${input.endpoint} was disabled automatically after ${input.after} deliveries in a row failed on every retry. Events are no longer queued for it.`,
+      "Fix the receiver, then re-enable the endpoint from its page. Events that happen while it is disabled are not replayed.",
+    ],
+    button: { label: "Open the endpoint", url: input.url },
+    footnote: "You get this each time an endpoint of a team you own is disabled automatically.",
+  });
+}
+
+export function webhookBacklogMail(input: {
+  team: string;
+  endpoint: string;
+  queued: number;
+  /** Where the count stopped: past it the mail says "more than". */
+  cap: number;
+  oldestAgeMs: number;
+  url: string;
+}): MailContent {
+  const queued =
+    input.queued > input.cap
+      ? `More than ${input.cap.toLocaleString("en-US")}`
+      : String(input.queued);
+  return layout({
+    subject: `${input.team}: webhook deliveries to ${host(input.endpoint)} are backing up`,
+    paragraphs: [
+      `${queued} deliveries to ${input.endpoint} are waiting; the oldest has been due for ${age(input.oldestAgeMs)}. The receiver is slow, rate-limiting, or failing, so events reach it late.`,
+      "Deliveries older than 24 hours are dropped. Speed up the receiver, or subscribe the endpoint only to the events it needs.",
+    ],
+    button: { label: "Open the endpoint", url: input.url },
+    footnote: "You get this at most once per day per endpoint.",
+  });
+}

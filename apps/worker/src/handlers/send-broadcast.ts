@@ -20,6 +20,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import type { EmailSendRequest, EnqueueEmailSends } from "@millionsend/queue";
 import { and, asc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
 
 /**
@@ -38,9 +39,17 @@ export interface BroadcastDeps {
   appBaseUrl: string | undefined;
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
-  enqueueEmailSend: (emailId: string, startAfter?: Date) => Promise<void>;
+  /** One call per contact page; the wiring sets the bulk priority. */
+  enqueueEmailSends: EnqueueEmailSends;
   /** Re-enqueue a not-yet-due scheduled broadcast at its due time. */
   reschedule?: ((broadcastId: string, at: Date) => Promise<void>) | undefined;
+  /**
+   * The job's abort signal: pg-boss aborts it on shutdown and when the job
+   * expires under a walk that is still running. Checked once per page, so
+   * either ends the walk within a page; the job is retried (or the
+   * broadcasts.reconcile sweep re-arms it), so nothing is re-enqueued here.
+   */
+  signal?: AbortSignal | undefined;
   batchSize?: number | undefined;
 }
 
@@ -195,6 +204,7 @@ export async function sendBroadcast(
   // whole team.
   let cursor: string | null = null;
   for (;;) {
+    if (deps.signal?.aborted) return "deferred";
     const contacts = await db
       .select({
         id: schema.contacts.id,
@@ -254,6 +264,7 @@ export async function sendBroadcast(
         );
       for (const r of rows) topicOverrides.set(r.contactId, r.subscribed);
     }
+    const batch: EmailSendRequest[] = [];
     for (const contact of contacts) {
       if (suppressed.has(contact.email)) continue;
       if (
@@ -343,11 +354,16 @@ export async function sendBroadcast(
         // spacing tight instead of leaving gaps for already-queued contacts.
         const startAfter = spacingMs > 0 ? new Date(startMs + emitted * spacingMs) : undefined;
         emitted += 1;
-        try {
-          await deps.enqueueEmailSend(accepted.id, startAfter);
-        } catch (err) {
-          console.error("email.send enqueue failed; reconcile sweep will recover", err);
-        }
+        batch.push({ emailId: accepted.id, startAfter });
+      }
+    }
+    // One statement per page: the rows are committed, so a failed enqueue
+    // only delays them until the sends.reconcile sweep.
+    if (batch.length > 0) {
+      try {
+        await deps.enqueueEmailSends(batch);
+      } catch (err) {
+        console.error("email.send enqueue failed; reconcile sweep will recover", err);
       }
     }
   }

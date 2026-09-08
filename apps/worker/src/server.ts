@@ -19,7 +19,12 @@ import {
   sesEventsHealth,
 } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
-import { EMAIL_SEND_PRIORITY, type EmailSendPriority, Queue } from "@millionsend/queue";
+import {
+  EMAIL_SEND_PRIORITY,
+  type EmailSendPriority,
+  type EnqueueEmailSends,
+  Queue,
+} from "@millionsend/queue";
 import {
   createKeyringFromEnv,
   createSesAccountClient,
@@ -133,21 +138,24 @@ const sesQuota = createSesQuotaGate(async () => (await getAccountOverview(accoun
 await sesQuota.refresh();
 setInterval(() => void sesQuota.refresh(), 60_000).unref();
 
-const queue = await Queue.start(env.DATABASE_URL);
+const queue = await Queue.start(env.DATABASE_URL, { workers: true });
 
 // Everything the worker itself enqueues is bulk unless the caller says
 // otherwise: broadcast fan-out always, drained or reconciled rows by origin.
-const enqueueSend = async (
-  emailId: string,
-  startAfter?: Date,
-  priority: EmailSendPriority = EMAIL_SEND_PRIORITY.bulk,
-): Promise<void> => {
-  await queue.send(
+// A page of sends is one statement; a single send is a page of one.
+const enqueueSends: EnqueueEmailSends = async (batch) => {
+  await queue.sendMany(
     "email.send",
-    { emailId },
-    { dedupeKey: emailId, priority, ...(startAfter ? { startAfter } : {}) },
+    batch.map(({ emailId, startAfter, priority }) => ({
+      payload: { emailId },
+      dedupeKey: emailId,
+      priority: priority ?? EMAIL_SEND_PRIORITY.bulk,
+      startAfter,
+    })),
   );
 };
+const enqueueSend = (emailId: string, startAfter?: Date, priority?: EmailSendPriority) =>
+  enqueueSends([{ emailId, startAfter, priority }]);
 
 // Account mail rides the pipeline, so the mailer needs the queue it enqueues into.
 const mailer = createSystemMailer({ db, keyring, enqueueSend });
@@ -177,6 +185,174 @@ const enqueueWebhook = async (deliveries: readonly QueuedWebhookDelivery[]): Pro
   await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
 };
 
+const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise<void> => {
+  await queue.send(
+    "broadcast.send",
+    { broadcastId },
+    { dedupeKey: broadcastId, ...(startAfter ? { startAfter } : {}) },
+  );
+};
+
+// Crons and dead-letter workers first: they poll slowly and must never wait
+// behind the send lanes' registration on a backlog.
+await queue.scheduleCrons({
+  "quota.drain": async () => {
+    const result = await drainQuotaParked(db, {
+      isCloud: env.IS_CLOUD,
+      enqueueSends,
+      sesQuotaExhausted: () => sesQuota.exhausted(),
+    });
+    console.log(`quota.drain: drained=${result.drained} stillParked=${result.stillParked}`);
+  },
+  "sends.reconcile": async () => {
+    const requeued = await reconcileStalledSends(db, { enqueueSends });
+    if (requeued > 0) console.log(`sends.reconcile: requeued=${requeued}`);
+  },
+  "retention.purge": async () => {
+    const purged = await purgeExpiredEmailBodies(db, {
+      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
+    });
+    const requests = await purgeExpiredApiRequests(db, {
+      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
+    });
+    const stripped = await stripExpiredEventPayloads(db, {
+      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
+    });
+    const metadata = await purgeExpiredEmailMetadata(db, {
+      retentionDays: metadataRetentionDays,
+      deliveryRetentionDays: env.WEBHOOK_DELIVERY_RETENTION_DAYS,
+    });
+    const sessions = await purgeExpiredSessions(db);
+    const hourlyUsage = await purgeStaleHourlyUsage(db);
+    const stripeEvents = await purgeStripeEvents(db);
+    const counts = {
+      purged,
+      hourlyUsage,
+      apiRequests: requests,
+      events: stripped.events,
+      deliveries: stripped.deliveries,
+      emails: metadata.emails,
+      oldDeliveries: metadata.deliveries,
+      broadcastsFrozen: metadata.broadcasts,
+      sessions,
+      stripeEvents,
+    };
+    if (Object.values(counts).some((n) => n > 0)) {
+      console.log(
+        `retention.purge: ${Object.entries(counts)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(" ")}`,
+      );
+    }
+  },
+  "billing.reconcile": async () => {
+    if (!stripe) return;
+    const result = await reconcileBillingPlans(db, {
+      reconcileTeam: (teamId) => reconcileTeamPlan({ db, stripe, log: console.warn }, teamId),
+    });
+    console.log(`billing.reconcile: reconciled=${result.reconciled} failed=${result.failed}`);
+  },
+  "idempotency.purge": async () => {
+    await purgeExpiredIdempotencyKeys(db);
+  },
+  "webhooks.reconcile": async () => {
+    const armed = await reconcileWebhookDeliveries(db, { enqueue: enqueueWebhook });
+    if (armed > 0) console.log(`webhooks.reconcile: armed=${armed}`);
+  },
+  "broadcasts.reconcile": async () => {
+    const requeued = await reconcileStalledBroadcasts(db, {
+      enqueue: (broadcastId) => enqueueBroadcast(broadcastId),
+    });
+    if (requeued > 0) console.log(`broadcasts.reconcile: requeued=${requeued}`);
+  },
+  "segments.recount": async () => {
+    const recounted = await recountStaleSegments(db, { olderThanMs: 30 * 60_000 });
+    if (recounted > 0) console.log(`segments.recount: recounted=${recounted}`);
+  },
+  "notifications.sweep": async () => {
+    const result = await sweepNotifications(db, {
+      isCloud: env.IS_CLOUD,
+      mailer,
+      enqueueWebhook,
+      appBaseUrl: env.APP_BASE_URL,
+    });
+    if (result.sent > 0) console.log(`notifications.sweep: sent=${result.sent}`);
+  },
+  "platform.breaker": async () => {
+    // Without SES events there are no bounce/complaint counts to judge.
+    if (!env.SNS_TOPIC_ARNS?.length) return;
+    await runPlatformBreaker(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+  },
+  "events.health": async () => {
+    // No topic allowlist = ingestion disabled on purpose; nothing to judge.
+    if (!env.SNS_TOPIC_ARNS?.length) return;
+    const health = await sesEventsHealth(db);
+    if (health.status !== "unhealthy") return;
+    console.warn(
+      `events.health: ${health.sentInWindow} email(s) sent in the last 2h but no SES event arrived (last one ${health.lastSesEventAt?.toISOString() ?? "never"}) — the SNS subscription is missing or pending confirmation, or SQS_QUEUE_URL is empty / the queue is not being read`,
+    );
+  },
+  "domains.reverify": async () => {
+    const result = await reverifyDomains(db, { clientForRegion, resolver: nodeDnsResolver });
+    if (result.checked > 0 || result.failed > 0) {
+      console.log(`domains.reverify: checked=${result.checked} failed=${result.failed}`);
+    }
+    // Branded tracking CNAMEs never gate domain status, so reverify above skips
+    // them; sweep them here to clear a resolved subdomain's clock or unset one
+    // that never resolved. trackingCnameTarget short-circuits to the edge host
+    // before parsing APP_BASE_URL, so an empty fallback is only ever ignored.
+    const trackingCnameValue =
+      env.TRACKING_EDGE_HOST || env.APP_BASE_URL
+        ? trackingCnameTarget(env.APP_BASE_URL ?? "")
+        : null;
+    const tracking = await reapStaleTrackingSubdomains(db, {
+      resolver: nodeDnsResolver,
+      trackingCnameValue,
+    });
+    if (tracking.unset > 0) console.log(`domains.reap-tracking: unset=${tracking.unset}`);
+  },
+  "tenants.sync": async () => {
+    const result = await syncTenants(db, {
+      clientForRegion,
+      configurationSet: env.SES_CONFIGURATION_SET,
+      enabled: sesTenantsEnabled(),
+    });
+    if (result.associated > 0 || result.failed > 0) {
+      console.log(`tenants.sync: associated=${result.associated} failed=${result.failed}`);
+    }
+  },
+  "domains.reap": async () => {
+    // Cloud-only: squatting is a cross-tenant problem. Self-host is one
+    // operator's own teams and adopts existing SES identities on create, so
+    // an unverified row blocks nobody there.
+    if (!env.IS_CLOUD) return;
+    const reaped = await reapUnverifiedDomains(db, { clientForRegion });
+    if (reaped > 0) console.log(`domains.reap: reaped=${reaped}`);
+  },
+});
+
+// Retries exhausted: the row must not stay "queued" for the reconcile sweep
+// to resurrect forever.
+await queue.workDeadLetter("email.send", async ({ emailId }) => {
+  const failed = await failQueuedEmail(db, emailId, "retries_exhausted");
+  console.error(`email.send: dead-lettered ${emailId} (marked failed=${failed})`);
+});
+
+// An erasure that exhausted its retries must not vanish: the log names the
+// team and the address's hash (never the address, which is what is being
+// erased) so an operator can re-run it from Audience → Erase recipient.
+await queue.workDeadLetter("recipient.erase", async ({ teamId, address }) => {
+  console.error(
+    `recipient.erase: dead-lettered team=${teamId} recipient=${hashRecipient(address)}; re-run it from Audience → Erase recipient`,
+  );
+});
+
+// A drain that kept throwing: its rows stay open and the reconcile sweep
+// arms a fresh pass once they read as stale.
+await queue.workDeadLetter("webhook.drain", async ({ endpointId }) => {
+  console.error(`webhook.drain: dead-lettered endpoint ${endpointId}`);
+});
+
 await queue.work(
   "email.send",
   async (payload) => {
@@ -200,24 +376,9 @@ await queue.work(
   { concurrency: SEND_CONCURRENCY, batchSize: SEND_BATCH },
 );
 
-// Retries exhausted: the row must not stay "queued" for the reconcile sweep
-// to resurrect forever.
-await queue.workDeadLetter("email.send", async ({ emailId }) => {
-  const failed = await failQueuedEmail(db, emailId, "retries_exhausted");
-  console.error(`email.send: dead-lettered ${emailId} (marked failed=${failed})`);
-});
-
-const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise<void> => {
-  await queue.send(
-    "broadcast.send",
-    { broadcastId },
-    { dedupeKey: broadcastId, ...(startAfter ? { startAfter } : {}) },
-  );
-};
-
 await queue.work(
   "broadcast.send",
-  async (payload) => {
+  async (payload, ctx) => {
     await sendBroadcast(
       db,
       {
@@ -225,8 +386,9 @@ await queue.work(
         unsubscribeSecretKey,
         appBaseUrl: env.APP_BASE_URL,
         isCloud: env.IS_CLOUD,
-        enqueueEmailSend: enqueueSend,
+        enqueueEmailSends: enqueueSends,
         reschedule: (broadcastId, at) => enqueueBroadcast(broadcastId, at),
+        signal: ctx.signal,
       },
       payload,
     );
@@ -301,160 +463,13 @@ await queue.work(
 
 // Erasure scans a team's whole history; it runs here so the request that
 // asked for it returns at once.
-await queue.work("recipient.erase", async ({ teamId, address }) => {
-  await eraseRecipient(db, teamId, address);
-});
-// An erasure that exhausted its retries must not vanish: the log names the
-// team and the address's hash (never the address, which is what is being
-// erased) so an operator can re-run it from Audience → Erase recipient.
-await queue.workDeadLetter("recipient.erase", async ({ teamId, address }) => {
-  console.error(
-    `recipient.erase: dead-lettered team=${teamId} recipient=${hashRecipient(address)}; re-run it from Audience → Erase recipient`,
-  );
-});
-
-// A drain that kept throwing: its rows stay open and the reconcile sweep
-// arms a fresh pass once they read as stale.
-await queue.workDeadLetter("webhook.drain", async ({ endpointId }) => {
-  console.error(`webhook.drain: dead-lettered endpoint ${endpointId}`);
-});
-
-await queue.scheduleCrons({
-  "quota.drain": async () => {
-    const result = await drainQuotaParked(db, {
-      isCloud: env.IS_CLOUD,
-      enqueueSend,
-      sesQuotaExhausted: () => sesQuota.exhausted(),
-    });
-    console.log(`quota.drain: drained=${result.drained} stillParked=${result.stillParked}`);
+await queue.work(
+  "recipient.erase",
+  async ({ teamId, address }) => {
+    await eraseRecipient(db, teamId, address);
   },
-  "sends.reconcile": async () => {
-    const requeued = await reconcileStalledSends(db, { enqueueSend });
-    if (requeued > 0) console.log(`sends.reconcile: requeued=${requeued}`);
-  },
-  "retention.purge": async () => {
-    const purged = await purgeExpiredEmailBodies(db, {
-      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
-    });
-    const requests = await purgeExpiredApiRequests(db, {
-      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
-    });
-    const stripped = await stripExpiredEventPayloads(db, {
-      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
-    });
-    const metadata = await purgeExpiredEmailMetadata(db, {
-      retentionDays: metadataRetentionDays,
-      deliveryRetentionDays: env.WEBHOOK_DELIVERY_RETENTION_DAYS,
-    });
-    const sessions = await purgeExpiredSessions(db);
-    const hourlyUsage = await purgeStaleHourlyUsage(db);
-    const stripeEvents = await purgeStripeEvents(db);
-    const counts = {
-      purged,
-      hourlyUsage,
-      apiRequests: requests,
-      events: stripped.events,
-      deliveries: stripped.deliveries,
-      emails: metadata.emails,
-      oldDeliveries: metadata.deliveries,
-      broadcastsFrozen: metadata.broadcasts,
-      sessions,
-      stripeEvents,
-    };
-    if (Object.values(counts).some((n) => n > 0)) {
-      console.log(
-        `retention.purge: ${Object.entries(counts)
-          .map(([k, v]) => `${k}=${v}`)
-          .join(" ")}`,
-      );
-    }
-  },
-  "billing.reconcile": async () => {
-    if (!stripe) return;
-    const result = await reconcileBillingPlans(db, {
-      reconcileTeam: (teamId) => reconcileTeamPlan({ db, stripe, log: console.warn }, teamId),
-    });
-    console.log(`billing.reconcile: reconciled=${result.reconciled} failed=${result.failed}`);
-  },
-  "idempotency.purge": async () => {
-    await purgeExpiredIdempotencyKeys(db);
-  },
-  "webhooks.reconcile": async () => {
-    const requeued = await reconcileWebhookDeliveries(db, { enqueue: enqueueWebhook });
-    if (requeued > 0) console.log(`webhooks.reconcile: requeued=${requeued}`);
-  },
-  "broadcasts.reconcile": async () => {
-    const requeued = await reconcileStalledBroadcasts(db, {
-      enqueue: (broadcastId) => enqueueBroadcast(broadcastId),
-    });
-    if (requeued > 0) console.log(`broadcasts.reconcile: requeued=${requeued}`);
-  },
-  "segments.recount": async () => {
-    const recounted = await recountStaleSegments(db, { olderThanMs: 30 * 60_000 });
-    if (recounted > 0) console.log(`segments.recount: recounted=${recounted}`);
-  },
-  "notifications.sweep": async () => {
-    const result = await sweepNotifications(db, {
-      isCloud: env.IS_CLOUD,
-      mailer,
-      enqueueWebhook,
-      appBaseUrl: env.APP_BASE_URL,
-    });
-    if (result.sent > 0) console.log(`notifications.sweep: sent=${result.sent}`);
-  },
-  "platform.breaker": async () => {
-    // Without SES events there are no bounce/complaint counts to judge.
-    if (!env.SNS_TOPIC_ARNS?.length) return;
-    await runPlatformBreaker(db, { mailer, appBaseUrl: env.APP_BASE_URL });
-  },
-  "events.health": async () => {
-    // No topic allowlist = ingestion disabled on purpose; nothing to judge.
-    if (!env.SNS_TOPIC_ARNS?.length) return;
-    const health = await sesEventsHealth(db);
-    if (health.status !== "unhealthy") return;
-    console.warn(
-      `events.health: ${health.sentInWindow} email(s) sent in the last 2h but no SES event arrived (last one ${health.lastSesEventAt?.toISOString() ?? "never"}) — the SNS subscription is missing or pending confirmation, or SQS_QUEUE_URL is empty / the queue is not being read`,
-    );
-  },
-  "domains.reverify": async () => {
-    const result = await reverifyDomains(db, { clientForRegion, resolver: nodeDnsResolver });
-    if (result.checked > 0 || result.failed > 0) {
-      console.log(`domains.reverify: checked=${result.checked} failed=${result.failed}`);
-    }
-    // Branded tracking CNAMEs never gate domain status, so reverify above skips
-    // them; sweep them here to clear a resolved subdomain's clock or unset one
-    // that never resolved. trackingCnameTarget short-circuits to the edge host
-    // before parsing APP_BASE_URL, so an empty fallback is only ever ignored.
-    const trackingCnameValue =
-      env.TRACKING_EDGE_HOST || env.APP_BASE_URL
-        ? trackingCnameTarget(env.APP_BASE_URL ?? "")
-        : null;
-    const tracking = await reapStaleTrackingSubdomains(db, {
-      resolver: nodeDnsResolver,
-      trackingCnameValue,
-    });
-    if (tracking.unset > 0) console.log(`domains.reap-tracking: unset=${tracking.unset}`);
-  },
-  "tenants.sync": async () => {
-    const result = await syncTenants(db, {
-      clientForRegion,
-      configurationSet: env.SES_CONFIGURATION_SET,
-      enabled: sesTenantsEnabled(),
-    });
-    if (result.associated > 0 || result.failed > 0) {
-      console.log(`tenants.sync: associated=${result.associated} failed=${result.failed}`);
-    }
-  },
-  "domains.reap": async () => {
-    // Cloud-only: squatting is a cross-tenant problem. Self-host is one
-    // operator's own teams and adopts existing SES identities on create, so
-    // an unverified row blocks nobody there.
-    if (!env.IS_CLOUD) return;
-    const reaped = await reapUnverifiedDomains(db, { clientForRegion });
-    if (reaped > 0) console.log(`domains.reap: reaped=${reaped}`);
-  },
-});
-
+  { pollingIntervalSeconds: 30 },
+);
 console.log("millionsend worker running");
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

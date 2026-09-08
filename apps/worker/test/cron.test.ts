@@ -71,8 +71,8 @@ it("drain reserves against the NEW day's cap — parking is not a quota bypass",
   const enqueued: string[] = [];
   const result = await drainQuotaParked(db, {
     isCloud: true,
-    enqueueSend: async (id) => {
-      enqueued.push(id);
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
     },
   });
 
@@ -95,8 +95,8 @@ it("self-host drain (no caps) releases everything", async () => {
   const enqueued: string[] = [];
   const result = await drainQuotaParked(db, {
     isCloud: false,
-    enqueueSend: async (id) => {
-      enqueued.push(id);
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
     },
   });
 
@@ -104,29 +104,30 @@ it("self-host drain (no caps) releases everything", async () => {
   expect(enqueued).toEqual([a, b]);
 });
 
-it("one enqueue failure re-parks that email, releases its reservation, and does NOT block the rest", async () => {
-  const failing = await insertParked(new Date("2026-08-13T01:00:00Z"));
-  const healthy = await insertParked(new Date("2026-08-13T02:00:00Z"));
+it("a failed page enqueue re-parks that whole page and releases its reservations, then rethrows", async () => {
+  const a = await insertParked(new Date("2026-08-13T01:00:00Z"));
+  const b = await insertParked(new Date("2026-08-13T02:00:00Z"));
 
-  const enqueued: string[] = [];
+  const batches: string[][] = [];
   await expect(
     drainQuotaParked(db, {
       isCloud: true,
-      enqueueSend: async (id) => {
-        if (id === failing) throw new Error("queue down");
-        enqueued.push(id);
+      enqueueSends: async (batch) => {
+        batches.push(batch.map((j) => j.emailId));
+        throw new Error("queue down");
       },
     }),
   ).rejects.toThrow("1 email(s) failed");
 
-  expect(await statusOf(failing)).toBe("queued_quota");
-  expect(await statusOf(healthy)).toBe("queued");
-  expect(enqueued).toEqual([healthy]);
+  // Both rows moved in one page, so one statement carried both and both go back.
+  expect(batches).toEqual([[a, b]]);
+  expect(await statusOf(a)).toBe("queued_quota");
+  expect(await statusOf(b)).toBe("queued_quota");
   const [counter] = await db
     .select()
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, teamId));
-  expect(counter?.accepted).toBe(1);
+  expect(counter?.accepted).toBe(0);
 });
 
 it("drain passes a scheduled email's due time through to the queue", async () => {
@@ -147,8 +148,10 @@ it("drain passes a scheduled email's due time through to the queue", async () =>
   const enqueued: { id: string; startAfter?: Date }[] = [];
   await drainQuotaParked(db, {
     isCloud: false,
-    enqueueSend: async (id, startAfter) => {
-      enqueued.push({ id, ...(startAfter ? { startAfter } : {}) });
+    enqueueSends: async (batch) => {
+      for (const j of batch) {
+        enqueued.push({ id: j.emailId, ...(j.startAfter ? { startAfter: j.startAfter } : {}) });
+      }
     },
   });
   expect(enqueued).toEqual([{ id: row.id, startAfter: due }]);
@@ -194,8 +197,8 @@ it("reconcile re-enqueues stale queued emails but never claimed or fresh ones", 
 
   const enqueued: string[] = [];
   const count = await reconcileStalledSends(db, {
-    enqueueSend: async (id) => {
-      enqueued.push(id);
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
     },
     now,
   });
@@ -203,7 +206,7 @@ it("reconcile re-enqueues stale queued emails but never claimed or fresh ones", 
   expect(enqueued).toEqual([due?.id, stale?.id]);
 });
 
-it("reconcile pages through a backlog larger than one batch, each row once", async () => {
+it("reconcile pages through a backlog larger than one batch, each row once, one enqueue per page", async () => {
   const now = new Date();
   const createdAt = new Date(now.getTime() - 30 * 60 * 1000);
   await db.insert(schema.emails).values(
@@ -217,14 +220,17 @@ it("reconcile pages through a backlog larger than one batch, each row once", asy
     })),
   );
   const enqueued: string[] = [];
+  const pages: number[] = [];
   const count = await reconcileStalledSends(db, {
-    enqueueSend: async (id) => {
-      enqueued.push(id);
+    enqueueSends: async (batch) => {
+      pages.push(batch.length);
+      enqueued.push(...batch.map((j) => j.emailId));
     },
     now,
   });
   expect(count).toBe(1001);
   expect(new Set(enqueued).size).toBe(1001);
+  expect(pages).toEqual([1000, 1]);
 });
 
 it("retention purge nulls only expired bodies and stamps bodyPurgedAt", async () => {
@@ -371,7 +377,7 @@ it("reconcile fails a claim that never reached SES (worker killed mid-send) with
     .returning({ id: schema.emails.id });
   if (!interrupted || !inFlight) throw new Error("insert failed");
 
-  await reconcileStalledSends(db, { enqueueSend: async () => {}, now });
+  await reconcileStalledSends(db, { enqueueSends: async () => {}, now });
 
   expect(await statusOf(interrupted.id)).toBe("failed");
   expect(await statusOf(inFlight.id)).toBe("queued");
@@ -556,8 +562,8 @@ it("holds every parked email while SES's own 24-hour quota is full", async () =>
   const enqueued: string[] = [];
   const result = await drainQuotaParked(db, {
     isCloud: true,
-    enqueueSend: async (id) => {
-      enqueued.push(id);
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
     },
     sesQuotaExhausted: () => true,
   });
@@ -681,7 +687,7 @@ it("drain terminates when an exhausted team's parked rows share one created_at",
   // Rows written by one statement share one now(); PGlite's now() is
   // millisecond-only, so the microsecond fraction is pinned by hand.
   await db.execute(sql`update ${schema.emails} set created_at = '2026-08-13T01:00:00.000123Z'`);
-  const result = await drainQuotaParked(db, { isCloud: true, enqueueSend: async () => {} });
+  const result = await drainQuotaParked(db, { isCloud: true, enqueueSends: async () => {} });
   expect(result).toEqual({ drained: 0, stillParked: 2 });
 });
 
@@ -712,8 +718,8 @@ it("drain keeps releasing other teams' rows once one team is found exhausted", a
   const enqueued: string[] = [];
   const result = await drainQuotaParked(db, {
     isCloud: true,
-    enqueueSend: async (id) => {
-      enqueued.push(id);
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
     },
   });
   expect(result).toEqual({ drained: 2, stillParked: 2 });

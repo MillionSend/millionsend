@@ -55,13 +55,21 @@ export async function recountSegment(
 }
 
 /**
- * A count this old is refreshed even when nothing looks changed: contact
- * deletes and manual-member removals leave no newer row behind, so the
- * change checks below cannot see them.
- * ponytail: bounded staleness instead of a signal; have those paths null
- * segments.counted_at for the team and drop this ceiling.
+ * Marks a team's segments (or one segment) as never counted so the next
+ * recount pass refreshes them. Contact deletes and manual-member removals
+ * must call this: they leave no newer row for recountStaleSegments to see.
+ * The stored counts stay readable until then.
  */
-const RECOUNT_CEILING_MS = 24 * 60 * 60 * 1000;
+export async function markSegmentsStale(
+  db: Db,
+  scope: { teamId: string } | { segmentId: string },
+): Promise<void> {
+  const s = schema.segments;
+  await db
+    .update(s)
+    .set({ countedAt: null })
+    .where("teamId" in scope ? eq(s.teamId, scope.teamId) : eq(s.id, scope.segmentId));
+}
 
 /**
  * Refreshes segments never counted or counted before `olderThanMs` ago, one
@@ -76,7 +84,6 @@ export async function recountStaleSegments(
 ): Promise<number> {
   const now = opts.now ?? new Date();
   const before = new Date(now.getTime() - opts.olderThanMs);
-  const ceiling = new Date(now.getTime() - RECOUNT_CEILING_MS);
   const s = schema.segments;
   const c = schema.contacts;
   const m = schema.segmentMembers;
@@ -97,9 +104,7 @@ export async function recountStaleSegments(
   const stale = await db
     .select({ id: s.id, teamId: s.teamId, filter: s.filter })
     .from(s)
-    .where(
-      or(isNull(s.countedAt), lt(s.countedAt, ceiling), and(lt(s.countedAt, before), changedSince)),
-    )
+    .where(or(isNull(s.countedAt), and(lt(s.countedAt, before), changedSince)))
     .orderBy(asc(s.countedAt))
     .limit(opts.limit ?? 200);
   for (const segment of stale) {

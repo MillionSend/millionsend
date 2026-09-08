@@ -227,6 +227,7 @@ export {
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
 export {
   countSegment,
+  markSegmentsStale,
   recountSegment,
   recountStaleSegments,
   type SegmentCounts,
@@ -331,7 +332,10 @@ export {
   signWebhook,
   type TeamWebhookEvent,
   verifyWebhookSignature,
+  WEBHOOK_BACKLOG_AGE_MS,
+  WEBHOOK_BACKLOG_COUNT,
   WEBHOOK_EVENT_TYPES,
+  WEBHOOK_FAILING_STREAK,
   WEBHOOK_MAX_AGE_MS,
   WEBHOOK_MAX_ATTEMPTS,
   WEBHOOK_MAX_RATE_PER_SECOND,
