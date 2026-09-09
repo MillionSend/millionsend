@@ -20,5 +20,9 @@ export const auditLog = pgTable(
     data: jsonb("data").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("audit_log_team_idx").on(t.teamId, t.createdAt)],
+  (t) => [
+    index("audit_log_team_idx").on(t.teamId, t.createdAt),
+    // The notification sweep reads recent rows of a few actions.
+    index("audit_log_action_recent_idx").on(t.action, t.createdAt),
+  ],
 );

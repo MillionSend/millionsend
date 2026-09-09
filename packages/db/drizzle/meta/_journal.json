@@ -232,6 +232,13 @@
       "when": 1788908199501,
       "tag": "0032_unsubscribe_powered_by",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788917329637,
+      "tag": "0033_account_emails",
+      "breakpoints": true
     }
   ]
 }

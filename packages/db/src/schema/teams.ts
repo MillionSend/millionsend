@@ -37,6 +37,10 @@ export const teams = pgTable(
     stripeSubscriptionId: text("stripe_subscription_id"),
     planStatus: planStatusEnum("plan_status").notNull().default("none"),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    // When Stripe will end the subscription (cancel_at); null while it renews.
+    // Mirrored so a scheduled cancellation is a visible transition and the
+    // reminder before it needs no Stripe call.
+    cancelAt: timestamp("cancel_at", { withTimezone: true }),
     // SES tenant name for cloud reputation isolation; null on self-host.
     sesTenantName: text("ses_tenant_name"),
     // Per-team customization of the hosted unsubscribe pages. All null =
