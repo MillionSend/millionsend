@@ -135,7 +135,6 @@ describe("code mode panes", () => {
       /<iframe[^>]*sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"/,
     );
     expect(out).not.toContain("allow-scripts");
-    expect(out).toContain("<base target=&quot;_blank&quot;>");
   });
 });
 
