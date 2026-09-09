@@ -29,10 +29,10 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^1.19.7
-        version: 1.19.17(hono@4.13.2)
+        version: 1.19.17(hono@4.13.5)
       '@hono/zod-openapi':
         specifier: ^1.5.3
-        version: 1.5.3(hono@4.13.2)(zod@4.4.3)
+        version: 1.5.3(hono@4.13.5)(zod@4.4.3)
       '@millionsend/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -55,8 +55,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@electric-sql/pglite@0.3.16)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
       hono:
-        specifier: ^4.13.2
-        version: 4.13.2
+        specifier: ^4.13.5
+        version: 4.13.5
       jose:
         specifier: 6.2.8
         version: 6.2.8
@@ -340,7 +340,7 @@ importers:
     devDependencies:
       '@hono/node-server':
         specifier: ^1.19.7
-        version: 1.19.17(hono@4.13.2)
+        version: 1.19.17(hono@4.13.5)
       '@millionsend/api':
         specifier: workspace:*
         version: link:../api
@@ -395,7 +395,7 @@ importers:
     devDependencies:
       '@hono/node-server':
         specifier: ^1.19.7
-        version: 1.19.17(hono@4.13.2)
+        version: 1.19.17(hono@4.13.5)
       '@millionsend/api':
         specifier: workspace:*
         version: link:../../apps/api
@@ -3990,8 +3990,8 @@ packages:
     resolution: {integrity: sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg==}
     engines: {node: '>=12.0.0'}
 
-  hono@4.13.2:
-    resolution: {integrity: sha512-JydRilDRkYBQMt9qR9U92mXxmbGqsqSn/IKOrh4e7/gEbn+0zSr8igTu0obwJoNGN4sez28DIql7FBHWydoJpA==}
+  hono@4.13.5:
+    resolution: {integrity: sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw==}
     engines: {node: '>=16.9.0'}
 
   html-encoding-sniffer@6.0.0:
@@ -6298,21 +6298,21 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.18
 
-  '@hono/node-server@1.19.17(hono@4.13.2)':
+  '@hono/node-server@1.19.17(hono@4.13.5)':
     dependencies:
-      hono: 4.13.2
+      hono: 4.13.5
 
-  '@hono/zod-openapi@1.5.3(hono@4.13.2)(zod@4.4.3)':
+  '@hono/zod-openapi@1.5.3(hono@4.13.5)(zod@4.4.3)':
     dependencies:
       '@asteasolutions/zod-to-openapi': 8.5.0(zod@4.4.3)
-      '@hono/zod-validator': 0.9.0(hono@4.13.2)(zod@4.4.3)
-      hono: 4.13.2
+      '@hono/zod-validator': 0.9.0(hono@4.13.5)(zod@4.4.3)
+      hono: 4.13.5
       openapi3-ts: 4.6.1
       zod: 4.4.3
 
-  '@hono/zod-validator@0.9.0(hono@4.13.2)(zod@4.4.3)':
+  '@hono/zod-validator@0.9.0(hono@4.13.5)(zod@4.4.3)':
     dependencies:
-      hono: 4.13.2
+      hono: 4.13.5
       zod: 4.4.3
 
   '@img/colour@1.1.0':
@@ -8614,7 +8614,7 @@ snapshots:
 
   highlight.js@11.12.0: {}
 
-  hono@4.13.2: {}
+  hono@4.13.5: {}
 
   html-encoding-sniffer@6.0.0(@noble/hashes@2.3.0):
     dependencies:
