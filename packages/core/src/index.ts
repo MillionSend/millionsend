@@ -22,6 +22,7 @@ export {
   type AccountMailKind,
   accountMailPhrase,
   buildAccountMail,
+  CANCEL_REMINDER_DAYS,
   formatMailDate,
   formatMailDateTime,
   isMailLocale,
@@ -30,7 +31,10 @@ export {
   type MailLocale,
   type MailPhraseKey,
   PLAN_NAME,
+  type PlanMove,
+  type PlanSnapshot,
   planCapPhrase,
+  planMove,
 } from "./account-mail.js";
 export {
   ACCOUNT_SCORE_WINDOW_DAYS,

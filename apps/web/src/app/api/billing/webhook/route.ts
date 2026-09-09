@@ -1,9 +1,12 @@
 import { handleWebhook, isLiveKey } from "@millionsend/billing";
-import { accountEmailFrom, env } from "@millionsend/config";
+import { accountEmailFrom, env, notificationsEmailFrom } from "@millionsend/config";
 import {
   type AccountMailKind,
   accountMailPhrase,
+  CANCEL_REMINDER_DAYS,
   claimNotification,
+  clearNotifications,
+  DAY_MS,
   effectivePlan,
   formatMailDate,
   listTeamOwners,
@@ -11,6 +14,7 @@ import {
   PLAN_DAILY_LIMIT,
   PLAN_NAME,
   planCapPhrase,
+  planMove,
   raisesDailyLimit,
   recordAudit,
 } from "@millionsend/core";
@@ -159,25 +163,30 @@ type PlanRow = NonNullable<Awaited<ReturnType<typeof planOf>>>;
 
 /**
  * What the owners hear about, read off the row before and after the event
- * rather than off the event itself, so a redelivered or reordered event says
- * nothing twice: activation and changes are the plan moving, a scheduled
- * cancellation is cancel_at appearing on a paid plan, and a downgrade is the
- * plan reaching free, which also covers an immediate cancellation. A failed
- * charge leaves the plan alone and is claimed per invoice attempt instead.
+ * rather than off the event itself: activation and changes are the plan
+ * moving, a scheduled cancellation is cancel_at appearing on a paid plan,
+ * and a downgrade is the plan reaching free, which also covers an immediate
+ * cancellation. Every mail is claimed, because Stripe delivers a checkout's
+ * events in parallel and each request snapshots `before` outside the
+ * customer lock, so all of them see the same move. A failed charge leaves
+ * the plan alone and is claimed per invoice attempt.
  */
 async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: PlanRow) {
-  const from = accountEmailFrom();
+  const from = notificationsEmailFrom();
   if (!from) return;
   const team = after.name;
   const freeCap = (locale: MailLocale) => (PLAN_DAILY_LIMIT.free ?? 0).toLocaleString(locale);
+  const claim = (kind: AccountMailKind, periodKey: string) =>
+    claimNotification(db, { teamId: after.id, kind, periodKey });
   const send = async (
     kind: AccountMailKind,
     values: (locale: MailLocale) => Record<string, string>,
     url?: string,
   ) => {
-    for (const owner of await listTeamOwners(db, after.id, from)) {
+    for (const owner of await listTeamOwners(db, after.id, accountEmailFrom())) {
       sendAccountMail(
         buildAccountEmail({
+          from,
           to: owner.email,
           kind,
           locale: owner.locale,
@@ -191,12 +200,7 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
 
   if (event.type === "invoice.payment_failed" && event.invoice && after.planStatus === "past_due") {
     const { id, attemptCount, nextAttempt, hostedUrl } = event.invoice;
-    const claimed = await claimNotification(db, {
-      teamId: after.id,
-      kind: "billing.payment_failed",
-      periodKey: `${id}:${attemptCount}`,
-    });
-    if (claimed) {
+    if (await claim("billing.payment_failed", `${id}:${attemptCount}`)) {
       await send(
         "billing.payment_failed",
         (locale) => ({
@@ -219,41 +223,27 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
     }
   }
 
-  if (before.plan !== "free" && after.plan === "free") {
-    // The sweep claims the same kind with the same period end when the grace
-    // window lapses before Stripe's event arrives; whichever runs first wins.
-    const claimed = await claimNotification(db, {
-      teamId: after.id,
-      kind: "billing.downgraded",
-      periodKey: before.currentPeriodEnd?.toISOString() ?? "none",
-    });
-    if (claimed) {
-      const ended = before.currentPeriodEnd ?? before.cancelAt ?? new Date();
-      await send("billing.downgraded", (locale) => ({
-        team,
-        plan: PLAN_NAME[before.plan],
-        date: formatMailDate(locale, ended),
-        freeCap: freeCap(locale),
-      }));
+  // The daily reconcile and the grace sweep claim a move with the same key.
+  const move = planMove(before, after);
+  if (move) {
+    if (await claim(move.kind, move.periodKey)) {
+      await send(move.kind, (locale) => move.values(locale, team));
     }
-    return;
+    if (move.kind === "billing.downgraded") return;
   }
-  if (before.plan === "free" && after.plan !== "free") {
-    await send("billing.plan_activated", (locale) => ({
-      team,
-      plan: PLAN_NAME[after.plan],
-      cap: planCapPhrase(locale, after.plan),
-    }));
-  } else if (before.plan !== after.plan) {
-    await send("billing.plan_changed", (locale) => ({
-      team,
-      old: PLAN_NAME[before.plan],
-      new: PLAN_NAME[after.plan],
-      cap: planCapPhrase(locale, after.plan),
-    }));
+  if (before.cancelAt !== null && after.cancelAt === null) {
+    // Resumed: a later cancellation, even for the same date, is news again.
+    await clearNotifications(db, { teamId: after.id, kind: "billing.cancel_scheduled" });
+    await clearNotifications(db, { teamId: after.id, kind: "billing.cancel_reminder" });
   }
   if (before.cancelAt === null && after.cancelAt !== null && after.plan !== "free") {
     const endsAt = after.cancelAt;
+    if (!(await claim("billing.cancel_scheduled", endsAt.toISOString()))) return;
+    // Scheduled inside the reminder window, this notice is the reminder:
+    // holding the sweep's claim keeps it from saying the same minutes later.
+    if (endsAt.getTime() <= Date.now() + CANCEL_REMINDER_DAYS * DAY_MS) {
+      await claim("billing.cancel_reminder", endsAt.toISOString());
+    }
     await send("billing.cancel_scheduled", (locale) => ({
       team,
       plan: PLAN_NAME[after.plan],

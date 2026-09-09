@@ -84,10 +84,9 @@ describe("email verification", () => {
     await expect(signIn(a)).rejects.toMatchObject({ status: "FORBIDDEN" });
     expect(sent).toHaveLength(2);
 
-    await a.api.verifyEmail({
-      query: { token: url.searchParams.get("token") ?? "" },
-      headers: new Headers({ "accept-language": "pt-BR" }),
-    });
+    // Over HTTP, as the browser opens the link: the welcome reads its language.
+    const opened = await a.handler(new Request(url, { headers: { "accept-language": "pt-BR" } }));
+    expect(opened.status).toBe(302);
     const [user] = await db
       .select({ verified: schema.user.emailVerified })
       .from(schema.user)
@@ -100,7 +99,7 @@ describe("email verification", () => {
       "email_verification",
       "welcome",
     ]);
-    expect(sent[2]).toMatchObject({ to: "ada@example.com", subject: "Welcome to MillionSend" });
+    expect(sent[2]).toMatchObject({ to: "ada@example.com", subject: "Bem-vindo ao MillionSend" });
     expect((await signIn(a)).token).toBeTruthy();
     expect(sent).toHaveLength(3);
   });

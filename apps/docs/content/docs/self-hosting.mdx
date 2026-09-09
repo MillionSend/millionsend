@@ -618,8 +618,11 @@ to whoever created it), a rotated webhook secret with the old secret's
 deadline, a member who joined, a broadcast that went out — or is waiting for
 the daily quota, or held while its region is paused — and, on the cloud, a
 plan activated, moved or ended, a scheduled cancellation with a reminder
-three days out, and a failed charge. Owner notices come from the
-notification sweep, so they arrive within ten minutes of the change; each is
+three days out, and a failed charge. A broadcast report is sent by the
+worker as the broadcast finishes and the billing notices by the Stripe
+webhook itself (only the cancellation reminder and a plan lapsing at its
+period end come from the worker); every other owner notice comes from the
+notification sweep, so it arrives within ten minutes of the change. Each is
 written in the language of the reader's contact in the team that holds the
 sender's domain (the row sign-up enrolls, below), else English.
 

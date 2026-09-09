@@ -11,6 +11,7 @@ import {
   formatMailDate,
   MAIL_LOCALES,
   planCapPhrase,
+  planMove,
 } from "../src/account-mail.js";
 import { accountMailCard } from "../src/html.js";
 import { listTeamOwners } from "../src/notifications.js";
@@ -30,6 +31,7 @@ const VALUES: Record<string, string> = Object.fromEntries(
     "url",
     "host",
     "until",
+    "deadline",
     "role",
     "domain",
     "subject",
@@ -181,5 +183,66 @@ describe("billing phrases", () => {
     const lateUtc = new Date("2026-09-30T23:30:00Z");
     expect(formatMailDate("en", lateUtc)).toBe("September 30, 2026");
     expect(formatMailDate("pt-BR", lateUtc)).toBe("30 de setembro de 2026");
+  });
+});
+
+describe("planMove", () => {
+  const now = new Date("2026-09-08T12:00:00Z");
+  const row = (
+    plan: "free" | "pro" | "scale",
+    periodEnd: string | null,
+    cancelAt: string | null = null,
+  ) => ({
+    plan,
+    currentPeriodEnd: periodEnd ? new Date(periodEnd) : null,
+    cancelAt: cancelAt ? new Date(cancelAt) : null,
+  });
+
+  it("keys an activation and a change by the period the new plan starts, and a downgrade by the period that ended", () => {
+    const up = planMove(row("free", null), row("pro", "2026-10-08T00:00:00Z"), now);
+    expect(up?.kind).toBe("billing.plan_activated");
+    expect(up?.periodKey).toBe("pro:2026-10-08T00:00:00.000Z");
+    expect(up?.values("en", "Acme")).toEqual({
+      team: "Acme",
+      plan: "Pro",
+      cap: "up to 3,000 emails a day",
+    });
+    const moved = planMove(
+      row("pro", "2026-10-08T00:00:00Z"),
+      row("scale", "2026-10-08T00:00:00Z"),
+      now,
+    );
+    expect(moved?.kind).toBe("billing.plan_changed");
+    expect(moved?.periodKey).toBe("pro>scale:2026-10-08T00:00:00.000Z");
+    expect(moved?.values("pt-BR", "Acme")).toMatchObject({
+      old: "Pro",
+      new: "Scale",
+      cap: "sem limite diário",
+    });
+    const down = planMove(row("pro", "2026-09-30T00:00:00Z"), row("free", null), now);
+    expect(down?.kind).toBe("billing.downgraded");
+    expect(down?.periodKey).toBe("2026-09-30T00:00:00.000Z");
+    expect(planMove(row("pro", null), row("pro", null), now)).toBeNull();
+  });
+
+  it("dates a downgrade at the earliest of the scheduled cancel, the period end and today", () => {
+    const immediate = planMove(row("pro", "2026-09-30T00:00:00Z"), row("free", null), now);
+    expect(immediate?.values("en", "Acme").date).toBe("September 8, 2026");
+    const scheduled = planMove(
+      row("pro", "2026-09-30T00:00:00Z", "2026-09-01T00:00:00Z"),
+      row("free", null),
+      now,
+    );
+    expect(scheduled?.values("en", "Acme").date).toBe("September 1, 2026");
+    const lapsed = planMove(
+      row("scale", "2026-08-30T00:00:00Z"),
+      row("free", "2026-08-30T00:00:00Z"),
+      now,
+    );
+    expect(lapsed?.values("pt-BR", "Acme")).toMatchObject({
+      plan: "Scale",
+      date: "30 de agosto de 2026",
+      freeCap: "100",
+    });
   });
 });

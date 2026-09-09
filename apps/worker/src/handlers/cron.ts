@@ -6,6 +6,7 @@ import {
   getInstanceSettings,
   isIdentitySharedByOtherDomains,
   PLAN_DAILY_LIMIT,
+  type PlanSnapshot,
   purgedEmailBodyColumns,
   recordAudit,
   releaseDailyQuota,
@@ -971,14 +972,30 @@ export async function purgeExpiredSessions(db: Db, now = new Date()): Promise<nu
 /**
  * Daily plan reconcile against Stripe for every team with a customer: covers
  * webhooks that were dropped or arrived out of order. One team's failure is
- * logged and never blocks the rest.
+ * logged and never blocks the rest. A plan the reconcile moved is reported
+ * through `onPlanMoved`, since the webhook that would have said so never
+ * came (or will find nothing left to say when it does).
  */
 export async function reconcileBillingPlans(
   db: Db,
-  deps: { reconcileTeam: (teamId: string) => Promise<void> },
+  deps: {
+    reconcileTeam: (teamId: string) => Promise<void>;
+    onPlanMoved?: (
+      team: { id: string; name: string },
+      before: PlanSnapshot,
+      after: PlanSnapshot,
+    ) => Promise<void>;
+  },
 ): Promise<{ reconciled: number; failed: number }> {
+  const columns = {
+    id: schema.teams.id,
+    name: schema.teams.name,
+    plan: schema.teams.plan,
+    currentPeriodEnd: schema.teams.currentPeriodEnd,
+    cancelAt: schema.teams.cancelAt,
+  };
   const teams = await db
-    .select({ id: schema.teams.id })
+    .select(columns)
     .from(schema.teams)
     .where(isNotNull(schema.teams.stripeCustomerId))
     .orderBy(asc(schema.teams.id));
@@ -986,6 +1003,13 @@ export async function reconcileBillingPlans(
   for (const team of teams) {
     try {
       await deps.reconcileTeam(team.id);
+      if (deps.onPlanMoved) {
+        const [after] = await db
+          .select(columns)
+          .from(schema.teams)
+          .where(eq(schema.teams.id, team.id));
+        if (after && after.plan !== team.plan) await deps.onPlanMoved(team, team, after);
+      }
     } catch (err) {
       failed += 1;
       console.warn(`billing.reconcile: team ${team.id} failed`, err);

@@ -4,6 +4,7 @@ import {
   accountLocale,
   accountMailPhrase,
   buildAccountMail,
+  CANCEL_REMINDER_DAYS,
   claimNotification,
   clearNotifications,
   DAY_MS,
@@ -19,8 +20,10 @@ import {
   PAUSE_COMPLAINT_RATE,
   PLAN_DAILY_LIMIT,
   PLAN_NAME,
+  type PlanSnapshot,
   parseAuditActor,
   planCapPhrase,
+  planMove,
   QUOTA_TOLERANCE,
   resultRows,
   type SystemMailKind,
@@ -72,8 +75,6 @@ export interface NotifyDeps {
 
 /** Share of the daily quota at which owners hear about it. */
 export const QUOTA_WARNING_RATIO = 0.8;
-/** Days ahead of a scheduled cancellation at which owners are reminded. */
-export const CANCEL_REMINDER_DAYS = 3;
 /** Audit actions owners hear about; rows older than a day are never read. */
 const AUDIT_MAILED = ["api_key.created", "webhook.secret_rotated", "member.joined"] as const;
 type AuditMailed = (typeof AUDIT_MAILED)[number];
@@ -167,6 +168,39 @@ const lineFor = (r: DeliverabilityReason): number =>
     : r.metric === "bounce"
       ? WARN_BOUNCE_RATE
       : WARN_COMPLAINT_RATE;
+
+/**
+ * Mails a plan move to the team's owners, claimed with the key the Stripe
+ * webhook route computes for the same move, so whichever surface notices
+ * first (the route, the daily reconcile, the grace sweep) is the one that
+ * speaks. True when it did.
+ */
+export async function reportPlanMove(
+  db: Db,
+  mailer: SystemMailer,
+  base: string,
+  team: { id: string; name: string },
+  before: PlanSnapshot,
+  after: PlanSnapshot,
+): Promise<boolean> {
+  const move = planMove(before, after);
+  if (!move) return false;
+  const claimed = await claimNotification(db, {
+    teamId: team.id,
+    kind: move.kind,
+    periodKey: move.periodKey,
+  });
+  if (!claimed) return false;
+  await mailTeamOwners(db, mailer, team.id, move.kind, (locale) =>
+    buildAccountMail({
+      kind: move.kind,
+      locale,
+      url: `${base}/settings/billing`,
+      values: move.values(locale, team.name),
+    }),
+  );
+  return true;
+}
 
 /**
  * One pass over every team's standing: quota (cloud only) and deliverability.
@@ -522,7 +556,12 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
         actor.kind === "user"
           ? (
               await db
-                .select({ name: schema.user.name, email: schema.user.email })
+                .select({
+                  name: schema.user.name,
+                  email: schema.user.email,
+                  // Still a member: someone removed since must not learn the key's prefix and last four.
+                  member: sql<boolean>`exists (select 1 from ${schema.teamMembers} where ${schema.teamMembers.teamId} = ${row.teamId} and ${schema.teamMembers.userId} = ${actor.id})`,
+                })
                 .from(schema.user)
                 .where(eq(schema.user.id, actor.id))
             )[0]
@@ -577,7 +616,7 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
                 })
               : "",
           })),
-          actorUser
+          actorUser?.member
             ? {
                 also: {
                   email: actorUser.email,
@@ -604,8 +643,13 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
             actor: actorLabel(locale),
             url,
             host,
-            until: expires
-              ? formatMailDateTime(locale, expires)
+            deadline: expires
+              ? accountMailPhrase({
+                  locale,
+                  kind: action,
+                  key: "overlap",
+                  values: { until: formatMailDateTime(locale, expires) },
+                })
               : accountMailPhrase({ locale, kind: action, key: "immediately" }),
           })),
         );
@@ -671,26 +715,12 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
           })),
         );
       }
-      const periodEnd = t.currentPeriodEnd;
       if (
-        periodEnd &&
-        effectivePlan(t.plan, periodEnd, now) === "free" &&
-        (await claimNotification(db, {
-          teamId: t.id,
-          kind: "billing.downgraded",
-          periodKey: periodEnd.toISOString(),
-        }))
+        t.currentPeriodEnd &&
+        effectivePlan(t.plan, t.currentPeriodEnd, now) === "free" &&
+        (await reportPlanMove(db, deps.mailer, base, t, t, { ...t, plan: "free" }))
       ) {
-        await mailOwners(
-          t.id,
-          "billing.downgraded",
-          account("billing.downgraded", "/settings/billing", (locale) => ({
-            team: t.name,
-            plan: PLAN_NAME[t.plan],
-            date: formatMailDate(locale, periodEnd),
-            freeCap: freeCap(locale),
-          })),
-        );
+        sent += 1;
       }
     }
   }

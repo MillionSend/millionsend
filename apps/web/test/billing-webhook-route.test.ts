@@ -1,4 +1,4 @@
-import type { SystemMailMessage } from "@millionsend/core";
+import { formatMailDate, type SystemMailMessage } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -187,13 +187,23 @@ describe("owner mail", () => {
     expect(h.sent).toEqual([]);
   });
 
-  it("reports an activation once, however often Stripe delivers the event", async () => {
+  it("reports an activation once, however often and however parallel Stripe delivers the events", async () => {
+    vi.stubEnv("NOTIFICATIONS_EMAIL_FROM", "MillionSend <notices@mail.example.com>");
     h.afterEvent = { plan: "pro", currentPeriodEnd: PERIOD_END };
-    await send("evt_1", "customer.subscription.updated");
-    await send("evt_1", "customer.subscription.updated");
-    await send("evt_2", "invoice.paid", { id: "in_1" });
+    // A checkout's three events arrive together; each request snapshots the
+    // free plan before any of them is applied.
+    await Promise.all([
+      send("evt_1", "checkout.session.completed", { id: "cs_1" }),
+      send("evt_2", "customer.subscription.created"),
+      send("evt_3", "invoice.paid", { id: "in_1" }),
+    ]);
+    await send("evt_2", "customer.subscription.created");
     expect(kinds()).toEqual(["billing.plan_activated"]);
-    expect(h.sent[0]).toMatchObject({ to: "ada@example.com", subject: "upgrader is on Pro" });
+    expect(h.sent[0]).toMatchObject({
+      from: "MillionSend <notices@mail.example.com>",
+      to: "ada@example.com",
+      subject: "upgrader is on Pro",
+    });
     expect(h.sent[0]?.text).toContain("up to 3,000 emails a day");
     expect(h.sent[0]?.text).toContain("https://app.example.com/settings/billing");
   });
@@ -252,16 +262,45 @@ describe("owner mail", () => {
     expect(h.sent[0]?.subject).toBe("Your Pro plan ends on September 30, 2026");
     expect(h.sent[0]?.text).toContain("Free (100 emails a day)");
 
-    // Resuming is the customer's own doing: nothing to tell them.
+    // Resuming is the customer's own doing: nothing to tell them, and the
+    // same date scheduled again later is news again.
     h.afterEvent = { cancelAt: null };
     await send("evt_3", "customer.subscription.updated");
     expect(kinds()).toHaveLength(1);
+    h.afterEvent = { cancelAt: PERIOD_END };
+    await send("evt_3b", "customer.subscription.updated");
+    expect(kinds()).toEqual(["billing.cancel_scheduled", "billing.cancel_scheduled"]);
+    h.afterEvent = { cancelAt: null };
+    await send("evt_3c", "customer.subscription.updated");
 
+    // Cancelled now: the plan ended today, not at the period end it never reached.
     h.afterEvent = { plan: "free", planStatus: "canceled", cancelAt: PERIOD_END };
     await send("evt_4", "customer.subscription.deleted");
-    expect(kinds()).toEqual(["billing.cancel_scheduled", "billing.downgraded"]);
-    expect(h.sent[1]?.subject).toBe("upgrader is now on Free");
-    expect(h.sent[1]?.text).toContain("The Pro plan ended on September 30, 2026.");
+    expect(kinds()).toEqual([
+      "billing.cancel_scheduled",
+      "billing.cancel_scheduled",
+      "billing.downgraded",
+    ]);
+    expect(h.sent[2]?.subject).toBe("upgrader is now on Free");
+    expect(h.sent[2]?.text).toContain(`The Pro plan ended on ${formatMailDate("en", new Date())}.`);
+  });
+
+  it("a cancellation scheduled inside the reminder window is its own reminder", async () => {
+    await h.db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, teamId));
+    const soon = new Date(Date.now() + 2 * 86_400_000);
+    h.afterEvent = { cancelAt: soon };
+    await send("evt_1", "customer.subscription.updated");
+    expect(kinds()).toEqual(["billing.cancel_scheduled"]);
+    expect(
+      (
+        await h.db
+          .select({ kind: schema.teamNotifications.kind, key: schema.teamNotifications.periodKey })
+          .from(schema.teamNotifications)
+      ).sort((a, b) => a.kind.localeCompare(b.kind)),
+    ).toEqual([
+      { kind: "billing.cancel_reminder", key: soon.toISOString() },
+      { kind: "billing.cancel_scheduled", key: soon.toISOString() },
+    ]);
   });
 
   it("claims a downgrade by the period that ended, so the sweep's own report stays silent", async () => {

@@ -193,17 +193,23 @@ export function buildInvitationEmail(input: {
 }
 
 /** One catalog kind, from the account sender, addressed to a person. */
-/** One account mail on the shared card; the button opens `path` on this instance unless `url` says elsewhere. */
+/**
+ * One account mail on the shared card; the button opens `path` on this
+ * instance unless `url` says elsewhere. Mail to a person about their own
+ * account goes from the account sender; an owner notice passes the
+ * notifications sender, as the worker's do.
+ */
 export function buildAccountEmail(input: {
   to: string;
   kind: AccountMailKind;
   locale: MailLocale;
   path: string;
   url?: string | undefined;
+  from?: string | undefined;
   values?: Record<string, string>;
 }): SystemMailMessage {
   return {
-    from: accountEmailFrom() ?? "",
+    from: input.from ?? accountEmailFrom() ?? "",
     to: input.to,
     ...buildAccountMail({
       kind: input.kind,

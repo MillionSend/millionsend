@@ -78,6 +78,76 @@ export function formatMailDate(locale: MailLocale, date: Date): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone: "UTC" }).format(date);
 }
 
+/** Days ahead of a scheduled cancellation at which owners are reminded. */
+export const CANCEL_REMINDER_DAYS = 3;
+
+export interface PlanSnapshot {
+  plan: Plan;
+  currentPeriodEnd: Date | null;
+  cancelAt: Date | null;
+}
+
+export interface PlanMove {
+  kind: "billing.plan_activated" | "billing.plan_changed" | "billing.downgraded";
+  /** Claim key every surface computes alike, so the first to notice is the one that speaks. */
+  periodKey: string;
+  values: (locale: MailLocale, team: string) => Record<string, string>;
+}
+
+/**
+ * What a team's owners hear when its plan moved from `before` to `after`,
+ * read off the team row rather than the event, so the Stripe webhook, the
+ * daily reconcile and the grace sweep agree on the mail and on its claim.
+ */
+export function planMove(
+  before: PlanSnapshot,
+  after: PlanSnapshot,
+  now: Date = new Date(),
+): PlanMove | null {
+  const freeCap = (locale: MailLocale) => (PLAN_DAILY_LIMIT.free ?? 0).toLocaleString(locale);
+  if (before.plan !== "free" && after.plan === "free") {
+    // The plan cannot have outlived a scheduled cancellation, its period, or today.
+    const ended = [before.cancelAt, before.currentPeriodEnd, now]
+      .filter((d): d is Date => d !== null)
+      .reduce((a, b) => (a < b ? a : b));
+    return {
+      kind: "billing.downgraded",
+      periodKey: before.currentPeriodEnd?.toISOString() ?? "none",
+      values: (locale, team) => ({
+        team,
+        plan: PLAN_NAME[before.plan],
+        date: formatMailDate(locale, ended),
+        freeCap: freeCap(locale),
+      }),
+    };
+  }
+  const period = after.currentPeriodEnd?.toISOString() ?? "none";
+  if (before.plan === "free" && after.plan !== "free") {
+    return {
+      kind: "billing.plan_activated",
+      periodKey: `${after.plan}:${period}`,
+      values: (locale, team) => ({
+        team,
+        plan: PLAN_NAME[after.plan],
+        cap: planCapPhrase(locale, after.plan),
+      }),
+    };
+  }
+  if (before.plan !== after.plan) {
+    return {
+      kind: "billing.plan_changed",
+      periodKey: `${before.plan}>${after.plan}:${period}`,
+      values: (locale, team) => ({
+        team,
+        old: PLAN_NAME[before.plan],
+        new: PLAN_NAME[after.plan],
+        cap: planCapPhrase(locale, after.plan),
+      }),
+    };
+  }
+  return null;
+}
+
 /** A moment in the reader's language, said in UTC so two readers agree on it. */
 export function formatMailDateTime(locale: MailLocale, date: Date): string {
   const at = new Intl.DateTimeFormat(locale, {

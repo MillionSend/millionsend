@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import {
   EnvKeyring,
   encryptWebhookSecret,
+  formatMailDate,
   generateWebhookSecret,
   type QueuedWebhookDelivery,
   utcDay,
@@ -508,6 +509,21 @@ it("a new API key is reported once to the owners and to the person who created i
   await sweepNotifications(db, deps(false));
   expect(sends).toHaveLength(2);
 
+  // Removed from the team since: the owners still hear it, the ex-member does not.
+  await db.delete(schema.teamMembers).where(eq(schema.teamMembers.userId, "adm"));
+  const [later] = await db
+    .insert(schema.apiKeys)
+    .values({ teamId, name: "later", tokenPrefix: "ms_live_ghi", keyHash: "h3", last4: "5678" })
+    .returning({ id: schema.apiKeys.id });
+  await audit("api_key.created", {
+    actor: "user:adm",
+    target: `api_key:${later?.id}`,
+    data: { name: "later", permission: "full_access", domainId: null },
+  });
+  await sweepNotifications(db, deps(false));
+  expect(sends.slice(2).map((s) => s.to)).toEqual(["owner@example.com"]);
+  expect(sends[2]?.text).toContain('Ada created the API key "later"');
+
   // A key minted by another key names no person; the owner is the only reader.
   const [minted] = await db
     .insert(schema.apiKeys)
@@ -519,8 +535,8 @@ it("a new API key is reported once to the owners and to the person who created i
     data: { name: "child", permission: "full_access", domainId: null },
   });
   await sweepNotifications(db, deps(false));
-  expect(sends).toHaveLength(3);
-  expect(sends[2]?.text).toContain(
+  expect(sends).toHaveLength(4);
+  expect(sends[3]?.text).toContain(
     'an API key created the API key "child" (ms_live_def…1234, full access) in',
   );
 });
@@ -547,7 +563,8 @@ it("a rotated webhook secret names the endpoint and the old secret's deadline", 
     data: { url: "https://receiver.example.com/hook", previousSecretExpiresAt: null },
   });
   await sweepNotifications(db, deps(false));
-  expect(sends[1]?.text).toContain("until now — it stopped verifying immediately;");
+  expect(sends[1]?.text).toContain("The previous secret stopped verifying at once;");
+  expect(sends[1]?.text).not.toContain("keeps verifying");
 });
 
 it("a member who joined is reported to the other owners, never to themselves", async () => {
@@ -591,7 +608,9 @@ it("a scheduled cancellation is recalled three days out, once, on the cloud only
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
   await sweepNotifications(db, deps());
-  expect(sends.map((s) => s.subject)).toEqual(["notify-team's Pro plan ends in 3 days"]);
+  expect(sends.map((s) => s.subject)).toEqual([
+    `Reminder: notify-team's Pro plan ends on ${formatMailDate("en", endsAt)}`,
+  ]);
   expect(sends[0]?.text).toContain("to keep sending up to 3,000 emails a day");
 
   // Too far out to count down yet; a fresh date is its own reminder.

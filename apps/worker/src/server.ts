@@ -51,7 +51,7 @@ import {
   stripExpiredEventPayloads,
 } from "./handlers/cron.js";
 import { drainWebhookEndpoint } from "./handlers/deliver-webhook.js";
-import { sweepNotifications } from "./handlers/notify.js";
+import { reportPlanMove, sweepNotifications } from "./handlers/notify.js";
 import { runPlatformBreaker } from "./handlers/platform-breaker.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
 import { sendBroadcast } from "./handlers/send-broadcast.js";
@@ -251,6 +251,9 @@ await queue.scheduleCrons({
     if (!stripe) return;
     const result = await reconcileBillingPlans(db, {
       reconcileTeam: (teamId) => reconcileTeamPlan({ db, stripe, log: console.warn }, teamId),
+      onPlanMoved: async (team, before, after) => {
+        await reportPlanMove(db, mailer, env.APP_BASE_URL ?? "", team, before, after);
+      },
     });
     console.log(`billing.reconcile: reconciled=${result.reconciled} failed=${result.failed}`);
   },

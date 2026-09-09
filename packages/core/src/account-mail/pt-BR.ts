@@ -47,12 +47,14 @@ export const ptBR = {
   },
   "webhook.secret_rotated": {
     subject: "Segredo do webhook {host} rotacionado",
-    body: [
-      "{actor} rotacionou o segredo de assinatura de {url} em {team}.",
-      "O segredo anterior continua válido até {until}; troque no receptor antes disso ou as entregas passam a falhar.",
-    ],
+    body: ["{actor} rotacionou o segredo de assinatura de {url} em {team}.", "{deadline}"],
     button: "Abrir endpoint",
-    extra: { immediately: "agora — ele deixou de valer imediatamente" },
+    extra: {
+      overlap:
+        "O segredo anterior continua válido até {until}; troque no receptor antes disso ou as entregas passam a falhar.",
+      immediately:
+        "O segredo anterior deixou de valer na hora; as entregas falham até o receptor usar o novo.",
+    },
   },
   "member.joined": {
     subject: "{name} entrou em {team}",
@@ -114,7 +116,7 @@ export const ptBR = {
     subject: "Pagamento recusado no plano {plan} de {team}",
     body: [
       "Não conseguimos cobrar o cartão cadastrado do plano {plan} de {team}.",
-      "{retry} Até lá nada muda e {team} continua enviando {cap}. Se as tentativas continuarem falhando, a Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
+      "{retry} Por enquanto nada muda: {team} continua enviando {cap}. Se a fatura continuar em aberto, a Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
     ],
     button: "Pagar fatura",
     muted: ["Ou atualize o cartão em Cobrança: {billingUrl}"],
@@ -148,7 +150,7 @@ export const ptBR = {
     button: "Abrir cobrança",
   },
   "billing.cancel_reminder": {
-    subject: "O plano {plan} de {team} termina em 3 dias",
+    subject: "Lembrete: o plano {plan} de {team} termina em {date}",
     body: [
       "Em {date} {team} volta ao Free: {freeCap} e-mails por dia, e o que passar do limite espera o dia seguinte.",
       "Retome o plano em Cobrança para continuar enviando {cap}.",

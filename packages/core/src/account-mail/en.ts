@@ -47,12 +47,14 @@ export const en = {
   },
   "webhook.secret_rotated": {
     subject: "Webhook secret rotated for {host}",
-    body: [
-      "{actor} rotated the signing secret of {url} in {team}.",
-      "The previous secret keeps verifying until {until}; switch the receiver before then or its deliveries start failing.",
-    ],
+    body: ["{actor} rotated the signing secret of {url} in {team}.", "{deadline}"],
     button: "Open the endpoint",
-    extra: { immediately: "now — it stopped verifying immediately" },
+    extra: {
+      overlap:
+        "The previous secret keeps verifying until {until}; switch the receiver before then or its deliveries start failing.",
+      immediately:
+        "The previous secret stopped verifying at once; deliveries fail until the receiver uses the new one.",
+    },
   },
   "member.joined": {
     subject: "{name} joined {team}",
@@ -114,7 +116,7 @@ export const en = {
     subject: "Payment failed for {team}'s {plan} plan",
     body: [
       "We couldn't charge the card on file for {team}'s {plan} plan.",
-      "{retry} Until then nothing changes and {team} keeps sending {cap}. If the retries keep failing, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
+      "{retry} Nothing changes yet: {team} keeps sending {cap}. If the invoice stays unpaid, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
     ],
     button: "Pay the invoice",
     muted: ["Or update the card from Billing: {billingUrl}"],
@@ -148,7 +150,7 @@ export const en = {
     button: "Open billing",
   },
   "billing.cancel_reminder": {
-    subject: "{team}'s {plan} plan ends in 3 days",
+    subject: "Reminder: {team}'s {plan} plan ends on {date}",
     body: [
       "On {date} {team} returns to Free: {freeCap} emails a day, and anything over the cap waits for the next day.",
       "Resume the plan from Billing to keep sending {cap}.",
