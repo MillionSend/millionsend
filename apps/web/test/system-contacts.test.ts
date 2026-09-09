@@ -59,6 +59,21 @@ async function signUp(auth: Auth, email: string, name = "Ada Lovelace") {
 const contactsOf = (email: string) =>
   db.select().from(schema.contacts).where(eq(schema.contacts.email, email));
 
+describe("enrollment and the sign-up flag", () => {
+  it("a self-host closed to sign-up enrolls nobody", async () => {
+    vi.stubEnv("ALLOW_SIGNUP", "false");
+    await signUp(createAuth(db), "first@example.com");
+    expect(await contactsOf("first@example.com")).toEqual([]);
+  });
+
+  it("the cloud enrolls whatever the flag says", async () => {
+    vi.stubEnv("ALLOW_SIGNUP", "false");
+    vi.stubEnv("IS_CLOUD", "true");
+    await signUp(createAuth(db), "first@example.com");
+    expect(await contactsOf("first@example.com")).toHaveLength(1);
+  });
+});
+
 describe("accounts as contacts of the account-mail team", () => {
   it("a sign-up becomes a contact with its name split and its provenance stamped", async () => {
     await signUp(createAuth(db), "ada@example.com");
