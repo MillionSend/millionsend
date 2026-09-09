@@ -206,6 +206,13 @@ export {
   rewriteForTracking,
 } from "./link-tracking.js";
 export {
+  isMailPreferenceKey,
+  MAIL_PREFERENCE_GROUPS,
+  MAIL_PREFERENCE_KEYS,
+  type MailPreferenceKey,
+  mailPreferenceOf,
+} from "./mail-preferences.js";
+export {
   accountLocale,
   claimNotification,
   clearNotifications,

@@ -15,7 +15,9 @@ import {
   planMove,
 } from "../src/account-mail.js";
 import { accountMailCard } from "../src/html.js";
+import { mailPreferenceOf } from "../src/mail-preferences.js";
 import { listTeamOwners } from "../src/notifications.js";
+import type { SystemMailKind } from "../src/system-mail.js";
 
 const VALUES: Record<string, string> = Object.fromEntries(
   [
@@ -176,6 +178,25 @@ describe("listTeamOwners", () => {
       ["en", "en"],
     );
   });
+
+  it("leaves out an owner who turned a notice off, never for mail that is always sent", async () => {
+    const teamId = await createTeam(db, "quiet");
+    await db.insert(schema.user).values({
+      id: "q1",
+      name: "Q",
+      email: "q@example.com",
+      mailOptOuts: ["broadcast.sent", "quota", "domain.lost"],
+    });
+    await db.insert(schema.teamMembers).values({ teamId, userId: "q1", role: "owner" });
+    const emails = async (kind?: SystemMailKind) =>
+      (await listTeamOwners(db, teamId, undefined, kind)).map((o) => o.email);
+    expect(await emails()).toEqual(["q@example.com"]);
+    expect(await emails("broadcast.sent")).toEqual([]);
+    expect(await emails("quota.paused")).toEqual([]);
+    expect(await emails("domain.lost.identity")).toEqual([]);
+    expect(await emails("broadcast.held")).toEqual(["q@example.com"]);
+    expect(await emails("api_key.created")).toEqual(["q@example.com"]);
+  });
 });
 
 describe("billing phrases", () => {
@@ -248,5 +269,24 @@ describe("planMove", () => {
       date: "30 de agosto de 2026",
       freeCap: "100",
     });
+  });
+});
+
+describe("mailPreferenceOf", () => {
+  it("folds severity steps and the identity variant into one switch, and names none for mail that is always sent", () => {
+    expect(mailPreferenceOf("quota.warning")).toBe("quota");
+    expect(mailPreferenceOf("deliverability.paused")).toBe("deliverability");
+    expect(mailPreferenceOf("domain.lost.identity")).toBe("domain.lost");
+    expect(mailPreferenceOf("billing.downgraded")).toBe("billing.downgraded");
+    const always = [
+      "welcome",
+      "password_changed",
+      "mcp.connected",
+      "api_key.created",
+      "webhook.secret_rotated",
+      "password_reset",
+      "region.paused",
+    ] as const;
+    for (const kind of always) expect(mailPreferenceOf(kind), kind).toBeNull();
   });
 });

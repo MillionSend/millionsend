@@ -653,3 +653,25 @@ it("an owner whose account contact is pt-BR reads the notice in pt-BR", async ()
   await sweepNotifications(db, deps(false));
   expect(sends.map((s) => s.subject)).toEqual(["mail.acme.dev está verificado"]);
 });
+
+it("an owner who turned a notice off is skipped for it, and still gets a security receipt", async () => {
+  await db
+    .update(schema.user)
+    .set({ mailOptOuts: ["domain.verified"] })
+    .where(eq(schema.user.id, "owner"));
+  await domain();
+  await sweepNotifications(db, deps(false));
+  expect(sends).toEqual([]);
+  const [key] = await db
+    .insert(schema.apiKeys)
+    .values({ teamId, name: "ci", tokenPrefix: "ms_live_abc", keyHash: "h1", last4: "wxyz" })
+    .returning({ id: schema.apiKeys.id });
+  await audit("api_key.created", {
+    target: `api_key:${key?.id}`,
+    data: { name: "ci", permission: "full_access", domainId: null },
+  });
+  await sweepNotifications(db, deps(false));
+  expect(sends.map((s) => [s.to, s.subject])).toEqual([
+    ["owner@example.com", "New API key in notify-team: ci"],
+  ]);
+});

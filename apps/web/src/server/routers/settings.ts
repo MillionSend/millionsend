@@ -8,6 +8,9 @@ import {
   INVITE_MAX_SENDS,
   INVITE_RESEND_COOLDOWN_MS,
   INVITE_TTL_MS,
+  isMailPreferenceKey,
+  MAIL_PREFERENCE_KEYS,
+  type MailPreferenceKey,
   PLAN_DAILY_LIMIT,
   type Plan,
   SystemMailRefused,
@@ -788,6 +791,40 @@ export function createSettingsRouter(
       }),
     }),
 
+    /**
+     * The owner notices this person receives, across every team they own.
+     * Stored as the keys turned off, so a switch added later is on for
+     * everyone; the writes are jsonb set operations, so two tabs toggling
+     * at once cannot undo each other.
+     */
+    mailPreferences: router({
+      get: protectedProcedure.query(async ({ ctx }) => {
+        return { optOuts: await mailOptOuts(ctx.db, ctx.session.user.id) };
+      }),
+
+      set: protectedProcedure
+        .input(
+          z.object({
+            key: z.enum(MAIL_PREFERENCE_KEYS as [MailPreferenceKey, ...MailPreferenceKey[]]),
+            enabled: z.boolean(),
+          }),
+        )
+        .mutation(async ({ ctx, input }) => {
+          const u = schema.user;
+          const without = sql`${u.mailOptOuts} - ${input.key}`;
+          await ctx.db
+            .update(u)
+            .set({
+              mailOptOuts: input.enabled
+                ? without
+                : sql`(${without}) || ${JSON.stringify([input.key])}::jsonb`,
+              updatedAt: new Date(),
+            })
+            .where(eq(u.id, ctx.session.user.id));
+          return { optOuts: await mailOptOuts(ctx.db, ctx.session.user.id) };
+        }),
+    }),
+
     unsubscribe: router({
       get: teamProcedure.query(async ({ ctx }) => {
         const [team] = await ctx.db
@@ -898,6 +935,15 @@ export function createSettingsRouter(
         }),
     }),
   });
+}
+
+/** The keys a person turned off, as stored; a key the app no longer knows is dropped on read. */
+async function mailOptOuts(db: Db, userId: string): Promise<MailPreferenceKey[]> {
+  const [row] = await db
+    .select({ optOuts: schema.user.mailOptOuts })
+    .from(schema.user)
+    .where(eq(schema.user.id, userId));
+  return (row?.optOuts ?? []).filter(isMailPreferenceKey);
 }
 
 export const settingsRouter = createSettingsRouter();

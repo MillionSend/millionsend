@@ -183,7 +183,7 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
     values: (locale: MailLocale) => Record<string, string>,
     url?: string,
   ) => {
-    for (const owner of await listTeamOwners(db, after.id, accountEmailFrom())) {
+    for (const owner of await listTeamOwners(db, after.id, accountEmailFrom(), kind)) {
       sendAccountMail(
         buildAccountEmail({
           from,

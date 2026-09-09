@@ -303,7 +303,9 @@ deliverability notices, a domain verifying or losing its records, a new API key,
 webhook secret, a member joining, a broadcast that went out or is held, billing on the
 cloud). Broadcast reports go out as the broadcast finishes and billing notices from the
 Stripe webhook itself; the other owner notices ride the ten-minute notification sweep. All
-read in the language of the owner's contact in the team below, else English. Verify the sender's domain under
+read in the language of the owner's contact in the team below, else English; each owner picks
+which notices they get under **Settings → Notifications** (account mail and security receipts are
+always sent). Verify the sender's domain under
 **Domains** in a team and those emails are logged and measured there, tagged
 `millionsend_system`, with their body purged once SES accepts them. Until a team holds the
 domain they go straight through SES and leave no trace.

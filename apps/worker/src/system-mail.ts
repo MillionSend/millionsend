@@ -75,7 +75,7 @@ export async function mailOwners(
   build: (locale: MailLocale) => MailContent,
   opts: { except?: string; also?: { email: string; locale: MailLocale } } = {},
 ): Promise<number> {
-  const owners = await listTeamOwners(db, teamId, accountEmailFrom());
+  const owners = await listTeamOwners(db, teamId, accountEmailFrom(), kind);
   const recipients = owners.filter(
     (owner) => owner.email.toLowerCase() !== opts.except?.toLowerCase(),
   );

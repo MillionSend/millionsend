@@ -2,7 +2,8 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
 import { isMailLocale, type MailLocale } from "./account-mail.js";
-import { findSenderDomainOwner } from "./system-mail.js";
+import { mailPreferenceOf } from "./mail-preferences.js";
+import { findSenderDomainOwner, type SystemMailKind } from "./system-mail.js";
 
 /**
  * Claim the right to send one notification for (team, kind, period). True for
@@ -49,14 +50,17 @@ export interface TeamOwner {
  * holds that sender's domain — the row sign-up enrolls, whose `locale`
  * property is the one language the instance knows for a person outside a
  * request. Owners without one, or an instance where no team holds the
- * sender, read English.
+ * sender, read English. With the kind given, an owner who turned that
+ * notice off is left out; mail that is always sent names no switch.
  */
 export async function listTeamOwners(
   db: Db,
   teamId: string,
   accountMailFrom?: string | null,
+  kind?: SystemMailKind,
 ): Promise<TeamOwner[]> {
   const home = accountMailFrom ? await findSenderDomainOwner(db, accountMailFrom) : null;
+  const preference = kind ? mailPreferenceOf(kind) : null;
   const c = schema.contacts;
   const rows = await db
     .select({
@@ -70,7 +74,13 @@ export async function listTeamOwners(
     })
     .from(schema.teamMembers)
     .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
-    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.role, "owner")));
+    .where(
+      and(
+        eq(schema.teamMembers.teamId, teamId),
+        eq(schema.teamMembers.role, "owner"),
+        preference ? sql`not (${schema.user.mailOptOuts} ? ${preference})` : undefined,
+      ),
+    );
   return rows.map((row) => ({
     email: row.email,
     name: row.name,

@@ -14,6 +14,7 @@ const TABS = [
   { key: "smtp", href: "/settings/smtp" },
   { key: "mcp", href: "/settings/mcp" },
   { key: "connectedApps", href: "/settings/connected-apps" },
+  { key: "notifications", href: "/settings/notifications" },
   { key: "unsubscribe", href: "/settings/unsubscribe" },
   { key: "audit", href: "/settings/audit" },
 ] as const;
