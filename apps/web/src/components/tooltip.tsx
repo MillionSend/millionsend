@@ -104,7 +104,6 @@ export function Tooltip({
   return (
     <>
       {inline ? (
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: focus is how keyboard users reach the stamp; a button here would swallow the row's click
         <span
           ref={setTrigger}
           className={
@@ -112,6 +111,7 @@ export function Tooltip({
               ? `ms-tooltip-trigger inline ${triggerClassName}`
               : "ms-tooltip-trigger inline"
           }
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: focus is how keyboard users reach the stamp; a button here would swallow the row's click
           tabIndex={0}
           {...hoverProps}
         >
