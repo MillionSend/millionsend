@@ -13,7 +13,7 @@ import { type BetterAuthPlugin, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { captcha, jwt } from "better-auth/plugins";
-import { and, eq, ne, notExists } from "drizzle-orm";
+import { and, desc, eq, ne, notExists } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { headers } from "next/headers";
 import { mcpResourceUrl, resolveBaseUrl } from "@/lib/api-base-url";
@@ -22,10 +22,14 @@ import { localeFromHeaders } from "./locale";
 import { getActiveMembership, listMemberships } from "./membership";
 import { enqueueRecipientErase } from "./queue";
 import {
+  buildMcpConnectedEmail,
+  buildPasswordChangedEmail,
+  buildWelcomeEmail,
   emailVerificationEnabled,
   passwordRecoveryEnabled,
   RESET_TOKEN_TTL_MINUTES,
   type SystemMailDeps,
+  sendAccountMail,
   sendPasswordResetEmail,
   sendVerificationEmail,
   VERIFY_TOKEN_TTL_MINUTES,
@@ -188,27 +192,85 @@ export function createAuth(
    * the address is verified, or this instance cannot verify anyone (no
    * sender to send the link) and the account is all there is. An address
    * merely typed at sign-up may be someone else's inbox, so it waits for
-   * the verification link. A self-host closed to sign-up has nobody to
-   * market to and does not enroll; the cloud enrolls whatever the flag says,
-   * since it closes sign-up for reasons of its own. Best-effort: the account
-   * exists whatever happens here.
+   * the verification link. Every account the instance admits is welcomed
+   * then; a self-host closed to sign-up has nobody to market to and does not
+   * enroll, while the cloud enrolls whatever the flag says, since it closes
+   * sign-up for reasons of its own. Best-effort: the account exists whatever
+   * happens here.
    */
   const enrollAccount = async (
     user: { email: string; name: string; emailVerified: boolean },
     headers: Headers | undefined,
   ) => {
     try {
-      if (!signupOpen() && !isCloudDeployment()) return;
       if (emailVerificationEnabled() && !user.emailVerified) return;
+      const locale = localeFromHeaders(headers);
+      if (accountEmailFrom()) {
+        sendAccountMail(buildWelcomeEmail({ to: user.email, name: user.name, locale }), mail);
+      }
+      if (!signupOpen() && !isCloudDeployment()) return;
       const owner = await accountMailTeam(db);
       if (!owner) return;
-      await enrollSystemContact(db, owner.teamId, {
-        email: user.email,
-        name: user.name,
-        locale: localeFromHeaders(headers),
-      });
+      await enrollSystemContact(db, owner.teamId, { email: user.email, name: user.name, locale });
     } catch (error) {
       console.error("Account-mail contact enrollment failed", error);
+    }
+  };
+  /**
+   * A consent just granted to an MCP client is a receipt to its user: the
+   * app can act in their name until revoked. The provider stamps a new
+   * consent row with one instant for both dates and moves only updatedAt on
+   * a re-consent, so a row whose dates differ is a repeat and stays silent.
+   */
+  const mailConsent = async (ctx: {
+    body?: unknown;
+    headers?: Headers | undefined;
+    context: { returned?: unknown; session?: { user: { id: string; email: string } } | null };
+  }) => {
+    try {
+      if (!accountEmailFrom()) return;
+      if ((ctx.body as { accept?: unknown } | undefined)?.accept !== true) return;
+      if (ctx.context.returned instanceof APIError) return;
+      const user = ctx.context.session?.user;
+      if (!user) return;
+      const [consent] = await db
+        .select({
+          app: schema.oauthClient.name,
+          scopes: schema.oauthConsent.scopes,
+          referenceId: schema.oauthConsent.referenceId,
+          createdAt: schema.oauthConsent.createdAt,
+          updatedAt: schema.oauthConsent.updatedAt,
+        })
+        .from(schema.oauthConsent)
+        .innerJoin(
+          schema.oauthClient,
+          eq(schema.oauthClient.clientId, schema.oauthConsent.clientId),
+        )
+        .where(eq(schema.oauthConsent.userId, user.id))
+        .orderBy(desc(schema.oauthConsent.updatedAt))
+        .limit(1);
+      if (!consent || consent.createdAt?.getTime() !== consent.updatedAt?.getTime()) return;
+      let team: string | "*" = "*";
+      if (consent.referenceId && consent.referenceId !== ALL_TEAMS_GRANT) {
+        const [row] = await db
+          .select({ name: schema.teams.name })
+          .from(schema.teams)
+          .where(eq(schema.teams.id, consent.referenceId));
+        if (!row) return;
+        team = row.name;
+      }
+      sendAccountMail(
+        buildMcpConnectedEmail({
+          to: user.email,
+          app: consent.app ?? "An app",
+          team,
+          scopes: consent.scopes,
+          locale: localeFromHeaders(ctx.headers),
+        }),
+        mail,
+      );
+    } catch (error) {
+      console.error("Connected-app email skipped", error);
     }
   };
   return betterAuth({
@@ -328,6 +390,18 @@ export function createAuth(
       maxPasswordLength: 128,
       revokeSessionsOnPasswordReset: true,
       resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_MINUTES * 60,
+      // The receipt for a reset that went through: whoever holds the inbox
+      // learns the password changed and can start a reset of their own.
+      onPasswordReset: async ({ user }: { user: { email: string } }, request?: Request) => {
+        if (!accountEmailFrom()) return;
+        sendAccountMail(
+          buildPasswordChangedEmail({
+            to: user.email,
+            locale: localeFromHeaders(request?.headers),
+          }),
+          mail,
+        );
+      },
       // A password sign-up gets no session until its address is verified;
       // an account from before this verifies at its next sign-in, where the
       // link is re-sent (sendOnSignIn). Gated like recovery: an instance
@@ -473,6 +547,10 @@ export function createAuth(
       // consent remains the gate. drizzle/0007 does the same for clients
       // registered before this hook existed.
       after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === "/oauth2/consent") {
+          await mailConsent(ctx);
+          return;
+        }
         if (ctx.path !== "/oauth2/register") return;
         const returned = ctx.context.returned;
         const clientId =

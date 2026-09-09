@@ -16,6 +16,8 @@ import { type Auth, createAuth } from "@/server/auth";
 let db: Db;
 let close: () => Promise<void>;
 let teamId: string;
+let sends: SystemMailMessage[];
+const seam = { send: async (message: SystemMailMessage) => void sends.push(message) };
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
 
 beforeEach(async () => {
@@ -29,6 +31,7 @@ beforeEach(async () => {
   vi.stubEnv("AWS_SECRET_ACCESS_KEY", "");
   vi.stubEnv("AWS_DEFAULT_CHAIN", "");
   ({ db, close } = await createTestDb());
+  sends = [];
   teamId = await createTeam(db, "owner");
   await db.insert(schema.domains).values({
     teamId,
@@ -60,23 +63,38 @@ const contactsOf = (email: string) =>
   db.select().from(schema.contacts).where(eq(schema.contacts.email, email));
 
 describe("enrollment and the sign-up flag", () => {
-  it("a self-host closed to sign-up enrolls nobody", async () => {
+  it("a self-host closed to sign-up enrolls nobody, but still welcomes the account it admits", async () => {
     vi.stubEnv("ALLOW_SIGNUP", "false");
-    await signUp(createAuth(db), "first@example.com");
+    await signUp(createAuth(db, seam), "first@example.com");
     expect(await contactsOf("first@example.com")).toEqual([]);
+    expect(sends.map((m) => [m.kind, m.to])).toEqual([["welcome", "first@example.com"]]);
+  });
+
+  it("welcomes once, in the sign-up request's language, with the docs and the domains page", async () => {
+    await signUp(createAuth(db, seam), "ada@example.com");
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toMatchObject({
+      kind: "welcome",
+      to: "ada@example.com",
+      from: "MillionSend <no-reply@mail.example.com>",
+      subject: "Bem-vindo ao MillionSend",
+    });
+    expect(sends[0]?.text).toContain("Olá, Ada Lovelace");
+    expect(sends[0]?.text).toContain("http://localhost:3000/domains");
+    expect(sends[0]?.text).toContain("https://docs.millionsend.com");
   });
 
   it("the cloud enrolls whatever the flag says", async () => {
     vi.stubEnv("ALLOW_SIGNUP", "false");
     vi.stubEnv("IS_CLOUD", "true");
-    await signUp(createAuth(db), "first@example.com");
+    await signUp(createAuth(db, seam), "first@example.com");
     expect(await contactsOf("first@example.com")).toHaveLength(1);
   });
 });
 
 describe("accounts as contacts of the account-mail team", () => {
   it("a sign-up becomes a contact with its name split and its provenance stamped", async () => {
-    await signUp(createAuth(db), "ada@example.com");
+    await signUp(createAuth(db, seam), "ada@example.com");
     const [contact] = await contactsOf("ada@example.com");
     expect(contact).toMatchObject({
       teamId,
@@ -95,13 +113,13 @@ describe("accounts as contacts of the account-mail team", () => {
 
   it("a closed instance enrolls nobody", async () => {
     vi.stubEnv("ALLOW_SIGNUP", "false");
-    await signUp(createAuth(db), "first@example.com");
+    await signUp(createAuth(db, seam), "first@example.com");
     expect(await contactsOf("first@example.com")).toHaveLength(0);
   });
 
   it("without a team owning the sender's domain, nothing is enrolled", async () => {
     vi.stubEnv("AUTH_EMAIL_FROM", "no-reply@unowned.example.com");
-    await signUp(createAuth(db), "ada@example.com");
+    await signUp(createAuth(db, seam), "ada@example.com");
     expect(await contactsOf("ada@example.com")).toHaveLength(0);
   });
 
@@ -112,7 +130,7 @@ describe("accounts as contacts of the account-mail team", () => {
       unsubscribed: true,
       properties: { source: "import" },
     });
-    await signUp(createAuth(db), "ada@example.com");
+    await signUp(createAuth(db, seam), "ada@example.com");
     const rows = await db.select().from(schema.contacts).where(eq(schema.contacts.teamId, teamId));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ unsubscribed: true, properties: { source: "import" } });
@@ -135,7 +153,7 @@ describe("accounts as contacts of the account-mail team", () => {
   });
 
   it("deleting the account removes the contact and scrubs the address from the team's log", async () => {
-    const auth = createAuth(db, undefined, {
+    const auth = createAuth(db, seam, {
       eraseRecipient: (teamId, address) => eraseRecipient(db, teamId, address),
     });
     const { cookie } = await signUp(auth, "ada@example.com");

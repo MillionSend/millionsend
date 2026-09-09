@@ -6,7 +6,10 @@ import {
   notificationsEmailFrom,
 } from "@millionsend/config";
 import {
+  type AccountMailKind,
   accountMailCard,
+  accountMailPhrase,
+  buildAccountMail,
   fillTemplate as fill,
   type MailLocale,
   type SystemMailMessage,
@@ -15,6 +18,8 @@ import {
 import { type Db, getDb, schema } from "@millionsend/db";
 import { createSesSendClient, sendSimpleEmail } from "@millionsend/ses";
 import { and, eq, gt, like, ne } from "drizzle-orm";
+import { appBaseUrl } from "@/lib/api-base-url";
+import { DOCS_URL } from "@/lib/docs-links";
 import enInvite from "../../messages/en/invite-email.json";
 import en from "../../messages/en/reset-email.json";
 import enUpdates from "../../messages/en/updates.json";
@@ -185,6 +190,91 @@ export function buildInvitationEmail(input: {
     }),
     kind: "invitation",
   };
+}
+
+/** One catalog kind, from the account sender, addressed to a person. */
+function accountMail(input: {
+  to: string;
+  kind: AccountMailKind;
+  locale: MailLocale;
+  path: string;
+  values?: Record<string, string>;
+}): SystemMailMessage {
+  return {
+    from: accountEmailFrom() ?? "",
+    to: input.to,
+    ...buildAccountMail({
+      kind: input.kind,
+      locale: input.locale,
+      url: `${appBaseUrl()}${input.path}`,
+      ...(input.values ? { values: input.values } : {}),
+    }),
+    kind: input.kind,
+  };
+}
+
+/** Exported for tests. Onboarding only: the first two steps and the docs. */
+export function buildWelcomeEmail(input: {
+  to: string;
+  name: string;
+  locale: MailLocale;
+}): SystemMailMessage {
+  return accountMail({
+    to: input.to,
+    kind: "welcome",
+    locale: input.locale,
+    path: "/domains",
+    values: { name: input.name, docsUrl: DOCS_URL },
+  });
+}
+
+/** Exported for tests. The button starts a new reset, which signs out whoever changed it. */
+export function buildPasswordChangedEmail(input: {
+  to: string;
+  locale: MailLocale;
+}): SystemMailMessage {
+  return accountMail({
+    to: input.to,
+    kind: "password_changed",
+    locale: input.locale,
+    path: "/forgot-password",
+    values: { email: input.to },
+  });
+}
+
+/** Exported for tests. `team` is the team's name, or every team when the grant was for all. */
+export function buildMcpConnectedEmail(input: {
+  to: string;
+  app: string;
+  team: string | "*";
+  scopes: string[];
+  locale: MailLocale;
+}): SystemMailMessage {
+  const team =
+    input.team === "*"
+      ? accountMailPhrase({ locale: input.locale, kind: "mcp.connected", key: "allTeams" })
+      : input.team;
+  return accountMail({
+    to: input.to,
+    kind: "mcp.connected",
+    locale: input.locale,
+    path: "/settings/connected-apps",
+    values: { app: input.app, team, scopes: input.scopes.join(", ") },
+  });
+}
+
+/**
+ * A mail about the account itself, sent without holding the request: the
+ * endpoint's answer must not depend on the send, and a failure is logged
+ * rather than surfaced — the account state it reports on already exists.
+ */
+export function sendAccountMail(
+  message: SystemMailMessage,
+  deps: SystemMailDeps = defaultSystemMailDeps,
+): void {
+  void deps.send(message).catch((error) => {
+    console.error(`${message.kind} email failed to send`, error);
+  });
 }
 
 /** Mail seam so tests capture sends instead of stubbing the pipeline or the AWS SDK. */

@@ -1,3 +1,4 @@
+import type { SystemMailMessage } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { SimpleEmail } from "@millionsend/ses";
@@ -212,6 +213,51 @@ describe("request-password-reset endpoint", () => {
       expect(sent).toHaveLength(1);
       expect(sent[0]?.to).toBe("ada@example.com");
       expect(sent[0]?.html).toContain("/reset-password/");
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("password changed receipt", () => {
+  it("follows a completed reset and points at a fresh reset, never a bad token", async () => {
+    stubRecoveryEnv();
+    vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-1234");
+    vi.stubEnv("APP_BASE_URL", "http://localhost:3000");
+    vi.stubEnv("ALLOW_SIGNUP", "true");
+    const { db, close } = await createTestDb();
+    try {
+      const sent: SystemMailMessage[] = [];
+      const auth = createAuth(db, { send: async (m) => void sent.push(m) });
+      await auth.api.signUpEmail({
+        body: { name: "Ada", email: "ada@example.com", password: "correct horse battery" },
+      });
+      sent.length = 0;
+      await auth.api.requestPasswordReset({ body: { email: "ada@example.com", redirectTo: "/x" } });
+      const token = sent[0]?.text.match(/reset-password\/([^?\s]+)/)?.[1] ?? "";
+      await expect(
+        auth.api.resetPassword({ body: { newPassword: "another horse battery", token: "nope" } }),
+      ).rejects.toBeTruthy();
+      expect(sent.map((m) => m.kind)).toEqual(["password_reset"]);
+      // Over HTTP, as the browser does it: the receipt reads the request's language.
+      const reset = await auth.handler(
+        new Request("http://localhost:3000/api/auth/reset-password", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "http://localhost:3000",
+            "accept-language": "pt-BR",
+          },
+          body: JSON.stringify({ newPassword: "another horse battery", token }),
+        }),
+      );
+      expect(reset.status).toBe(200);
+      expect(sent.map((m) => m.kind)).toEqual(["password_reset", "password_changed"]);
+      expect(sent[1]).toMatchObject({
+        to: "ada@example.com",
+        subject: "Sua senha do MillionSend foi alterada",
+      });
+      expect(sent[1]?.text).toContain("http://localhost:3000/forgot-password");
     } finally {
       await close();
     }
