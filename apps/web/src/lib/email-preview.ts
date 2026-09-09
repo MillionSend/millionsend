@@ -41,5 +41,20 @@ export function emulateEmailScheme(html: string, scheme: EmailScheme): string {
   // invert would turn it dark again (a text-only message reads black on black).
   const simulate = dark && !declares;
   const base = `<style>:root{color-scheme:${simulate ? "light" : scheme}}</style>`;
-  return forced + base + (simulate ? DARK_CLIENT_SIM : "");
+  return openLinksOutside(forced) + base + (simulate ? DARK_CLIENT_SIM : "");
+}
+
+const LINKS_OUTSIDE = '<base target="_blank">';
+
+/**
+ * A click in the preview opens in the viewer's own browser. Inside the
+ * sandboxed frame a link could only navigate the frame, which the sandbox
+ * blocks; the frame's sandbox lets popups out for the same reason. The base
+ * goes in the head when there is one, where every browser honours it.
+ */
+function openLinksOutside(html: string): string {
+  const head = /<head[^>]*>/i.exec(html);
+  return head
+    ? `${html.slice(0, head.index + head[0].length)}${LINKS_OUTSIDE}${html.slice(head.index + head[0].length)}`
+    : LINKS_OUTSIDE + html;
 }

@@ -436,7 +436,7 @@ export function EmailContentPanel({
               // as it would in a mail client.
               <iframe
                 title={t("detail.preview")}
-                sandbox=""
+                sandbox="allow-popups allow-popups-to-escape-sandbox"
                 srcDoc={emulateEmailScheme(email.html, scheme)}
                 style={{
                   display: "block",

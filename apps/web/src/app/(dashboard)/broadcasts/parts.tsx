@@ -97,7 +97,7 @@ export function ContentPreview({
       </div>
       <iframe
         title={title}
-        sandbox=""
+        sandbox="allow-popups allow-popups-to-escape-sandbox"
         srcDoc={emulateEmailScheme(fillMergeSamples(html, samples), scheme)}
         style={{
           display: "block",

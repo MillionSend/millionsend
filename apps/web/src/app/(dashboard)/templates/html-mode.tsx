@@ -265,7 +265,7 @@ function CodePreview({
         {filled ? (
           <iframe
             title={title}
-            sandbox="allow-same-origin"
+            sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
             srcDoc={emulateEmailScheme(fillMergeSamples(html, samples), scheme)}
             onLoad={(event) => {
               const win = event.currentTarget.contentWindow;

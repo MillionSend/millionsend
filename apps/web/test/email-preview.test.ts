@@ -24,3 +24,14 @@ describe("emulateEmailScheme", () => {
     expect(doc).not.toContain(DARK_CLIENT_SIM);
   });
 });
+
+it("sends every link to the viewer's own browser, from the head when the message has one", () => {
+  const withHead = emulateEmailScheme(
+    '<html><head><title>x</title></head><body><a href="https://x.example">go</a></body></html>',
+    "light",
+  );
+  expect(withHead.startsWith('<html><head><base target="_blank"><title>x</title>')).toBe(true);
+  expect(
+    emulateEmailScheme("<p>bare</p>", "dark").startsWith('<base target="_blank"><p>bare</p>'),
+  ).toBe(true);
+});
