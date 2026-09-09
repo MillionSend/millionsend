@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import {
   EnvKeyring,
   encryptWebhookSecret,
+  formatMailDate,
   generateWebhookSecret,
   type QueuedWebhookDelivery,
   utcDay,
@@ -375,4 +376,302 @@ it("rows exhausted without running out of retries do not read as a failing endpo
   // Real exhaustions on top still count.
   await delivery("exhausted", { count: 10 });
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
+});
+
+const DAY = 86_400_000;
+
+async function domain(
+  status: "verified" | "pending" | "temporary_failure" | "failed" = "verified",
+) {
+  const [row] = await db
+    .insert(schema.domains)
+    .values({ teamId, name: "mail.acme.dev", region: "us-east-1", status, verifiedAt: new Date() })
+    .returning({ id: schema.domains.id });
+  if (!row) throw new Error("domain insert failed");
+  return row.id;
+}
+
+async function setDomain(id: string, status: "verified" | "temporary_failure" | "failed") {
+  await db.update(schema.domains).set({ status }).where(eq(schema.domains.id, id));
+}
+
+async function claims(prefix: string) {
+  return (
+    await db
+      .select({ kind: schema.teamNotifications.kind })
+      .from(schema.teamNotifications)
+      .where(like(schema.teamNotifications.kind, `${prefix}%`))
+  ).map((c) => c.kind);
+}
+
+it("a domain is announced once when it verifies; losing a record says so once and re-arms the announcement", async () => {
+  const id = await domain();
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
+  expect(sends.map((s) => s.subject)).toEqual(["mail.acme.dev is verified"]);
+  expect(sends[0]?.text).toContain(`https://app.example.test/domains/${id}`);
+  await sweepNotifications(db, deps(false));
+  expect(sends).toHaveLength(1);
+
+  await setDomain(id, "temporary_failure");
+  await sweepNotifications(db, deps(false));
+  await sweepNotifications(db, deps(false));
+  expect(sends.map((s) => s.subject)).toEqual([
+    "mail.acme.dev is verified",
+    "mail.acme.dev lost its verification",
+  ]);
+  expect(sends[1]?.text).toContain("DKIM or MAIL FROM");
+  expect(await claims("domain.")).toEqual([`domain.lost:${id}`]);
+
+  await setDomain(id, "verified");
+  await sweepNotifications(db, deps(false));
+  expect(sends).toHaveLength(3);
+  expect(await claims("domain.")).toEqual([`domain.verified:${id}`]);
+
+  // SES giving up is terminal: the mail says to add the domain again.
+  await setDomain(id, "failed");
+  await sweepNotifications(db, deps(false));
+  expect(sends[3]?.text).toContain("given up on mail.acme.dev");
+  expect(sends[3]?.text).toContain("https://app.example.test/domains\n");
+
+  await db.delete(schema.domains).where(eq(schema.domains.id, id));
+  await sweepNotifications(db, deps(false));
+  expect(await claims("domain.")).toEqual([]);
+});
+
+it("a domain that verified before the sweep existed, or never did, says nothing", async () => {
+  const seeded = await domain();
+  await db
+    .insert(schema.teamNotifications)
+    .values({ teamId, kind: `domain.verified:${seeded}`, periodKey: "episode" });
+  await db
+    .insert(schema.domains)
+    .values({ teamId, name: "new.acme.dev", region: "us-east-1", status: "pending" });
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+  expect(sends).toEqual([]);
+});
+
+async function audit(
+  action: "api_key.created" | "webhook.secret_rotated" | "member.joined",
+  opts: {
+    actor?: string | null;
+    target?: string;
+    data?: Record<string, unknown>;
+    team?: string;
+    createdAt?: Date;
+  } = {},
+) {
+  const [row] = await db
+    .insert(schema.auditLog)
+    .values({
+      teamId: opts.team ?? teamId,
+      actorId: opts.actor === undefined ? "user:owner" : opts.actor,
+      action,
+      target: opts.target ?? null,
+      data: opts.data ?? null,
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+    })
+    .returning({ id: schema.auditLog.id });
+  if (!row) throw new Error("audit insert failed");
+  return row.id;
+}
+
+it("a new API key is reported once to the owners and to the person who created it", async () => {
+  await db.insert(schema.user).values({ id: "adm", name: "Ada", email: "ada@example.com" });
+  await db.insert(schema.teamMembers).values({ teamId, userId: "adm", role: "admin" });
+  const [scoped] = await db
+    .insert(schema.domains)
+    .values({ teamId, name: "mail.acme.dev", region: "us-east-1", status: "verified" })
+    .returning({ id: schema.domains.id });
+  const [key] = await db
+    .insert(schema.apiKeys)
+    .values({
+      teamId,
+      name: "ci",
+      tokenPrefix: "ms_live_abc",
+      keyHash: "h1",
+      last4: "wxyz",
+      permission: "sending_access",
+      domainId: scoped?.id,
+    })
+    .returning({ id: schema.apiKeys.id });
+  await audit("api_key.created", {
+    actor: "user:adm",
+    target: `api_key:${key?.id}`,
+    data: { name: "ci", permission: "sending_access", domainId: scoped?.id },
+  });
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
+  expect(sends.map((s) => s.to).sort()).toEqual(["ada@example.com", "owner@example.com"]);
+  expect(sends[0]?.subject).toBe("New API key in notify-team: ci");
+  expect(sends[0]?.text).toContain(
+    'Ada created the API key "ci" (ms_live_abc…wxyz, sending access, limited to mail.acme.dev) in notify-team.',
+  );
+  expect(sends[0]?.text).toContain("https://app.example.test/api-keys");
+  await sweepNotifications(db, deps(false));
+  expect(sends).toHaveLength(2);
+
+  // Removed from the team since: the owners still hear it, the ex-member does not.
+  await db.delete(schema.teamMembers).where(eq(schema.teamMembers.userId, "adm"));
+  const [later] = await db
+    .insert(schema.apiKeys)
+    .values({ teamId, name: "later", tokenPrefix: "ms_live_ghi", keyHash: "h3", last4: "5678" })
+    .returning({ id: schema.apiKeys.id });
+  await audit("api_key.created", {
+    actor: "user:adm",
+    target: `api_key:${later?.id}`,
+    data: { name: "later", permission: "full_access", domainId: null },
+  });
+  await sweepNotifications(db, deps(false));
+  expect(sends.slice(2).map((s) => s.to)).toEqual(["owner@example.com"]);
+  expect(sends[2]?.text).toContain('Ada created the API key "later"');
+
+  // A key minted by another key names no person; the owner is the only reader.
+  const [minted] = await db
+    .insert(schema.apiKeys)
+    .values({ teamId, name: "child", tokenPrefix: "ms_live_def", keyHash: "h2", last4: "1234" })
+    .returning({ id: schema.apiKeys.id });
+  await audit("api_key.created", {
+    actor: `api_key:${key?.id}`,
+    target: `api_key:${minted?.id}`,
+    data: { name: "child", permission: "full_access", domainId: null },
+  });
+  await sweepNotifications(db, deps(false));
+  expect(sends).toHaveLength(4);
+  expect(sends[3]?.text).toContain(
+    'an API key created the API key "child" (ms_live_def…1234, full access) in',
+  );
+});
+
+it("a rotated webhook secret names the endpoint and the old secret's deadline", async () => {
+  const endpointId = await endpoint();
+  await audit("webhook.secret_rotated", {
+    target: `webhook:${endpointId}`,
+    data: {
+      url: "https://receiver.example.com/hook",
+      previousSecretExpiresAt: "2026-09-10T15:00:00.000Z",
+    },
+  });
+  await sweepNotifications(db, deps(false));
+  expect(sends.map((s) => s.subject)).toEqual(["Webhook secret rotated for receiver.example.com"]);
+  expect(sends[0]?.text).toContain(
+    "Owner rotated the signing secret of https://receiver.example.com/hook in notify-team.",
+  );
+  expect(sends[0]?.text).toContain("until September 10, 2026 at 3:00 PM UTC;");
+  expect(sends[0]?.text).toContain(`https://app.example.test/webhooks/${endpointId}`);
+
+  await audit("webhook.secret_rotated", {
+    target: `webhook:${endpointId}`,
+    data: { url: "https://receiver.example.com/hook", previousSecretExpiresAt: null },
+  });
+  await sweepNotifications(db, deps(false));
+  expect(sends[1]?.text).toContain("The previous secret stopped verifying at once;");
+  expect(sends[1]?.text).not.toContain("keeps verifying");
+});
+
+it("a member who joined is reported to the other owners, never to themselves", async () => {
+  await db.insert(schema.user).values({ id: "j", name: "Jo", email: "jo@example.com" });
+  await db.insert(schema.teamMembers).values({ teamId, userId: "j", role: "owner" });
+  await audit("member.joined", { actor: "user:j", target: "user:j", data: { role: "owner" } });
+  await sweepNotifications(db, deps(false));
+  expect(sends.map((s) => s.to)).toEqual(["owner@example.com"]);
+  expect(sends[0]?.subject).toBe("Jo joined notify-team");
+  expect(sends[0]?.text).toContain(
+    "Jo (jo@example.com) accepted the invitation and is now an owner of notify-team.",
+  );
+});
+
+it("audit rows of a deleted team or older than a day are left alone, and their claims go", async () => {
+  await audit("member.joined", {
+    team: randomUUID(),
+    target: "user:owner",
+    data: { role: "member" },
+  });
+  await audit("member.joined", {
+    target: "user:owner",
+    data: { role: "member" },
+    createdAt: new Date(Date.now() - 2 * DAY),
+  });
+  await db
+    .insert(schema.teamNotifications)
+    .values({ teamId, kind: "member.joined", periodKey: randomUUID() });
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+  expect(sends).toEqual([]);
+  expect(await claims("member.")).toEqual([]);
+});
+
+async function setPlan(values: Partial<typeof schema.teams.$inferInsert>) {
+  await db.update(schema.teams).set(values).where(eq(schema.teams.id, teamId));
+}
+
+it("a scheduled cancellation is recalled three days out, once, on the cloud only", async () => {
+  const endsAt = new Date(Date.now() + 2 * DAY);
+  await setPlan({ plan: "pro", cancelAt: endsAt });
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+  expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
+  await sweepNotifications(db, deps());
+  expect(sends.map((s) => s.subject)).toEqual([
+    `Reminder: notify-team's Pro plan ends on ${formatMailDate("en", endsAt)}`,
+  ]);
+  expect(sends[0]?.text).toContain("to keep sending up to 3,000 emails a day");
+
+  // Too far out to count down yet; a fresh date is its own reminder.
+  await setPlan({ cancelAt: new Date(Date.now() + 10 * DAY) });
+  await sweepNotifications(db, deps());
+  expect(sends).toHaveLength(1);
+});
+
+it("a paid period that lapsed past its grace reads as the downgrade, keyed like the webhook's", async () => {
+  const periodEnd = new Date(Date.now() - 8 * DAY);
+  await setPlan({ plan: "scale", currentPeriodEnd: periodEnd });
+  expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
+  expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
+  await sweepNotifications(db, deps());
+  expect(sends.map((s) => s.subject)).toEqual(["notify-team is now on Free"]);
+  expect(sends[0]?.text).toContain("The Scale plan ended on");
+  expect(
+    await db
+      .select({ key: schema.teamNotifications.periodKey })
+      .from(schema.teamNotifications)
+      .where(eq(schema.teamNotifications.kind, "billing.downgraded")),
+  ).toEqual([{ key: periodEnd.toISOString() }]);
+
+  // Still inside the grace window: nothing to say yet.
+  await setPlan({ currentPeriodEnd: new Date(Date.now() - 2 * DAY) });
+  await sweepNotifications(db, deps());
+  expect(sends).toHaveLength(1);
+});
+
+it("an owner whose account contact is pt-BR reads the notice in pt-BR", async () => {
+  vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <account@mail.example.com>");
+  const home = await createTeam(db, "home");
+  await db
+    .insert(schema.domains)
+    .values({ teamId: home, name: "mail.example.com", region: "us-east-1", status: "verified" });
+  await db
+    .insert(schema.contacts)
+    .values({ teamId: home, email: "owner@example.com", properties: { locale: "pt-BR" } });
+  await domain();
+  await sweepNotifications(db, deps(false));
+  expect(sends.map((s) => s.subject)).toEqual(["mail.acme.dev está verificado"]);
+});
+
+it("an owner who turned a notice off is skipped for it, and still gets a security receipt", async () => {
+  await db
+    .update(schema.user)
+    .set({ mailOptOuts: ["domain.verified"] })
+    .where(eq(schema.user.id, "owner"));
+  await domain();
+  await sweepNotifications(db, deps(false));
+  expect(sends).toEqual([]);
+  const [key] = await db
+    .insert(schema.apiKeys)
+    .values({ teamId, name: "ci", tokenPrefix: "ms_live_abc", keyHash: "h1", last4: "wxyz" })
+    .returning({ id: schema.apiKeys.id });
+  await audit("api_key.created", {
+    target: `api_key:${key?.id}`,
+    data: { name: "ci", permission: "full_access", domainId: null },
+  });
+  await sweepNotifications(db, deps(false));
+  expect(sends.map((s) => [s.to, s.subject])).toEqual([
+    ["owner@example.com", "New API key in notify-team: ci"],
+  ]);
 });

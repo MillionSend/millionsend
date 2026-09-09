@@ -8,6 +8,7 @@
     "mcp": "MCP",
     "unsubscribe": "Unsubscribe page",
     "connectedApps": "Connected apps",
+    "notifications": "Notifications",
     "audit": "Audit log"
   },
   "smtp": {
@@ -391,5 +392,88 @@
     "loadError": "Could not load the audit log.",
     "retry": "Retry",
     "forbidden": "Only owners and admins can read the audit log."
+  },
+  "notifications": {
+    "title": "Email notifications",
+    "intro": "What MillionSend emails you as an owner of your teams. Each switch applies to every team you own.",
+    "always": "Always sent: mail about your own account (password reset, verification, the welcome, a password change, an app granted access) and the security receipts for API keys and webhook secrets.",
+    "groups": {
+      "domains": "Domains",
+      "team": "Team",
+      "broadcasts": "Broadcasts",
+      "sending": "Sending health",
+      "webhooks": "Webhooks",
+      "billing": "Billing"
+    },
+    "items": {
+      "domain_verified": {
+        "label": "Domain verified",
+        "note": "A sending domain's DNS records check out."
+      },
+      "domain_lost": {
+        "label": "Domain lost its verification",
+        "note": "A record disappeared, or SES gave up on the domain."
+      },
+      "member_joined": {
+        "label": "Member joined",
+        "note": "Someone accepted an invitation to a team you own."
+      },
+      "broadcast_sent": {
+        "label": "Broadcast sent",
+        "note": "The recipient count once a broadcast has gone out."
+      },
+      "broadcast_held_quota": {
+        "label": "Broadcast waiting for the quota",
+        "note": "Part of a broadcast is parked over the daily cap."
+      },
+      "broadcast_held": {
+        "label": "Broadcast on hold",
+        "note": "Sending from its region is paused across the platform."
+      },
+      "quota": {
+        "label": "Daily quota",
+        "note": "Nearing, reaching and running past the day's cap."
+      },
+      "deliverability": {
+        "label": "Deliverability",
+        "note": "Bounce or complaint rates at risk, or sending paused."
+      },
+      "webhook_failing": {
+        "label": "Webhook endpoint failing",
+        "note": "Every recent delivery to an endpoint failed."
+      },
+      "webhook_auto_disabled": {
+        "label": "Webhook endpoint disabled",
+        "note": "An endpoint was switched off after failing for too long."
+      },
+      "webhook_backlog": {
+        "label": "Webhook backlog",
+        "note": "Deliveries to an endpoint are queuing up."
+      },
+      "billing_payment_failed": {
+        "label": "Payment failed",
+        "note": "A charge for the plan was declined."
+      },
+      "billing_plan_activated": {
+        "label": "Plan activated",
+        "note": "A paid plan started."
+      },
+      "billing_plan_changed": {
+        "label": "Plan changed",
+        "note": "The team moved between paid plans."
+      },
+      "billing_cancel_scheduled": {
+        "label": "Cancellation scheduled",
+        "note": "The plan will end when the period closes."
+      },
+      "billing_cancel_reminder": {
+        "label": "Cancellation reminder",
+        "note": "Three days before a scheduled end."
+      },
+      "billing_downgraded": {
+        "label": "Back on Free",
+        "note": "The paid plan ended."
+      }
+    }
   }
 }

@@ -39,6 +39,10 @@
     "./plans": {
       "types": "./src/plans.ts",
       "default": "./src/plans.ts"
+    },
+    "./mail-preferences": {
+      "types": "./src/mail-preferences.ts",
+      "default": "./src/mail-preferences.ts"
     }
   },
   "scripts": {

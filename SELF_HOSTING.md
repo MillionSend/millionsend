@@ -296,11 +296,19 @@ signup deliberately.
 <details>
 <summary><b>Account mail, contacts and product updates</b></summary>
 
-MillionSend's own emails (password resets, email verification, invitations, quota and
-deliverability notices) go out from `AUTH_EMAIL_FROM` / `NOTIFICATIONS_EMAIL_FROM`. Verify
-the sender's domain under **Domains** in a team and those emails are logged and measured
-there, tagged `millionsend_system`, with their body purged once SES accepts them. Until a
-team holds the domain they go straight through SES and leave no trace.
+MillionSend's own emails go out from `AUTH_EMAIL_FROM` / `NOTIFICATIONS_EMAIL_FROM`: to a
+person about their account (password reset, verification, welcome, a password-changed
+receipt, an app granted access) and to a team's owners (invitations, quota and
+deliverability notices, a domain verifying or losing its records, a new API key, a rotated
+webhook secret, a member joining, a broadcast that went out or is held, billing on the
+cloud). Broadcast reports go out as the broadcast finishes and billing notices from the
+Stripe webhook itself; the other owner notices ride the ten-minute notification sweep. All
+read in the language of the owner's contact in the team below, else English; each owner picks
+which notices they get under **Settings → Notifications** (account mail and security receipts are
+always sent). Verify the sender's domain under
+**Domains** in a team and those emails are logged and measured there, tagged
+`millionsend_system`, with their body purged once SES accepts them. Until a team holds the
+domain they go straight through SES and leave no trace.
 
 On an instance with `ALLOW_SIGNUP=true`, every new account becomes a contact of that team
 (`source: signup`) once its address is verified; the sign-up screen says so, and deleting the

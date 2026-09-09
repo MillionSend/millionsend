@@ -1,6 +1,9 @@
-import { env, notificationsEmailFrom } from "@millionsend/config";
+import { accountEmailFrom, env, notificationsEmailFrom } from "@millionsend/config";
 import {
   type Keyring,
+  listTeamOwners,
+  type MailContent,
+  type MailLocale,
   type SystemMailKind,
   type SystemMailMessage,
   sendSystemMail,
@@ -56,4 +59,40 @@ export function createSystemMailer(deps: {
       await sendSystemMail(sendDeps, { from, to, ...message });
     },
   };
+}
+
+/**
+ * One notice to every owner of a team, each in their own language; a
+ * failing send is logged and the others still go out. `except` drops an
+ * owner who is the subject of the notice; `also` adds a recipient who is
+ * not an owner (the person who created a key). Returns how many went out.
+ */
+export async function mailOwners(
+  db: Db,
+  mailer: SystemMailer,
+  teamId: string,
+  kind: SystemMailKind,
+  build: (locale: MailLocale) => MailContent,
+  opts: { except?: string; also?: { email: string; locale: MailLocale } } = {},
+): Promise<number> {
+  const owners = await listTeamOwners(db, teamId, accountEmailFrom(), kind);
+  const recipients = owners.filter(
+    (owner) => owner.email.toLowerCase() !== opts.except?.toLowerCase(),
+  );
+  if (
+    opts.also &&
+    !recipients.some((r) => r.email.toLowerCase() === opts.also?.email.toLowerCase())
+  ) {
+    recipients.push({ email: opts.also.email, name: "", locale: opts.also.locale });
+  }
+  let sent = 0;
+  for (const recipient of recipients) {
+    try {
+      await mailer.send(recipient.email, { ...build(recipient.locale), kind });
+      sent += 1;
+    } catch (err) {
+      console.error(`system mail: ${kind} to ${recipient.email} failed`, err);
+    }
+  }
+  return sent;
 }

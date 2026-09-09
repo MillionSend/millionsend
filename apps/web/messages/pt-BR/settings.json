@@ -8,6 +8,7 @@
     "mcp": "MCP",
     "unsubscribe": "Página de cancelamento",
     "connectedApps": "Aplicativos conectados",
+    "notifications": "Notificações",
     "audit": "Registro de auditoria"
   },
   "smtp": {
@@ -391,5 +392,88 @@
     "loadError": "Não foi possível carregar o registro de auditoria.",
     "retry": "Tentar de novo",
     "forbidden": "Somente proprietários e administradores podem ler o registro de auditoria."
+  },
+  "notifications": {
+    "title": "Notificações por e-mail",
+    "intro": "O que o MillionSend envia a você como proprietário das suas equipes. Cada opção vale para todas as equipes que você possui.",
+    "always": "Sempre enviados: e-mails sobre a sua própria conta (redefinição de senha, verificação, boas-vindas, senha alterada, app autorizado) e os recibos de segurança de chaves de API e segredos de webhook.",
+    "groups": {
+      "domains": "Domínios",
+      "team": "Equipe",
+      "broadcasts": "Broadcasts",
+      "sending": "Saúde do envio",
+      "webhooks": "Webhooks",
+      "billing": "Cobrança"
+    },
+    "items": {
+      "domain_verified": {
+        "label": "Domínio verificado",
+        "note": "Os registros DNS de um domínio de envio estão corretos."
+      },
+      "domain_lost": {
+        "label": "Domínio perdeu a verificação",
+        "note": "Um registro sumiu, ou o SES desistiu do domínio."
+      },
+      "member_joined": {
+        "label": "Membro entrou",
+        "note": "Alguém aceitou um convite para uma equipe sua."
+      },
+      "broadcast_sent": {
+        "label": "Broadcast enviado",
+        "note": "O número de destinatários quando um broadcast sai."
+      },
+      "broadcast_held_quota": {
+        "label": "Broadcast aguardando a cota",
+        "note": "Parte de um broadcast ficou retida acima do limite diário."
+      },
+      "broadcast_held": {
+        "label": "Broadcast em espera",
+        "note": "O envio da região está pausado em toda a plataforma."
+      },
+      "quota": {
+        "label": "Cota diária",
+        "note": "Ao se aproximar, atingir e passar do limite do dia."
+      },
+      "deliverability": {
+        "label": "Entregabilidade",
+        "note": "Taxas de bounce ou reclamação em risco, ou envio pausado."
+      },
+      "webhook_failing": {
+        "label": "Endpoint de webhook falhando",
+        "note": "Todas as entregas recentes a um endpoint falharam."
+      },
+      "webhook_auto_disabled": {
+        "label": "Endpoint de webhook desativado",
+        "note": "Um endpoint foi desligado depois de falhar por muito tempo."
+      },
+      "webhook_backlog": {
+        "label": "Fila de webhooks",
+        "note": "As entregas a um endpoint estão se acumulando."
+      },
+      "billing_payment_failed": {
+        "label": "Pagamento recusado",
+        "note": "Uma cobrança do plano foi recusada."
+      },
+      "billing_plan_activated": {
+        "label": "Plano ativado",
+        "note": "Um plano pago começou."
+      },
+      "billing_plan_changed": {
+        "label": "Plano alterado",
+        "note": "A equipe mudou entre planos pagos."
+      },
+      "billing_cancel_scheduled": {
+        "label": "Cancelamento agendado",
+        "note": "O plano termina no fim do período."
+      },
+      "billing_cancel_reminder": {
+        "label": "Lembrete de cancelamento",
+        "note": "Três dias antes de um término agendado."
+      },
+      "billing_downgraded": {
+        "label": "De volta ao Free",
+        "note": "O plano pago terminou."
+      }
+    }
   }
 }

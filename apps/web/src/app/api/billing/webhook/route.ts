@@ -1,10 +1,31 @@
 import { handleWebhook, isLiveKey } from "@millionsend/billing";
-import { env } from "@millionsend/config";
-import { effectivePlan, raisesDailyLimit, recordAudit } from "@millionsend/core";
+import { accountEmailFrom, env, notificationsEmailFrom } from "@millionsend/config";
+import {
+  type AccountMailKind,
+  accountMailPhrase,
+  CANCEL_REMINDER_DAYS,
+  claimNotification,
+  clearNotifications,
+  DAY_MS,
+  effectivePlan,
+  formatMailDate,
+  listTeamOwners,
+  type MailLocale,
+  PLAN_DAILY_LIMIT,
+  PLAN_NAME,
+  planCapPhrase,
+  planMove,
+  raisesDailyLimit,
+  recordAudit,
+} from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
+import { appBaseUrl } from "@/lib/api-base-url";
 import { getStripe } from "@/server/billing";
 import { getQueue } from "@/server/queue";
+import { buildAccountEmail, sendAccountMail } from "@/server/system-mail";
+
+const BILLING_PATH = "/settings/billing";
 
 /**
  * Stripe webhook endpoint. Unauthenticated by design: the raw body is
@@ -56,23 +77,68 @@ export async function POST(request: Request) {
         }
       }
     }
+    if (after) {
+      try {
+        await mailOwners(db, event, before, after);
+      } catch (err) {
+        console.error("billing webhook: owner mail skipped", err);
+      }
+    }
   }
   return new Response(null, { status });
 }
 
-function parseEvent(rawBody: string): { type: string; customerId: string } | null {
+interface BillingEvent {
+  type: string;
+  customerId: string;
+  /** Set on invoice events; how Stripe reports a failed charge and its own retry. */
+  invoice: {
+    id: string;
+    attemptCount: number;
+    nextAttempt: Date | null;
+    hostedUrl: string | null;
+  } | null;
+}
+
+function parseEvent(rawBody: string): BillingEvent | null {
   try {
     const parsed: unknown = JSON.parse(rawBody);
     if (typeof parsed !== "object" || parsed === null) return null;
-    const { type, data } = parsed as { type?: unknown; data?: { object?: { customer?: unknown } } };
-    const customer = data?.object?.customer;
+    const { type, data } = parsed as {
+      type?: unknown;
+      data?: {
+        object?: {
+          id?: unknown;
+          customer?: unknown;
+          attempt_count?: unknown;
+          next_payment_attempt?: unknown;
+          hosted_invoice_url?: unknown;
+        };
+      };
+    };
+    const object = data?.object;
+    const customer = object?.customer;
     const customerId =
       typeof customer === "string"
         ? customer
         : typeof customer === "object" && customer !== null && "id" in customer
           ? String(customer.id)
           : null;
-    return typeof type === "string" && customerId ? { type, customerId } : null;
+    if (typeof type !== "string" || !customerId) return null;
+    const invoice =
+      type.startsWith("invoice.") && typeof object?.id === "string"
+        ? {
+            id: object.id,
+            attemptCount: typeof object.attempt_count === "number" ? object.attempt_count : 0,
+            nextAttempt:
+              typeof object.next_payment_attempt === "number"
+                ? new Date(object.next_payment_attempt * 1000)
+                : null,
+            hostedUrl:
+              typeof object.hosted_invoice_url === "string" ? object.hosted_invoice_url : null,
+          }
+        : null;
+    return { type, customerId, invoice };
   } catch {
     return null;
   }
@@ -82,11 +148,107 @@ async function planOf(db: Db, customerId: string) {
   const [team] = await db
     .select({
       id: schema.teams.id,
+      name: schema.teams.name,
       plan: schema.teams.plan,
       planStatus: schema.teams.planStatus,
       currentPeriodEnd: schema.teams.currentPeriodEnd,
+      cancelAt: schema.teams.cancelAt,
     })
     .from(schema.teams)
     .where(eq(schema.teams.stripeCustomerId, customerId));
   return team ?? null;
+}
+
+type PlanRow = NonNullable<Awaited<ReturnType<typeof planOf>>>;
+
+/**
+ * What the owners hear about, read off the row before and after the event
+ * rather than off the event itself: activation and changes are the plan
+ * moving, a scheduled cancellation is cancel_at appearing on a paid plan,
+ * and a downgrade is the plan reaching free, which also covers an immediate
+ * cancellation. Every mail is claimed, because Stripe delivers a checkout's
+ * events in parallel and each request snapshots `before` outside the
+ * customer lock, so all of them see the same move. A failed charge leaves
+ * the plan alone and is claimed per invoice attempt.
+ */
+async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: PlanRow) {
+  const from = notificationsEmailFrom();
+  if (!from) return;
+  const team = after.name;
+  const freeCap = (locale: MailLocale) => (PLAN_DAILY_LIMIT.free ?? 0).toLocaleString(locale);
+  const claim = (kind: AccountMailKind, periodKey: string) =>
+    claimNotification(db, { teamId: after.id, kind, periodKey });
+  const send = async (
+    kind: AccountMailKind,
+    values: (locale: MailLocale) => Record<string, string>,
+    url?: string,
+  ) => {
+    for (const owner of await listTeamOwners(db, after.id, accountEmailFrom(), kind)) {
+      sendAccountMail(
+        buildAccountEmail({
+          from,
+          to: owner.email,
+          kind,
+          locale: owner.locale,
+          path: BILLING_PATH,
+          url,
+          values: values(owner.locale),
+        }),
+      );
+    }
+  };
+
+  if (event.type === "invoice.payment_failed" && event.invoice && after.planStatus === "past_due") {
+    const { id, attemptCount, nextAttempt, hostedUrl } = event.invoice;
+    if (await claim("billing.payment_failed", `${id}:${attemptCount}`)) {
+      await send(
+        "billing.payment_failed",
+        (locale) => ({
+          team,
+          plan: PLAN_NAME[after.plan],
+          cap: planCapPhrase(locale, after.plan),
+          freeCap: freeCap(locale),
+          retry: nextAttempt
+            ? accountMailPhrase({
+                locale,
+                kind: "billing.payment_failed",
+                key: "retryOn",
+                values: { date: formatMailDate(locale, nextAttempt) },
+              })
+            : accountMailPhrase({ locale, kind: "billing.payment_failed", key: "noRetry" }),
+          billingUrl: `${appBaseUrl()}${BILLING_PATH}`,
+        }),
+        hostedUrl ?? undefined,
+      );
+    }
+  }
+
+  // The daily reconcile and the grace sweep claim a move with the same key.
+  const move = planMove(before, after);
+  if (move) {
+    if (await claim(move.kind, move.periodKey)) {
+      await send(move.kind, (locale) => move.values(locale, team));
+    }
+    if (move.kind === "billing.downgraded") return;
+  }
+  if (before.cancelAt !== null && after.cancelAt === null) {
+    // Resumed: a later cancellation, even for the same date, is news again.
+    await clearNotifications(db, { teamId: after.id, kind: "billing.cancel_scheduled" });
+    await clearNotifications(db, { teamId: after.id, kind: "billing.cancel_reminder" });
+  }
+  if (before.cancelAt === null && after.cancelAt !== null && after.plan !== "free") {
+    const endsAt = after.cancelAt;
+    if (!(await claim("billing.cancel_scheduled", endsAt.toISOString()))) return;
+    // Scheduled inside the reminder window, this notice is the reminder:
+    // holding the sweep's claim keeps it from saying the same minutes later.
+    if (endsAt.getTime() <= Date.now() + CANCEL_REMINDER_DAYS * DAY_MS) {
+      await claim("billing.cancel_reminder", endsAt.toISOString());
+    }
+    await send("billing.cancel_scheduled", (locale) => ({
+      team,
+      plan: PLAN_NAME[after.plan],
+      date: formatMailDate(locale, endsAt),
+      freeCap: freeCap(locale),
+    }));
+  }
 }

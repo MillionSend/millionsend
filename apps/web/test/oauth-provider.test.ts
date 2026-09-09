@@ -1,4 +1,5 @@
 import { createHash, createPublicKey, type JsonWebKey, randomBytes, verify } from "node:crypto";
+import type { SystemMailMessage } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -18,13 +19,15 @@ const RESOURCE_SCOPE = "emails:send audience:read";
 let db: Db;
 let close: () => Promise<void>;
 let auth: Auth;
+let sent: SystemMailMessage[];
 
 beforeEach(async () => {
   vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret-1234");
   vi.stubEnv("APP_BASE_URL", BASE);
   vi.stubEnv("ALLOW_SIGNUP", "true");
   ({ db, close } = await createTestDb());
-  auth = createAuth(db);
+  sent = [];
+  auth = createAuth(db, { send: async (m) => void sent.push(m) });
 });
 
 afterEach(async () => {
@@ -111,7 +114,12 @@ async function clientRow(clientId: string) {
 }
 
 /** Authorization-code + PKCE round trip as an MCP client would run it. */
-async function authorize(clientId: string, cookie: string, consentScope?: string) {
+async function authorize(
+  clientId: string,
+  cookie: string,
+  consentScope?: string,
+  prompt?: "consent",
+) {
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
   const query = new URLSearchParams({
@@ -123,6 +131,7 @@ async function authorize(clientId: string, cookie: string, consentScope?: string
     code_challenge: challenge,
     code_challenge_method: "S256",
     resource: RESOURCE,
+    ...(prompt ? { prompt } : {}),
   });
   const authorizeRes = await call(`/oauth2/authorize?${query}`, { cookie });
   const consentUrl = new URL(await redirectTarget(authorizeRes), BASE);
@@ -670,5 +679,31 @@ describe("OAuth authorization server", () => {
     } finally {
       auth = prior;
     }
+  });
+});
+
+describe("connected-app receipt", () => {
+  it("mails the granting user once per fresh consent, naming the app, the team and the scopes", async () => {
+    vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@mail.example.com>");
+    const { userId, cookie } = await signUp("ada@example.com");
+    const teamId = await createTeam(db, "acme");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+    sent.length = 0;
+    await authorize(clientId, cookie);
+    expect(sent.map((m) => m.kind)).toEqual(["mcp.connected"]);
+    expect(sent[0]).toMatchObject({ to: "ada@example.com" });
+    expect(sent[0]?.subject).toContain("Claude Code");
+    expect(sent[0]?.text).toContain("emails:send");
+    expect(sent[0]?.text).toContain("/settings/connected-apps");
+    // Granting the same app again later (prompt=consent brings the screen
+    // back) updates the stored consent: a repeat, not news. The provider
+    // stamps consents to the second, so the first one is aged past that.
+    await db
+      .update(schema.oauthConsent)
+      .set({ createdAt: new Date(Date.now() - 5_000) })
+      .where(eq(schema.oauthConsent.clientId, clientId));
+    await authorize(clientId, cookie, undefined, "consent");
+    expect(sent).toHaveLength(1);
   });
 });

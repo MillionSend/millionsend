@@ -24,6 +24,9 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  // Owner notices this person turned off, by preference key (core
+  // mail-preferences); mail about the account itself is never listed here.
+  mailOptOuts: jsonb("mail_opt_outs").$type<string[]>().notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

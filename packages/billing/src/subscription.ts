@@ -85,6 +85,7 @@ export async function applySubscription(
       planStatus: planStatusOf(sub.status),
       stripeSubscriptionId: sub.id,
       currentPeriodEnd: periodEnd(sub),
+      cancelAt: sub.cancel_at ? new Date(sub.cancel_at * 1000) : null,
     })
     .where(eq(schema.teams.id, team.id));
 }
@@ -142,6 +143,7 @@ export async function cancelTeamSubscription(deps: BillingDeps, teamId: string):
       planStatus: "canceled",
       stripeSubscriptionId: null,
       currentPeriodEnd: null,
+      cancelAt: null,
     })
     .where(eq(schema.teams.id, teamId));
 }

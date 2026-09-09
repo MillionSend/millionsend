@@ -84,13 +84,24 @@ describe("email verification", () => {
     await expect(signIn(a)).rejects.toMatchObject({ status: "FORBIDDEN" });
     expect(sent).toHaveLength(2);
 
-    await a.api.verifyEmail({ query: { token: url.searchParams.get("token") ?? "" } });
+    // Over HTTP, as the browser opens the link: the welcome reads its language.
+    const opened = await a.handler(new Request(url, { headers: { "accept-language": "pt-BR" } }));
+    expect(opened.status).toBe(302);
     const [user] = await db
       .select({ verified: schema.user.emailVerified })
       .from(schema.user)
       .where(eq(schema.user.email, "ada@example.com"));
     expect(user?.verified).toBe(true);
+    // The welcome waits for the address to be its owner's, then follows the
+    // language of the request that opened the link.
+    expect(sent.map((m) => m.kind)).toEqual([
+      "email_verification",
+      "email_verification",
+      "welcome",
+    ]);
+    expect(sent[2]).toMatchObject({ to: "ada@example.com", subject: "Bem-vindo ao MillionSend" });
     expect((await signIn(a)).token).toBeTruthy();
+    expect(sent).toHaveLength(3);
   });
 
   it("an account from before verification existed is asked at its next sign-in", async () => {

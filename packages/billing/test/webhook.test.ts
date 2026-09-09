@@ -269,6 +269,32 @@ describe("handleWebhook", () => {
     });
   });
 
+  it("mirrors Stripe's cancel_at and clears it once the cancellation is undone", async () => {
+    const teamId = await createTeam(db, "acme");
+    await db
+      .update(schema.teams)
+      .set({ stripeCustomerId: "cus_1" })
+      .where(eq(schema.teams.id, teamId));
+    const scheduled = { ...subscription("sub_1", "cus_1", "active"), cancel_at: 1_900_000_000 };
+    subscriptions.sub_1 = scheduled as Stripe.Subscription;
+    expect(
+      await deliver(event("customer.subscription.updated", { id: "sub_1", customer: "cus_1" })),
+    ).toBe(200);
+    const cancelAt = async () =>
+      (
+        await db
+          .select({ cancelAt: schema.teams.cancelAt })
+          .from(schema.teams)
+          .where(eq(schema.teams.id, teamId))
+      )[0]?.cancelAt;
+    expect((await cancelAt())?.toISOString()).toBe(new Date(1_900_000_000 * 1000).toISOString());
+    subscriptions.sub_1 = subscription("sub_1", "cus_1", "active");
+    expect(
+      await deliver(event("customer.subscription.updated", { id: "sub_1", customer: "cus_1" })),
+    ).toBe(200);
+    expect(await cancelAt()).toBeNull();
+  });
+
   it("ignores the end of a superseded subscription", async () => {
     const teamId = await customerTeam();
     subscriptions.sub_old = subscription("sub_old", "cus_1", "canceled");

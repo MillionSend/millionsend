@@ -644,6 +644,43 @@ it("billing reconcile visits only teams with a Stripe customer and isolates fail
   expect(visited.sort()).toEqual([withStripe, failing].sort());
 });
 
+it("billing reconcile reports a plan it moved, with the row before and after", async () => {
+  const teamId = await createTeam(db, "lapsed-team");
+  const periodEnd = new Date("2026-08-30T00:00:00Z");
+  await db
+    .update(schema.teams)
+    .set({ stripeCustomerId: "cus_9", plan: "pro", currentPeriodEnd: periodEnd })
+    .where(eq(schema.teams.id, teamId));
+  const moves: { team: string; before: string; after: string }[] = [];
+  const deps = {
+    // Stands in for Stripe answering that the subscription is gone.
+    reconcileTeam: async (id: string) => {
+      await db
+        .update(schema.teams)
+        .set({ plan: "free", currentPeriodEnd: null })
+        .where(eq(schema.teams.id, id));
+    },
+    onPlanMoved: async (
+      team: { id: string; name: string },
+      before: { plan: string; currentPeriodEnd: Date | null },
+      after: { plan: string },
+    ) => {
+      moves.push({
+        team: team.name,
+        before: `${before.plan}:${before.currentPeriodEnd?.toISOString()}`,
+        after: after.plan,
+      });
+    },
+  };
+  await reconcileBillingPlans(db, deps);
+  expect(moves).toEqual([
+    { team: "lapsed-team", before: `pro:${periodEnd.toISOString()}`, after: "free" },
+  ]);
+  // Nothing moved the second time: nothing to report.
+  await reconcileBillingPlans(db, deps);
+  expect(moves).toHaveLength(1);
+});
+
 it("holds every parked email while SES's own 24-hour quota is full", async () => {
   await insertParked(new Date("2026-08-13T01:00:00Z"));
   const enqueued: string[] = [];
