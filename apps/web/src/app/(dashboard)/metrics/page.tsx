@@ -58,7 +58,7 @@ type Bar = {
   detail: string;
   partial: boolean;
   /** Under the guardrail's floor: a day this small could not trip the warning on its own. */
-  hollow: boolean;
+  underFloor: boolean;
 };
 type DayCounts = { day: string; sent: number; hardBounced: number; complained: number };
 type EngagementDay = { day: string; delivered: number; opened: number; clicked: number };
@@ -84,7 +84,7 @@ function rateBars(
       dayLabel: formatDay(d.day),
       detail: `${fmtPct.format(rate)} · ${ofSent(c, d.sent)}`,
       partial: d.day === today,
-      hollow: c > 0 && belowFloor(d, c),
+      underFloor: c > 0 && belowFloor(d, c),
     };
   });
 }
@@ -112,7 +112,7 @@ function engagementBars(
       dayLabel: formatDay(d.day),
       detail: `${fmtPct.format(rate)} · ${fmt.format(count(d))}`,
       partial: d.day === today,
-      hollow: false,
+      underFloor: false,
     };
   });
 }
@@ -142,7 +142,7 @@ function RateCard(props: {
   note?: string;
   // Tooltip suffix for a bar whose day is still being counted.
   partialNote: string;
-  // Tooltip line under a hollow bar: too small a day for the guardrail to judge.
+  // Tooltip line for a day under the floor: too small for the guardrail to judge.
   floorNote?: string | undefined;
   // Muted second footer row for what deliberately stays out of the headline.
   secondary?: { label: string; note: string; hint: string; count: string; pct: string } | undefined;
@@ -220,11 +220,9 @@ function RateCard(props: {
                 flex: "1 1 0",
                 // 2px floor keeps zero days visible as a baseline stub.
                 height: Math.max(2, bar.height),
-                // A day under the guardrail's floor keeps its outline and
-                // loses its fill: the spike is visible, the alarm is not.
-                background: bar.hollow ? "transparent" : props.color,
-                boxSizing: "border-box",
-                border: bar.hollow ? `1px solid ${props.color}` : undefined,
+                // A day under the guardrail's floor draws like any other;
+                // the tooltip is where it says the alarm could not trip.
+                background: props.color,
                 // A day still being counted sits lighter than the settled ones.
                 opacity: bar.partial
                   ? hover?.index === index
@@ -255,7 +253,7 @@ function RateCard(props: {
             >
               {hoveredBar.detail}
             </div>
-            {hoveredBar.hollow && props.floorNote ? (
+            {hoveredBar.underFloor && props.floorNote ? (
               <div
                 className="ms-mono"
                 style={{ fontSize: 11, color: "var(--ms-faint)", marginTop: 3 }}
