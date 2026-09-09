@@ -16,7 +16,10 @@
     "onboarding": "Onboarding",
     "appearance": "Aparência",
     "themeLight": "Claro",
-    "themeDark": "Escuro"
+    "themeDark": "Escuro",
+    "language": "Idioma",
+    "language_en": "English",
+    "language_ptBR": "Português (Brasil)"
   },
   "teamSwitcher": {
     "teams": "Times",

@@ -9,6 +9,7 @@ import { EllipsisGlyph, NavGlyph, type NavIconName } from "@/components/icons/na
 import { useDismiss } from "@/components/popover-menu";
 import { TeamSwitcher } from "@/components/team-switcher";
 import { authClient } from "@/lib/auth-client";
+import { isAppLocale, LOCALES, setLocaleCookie } from "@/lib/locale-cookie";
 import { isActive } from "@/lib/nav";
 import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
 import { useTRPC } from "@/lib/trpc";
@@ -51,6 +52,37 @@ function NavItem({
       <NavGlyph name={item.icon} hovered={hovered} />
       {label}
     </Link>
+  );
+}
+
+/* Language row — the same segmented pill with the two language codes; the
+   cookie is the whole setting, so the server re-renders the tree on refresh. */
+function LanguageRow() {
+  const tCommon = useTranslations("common");
+  const locale = useLocale();
+  const router = useRouter();
+  return (
+    <div className="ms-menu-item static">
+      {tCommon("accountMenu.language")}
+      <span className="ms-theme-toggle">
+        {LOCALES.map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={locale === value ? "active wide" : "wide"}
+            aria-label={tCommon(`accountMenu.language_${value === "en" ? "en" : "ptBR"}`)}
+            aria-pressed={locale === value}
+            onClick={() => {
+              if (locale === value || !isAppLocale(value)) return;
+              setLocaleCookie(value);
+              router.refresh();
+            }}
+          >
+            {value === "en" ? "EN" : "PT"}
+          </button>
+        ))}
+      </span>
+    </div>
   );
 }
 
@@ -260,6 +292,14 @@ export function Sidebar({
             }}
           >
             <Link
+              href="/settings"
+              role="menuitem"
+              className="ms-menu-item"
+              onClick={() => setMenuOpen(false)}
+            >
+              {t("settings")}
+            </Link>
+            <Link
               href="/onboarding"
               role="menuitem"
               className="ms-menu-item"
@@ -268,6 +308,7 @@ export function Sidebar({
               {tCommon("accountMenu.onboarding")}
             </Link>
             <AppearanceRow />
+            <LanguageRow />
             <hr className="ms-menu-sep" />
             <button type="button" role="menuitem" className="ms-menu-item" onClick={signOut}>
               {tCommon("signOut")}

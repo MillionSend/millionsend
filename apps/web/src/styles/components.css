@@ -1305,6 +1305,13 @@ summary:focus-visible,
     color var(--ms-dur-fast) var(--ms-ease),
     background var(--ms-dur-fast) var(--ms-ease);
 }
+.ms-theme-toggle button.wide {
+  width: auto;
+  padding: 0 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
 .ms-theme-toggle button:hover {
   color: var(--ms-muted);
 }

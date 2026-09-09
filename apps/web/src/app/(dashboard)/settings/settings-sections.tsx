@@ -16,20 +16,13 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
-import type { AppLocale } from "@/i18n/request";
 import { authClient } from "@/lib/auth-client";
 import { UPDATES_URL } from "@/lib/docs-links";
 import { TEAM_LOGO_ACCEPT, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
+import { isAppLocale, LOCALES, setLocaleCookie } from "@/lib/locale-cookie";
 import { removeTeamLogo, uploadTeamLogo } from "@/lib/team-logo-api";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter } from "../emails/list-parts";
-
-// Mirrors LOCALE_COOKIE in src/i18n/request.ts — that module reads
-// next/headers and cannot be imported from client components.
-const LOCALE_COOKIE = "NEXT_LOCALE";
-const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-
-const LOCALE_OPTIONS: readonly AppLocale[] = ["en", "pt-BR"];
 
 function SectionCard({
   title,
@@ -746,12 +739,12 @@ function LanguageSection() {
           width={260}
           value={locale}
           onChange={(value) => {
-            // biome-ignore lint/suspicious/noDocumentCookie: Cookie Store API is unavailable in Safari.
-            document.cookie = `${LOCALE_COOKIE}=${value}; path=/; max-age=${LOCALE_COOKIE_MAX_AGE}`;
+            if (!isAppLocale(value)) return;
+            setLocaleCookie(value);
             router.refresh();
           }}
           ariaLabel={t("language.label")}
-          options={LOCALE_OPTIONS.map((value) => ({ value, label: t(`language.${value}`) }))}
+          options={LOCALES.map((value) => ({ value, label: t(`language.${value}`) }))}
         />
       </div>
     </SectionCard>

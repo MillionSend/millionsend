@@ -1,10 +1,8 @@
 import { cookies } from "next/headers";
 import { getRequestConfig } from "next-intl/server";
+import { type AppLocale, DEFAULT_LOCALE, LOCALE_COOKIE, LOCALES } from "@/lib/locale-cookie";
 
-export const LOCALES = ["en", "pt-BR"] as const;
-export type AppLocale = (typeof LOCALES)[number];
-export const DEFAULT_LOCALE: AppLocale = "en";
-export const LOCALE_COOKIE = "NEXT_LOCALE";
+export { type AppLocale, DEFAULT_LOCALE, LOCALE_COOKIE, LOCALES };
 
 const NAMESPACES = [
   "common",
