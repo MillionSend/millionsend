@@ -58,20 +58,19 @@ export function UnsubscribePreview({
           border: "1px solid var(--ms-line)",
           borderRadius: "var(--ms-r-card)",
           overflow: "hidden",
-          height: 420,
         }}
       >
         {/* inert: the preview renders the page's real forms; nothing may submit. */}
-        {/* scale × minHeight = the frame's 420px, so the page centers exactly. */}
+        {/* zoom, not transform: it shrinks the layout box too, so the frame follows
+            the page's height and its bottom padding shows like the top one.
+            zoom × minHeight = 420px, the frame's floor, where the page centers. */}
         {/* data-theme rescopes the color tokens to the scheme being previewed. */}
         <div
           inert
           lang={locale}
           data-theme={scheme}
           style={{
-            transform: "scale(0.8)",
-            transformOrigin: "top left",
-            width: "125%",
+            zoom: 0.8,
             background: "var(--ms-void)",
             colorScheme: scheme,
           }}
