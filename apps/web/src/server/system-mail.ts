@@ -5,8 +5,13 @@ import {
   isCloudDeployment,
   notificationsEmailFrom,
 } from "@millionsend/config";
-import { type SystemMailMessage, sendSystemMail } from "@millionsend/core";
-import { EMAIL_WORDMARK_URL, escapeHtml } from "@millionsend/core/html";
+import {
+  accountMailCard,
+  fillTemplate as fill,
+  type MailLocale,
+  type SystemMailMessage,
+  sendSystemMail,
+} from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { createSesSendClient, sendSimpleEmail } from "@millionsend/ses";
 import { and, eq, gt, like, ne } from "drizzle-orm";
@@ -32,7 +37,8 @@ const MESSAGES = { en, "pt-BR": ptBR } as const;
 const INVITE_MESSAGES = { en: enInvite, "pt-BR": ptBRInvite } as const;
 const VERIFY_MESSAGES = { en: enVerify, "pt-BR": ptBRVerify } as const;
 const UPDATES_MESSAGES = { en: enUpdates.email, "pt-BR": ptBRUpdates.email } as const;
-export type MailLocale = keyof typeof MESSAGES;
+
+export type { MailLocale };
 
 /**
  * Honest "this process can reach SES": explicit keys, or the operator's
@@ -65,50 +71,6 @@ export function passwordRecoveryEnabled(): boolean {
  */
 export function emailVerificationEnabled(): boolean {
   return passwordRecoveryEnabled();
-}
-
-const MUTED = 'style="font-size:13px;line-height:1.5;color:#52525b;margin:24px 0 0"';
-
-/**
- * Fills `{key}` placeholders. A replacer function, not a replacement string:
- * user-controlled values such as names may contain `$'` / `$$`, which
- * String.replace would otherwise interpret. Every occurrence is filled.
- */
-function fill(template: string, values: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (match, key: string) => values[key] ?? match);
-}
-
-/**
- * The one account-mail layout: wordmark, white card, paragraphs, a button,
- * the link as text, muted footers. Everything is escaped here, so the
- * catalogs stay plain text.
- */
-function accountMailCard(input: {
-  paragraphs: string[];
-  button: string;
-  url: string;
-  linkFallback: string;
-  muted: string[];
-}): { html: string; text: string } {
-  const url = escapeHtml(input.url);
-  const paragraphs = input.paragraphs
-    .map(
-      (p) =>
-        `<p style="font-size:14px;line-height:1.5;color:#18181b;margin:0 0 12px">${escapeHtml(p)}</p>`,
-    )
-    .join("\n    ");
-  const muted = input.muted.map((m) => `<p ${MUTED}>${escapeHtml(m)}</p>`).join("\n    ");
-  const html = `<div style="background:#f4f4f5;padding:32px 16px;font-family:-apple-system,'Segoe UI',Roboto,sans-serif">
-  <div style="max-width:440px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px">
-    <img src="${EMAIL_WORDMARK_URL}" width="174" height="24" alt="MillionSend" style="display:block;height:24px;width:auto;margin:0 0 24px;border:0">
-    ${paragraphs}
-    <a href="${url}" style="display:inline-block;background:#18181b;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;padding:12px 20px;margin-top:12px">${escapeHtml(input.button)}</a>
-    <p ${MUTED}>${escapeHtml(input.linkFallback)}<br><a href="${url}" style="color:#18181b;word-break:break-all">${url}</a></p>
-    ${muted}
-  </div>
-</div>`;
-  const text = `${input.paragraphs.join("\n\n")}\n\n${input.url}\n\n${input.muted.join("\n\n")}\n`;
-  return { html, text };
 }
 
 /** Exported for tests; interpolates and escapes, so strings stay in JSON. */

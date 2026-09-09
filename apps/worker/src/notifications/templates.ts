@@ -1,37 +1,26 @@
-import { EMAIL_WORDMARK_URL, escapeHtml, QUOTA_TOLERANCE } from "@millionsend/core";
+import { accountMailCard, type MailContent, QUOTA_TOLERANCE } from "@millionsend/core";
 
-export interface MailContent {
-  subject: string;
-  html: string;
-  text: string;
-}
+export type { MailContent };
 
-const MUTED = 'style="font-size:13px;line-height:1.5;color:#52525b;margin:24px 0 0"';
-
-/** The one system-mail layout: wordmark, white card, paragraphs, one button. */
+/**
+ * Owner notices on the shared account-mail card: the notice names its button
+ * and one muted footnote, and the text version reads "Button: url".
+ */
 function layout(input: {
   subject: string;
   paragraphs: string[];
   button: { label: string; url: string };
   footnote: string;
 }): MailContent {
-  const url = escapeHtml(input.button.url);
-  const body = input.paragraphs
-    .map(
-      (p) =>
-        `<p style="font-size:14px;line-height:1.5;color:#18181b;margin:0 0 12px">${escapeHtml(p)}</p>`,
-    )
-    .join("\n    ");
-  const html = `<div style="background:#f4f4f5;padding:32px 16px;font-family:-apple-system,'Segoe UI',Roboto,sans-serif">
-  <div style="max-width:440px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px">
-    <img src="${EMAIL_WORDMARK_URL}" width="174" height="24" alt="MillionSend" style="display:block;height:24px;width:auto;margin:0 0 24px;border:0">
-    ${body}
-    <a href="${url}" style="display:inline-block;background:#18181b;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;padding:12px 20px;margin-top:12px">${escapeHtml(input.button.label)}</a>
-    <p ${MUTED}>${escapeHtml(input.footnote)}</p>
-  </div>
-</div>`;
-  const text = `${input.paragraphs.join("\n\n")}\n\n${input.button.label}: ${input.button.url}\n\n${input.footnote}\n`;
-  return { subject: input.subject, html, text };
+  return {
+    subject: input.subject,
+    ...accountMailCard({
+      paragraphs: input.paragraphs,
+      button: input.button.label,
+      url: input.button.url,
+      muted: [input.footnote],
+    }),
+  };
 }
 
 const percent = (rate: number) => `${(rate * 100).toFixed(2)}%`;

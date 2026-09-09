@@ -2,6 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { type AcceptEmailDeps, acceptEmail } from "./accept-email.js";
+import type { AccountMailKind } from "./account-mail.js";
 import { parseSingleSender } from "./sender-address.js";
 
 /**
@@ -26,7 +27,8 @@ export type SystemMailKind =
   | "webhook.failing"
   | "webhook.auto_disabled"
   | "webhook.backlog"
-  | "updates.confirm";
+  | "updates.confirm"
+  | AccountMailKind;
 
 export interface SystemMailMessage {
   /** `Name <user@domain>` or a bare address; one of the instance's sender env vars. */

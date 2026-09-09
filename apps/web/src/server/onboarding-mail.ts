@@ -1,10 +1,11 @@
+import { MAIL_LOCALES, type MailLocale } from "@millionsend/core";
 import { EMAIL_WORDMARK_URL, escapeHtml } from "@millionsend/core/html";
 import en from "../../messages/en/onboarding-email.json";
 import ptBR from "../../messages/pt-BR/onboarding-email.json";
 
 const MESSAGES = { en, "pt-BR": ptBR } as const;
-export const MAIL_LOCALES = ["en", "pt-BR"] as const;
-export type MailLocale = (typeof MAIL_LOCALES)[number];
+
+export { MAIL_LOCALES, type MailLocale };
 
 /**
  * The onboarding "Send email" body in the dashboard's locale: the first

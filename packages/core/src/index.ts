@@ -17,6 +17,17 @@ export {
   verifySenderDomain,
 } from "./accept-email.js";
 export {
+  ACCOUNT_MAIL_KINDS,
+  type AccountMailEntry,
+  type AccountMailKind,
+  accountMailPhrase,
+  buildAccountMail,
+  isMailLocale,
+  MAIL_LOCALES,
+  type MailContent,
+  type MailLocale,
+} from "./account-mail.js";
+export {
   ACCOUNT_SCORE_WINDOW_DAYS,
   type AccountScore,
   type AccountScoreInput,
@@ -169,7 +180,7 @@ export {
 export { purgedEmailBodyColumns } from "./email-retention.js";
 export { ERASED_TOMBSTONE, type EraseRecipientResult, eraseRecipient } from "./erase-recipient.js";
 export { type SesEventsHealth, sesEventsHealth } from "./events-health.js";
-export { EMAIL_WORDMARK_URL, escapeHtml } from "./html.js";
+export { accountMailCard, EMAIL_WORDMARK_URL, escapeHtml, fillTemplate } from "./html.js";
 export {
   beginIdempotent,
   completeIdempotent,
@@ -185,7 +196,12 @@ export {
   type RewriteOptions,
   rewriteForTracking,
 } from "./link-tracking.js";
-export { claimNotification, clearNotifications, listTeamOwners } from "./notifications.js";
+export {
+  claimNotification,
+  clearNotifications,
+  listTeamOwners,
+  type TeamOwner,
+} from "./notifications.js";
 export {
   ADMIN_MCP_SCOPES,
   ALL_TEAMS_GRANT,
