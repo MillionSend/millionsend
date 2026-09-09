@@ -1,0 +1,14 @@
+{
+  "confirm": "配信停止",
+  "confirmPrefs": "配信設定の管理",
+  "confirmTopic": "{topic}の配信停止",
+  "button": "配信停止",
+  "preferences": "受け取るメールを選択してください：",
+  "save": "設定を保存",
+  "saved": "メールの配信設定を更新しました。",
+  "done": "配信を停止しました。",
+  "doneDetail": "今後、マーケティングメールは届きません。領収書やパスワードの再設定など、アカウントに関するメールは引き続き届きます。",
+  "doneDetailTopic": "今後、{topic}のメールは届きません。",
+  "invalid": "このリンクは無効です。",
+  "poweredBy": "Powered by {brand}"
+}

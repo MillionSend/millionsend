@@ -214,6 +214,8 @@ export interface ApiDeps {
    * router enforces).
    */
   appBaseUrl?: string | undefined;
+  /** Host of the hosted unsubscribe pages when they have their own; omitted → appBaseUrl. */
+  unsubscribeBaseUrl?: string | undefined;
   /**
    * Public origin of this API, when a reverse proxy serves it somewhere other
    * than port 3001 of the dashboard host. Omitted → derived from appBaseUrl.
@@ -1677,7 +1679,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       const contact = await findContact(auth.teamId, c.req.valid("param").id);
       if (!contact) return c.json(errorBody(404, "not_found", "Contact not found"), 404);
       const url = buildUnsubscribeUrl(
-        deps.appBaseUrl,
+        deps.unsubscribeBaseUrl ?? deps.appBaseUrl,
         makeUnsubscribeToken({ contactId: contact.id, secretKey: deps.unsubscribeSecretKey }),
       );
       return c.json({ object: "preferences_link" as const, contact: contact.id, url }, 200);

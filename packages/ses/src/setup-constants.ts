@@ -132,6 +132,13 @@ BETTER_AUTH_SECRET=
 # signup fail with an "invalid origin" error.
 APP_BASE_URL=http://localhost:3000
 
+# Optional: give the hosted unsubscribe pages their own host, e.g.
+# https://unsubscribe.example.com (point it at the same web process). Links in
+# mail and the page's own redirects use it, and that host answers the
+# unsubscribe flow only — the dashboard and its cookies stay on APP_BASE_URL,
+# out of reach of link scanners and URL reputation lists. Unset: APP_BASE_URL.
+# UNSUBSCRIBE_BASE_URL=https://unsubscribe.example.com
+
 # Public origin of the API, for deployments whose reverse proxy serves it on
 # its own hostname (e.g. https://api.example.com) rather than on port 3001 of
 # the dashboard host. Unset, that derived URL is what the dashboard prints as
@@ -268,7 +275,9 @@ NOTIFICATIONS_EMAIL_FROM=
 # CF-Connecting-IP) are trusted, comma-separated. Default: loopback only,
 # which covers a proxy on the same host. Add your proxy's address when it
 # runs elsewhere; an untrusted source's headers are ignored and the socket
-# address is used instead.
+# address is used instead. A tracking edge (millionsend-tracking-edge) that
+# forwards branded links through Cloudflare belongs here too, or every
+# tracking hit records the edge as the client.
 # TRUSTED_PROXIES=127.0.0.1,::1
 
 # Local development only: let webhook endpoints target http:// and

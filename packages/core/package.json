@@ -28,6 +28,10 @@
       "types": "./src/html.ts",
       "default": "./src/html.ts"
     },
+    "./open-classifier": {
+      "types": "./src/open-classifier.ts",
+      "default": "./src/open-classifier.ts"
+    },
     "./org-domain": {
       "types": "./src/org-domain.ts",
       "default": "./src/org-domain.ts"

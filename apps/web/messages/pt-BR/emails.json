@@ -62,8 +62,10 @@
       "apple_mpp": "privacidade do Apple Mail",
       "gmail_prefetch": "pré-carregamento do Gmail",
       "scanner": "scanner de segurança",
+      "spoofed_ua": "navegador forjado",
       "before_delivery": "antes da entrega",
-      "timing": "segundos após a entrega"
+      "timing": "segundos após a entrega",
+      "burst": "dois links em um quarto de segundo"
     },
     "suppressedLine": "envios futuros bloqueados",
     "bounceBanner": {

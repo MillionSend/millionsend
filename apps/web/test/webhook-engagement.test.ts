@@ -1,12 +1,8 @@
 import { type Db, schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { recordEngagement } from "@/app/t/record";
-
-// recordEngagement only reads endpoint id/events/teamId/status — the encrypted
-// secret is never touched here, so dummy bytea fills the not-null columns.
-const DUMMY = Buffer.alloc(1);
 
 // A person's phone fetching the pixel; without a user agent the fetch reads
 // as a scanner and lands as a prefetch instead.
@@ -36,23 +32,6 @@ async function seedEmail(teamId: string): Promise<string> {
   return email?.id ?? "";
 }
 
-async function seedEndpoint(teamId: string, events: string[] | null): Promise<string> {
-  const [row] = await db
-    .insert(schema.webhookEndpoints)
-    .values({
-      teamId,
-      url: "https://hook.example.com/in",
-      secretCiphertext: DUMMY,
-      secretIv: DUMMY,
-      secretWrappedDek: DUMMY,
-      secretKeyVersion: 1,
-      secretLast4: "abcd",
-      events,
-    })
-    .returning({ id: schema.webhookEndpoints.id });
-  return row?.id ?? "";
-}
-
 async function deliveries(endpointId: string) {
   return db
     .select({
@@ -68,7 +47,7 @@ describe("recordEngagement webhook fan-out", () => {
   it("fans an open out to a subscribed endpoint and enqueues the delivery", async () => {
     const teamId = await createTeam(db);
     const emailId = await seedEmail(teamId);
-    const endpointId = await seedEndpoint(teamId, ["email.opened"]);
+    const endpointId = await createWebhookEndpoint(db, teamId, ["email.opened"]);
     const enqueued: string[] = [];
 
     await recordEngagement(
@@ -94,7 +73,7 @@ describe("recordEngagement webhook fan-out", () => {
   it("fans a click out as email.clicked", async () => {
     const teamId = await createTeam(db);
     const emailId = await seedEmail(teamId);
-    const endpointId = await seedEndpoint(teamId, ["email.clicked"]);
+    const endpointId = await createWebhookEndpoint(db, teamId, ["email.clicked"]);
 
     await recordEngagement(db, emailId, "clicked", undefined, HUMAN);
 
@@ -105,7 +84,7 @@ describe("recordEngagement webhook fan-out", () => {
   it("does not re-deliver on a second open inside the damping window", async () => {
     const teamId = await createTeam(db);
     const emailId = await seedEmail(teamId);
-    const endpointId = await seedEndpoint(teamId, null); // null = all events
+    const endpointId = await createWebhookEndpoint(db, teamId, null); // null = all events
 
     await recordEngagement(db, emailId, "opened", undefined, HUMAN);
     await recordEngagement(db, emailId, "opened", undefined, HUMAN);
@@ -116,7 +95,7 @@ describe("recordEngagement webhook fan-out", () => {
   it("delivers once per recorded event — a repeat open past the damping window fans out again", async () => {
     const teamId = await createTeam(db);
     const emailId = await seedEmail(teamId);
-    const endpointId = await seedEndpoint(teamId, ["email.opened"]);
+    const endpointId = await createWebhookEndpoint(db, teamId, ["email.opened"]);
 
     await recordEngagement(db, emailId, "opened", undefined, HUMAN);
     await db
@@ -131,7 +110,7 @@ describe("recordEngagement webhook fan-out", () => {
   it("does not deliver an unsubscribed event type", async () => {
     const teamId = await createTeam(db);
     const emailId = await seedEmail(teamId);
-    const endpointId = await seedEndpoint(teamId, ["email.clicked"]);
+    const endpointId = await createWebhookEndpoint(db, teamId, ["email.clicked"]);
 
     await recordEngagement(db, emailId, "opened", undefined, HUMAN);
 
@@ -141,8 +120,8 @@ describe("recordEngagement webhook fan-out", () => {
   it("keeps a prefetch away from an all-events endpoint and hands it to one that names it", async () => {
     const teamId = await createTeam(db);
     const emailId = await seedEmail(teamId);
-    const everything = await seedEndpoint(teamId, null);
-    const optedIn = await seedEndpoint(teamId, ["email.prefetched"]);
+    const everything = await createWebhookEndpoint(db, teamId, null);
+    const optedIn = await createWebhookEndpoint(db, teamId, ["email.prefetched"]);
 
     await recordEngagement(db, emailId, "opened", undefined, APPLE_MPP);
 
@@ -159,7 +138,7 @@ describe("recordEngagement webhook fan-out", () => {
     const teamA = await createTeam(db, "team-a");
     const teamB = await createTeam(db, "team-b");
     const emailA = await seedEmail(teamA);
-    const endpointB = await seedEndpoint(teamB, ["email.opened"]);
+    const endpointB = await createWebhookEndpoint(db, teamB, ["email.opened"]);
 
     await recordEngagement(db, emailA, "opened", undefined, HUMAN);
 

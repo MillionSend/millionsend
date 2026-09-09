@@ -232,7 +232,7 @@
     "visibilityLabel": "Visibility",
     "visibilityPrivate": "Private",
     "visibilityPublic": "Public",
-    "visibilityTooltip": "Public topics appear on the hosted unsubscribe page, where contacts manage their subscriptions. Private topics don't.",
+    "visibilityTooltip": "Public topics appear on the hosted unsubscribe page, where contacts manage their subscriptions.\n\nPrivate topics don't.",
     "createConfirm": "Create",
     "createError": "Could not create the topic. Try again.",
     "editTitle": "Edit topic",

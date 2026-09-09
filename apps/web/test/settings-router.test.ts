@@ -357,6 +357,8 @@ describe("settings.unsubscribe", () => {
     accentColor: null,
     hideBranding: true,
     logoRadius: "gentle" as const,
+    poweredBy: true,
+    poweredByLocked: false,
   };
 
   it("get returns the team's customization, defaults by default", async () => {
@@ -380,9 +382,14 @@ describe("settings.unsubscribe", () => {
       accentColor: "#46a3f9",
       hideBranding: true,
       logoRadius: "circle" as const,
+      poweredBy: false,
     };
     await caller.settings.unsubscribe.update(full);
-    expect(await caller.settings.unsubscribe.get()).toEqual({ teamName: "acme", ...full });
+    expect(await caller.settings.unsubscribe.get()).toEqual({
+      teamName: "acme",
+      ...full,
+      poweredByLocked: false,
+    });
     // Empty strings clear back to null.
     await caller.settings.unsubscribe.update({
       brandName: "",
@@ -394,9 +401,35 @@ describe("settings.unsubscribe", () => {
       accentColor: "",
       hideBranding: false,
       logoRadius: "gentle",
+      poweredBy: true,
     });
     // hideBranding false was an explicit choice, not a cleared field.
     expect(await caller.settings.unsubscribe.get()).toEqual({ ...emptyCfg, hideBranding: false });
+  });
+
+  it("a free plan on the cloud keeps Powered by on, whatever is sent; a paid plan may turn it off", async () => {
+    stubCloud();
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    const caller = callerFor("u1", teamId, "owner");
+    const { poweredBy } = await caller.settings.unsubscribe.update({
+      ...emptyCfg,
+      poweredBy: false,
+    });
+    expect(poweredBy).toBe(true);
+    expect(await caller.settings.unsubscribe.get()).toMatchObject({
+      poweredBy: true,
+      poweredByLocked: true,
+    });
+    await db
+      .update(schema.teams)
+      .set({ plan: "pro", currentPeriodEnd: new Date(Date.now() + 30 * DAY_MS) })
+      .where(eq(schema.teams.id, teamId));
+    await caller.settings.unsubscribe.update({ ...emptyCfg, poweredBy: false });
+    expect(await caller.settings.unsubscribe.get()).toMatchObject({
+      poweredBy: false,
+      poweredByLocked: false,
+    });
   });
 
   it("update rejects a logo radius outside the enum", async () => {

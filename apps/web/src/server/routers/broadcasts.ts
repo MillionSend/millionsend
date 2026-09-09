@@ -236,6 +236,9 @@ export const broadcastsRouter = router({
           segmentId: b.segmentId,
           topicId: b.topicId,
           segmentName: sg.name,
+          // Mirrors lib/email-doc isMailyDoc: anything but a Tiptap doc node
+          // is html authored outside the block editor, shown as such in the list.
+          htmlAuthored: sql<boolean>`${b.document} is null or ${b.document}->>'type' is distinct from 'doc'`,
           recipients: recipientsSql(b),
           scheduledAt: b.scheduledAt,
           sentAt: b.sentAt,

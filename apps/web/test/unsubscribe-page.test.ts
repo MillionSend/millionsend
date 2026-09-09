@@ -6,7 +6,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_UNSUBSCRIBE_CUSTOMIZATION, UnsubscribePageView } from "@/app/unsubscribe/page-view";
-import en from "../messages/en/unsubscribe.json";
+import en from "../messages/unsubscribe/en.json";
 
 // A known 32-byte master key so lookup derives the same key we sign with.
 const KEY_B64 = "dOdpMPArQsV3KWv5I+kizDihKLus3uMLev4DODaFnOQ=";
@@ -79,6 +79,24 @@ describe("/unsubscribe/[token] route", () => {
       }),
       { params: Promise.resolve({ token }) },
     );
+
+  it("redirects on the unsubscribe host when the pages have their own", async () => {
+    vi.stubEnv("APP_BASE_URL", APP);
+    vi.stubEnv("UNSUBSCRIBE_BASE_URL", "https://unsubscribe.example.com");
+    const teamId = await createTeam(db, "acme");
+    const token = makeUnsubscribeToken({ contactId: await seedContact(teamId), secretKey });
+    const get = await call("GET", token);
+    expect(new URL(get.headers.get("location") ?? "").origin).toBe(
+      "https://unsubscribe.example.com",
+    );
+    const post = await call("POST", token);
+    expect(new URL(post.headers.get("location") ?? "").origin).toBe(
+      "https://unsubscribe.example.com",
+    );
+    expect(postUnsubscribeLocation("tok", null)).toBe(
+      "https://unsubscribe.example.com/unsubscribe/confirm/tok?done=1",
+    );
+  });
 
   it("redirects on APP_BASE_URL regardless of the request host", async () => {
     vi.stubEnv("APP_BASE_URL", APP);
@@ -215,7 +233,24 @@ describe("targetForToken customization", () => {
       backgroundColor: "#000000",
       textColor: "#ffffff",
       accentColor: "#46a3f9",
+      poweredBy: true,
     });
+  });
+
+  it("shows Powered by for a free cloud team even when turned off, and honours a paid team's choice", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const teamId = await createTeam(db, "acme");
+    await db
+      .update(schema.teams)
+      .set({ unsubscribePoweredBy: false })
+      .where(eq(schema.teams.id, teamId));
+    const token = makeUnsubscribeToken({ contactId: await seedContact(teamId), secretKey });
+    expect((await targetForToken(db, token))?.customization.poweredBy).toBe(true);
+    await db
+      .update(schema.teams)
+      .set({ plan: "pro", currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000) })
+      .where(eq(schema.teams.id, teamId));
+    expect((await targetForToken(db, token))?.customization.poweredBy).toBe(false);
   });
 
   it("defaults a never-customized team to its own name as the brand", async () => {
@@ -235,6 +270,7 @@ describe("targetForToken customization", () => {
       backgroundColor: null,
       textColor: null,
       accentColor: null,
+      poweredBy: true,
     });
   });
 
@@ -287,5 +323,48 @@ describe("UnsubscribePageView logo", () => {
     expect(render("gentle")).toContain("border-radius:8px");
     expect(render("rounded")).toContain("border-radius:16px");
     expect(render("circle")).toContain("border-radius:50%");
+  });
+});
+
+describe("UnsubscribePageView layout", () => {
+  const out = renderToStaticMarkup(
+    createElement(UnsubscribePageView, {
+      m: en,
+      state: "confirm",
+      topicName: "Product news",
+      topics: [{ id: "t1", name: "Product news", subscribed: true }],
+      customization: EMPTY_UNSUBSCRIBE_CUSTOMIZATION,
+    }),
+  );
+
+  it("sizes the card and the page by their borders, so a narrow screen never scrolls sideways", () => {
+    expect(out).toMatch(/class="ms-card" style="[^"]*box-sizing:border-box/);
+    expect(out).toMatch(/min-height:100dvh[^"]*box-sizing:border-box/);
+  });
+
+  it("sets the topic's name in the heading's own type", () => {
+    expect(out).toContain("Unsubscribe from <span");
+    expect(out).not.toContain("ms-mono");
+  });
+
+  it("draws each topic as a switch over a real checkbox the form posts", () => {
+    expect(out).toMatch(
+      /<input type="checkbox" class="ms-switch-input" name="topic" checked="" value="t1"\/><span class="ms-switch" aria-hidden="true"><span><\/span><\/span>Product news/,
+    );
+    expect(out).not.toContain("ms-checkbox");
+  });
+
+  it("credits MillionSend under the card unless the team turned it off", () => {
+    expect(out).toMatch(
+      /Powered by <span[^>]*><img[^>]*millionsend-favicon\.svg[^>]*\/>MillionSend<\/span><\/a>/,
+    );
+    const off = renderToStaticMarkup(
+      createElement(UnsubscribePageView, {
+        m: en,
+        state: "confirm",
+        customization: { ...EMPTY_UNSUBSCRIBE_CUSTOMIZATION, poweredBy: false },
+      }),
+    );
+    expect(off).not.toContain("Powered by");
   });
 });

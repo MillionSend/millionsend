@@ -18,9 +18,11 @@ import { MarkerRail, MobileStepBar, StepRail } from "@/components/stepper";
 import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
 import { statusGlow } from "@/lib/status-glow";
+import { bodyEditorMode } from "@/lib/template-mode";
 import { useTRPC } from "@/lib/trpc";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
+import { ConvertBlocksDialog, HtmlAuthoredBanner, HtmlCodeMode } from "../templates/html-mode";
 import { ContentPreview } from "./parts";
 
 /** Everything a crash would lose — mirrored into the local draft. */
@@ -106,7 +108,18 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   const [html, setHtml] = useState(initial?.html ?? "");
   const [text, setText] = useState(initial?.text ?? "");
   const [document, setDocument] = useState<unknown>(initial?.document ?? null);
-  const [tab, setTab] = useState<"edit" | "preview">("edit");
+  // Armed by "Convert this broadcast": the block editor then mounts on the
+  // html seed and emits its parse. Until then an html-authored body never
+  // reaches the block editor — its html would be flattened on the first edit.
+  const [converting, setConverting] = useState(false);
+  const mode = bodyEditorMode({ document, html, converting });
+  // An html-authored body opens on its faithful preview, not on an editor.
+  const [tab, setTab] = useState<"edit" | "preview">(() =>
+    bodyEditorMode({ document: initial?.document ?? null, html: initial?.html ?? "" }) === "code"
+      ? "preview"
+      : "edit",
+  );
+  const [convertOpen, setConvertOpen] = useState(false);
   const [guardOpen, setGuardOpen] = useState(false);
   const [schedule, setSchedule] = useState("");
   const [templateId, setTemplateId] = useState("");
@@ -116,11 +129,13 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
 
   // Unsaved-body tracking for the native leave warning: the baseline is the
   // last-persisted document (or the editor's very first emit for a new one);
-  // any later emit that differs arms beforeunload until the next save.
+  // any later emit that differs arms beforeunload until the next save. Code
+  // mode compares the html itself.
   const [dirty, setDirty] = useState(false);
   const savedDoc = useRef<string | null>(
     initial !== undefined ? JSON.stringify(initial.document ?? null) : null,
   );
+  const savedHtml = useRef(initial?.html ?? "");
   useUnsavedChangesWarning(dirty, common("unsavedWarn"));
 
   // Local crash-recovery draft (browser-only, one key per broadcast).
@@ -242,6 +257,13 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
     setText(template.text ?? "");
     setDocument(template.document);
     setEditorNonce((n) => n + 1);
+    // An html-authored template lands as html: on its preview, like a stored one.
+    setConverting(false);
+    setTab(
+      bodyEditorMode({ document: template.document, html: template.html }) === "code"
+        ? "preview"
+        : "edit",
+    );
     // Applied-but-unsaved content: poison the baseline so the editor's next
     // emit differs and the leave-guard arms immediately.
     savedDoc.current = "__applied__";
@@ -306,9 +328,11 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
         replyTo: replyTo.trim(),
         html,
         text,
-        document,
+        // Code mode keeps the row html-authored, whatever shape the state holds.
+        document: mode === "code" ? null : document,
       });
       savedDoc.current = JSON.stringify(document);
+      savedHtml.current = html;
       setDirty(false);
       draft.markSaved();
       return initial.id;
@@ -322,9 +346,10 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
       ...(replyTo.trim() ? { replyTo: replyTo.trim() } : {}),
       ...(html ? { html } : {}),
       ...(text ? { text } : {}),
-      ...(document ? { document } : {}),
+      ...(document && mode !== "code" ? { document } : {}),
     });
     savedDoc.current = JSON.stringify(document);
+    savedHtml.current = html;
     setDirty(false);
     draft.markSaved();
     return id;
@@ -359,6 +384,14 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
   }
 
   const closeGuard = useCallback(() => setGuardOpen(false), []);
+  const closeConvert = useCallback(() => setConvertOpen(false), []);
+  const convertInPlace = useCallback(() => {
+    setConvertOpen(false);
+    setConverting(true);
+    setTab("edit");
+  }, []);
+  // Source beside preview needs the room; every other body stays at reading width.
+  const wideBody = mode === "code" && tab === "edit";
 
   const saveError = createMutation.isError || updateMutation.isError;
   // Server guards (deliverability pause, region breaker, unverified sender)
@@ -623,7 +656,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                 display: "flex",
                 flexDirection: "column",
                 gap: 18,
-                maxWidth: 720,
+                maxWidth: wideBody ? 1200 : 720,
               }}
             >
               {templateOptions.length > 0 ? (
@@ -719,10 +752,11 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                     ))}
                   </div>
                 </div>
-                {tab === "edit" ? (
+                {tab === "edit" && mode === "blocks" ? (
                   <MailyEditor
                     key={`${templateId}:${editorNonce}`}
                     value={{ document, html }}
+                    convertHtml={converting}
                     onChange={(v) => {
                       setDocument(v.document);
                       const snapshot = JSON.stringify(v.document);
@@ -732,33 +766,53 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                     }}
                     mergeFields={mergeFields}
                   />
-                ) : (
-                  <div
-                    style={{
-                      border: "1px solid var(--ms-line)",
-                      borderRadius: "var(--ms-r-input)",
-                      overflow: "hidden",
+                ) : tab === "edit" ? (
+                  <HtmlCodeMode
+                    id="bc-html"
+                    html={html}
+                    onChange={(next) => {
+                      setHtml(next);
+                      setDirty(next !== savedHtml.current);
                     }}
-                  >
-                    {html ? (
-                      <ContentPreview
-                        html={html}
-                        title={t("composer.previewTab")}
-                        samples={previewSamples}
+                    mergeFields={mergeFields}
+                    previewSamples={previewSamples}
+                    hasText={text !== ""}
+                  />
+                ) : (
+                  <>
+                    {mode === "code" ? (
+                      <HtmlAuthoredBanner
+                        onEditHtml={() => setTab("edit")}
+                        onConvert={() => setConvertOpen(true)}
                       />
-                    ) : (
-                      <p
-                        style={{
-                          margin: 0,
-                          padding: "16px 18px",
-                          color: "var(--ms-muted)",
-                          fontSize: "var(--ms-fs-ui)",
-                        }}
-                      >
-                        {t("composer.noHtml")}
-                      </p>
-                    )}
-                  </div>
+                    ) : null}
+                    <div
+                      style={{
+                        border: "1px solid var(--ms-line)",
+                        borderRadius: "var(--ms-r-input)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {html ? (
+                        <ContentPreview
+                          html={html}
+                          title={t("composer.previewTab")}
+                          samples={previewSamples}
+                        />
+                      ) : (
+                        <p
+                          style={{
+                            margin: 0,
+                            padding: "16px 18px",
+                            color: "var(--ms-muted)",
+                            fontSize: "var(--ms-fs-ui)",
+                          }}
+                        >
+                          {t("composer.noHtml")}
+                        </p>
+                      )}
+                    </div>
+                  </>
                 )}
                 {draft.recovered ? (
                   <DraftBanner
@@ -835,6 +889,13 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
           </ModalFooter>
         </form>
       </Modal>
+
+      <ConvertBlocksDialog
+        open={convertOpen}
+        onClose={closeConvert}
+        onConvertInPlace={convertInPlace}
+        inPlaceLabel={t("composer.convertInPlace")}
+      />
     </>
   );
 }

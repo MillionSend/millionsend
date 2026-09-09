@@ -4,6 +4,7 @@ import {
   env,
   sesTenantsEnabled,
   trackingSubdomainsSupported,
+  unsubscribeBaseUrl,
 } from "@millionsend/config";
 import { deriveUnsubscribeKey, hashRecipient } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
@@ -55,6 +56,7 @@ const app = createApi({
   rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   revision: env.MILLIONSEND_REVISION,
   appBaseUrl: env.APP_BASE_URL,
+  unsubscribeBaseUrl: unsubscribeBaseUrl(),
   publicApiUrl: env.PUBLIC_API_URL,
   unsubscribeSecretKey: deriveUnsubscribeKey(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64")),
   enqueueWebhookDeliveries: async (deliveries) => {

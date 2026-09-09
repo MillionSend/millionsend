@@ -22,6 +22,11 @@ export function effectivePlan(
   return currentPeriodEnd.getTime() + PLAN_GRACE_DAYS * DAY_MS < now.getTime() ? "free" : plan;
 }
 
+/** Whether a plan may drop the "Powered by MillionSend" line from the hosted unsubscribe page. */
+export function planCanHidePoweredBy(plan: Plan): boolean {
+  return plan !== "free";
+}
+
 /** Daily send caps per plan; null = unlimited. Self-host ignores plans entirely. */
 export const PLAN_DAILY_LIMIT: Record<Plan, number | null> = {
   free: 100,

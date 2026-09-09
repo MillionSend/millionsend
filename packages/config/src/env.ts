@@ -182,6 +182,11 @@ export const env = createEnv({
     // Public base URL of this deployment; SNS subscriptions and hosted
     // unsubscribe pages are derived from it.
     APP_BASE_URL: z.url().optional(),
+    // Public base URL the hosted unsubscribe pages and their links use when
+    // they live on their own host (e.g. https://unsubscribe.example.com):
+    // the origin recipients' browsers and security scanners hit stays apart
+    // from the dashboard's cookies and reputation. Unset: APP_BASE_URL.
+    UNSUBSCRIBE_BASE_URL: z.url().optional(),
 
     // Public origin of the API, when a reverse proxy serves it somewhere other
     // than port 3001 of the dashboard host (the compose default the derivation
@@ -296,6 +301,11 @@ function envFlag(value: unknown): boolean {
 /** The single seam between the hosted SaaS and self-host. */
 export function isCloudDeployment(e: Env = env): boolean {
   return envFlag(e.IS_CLOUD);
+}
+
+/** Where the hosted unsubscribe pages live: their own host when configured, else the dashboard's. */
+export function unsubscribeBaseUrl(e: Env = env): string | undefined {
+  return e.UNSUBSCRIBE_BASE_URL ?? e.APP_BASE_URL;
 }
 
 /** Whether teams get their own SES tenant: explicit SES_TENANTS wins, else the cloud default. */

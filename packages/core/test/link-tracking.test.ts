@@ -31,8 +31,33 @@ describe("rewriteForTracking — click", () => {
       emailId,
       url: "https://acme.example/welcome",
     });
+    // The signed destination is the URL a browser would follow: the
+    // attribute's "&amp;" is one "&", not a second query parameter named "amp;y".
+    expect(verifyClickToken(tokens[1] as string, key)).toEqual({
+      emailId,
+      url: "https://acme.example/docs?x=1&y=2",
+    });
     // The raw destination is gone from the body — the redirect owns it now.
     expect(out).not.toContain('href="https://acme.example/welcome"');
+  });
+
+  it("takes single-quoted hrefs and a quote of the other kind inside the value", () => {
+    const src = `<a href='https://acme.example/a'>a</a><a href="https://acme.example/?q=it's">b</a>`;
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const tokens = [...out.matchAll(/t\/c\/([^"']+)/g)].map((m) => m[1] as string);
+    expect(tokens.map((token) => verifyClickToken(token, key)?.url)).toEqual([
+      "https://acme.example/a",
+      "https://acme.example/?q=it's",
+    ]);
+    // Each rewritten attribute keeps the quote it was written with.
+    expect(out).toMatch(/<a href='https:\/\/track\.example\.com\/t\/c\/[^']+'>a<\/a>/);
+    expect(out).toMatch(/<a href="https:\/\/track\.example\.com\/t\/c\/[^"]+">b<\/a>/);
+  });
+
+  it("walks a crafted body of repeated unclosed hrefs in linear time", () => {
+    // The vitest timeout is the guard: a backtracking regex takes seconds here.
+    const src = `<a${' href="='.repeat(20_000)}`;
+    expect(rewriteForTracking(src, opts({ click: true }))).toBe(src);
   });
 
   it("leaves mailto:, tel:, relative, and unexpanded {{{...}}} hrefs intact", () => {
@@ -49,6 +74,25 @@ describe("rewriteForTracking — click", () => {
     const out = rewriteForTracking(src, opts({ click: true }));
     expect(out).toContain('href="{{{UNSUBSCRIBE_URL}}}"');
     expect(out).toContain("/t/c/");
+  });
+
+  it("decodes the numeric references template engines emit", () => {
+    const src = '<a href="https://acme.example/go?a&#x3D;1&amp;b&#61;2&#x27;">go</a>';
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const token = out.match(/t\/c\/([^"']+)/)?.[1];
+    expect(verifyClickToken(token as string, key)).toEqual({
+      emailId,
+      url: "https://acme.example/go?a=1&b=2'",
+    });
+  });
+
+  it("matches skipHrefPrefix against the decoded href", () => {
+    const unsub = "https://app.example.com/unsubscribe/abc.def?scope=all&amp;topic=1";
+    const out = rewriteForTracking(
+      `<a href="${unsub}">unsub</a>`,
+      opts({ click: true, skipHrefPrefix: "https://app.example.com/unsubscribe/" }),
+    );
+    expect(out).toBe(`<a href="${unsub}">unsub</a>`);
   });
 
   it("leaves an already-expanded unsubscribe link under skipHrefPrefix un-wrapped, still wrapping ordinary links", () => {

@@ -36,6 +36,24 @@ describe("classifyOpen", () => {
       "scanner",
     ],
     [
+      "a desktop Chrome user agent carrying a build number no browser sends",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.163 Safari/537.36",
+      delivered(45),
+      "spoofed_ua",
+    ],
+    [
+      "the same forged build on a Mac platform",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.7390.0 Safari/537.36",
+      delivered(3600),
+      "spoofed_ua",
+    ],
+    [
+      "headless Chrome naming itself",
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/142.0.7444.163 Safari/537.36",
+      delivered(600),
+      "scanner",
+    ],
+    [
       "a fetch before the delivery report",
       IPHONE,
       { at: new Date(at.getTime() + 5000), delivered: true },
@@ -69,6 +87,46 @@ describe("classifyOpen", () => {
       delivered(45),
     ],
     ["a fast fetch with no known send or delivery moment", IPHONE, null],
+    [
+      "a current desktop Chrome, reduced to major.0.0.0",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+      delivered(45),
+    ],
+    [
+      "an old but reduced desktop Chrome",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
+      delivered(45),
+    ],
+    [
+      "Edge on Windows",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0",
+      delivered(45),
+    ],
+    [
+      "an Electron mail client, which keeps the full build",
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Mailspring/1.22.0 Chrome/146.0.7680.216 Electron/39.0.0 Safari/537.36",
+      delivered(45),
+    ],
+    [
+      "a QtWebEngine mail client, which keeps the full build",
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) QtWebEngine/6.7.2 Chrome/118.0.5993.220 Safari/537.36",
+      delivered(45),
+    ],
+    [
+      "a phone's Chrome, which was never reduced on Android 6",
+      "Mozilla/5.0 (Linux; Android 6.0.1; SM-G920F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.5249.126 Mobile Safari/537.36",
+      delivered(45),
+    ],
+    [
+      "Chrome on iOS, which reports its full build",
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 26_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/152.0.7977.64 Mobile/15E148 Safari/604.1",
+      delivered(45),
+    ],
+    [
+      "a desktop Chrome from before the reduction",
+      "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.84 Safari/537.36",
+      delivered(45),
+    ],
   ])("keeps %s as an open", (_label, userAgent, anchor) => {
     expect(classifyOpen({ userAgent, at, anchor, windowMs: 10_000 })).toEqual({
       prefetched: false,

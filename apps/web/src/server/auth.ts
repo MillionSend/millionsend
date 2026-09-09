@@ -188,16 +188,17 @@ export function createAuth(
    * the address is verified, or this instance cannot verify anyone (no
    * sender to send the link) and the account is all there is. An address
    * merely typed at sign-up may be someone else's inbox, so it waits for
-   * the verification link. Only instances open to sign-up enroll — a closed
-   * self-host has nobody to market to. Best-effort: the account exists
-   * whatever happens here.
+   * the verification link. A self-host closed to sign-up has nobody to
+   * market to and does not enroll; the cloud enrolls whatever the flag says,
+   * since it closes sign-up for reasons of its own. Best-effort: the account
+   * exists whatever happens here.
    */
   const enrollAccount = async (
     user: { email: string; name: string; emailVerified: boolean },
     headers: Headers | undefined,
   ) => {
     try {
-      if (!signupOpen()) return;
+      if (!signupOpen() && !isCloudDeployment()) return;
       if (emailVerificationEnabled() && !user.emailVerified) return;
       const owner = await accountMailTeam(db);
       if (!owner) return;
@@ -414,7 +415,7 @@ export function createAuth(
       user: {
         create: {
           before: async () => {
-            await assertSignupAllowed(db, env.ALLOW_SIGNUP);
+            await assertSignupAllowed(db, signupOpen());
           },
           // Runs after the row exists (after the adapter's transaction for a
           // social first sign-in). Social sign-ins arrive verified and enroll
@@ -431,6 +432,15 @@ export function createAuth(
       // type the provider (rightly) refuses http redirects for. A loopback
       // redirect is the RFC 8252 signature of a native app, so classify it as one.
       before: createAuthMiddleware(async (ctx) => {
+        // Refused here, ahead of the endpoint: thrown from inside user
+        // creation, a 403 reads to better-auth as its own anti-enumeration
+        // signal for an address already registered, and the caller is shown
+        // "check your inbox" instead of the policy. The database hook below
+        // still guards the paths that create users elsewhere (social sign-in).
+        if (ctx.path === "/sign-up/email") {
+          await assertSignupAllowed(db, signupOpen());
+          return;
+        }
         if (ctx.path !== "/oauth2/register") return;
         const body = ctx.body as Record<string, unknown> | undefined;
         if (!body) return;

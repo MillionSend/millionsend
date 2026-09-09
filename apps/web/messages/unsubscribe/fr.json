@@ -1,0 +1,14 @@
+{
+  "confirm": "Se désabonner",
+  "confirmPrefs": "Gérer vos préférences",
+  "confirmTopic": "Se désabonner de « {topic} »",
+  "button": "Se désabonner",
+  "preferences": "Choisissez les e-mails que vous souhaitez recevoir :",
+  "save": "Enregistrer",
+  "saved": "Vos préférences ont été mises à jour.",
+  "done": "Désabonnement confirmé.",
+  "doneDetail": "Vous ne recevrez plus d'e-mails marketing. Les messages liés à votre compte, comme les reçus et les réinitialisations de mot de passe, continueront de vous parvenir.",
+  "doneDetailTopic": "Vous ne recevrez plus les e-mails « {topic} ».",
+  "invalid": "Ce lien n'est pas valide.",
+  "poweredBy": "Propulsé par {brand}"
+}

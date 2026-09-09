@@ -5,6 +5,7 @@ import {
   sesTenantsEnabled,
   trackingCnameTarget,
   trackingSubdomainsSupported,
+  unsubscribeBaseUrl,
 } from "@millionsend/config";
 import {
   deriveTrackingKey,
@@ -87,8 +88,9 @@ const tracking = {
 };
 // Absent APP_BASE_URL doesn't stop the worker — transactional mail still
 // flows — but broadcast fan-out and broadcast sends refuse loudly.
-const unsubscribe = env.APP_BASE_URL
-  ? { secretKey: unsubscribeSecretKey, baseUrl: env.APP_BASE_URL }
+const unsubscribeHost = unsubscribeBaseUrl();
+const unsubscribe = unsubscribeHost
+  ? { secretKey: unsubscribeSecretKey, baseUrl: unsubscribeHost }
   : undefined;
 const ses = createSesSender(env.AWS_REGION);
 // SESv2 identity clients (GetEmailIdentity) for domain re-verification, cached
@@ -384,7 +386,7 @@ await queue.work(
       {
         keyring,
         unsubscribeSecretKey,
-        appBaseUrl: env.APP_BASE_URL,
+        unsubscribeBaseUrl: unsubscribeHost,
         isCloud: env.IS_CLOUD,
         enqueueEmailSends: enqueueSends,
         reschedule: (broadcastId, at) => enqueueBroadcast(broadcastId, at),

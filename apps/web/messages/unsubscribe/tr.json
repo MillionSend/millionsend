@@ -1,0 +1,14 @@
+{
+  "confirm": "Abonelikten çık",
+  "confirmPrefs": "Tercihleri yönet",
+  "confirmTopic": "{topic} aboneliğinden çık",
+  "button": "Abonelikten çık",
+  "preferences": "Hangi e-postaları almak istediğinizi seçin:",
+  "save": "Tercihleri kaydet",
+  "saved": "E-posta tercihleriniz güncellendi.",
+  "done": "Abonelikten çıktınız.",
+  "doneDetail": "Artık pazarlama e-postaları almayacaksınız. Makbuzlar ve parola sıfırlama gibi hesabınızla ilgili mesajlar gelmeye devam edecek.",
+  "doneDetailTopic": "Artık {topic} e-postalarını almayacaksınız.",
+  "invalid": "Bu bağlantı geçerli değil.",
+  "poweredBy": "{brand} altyapısıyla"
+}

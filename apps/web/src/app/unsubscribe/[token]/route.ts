@@ -6,7 +6,7 @@ import {
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
-import { appBaseUrl } from "@/lib/api-base-url";
+import { unsubscribeBaseUrl } from "@/lib/api-base-url";
 import { enqueueWebhookDeliveries } from "@/server/queue";
 import {
   postUnsubscribeLocation,
@@ -63,13 +63,14 @@ async function recordEmailUnsubscribe(
  * (form-encoded `List-Unsubscribe=One-Click`, which must get a bare 2xx,
  * not a redirect).
  *
- * Redirects are built on APP_BASE_URL, never request.url: behind a reverse
- * proxy that rewrites Host the request URL names the upstream (localhost:3000).
+ * Redirects are built on the unsubscribe host, never request.url: behind a
+ * reverse proxy that rewrites Host the request URL names the upstream
+ * (localhost:3000).
  */
 export async function GET(_request: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
   return Response.redirect(
-    new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}`, appBaseUrl()),
+    new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}`, unsubscribeBaseUrl()),
     302,
   );
 }
@@ -136,7 +137,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ token: str
       }
     }
     return Response.redirect(
-      new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}?saved=1`, appBaseUrl()),
+      new URL(`/unsubscribe/confirm/${encodeURIComponent(token)}?saved=1`, unsubscribeBaseUrl()),
       303,
     );
   }

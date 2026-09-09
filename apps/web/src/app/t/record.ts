@@ -6,12 +6,14 @@ import {
   deriveTrackingKey,
   enqueueWebhookDeliveries,
   forwardedClientIp,
+  highestStatus,
   type QueuedWebhookDelivery,
   utcDay,
+  type WebhookEmailFacts,
   type WebhookEnqueue,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { trustedProxies } from "../../server/trusted-proxies";
 
@@ -52,6 +54,14 @@ export function engagementHit(request: Request, link?: string): EngagementHit {
  */
 const DAMP_WINDOW_MS = 60_000;
 
+/**
+ * Two different links of one message hit this close together were fetched
+ * by a machine walking the message, whatever it calls itself: a gateway
+ * fans out in tens of milliseconds, a person's fastest second click takes
+ * a few hundred.
+ */
+const BURST_WINDOW_MS = 250;
+
 type RecordedType = "opened" | "clicked" | "prefetched";
 
 /** Under SKIP_ENV_VALIDATION the env proxy carries the raw string, not the parsed number. */
@@ -83,6 +93,132 @@ async function openAnchor(
   return email.sentAt ? { at: email.sentAt, delivered: false } : null;
 }
 
+/** Takes back a unique counter on the day and hour its first event advanced. */
+async function retractCounter(
+  tx: Db,
+  teamId: string,
+  counter: "opened" | "clicked",
+  at: Date,
+): Promise<void> {
+  await tx.execute(sql`
+    update ${schema.usageCounters}
+    set ${sql.raw(counter)} = ${schema.usageCounters}.${sql.raw(counter)} - 1
+    where team_id = ${teamId} and day = ${utcDay(at)}
+  `);
+  await bumpHourlyUsage(tx, { teamId, at, counts: { [counter]: -1 } });
+}
+
+interface FoldedClick {
+  id: string;
+  occurredAt: Date;
+  data: Record<string, unknown> | null;
+}
+
+/**
+ * A click recorded before the burst around it could be seen was a
+ * machine's after all. The row becomes a prefetch, the open inferred from
+ * it goes, and what the click advanced — status, unique counters,
+ * deliveries no drain pass holds yet — is taken back. A delivery already
+ * posted or leased stays: the opt-in `email.prefetched` that follows
+ * carries the click's own timestamp, which is how a consumer learns it was
+ * retracted. `folded` is ordered oldest first.
+ */
+async function foldBurst(
+  tx: Db,
+  teamId: string,
+  email: WebhookEmailFacts,
+  folded: readonly FoldedClick[],
+  deliveries: QueuedWebhookDelivery[],
+): Promise<void> {
+  const [first] = folded;
+  if (!first) return;
+  await tx
+    .update(schema.emailEvents)
+    .set({
+      type: "prefetched",
+      data: sql`jsonb_set(${schema.emailEvents.data}, '{click,reason}', '"burst"')`,
+    })
+    .where(
+      inArray(
+        schema.emailEvents.id,
+        folded.map((row) => row.id),
+      ),
+    );
+  // The open inferred from a click is stamped one millisecond before it,
+  // and there is never more than one: it is only written while no open
+  // exists.
+  const [removedOpen] = await tx
+    .delete(schema.emailEvents)
+    .where(
+      and(
+        eq(schema.emailEvents.emailId, email.emailId),
+        eq(schema.emailEvents.type, "opened"),
+        sql`${schema.emailEvents.data}->'open'->>'reason' = 'click'`,
+        inArray(
+          schema.emailEvents.occurredAt,
+          folded.map((row) => new Date(row.occurredAt.getTime() - 1)),
+        ),
+      ),
+    )
+    .returning({ occurredAt: schema.emailEvents.occurredAt });
+  // A row a drain pass has leased carries a due instant ahead of the clock
+  // and will be posted; only rows still waiting are dropped.
+  await tx.delete(schema.webhookDeliveries).where(
+    and(
+      eq(schema.webhookDeliveries.emailId, email.emailId),
+      eq(schema.webhookDeliveries.status, "pending"),
+      lte(schema.webhookDeliveries.nextAttemptAt, sql`clock_timestamp()`),
+      inArray(schema.webhookDeliveries.eventType, ["email.clicked", "email.opened"]),
+      inArray(
+        sql`${schema.webhookDeliveries.payload}->>'created_at'`,
+        [...folded, ...(removedOpen ? [removedOpen] : [])].map((row) =>
+          row.occurredAt.toISOString(),
+        ),
+      ),
+    ),
+  );
+  const remaining = (
+    await tx
+      .selectDistinct({ type: schema.emailEvents.type })
+      .from(schema.emailEvents)
+      .where(eq(schema.emailEvents.emailId, email.emailId))
+  ).map((row) => row.type);
+  // A unique counter advanced on the email's first event of its type; with
+  // none left, that event was among the ones taken back. The earlier
+  // bucket first, the order every increment takes them in.
+  if (removedOpen && !remaining.includes("opened")) {
+    await retractCounter(tx, teamId, "opened", removedOpen.occurredAt);
+  }
+  if (!remaining.includes("clicked")) {
+    await retractCounter(tx, teamId, "clicked", first.occurredAt);
+  }
+  // The status stood on a person's click; the remaining events say what it
+  // is. A tracking token only exists in a message that was sent, so that is
+  // the least the row can say once older events have aged out.
+  await tx
+    .update(schema.emails)
+    .set({ latestStatus: highestStatus(remaining) ?? "sent" })
+    .where(
+      and(
+        eq(schema.emails.id, email.emailId),
+        inArray(schema.emails.latestStatus, ["opened", "clicked"]),
+      ),
+    );
+  for (const row of folded) {
+    const click = { ...(row.data?.click as Record<string, unknown>), reason: "burst" };
+    await enqueueWebhookDeliveries(tx, {
+      teamId,
+      email,
+      type: "email.prefetched",
+      occurredAt: row.occurredAt,
+      extras: { click },
+      enqueue: async (rows) => {
+        deliveries.push(...rows);
+      },
+    });
+  }
+}
+
 /**
  * Records an app-layer engagement event for a verified tracking token. The
  * teamId is read from the email row — never taken from the request — so a
@@ -92,10 +228,11 @@ async function openAnchor(
  * `prefetched` event, which is kept and fanned out (opt-in) but never lifts
  * the status or the opened counter. Every verified hit records an event row
  * (and fans out webhooks), damped to at most one per minute per (email,
- * type). The daily usage counter still advances only on the FIRST event of
- * its type for this email — open/click RATES stay unique-based, mirroring the
- * old SES OPEN/CLICK path. Both endpoints are public, so a missing/foreign/
- * non-uuid emailId returns silently.
+ * type, link): a person who clicks a second link a moment later made a
+ * second click. The daily usage counter still advances only on the FIRST
+ * event of its type for this email — open/click RATES stay unique-based,
+ * mirroring the old SES OPEN/CLICK path. Both endpoints are public, so a
+ * missing/foreign/non-uuid emailId returns silently.
  */
 export async function recordEngagement(
   db: Db,
@@ -106,20 +243,6 @@ export async function recordEngagement(
 ): Promise<void> {
   // A raw non-uuid string must never reach a uuid column — Postgres would 500.
   if (!z.uuid().safeParse(emailId).success) return;
-
-  const [email] = await db
-    .select({
-      id: schema.emails.id,
-      teamId: schema.emails.teamId,
-      from: schema.emails.from,
-      to: schema.emails.to,
-      subject: schema.emails.subject,
-      sentAt: schema.emails.sentAt,
-    })
-    .from(schema.emails)
-    .where(eq(schema.emails.id, emailId))
-    .limit(1);
-  if (!email) return;
 
   const occurredAt = new Date();
   // The fetcher's identity in SES's shape — the object Resend's email.clicked
@@ -133,6 +256,30 @@ export async function recordEngagement(
   const deliveries: QueuedWebhookDelivery[] = [];
   await db.transaction(async (txRaw) => {
     const tx = txRaw as unknown as Db;
+    // The email row is held for the whole record: a gateway fetches every
+    // link of a message at once, and each hit must see the rows the one
+    // before it wrote before it damps, counts or lifts the status.
+    const [email] = await tx
+      .select({
+        id: schema.emails.id,
+        teamId: schema.emails.teamId,
+        from: schema.emails.from,
+        to: schema.emails.to,
+        subject: schema.emails.subject,
+        sentAt: schema.emails.sentAt,
+      })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, emailId))
+      .limit(1)
+      .for("update");
+    if (!email) return;
+    const facts: WebhookEmailFacts = {
+      emailId: email.id,
+      from: email.from,
+      to: email.to,
+      subject: email.subject,
+    };
+
     let recorded: RecordedType = type;
     let data: Record<string, unknown>;
     // A link a machine followed is no click either — security gateways and
@@ -144,8 +291,32 @@ export async function recordEngagement(
       anchor: await openAnchor(tx, email),
       windowMs: prefetchWindowMs(),
     });
-    if (verdict.prefetched) recorded = "prefetched";
-    const reason = verdict.prefetched ? { reason: verdict.reason } : {};
+    // The other links of this message hit within the burst window, oldest
+    // first. One is enough: this hit is a machine's whatever it calls
+    // itself, and any of those siblings still standing as a click is folded.
+    const siblings =
+      type === "clicked" && hit?.link !== undefined
+        ? await tx
+            .select({
+              id: schema.emailEvents.id,
+              type: schema.emailEvents.type,
+              occurredAt: schema.emailEvents.occurredAt,
+              data: schema.emailEvents.data,
+            })
+            .from(schema.emailEvents)
+            .where(
+              and(
+                eq(schema.emailEvents.emailId, email.id),
+                inArray(schema.emailEvents.type, ["clicked", "prefetched"]),
+                sql`${schema.emailEvents.data}->'click'->>'link' <> ${hit.link}`,
+                gt(schema.emailEvents.occurredAt, new Date(occurredAt.getTime() - BURST_WINDOW_MS)),
+              ),
+            )
+            .orderBy(asc(schema.emailEvents.occurredAt))
+        : [];
+    if (verdict.prefetched || siblings.length > 0) recorded = "prefetched";
+    const reason =
+      recorded === "prefetched" ? { reason: verdict.prefetched ? verdict.reason : "burst" } : {};
     if (type === "clicked") {
       data = {
         click: { ...(hit?.link === undefined ? {} : { link: hit.link }), ...fetcher, ...reason },
@@ -154,16 +325,33 @@ export async function recordEngagement(
       data = { open: { ...fetcher, ...reason } };
     }
 
+    // Damping compares like with like: a link against earlier hits on that
+    // same link, the pixel against earlier pixel fetches. Prefetched rows
+    // hold either shape, so the shape is part of the match.
+    const sameHit =
+      type === "clicked"
+        ? sql`${schema.emailEvents.data}->'click'->>'link' = ${hit?.link ?? ""}`
+        : sql`${schema.emailEvents.data} ? 'open'`;
     const [newest] = await tx
       .select({ occurredAt: schema.emailEvents.occurredAt })
       .from(schema.emailEvents)
-      .where(and(eq(schema.emailEvents.emailId, email.id), eq(schema.emailEvents.type, recorded)))
+      .where(
+        and(
+          eq(schema.emailEvents.emailId, email.id),
+          eq(schema.emailEvents.type, recorded),
+          sameHit,
+        ),
+      )
       .orderBy(desc(schema.emailEvents.occurredAt))
       .limit(1);
-    // ponytail: two concurrent identical hits could both miss `newest` and
-    // slip the damping window — same race the SES path carries. A slightly-
-    // high engagement event count is not a correctness/security concern; add
-    // row locking if it ever matters.
+    const [prior] = await tx
+      .select({ id: schema.emailEvents.id })
+      .from(schema.emailEvents)
+      .where(and(eq(schema.emailEvents.emailId, email.id), eq(schema.emailEvents.type, recorded)))
+      .limit(1);
+    // Before the damping: a repeat hit still exposes the burst it belongs to.
+    const folded = siblings.filter((row) => row.type === "clicked");
+    if (folded.length > 0) await foldBurst(tx, email.teamId, facts, folded, deliveries);
     if (newest && occurredAt.getTime() - newest.occurredAt.getTime() < DAMP_WINDOW_MS) return;
 
     await tx
@@ -193,7 +381,7 @@ export async function recordEngagement(
           .values({ emailId: email.id, type: "opened", occurredAt: openedAt, data: { open } });
         await enqueueWebhookDeliveries(tx, {
           teamId: email.teamId,
-          email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
+          email: facts,
           type: "email.opened",
           occurredAt: openedAt,
           extras: { open },
@@ -217,7 +405,7 @@ export async function recordEngagement(
     // send happens after commit.
     await enqueueWebhookDeliveries(tx, {
       teamId: email.teamId,
-      email: { emailId: email.id, from: email.from, to: email.to, subject: email.subject },
+      email: facts,
       type: `email.${recorded}`,
       occurredAt,
       extras: data,
@@ -231,7 +419,7 @@ export async function recordEngagement(
     // engaged, not engagement hits. Last in the transaction: this row is
     // shared by every send and event of the team, so its lock is held for
     // one statement and the commit, not across the fan-out above.
-    if (!newest) {
+    if (!prior) {
       await tx.execute(sql`
         insert into ${schema.usageCounters} (team_id, day, ${sql.raw(recorded)})
         values (${email.teamId}, ${utcDay(occurredAt)}, 1)

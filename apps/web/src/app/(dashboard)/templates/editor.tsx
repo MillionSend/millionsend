@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { isMailyDoc } from "@/lib/email-doc";
 import { buildMergeOptions } from "@/lib/merge-fields";
-import { blocksCopyName, templateEditorMode, templateSaveInput } from "@/lib/template-mode";
+import { blocksCopyName, bodyEditorMode, templateSaveInput } from "@/lib/template-mode";
 import { useTRPC } from "@/lib/trpc";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { confirmUnsavedNavigation, useUnsavedChangesWarning } from "@/lib/use-unsaved-warning";
@@ -91,10 +91,10 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
   // html seed and emits its parse. Until then a document-less row never
   // reaches the block editor — its html would be flattened on the first edit.
   const [converting, setConverting] = useState(false);
-  const mode = templateEditorMode({ isNew: !initial, document, converting });
+  const mode = bodyEditorMode({ document, html, converting });
   // Html-authored rows open on their faithful preview, not on an editor.
   const [tab, setTab] = useState<"edit" | "preview">(() =>
-    templateEditorMode({ isNew: !initial, document: initial?.document ?? null }) === "code"
+    bodyEditorMode({ document: initial?.document ?? null, html: initial?.html ?? "" }) === "code"
       ? "preview"
       : "edit",
   );
@@ -488,6 +488,7 @@ export function TemplateEditor({ initial }: { initial?: EditorInitial }) {
         onClose={closeConvert}
         onDuplicate={duplicateAndConvert}
         onConvertInPlace={convertInPlace}
+        inPlaceLabel={t("html.convertInPlace")}
       />
       {probeHtml !== null ? (
         <div hidden>

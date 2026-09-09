@@ -125,6 +125,9 @@
    the layered .mly:prose definitions. The sent email is unaffected (its html
    is rendered server-side with inline styles). */
 .ms-maily .ms-maily-content {
+  /* The content element also carries Tailwind Typography's prose class, whose
+     65ch cap left a third of the field empty; the field's width is the cap. */
+  max-width: none;
   --mly-tw-prose-body: var(--ms-bone);
   --mly-tw-prose-headings: var(--ms-bone);
   --mly-tw-prose-lead: var(--ms-muted);

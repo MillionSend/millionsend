@@ -1,0 +1,14 @@
+{
+  "confirm": "Wypisz się",
+  "confirmPrefs": "Zarządzaj preferencjami",
+  "confirmTopic": "Wypisz się z „{topic}”",
+  "button": "Wypisz się",
+  "preferences": "Wybierz, które e-maile chcesz otrzymywać:",
+  "save": "Zapisz preferencje",
+  "saved": "Twoje preferencje e-mailowe zostały zaktualizowane.",
+  "done": "Wypisaliśmy Cię.",
+  "doneDetail": "Nie będziesz już otrzymywać e-maili marketingowych. Wiadomości dotyczące Twojego konta, takie jak potwierdzenia płatności czy resetowanie hasła, nadal będą przychodzić.",
+  "doneDetailTopic": "Nie będziesz już otrzymywać e-maili z „{topic}”.",
+  "invalid": "Ten link jest nieprawidłowy.",
+  "poweredBy": "Obsługiwane przez {brand}"
+}

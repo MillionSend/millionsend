@@ -8,8 +8,9 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, or } from "drizzle-orm";
 import { z } from "zod";
-import { appBaseUrl } from "@/lib/api-base-url";
+import { unsubscribeBaseUrl } from "@/lib/api-base-url";
 import type { UnsubscribeLogoRadius } from "@/lib/unsubscribe-theme";
+import { poweredByLocked } from "@/server/powered-by";
 import { uploadsEnabled } from "@/server/storage";
 
 /** Per-team customization the hosted confirm page applies; all fields optional. */
@@ -24,6 +25,8 @@ export interface UnsubscribeCustomization {
   backgroundColor: string | null;
   textColor: string | null;
   accentColor: string | null;
+  /** The "Powered by MillionSend" line: the team's choice, or forced by its plan. */
+  poweredBy: boolean;
 }
 
 export interface UnsubscribeTarget {
@@ -78,14 +81,14 @@ export async function preferenceTopics(
 /**
  * Where the browser lands after a (non-one-click) unsubscribe POST: the team's
  * configured redirect when set, else the in-place done state. Absolute string
- * (on APP_BASE_URL, never the request's Host) so it can go straight into a
- * Location header.
+ * (on the unsubscribe host, never the request's Host) so it can go straight
+ * into a Location header.
  */
 export function postUnsubscribeLocation(token: string, redirectUrl: string | null): string {
   if (redirectUrl) return redirectUrl;
   return new URL(
     `/unsubscribe/confirm/${encodeURIComponent(token)}?done=1`,
-    appBaseUrl(),
+    unsubscribeBaseUrl(),
   ).toString();
 }
 
@@ -126,6 +129,9 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
       hideBranding: tm.unsubscribeHideBranding,
       logoRadius: tm.unsubscribeLogoRadius,
       logoUrl: tm.logoUrl,
+      poweredBy: tm.unsubscribePoweredBy,
+      plan: tm.plan,
+      currentPeriodEnd: tm.currentPeriodEnd,
     })
     .from(c)
     .innerJoin(tm, eq(tm.id, c.teamId))
@@ -146,6 +152,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
     backgroundColor: contact.backgroundColor,
     textColor: contact.textColor,
     accentColor: contact.accentColor,
+    poweredBy: contact.poweredBy || poweredByLocked(contact),
   };
 
   if (topicId === null) {

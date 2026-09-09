@@ -56,6 +56,15 @@ export async function transitionQueueState(
   return firstRow<{ id: string }>(rows) !== undefined;
 }
 
+/**
+ * The highest-ranked status among a row's event types, for a status that
+ * is recomputed from the events left after some were reclassified. Null
+ * when none of the types is a status.
+ */
+export function highestStatus(types: readonly string[]): EmailStatus | null {
+  return schema.emailStatusEnum.enumValues.findLast((status) => types.includes(status)) ?? null;
+}
+
 function compareStatus(a: EmailStatus, b: EmailStatus): number {
   const order = schema.emailStatusEnum.enumValues;
   return order.indexOf(a) - order.indexOf(b);

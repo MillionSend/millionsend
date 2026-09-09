@@ -33,6 +33,7 @@ import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { getStripe } from "../billing";
 import { activeLocale } from "../locale";
+import { poweredByLocked } from "../powered-by";
 import { smtpRelayOffered } from "../smtp";
 import { deletePublicObject, keyFromPublicUrl, uploadsEnabled } from "../storage";
 import {
@@ -804,11 +805,16 @@ export function createSettingsRouter(
             accentColor: schema.teams.unsubscribeAccentColor,
             hideBranding: schema.teams.unsubscribeHideBranding,
             logoRadius: schema.teams.unsubscribeLogoRadius,
+            poweredBy: schema.teams.unsubscribePoweredBy,
+            plan: schema.teams.plan,
+            currentPeriodEnd: schema.teams.currentPeriodEnd,
           })
           .from(schema.teams)
           .where(eq(schema.teams.id, ctx.teamId));
         if (!team) throw new TRPCError({ code: "NOT_FOUND" });
-        return team;
+        const { plan, currentPeriodEnd, ...cfg } = team;
+        const locked = poweredByLocked({ plan, currentPeriodEnd });
+        return { ...cfg, poweredBy: cfg.poweredBy || locked, poweredByLocked: locked };
       }),
 
       update: teamProcedure
@@ -823,10 +829,18 @@ export function createSettingsRouter(
             accentColor: nullableHexColor,
             hideBranding: z.boolean(),
             logoRadius: z.enum(schema.unsubscribeLogoRadiusEnum.enumValues),
+            poweredBy: z.boolean(),
           }),
         )
         .mutation(async ({ ctx, input }) => {
           assertCanManageMembers(ctx.role);
+          const [team] = await ctx.db
+            .select({ plan: schema.teams.plan, currentPeriodEnd: schema.teams.currentPeriodEnd })
+            .from(schema.teams)
+            .where(eq(schema.teams.id, ctx.teamId));
+          if (!team) throw new TRPCError({ code: "NOT_FOUND" });
+          // A plan that cannot hide the line keeps it on, whatever was sent.
+          const poweredBy = input.poweredBy || poweredByLocked(team);
           await ctx.db
             .update(schema.teams)
             .set({
@@ -839,9 +853,10 @@ export function createSettingsRouter(
               unsubscribeAccentColor: input.accentColor,
               unsubscribeHideBranding: input.hideBranding,
               unsubscribeLogoRadius: input.logoRadius,
+              unsubscribePoweredBy: poweredBy,
             })
             .where(eq(schema.teams.id, ctx.teamId));
-          return input;
+          return { ...input, poweredBy };
         }),
     }),
 

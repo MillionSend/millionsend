@@ -146,6 +146,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `WEBHOOK_ALLOW_LOCALHOST` | Local development only: lets webhook endpoints (test fires included) target `http://` and loopback/private addresses on any port. Keep `false` on any internet-reachable instance. |
 | `COMPOSE_PROFILES` | Optional compose services, comma-separated: `smtp` (the relay; mount a STARTTLS keypair first), and in the standalone file also `docs` (this documentation site) and `backup` (scheduled dumps). |
 | `PORT` | API port (default `3001`). Under compose this moves both the container's listen port and the published host port together. |
+| `UNSUBSCRIBE_BASE_URL` | Optional own host for the hosted unsubscribe pages (e.g. `https://unsubscribe.example.com`), pointed at the same web process. Unsubscribe links in mail and the page's redirects use it, and that host serves the unsubscribe flow only, so recipients and link scanners never reach the dashboard's origin, cookies or reputation. Unset: `APP_BASE_URL`. |
 | `WEB_PORT` | Host port the compose file publishes the dashboard on (the web process is always 3000 inside the container). Keep `APP_BASE_URL` in sync. |
 | `DOCS_PORT` | Host port the compose file publishes this documentation site on (the docs process is always 3002 inside the container). |
 | `SMTP_PORT` | SMTP relay listen port (default `2587`). |

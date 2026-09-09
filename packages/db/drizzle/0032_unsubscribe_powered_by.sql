@@ -1,0 +1,1 @@
+ALTER TABLE "teams" ADD COLUMN "unsubscribe_powered_by" boolean DEFAULT true NOT NULL;

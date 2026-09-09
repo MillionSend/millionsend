@@ -179,7 +179,12 @@ export {
 } from "./idempotency.js";
 export { findInstanceOperator, isInstanceOperator } from "./instance-operator.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
-export { ANCHOR_HREF, type RewriteOptions, rewriteForTracking } from "./link-tracking.js";
+export {
+  ANCHOR_HREF,
+  anchorHrefParts,
+  type RewriteOptions,
+  rewriteForTracking,
+} from "./link-tracking.js";
 export { claimNotification, clearNotifications, listTeamOwners } from "./notifications.js";
 export {
   ADMIN_MCP_SCOPES,
@@ -200,6 +205,7 @@ export {
   PLAN_GRACE_DAYS,
   PLAN_TEAM_LIMIT,
   type Plan,
+  planCanHidePoweredBy,
   QUOTA_TOLERANCE,
   raisesDailyLimit,
 } from "./plans.js";
@@ -250,7 +256,12 @@ export {
   postFailureCode,
   postJson,
 } from "./ssrf.js";
-export { applyStatusCas, type EmailStatus, transitionQueueState } from "./status.js";
+export {
+  applyStatusCas,
+  type EmailStatus,
+  highestStatus,
+  transitionQueueState,
+} from "./status.js";
 export {
   clearUnsubscribeSuppression,
   extractAddrSpec,

@@ -1,4 +1,4 @@
-import { ANCHOR_HREF } from "./link-tracking.js";
+import { ANCHOR_HREF, anchorHrefParts } from "./link-tracking.js";
 import { isRootDomainSend, registrableDomain } from "./org-domain.js";
 import { parseMailbox } from "./sender-address.js";
 
@@ -166,7 +166,7 @@ function extractAnchors(html: string): Anchor[] {
     if (openEnd === -1) continue;
     const close = lower.indexOf("</a", openEnd + 1);
     const inner = html.slice(openEnd + 1, close === -1 ? html.length : close);
-    anchors.push({ href: m[3] as string, text: visibleText(inner), index: m.index });
+    anchors.push({ href: anchorHrefParts(m).value, text: visibleText(inner), index: m.index });
   }
   return anchors;
 }

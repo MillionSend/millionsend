@@ -23,6 +23,7 @@ interface Draft {
   accentColor: string;
   hideBranding: boolean;
   logoRadius: UnsubscribeLogoRadius;
+  poweredBy: boolean;
 }
 
 const LOGO_RADII = Object.keys(UNSUBSCRIBE_LOGO_RADIUS) as UnsubscribeLogoRadius[];
@@ -149,6 +150,7 @@ export function UnsubscribeView() {
     textColor: data.textColor ?? "",
     accentColor: data.accentColor ?? "",
     hideBranding: data.hideBranding,
+    poweredBy: data.poweredBy,
     logoRadius: data.logoRadius,
   };
   const set = (patch: Partial<Draft>) => setDraft({ ...form, ...patch });
@@ -176,6 +178,7 @@ export function UnsubscribeView() {
             accentColor: toNull(form.accentColor),
             hideBranding: form.hideBranding,
             logoRadius: form.logoRadius,
+            poweredBy: form.poweredBy,
           });
         }}
       >
@@ -204,6 +207,29 @@ export function UnsubscribeView() {
               disabled={disabled || !logoAvailable}
               onChange={(checked) => set({ hideBranding: checked })}
               ariaLabel={t("showLogo")}
+            />
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              gap: 16,
+              marginBottom: 18,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <span style={fieldLabelStyle()}>{t("poweredBy")}</span>
+              <span style={{ display: "block", fontSize: 12, color: "var(--ms-muted)" }}>
+                {data.poweredByLocked ? t("poweredByLocked") : t("poweredByNote")}
+              </span>
+            </div>
+            <Switch
+              checked={form.poweredBy}
+              disabled={disabled || data.poweredByLocked}
+              onChange={(checked) => set({ poweredBy: checked })}
+              ariaLabel={t("poweredBy")}
             />
           </div>
 
@@ -388,6 +414,7 @@ export function UnsubscribeView() {
             backgroundColor: toNull(form.backgroundColor),
             textColor: toNull(form.textColor),
             accentColor: toNull(form.accentColor),
+            poweredBy: form.poweredBy || data.poweredByLocked,
           }}
         />
       </div>

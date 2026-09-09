@@ -1,0 +1,14 @@
+{
+  "confirm": "수신 거부",
+  "confirmPrefs": "수신 설정 관리",
+  "confirmTopic": "{topic} 수신 거부",
+  "button": "수신 거부",
+  "preferences": "받고 싶은 이메일을 선택하세요:",
+  "save": "설정 저장",
+  "saved": "이메일 수신 설정이 저장되었습니다.",
+  "done": "수신 거부가 완료되었습니다.",
+  "doneDetail": "더 이상 마케팅 이메일이 발송되지 않습니다. 영수증, 비밀번호 재설정 등 계정 관련 이메일은 계속 발송됩니다.",
+  "doneDetailTopic": "더 이상 {topic} 이메일이 발송되지 않습니다.",
+  "invalid": "유효하지 않은 링크입니다.",
+  "poweredBy": "{brand} 제공"
+}

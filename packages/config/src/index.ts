@@ -16,4 +16,5 @@ export {
   signupOpen,
   trackingCnameTarget,
   trackingSubdomainsSupported,
+  unsubscribeBaseUrl,
 } from "./env.js";

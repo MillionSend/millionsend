@@ -151,6 +151,7 @@ auto-hospedada não tem limites de plano.
 | `WEBHOOK_ALLOW_LOCALHOST` | Só para desenvolvimento local: permite que endpoints de webhook (disparos de teste incluídos) apontem para `http://` e endereços de loopback/privados em qualquer porta. Mantenha `false` em qualquer instância acessível pela internet. |
 | `COMPOSE_PROFILES` | Serviços opcionais do compose, separados por vírgula: `smtp` (o relay; monte um par de chaves STARTTLS antes) e, no arquivo standalone, também `docs` (este site de documentação) e `backup` (dumps agendados). |
 | `PORT` | Porta da API (padrão `3001`). No compose, move junto a porta interna do contêiner e a porta publicada no host. |
+| `UNSUBSCRIBE_BASE_URL` | Host próprio, opcional, para as páginas hospedadas de descadastro (ex.: `https://unsubscribe.example.com`), apontado para o mesmo processo web. Os links de descadastro nos e-mails e os redirecionamentos da página usam esse host, e ele serve só o fluxo de descadastro, então destinatários e scanners de links nunca alcançam a origem, os cookies nem a reputação do painel. Sem definir: `APP_BASE_URL`. |
 | `WEB_PORT` | Porta do host em que o compose publica o painel (o processo web é sempre 3000 dentro do contêiner). Mantenha `APP_BASE_URL` em sincronia. |
 | `DOCS_PORT` | Porta do host em que o compose publica este site de documentação (o processo docs é sempre 3002 dentro do contêiner). |
 | `SMTP_PORT` | Porta do relay SMTP (padrão `2587`). |

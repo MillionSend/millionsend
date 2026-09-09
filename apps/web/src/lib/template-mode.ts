@@ -1,20 +1,23 @@
 import { isMailyDoc } from "./email-doc";
 
 /**
- * Which editor a template opens in. A row whose `document` is renderable
- * Maily JSON was authored in the block editor and keeps editing there; any
- * other row (null document, or a pre-Maily shape) carries html authored
- * outside it — API, MCP, migration — which Tiptap's parse would flatten, so
- * it edits as source until the user explicitly converts.
+ * Which editor a body opens in. A row whose `document` is renderable Maily
+ * JSON was authored in the block editor and keeps editing there; a body with
+ * html and no such document was authored outside it — API, MCP, migration,
+ * an html template applied to a broadcast — which Tiptap's parse would
+ * flatten, so it edits as source until the user explicitly converts. An
+ * empty body starts in the block editor.
  */
-export type TemplateEditorMode = "blocks" | "code";
+export type BodyEditorMode = "blocks" | "code";
 
-export function templateEditorMode(opts: {
-  isNew: boolean;
+export function bodyEditorMode(opts: {
   document: unknown;
+  html: string;
   converting?: boolean;
-}): TemplateEditorMode {
-  return opts.isNew || opts.converting || isMailyDoc(opts.document) ? "blocks" : "code";
+}): BodyEditorMode {
+  return opts.converting || isMailyDoc(opts.document) || opts.html.trim() === ""
+    ? "blocks"
+    : "code";
 }
 
 export interface TemplateSaveInput {
@@ -31,7 +34,7 @@ export interface TemplateSaveInput {
  * a legacy non-Maily document the server would reject.
  */
 export function templateSaveInput(
-  mode: TemplateEditorMode,
+  mode: BodyEditorMode,
   fields: TemplateSaveInput,
 ): TemplateSaveInput {
   return {

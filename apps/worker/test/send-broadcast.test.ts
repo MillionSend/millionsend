@@ -84,7 +84,7 @@ function makeDeps(overrides: Partial<BroadcastDeps> = {}): {
     deps: {
       keyring,
       unsubscribeSecretKey: secretKey,
-      appBaseUrl: BASE_URL,
+      unsubscribeBaseUrl: BASE_URL,
       isCloud: false,
       enqueueEmailSends: async (batch) => {
         batches.push([...batch]);
@@ -513,7 +513,7 @@ it("a stored multi-mailbox from fails the fan-out loudly, sending nothing", asyn
 
 it("missing APP_BASE_URL fails the fan-out loudly, sending nothing", async () => {
   const broadcastId = await insertBroadcast();
-  const { deps, enqueued } = makeDeps({ appBaseUrl: undefined });
+  const { deps, enqueued } = makeDeps({ unsubscribeBaseUrl: undefined });
   await expect(sendBroadcast(db, deps, { broadcastId })).rejects.toThrow(/APP_BASE_URL/);
   expect(await emailsOf(broadcastId)).toHaveLength(0);
   expect(enqueued).toHaveLength(0);

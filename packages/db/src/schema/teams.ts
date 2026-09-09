@@ -55,6 +55,9 @@ export const teams = pgTable(
       .default("gentle"),
     // Success-state copy shown after preferences are saved.
     unsubscribeSuccessMessage: text("unsubscribe_success_message"),
+    // "Powered by MillionSend" under the page. Default on; on the cloud a free
+    // plan cannot turn it off (the settings router and the page enforce it).
+    unsubscribePoweredBy: boolean("unsubscribe_powered_by").notNull().default(true),
     // Public URL of the uploaded team logo (S3-compatible storage), including a
     // ?v= cache-buster stamped at upload. Null = the initial-letter tile.
     logoUrl: text("logo_url"),

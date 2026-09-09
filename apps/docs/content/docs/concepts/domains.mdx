@@ -89,8 +89,12 @@ shows on the email's timeline and as its own line under the open rate, but it
 never moves the status, never counts in the open rate, and never fires
 `email.opened` (endpoints can opt in to `email.prefetched`). The timing rule's
 window is `OPEN_PREFETCH_WINDOW_SECONDS` for self-hosters (default `10`; `0`
-keeps only the user-agent rules). Links go through the same rules: one a
-security gateway or a link preview followed is a prefetch, not a click.
+keeps only the user-agent rules). Links go through the same rules, plus two
+of their own: a desktop Chrome that reports a build number no browser has sent
+since Chrome's user-agent reduction, and two links of a message hit within a
+quarter of a second, are a machine's whatever they call themselves. A click recorded before
+the rest of its burst arrived is taken back — row, inferred open, counters,
+status and any delivery not yet posted.
 
 A click is also an open. A person cannot click a link in a message they never
 rendered, so a click on an email with no open yet records the open as well,
