@@ -1,6 +1,7 @@
+import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { en } from "../src/account-mail/en.js";
 import { ptBR } from "../src/account-mail/pt-BR.js";
 import {
@@ -133,44 +134,47 @@ describe("accountMailCard", () => {
 });
 
 describe("listTeamOwners", () => {
+  // The PGlite boot belongs in the hook: it has the long timeout, the test does not.
+  let db: Db;
+  let close: () => Promise<void>;
+  beforeAll(async () => {
+    ({ db, close } = await createTestDb());
+  });
+  afterAll(() => close());
+
   it("reads each owner's language off their contact in the account-mail team, English otherwise", async () => {
-    const { db, close } = await createTestDb();
-    try {
-      const teamId = await createTeam(db, "acme");
-      const home = await createTeam(db, "home");
-      await db.insert(schema.domains).values({
-        teamId: home,
-        name: "mail.example.com",
-        region: "us-east-1",
-        status: "verified",
-      });
-      await db.insert(schema.user).values([
-        { id: "u1", name: "Ana", email: "Ana@example.com" },
-        { id: "u2", name: "Bob", email: "bob@example.com" },
-        { id: "u3", name: "Cid", email: "cid@example.com" },
-      ]);
-      await db.insert(schema.teamMembers).values([
-        { teamId, userId: "u1", role: "owner" },
-        { teamId, userId: "u2", role: "owner" },
-        { teamId, userId: "u3", role: "member" },
-      ]);
-      await db.insert(schema.contacts).values([
-        { teamId: home, email: "ana@example.com", properties: { locale: "pt-BR" } },
-        { teamId: home, email: "bob@example.com", properties: { locale: "xx" } },
-      ]);
-      const owners = await listTeamOwners(db, teamId, "MillionSend <account@mail.example.com>");
-      expect(owners.map((o) => [o.email, o.locale]).sort()).toEqual([
-        ["Ana@example.com", "pt-BR"],
-        ["bob@example.com", "en"],
-      ]);
-      // No sender, or a sender no team holds: nothing to read, English.
-      expect((await listTeamOwners(db, teamId)).map((o) => o.locale)).toEqual(["en", "en"]);
-      expect(
-        (await listTeamOwners(db, teamId, "x@nobody.example.com")).map((o) => o.locale),
-      ).toEqual(["en", "en"]);
-    } finally {
-      await close();
-    }
+    const teamId = await createTeam(db, "acme");
+    const home = await createTeam(db, "home");
+    await db.insert(schema.domains).values({
+      teamId: home,
+      name: "mail.example.com",
+      region: "us-east-1",
+      status: "verified",
+    });
+    await db.insert(schema.user).values([
+      { id: "u1", name: "Ana", email: "Ana@example.com" },
+      { id: "u2", name: "Bob", email: "bob@example.com" },
+      { id: "u3", name: "Cid", email: "cid@example.com" },
+    ]);
+    await db.insert(schema.teamMembers).values([
+      { teamId, userId: "u1", role: "owner" },
+      { teamId, userId: "u2", role: "owner" },
+      { teamId, userId: "u3", role: "member" },
+    ]);
+    await db.insert(schema.contacts).values([
+      { teamId: home, email: "ana@example.com", properties: { locale: "pt-BR" } },
+      { teamId: home, email: "bob@example.com", properties: { locale: "xx" } },
+    ]);
+    const owners = await listTeamOwners(db, teamId, "MillionSend <account@mail.example.com>");
+    expect(owners.map((o) => [o.email, o.locale]).sort()).toEqual([
+      ["Ana@example.com", "pt-BR"],
+      ["bob@example.com", "en"],
+    ]);
+    // No sender, or a sender no team holds: nothing to read, English.
+    expect((await listTeamOwners(db, teamId)).map((o) => o.locale)).toEqual(["en", "en"]);
+    expect((await listTeamOwners(db, teamId, "x@nobody.example.com")).map((o) => o.locale)).toEqual(
+      ["en", "en"],
+    );
   });
 });
 
