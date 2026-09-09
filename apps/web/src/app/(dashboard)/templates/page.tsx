@@ -17,6 +17,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, StateCard } from "../emails/list-parts";
 
@@ -27,7 +28,7 @@ function TemplatesHead() {
       <tr>
         <th style={{ width: "64%" }}>{t("list.name")}</th>
         <th className="right">{t("list.updated")}</th>
-        <th className="right" />
+        <th className="right" style={{ width: 44 }} />
       </tr>
     </thead>
   );
@@ -37,7 +38,7 @@ function TemplatesHead() {
 function TemplatesSkeleton() {
   const widths = ["46%", "62%", "38%", "54%", "42%"];
   return (
-    <Table>
+    <Table style={{ tableLayout: "fixed" }}>
       <TemplatesHead />
       <tbody>
         {widths.map((width, row) => (
@@ -131,7 +132,7 @@ export default function TemplatesPage() {
         />
       ) : (
         <>
-          <Table>
+          <Table style={{ tableLayout: "fixed" }}>
             <TemplatesHead />
             <tbody>
               {items.map((row) => {
@@ -139,14 +140,14 @@ export default function TemplatesPage() {
                 return (
                   <tr key={row.id} className="hoverable" onClick={() => router.push(href)}>
                     <td>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                         <NavTile name="templates" color={TONE_COLOR.neutral} />
                         <Link
                           href={href}
-                          style={{ color: "var(--ms-bone)" }}
+                          style={{ color: "var(--ms-bone)", minWidth: 0 }}
                           onClick={(event) => event.stopPropagation()}
                         >
-                          {row.name}
+                          <Truncated text={row.name} />
                         </Link>
                         {row.htmlAuthored ? (
                           <Tooltip inline text={t("list.htmlChipHint")}>

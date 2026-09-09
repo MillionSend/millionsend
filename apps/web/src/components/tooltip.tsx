@@ -32,10 +32,13 @@ export function Tooltip({
   text,
   children,
   inline = false,
+  triggerClassName,
 }: {
   text: React.ReactNode;
   children?: React.ReactNode;
   inline?: boolean;
+  /** Extra class on the inline trigger, for a trigger that must take its parent's width. */
+  triggerClassName?: string;
 }) {
   const t = useTranslations("common");
   const [hover, setHover] = useState(false);
@@ -102,7 +105,16 @@ export function Tooltip({
     <>
       {inline ? (
         // biome-ignore lint/a11y/noNoninteractiveTabindex: focus is how keyboard users reach the stamp; a button here would swallow the row's click
-        <span ref={setTrigger} className="ms-tooltip-trigger inline" tabIndex={0} {...hoverProps}>
+        <span
+          ref={setTrigger}
+          className={
+            triggerClassName
+              ? `ms-tooltip-trigger inline ${triggerClassName}`
+              : "ms-tooltip-trigger inline"
+          }
+          tabIndex={0}
+          {...hoverProps}
+        >
           {children}
         </span>
       ) : (

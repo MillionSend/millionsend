@@ -1281,6 +1281,20 @@ summary:focus-visible,
   background: none;
 }
 /* Appearance switcher — segmented sun/moon pair; the active side sits raised. */
+/* A cell value that stays on one line; the Truncated component adds the
+   tooltip with the whole text once it is cut. */
+.ms-truncate {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ms-tooltip-trigger.inline.ms-truncate-host {
+  display: block;
+  min-width: 0;
+}
+
 .ms-theme-toggle {
   display: inline-flex;
   gap: 2px;

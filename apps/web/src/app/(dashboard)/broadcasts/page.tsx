@@ -18,6 +18,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { NavTile, TONE_COLOR } from "@/components/status-tile";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, StateCard } from "../emails/list-parts";
 import { type BroadcastStatus, PILL_VARIANT, StatusPill } from "./parts";
@@ -34,7 +35,7 @@ function BroadcastsHead() {
           {t("list.recipients")}
         </th>
         <th className="right">{t("list.created")}</th>
-        <th className="right" />
+        <th className="right" style={{ width: 44 }} />
       </tr>
     </thead>
   );
@@ -44,7 +45,7 @@ function BroadcastsHead() {
 function BroadcastsSkeleton() {
   const widths = ["58%", "42%", "66%", "50%", "38%"];
   return (
-    <Table>
+    <Table style={{ tableLayout: "fixed" }}>
       <BroadcastsHead />
       <tbody>
         {widths.map((width, row) => (
@@ -169,7 +170,8 @@ export default function BroadcastsPage() {
         />
       ) : (
         <>
-          <Table>
+          {/* Fixed layout: the name column keeps its share and the name truncates in it. */}
+          <Table style={{ tableLayout: "fixed" }}>
             <BroadcastsHead />
             <tbody>
               {items.map((row) => {
@@ -180,14 +182,14 @@ export default function BroadcastsPage() {
                 return (
                   <tr key={row.id} className="hoverable" onClick={() => router.push(href)}>
                     <td>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                         <NavTile name="broadcasts" color={TONE_COLOR[PILL_VARIANT[status]]} />
                         <Link
                           href={href}
-                          style={{ color: "var(--ms-bone)" }}
+                          style={{ color: "var(--ms-bone)", minWidth: 0 }}
                           onClick={(event) => event.stopPropagation()}
                         >
-                          {label}
+                          <Truncated text={label} />
                         </Link>
                         {row.htmlAuthored ? (
                           <Tooltip inline text={tTemplates("list.htmlChipHint")}>

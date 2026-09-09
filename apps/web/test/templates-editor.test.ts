@@ -130,9 +130,12 @@ describe("code mode panes", () => {
     expect(out.slice(0, source)).toContain("ms-tpl-code-tabs");
   });
 
-  it("previews in a same-origin, script-less frame so the scroll survives updates", () => {
-    expect(out).toMatch(/<iframe[^>]*sandbox="allow-same-origin"/);
+  it("previews in a same-origin, script-less frame so the scroll survives updates, with links let out", () => {
+    expect(out).toMatch(
+      /<iframe[^>]*sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"/,
+    );
     expect(out).not.toContain("allow-scripts");
+    expect(out).toContain("<base target=&quot;_blank&quot;>");
   });
 });
 
@@ -227,8 +230,9 @@ describe("templates list", () => {
     expect(out.match(/class="ms-chip"[^>]*>HTML</g)).toHaveLength(1);
     // The hint rides a hover tooltip (its panel only exists while open), so
     // the chip sits inside a tooltip trigger, beside the row's name link.
+    // The name stays on one line inside its link, so the chip never wraps under it.
     expect(out).toMatch(
-      /Legacy<\/a><span class="ms-tooltip-trigger inline"[^>]*><span class="ms-chip"/,
+      /<span class="ms-truncate">Legacy<\/span><\/a><span class="ms-tooltip-trigger inline"[^>]*><span class="ms-chip"/,
     );
   });
 });
