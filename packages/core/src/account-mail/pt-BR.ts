@@ -1,4 +1,4 @@
-import type { AccountMailEntry, AccountMailKind } from "../account-mail.js";
+import type { AccountMailEntry, AccountMailKind, MailPhraseKey } from "../account-mail.js";
 
 export const ptBR = {
   welcome: {
@@ -114,7 +114,7 @@ export const ptBR = {
     subject: "Pagamento recusado no plano {plan} de {team}",
     body: [
       "Não conseguimos cobrar o cartão cadastrado do plano {plan} de {team}.",
-      "{retry} Até lá nada muda e o limite diário continua em {cap}. Se as tentativas continuarem falhando, a Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
+      "{retry} Até lá nada muda e {team} continua enviando {cap}. Se as tentativas continuarem falhando, a Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
     ],
     button: "Pagar fatura",
     muted: ["Ou atualize o cartão em Cobrança: {billingUrl}"],
@@ -126,7 +126,7 @@ export const ptBR = {
   "billing.plan_activated": {
     subject: "{team} está no plano {plan}",
     body: [
-      "Sua assinatura está ativa: {team} agora envia até {cap} e-mails por dia, e o que estava retido acima do limite antigo é liberado em minutos.",
+      "Sua assinatura está ativa: {team} agora envia {cap}, e o que estava retido acima do limite antigo é liberado em minutos.",
       "Recibos e faturas vêm da Stripe; a assinatura é gerenciada em Cobrança.",
     ],
     button: "Abrir cobrança",
@@ -134,7 +134,7 @@ export const ptBR = {
   "billing.plan_changed": {
     subject: "{team} mudou de {old} para {new}",
     body: [
-      "A partir de agora {team} envia até {cap} e-mails por dia. Num limite menor, os envios já aceitos não mudam; o que passar do novo limite espera o próximo dia UTC.",
+      "A partir de agora {team} envia {cap}. Num limite menor, os envios já aceitos não mudam; o que passar do novo limite espera o próximo dia UTC.",
       "O rateio aparece na próxima fatura da Stripe.",
     ],
     button: "Abrir cobrança",
@@ -151,7 +151,7 @@ export const ptBR = {
     subject: "O plano {plan} de {team} termina em 3 dias",
     body: [
       "Em {date} {team} volta ao Free: {freeCap} e-mails por dia, e o que passar do limite espera o dia seguinte.",
-      "Retome o plano em Cobrança para manter {cap}.",
+      "Retome o plano em Cobrança para continuar enviando {cap}.",
     ],
     button: "Abrir cobrança",
   },
@@ -164,3 +164,8 @@ export const ptBR = {
     button: "Abrir cobrança",
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
+
+export const ptBRPhrases = {
+  capUpTo: "até {n} e-mails por dia",
+  capNone: "sem limite diário",
+} as const satisfies Record<MailPhraseKey, string>;

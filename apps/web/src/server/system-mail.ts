@@ -193,11 +193,13 @@ export function buildInvitationEmail(input: {
 }
 
 /** One catalog kind, from the account sender, addressed to a person. */
-function accountMail(input: {
+/** One account mail on the shared card; the button opens `path` on this instance unless `url` says elsewhere. */
+export function buildAccountEmail(input: {
   to: string;
   kind: AccountMailKind;
   locale: MailLocale;
   path: string;
+  url?: string | undefined;
   values?: Record<string, string>;
 }): SystemMailMessage {
   return {
@@ -206,7 +208,7 @@ function accountMail(input: {
     ...buildAccountMail({
       kind: input.kind,
       locale: input.locale,
-      url: `${appBaseUrl()}${input.path}`,
+      url: input.url ?? `${appBaseUrl()}${input.path}`,
       ...(input.values ? { values: input.values } : {}),
     }),
     kind: input.kind,
@@ -219,7 +221,7 @@ export function buildWelcomeEmail(input: {
   name: string;
   locale: MailLocale;
 }): SystemMailMessage {
-  return accountMail({
+  return buildAccountEmail({
     to: input.to,
     kind: "welcome",
     locale: input.locale,
@@ -233,7 +235,7 @@ export function buildPasswordChangedEmail(input: {
   to: string;
   locale: MailLocale;
 }): SystemMailMessage {
-  return accountMail({
+  return buildAccountEmail({
     to: input.to,
     kind: "password_changed",
     locale: input.locale,
@@ -254,7 +256,7 @@ export function buildMcpConnectedEmail(input: {
     input.team === "*"
       ? accountMailPhrase({ locale: input.locale, kind: "mcp.connected", key: "allTeams" })
       : input.team;
-  return accountMail({
+  return buildAccountEmail({
     to: input.to,
     kind: "mcp.connected",
     locale: input.locale,

@@ -22,10 +22,14 @@ export {
   type AccountMailKind,
   accountMailPhrase,
   buildAccountMail,
+  formatMailDate,
   isMailLocale,
   MAIL_LOCALES,
   type MailContent,
   type MailLocale,
+  type MailPhraseKey,
+  PLAN_NAME,
+  planCapPhrase,
 } from "./account-mail.js";
 export {
   ACCOUNT_SCORE_WINDOW_DAYS,

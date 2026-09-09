@@ -1,6 +1,7 @@
-import { en } from "./account-mail/en.js";
-import { ptBR } from "./account-mail/pt-BR.js";
+import { en, enPhrases } from "./account-mail/en.js";
+import { ptBR, ptBRPhrases } from "./account-mail/pt-BR.js";
 import { accountMailCard, fillTemplate } from "./html.js";
+import { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
 
 /** The languages account mail is written in; the dashboard's own two. */
 export const MAIL_LOCALES = ["en", "pt-BR"] as const;
@@ -53,6 +54,29 @@ const CATALOGS: Record<MailLocale, Record<AccountMailKind, AccountMailEntry>> = 
   en,
   "pt-BR": ptBR,
 };
+
+export type MailPhraseKey = "capUpTo" | "capNone";
+
+const PHRASES: Record<MailLocale, Record<MailPhraseKey, string>> = {
+  en: enPhrases,
+  "pt-BR": ptBRPhrases,
+};
+
+/** Plan names as the mails say them: the same word in every language. */
+export const PLAN_NAME: Record<Plan, string> = { free: "Free", pro: "Pro", scale: "Scale" };
+
+/** What a plan lets a team send, as a clause: "up to 3,000 emails a day", or the no-cap phrase. */
+export function planCapPhrase(locale: MailLocale, plan: Plan): string {
+  const limit = PLAN_DAILY_LIMIT[plan];
+  return limit === null
+    ? PHRASES[locale].capNone
+    : fillTemplate(PHRASES[locale].capUpTo, { n: limit.toLocaleString(locale) });
+}
+
+/** A calendar date in the reader's language, on the UTC day billing and quotas run on. */
+export function formatMailDate(locale: MailLocale, date: Date): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone: "UTC" }).format(date);
+}
 
 /** A phrase from an entry's `extra`, filled; the caller passes it back in as a value. */
 export function accountMailPhrase(input: {

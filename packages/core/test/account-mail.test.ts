@@ -5,9 +5,12 @@ import { en } from "../src/account-mail/en.js";
 import { ptBR } from "../src/account-mail/pt-BR.js";
 import {
   ACCOUNT_MAIL_KINDS,
+  type AccountMailEntry,
   accountMailPhrase,
   buildAccountMail,
+  formatMailDate,
   MAIL_LOCALES,
+  planCapPhrase,
 } from "../src/account-mail.js";
 import { accountMailCard } from "../src/html.js";
 import { listTeamOwners } from "../src/notifications.js";
@@ -68,8 +71,8 @@ describe("account mail catalogs", () => {
   it("carries the same slots in pt-BR as in en, entry by entry", () => {
     const slots = (s: string) => [...s.matchAll(/\{\w+\}/g)].map((m) => m[0]).sort();
     for (const kind of ACCOUNT_MAIL_KINDS) {
-      const a = en[kind];
-      const b = ptBR[kind];
+      const a: AccountMailEntry = en[kind];
+      const b: AccountMailEntry = ptBR[kind];
       expect(slots(b.subject), `${kind} subject`).toEqual(slots(a.subject));
       expect(slots(b.body.join(" ")), `${kind} body`).toEqual(slots(a.body.join(" ")));
       expect(Object.keys(b.extra ?? {}).sort(), `${kind} extra`).toEqual(
@@ -166,5 +169,17 @@ describe("listTeamOwners", () => {
     } finally {
       await close();
     }
+  });
+});
+
+describe("billing phrases", () => {
+  it("say a plan's cap as a clause and a date on its UTC day, each in the reader's language", () => {
+    expect(planCapPhrase("en", "pro")).toBe("up to 3,000 emails a day");
+    expect(planCapPhrase("pt-BR", "pro")).toBe("até 3.000 e-mails por dia");
+    expect(planCapPhrase("en", "scale")).toBe("with no daily cap");
+    expect(planCapPhrase("pt-BR", "scale")).toBe("sem limite diário");
+    const lateUtc = new Date("2026-09-30T23:30:00Z");
+    expect(formatMailDate("en", lateUtc)).toBe("September 30, 2026");
+    expect(formatMailDate("pt-BR", lateUtc)).toBe("30 de setembro de 2026");
   });
 });

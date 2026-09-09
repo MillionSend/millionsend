@@ -1,4 +1,4 @@
-import type { AccountMailEntry, AccountMailKind } from "../account-mail.js";
+import type { AccountMailEntry, AccountMailKind, MailPhraseKey } from "../account-mail.js";
 
 export const en = {
   welcome: {
@@ -114,7 +114,7 @@ export const en = {
     subject: "Payment failed for {team}'s {plan} plan",
     body: [
       "We couldn't charge the card on file for {team}'s {plan} plan.",
-      "{retry} Until then nothing changes and the daily cap stays at {cap}. If the retries keep failing, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
+      "{retry} Until then nothing changes and {team} keeps sending {cap}. If the retries keep failing, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
     ],
     button: "Pay the invoice",
     muted: ["Or update the card from Billing: {billingUrl}"],
@@ -126,7 +126,7 @@ export const en = {
   "billing.plan_activated": {
     subject: "{team} is on {plan}",
     body: [
-      "Your subscription is active: {team} now sends up to {cap} emails a day, and anything parked over the old cap is released within minutes.",
+      "Your subscription is active: {team} now sends {cap}, and anything parked over the old cap is released within minutes.",
       "Receipts and invoices come from Stripe; the subscription is managed from Billing.",
     ],
     button: "Open billing",
@@ -134,7 +134,7 @@ export const en = {
   "billing.plan_changed": {
     subject: "{team} moved from {old} to {new}",
     body: [
-      "From now on {team} sends up to {cap} emails a day. On a lower cap, sends already accepted are unaffected; anything over the new cap waits for the next UTC day.",
+      "From now on {team} sends {cap}. On a lower cap, sends already accepted are unaffected; anything over the new cap waits for the next UTC day.",
       "Proration shows on the next Stripe invoice.",
     ],
     button: "Open billing",
@@ -151,7 +151,7 @@ export const en = {
     subject: "{team}'s {plan} plan ends in 3 days",
     body: [
       "On {date} {team} returns to Free: {freeCap} emails a day, and anything over the cap waits for the next day.",
-      "Resume the plan from Billing to keep {cap}.",
+      "Resume the plan from Billing to keep sending {cap}.",
     ],
     button: "Open billing",
   },
@@ -164,3 +164,9 @@ export const en = {
     button: "Open billing",
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
+
+/** Sentences several kinds share, filled by the builders. */
+export const enPhrases = {
+  capUpTo: "up to {n} emails a day",
+  capNone: "with no daily cap",
+} as const satisfies Record<MailPhraseKey, string>;
