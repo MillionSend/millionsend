@@ -1,4 +1,9 @@
+import { accountEmailFrom } from "@millionsend/config";
 import {
+  type AccountMailKind,
+  accountLocale,
+  accountMailPhrase,
+  buildAccountMail,
   claimNotification,
   clearNotifications,
   DAY_MS,
@@ -6,13 +11,19 @@ import {
   effectivePlan,
   enqueueTeamWebhookDeliveries,
   fetchDeliverabilityHealth,
-  listTeamOwners,
+  formatMailDate,
+  formatMailDateTime,
+  type MailLocale,
   nextUtcDayStart,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   PLAN_DAILY_LIMIT,
+  PLAN_NAME,
+  parseAuditActor,
+  planCapPhrase,
   QUOTA_TOLERANCE,
   resultRows,
+  type SystemMailKind,
   utcDay,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
@@ -23,7 +34,20 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, gt, gte, like, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  like,
+  lt,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   deliverabilityPausedMail,
   deliverabilityWarningMail,
@@ -35,7 +59,7 @@ import {
   webhookBacklogMail,
   webhookFailingMail,
 } from "../notifications/templates.js";
-import type { SystemMailer } from "../system-mail.js";
+import { mailOwners as mailTeamOwners, type SystemMailer } from "../system-mail.js";
 import { COUNTED_SETTLED_SQL, WEBHOOK_AUTO_DISABLE_AFTER } from "./deliver-webhook.js";
 
 export interface NotifyDeps {
@@ -48,6 +72,11 @@ export interface NotifyDeps {
 
 /** Share of the daily quota at which owners hear about it. */
 export const QUOTA_WARNING_RATIO = 0.8;
+/** Days ahead of a scheduled cancellation at which owners are reminded. */
+export const CANCEL_REMINDER_DAYS = 3;
+/** Audit actions owners hear about; rows older than a day are never read. */
+const AUDIT_MAILED = ["api_key.created", "webhook.secret_rotated", "member.joined"] as const;
+type AuditMailed = (typeof AUDIT_MAILED)[number];
 /**
  * A deliverability episode ends only once the 7-day rates are this far under
  * the warning lines: a sender hovering at the line would otherwise be
@@ -156,7 +185,7 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
   // never stops the sweep for the others.
   const attempt = async (
     teamId: string,
-    type: NotificationType,
+    type: SystemMailKind,
     what: string,
     fn: () => Promise<void>,
   ) => {
@@ -166,14 +195,26 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       console.error(`notifications.sweep: ${type} for team ${teamId} failed (${what})`, err);
     }
   };
-  const mailOwners = async (teamId: string, type: NotificationType, mail: MailContent) => {
-    for (const owner of await listTeamOwners(db, teamId)) {
-      await attempt(teamId, type, `mail to ${owner.email}`, () =>
-        deps.mailer.send(owner.email, { ...mail, kind: type }),
-      );
-    }
+  const mailOwners = async (
+    teamId: string,
+    kind: SystemMailKind,
+    mail: MailContent | ((locale: MailLocale) => MailContent),
+    opts?: { except?: string; also?: { email: string; locale: MailLocale } },
+  ) => {
+    await mailTeamOwners(
+      db,
+      deps.mailer,
+      teamId,
+      kind,
+      typeof mail === "function" ? mail : () => mail,
+      opts,
+    );
     sent += 1;
   };
+  const account =
+    (kind: AccountMailKind, path: string, values: (locale: MailLocale) => Record<string, string>) =>
+    (locale: MailLocale) =>
+      buildAccountMail({ kind, locale, url: `${base}${path}`, values: values(locale) });
   const notify = async (
     teamId: string,
     type: Exclude<NotificationType, `webhook.${string}`>,
@@ -374,6 +415,284 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
         ? deliverabilityPausedMail(input)
         : deliverabilityWarningMail(input),
     );
+  }
+
+  // Sender domains: verification gained or lost is an episode per domain,
+  // whichever surface moved it (dashboard, REST, the re-verify sweep). Only
+  // domains that verified at least once take part; a domain that never did
+  // has nothing to lose yet.
+  const domainRows = await db
+    .select({
+      id: schema.domains.id,
+      name: schema.domains.name,
+      teamId: schema.domains.teamId,
+      status: schema.domains.status,
+    })
+    .from(schema.domains)
+    .where(isNotNull(schema.domains.verifiedAt));
+  const domainClaims = await db
+    .select({ teamId: schema.teamNotifications.teamId, kind: schema.teamNotifications.kind })
+    .from(schema.teamNotifications)
+    .where(like(schema.teamNotifications.kind, "domain.%"));
+  const domainClaimed = new Set(domainClaims.map((c) => `${c.teamId}:${c.kind}`));
+  const liveDomains = new Set(domainRows.map((d) => d.id));
+  for (const c of domainClaims) {
+    if (!liveDomains.has(c.kind.slice(c.kind.indexOf(":") + 1))) {
+      await clearNotifications(db, { teamId: c.teamId, kind: c.kind });
+    }
+  }
+  for (const d of domainRows) {
+    const gained = `domain.verified:${d.id}`;
+    const lost = `domain.lost:${d.id}`;
+    const values = () => ({ domain: d.name });
+    if (d.status === "verified") {
+      if (domainClaimed.has(`${d.teamId}:${lost}`)) {
+        await clearNotifications(db, { teamId: d.teamId, kind: lost });
+      }
+      if (await claimNotification(db, { teamId: d.teamId, kind: gained, periodKey: "episode" })) {
+        await mailOwners(
+          d.teamId,
+          "domain.verified",
+          account("domain.verified", `/domains/${d.id}`, values),
+        );
+      }
+      continue;
+    }
+    if (domainClaimed.has(`${d.teamId}:${gained}`)) {
+      await clearNotifications(db, { teamId: d.teamId, kind: gained });
+    }
+    if (await claimNotification(db, { teamId: d.teamId, kind: lost, periodKey: "episode" })) {
+      // SES marks a domain failed for good when its identity is gone or it
+      // gave up on the records; anything else is a record that can come back.
+      const kind = d.status === "failed" ? "domain.lost.identity" : "domain.lost";
+      const path = d.status === "failed" ? "/domains" : `/domains/${d.id}`;
+      await mailOwners(d.teamId, kind, account(kind, path, values));
+    }
+  }
+
+  // Security receipts off the audit trail, one per row. A row for a team
+  // that is gone is skipped by the join; claims for rows that left the
+  // window are dropped, since those rows are never read again.
+  const auditSince = new Date(now.getTime() - DAY_MS);
+  const auditActions = [...AUDIT_MAILED];
+  await db.delete(schema.teamNotifications).where(
+    and(
+      inArray(schema.teamNotifications.kind, auditActions),
+      notInArray(
+        schema.teamNotifications.periodKey,
+        db
+          .select({ id: sql<string>`${schema.auditLog.id}::text` })
+          .from(schema.auditLog)
+          .where(
+            and(
+              inArray(schema.auditLog.action, auditActions),
+              gt(schema.auditLog.createdAt, auditSince),
+            ),
+          ),
+      ),
+    ),
+  );
+  const auditRows = await db
+    .select({
+      id: schema.auditLog.id,
+      teamId: schema.teams.id,
+      team: schema.teams.name,
+      actorId: schema.auditLog.actorId,
+      action: schema.auditLog.action,
+      target: schema.auditLog.target,
+      data: schema.auditLog.data,
+    })
+    .from(schema.auditLog)
+    .innerJoin(schema.teams, eq(schema.teams.id, schema.auditLog.teamId))
+    .where(
+      and(inArray(schema.auditLog.action, auditActions), gt(schema.auditLog.createdAt, auditSince)),
+    )
+    .orderBy(schema.auditLog.createdAt);
+  const from = accountEmailFrom();
+  for (const row of auditRows) {
+    const action = row.action as AuditMailed;
+    if (!(await claimNotification(db, { teamId: row.teamId, kind: action, periodKey: row.id }))) {
+      continue;
+    }
+    await attempt(row.teamId, action, `audit row ${row.id}`, async () => {
+      const targetId = row.target?.slice(row.target.indexOf(":") + 1) ?? "";
+      const data = row.data ?? {};
+      const actor = parseAuditActor(row.actorId);
+      const actorUser =
+        actor.kind === "user"
+          ? (
+              await db
+                .select({ name: schema.user.name, email: schema.user.email })
+                .from(schema.user)
+                .where(eq(schema.user.id, actor.id))
+            )[0]
+          : undefined;
+      const actorLabel = (locale: MailLocale) =>
+        actorUser
+          ? actorUser.name || actorUser.email
+          : accountMailPhrase({
+              locale,
+              kind: "api_key.created",
+              key:
+                actor.kind === "api_key"
+                  ? "apiKeyActor"
+                  : actor.kind === "oauth"
+                    ? "mcpActor"
+                    : "systemActor",
+            });
+      if (action === "api_key.created") {
+        const [key] = await db
+          .select({
+            name: schema.apiKeys.name,
+            prefix: schema.apiKeys.tokenPrefix,
+            last4: schema.apiKeys.last4,
+            permission: schema.apiKeys.permission,
+            domainId: schema.apiKeys.domainId,
+          })
+          .from(schema.apiKeys)
+          .where(eq(schema.apiKeys.id, targetId));
+        if (!key) throw new Error("api key row missing");
+        const [domain] = key.domainId
+          ? await db
+              .select({ name: schema.domains.name })
+              .from(schema.domains)
+              .where(eq(schema.domains.id, key.domainId))
+          : [];
+        await mailOwners(
+          row.teamId,
+          action,
+          account(action, "/api-keys", (locale) => ({
+            team: row.team,
+            actor: actorLabel(locale),
+            name: typeof data.name === "string" ? data.name : key.name,
+            prefix: key.prefix,
+            last4: key.last4,
+            permission: accountMailPhrase({ locale, kind: action, key: key.permission }),
+            scope: domain
+              ? accountMailPhrase({
+                  locale,
+                  kind: action,
+                  key: "scope",
+                  values: { domain: domain.name },
+                })
+              : "",
+          })),
+          actorUser
+            ? {
+                also: {
+                  email: actorUser.email,
+                  locale: await accountLocale(db, from, actorUser.email),
+                },
+              }
+            : undefined,
+        );
+      } else if (action === "webhook.secret_rotated") {
+        const url = typeof data.url === "string" ? data.url : "";
+        const expires =
+          typeof data.previousSecretExpiresAt === "string"
+            ? new Date(data.previousSecretExpiresAt)
+            : null;
+        let host = url;
+        try {
+          host = new URL(url).host;
+        } catch {}
+        await mailOwners(
+          row.teamId,
+          action,
+          account(action, `/webhooks/${targetId}`, (locale) => ({
+            team: row.team,
+            actor: actorLabel(locale),
+            url,
+            host,
+            until: expires
+              ? formatMailDateTime(locale, expires)
+              : accountMailPhrase({ locale, kind: action, key: "immediately" }),
+          })),
+        );
+      } else {
+        const [joiner] = await db
+          .select({ name: schema.user.name, email: schema.user.email })
+          .from(schema.user)
+          .where(eq(schema.user.id, targetId));
+        if (!joiner) throw new Error("joined user missing");
+        const role = typeof data.role === "string" ? data.role : "member";
+        await mailOwners(
+          row.teamId,
+          action,
+          account(action, "/settings", (locale) => ({
+            team: row.team,
+            name: joiner.name || joiner.email,
+            email: joiner.email,
+            role: accountMailPhrase({ locale, kind: action, key: role }),
+          })),
+          { except: joiner.email },
+        );
+      }
+    });
+  }
+
+  if (deps.isCloud) {
+    // Paid plans: a cancellation a few days out, and a period that lapsed
+    // past its grace without Stripe saying so (the day effectivePlan starts
+    // answering free). The downgrade claim is keyed by the period end, the
+    // key the webhook route uses, so whichever notices first is the one.
+    const freeCap = (locale: MailLocale) => (PLAN_DAILY_LIMIT.free ?? 0).toLocaleString(locale);
+    const paid = await db
+      .select({
+        id: schema.teams.id,
+        name: schema.teams.name,
+        plan: schema.teams.plan,
+        currentPeriodEnd: schema.teams.currentPeriodEnd,
+        cancelAt: schema.teams.cancelAt,
+      })
+      .from(schema.teams)
+      .where(ne(schema.teams.plan, "free"));
+    for (const t of paid) {
+      const endsAt = t.cancelAt;
+      if (
+        endsAt &&
+        endsAt.getTime() > now.getTime() &&
+        endsAt.getTime() <= now.getTime() + CANCEL_REMINDER_DAYS * DAY_MS &&
+        (await claimNotification(db, {
+          teamId: t.id,
+          kind: "billing.cancel_reminder",
+          periodKey: endsAt.toISOString(),
+        }))
+      ) {
+        await mailOwners(
+          t.id,
+          "billing.cancel_reminder",
+          account("billing.cancel_reminder", "/settings/billing", (locale) => ({
+            team: t.name,
+            plan: PLAN_NAME[t.plan],
+            date: formatMailDate(locale, endsAt),
+            cap: planCapPhrase(locale, t.plan),
+            freeCap: freeCap(locale),
+          })),
+        );
+      }
+      const periodEnd = t.currentPeriodEnd;
+      if (
+        periodEnd &&
+        effectivePlan(t.plan, periodEnd, now) === "free" &&
+        (await claimNotification(db, {
+          teamId: t.id,
+          kind: "billing.downgraded",
+          periodKey: periodEnd.toISOString(),
+        }))
+      ) {
+        await mailOwners(
+          t.id,
+          "billing.downgraded",
+          account("billing.downgraded", "/settings/billing", (locale) => ({
+            team: t.name,
+            plan: PLAN_NAME[t.plan],
+            date: formatMailDate(locale, periodEnd),
+            freeCap: freeCap(locale),
+          })),
+        );
+      }
+    }
   }
 
   return { sent };

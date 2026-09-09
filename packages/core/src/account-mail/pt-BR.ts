@@ -82,7 +82,7 @@ export const ptBR = {
   "domain.lost.identity": {
     subject: "{domain} perdeu a verificação",
     body: [
-      "A identidade SES de {domain} não existe mais, então os envios são recusados. Adicione o domínio de novo para voltar a enviar.",
+      "O SES desistiu de {domain}: a identidade sumiu ou os registros DKIM ficaram ausentes além da janela de 72 horas. Os envios são recusados; adicione o domínio de novo para voltar a enviar.",
     ],
     button: "Abrir domínios",
   },

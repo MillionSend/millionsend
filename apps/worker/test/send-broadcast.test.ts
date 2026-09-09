@@ -39,6 +39,12 @@ async function seedTeam(
   contacts: (Partial<typeof schema.contacts.$inferInsert> & { email: string })[],
 ): Promise<{ teamId: string; ids: Record<string, string> }> {
   const tId = await createTeam(db, label);
+  await db
+    .insert(schema.user)
+    .values({ id: `${label}-owner`, name: "", email: `${label}-owner@example.com` });
+  await db
+    .insert(schema.teamMembers)
+    .values({ teamId: tId, userId: `${label}-owner`, role: "owner" });
   await db.insert(schema.domains).values({
     teamId: tId,
     name: `${label}.dev`,
@@ -67,6 +73,17 @@ beforeAll(async () => {
   ]));
 });
 afterAll(() => close());
+
+/** Captures the owners' reports; every other test runs without a mailer and mails nothing. */
+function captureMailer() {
+  const sends: { to: string; kind: string; subject: string; text: string }[] = [];
+  const mailer: NonNullable<BroadcastDeps["mailer"]> = {
+    send: async (to, m) => {
+      sends.push({ to, kind: m.kind, subject: m.subject, text: m.text });
+    },
+  };
+  return { sends, mailer, appBaseUrl: BASE_URL };
+}
 
 function makeDeps(overrides: Partial<BroadcastDeps> = {}): {
   deps: BroadcastDeps;
@@ -125,9 +142,16 @@ const emailsOf = (broadcastId: string) =>
 
 it("a broadcast with no segment or topic fans out to ALL subscribed team contacts, personalizes, and marks sent", async () => {
   const broadcastId = await insertBroadcast();
-  const { deps, enqueued } = makeDeps();
+  const mail = captureMailer();
+  const { deps, enqueued } = makeDeps(mail);
 
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+  // The owners' report: what went out, to how many, with the link.
+  expect(mail.sends.map((s) => [s.to, s.kind, s.subject])).toEqual([
+    ["acme-owner@example.com", "broadcast.sent", '"launch" went out to 2 recipients'],
+  ]);
+  expect(mail.sends[0]?.text).toContain('"launch" was handed to 2 contacts of acme;');
+  expect(mail.sends[0]?.text).toContain(`${BASE_URL}/broadcasts/${broadcastId}`);
 
   const rows = await emailsOf(broadcastId);
   expect(rows.map((r) => r.to[0]).sort()).toEqual(["a@example.com", "b@example.com"]);
@@ -222,9 +246,10 @@ it("suppressed recipients are skipped like unsubscribed ones", async () => {
   await db.delete(schema.contacts).where(eq(schema.contacts.id, extra.id));
 });
 
-it("re-running a fan-out never double-sends: no duplicate rows or jobs", async () => {
+it("re-running a fan-out never double-sends: no duplicate rows, jobs or reports", async () => {
   const broadcastId = await insertBroadcast();
-  const first = makeDeps();
+  const mail = captureMailer();
+  const first = makeDeps(mail);
   expect(await sendBroadcast(db, first.deps, { broadcastId })).toBe("sent");
   expect(first.enqueued).toHaveLength(2);
 
@@ -233,15 +258,16 @@ it("re-running a fan-out never double-sends: no duplicate rows or jobs", async (
     .update(schema.broadcasts)
     .set({ status: "sending" })
     .where(eq(schema.broadcasts.id, broadcastId));
-  const second = makeDeps();
+  const second = makeDeps(mail);
   expect(await sendBroadcast(db, second.deps, { broadcastId })).toBe("sent");
   expect(await emailsOf(broadcastId)).toHaveLength(2);
   // Conflicted rows enqueue nothing — their jobs already exist.
   expect(second.enqueued).toHaveLength(0);
 
   // A completed broadcast is a no-op.
-  const third = makeDeps();
+  const third = makeDeps(mail);
   expect(await sendBroadcast(db, third.deps, { broadcastId })).toBe("skipped");
+  expect(mail.sends.map((s) => s.kind)).toEqual(["broadcast.sent"]);
 });
 
 it("broadcast emails carry RFC 8058 headers through the SES send", async () => {
@@ -367,9 +393,19 @@ it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", 
     teamId: qTeamId,
     from: "Acme <hi@quota.dev>",
   });
-  const { deps, enqueued } = makeDeps({ isCloud: true });
+  const mail = captureMailer();
+  const { deps, enqueued } = makeDeps({ isCloud: true, ...mail });
 
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+  // Anything parked turns the report into the quota notice.
+  expect(mail.sends.map((s) => [s.to, s.subject])).toEqual([
+    ["quota-owner@example.com", '"launch": 1 of 3 recipients are waiting for the quota'],
+  ]);
+  expect(mail.sends[0]?.text).toContain(
+    "2 emails went out; 1 are parked because quota reached its daily quota of 100.",
+  );
+  expect(mail.sends[0]?.text).toContain("after the reset at 00:00 UTC");
+  expect(mail.sends[0]?.text).toContain(`${BASE_URL}/settings/billing`);
 
   const rows = await emailsOf(broadcastId);
   expect(rows).toHaveLength(3);
@@ -924,13 +960,20 @@ it("defers the fan-out while the sender domain's region is held by the platform 
   await db.insert(schema.regionBreakers).values({ region: "us-east-1", paused: true });
   const broadcastId = await insertBroadcast();
   const rescheduled: Date[] = [];
+  const mail = captureMailer();
   const { deps, enqueued } = makeDeps({
     reschedule: async (_id, at) => {
       rescheduled.push(at);
     },
+    ...mail,
   });
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("deferred");
-  expect(rescheduled).toHaveLength(1);
+  // Said once, however many waits the hold lasts.
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("deferred");
+  expect(rescheduled).toHaveLength(2);
+  expect(mail.sends.map((s) => s.subject)).toEqual(['"launch" is on hold']);
+  expect(mail.sends[0]?.text).toContain("Sending from us-east-1 is paused");
+  expect(mail.sends[0]?.text).toContain(`${BASE_URL}/broadcasts/${broadcastId}`);
   expect(enqueued).toEqual([]);
   const [row] = await db
     .select({ status: schema.broadcasts.status })

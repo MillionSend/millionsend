@@ -23,6 +23,7 @@ export {
   accountMailPhrase,
   buildAccountMail,
   formatMailDate,
+  formatMailDateTime,
   isMailLocale,
   MAIL_LOCALES,
   type MailContent,
@@ -201,6 +202,7 @@ export {
   rewriteForTracking,
 } from "./link-tracking.js";
 export {
+  accountLocale,
   claimNotification,
   clearNotifications,
   listTeamOwners,

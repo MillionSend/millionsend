@@ -82,7 +82,7 @@ export const en = {
   "domain.lost.identity": {
     subject: "{domain} lost its verification",
     body: [
-      "The SES identity for {domain} no longer exists, so sends from it are refused. Add the domain again to keep sending from it.",
+      "SES has given up on {domain}: its identity is gone, or its DKIM records stayed missing past the 72-hour window. Sends from it are refused; add the domain again to keep sending from it.",
     ],
     button: "Open domains",
   },

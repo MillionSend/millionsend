@@ -77,3 +77,20 @@ export async function listTeamOwners(
     locale: isMailLocale(row.locale) ? row.locale : "en",
   }));
 }
+
+/** The language the instance knows for one address, read the same way; English when it knows none. */
+export async function accountLocale(
+  db: Db,
+  accountMailFrom: string | null | undefined,
+  email: string,
+): Promise<MailLocale> {
+  const home = accountMailFrom ? await findSenderDomainOwner(db, accountMailFrom) : null;
+  if (!home) return "en";
+  const c = schema.contacts;
+  const [row] = await db
+    .select({ locale: sql<string | null>`${c.properties}->>'locale'` })
+    .from(c)
+    .where(and(eq(c.teamId, home.teamId), sql`lower(${c.email}) = lower(${email})`))
+    .limit(1);
+  return isMailLocale(row?.locale) ? row.locale : "en";
+}

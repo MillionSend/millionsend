@@ -78,6 +78,16 @@ export function formatMailDate(locale: MailLocale, date: Date): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone: "UTC" }).format(date);
 }
 
+/** A moment in the reader's language, said in UTC so two readers agree on it. */
+export function formatMailDateTime(locale: MailLocale, date: Date): string {
+  const at = new Intl.DateTimeFormat(locale, {
+    dateStyle: "long",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(date);
+  return `${at} UTC`;
+}
+
 /** A phrase from an entry's `extra`, filled; the caller passes it back in as a value. */
 export function accountMailPhrase(input: {
   locale: MailLocale;

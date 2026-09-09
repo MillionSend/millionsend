@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
+  type AccountMailKind,
   applyMergeFields,
   broadcastSendSpacingMs,
+  buildAccountMail,
   buildUnsubscribeHeaders,
+  claimNotification,
   encryptEmailBody,
   fetchDeliverabilityHealth,
   fetchEffectivePlan,
@@ -10,7 +13,9 @@ import {
   injectPreheader,
   isSubscribedToTopic,
   type Keyring,
+  type MailLocale,
   makeUnsubscribeToken,
+  nextUtcDayStart,
   PLAN_DAILY_LIMIT,
   parseSingleSender,
   regionPause,
@@ -22,6 +27,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { EmailSendRequest, EnqueueEmailSends } from "@millionsend/queue";
 import { and, asc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
+import { mailOwners, type SystemMailer } from "../system-mail.js";
 
 /**
  * Fans a broadcast out into individual email rows and email.send jobs — the
@@ -52,6 +58,42 @@ export interface BroadcastDeps {
    */
   signal?: AbortSignal | undefined;
   batchSize?: number | undefined;
+  /** Owners hear when the broadcast went out or is held; absent = silent (tests). */
+  mailer?: SystemMailer | undefined;
+  /** Dashboard origin for the links in those mails. */
+  appBaseUrl?: string | undefined;
+}
+
+/**
+ * One report to the owners about a broadcast; never throws, the fan-out's
+ * outcome stands whatever the mail does.
+ */
+async function report(
+  db: Db,
+  deps: BroadcastDeps,
+  broadcast: { id: string; teamId: string },
+  kind: AccountMailKind,
+  path: string,
+  values: (locale: MailLocale, team: string) => Record<string, string>,
+): Promise<void> {
+  if (!deps.mailer) return;
+  try {
+    const [team] = await db
+      .select({ name: schema.teams.name })
+      .from(schema.teams)
+      .where(eq(schema.teams.id, broadcast.teamId));
+    if (!team) return;
+    await mailOwners(db, deps.mailer, broadcast.teamId, kind, (locale) =>
+      buildAccountMail({
+        kind,
+        locale,
+        url: `${deps.appBaseUrl ?? ""}${path}`,
+        values: values(locale, team.name),
+      }),
+    );
+  } catch (err) {
+    console.error(`broadcast ${broadcast.id}: ${kind} mail skipped`, err);
+  }
 }
 
 export type BroadcastOutcome = "sent" | "skipped" | "deferred";
@@ -122,6 +164,28 @@ export async function sendBroadcast(
   // Platform breaker: a broadcast scheduled before its region was held waits
   // it out like a not-yet-due one; the reconcile sweep keeps it alive.
   if (await regionPause(db, domain.region)) {
+    // Said once per broadcast, however many 15-minute waits the hold lasts.
+    if (
+      deps.mailer &&
+      (await claimNotification(db, {
+        teamId: broadcast.teamId,
+        kind: `broadcast.held:${broadcast.id}`,
+        periodKey: "region",
+      }))
+    ) {
+      await report(
+        db,
+        deps,
+        broadcast,
+        "broadcast.held",
+        `/broadcasts/${broadcast.id}`,
+        (_, team) => ({
+          name: broadcast.name ?? broadcast.subject,
+          region: domain.region,
+          team,
+        }),
+      );
+    }
     await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));
     return "deferred";
   }
@@ -374,7 +438,7 @@ export async function sendBroadcast(
     }
   }
 
-  await db
+  const [done] = await db
     .update(schema.broadcasts)
     .set({
       status: "sent",
@@ -384,6 +448,62 @@ export async function sendBroadcast(
       // join the emails table to size a broadcast.
       recipientCount: sql`(select count(*)::int from ${schema.emails} where ${schema.emails.broadcastId} = ${broadcast.id})`,
     })
-    .where(and(eq(schema.broadcasts.id, broadcast.id), eq(schema.broadcasts.status, "sending")));
+    .where(and(eq(schema.broadcasts.id, broadcast.id), eq(schema.broadcasts.status, "sending")))
+    .returning({ recipientCount: schema.broadcasts.recipientCount });
+  // The report follows the flip and is claimed per broadcast, so a walk that
+  // resumed after a crash or a reconcile re-kick reports once.
+  if (
+    done &&
+    deps.mailer &&
+    (await claimNotification(db, {
+      teamId: broadcast.teamId,
+      kind: "broadcast.sent",
+      periodKey: broadcast.id,
+    }))
+  ) {
+    const count = done.recipientCount ?? 0;
+    const [{ parked } = { parked: 0 }] = await db
+      .select({ parked: sql<number>`count(*)::int` })
+      .from(schema.emails)
+      .where(
+        and(
+          eq(schema.emails.broadcastId, broadcast.id),
+          eq(schema.emails.latestStatus, "queued_quota"),
+        ),
+      );
+    const name = broadcast.name ?? broadcast.subject;
+    if (parked > 0) {
+      await report(
+        db,
+        deps,
+        broadcast,
+        "broadcast.held_quota",
+        "/settings/billing",
+        (locale, team) => ({
+          name,
+          team,
+          count: count.toLocaleString(locale),
+          parked: parked.toLocaleString(locale),
+          sent: (count - parked).toLocaleString(locale),
+          limit: (dailyLimit ?? 0).toLocaleString(locale),
+          resetsAt: nextUtcDayStart(Date.now()).toISOString().slice(11, 16),
+        }),
+      );
+    } else {
+      await report(
+        db,
+        deps,
+        broadcast,
+        "broadcast.sent",
+        `/broadcasts/${broadcast.id}`,
+        (locale, team) => ({
+          name,
+          subject: broadcast.subject,
+          team,
+          count: count.toLocaleString(locale),
+        }),
+      );
+    }
+  }
   return "sent";
 }

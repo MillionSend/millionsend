@@ -391,6 +391,8 @@ await queue.work(
         enqueueEmailSends: enqueueSends,
         reschedule: (broadcastId, at) => enqueueBroadcast(broadcastId, at),
         signal: ctx.signal,
+        mailer,
+        appBaseUrl: env.APP_BASE_URL,
       },
       payload,
     );
