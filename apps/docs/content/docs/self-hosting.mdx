@@ -156,10 +156,10 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PORTAL_CONFIG` | Hosted cloud only; ignored when `IS_CLOUD=false`. Stripe API key, the signing secret of the webhook endpoint at `/api/billing/webhook`, and an optional customer-portal configuration id. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials for "Continue with Google". The button appears only when both are set. Callback URL: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Same, for GitHub. Callback URL: `{APP_BASE_URL}/api/auth/callback/github`. |
-| `AUTH_EMAIL_FROM` | Sender for account emails (password reset, email verification), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery and sign-up verification only exist when this is set and SES credentials are configured — leave unset to skip both. Verify its domain in a team under **Domains** and those emails are logged there, with new accounts as its contacts (see [Account mail](#account-mail-contacts-and-product-updates)). |
+| `AUTH_EMAIL_FROM` | Sender for the emails to a person about their own account (password reset, email verification, the welcome, a password-changed receipt, an app granted access), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery and sign-up verification only exist when this is set and SES credentials are configured — leave unset to skip both. Verify its domain in a team under **Domains** and those emails are logged there, with new accounts as its contacts (see [Account mail](#account-mail-contacts-and-product-updates)). |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys, both or neither. When set, sign-in, sign-up, password reset and the onboarding "Send email" button verify a challenge token (invisible or managed widgets both work). Unset, every form runs without a captcha. |
 | `ONBOARDING_EMAIL_FROM` | Shared sender for the onboarding "Send email" button and snippet, as `Name <user@domain>` or a bare address on a domain verified in this SES account. Any team may send from it, but only to members who verified their address (where the instance verifies), and always with this exact display name. Leave unset to hide the button; the snippet then asks for the team's own domain. |
-| `NOTIFICATIONS_EMAIL_FROM` | Sender for account notifications to team owners (daily quota nearly or fully used, bounce/complaint rates at risk or paused) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. Verify its domain in a team to log these emails there. |
+| `NOTIFICATIONS_EMAIL_FROM` | Sender for the notices to team owners (daily quota, bounce/complaint rates, a domain verifying or losing its records, a new API key, a rotated webhook secret, a member joining, a broadcast that went out or is held, billing on the cloud) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. Verify its domain in a team to log these emails there. |
 
 ### Worker sizing
 
@@ -607,9 +607,23 @@ you have opened signup deliberately.
 
 ## Account mail, contacts and product updates
 
-MillionSend's own emails — password resets, email verification, team
-invitations, and the quota and deliverability notices to team owners — go out
-from `AUTH_EMAIL_FROM` and `NOTIFICATIONS_EMAIL_FROM`. Verify the sender's
+MillionSend's own emails go out from `AUTH_EMAIL_FROM` and
+`NOTIFICATIONS_EMAIL_FROM`. To a person, about their account: password
+resets, email verification, a welcome once the address is theirs, a receipt
+when a password reset goes through, and one when an MCP app is granted
+access — sent from the request itself. To a team's owners: team invitations,
+the quota and deliverability notices, a domain that verified or lost a
+record (a domain SES gave up on says to add it again), a new API key (also
+to whoever created it), a rotated webhook secret with the old secret's
+deadline, a member who joined, a broadcast that went out — or is waiting for
+the daily quota, or held while its region is paused — and, on the cloud, a
+plan activated, moved or ended, a scheduled cancellation with a reminder
+three days out, and a failed charge. Owner notices come from the
+notification sweep, so they arrive within ten minutes of the change; each is
+written in the language of the reader's contact in the team that holds the
+sender's domain (the row sign-up enrolls, below), else English.
+
+Verify the sender's
 domain under **Domains** in a team, and from then on those emails are logged
 and measured in that team like any other: they appear in its Emails list with
 a `millionsend_system` tag, count in its Metrics, and its Suppressions fill in
@@ -648,6 +662,10 @@ credentials are configured — the same condition as password recovery. A
 password sign-up gets no session until the emailed link is opened; accounts
 from before verify at their next sign-in. Where the instance verifies, the
 onboarding sender only reaches members who did.
+
+On an instance upgrading to this release, domains already verified and
+day-old audit rows are marked as told, but a domain that is demoted at the
+moment of the upgrade is reported as lost on the first sweep.
 
 Nothing on a self-hosted instance contacts millionsend.com on its own. The
 setup wizard offers, once and interactively, to subscribe the operator's
