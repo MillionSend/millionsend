@@ -164,7 +164,7 @@ describe("quota release", () => {
       limit: 100,
       day: "2026-08-14",
     });
-    expect(again).toEqual({ reserved: true, acceptedToday: 100 });
+    expect(again).toEqual({ reserved: true, accepted: 100, ceiling: 150 });
     await releaseDailyQuota(db, { teamId: t, count: 500, day: "2026-08-14" });
     const afterFloor = await reserveDailyQuota(db, {
       teamId: t,
@@ -172,7 +172,7 @@ describe("quota release", () => {
       limit: 100,
       day: "2026-08-14",
     });
-    expect(afterFloor).toEqual({ reserved: true, acceptedToday: 1 });
+    expect(afterFloor).toEqual({ reserved: true, accepted: 1, ceiling: 150 });
   });
 
   it("passes sends up to the tolerance past the nominal limit, then parks", async () => {
@@ -180,15 +180,18 @@ describe("quota release", () => {
     const day = "2026-08-15";
     expect(await reserveDailyQuota(db, { teamId: t, count: 100, limit: 100, day })).toEqual({
       reserved: true,
-      acceptedToday: 100,
+      accepted: 100,
+      ceiling: 150,
     });
     expect(await reserveDailyQuota(db, { teamId: t, count: 50, limit: 100, day })).toEqual({
       reserved: true,
-      acceptedToday: 150,
+      accepted: 150,
+      ceiling: 150,
     });
     expect(await reserveDailyQuota(db, { teamId: t, count: 1, limit: 100, day })).toEqual({
       reserved: false,
-      acceptedToday: 150,
+      accepted: 150,
+      ceiling: 150,
     });
   });
 });

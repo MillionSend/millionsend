@@ -246,6 +246,13 @@
       "when": 1788921184349,
       "tag": "0034_mail_opt_outs",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1789043149223,
+      "tag": "0035_pricing_ladder",
+      "breakpoints": true
     }
   ]
 }

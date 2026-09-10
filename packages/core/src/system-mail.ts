@@ -92,9 +92,8 @@ const warnedSenders = new Set<string>();
  *
  * When a team owns the sender's verified domain the message rides the same
  * accept pipeline as customer mail into that team — emails row, quota
- * counters, SES events by tag, webhooks — under plan `scale`: the limit is
- * null while `accepted` still counts, and a parked password reset would
- * expire before the quota freed. Topic-less, so a recipient's one-click
+ * counters, SES events by tag, webhooks — uncapped: `accepted` still
+ * counts, but a parked password reset would expire before any quota freed. Topic-less, so a recipient's one-click
  * unsubscribe never blocks account mail (the hosted page promises exactly
  * that) while hard bounces, complaints and manual suppressions still apply.
  *
@@ -123,7 +122,7 @@ export async function sendSystemMail(
   try {
     result = await acceptEmail(
       deps,
-      { teamId: owner.teamId, plan: "scale", apiKeyId: null },
+      { teamId: owner.teamId, billing: "uncapped", apiKeyId: null },
       {
         from: message.from,
         to: [message.to],

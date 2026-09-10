@@ -365,6 +365,9 @@ importers:
 
   packages/billing:
     dependencies:
+      '@millionsend/core':
+        specifier: workspace:*
+        version: link:../core
       '@millionsend/db':
         specifier: workspace:*
         version: link:../db

@@ -101,6 +101,7 @@ describe("system.sesAccount", () => {
       sendingEnabled: true,
       productionAccess: false,
       quota: { max24h: 200, sentLast24h: 3, maxSendRate: 1 },
+      committedPerDay: null,
     });
   });
 

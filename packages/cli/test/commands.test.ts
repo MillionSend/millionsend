@@ -159,7 +159,7 @@ describe("millionsend migrate", () => {
         "On Resend you sent 41,208 emails in the last 30 days (~1,374/day).",
       );
       expect(stdout.replace(/\n/g, " ")).toContain(
-        "Free allows 100/day; Pro (3,000/day, 20 domains) fits.",
+        "Free allows 3,000/month; Starter (45,000/month, 10 domains) fits.",
       );
       expect(stdout).toContain("https://app.example.test/settings/billing");
       expect(stdout).toContain("again right before cutover");
@@ -194,7 +194,7 @@ describe("millionsend migrate", () => {
       expect(report.dns.map((d) => d.domain).sort()).toEqual(["example.com", "news.example.com"]);
       expect(report.dns[0]?.records.some((r) => r.record === "DKIM")).toBe(true);
       expect(report.apiKeys).toEqual(["Production", "Staging"]);
-      expect(report.offer?.fits).toBe("pro");
+      expect(report.offer?.fits).toBe("starter");
       expect(report.freshWebhookSecrets).toEqual([]);
       const md = readFileSync(paths.reportMd, "utf8");
       expect(md).toContain("### DNS records for example.com");

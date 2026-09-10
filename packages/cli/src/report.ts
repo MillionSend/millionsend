@@ -54,15 +54,33 @@ export interface Report {
   trademark: string;
 }
 
-/** Mirror of packages/core/src/plans.ts PLAN_DAILY_LIMIT / PLAN_DOMAIN_LIMIT; null = unlimited. */
-const PLANS: { id: string; perDay: number | null; domains: number | null }[] = [
-  { id: "free", perDay: 100, domains: 3 },
-  { id: "pro", perDay: 3000, domains: 20 },
-  { id: "scale", perDay: null, domains: 100 },
+interface PlanRow {
+  id: string;
+  label: string;
+  /** Emails a rung lets through in 30 days: a daily cap times 30, or the monthly volume; null = unlimited. */
+  perMonth: number | null;
+  domains: number | null;
+}
+
+/** Above the top rung the volume still fits: the rest bills as overage. */
+const TOP: PlanRow = { id: "scale", label: "Scale 2.5M", perMonth: 2_500_000, domains: null };
+
+/** Mirror of packages/core/src/plans.ts PLAN_RUNGS / PLAN_DOMAIN_LIMIT, cheapest first. */
+const PLANS: PlanRow[] = [
+  { id: "free", label: "Free", perMonth: 3_000, domains: 3 },
+  { id: "starter", label: "Starter", perMonth: 45_000, domains: 10 },
+  { id: "pro", label: "Pro 100k", perMonth: 100_000, domains: null },
+  { id: "pro", label: "Pro 200k", perMonth: 200_000, domains: null },
+  { id: "scale", label: "Scale 500k", perMonth: 500_000, domains: null },
+  { id: "scale", label: "Scale 1M", perMonth: 1_000_000, domains: null },
+  { id: "scale", label: "Scale 1.5M", perMonth: 1_500_000, domains: null },
+  TOP,
 ];
 
-const perDayText = (n: number | null): string =>
-  n === null ? "unlimited" : `${formatNumber(n)}/day`;
+const perMonthText = (n: number | null): string =>
+  n === null ? "unlimited" : `${formatNumber(n)}/month`;
+const domainsText = (n: number | null): string =>
+  n === null ? "unlimited domains" : pluralize(n, "domain");
 
 function buildOffer(
   usage: TargetUsage,
@@ -73,22 +91,28 @@ function buildOffer(
   if (!usage.cloud || usage.plan === null) return null;
   const sent = snapshot.metrics.emailsLast30Days;
   const perDay = sent === null ? null : Math.ceil(sent / 30);
-  const current = PLANS.find((p) => p.id === usage.plan) ?? {
+  const included = usage.limits.emailsPerMonth;
+  const current: PlanRow = PLANS.find(
+    (p) => p.id === usage.plan && (included === null || p.perMonth === included),
+  ) ?? {
     id: usage.plan,
-    perDay: usage.limits.emailsPerDay,
+    label: capitalize(usage.plan),
+    perMonth:
+      included ?? (usage.limits.emailsPerDay === null ? null : usage.limits.emailsPerDay * 30),
     domains: usage.limits.domains,
   };
-  const label = capitalize(current.id);
   const url =
     usage.appUrl === null
       ? CLOUD_BILLING_URL
       : `${usage.appUrl.replace(/\/+$/, "")}/settings/billing`;
   const short: string[] = [];
-  if (perDay !== null && current.perDay !== null && perDay > current.perDay) {
-    short.push(`${label} allows ${perDayText(current.perDay)}`);
-  }
+  const over = sent !== null && current.perMonth !== null && sent > current.perMonth;
+  const volumeShort = over && !usage.period?.overageEnabled;
+  if (volumeShort) short.push(`${current.label} allows ${perMonthText(current.perMonth)}`);
   if (current.domains !== null && domains > current.domains) {
-    short.push(`${label} allows ${pluralize(current.domains, "domain")}, you have ${domains}`);
+    short.push(
+      `${current.label} allows ${pluralize(current.domains, "domain")}, you have ${domains}`,
+    );
   }
   if (short.length === 0 && sent === null) return null;
   const text: string[] = [];
@@ -99,20 +123,23 @@ function buildOffer(
   }
   let fits: string | null = current.id;
   if (short.length === 0) {
-    text.push(`${label} allows ${perDayText(current.perDay)}; that covers it.`);
+    text.push(
+      over
+        ? `${current.label} includes ${perMonthText(current.perMonth)}; the rest bills as overage.`
+        : `${current.label} allows ${perMonthText(current.perMonth)}; that covers it.`,
+    );
   } else {
     const fit = PLANS.find(
       (p) =>
-        p.id !== current.id &&
-        (p.perDay === null || (perDay ?? 0) <= p.perDay) &&
+        (p.perMonth === null || (sent ?? 0) <= p.perMonth) &&
         (p.domains === null || domains <= p.domains),
     );
-    fits = fit?.id ?? null;
+    fits = fit?.id ?? TOP.id;
+    const spec = (p: PlanRow) =>
+      `${p.label} (${perMonthText(p.perMonth)}, ${domainsText(p.domains)})`;
     text.push(
       `${short.join("; ")}; ${
-        fit
-          ? `${capitalize(fit.id)} (${perDayText(fit.perDay)}, ${pluralize(fit.domains ?? 0, "domain")}) fits.`
-          : "no plan covers that."
+        fit ? `${spec(fit)} fits.` : `${spec(TOP)} is the top rung; emails past it bill as overage.`
       } Upgrade: ${url}`,
     );
   }

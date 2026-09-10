@@ -20,40 +20,16 @@ import { listTeamOwners } from "../src/notifications.js";
 import type { SystemMailKind } from "../src/system-mail.js";
 
 const VALUES: Record<string, string> = Object.fromEntries(
-  [
-    "name",
-    "email",
-    "app",
-    "team",
-    "scopes",
-    "actor",
-    "prefix",
-    "last4",
-    "permission",
-    "scope",
-    "url",
-    "host",
-    "until",
-    "deadline",
-    "role",
-    "domain",
-    "subject",
-    "count",
-    "parked",
-    "sent",
-    "limit",
-    "resetsAt",
-    "region",
-    "plan",
-    "retry",
-    "cap",
-    "freeCap",
-    "billingUrl",
-    "old",
-    "new",
-    "date",
-    "docsUrl",
-  ].map((key) => [key, `[${key}]`]),
+  [...Object.values(en), ...Object.values(ptBR)]
+    .flatMap((e: AccountMailEntry) => [
+      e.subject,
+      ...e.body,
+      e.button,
+      ...(e.muted ?? []),
+      ...Object.values(e.extra ?? {}),
+    ])
+    .flatMap((s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1] as string))
+    .map((key) => [key, `[${key}]`]),
 );
 
 describe("account mail catalogs", () => {
@@ -83,6 +59,11 @@ describe("account mail catalogs", () => {
       expect(Object.keys(b.extra ?? {}).sort(), `${kind} extra`).toEqual(
         Object.keys(a.extra ?? {}).sort(),
       );
+      for (const key of Object.keys(a.extra ?? {})) {
+        expect(slots(b.extra?.[key] ?? ""), `${kind} extra ${key}`).toEqual(
+          slots(a.extra?.[key] ?? ""),
+        );
+      }
     }
   });
 
@@ -201,10 +182,11 @@ describe("listTeamOwners", () => {
 
 describe("billing phrases", () => {
   it("say a plan's cap as a clause and a date on its UTC day, each in the reader's language", () => {
-    expect(planCapPhrase("en", "pro")).toBe("up to 3,000 emails a day");
-    expect(planCapPhrase("pt-BR", "pro")).toBe("até 3.000 e-mails por dia");
-    expect(planCapPhrase("en", "scale")).toBe("with no daily cap");
-    expect(planCapPhrase("pt-BR", "scale")).toBe("sem limite diário");
+    expect(planCapPhrase("en", "starter", null)).toBe("up to 1,500 emails a day");
+    expect(planCapPhrase("pt-BR", "starter", null)).toBe("até 1.500 e-mails por dia");
+    expect(planCapPhrase("en", "pro", 100_000)).toBe("up to 100,000 emails a month");
+    expect(planCapPhrase("pt-BR", "pro", 100_000)).toBe("até 100.000 e-mails por mês");
+    expect(planCapPhrase("en", "scale", 2_500_000)).toBe("up to 2,500,000 emails a month");
     const lateUtc = new Date("2026-09-30T23:30:00Z");
     expect(formatMailDate("en", lateUtc)).toBe("September 30, 2026");
     expect(formatMailDate("pt-BR", lateUtc)).toBe("30 de setembro de 2026");
@@ -217,32 +199,48 @@ describe("planMove", () => {
     plan: "free" | "pro" | "scale",
     periodEnd: string | null,
     cancelAt: string | null = null,
+    planQuota: number | null = null,
   ) => ({
     plan,
+    planQuota,
     currentPeriodEnd: periodEnd ? new Date(periodEnd) : null,
     cancelAt: cancelAt ? new Date(cancelAt) : null,
   });
 
   it("keys an activation and a change by the period the new plan starts, and a downgrade by the period that ended", () => {
-    const up = planMove(row("free", null), row("pro", "2026-10-08T00:00:00Z"), now);
+    const up = planMove(row("free", null), row("pro", "2026-10-08T00:00:00Z", null, 100_000), now);
     expect(up?.kind).toBe("billing.plan_activated");
-    expect(up?.periodKey).toBe("pro:2026-10-08T00:00:00.000Z");
+    expect(up?.periodKey).toBe("pro_100k:2026-10-08T00:00:00.000Z");
     expect(up?.values("en", "Acme")).toEqual({
       team: "Acme",
-      plan: "Pro",
-      cap: "up to 3,000 emails a day",
+      plan: "Pro 100k",
+      cap: "up to 100,000 emails a month",
     });
     const moved = planMove(
-      row("pro", "2026-10-08T00:00:00Z"),
-      row("scale", "2026-10-08T00:00:00Z"),
+      row("pro", "2026-10-08T00:00:00Z", null, 100_000),
+      row("scale", "2026-10-08T00:00:00Z", null, 500_000),
       now,
     );
     expect(moved?.kind).toBe("billing.plan_changed");
-    expect(moved?.periodKey).toBe("pro>scale:2026-10-08T00:00:00.000Z");
+    expect(moved?.periodKey).toBe("pro_100k>scale_500k:2026-10-08T00:00:00.000Z");
     expect(moved?.values("pt-BR", "Acme")).toMatchObject({
-      old: "Pro",
-      new: "Scale",
-      cap: "sem limite diário",
+      old: "Pro 100k",
+      new: "Scale 500k",
+      cap: "até 500.000 e-mails por mês",
+    });
+    // A step between rungs of one plan is a change like any other.
+    const stepped = planMove(
+      row("pro", "2026-10-08T00:00:00Z", null, 100_000),
+      row("pro", "2026-10-08T00:00:00Z", null, 200_000),
+      now,
+    );
+    expect(stepped?.kind).toBe("billing.plan_changed");
+    expect(stepped?.periodKey).toBe("pro_100k>pro_200k:2026-10-08T00:00:00.000Z");
+    expect(stepped?.values("en", "Acme")).toEqual({
+      team: "Acme",
+      old: "Pro 100k",
+      new: "Pro 200k",
+      cap: "up to 200,000 emails a month",
     });
     const down = planMove(row("pro", "2026-09-30T00:00:00Z"), row("free", null), now);
     expect(down?.kind).toBe("billing.downgraded");
@@ -265,7 +263,7 @@ describe("planMove", () => {
       now,
     );
     expect(lapsed?.values("pt-BR", "Acme")).toMatchObject({
-      plan: "Scale",
+      plan: "Scale 500k",
       date: "30 de agosto de 2026",
       freeCap: "100",
     });

@@ -1,9 +1,10 @@
 import { env } from "@millionsend/config";
-import { acceptEmail, fetchEffectivePlan } from "@millionsend/core";
+import { acceptEmail } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { fetchQuotaRow } from "../billing";
 import { getKeyring } from "../keyring";
 import { buildOnboardingEmail, MAIL_LOCALES } from "../onboarding-mail";
 import { router, teamProcedure } from "../trpc";
@@ -72,7 +73,7 @@ export const onboardingRouter = router({
         },
         {
           teamId: ctx.teamId,
-          plan: (await fetchEffectivePlan(ctx.db, ctx.teamId)) ?? "free",
+          billing: await fetchQuotaRow(ctx.db, ctx.teamId),
           apiKeyId: null,
         },
         {

@@ -5,7 +5,12 @@ import {
   SES_MAX_SEND_RATE_DEFAULT,
   trackingSubdomainsSupported,
 } from "@millionsend/config";
-import { getInstanceSettings, pausedRegions, sesEventsHealth } from "@millionsend/core";
+import {
+  committedDailyVolume,
+  getInstanceSettings,
+  pausedRegions,
+  sesEventsHealth,
+} from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import {
   createSesAccountClient,
@@ -175,9 +180,10 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
      */
     sesAccount: teamProcedure.query(async ({ ctx }) => {
       await assertInstanceVisible(ctx);
+      const committed = isCloudDeployment() ? await committedDailyVolume(ctx.db) : null;
       try {
         const overview = await getAccountOverview(deps.accountClient());
-        return { ok: true as const, ...overview };
+        return { ok: true as const, ...overview, committedPerDay: committed };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {

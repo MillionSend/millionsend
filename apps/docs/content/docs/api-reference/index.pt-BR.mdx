@@ -64,8 +64,18 @@ deliberadas e explícitas:
   do remetente se recupera; é por região, não afeta e-mail transacional e
   libera sozinho.
 - `POST /emails` e `POST /emails/batch` retornam `429 daily_quota_exceeded`
-  quando a cota diária de envio acabou e a fila de espera está cheia — tente
-  de novo depois da virada do dia em UTC.
+  em um plano diário (Free, Starter) quando a cota diária de envio acabou e a
+  fila de espera está cheia — tente de novo depois da virada do dia em UTC — e
+  `429 monthly_quota_exceeded` em um plano mensal (Pro, Scale) no volume
+  incluído com o excedente desligado; ative o excedente em Cobrança ou espere
+  o período renovar (a mensagem informa a data). Um lote é aceito ou recusado
+  por inteiro.
+- `GET /usage` existe (o Resend não tem endpoint de uso): o plano efetivo,
+  seus limites (`emails_per_day` em planos diários, `emails_per_month` em
+  planos mensais, `domains`), o total aceito hoje e, em um plano mensal, um
+  objeto `period` — `emails_sent`, `included`, `overage_enabled`,
+  `overage_usd_per_1k`, `starts_at`, `ends_at`. Instâncias auto-hospedadas
+  reportam `cloud: false` com plano, limites e period nulos.
 - `DELETE /emails/{id}` existe (o Resend não tem exclusão de emails).
 - `headers` personalizados seguem uma lista de permitidos: qualquer nome
   `X-*` (exceto `X-SES-*` e `X-MillionSend-*`) mais `In-Reply-To`,

@@ -122,7 +122,8 @@
         "credentials": "AWS rejected the credentials — check <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code>.",
         "unreachable": "SES did not respond — check <code>AWS_REGION</code> and the network path."
       },
-      "disabledHint": "Set your AWS credentials first."
+      "disabledHint": "Set your AWS credentials first.",
+      "committedPerDay": "Committed per day"
     },
     "next": {
       "title": "Next steps",
@@ -165,6 +166,7 @@
   },
   "plans": {
     "free": "Free",
+    "starter": "Starter",
     "pro": "Pro",
     "scale": "Scale"
   },
@@ -263,7 +265,9 @@
     "sent": "Sent",
     "delivered": "Delivered",
     "bounced": "Bounced",
-    "complained": "Complained"
+    "complained": "Complained",
+    "sentThisPeriod": "Emails sent this period",
+    "renewsOn": "Renews on {date}"
   },
   "billing": {
     "plan": "Plan",
@@ -276,23 +280,47 @@
       "canceled": "Canceled",
       "incomplete": "Incomplete"
     },
-    "dailyLimit": "Daily limit",
-    "unlimited": "Unlimited",
-    "perDay": "{limit} emails / day",
+    "cap": "Sending quota",
+    "capPerDay": "{n} emails / day",
+    "capPerMonth": "{n} emails / month",
     "renewsOn": "Renews on",
-    "upgradePro": "Upgrade to Pro",
-    "upgradeScale": "Upgrade to Scale",
     "manage": "Manage billing",
-    "manageHint": "Invoices, payment methods, and plan changes live in the billing portal.",
+    "manageHint": "Plans change here. Invoices, payment method, tax ID and cancellation live in the billing portal.",
     "readOnly": "Only owners and admins can change billing.",
     "pastDue": "Payment failed — update your card to keep your plan.",
     "updateCard": "Update payment method",
-    "usageTitle": "Usage today",
+    "usageTitle": "Usage",
+    "overage": "Overage",
+    "overageCopy": "{price} per 1,000 emails past the quota, billed with the next invoice. Off, sends stop at the quota until the period renews.",
+    "overSoFar": "{n, plural, one {# email} other {# emails}} over quota so far, about {amount}.",
     "plansTitle": "Plans",
+    "volume": "Emails a month",
     "current": "Current",
+    "perMonth": "/ month",
+    "overagePer1k": "{price} per 1,000 past the quota",
+    "noOverage": "No overage: sends past the cap wait for the next day",
+    "choose": "Choose",
+    "switch": "Switch",
+    "freeHint": "To return to Free, cancel in the billing portal; the plan runs until the period ends.",
+    "features": {
+      "domains": "{n, plural, one {# sending domain} other {# sending domains}}",
+      "domainsUnlimited": "Unlimited sending domains",
+      "contacts": "Unlimited contacts, segments and topics",
+      "contactsFairUse": "Unlimited contacts, segments and topics (fair use)",
+      "broadcasts": "Broadcasts with merge fields, templates and code mode",
+      "integrations": "Webhooks, API keys, SMTP relay, MCP server, CLI and SDKs",
+      "teams": "Up to {n} teams",
+      "history": "30 days of request logs and email history",
+      "support": {
+        "free": "Community support",
+        "starter": "Email support",
+        "pro": "Email support",
+        "scale": "Priority email support"
+      }
+    },
     "checkoutSuccess": "Thanks! Your plan updates as soon as Stripe confirms the payment — usually within a few seconds.",
     "checkoutCancel": "Checkout canceled. Your plan is unchanged.",
-    "error": "Could not open Stripe. Try again."
+    "error": "Something went wrong with Stripe. Try again."
   },
   "mcp": {
     "title": "MCP server",
@@ -385,7 +413,9 @@
       "instance.settings_updated": "Updated instance settings",
       "billing.checkout_started": "Started checkout",
       "billing.portal_opened": "Opened billing portal",
-      "billing.subscription_updated": "Subscription changed"
+      "billing.subscription_updated": "Subscription changed",
+      "billing.plan_changed": "Changed plan",
+      "billing.overage_toggled": "Toggled overage billing"
     },
     "empty": "Nothing recorded yet.",
     "loadMore": "Load more",
@@ -424,15 +454,15 @@
       },
       "broadcast_held_quota": {
         "label": "Broadcast waiting for the quota",
-        "note": "Part of a broadcast is parked over the daily cap."
+        "note": "Part of a broadcast is parked over the quota."
       },
       "broadcast_held": {
         "label": "Broadcast on hold",
         "note": "Sending from its region is paused across the platform."
       },
       "quota": {
-        "label": "Daily quota",
-        "note": "Nearing, reaching and running past the day's cap."
+        "label": "Sending quota",
+        "note": "Nearing, reaching and running past your plan's cap."
       },
       "deliverability": {
         "label": "Deliverability",

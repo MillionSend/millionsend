@@ -31,7 +31,9 @@
     "capBanner": {
       "reached": "Limite diário de {limit} e-mails atingido.",
       "queued": "{count} e-mails na fila — serão enviados em {duration}.",
-      "upgrade": "Faça upgrade para o Pro: 3.000/dia →"
+      "upgrade": "Faça upgrade para um limite maior →",
+      "reachedMonth": "Cota mensal de {limit} e-mails atingida.",
+      "queuedMonth": "{count} e-mails na fila — serão enviados quando o período renovar em {date}, ou assim que o excedente for ativado."
     },
     "allDomains": "Todos os domínios"
   },

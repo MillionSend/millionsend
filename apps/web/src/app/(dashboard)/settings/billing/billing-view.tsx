@@ -1,18 +1,29 @@
 "use client";
 
-import { PLAN_DAILY_LIMIT, type Plan } from "@millionsend/core/plans";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  formatVolume,
+  PLAN_DOMAIN_LIMIT,
+  PLAN_RUNGS,
+  PLAN_TEAM_LIMIT,
+  type Plan,
+  type PlanRung,
+  type PlanRungKey,
+  planLabel,
+} from "@millionsend/core/plans";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
+import { Odometer } from "@/components/odometer";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
+import { Switch } from "@/components/switch";
 import { WarnCard } from "@/components/warn-card";
-import { formatDayTime } from "@/lib/format";
+import { formatDay, formatDayTime, formatUsd } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { QuotaRow } from "../usage/usage-view";
 
-const PLANS = ["free", "pro", "scale"] as const satisfies readonly Plan[];
+const PLANS = ["free", "starter", "pro", "scale"] as const satisfies readonly Plan[];
 
 /** Subscription status → badge tone: paying reads healthy, grace warns, lapsed is a danger. */
 const STATUS_TONE = {
@@ -79,12 +90,25 @@ function BillingSkeleton({ title }: { title: string }) {
   );
 }
 
+function Check() {
+  return (
+    <span
+      className="ms-mono"
+      aria-hidden="true"
+      style={{ fontSize: 11, color: "var(--ms-success)", flex: "none", lineHeight: "18px" }}
+    >
+      ✓
+    </span>
+  );
+}
+
 export function BillingView({ checkout }: { checkout: "success" | "cancel" | null }) {
   const t = useTranslations("settings.billing");
   const planName = useTranslations("settings.plans");
   const usageT = useTranslations("settings.usage");
   const locale = useLocale();
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
 
   const status = useQuery({
     ...trpc.billing.status.queryOptions(),
@@ -93,20 +117,35 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         ? POST_CHECKOUT_POLL_MS
         : false,
   });
-  const usage = useQuery(trpc.settings.usage.recent.queryOptions({}));
   const teams = useQuery(trpc.team.list.queryOptions());
   const role = teams.data?.teams.find((m) => m.teamId === teams.data.activeTeamId)?.role;
   const canManage = role === "owner" || role === "admin";
 
   const redirect = { onSuccess: ({ url }: { url: string }) => window.location.assign(url) };
+  // The sidebar meter and the cap banner read usage.recent; team.list carries the plan.
+  const refresh = {
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries(trpc.billing.status.queryFilter()),
+        queryClient.invalidateQueries(trpc.settings.usage.recent.queryFilter()),
+        queryClient.invalidateQueries(trpc.team.list.queryFilter()),
+      ]),
+  };
   const startCheckout = useMutation(trpc.billing.checkout.mutationOptions(redirect));
   const openPortal = useMutation(trpc.billing.portal.mutationOptions(redirect));
-  const busy = startCheckout.isPending || openPortal.isPending;
-  const failed = startCheckout.isError || openPortal.isError;
+  const changePlan = useMutation(trpc.billing.changePlan.mutationOptions(refresh));
+  const setOverage = useMutation(trpc.billing.setOverage.mutationOptions(refresh));
+  const mutations = [startCheckout, openPortal, changePlan, setOverage];
+  const busy = mutations.some((m) => m.isPending);
+  const failed = mutations.some((m) => m.isError);
+
+  // The selector follows the team's own rung until the viewer picks another.
+  const [picked, setPicked] = useState<PlanRungKey | null>(null);
 
   const fmt = new Intl.NumberFormat(locale);
-  const limitLabel = (limit: number | null) =>
-    limit === null ? t("unlimited") : t("perDay", { limit: fmt.format(limit) });
+  const usd = (cents: number) => formatUsd(cents, locale);
+  const capLine = (rung: PlanRung) =>
+    t(rung.period === "day" ? "capPerDay" : "capPerMonth", { n: fmt.format(rung.included) });
 
   const notice =
     checkout === "success" ? (
@@ -151,7 +190,21 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     );
   }
 
-  const { plan, planStatus, currentPeriodEnd, dailyLimit, hasCustomer, canCheckout } = status.data;
+  const {
+    plan,
+    planQuota,
+    rung: currentKey,
+    planStatus,
+    currentPeriodEnd,
+    quota,
+    usage,
+    hasCustomer,
+    hasLiveSubscription,
+  } = status.data;
+  const current = PLAN_RUNGS.find((r) => r.key === currentKey) ?? PLAN_RUNGS[0];
+  const selected = PLAN_RUNGS.find((r) => r.key === picked) ?? current;
+  const over = quota.kind === "month" ? Math.max(0, usage.accepted - quota.included) : 0;
+
   const portalButton = (label: string, className: string) => (
     <button
       type="button"
@@ -164,6 +217,19 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     </button>
   );
 
+  const features = (p: Plan): string[] => {
+    const domains = PLAN_DOMAIN_LIMIT[p];
+    return [
+      domains === null ? t("features.domainsUnlimited") : t("features.domains", { n: domains }),
+      t(p === "free" ? "features.contactsFairUse" : "features.contacts"),
+      t("features.broadcasts"),
+      t("features.integrations"),
+      t("features.teams", { n: PLAN_TEAM_LIMIT[p] }),
+      t("features.history"),
+      t(`features.support.${p}`),
+    ];
+  };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       {notice}
@@ -172,62 +238,34 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         title={t("plan")}
         action={canManage && hasCustomer ? portalButton(t("manage"), "ms-btn-secondary") : null}
       >
-        <div className="ms-wrap-row" style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span
-              className="ms-display"
-              style={{ fontSize: "var(--ms-fs-h1)", color: "var(--ms-bone)", lineHeight: 1 }}
-            >
-              {planName(plan)}
-            </span>
-            {/* Optical: the display face sits a hair low in its line box, so the
-                pill follows its cap height rather than the box center. */}
-            <span
-              className={`ms-badge ms-badge-${STATUS_TONE[planStatus]}`}
-              style={{ position: "relative", top: 1 }}
-            >
-              {t(`status.${planStatus}`)}
-            </span>
-          </div>
-          {canManage && canCheckout ? (
-            <div style={{ marginLeft: "auto", display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {canCheckout ? (
-                <>
-                  <button
-                    type="button"
-                    className="ms-btn ms-btn-primary"
-                    disabled={busy}
-                    onClick={() => startCheckout.mutate({ plan: "pro" })}
-                  >
-                    <BtnSpinner
-                      on={startCheckout.isPending && startCheckout.variables?.plan === "pro"}
-                    />
-                    {t("upgradePro")}
-                  </button>
-                  <button
-                    type="button"
-                    className="ms-btn ms-btn-secondary"
-                    disabled={busy}
-                    onClick={() => startCheckout.mutate({ plan: "scale" })}
-                  >
-                    <BtnSpinner
-                      on={startCheckout.isPending && startCheckout.variables?.plan === "scale"}
-                    />
-                    {t("upgradeScale")}
-                  </button>
-                </>
-              ) : null}
-            </div>
-          ) : null}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span
+            className="ms-display"
+            style={{ fontSize: "var(--ms-fs-h1)", color: "var(--ms-bone)", lineHeight: 1 }}
+          >
+            {planLabel(plan, planQuota)}
+          </span>
+          {/* Optical: the display face sits a hair low in its line box, so the
+              pill follows its cap height rather than the box center. */}
+          <span
+            className={`ms-badge ms-badge-${STATUS_TONE[planStatus]}`}
+            style={{ position: "relative", top: 1 }}
+          >
+            {t(`status.${planStatus}`)}
+          </span>
         </div>
 
         <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 22 }}>
           <div>
             <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
-              {t("dailyLimit")}
+              {t("cap")}
             </div>
             <div style={{ marginTop: 6, color: "var(--ms-bone)", fontSize: "var(--ms-fs-ui)" }}>
-              {dailyLimit === null ? `${t("unlimited")} ∞` : fmt.format(dailyLimit)}
+              {quota.kind === "day"
+                ? t("capPerDay", { n: fmt.format(quota.limit) })
+                : quota.kind === "month"
+                  ? t("capPerMonth", { n: fmt.format(quota.included) })
+                  : null}
             </div>
           </div>
           {currentPeriodEnd && plan !== "free" ? (
@@ -260,51 +298,190 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
       </Card>
 
       <Card title={t("usageTitle")}>
-        {usage.data ? (
+        {quota.kind === "month" ? (
+          <>
+            <QuotaRow
+              label={usageT("sentThisPeriod")}
+              hint={usageT("renewsOn", { date: formatDay(quota.periodEnd, locale) })}
+              used={usage.accepted}
+              limit={quota.included}
+            />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 14,
+                marginTop: 18,
+                paddingTop: 18,
+                borderTop: "1px solid var(--ms-line)",
+              }}
+            >
+              <Switch
+                checked={quota.overage}
+                disabled={!canManage || !hasLiveSubscription || busy}
+                onChange={(enabled) => setOverage.mutate({ enabled })}
+                ariaLabel={t("overage")}
+              />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14, color: "var(--ms-bone)" }}>{t("overage")}</div>
+                <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>
+                  {t("overageCopy", { price: usd(quota.overageCentsPer1k) })}
+                </div>
+                {over > 0 ? (
+                  <div style={{ fontSize: 12.5, color: "var(--ms-bone)", marginTop: 6 }}>
+                    {t("overSoFar", {
+                      n: over,
+                      amount: usd(Math.round((over * quota.overageCentsPer1k) / 1000)),
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </>
+        ) : (
           <QuotaRow
             label={usageT("sentToday")}
             hint={usageT("resetsMidnightUtc")}
-            used={usage.data.today.accepted}
-            limit={usage.data.today.limit}
+            used={usage.accepted}
+            limit={quota.kind === "day" ? quota.limit : null}
           />
-        ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <Skeleton width={40} height={40} radius="50%" />
-            <Skeleton width={110} height="1lh" />
-          </div>
         )}
       </Card>
 
       <Card title={t("plansTitle")}>
         <div
+          className="ms-wrap-row"
+          style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}
+        >
+          <span className="ms-microlabel" style={{ fontSize: 10.5 }}>
+            {t("volume")}
+          </span>
+          <div
+            style={{
+              display: "inline-flex",
+              flexWrap: "wrap",
+              gap: 2,
+              padding: 2,
+              background: "var(--ms-inset)",
+              border: "1px solid var(--ms-line)",
+              borderRadius: "var(--ms-r-pill)",
+            }}
+          >
+            {PLAN_RUNGS.map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                className={r.key === selected.key ? "ms-code-tab active" : "ms-code-tab"}
+                aria-pressed={r.key === selected.key}
+                style={{ borderRadius: "var(--ms-r-pill)" }}
+                onClick={() => setPicked(r.key)}
+              >
+                <span className="ms-digits">
+                  {formatVolume(r.period === "day" ? r.included * 30 : r.included)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
             gap: 12,
           }}
         >
-          {PLANS.map((p) => (
-            <div
-              key={p}
-              style={{
-                padding: "14px 16px",
-                borderRadius: 12,
-                border: `1px solid ${p === plan ? "var(--ms-steel)" : "var(--ms-line)"}`,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span className="ms-display" style={{ fontSize: 16, color: "var(--ms-bone)" }}>
-                  {planName(p)}
-                </span>
-                {p === plan ? (
-                  <span className="ms-badge ms-badge-neutral">{t("current")}</span>
+          {PLANS.map((p) => {
+            // A plan shows the rung the selector landed on when it is one of
+            // its own, else its entry rung.
+            const r =
+              selected.plan === p ? selected : (PLAN_RUNGS.find((x) => x.plan === p) ?? selected);
+            const lit = r.key === selected.key;
+            const isCurrent = r.key === current.key;
+            const forSale = canManage && r.priceCents > 0 && !isCurrent;
+            return (
+              <div
+                key={p}
+                style={{
+                  padding: "16px 18px",
+                  borderRadius: 12,
+                  border: `1px solid ${lit ? "var(--ms-steel)" : "var(--ms-line)"}`,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="ms-display" style={{ fontSize: 16, color: "var(--ms-bone)" }}>
+                    {planName(p)}
+                  </span>
+                  {isCurrent ? (
+                    <span className="ms-badge ms-badge-neutral">{t("current")}</span>
+                  ) : null}
+                </div>
+                <div
+                  className="ms-digits"
+                  style={{ fontSize: 26, color: "var(--ms-bone)", lineHeight: 1 }}
+                >
+                  <Odometer formatted={usd(r.priceCents)} />
+                  <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ms-muted)" }}>
+                    {" "}
+                    {t("perMonth")}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: "var(--ms-bone)" }}>{capLine(r)}</div>
+                <div style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
+                  {r.overageCentsPer1k === null
+                    ? t("noOverage")
+                    : t("overagePer1k", { price: usd(r.overageCentsPer1k) })}
+                </div>
+                <ul
+                  style={{
+                    listStyle: "none",
+                    margin: 0,
+                    padding: 0,
+                    display: "grid",
+                    gap: 6,
+                    fontSize: 12.5,
+                    lineHeight: "18px",
+                    color: "var(--ms-muted)",
+                    flex: 1,
+                  }}
+                >
+                  {features(p).map((f) => (
+                    <li key={f} style={{ display: "flex", gap: 8 }}>
+                      <Check />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                {forSale ? (
+                  <button
+                    type="button"
+                    className={`ms-btn ${lit ? "ms-btn-primary" : "ms-btn-secondary"}`}
+                    disabled={busy}
+                    onClick={() =>
+                      hasLiveSubscription
+                        ? changePlan.mutate({ rung: r.key })
+                        : startCheckout.mutate({ rung: r.key })
+                    }
+                  >
+                    <BtnSpinner
+                      on={
+                        (startCheckout.isPending && startCheckout.variables?.rung === r.key) ||
+                        (changePlan.isPending && changePlan.variables?.rung === r.key)
+                      }
+                    />
+                    {hasLiveSubscription ? t("switch") : t("choose")}
+                  </button>
+                ) : p === "free" && canManage && hasLiveSubscription ? (
+                  <p style={{ margin: 0, fontSize: 12, color: "var(--ms-muted)" }}>
+                    {t("freeHint")}
+                  </p>
                 ) : null}
               </div>
-              <div style={{ marginTop: 6, fontSize: 13, color: "var(--ms-muted)" }}>
-                {limitLabel(PLAN_DAILY_LIMIT[p])}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Card>
     </div>

@@ -14,7 +14,7 @@ import { PageHeader } from "@/components/page-header";
 import { Select } from "@/components/select";
 import { StatusDot } from "@/components/status-badge";
 import { codeRichTags } from "@/lib/code-rich-tags";
-import { formatHoursMinutes } from "@/lib/format";
+import { formatDay, formatHoursMinutes } from "@/lib/format";
 import { manyOf } from "@/lib/list-param";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { statusGlow } from "@/lib/status-glow";
@@ -94,8 +94,16 @@ export default function EmailsPage() {
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
 
-  const capReached =
-    usage.data?.today.limit != null && usage.data.today.accepted >= usage.data.today.limit;
+  // The cap that can stop sends: the billing period's included volume on a
+  // monthly plan (nothing stops it with overage on), today's cap otherwise.
+  const cap = usage.data?.period
+    ? usage.data.period.overage
+      ? null
+      : { limit: usage.data.period.included, accepted: usage.data.period.accepted, monthly: true }
+    : usage.data?.today.limit != null
+      ? { limit: usage.data.today.limit, accepted: usage.data.today.accepted, monthly: false }
+      : null;
+  const capReached = cap !== null && cap.accepted >= cap.limit;
 
   const hasFilters =
     deferredSearch !== "" ||
@@ -158,7 +166,7 @@ export default function EmailsPage() {
         }
       />
 
-      {capReached && usage.data?.today.limit != null ? (
+      {capReached && cap ? (
         <div
           className="ms-wrap-row"
           style={{
@@ -174,14 +182,21 @@ export default function EmailsPage() {
           }}
         >
           <span style={{ fontSize: 13.5, color: "var(--ms-warn)" }}>
-            {t("list.capBanner.reached", { limit: nf.format(usage.data.today.limit) })}
+            {t(cap.monthly ? "list.capBanner.reachedMonth" : "list.capBanner.reached", {
+              limit: nf.format(cap.limit),
+            })}
           </span>
           {stats.data && stats.data.queuedQuota > 0 ? (
             <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
-              {t("list.capBanner.queued", {
-                count: nf.format(stats.data.queuedQuota),
-                duration: formatHoursMinutes(msToUtcMidnight()),
-              })}
+              {cap.monthly && usage.data?.period
+                ? t("list.capBanner.queuedMonth", {
+                    count: nf.format(stats.data.queuedQuota),
+                    date: formatDay(usage.data.period.end, locale),
+                  })
+                : t("list.capBanner.queued", {
+                    count: nf.format(stats.data.queuedQuota),
+                    duration: formatHoursMinutes(msToUtcMidnight()),
+                  })}
             </span>
           ) : null}
           {/* A daily limit exists only on the hosted cloud, so the billing page always exists here. */}

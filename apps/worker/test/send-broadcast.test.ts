@@ -4,6 +4,7 @@ import {
   decryptEmailBody,
   deriveUnsubscribeKey,
   EnvKeyring,
+  formatMailDate,
   hashRecipient,
   utcDay,
   verifyUnsubscribeToken,
@@ -402,7 +403,7 @@ it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", 
     ["quota-owner@example.com", '"launch": 1 of 3 recipients are waiting for the quota'],
   ]);
   expect(mail.sends[0]?.text).toContain(
-    "2 emails went out; 1 are parked because quota reached its daily quota of 100.",
+    "2 emails went out; 1 are parked because quota reached its quota of 100.",
   );
   expect(mail.sends[0]?.text).toContain("after the reset at 00:00 UTC");
   expect(mail.sends[0]?.text).toContain(`${BASE_URL}/settings/billing`);
@@ -421,6 +422,90 @@ it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", 
     .from(schema.usageCounters)
     .where(eq(schema.usageCounters.teamId, qTeamId));
   expect(counter?.accepted).toBe(150);
+});
+
+it("cloud fan-out on a monthly plan parks at the included volume and names the renewal date", async () => {
+  const { teamId: mTeamId } = await seedTeam("monthly", [
+    { email: "m1@example.com" },
+    { email: "m2@example.com" },
+    { email: "m3@example.com" },
+  ]);
+  const periodStart = new Date(Date.now() - 10 * 86_400_000);
+  const periodEnd = new Date(Date.now() + 20 * 86_400_000);
+  await db
+    .update(schema.teams)
+    .set({
+      plan: "pro",
+      planQuota: 100_000,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+    })
+    .where(eq(schema.teams.id, mTeamId));
+  // No tolerance on a monthly plan: one slot left means one of three goes.
+  await db.insert(schema.usagePeriods).values({ teamId: mTeamId, periodStart, accepted: 99_999 });
+  const broadcastId = await insertBroadcast({ teamId: mTeamId, from: "Acme <hi@monthly.dev>" });
+  const mail = captureMailer();
+  const { deps, enqueued } = makeDeps({ isCloud: true, ...mail });
+
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+  expect(mail.sends.map((s) => s.subject)).toEqual([
+    '"launch": 2 of 3 recipients are waiting for the quota',
+  ]);
+  expect(mail.sends[0]?.text).toContain(
+    "1 emails went out; 2 are parked because monthly reached its quota of 100,000.",
+  );
+  expect(mail.sends[0]?.text).toContain(
+    `They go out when the period renews on ${formatMailDate("en", periodEnd)}, as soon as overage is turned on in Billing`,
+  );
+  const rows = await emailsOf(broadcastId);
+  expect(rows.filter((r) => r.latestStatus === "queued")).toHaveLength(1);
+  expect(rows.filter((r) => r.latestStatus === "queued_quota")).toHaveLength(2);
+  expect(enqueued).toHaveLength(1);
+  const [period] = await db
+    .select({ accepted: schema.usagePeriods.accepted })
+    .from(schema.usagePeriods)
+    .where(eq(schema.usagePeriods.teamId, mTeamId));
+  expect(period?.accepted).toBe(100_000);
+});
+
+it("cloud fan-out re-reads the billing period per page, so a renewal mid-walk counts the rest against the new period", async () => {
+  const { teamId: rTeamId } = await seedTeam("renew", [
+    { email: "r1@example.com" },
+    { email: "r2@example.com" },
+  ]);
+  const start = new Date(Date.now() - 10 * 86_400_000);
+  const end = new Date(Date.now() + 20 * 86_400_000);
+  const nextEnd = new Date(Date.now() + 50 * 86_400_000);
+  await db
+    .update(schema.teams)
+    .set({ plan: "pro", planQuota: 100_000, currentPeriodStart: start, currentPeriodEnd: end })
+    .where(eq(schema.teams.id, rTeamId));
+  const broadcastId = await insertBroadcast({ teamId: rTeamId, from: "Acme <hi@renew.dev>" });
+  const { deps } = makeDeps({ isCloud: true });
+  // The renewal webhook lands between the two one-contact pages.
+  const enqueue = deps.enqueueEmailSends;
+  deps.enqueueEmailSends = async (batch) => {
+    await enqueue(batch);
+    await db
+      .update(schema.teams)
+      .set({ currentPeriodStart: end, currentPeriodEnd: nextEnd })
+      .where(eq(schema.teams.id, rTeamId));
+  };
+
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+  expect(
+    await db
+      .select({
+        periodStart: schema.usagePeriods.periodStart,
+        accepted: schema.usagePeriods.accepted,
+      })
+      .from(schema.usagePeriods)
+      .where(eq(schema.usagePeriods.teamId, rTeamId))
+      .orderBy(schema.usagePeriods.periodStart),
+  ).toEqual([
+    { periodStart: start, accepted: 1 },
+    { periodStart: end, accepted: 1 },
+  ]);
 });
 
 async function seedThrottleTeam(

@@ -1,5 +1,13 @@
+import { PAID_RUNGS, PLAN_NAME, type Plan, type PlanRung } from "@millionsend/core";
 import Stripe from "stripe";
-import { PAID_PLANS, type PaidPlan, PLAN_LOOKUP_KEYS, PRODUCT_METADATA_KEY } from "./prices.js";
+import {
+  LEGACY_LOOKUP_KEYS,
+  METER_EVENT_NAME,
+  overageLookupKey,
+  PRODUCT_METADATA_KEY,
+  priceMetadata,
+  rungLookupKey,
+} from "./prices.js";
 
 /** The Stripe surface provisioning touches; the real client satisfies it, tests inject a fake. */
 export interface ProvisionStripe {
@@ -11,6 +19,12 @@ export interface ProvisionStripe {
     list(params: Stripe.PriceListParams): Promise<Stripe.ApiList<Stripe.Price>>;
     create(params: Stripe.PriceCreateParams): Promise<Stripe.Price>;
     update(id: string, params: Stripe.PriceUpdateParams): Promise<Stripe.Price>;
+  };
+  billing: {
+    meters: {
+      list(params: Stripe.Billing.MeterListParams): Promise<Stripe.ApiList<Stripe.Billing.Meter>>;
+      create(params: Stripe.Billing.MeterCreateParams): Promise<Stripe.Billing.Meter>;
+    };
   };
   webhookEndpoints: {
     list(params: Stripe.WebhookEndpointListParams): Promise<Stripe.ApiList<Stripe.WebhookEndpoint>>;
@@ -51,14 +65,10 @@ export const WEBHOOK_EVENTS = [
   "invoice.payment_failed",
 ] as const satisfies readonly Stripe.WebhookEndpointCreateParams.EnabledEvent[];
 
-const PRODUCT_NAMES: Record<PaidPlan, string> = {
-  pro: "MillionSend Pro",
-  scale: "MillionSend Scale",
-};
+/** Plans that are sold: one Stripe product each, holding every rung's prices. */
+export const PAID_PLANS = [...new Set(PAID_RUNGS.map((r) => r.plan))] as Plan[];
 
 export interface ProvisionOptions {
-  /** Monthly price per plan in cents (USD). */
-  amounts: Record<PaidPlan, number>;
   /** Public URL of /api/billing/webhook; omitted = no endpoint (local `stripe listen`). */
   webhookUrl?: string | undefined;
   /** Create/refresh the customer-portal configuration referenced by STRIPE_PORTAL_CONFIG. */
@@ -67,8 +77,12 @@ export interface ProvisionOptions {
 }
 
 export interface ProvisionResult {
-  products: Record<PaidPlan, string>;
-  prices: Record<PaidPlan, string>;
+  products: Record<string, string>;
+  /** Plan price per rung key. */
+  prices: Record<string, string>;
+  /** Metered overage price per monthly rung key. */
+  overagePrices: Record<string, string>;
+  meter: string;
   webhook?: { id: string; secret?: string | undefined } | undefined;
   portalConfiguration?: string | undefined;
 }
@@ -79,19 +93,13 @@ export const DASHBOARD_CHECKLIST = [
   "Business profile: legal name, support email/URL, and the statement descriptor shown on card statements (Settings → Public details).",
   "Branding: logo, icon, and colors used by Checkout, the customer portal, invoices, and emails (Settings → Branding).",
   "Customer emails: turn on successful-payment receipts and failed-payment notices (Settings → Emails).",
+  "Existing subscriptions on an archived price keep it; move each one to its new rung price from the subscription page (no proration, at period end).",
   "Live mode: repeat the provisioning with the live secret key; test and live objects are separate.",
 ] as const;
 
-/** Cents from a dollar string such as "20" or "19.99"; rejects anything that is not a positive amount. */
-export function usdToCents(value: string): number {
-  const cents = Math.round(Number(value) * 100);
-  if (!Number.isInteger(cents) || cents <= 0) throw new Error(`Invalid USD amount: ${value}`);
-  return cents;
-}
-
 async function ensureProduct(
   stripe: ProvisionStripe,
-  plan: PaidPlan,
+  plan: Plan,
   log: (line: string) => void,
 ): Promise<string> {
   const { data } = await stripe.products.list({ active: true, limit: 100 });
@@ -101,7 +109,7 @@ async function ensureProduct(
     return existing.id;
   }
   const created = await stripe.products.create({
-    name: PRODUCT_NAMES[plan],
+    name: `MillionSend ${PLAN_NAME[plan]}`,
     metadata: { [PRODUCT_METADATA_KEY]: plan },
     tax_code: SAAS_BUSINESS_TAX_CODE,
   });
@@ -109,48 +117,115 @@ async function ensureProduct(
   return created.id;
 }
 
+async function ensureMeter(stripe: ProvisionStripe, log: (line: string) => void): Promise<string> {
+  const { data } = await stripe.billing.meters.list({ status: "active", limit: 100 });
+  const existing = data.find((m) => m.event_name === METER_EVENT_NAME);
+  if (existing) {
+    log(`meter ${METER_EVENT_NAME}: ${existing.id} (existing)`);
+    return existing.id;
+  }
+  const created = await stripe.billing.meters.create({
+    display_name: "Emails over quota",
+    event_name: METER_EVENT_NAME,
+    default_aggregation: { formula: "sum" },
+    customer_mapping: { event_payload_key: "stripe_customer_id", type: "by_id" },
+    value_settings: { event_payload_key: "value" },
+  });
+  log(`meter ${METER_EVENT_NAME}: ${created.id} (created)`);
+  return created.id;
+}
+
+interface PriceSpec {
+  lookupKey: string;
+  product: string;
+  unitAmount: number;
+  metadata: Record<string, string>;
+  /** Present on the metered overage prices. */
+  meter?: string | undefined;
+}
+
+function priceMatches(price: Stripe.Price, spec: PriceSpec): boolean {
+  if (!price.active || price.unit_amount !== spec.unitAmount || price.currency !== "usd") {
+    return false;
+  }
+  if (price.recurring?.interval !== "month") return false;
+  if (spec.meter) {
+    return (
+      price.recurring.usage_type === "metered" &&
+      price.recurring.meter === spec.meter &&
+      price.transform_quantity?.divide_by === 1000
+    );
+  }
+  return price.recurring.usage_type !== "metered";
+}
+
 /**
- * Prices are immutable in Stripe, so an amount change creates a new price
+ * Prices are immutable in Stripe, so a changed amount creates a new price
  * and moves the lookup key onto it (transfer_lookup_key), then archives the
- * old one. Existing subscriptions keep their old price (identified by the
- * product's metadata thereafter); new checkouts pick up the new amount
- * immediately.
+ * old one. Existing subscriptions keep their old price (identified by its
+ * metadata or product thereafter); new checkouts pick up the new amount
+ * immediately. Metadata alone is mutable and is refreshed in place.
  */
 async function ensurePrice(
   stripe: ProvisionStripe,
-  plan: PaidPlan,
-  product: string,
-  unitAmount: number,
+  spec: PriceSpec,
   log: (line: string) => void,
 ): Promise<string> {
-  const lookupKey = PLAN_LOOKUP_KEYS[plan];
-  const { data } = await stripe.prices.list({ lookup_keys: [lookupKey], limit: 10 });
-  const current = data.find((p) => p.lookup_key === lookupKey);
-  const matches =
-    current?.active &&
-    current.unit_amount === unitAmount &&
-    current.currency === "usd" &&
-    current.recurring?.interval === "month";
-  if (current && matches) {
-    log(`price ${plan}: ${current.id} (existing, ${unitAmount} cents/month)`);
+  const { data } = await stripe.prices.list({ lookup_keys: [spec.lookupKey], limit: 10 });
+  const current = data.find((p) => p.lookup_key === spec.lookupKey);
+  const label = `${spec.unitAmount} cents${spec.meter ? " per 1,000 over quota" : "/month"}`;
+  if (current && priceMatches(current, spec)) {
+    const stale = Object.entries(spec.metadata).some(([k, v]) => current.metadata?.[k] !== v);
+    if (stale) await stripe.prices.update(current.id, { metadata: spec.metadata });
+    log(
+      `price ${spec.lookupKey}: ${current.id} (existing, ${label}${stale ? ", metadata refreshed" : ""})`,
+    );
     return current.id;
   }
   const created = await stripe.prices.create({
-    product,
+    product: spec.product,
     currency: "usd",
-    unit_amount: unitAmount,
-    recurring: { interval: "month" },
-    lookup_key: lookupKey,
+    unit_amount: spec.unitAmount,
+    recurring: spec.meter
+      ? { interval: "month", usage_type: "metered", meter: spec.meter }
+      : { interval: "month" },
+    ...(spec.meter
+      ? { billing_scheme: "per_unit", transform_quantity: { divide_by: 1000, round: "up" } }
+      : {}),
+    lookup_key: spec.lookupKey,
     transfer_lookup_key: true,
     tax_behavior: "exclusive",
+    metadata: spec.metadata,
   });
   if (current) {
     await stripe.prices.update(current.id, { active: false });
-    log(`price ${plan}: ${created.id} (replaced ${current.id}, ${unitAmount} cents/month)`);
+    log(`price ${spec.lookupKey}: ${created.id} (replaced ${current.id}, ${label})`);
   } else {
-    log(`price ${plan}: ${created.id} (created, ${unitAmount} cents/month)`);
+    log(`price ${spec.lookupKey}: ${created.id} (created, ${label})`);
   }
   return created.id;
+}
+
+/**
+ * The two pre-ladder prices are archived, not deleted: the subscriptions
+ * still on them keep working (and keep resolving through LEGACY_LOOKUP_KEYS)
+ * until each is moved; only new checkouts stop seeing them.
+ */
+async function archiveLegacyPrices(
+  stripe: ProvisionStripe,
+  log: (line: string) => void,
+): Promise<void> {
+  const keys = Object.keys(LEGACY_LOOKUP_KEYS);
+  const { data } = await stripe.prices.list({ lookup_keys: keys, limit: 10 });
+  for (const price of data) {
+    if (!price.lookup_key || !keys.includes(price.lookup_key)) continue;
+    if (price.active) {
+      await stripe.prices.update(price.id, { active: false });
+      log(`price ${price.lookup_key}: ${price.id} (archived)`);
+    } else {
+      log(`price ${price.lookup_key}: ${price.id} (already archived)`);
+    }
+  }
 }
 
 function sameEvents(a: readonly string[], b: readonly string[]): boolean {
@@ -172,7 +247,7 @@ async function ensureWebhook(
       log(`webhook: ${existing.id} (existing)`);
     }
     log(
-      "webhook: Stripe only reveals the signing secret at creation. To rotate it, delete the endpoint in the dashboard and run again.",
+      "webhook: Stripe only reveals the signing secret at creation. To rotate it, roll it in the dashboard (Developers → Webhooks → the endpoint → Roll secret).",
     );
     return { id: existing.id };
   }
@@ -193,35 +268,23 @@ async function ensureWebhook(
   return { id: created.id, secret: created.secret };
 }
 
-function portalFeatures(
-  products: Record<PaidPlan, string>,
-  prices: Record<PaidPlan, string>,
-): Stripe.BillingPortal.ConfigurationCreateParams.Features {
+/**
+ * Plan switches are NOT offered in the portal: Stripe's portal cannot update
+ * a subscription that carries more than one item, and a subscription with
+ * overage on carries two. The dashboard moves rungs through the API instead.
+ */
+function portalFeatures(): Stripe.BillingPortal.ConfigurationCreateParams.Features {
   return {
     invoice_history: { enabled: true },
     payment_method_update: { enabled: true },
     customer_update: { enabled: true, allowed_updates: ["email", "name", "address", "tax_id"] },
     subscription_cancel: { enabled: true, mode: "at_period_end" },
-    subscription_update: {
-      enabled: true,
-      default_allowed_updates: ["price"],
-      proration_behavior: "create_prorations",
-      products: PAID_PLANS.map((plan) => ({ product: products[plan], prices: [prices[plan]] })),
-    },
+    subscription_update: { enabled: false },
   };
 }
 
-/**
- * The portal must reference the CURRENT price ids, so an existing
- * configuration is always re-pointed after a price rotation.
- */
-async function ensurePortal(
-  stripe: ProvisionStripe,
-  products: Record<PaidPlan, string>,
-  prices: Record<PaidPlan, string>,
-  log: (line: string) => void,
-): Promise<string> {
-  const features = portalFeatures(products, prices);
+async function ensurePortal(stripe: ProvisionStripe, log: (line: string) => void): Promise<string> {
+  const features = portalFeatures();
   const { data } = await stripe.billingPortal.configurations.list({ active: true, limit: 100 });
   const existing = data.find((c) => c.metadata?.millionsend === PORTAL_METADATA.millionsend);
   if (existing) {
@@ -237,21 +300,51 @@ async function ensurePortal(
   return created.id;
 }
 
+/** The specs behind the ladder: one plan price per paid rung, one metered price per monthly rung. */
+export function priceSpecs(
+  products: Record<string, string>,
+  meter: string,
+): { plan: PriceSpec; overage: PriceSpec | null; rung: PlanRung }[] {
+  return PAID_RUNGS.map((rung) => {
+    const product = products[rung.plan];
+    if (!product) throw new Error(`no product for plan ${rung.plan}`);
+    const metadata = priceMetadata(rung);
+    return {
+      rung,
+      plan: { lookupKey: rungLookupKey(rung), product, unitAmount: rung.priceCents, metadata },
+      overage:
+        rung.overageCentsPer1k === null
+          ? null
+          : {
+              lookupKey: overageLookupKey(rung),
+              product,
+              unitAmount: rung.overageCentsPer1k,
+              metadata,
+              meter,
+            },
+    };
+  });
+}
+
 export async function provision(
   stripe: ProvisionStripe,
-  options: ProvisionOptions,
+  options: ProvisionOptions = {},
 ): Promise<ProvisionResult> {
   const log = options.log ?? console.log;
-  const products = {} as Record<PaidPlan, string>;
-  const prices = {} as Record<PaidPlan, string>;
-  for (const plan of PAID_PLANS) {
-    products[plan] = await ensureProduct(stripe, plan, log);
-    prices[plan] = await ensurePrice(stripe, plan, products[plan], options.amounts[plan], log);
+  const products: Record<string, string> = {};
+  for (const plan of PAID_PLANS) products[plan] = await ensureProduct(stripe, plan, log);
+  const meter = await ensureMeter(stripe, log);
+  const prices: Record<string, string> = {};
+  const overagePrices: Record<string, string> = {};
+  for (const spec of priceSpecs(products, meter)) {
+    prices[spec.rung.key] = await ensurePrice(stripe, spec.plan, log);
+    if (spec.overage) overagePrices[spec.rung.key] = await ensurePrice(stripe, spec.overage, log);
   }
-  const result: ProvisionResult = { products, prices };
+  await archiveLegacyPrices(stripe, log);
+  const result: ProvisionResult = { products, prices, overagePrices, meter };
   if (options.webhookUrl) result.webhook = await ensureWebhook(stripe, options.webhookUrl, log);
   if (options.portal) {
-    result.portalConfiguration = await ensurePortal(stripe, products, prices, log);
+    result.portalConfiguration = await ensurePortal(stripe, log);
     log(`portal: STRIPE_PORTAL_CONFIG=${result.portalConfiguration}`);
   }
   log("");
@@ -277,6 +370,9 @@ export function dryRunStripe(
       list: (p) => stripe.prices.list(p),
       create: stub("prices.create"),
       update: stub("prices.update"),
+    },
+    billing: {
+      meters: { list: (p) => stripe.billing.meters.list(p), create: stub("billing.meters.create") },
     },
     webhookEndpoints: {
       list: (p) => stripe.webhookEndpoints.list(p),

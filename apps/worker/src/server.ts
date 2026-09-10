@@ -1,5 +1,10 @@
 import { SQSClient } from "@aws-sdk/client-sqs";
-import { createStripe, purgeStripeEvents, reconcileTeamPlan } from "@millionsend/billing";
+import {
+  createStripe,
+  purgeStripeEvents,
+  reconcileTeamPlan,
+  reportOverage,
+} from "@millionsend/billing";
 import {
   env,
   sesTenantsEnabled,
@@ -8,6 +13,7 @@ import {
   unsubscribeBaseUrl,
 } from "@millionsend/config";
 import {
+  committedDailyVolume,
   deriveTrackingKey,
   deriveUnsubscribeKey,
   eraseRecipient,
@@ -255,7 +261,22 @@ await queue.scheduleCrons({
         await reportPlanMove(db, mailer, env.APP_BASE_URL ?? "", team, before, after);
       },
     });
-    console.log(`billing.reconcile: reconciled=${result.reconciled} failed=${result.failed}`);
+    // Sold capacity against the shared SES quota, once a day where the operator reads logs.
+    const committed = await committedDailyVolume(db);
+    const sesDaily = await getAccountOverview(accountClient).then(
+      (o) => o.quota.max24h,
+      () => "unknown",
+    );
+    console.log(
+      `billing.reconcile: reconciled=${result.reconciled} failed=${result.failed} committedPerDay=${committed} sesDailyQuota=${sesDaily}`,
+    );
+  },
+  "billing.overage": async () => {
+    if (!stripe) return;
+    const result = await reportOverage({ db, stripe, log: console.warn });
+    if (result.reported > 0 || result.failed > 0) {
+      console.log(`billing.overage: reported=${result.reported} failed=${result.failed}`);
+    }
   },
   "idempotency.purge": async () => {
     await purgeExpiredIdempotencyKeys(db);

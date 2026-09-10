@@ -6,7 +6,6 @@ import {
   emailInsightsView,
   fetchBroadcastInsights,
   fetchDeliverabilityHealth,
-  fetchEffectivePlan,
   injectPreheader,
   type MergeContact,
   PAUSE_BOUNCE_RATE,
@@ -27,6 +26,7 @@ import { mailyDocumentSchema } from "@/lib/email-doc";
 import enDeliverability from "../../../messages/en/deliverability.json";
 import ptBRDeliverability from "../../../messages/pt-BR/deliverability.json";
 import type { AppLocale } from "../../i18n/request";
+import { fetchQuotaRow } from "../billing";
 import { resolveEditorSave } from "../email-content";
 import { getKeyring } from "../keyring";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
@@ -576,7 +576,7 @@ export const broadcastsRouter = router({
         },
         {
           teamId: ctx.teamId,
-          plan: (await fetchEffectivePlan(ctx.db, ctx.teamId)) ?? "free",
+          billing: await fetchQuotaRow(ctx.db, ctx.teamId),
           apiKeyId: null,
         },
         {

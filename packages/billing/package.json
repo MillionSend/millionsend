@@ -15,6 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "stripe": "^22.5.0"

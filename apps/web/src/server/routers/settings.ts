@@ -3,7 +3,6 @@ import { env, isCloudDeployment, notificationsEmailFrom } from "@millionsend/con
 import {
   createFixedWindowLimiter,
   DAY_MS,
-  effectivePlan,
   INVITE_EMAILS_PER_HOUR,
   INVITE_MAX_SENDS,
   INVITE_RESEND_COOLDOWN_MS,
@@ -11,10 +10,11 @@ import {
   isMailPreferenceKey,
   MAIL_PREFERENCE_KEYS,
   type MailPreferenceKey,
-  PLAN_DAILY_LIMIT,
-  type Plan,
+  QUOTA_COLUMNS,
+  readPeriodUsage,
   SystemMailRefused,
   signInviteToken,
+  teamQuota,
   utcDay,
   verifyInviteToken,
 } from "@millionsend/core";
@@ -46,15 +46,6 @@ import {
   type SystemMailDeps,
 } from "../system-mail";
 import { protectedProcedure, publicProcedure, router, teamProcedure } from "../trpc";
-
-/**
- * The API enforces plan caps only when IS_CLOUD; self-host has no daily
- * quota, so the dashboard must report none. env is read lazily (per call)
- * so tests can construct the environment first.
- */
-function planDailyLimit(plan: Plan): number | null {
-  return env.IS_CLOUD ? PLAN_DAILY_LIMIT[plan] : null;
-}
 
 /** Managing members is an owner/admin concern; plain members are read-only. */
 function assertCanManageMembers(role: string): void {
@@ -282,20 +273,17 @@ export function createSettingsRouter(
             name: schema.teams.name,
             slug: schema.teams.slug,
             plan: schema.teams.plan,
-            currentPeriodEnd: schema.teams.currentPeriodEnd,
             logoUrl: schema.teams.logoUrl,
           })
           .from(schema.teams)
           .where(eq(schema.teams.id, ctx.teamId));
         if (!team) throw new TRPCError({ code: "NOT_FOUND" });
-        const { currentPeriodEnd, ...rest } = team;
         const logoUploadsEnabled = uploadsEnabled();
         return {
-          ...rest,
+          ...team,
           // Storage off ⇒ stored URLs may be dead; the UI falls back to the tile.
           logoUrl: logoUploadsEnabled ? team.logoUrl : null,
           logoUploadsEnabled,
-          planDailyLimit: planDailyLimit(effectivePlan(team.plan, currentPeriodEnd)),
         };
       }),
 
@@ -906,10 +894,12 @@ export function createSettingsRouter(
           const since = utcDay(Date.now() - (days - 1) * DAY_MS);
 
           const [team] = await ctx.db
-            .select({ plan: schema.teams.plan, currentPeriodEnd: schema.teams.currentPeriodEnd })
+            .select(QUOTA_COLUMNS)
             .from(schema.teams)
             .where(eq(schema.teams.id, ctx.teamId));
           if (!team) throw new TRPCError({ code: "NOT_FOUND" });
+          // The API enforces plan caps only on cloud; self-host reports none.
+          const quota = teamQuota(team, env.IS_CLOUD);
 
           const c = schema.usageCounters;
           const rows = await ctx.db
@@ -925,12 +915,24 @@ export function createSettingsRouter(
             .where(and(eq(c.teamId, ctx.teamId), gte(c.day, since)))
             .orderBy(desc(c.day));
 
+          const period =
+            quota.kind === "month"
+              ? {
+                  accepted: (await readPeriodUsage(ctx.db, ctx.teamId, quota.periodStart)).accepted,
+                  included: quota.included,
+                  start: quota.periodStart,
+                  end: quota.periodEnd,
+                  overage: quota.overage,
+                }
+              : null;
           return {
             rows,
             today: {
               accepted: rows.find((r) => r.day === today)?.accepted ?? 0,
-              limit: planDailyLimit(effectivePlan(team.plan, team.currentPeriodEnd)),
+              limit: quota.kind === "day" ? quota.limit : null,
             },
+            /** The billing period a monthly plan counts against; null on a daily cap or self-host. */
+            period,
           };
         }),
     }),

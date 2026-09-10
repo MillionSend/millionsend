@@ -96,7 +96,12 @@ it("quota warning at 80% fires once per UTC day, by email and webhook", async ()
   expect(rows[0]?.type).toBe("quota.warning");
   expect(rows[0]?.payload).toMatchObject({
     type: "quota.warning",
-    data: { used: 80, limit: 100, dashboard_url: "https://app.example.test/settings/billing" },
+    data: {
+      used: 80,
+      limit: 100,
+      period: "day",
+      dashboard_url: "https://app.example.test/settings/billing",
+    },
   });
   expect(enqueued).toHaveLength(1);
 
@@ -139,6 +144,108 @@ it("quota paused fires once when the ceiling is reached, after warning and reach
     "quota.paused",
   ]);
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 0 });
+});
+
+async function monthlyPlan(overage = false) {
+  const periodStart = new Date(Date.now() - 10 * DAY);
+  const periodEnd = new Date(Date.now() + 20 * DAY);
+  await db
+    .update(schema.teams)
+    .set({
+      plan: "pro",
+      planQuota: 100_000,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+      stripeOverageItemId: overage ? "si_over" : null,
+    })
+    .where(eq(schema.teams.id, teamId));
+  const used = async (accepted: number) => {
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart, accepted })
+      .onConflictDoUpdate({
+        target: [schema.usagePeriods.teamId, schema.usagePeriods.periodStart],
+        set: { accepted },
+      });
+  };
+  return { periodStart, periodEnd, used };
+}
+
+it("monthly quota warning and reached fire once per billing period, with the period in the payload", async () => {
+  const { periodStart, periodEnd, used } = await monthlyPlan();
+  // The day's counter is uncapped on a monthly plan: no daily notice.
+  await counters({ accepted: 5_000 });
+  await used(80_000);
+  expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
+  expect(sends[0]?.subject).toContain("80% of this period's sending quota");
+  expect(sends[0]?.text).toContain("80,000 of the 100,000 emails");
+  expect(sends[0]?.text).toContain(formatMailDate("en", periodEnd));
+  expect(sends[0]?.text).toContain("Turn on overage in Billing");
+  const [row] = await deliveries();
+  expect(row?.type).toBe("quota.warning");
+  expect(row?.payload).toMatchObject({
+    data: {
+      used: 80_000,
+      limit: 100_000,
+      period: "month",
+      overage: false,
+      resets_at: periodEnd.toISOString(),
+      dashboard_url: "https://app.example.test/settings/billing",
+    },
+  });
+  expect(await sweepNotifications(db, deps())).toEqual({ sent: 0 });
+
+  await used(100_000);
+  expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
+  expect(sends[1]?.subject).toContain("this period's sending quota reached");
+  expect(sends[1]?.text).toContain(
+    `New API sends are refused until the period renews on ${formatMailDate("en", periodEnd)} or overage is turned on in Billing; broadcasts park until then.`,
+  );
+  expect((await deliveries()).map((d) => d.type)).toEqual(["quota.warning", "quota.reached"]);
+  expect(
+    (
+      await db
+        .select({ kind: schema.teamNotifications.kind, key: schema.teamNotifications.periodKey })
+        .from(schema.teamNotifications)
+        .where(like(schema.teamNotifications.kind, "quota.%"))
+    ).sort((a, b) => a.kind.localeCompare(b.kind)),
+  ).toEqual([
+    { kind: "quota.reached", key: periodStart.toISOString() },
+    { kind: "quota.warning", key: periodStart.toISOString() },
+  ]);
+  expect(await sweepNotifications(db, deps())).toEqual({ sent: 0 });
+});
+
+it("monthly quota reached with overage on says sends now bill", async () => {
+  const { used } = await monthlyPlan(true);
+  await used(100_500);
+  expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
+  expect(sends[0]?.text).toContain(
+    "Sends past the quota now bill at your plan's overage rate and show on the next invoice.",
+  );
+  const [row] = await deliveries();
+  expect(row?.payload).toMatchObject({
+    type: "quota.reached",
+    data: { used: 100_500, limit: 100_000, period: "month", overage: true },
+  });
+});
+
+it("a monthly period that rolled before its renewal webhook is judged by the row keyed at the old period end", async () => {
+  const { periodEnd, used } = await monthlyPlan();
+  // Last period's row, also full: judged in its own period, never again.
+  await used(100_000);
+  await db
+    .insert(schema.usagePeriods)
+    .values({ teamId, periodStart: periodEnd, accepted: 100_000 });
+  const later = new Date(periodEnd.getTime() + 3_600_000);
+  expect(await sweepNotifications(db, deps(true, later))).toEqual({ sent: 1 });
+  expect(sends[0]?.subject).toContain("this period's sending quota reached");
+  expect(
+    await db
+      .select({ kind: schema.teamNotifications.kind, key: schema.teamNotifications.periodKey })
+      .from(schema.teamNotifications)
+      .where(like(schema.teamNotifications.kind, "quota.%")),
+  ).toEqual([{ kind: "quota.reached", key: periodEnd.toISOString() }]);
 });
 
 it("self-host has no quota to notify about", async () => {
@@ -609,9 +716,9 @@ it("a scheduled cancellation is recalled three days out, once, on the cloud only
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
   await sweepNotifications(db, deps());
   expect(sends.map((s) => s.subject)).toEqual([
-    `Reminder: notify-team's Pro plan ends on ${formatMailDate("en", endsAt)}`,
+    `Reminder: notify-team's Pro 100k plan ends on ${formatMailDate("en", endsAt)}`,
   ]);
-  expect(sends[0]?.text).toContain("to keep sending up to 3,000 emails a day");
+  expect(sends[0]?.text).toContain("to keep sending up to 100,000 emails a month");
 
   // Too far out to count down yet; a fresh date is its own reminder.
   await setPlan({ cancelAt: new Date(Date.now() + 10 * DAY) });
@@ -626,7 +733,7 @@ it("a paid period that lapsed past its grace reads as the downgrade, keyed like 
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
   await sweepNotifications(db, deps());
   expect(sends.map((s) => s.subject)).toEqual(["notify-team is now on Free"]);
-  expect(sends[0]?.text).toContain("The Scale plan ended on");
+  expect(sends[0]?.text).toContain("The Scale 500k plan ended on");
   expect(
     await db
       .select({ key: schema.teamNotifications.periodKey })

@@ -72,3 +72,23 @@ export const usageCountersHourly = pgTable(
     index("usage_counters_hourly_hour_idx").on(t.hour),
   ],
 );
+
+/**
+ * Monthly-plan counters, one row per team and Stripe billing period. The
+ * accept paths reserve against `accepted` with the same atomic upsert the
+ * daily table uses; `reportedOverage` is how much past the included volume
+ * has already been sent to the Stripe meter, so a report retry never bills
+ * twice. Kept forever like the daily rows.
+ */
+export const usagePeriods = pgTable(
+  "usage_periods",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    accepted: integer("accepted").notNull().default(0),
+    reportedOverage: integer("reported_overage").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.periodStart] })],
+);

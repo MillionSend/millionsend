@@ -79,8 +79,9 @@ describe("probe", () => {
     expect(await target.probe()).toEqual({
       cloud: true,
       plan: "free",
-      limits: { emailsPerDay: 100, domains: 3 },
+      limits: { emailsPerDay: 100, emailsPerMonth: null, domains: 3 },
       today: { emailsSent: 0 },
+      period: null,
       appUrl: "https://app.example.test",
     });
     expect(target.requests).toBe(1);
@@ -90,8 +91,9 @@ describe("probe", () => {
     expect(await targetFor(selfHost).probe()).toEqual({
       cloud: false,
       plan: null,
-      limits: { emailsPerDay: null, domains: null },
+      limits: { emailsPerDay: null, emailsPerMonth: null, domains: null },
       today: { emailsSent: 0 },
+      period: null,
       appUrl: null,
     });
   });

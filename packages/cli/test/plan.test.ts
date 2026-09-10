@@ -22,8 +22,9 @@ const emptyTarget: TargetState = {
   usage: {
     cloud: false,
     plan: null,
-    limits: { emailsPerDay: null, domains: null },
+    limits: { emailsPerDay: null, emailsPerMonth: null, domains: null },
     today: { emailsSent: 0 },
+    period: null,
     appUrl: null,
   },
   domains: [],
@@ -40,8 +41,9 @@ const goldenTarget: TargetState = {
   usage: {
     cloud: true,
     plan: "free",
-    limits: { emailsPerDay: 100, domains: 1 },
+    limits: { emailsPerDay: 100, emailsPerMonth: null, domains: 1 },
     today: { emailsSent: 0 },
+    period: null,
     appUrl: "https://app.millionsend.com",
   },
   domains: [
@@ -480,7 +482,11 @@ describe("buildPlan diffs against existing rows", () => {
     const plan = buildPlan({
       snapshot,
       target: withRows({
-        usage: { ...emptyTarget.usage, plan: "pro", limits: { emailsPerDay: 3000, domains: 2 } },
+        usage: {
+          ...emptyTarget.usage,
+          plan: "pro",
+          limits: { emailsPerDay: 3000, emailsPerMonth: null, domains: 2 },
+        },
         domains: [
           {
             id: "d1",
@@ -516,7 +522,7 @@ describe("buildPlan diffs against existing rows", () => {
           ...emptyTarget.usage,
           cloud: true,
           plan: "free",
-          limits: { emailsPerDay: 100, domains: 1 },
+          limits: { emailsPerDay: 100, emailsPerMonth: null, domains: 1 },
         },
       }),
       options: options({ include: only("domains") }),

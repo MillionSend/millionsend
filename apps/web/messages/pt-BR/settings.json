@@ -122,7 +122,8 @@
         "credentials": "A AWS rejeitou as credenciais — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code>.",
         "unreachable": "O SES não respondeu — verifique <code>AWS_REGION</code> e o caminho de rede."
       },
-      "disabledHint": "Defina suas credenciais AWS primeiro."
+      "disabledHint": "Defina suas credenciais AWS primeiro.",
+      "committedPerDay": "Comprometido por dia"
     },
     "next": {
       "title": "Próximos passos",
@@ -165,6 +166,7 @@
   },
   "plans": {
     "free": "Free",
+    "starter": "Starter",
     "pro": "Pro",
     "scale": "Scale"
   },
@@ -263,7 +265,9 @@
     "sent": "Enviados",
     "delivered": "Entregues",
     "bounced": "Devolvidos",
-    "complained": "Reclamações"
+    "complained": "Reclamações",
+    "sentThisPeriod": "E-mails enviados neste período",
+    "renewsOn": "Renova em {date}"
   },
   "billing": {
     "plan": "Plano",
@@ -276,23 +280,47 @@
       "canceled": "Cancelado",
       "incomplete": "Incompleto"
     },
-    "dailyLimit": "Limite diário",
-    "unlimited": "Ilimitado",
-    "perDay": "{limit} e-mails / dia",
+    "cap": "Cota de envio",
+    "capPerDay": "{n} e-mails / dia",
+    "capPerMonth": "{n} e-mails / mês",
     "renewsOn": "Renova em",
-    "upgradePro": "Fazer upgrade para o Pro",
-    "upgradeScale": "Fazer upgrade para o Scale",
     "manage": "Gerenciar cobrança",
-    "manageHint": "Faturas, formas de pagamento e mudanças de plano ficam no portal de cobrança.",
+    "manageHint": "Os planos mudam aqui. Faturas, forma de pagamento, CNPJ/CPF e cancelamento ficam no portal de cobrança.",
     "readOnly": "Apenas proprietários e administradores podem alterar a cobrança.",
     "pastDue": "O pagamento falhou — atualize seu cartão para manter o plano.",
     "updateCard": "Atualizar forma de pagamento",
-    "usageTitle": "Uso de hoje",
+    "usageTitle": "Uso",
+    "overage": "Excedente",
+    "overageCopy": "{price} por 1.000 e-mails além da cota, cobrado na próxima fatura. Desligado, os envios param na cota até o período renovar.",
+    "overSoFar": "{n, plural, one {# e-mail} other {# e-mails}} além da cota até agora, cerca de {amount}.",
     "plansTitle": "Planos",
+    "volume": "E-mails por mês",
     "current": "Atual",
+    "perMonth": "/ mês",
+    "overagePer1k": "{price} por 1.000 além da cota",
+    "noOverage": "Sem excedente: os envios além do limite aguardam o dia seguinte",
+    "choose": "Escolher",
+    "switch": "Trocar",
+    "freeHint": "Para voltar ao Free, cancele no portal de cobrança; o plano segue até o fim do período.",
+    "features": {
+      "domains": "{n, plural, one {# domínio de envio} other {# domínios de envio}}",
+      "domainsUnlimited": "Domínios de envio ilimitados",
+      "contacts": "Contatos, segmentos e tópicos ilimitados",
+      "contactsFairUse": "Contatos, segmentos e tópicos ilimitados (uso razoável)",
+      "broadcasts": "Broadcasts com campos dinâmicos, templates e modo código",
+      "integrations": "Webhooks, chaves de API, relay SMTP, servidor MCP, CLI e SDKs",
+      "teams": "Até {n} equipes",
+      "history": "30 dias de logs de requisições e histórico de e-mails",
+      "support": {
+        "free": "Suporte da comunidade",
+        "starter": "Suporte por e-mail",
+        "pro": "Suporte por e-mail",
+        "scale": "Suporte prioritário por e-mail"
+      }
+    },
     "checkoutSuccess": "Obrigado! Seu plano é atualizado assim que o Stripe confirmar o pagamento — normalmente em poucos segundos.",
     "checkoutCancel": "Checkout cancelado. Seu plano não mudou.",
-    "error": "Não foi possível abrir o Stripe. Tente novamente."
+    "error": "Algo deu errado com o Stripe. Tente novamente."
   },
   "mcp": {
     "title": "Servidor MCP",
@@ -385,7 +413,9 @@
       "instance.settings_updated": "Atualizou configurações da instância",
       "billing.checkout_started": "Iniciou checkout",
       "billing.portal_opened": "Abriu portal de cobrança",
-      "billing.subscription_updated": "Assinatura alterada"
+      "billing.subscription_updated": "Assinatura alterada",
+      "billing.plan_changed": "Alterou o plano",
+      "billing.overage_toggled": "Alterou a cobrança de excedente"
     },
     "empty": "Nada registrado ainda.",
     "loadMore": "Carregar mais",
@@ -424,15 +454,15 @@
       },
       "broadcast_held_quota": {
         "label": "Broadcast aguardando a cota",
-        "note": "Parte de um broadcast ficou retida acima do limite diário."
+        "note": "Parte de um broadcast ficou retida acima da cota."
       },
       "broadcast_held": {
         "label": "Broadcast em espera",
         "note": "O envio da região está pausado em toda a plataforma."
       },
       "quota": {
-        "label": "Cota diária",
-        "note": "Ao se aproximar, atingir e passar do limite do dia."
+        "label": "Cota de envio",
+        "note": "Ao se aproximar, atingir e passar do limite do plano."
       },
       "deliverability": {
         "label": "Entregabilidade",

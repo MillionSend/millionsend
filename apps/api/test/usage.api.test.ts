@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey } from "@millionsend/core";
+import { DAY_MS, EnvKeyring, generateApiKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -65,8 +65,9 @@ describe("GET /usage", () => {
       object: "usage",
       cloud: true,
       plan: "free",
-      limits: { emails_per_day: 100, domains: 3 },
+      limits: { emails_per_day: 100, emails_per_month: null, domains: 3 },
       today: { emails_sent: 0, resets_at: expect.any(String) },
+      period: null,
       team: { id: teamId, name: "usage-team" },
       app_url: "https://app.example.test",
     });
@@ -88,20 +89,48 @@ describe("GET /usage", () => {
   });
 
   it("follows the team's effective plan", async () => {
-    await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, teamId));
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, teamId));
     expect(await (await get(cloud)).json()).toMatchObject({
-      plan: "pro",
-      limits: { emails_per_day: 3000, domains: 20 },
+      plan: "starter",
+      limits: { emails_per_day: 1500, emails_per_month: null, domains: 10 },
+      period: null,
     });
     await db.update(schema.teams).set({ plan: "free" }).where(eq(schema.teams.id, teamId));
+  });
+
+  it("reports the billing period's usage on a monthly plan", async () => {
+    const start = new Date(Date.now() - 5 * DAY_MS);
+    const end = new Date(start.getTime() + 30 * DAY_MS);
+    await db
+      .update(schema.teams)
+      .set({ plan: "pro", planQuota: 100_000, currentPeriodStart: start, currentPeriodEnd: end })
+      .where(eq(schema.teams.id, teamId));
+    await db.insert(schema.usagePeriods).values({ teamId, periodStart: start, accepted: 42 });
+    expect(await (await get(cloud)).json()).toMatchObject({
+      plan: "pro",
+      limits: { emails_per_day: null, emails_per_month: 100_000, domains: null },
+      period: {
+        emails_sent: 42,
+        included: 100_000,
+        overage_enabled: false,
+        overage_usd_per_1k: 0.3,
+        starts_at: start.toISOString(),
+        ends_at: end.toISOString(),
+      },
+    });
+    await db
+      .update(schema.teams)
+      .set({ plan: "free", planQuota: null, currentPeriodStart: null, currentPeriodEnd: null })
+      .where(eq(schema.teams.id, teamId));
   });
 
   it("reports no plan and no limits self-hosted, keeping the counter", async () => {
     expect(await (await get(selfHost)).json()).toMatchObject({
       cloud: false,
       plan: null,
-      limits: { emails_per_day: null, domains: null },
+      limits: { emails_per_day: null, emails_per_month: null, domains: null },
       today: { emails_sent: 1 },
+      period: null,
       app_url: null,
     });
   });

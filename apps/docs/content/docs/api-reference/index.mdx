@@ -60,8 +60,18 @@ remaining deltas are deliberate and loud:
   SES region is recovering; it is per region, leaves transactional email
   untouched, and clears on its own.
 - `POST /emails` and `POST /emails/batch` return `429 daily_quota_exceeded`
-  when the day's sending quota is spent and the queued backlog is full — retry
-  after the UTC day rolls over.
+  on a daily plan (Free, Starter) when the day's sending quota is spent and
+  the queued backlog is full — retry after the UTC day rolls over — and
+  `429 monthly_quota_exceeded` on a monthly plan (Pro, Scale) at its included
+  volume with overage off; turn on overage in Billing or wait for the period
+  to renew (the message names the date). A batch is accepted or refused
+  whole.
+- `GET /usage` exists (Resend has no usage endpoint): the effective plan, its
+  limits (`emails_per_day` on daily plans, `emails_per_month` on monthly ones,
+  `domains`), today's accepted count and, on a monthly plan, a `period` object
+  — `emails_sent`, `included`, `overage_enabled`, `overage_usd_per_1k`,
+  `starts_at`, `ends_at`. Self-hosted instances report `cloud: false` with
+  null plan, limits and period.
 - `DELETE /emails/{id}` exists (Resend has no email deletion).
 - Custom `headers` are allowlisted: any `X-*` name (except `X-SES-*` and
   `X-MillionSend-*`) plus `In-Reply-To`, `References`, `Importance`,

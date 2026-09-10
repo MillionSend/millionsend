@@ -2,12 +2,14 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { extractTokenPrefix, verifyApiKey } from "./api-keys.js";
-import { effectivePlan, type Plan } from "./plans.js";
+import { effectivePlan, type Plan, type QuotaTeamRow } from "./plans.js";
 
 /** SECURITY: the only source of teamId for API-key-authenticated requests. */
 export interface ApiKeyAuth {
   teamId: string;
   plan: Plan;
+  /** The team's billing columns, from which each send surface derives its cap (teamQuota). */
+  billing: QuotaTeamRow;
   /** Null when the caller authenticated with an OAuth access token (MCP) instead of a key. */
   apiKeyId: string | null;
   /** The OAuth token's holder, so audit rows name the person behind an MCP call. */
@@ -44,7 +46,10 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
       permission: schema.apiKeys.permission,
       domainId: schema.apiKeys.domainId,
       plan: schema.teams.plan,
+      planQuota: schema.teams.planQuota,
+      currentPeriodStart: schema.teams.currentPeriodStart,
       currentPeriodEnd: schema.teams.currentPeriodEnd,
+      stripeOverageItemId: schema.teams.stripeOverageItemId,
     })
     .from(schema.apiKeys)
     .innerJoin(schema.teams, eq(schema.apiKeys.teamId, schema.teams.id))
@@ -64,6 +69,13 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
   return {
     teamId: match.teamId,
     plan: effectivePlan(match.plan, match.currentPeriodEnd),
+    billing: {
+      plan: match.plan,
+      planQuota: match.planQuota,
+      currentPeriodStart: match.currentPeriodStart,
+      currentPeriodEnd: match.currentPeriodEnd,
+      stripeOverageItemId: match.stripeOverageItemId,
+    },
     apiKeyId: match.id,
     permission: match.permission,
     domainId: match.domainId,

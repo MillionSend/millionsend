@@ -1,9 +1,18 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  check,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 // Billing concept only — deployment mode lives exclusively in env.IS_CLOUD;
 // self-host ignores plan entirely (quota code guards on IS_CLOUD first).
-export const planEnum = pgEnum("plan", ["free", "pro", "scale"]);
+export const planEnum = pgEnum("plan", ["free", "starter", "pro", "scale"]);
 
 // Mirrors Stripe subscription statuses; "none" = never subscribed. The
 // entitlement is `teams.plan`, written only by the verified Stripe webhook.
@@ -32,10 +41,17 @@ export const teams = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull().unique(),
     plan: planEnum("plan").notNull().default("free"),
+    // Emails included per billing period on a monthly plan — the rung the
+    // team bought; null on daily plans. Written by the Stripe webhook only.
+    planQuota: integer("plan_quota"),
     // Cloud-only Stripe linkage; all null/"none" on self-host.
     stripeCustomerId: text("stripe_customer_id").unique(),
     stripeSubscriptionId: text("stripe_subscription_id"),
+    // The metered overage item on the subscription; null while overage is off.
+    stripeOverageItemId: text("stripe_overage_item_id"),
     planStatus: planStatusEnum("plan_status").notNull().default("none"),
+    // The Stripe billing period: monthly quotas count sends from its start.
+    currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     // When Stripe will end the subscription (cancel_at); null while it renews.
     // Mirrored so a scheduled cancellation is a visible transition and the

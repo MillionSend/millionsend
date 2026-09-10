@@ -396,7 +396,7 @@ describe("millionsend (built bundle)", () => {
         "Run `millionsend migrate --from resend` again right before cutover to sync new contacts.",
       );
       expect(stdout.replace(/\n/g, " ")).toContain(
-        `On Resend you sent ${EMAILS_SENT_30D.toLocaleString("en-US")} emails in the last 30 days (~1,374/day). Free allows 100/day; Pro (3,000/day, 20 domains) fits. Upgrade: https://app.example.test/settings/billing`,
+        `On Resend you sent ${EMAILS_SENT_30D.toLocaleString("en-US")} emails in the last 30 days (~1,374/day). Free allows 3,000/month; Starter (45,000/month, 10 domains) fits. Upgrade: https://app.example.test/settings/billing`,
       );
       expect(stdout).not.toContain("Webhook signing secrets");
 
@@ -441,7 +441,7 @@ describe("millionsend (built bundle)", () => {
         emailsLast30Days: EMAILS_SENT_30D,
         perDay: 1374,
         plan: "free",
-        fits: "pro",
+        fits: "starter",
       });
       expect(readFileSync(paths.reportMd, "utf8")).toContain(
         "### DNS records for news.example.com",

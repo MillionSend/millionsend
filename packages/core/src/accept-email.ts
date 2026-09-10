@@ -4,8 +4,8 @@ import { schema } from "@millionsend/db";
 import { and, count, eq } from "drizzle-orm";
 import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
-import { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
-import { reserveDailyQuota } from "./quota.js";
+import { type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
+import { reserveQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
 import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppressions.js";
 import { findTopicOptOuts } from "./topics.js";
@@ -123,7 +123,12 @@ export interface AcceptEmailDeps {
 /** SECURITY: must come from verified authentication, never from the payload. */
 export interface AcceptEmailAuth {
   teamId: string;
-  plan: Plan;
+  /**
+   * The team's billing columns; the cap is derived here (teamQuota), never
+   * trusted from the payload. "uncapped" is for the instance's own account
+   * mail, which counts but must never park.
+   */
+  billing: QuotaTeamRow | "uncapped";
   /** Null when the caller authenticated with something other than an API key (OAuth/MCP). */
   apiKeyId: string | null;
 }
@@ -188,10 +193,14 @@ export type AcceptEmailResult =
       /** Distinct mailboxes charged to the quota, and the UTC day they count against. */
       recipientCount: number;
       day: string;
+      /** The cap the reservation ran against, for callers that reserve in bulk. */
+      quota: TeamQuota;
     }
   | { ok: false; reason: "all_suppressed" }
   | { ok: false; reason: "attachments_too_large"; maxBytes: number }
-  | { ok: false; reason: "quota_backlog_full" };
+  | { ok: false; reason: "quota_backlog_full" }
+  /** A monthly plan at its included volume with overage off: refused outright, nothing parks for a month. */
+  | { ok: false; reason: "monthly_quota_exceeded"; periodEnd: Date };
 
 /**
  * The single accept pipeline behind every send surface: suppression strip,
@@ -273,26 +282,29 @@ export async function acceptEmail(
       ? await sealAttachments(payload.attachments, deps.keyring, owner)
       : null;
 
-  const limit = deps.isCloud ? PLAN_DAILY_LIMIT[auth.plan] : null;
+  const quota: TeamQuota =
+    auth.billing === "uncapped" ? { kind: "none" } : teamQuota(auth.billing, deps.isCloud);
   // Quota reservation, email insert, and the caller's in-transaction hook
-  // commit atomically (the quota contract). Over-quota mail is parked as
-  // queued_quota — still accepted, drained after the midnight rollover.
-  // A scheduled send is charged to its delivery day, so a team cannot stack
-  // many days of the cap onto one future instant.
+  // commit atomically (the quota contract). Over a DAILY cap mail is parked
+  // as queued_quota — still accepted, drained after the midnight rollover;
+  // a scheduled send is charged to its delivery day, so a team cannot stack
+  // many days of the cap onto one future instant. A monthly plan counts
+  // every accept against the current billing period, whenever it delivers.
   const deliveryAt = payload.scheduledAt ?? new Date();
   const day = utcDay(deliveryAt);
   const runAccept = async (txDb: Db) => {
-    const quota =
+    const reservation =
       opts.quota === "deferred"
         ? { reserved: true }
-        : await reserveDailyQuota(txDb, {
+        : await reserveQuota(txDb, {
             teamId: auth.teamId,
             count: recipientCount,
-            limit,
+            quota,
             day,
             at: deliveryAt,
           });
-    if (!quota.reserved && limit !== null) {
+    if (!reservation.reserved && quota.kind === "month") return "monthly_quota_exceeded" as const;
+    if (!reservation.reserved && quota.kind === "day") {
       const [parked] = await txDb
         .select({ n: count() })
         .from(schema.emails)
@@ -302,7 +314,8 @@ export async function acceptEmail(
             eq(schema.emails.latestStatus, "queued_quota"),
           ),
         );
-      if ((parked?.n ?? 0) >= limit * QUOTA_BACKLOG_DAYS) return null;
+      if ((parked?.n ?? 0) >= quota.limit * QUOTA_BACKLOG_DAYS)
+        return "quota_backlog_full" as const;
     }
     const [row] = await txDb
       .insert(schema.emails)
@@ -321,7 +334,7 @@ export async function acceptEmail(
         headers: payload.headers ?? null,
         attachments: sealedAttachments,
         topicId: payload.topicId ?? null,
-        latestStatus: quota.reserved ? "queued" : "queued_quota",
+        latestStatus: reservation.reserved ? "queued" : "queued_quota",
         scheduledAt: payload.scheduledAt ?? null,
         bodyCiphertext: encrypted.ciphertext,
         bodyIv: encrypted.iv,
@@ -331,12 +344,19 @@ export async function acceptEmail(
       .returning({ id: schema.emails.id });
     if (!row) throw new Error("email insert returned no row");
     await opts.completeInTx?.(txDb, row.id);
-    return { id: row.id, parked: !quota.reserved };
+    return { id: row.id, parked: !reservation.reserved };
   };
   const accepted = opts.tx
     ? await runAccept(opts.tx)
     : await deps.db.transaction((tx) => runAccept(tx as unknown as Db));
-  if (accepted === null) return { ok: false, reason: "quota_backlog_full" };
+  if (accepted === "quota_backlog_full") return { ok: false, reason: "quota_backlog_full" };
+  if (accepted === "monthly_quota_exceeded") {
+    return {
+      ok: false,
+      reason: "monthly_quota_exceeded",
+      periodEnd: quota.kind === "month" ? quota.periodEnd : deliveryAt,
+    };
+  }
   // After commit: hand the send to the queue (quota-parked emails wait for
   // the midnight drain instead). An enqueue failure must NOT undo the accept
   // — the email is committed, so rethrowing would let a retry create a
@@ -353,5 +373,5 @@ export async function acceptEmail(
       console.error("email.send enqueue failed; reconcile sweep will recover", err);
     }
   }
-  return { ok: true, id: accepted.id, parked: accepted.parked, recipientCount, day };
+  return { ok: true, id: accepted.id, parked: accepted.parked, recipientCount, day, quota };
 }

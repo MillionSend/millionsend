@@ -9,6 +9,7 @@ import {
   MCP_SCOPES,
   type McpScope,
   mcpResourceUrl,
+  QUOTA_COLUMNS,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -78,6 +79,7 @@ interface McpTeam {
   teamId: string;
   name: string;
   plan: ApiKeyAuth["plan"];
+  billing: ApiKeyAuth["billing"];
   role: TeamRole;
 }
 
@@ -98,6 +100,7 @@ function teamAuth(team: McpTeam, userId: string, oauthClientId: string): ApiKeyA
   return {
     teamId: team.teamId,
     plan: team.plan,
+    billing: team.billing,
     apiKeyId: null,
     userId,
     oauthClientId,
@@ -195,20 +198,17 @@ function createTokenVerifier(
         // as the single-team check) and pick the team per tool call.
         const teams: McpTeam[] = (
           await db
-            .select({
-              teamId: m.teamId,
-              name: schema.teams.name,
-              plan: schema.teams.plan,
-              currentPeriodEnd: schema.teams.currentPeriodEnd,
-              role: m.role,
-            })
+            .select({ teamId: m.teamId, name: schema.teams.name, role: m.role, ...QUOTA_COLUMNS })
             .from(m)
             .innerJoin(schema.teams, eq(m.teamId, schema.teams.id))
             .where(eq(m.userId, claims.data.sub))
             .orderBy(asc(m.createdAt))
-        ).map(({ currentPeriodEnd, ...t }) => ({
-          ...t,
-          plan: effectivePlan(t.plan, currentPeriodEnd),
+        ).map(({ teamId, name, role, ...billing }) => ({
+          teamId,
+          name,
+          role,
+          plan: effectivePlan(billing.plan, billing.currentPeriodEnd),
+          billing,
         }));
         const first = teams[0];
         if (!first) throw invalid("Token holder is no longer a member of any team");
@@ -220,19 +220,17 @@ function createTokenVerifier(
         };
       } else {
         const [membership] = await db
-          .select({
-            plan: schema.teams.plan,
-            currentPeriodEnd: schema.teams.currentPeriodEnd,
-            role: m.role,
-          })
+          .select({ role: m.role, ...QUOTA_COLUMNS })
           .from(m)
           .innerJoin(schema.teams, eq(m.teamId, schema.teams.id))
           .where(and(eq(m.userId, claims.data.sub), eq(m.teamId, claims.data.team_id)));
         if (!membership) throw invalid("Token holder is no longer a member of the team");
+        const { role, ...billing } = membership;
         extra = {
           auth: {
             teamId: claims.data.team_id,
-            plan: effectivePlan(membership.plan, membership.currentPeriodEnd),
+            plan: effectivePlan(billing.plan, billing.currentPeriodEnd),
+            billing,
             apiKeyId: null,
             userId: claims.data.sub,
             oauthClientId: claims.data.client_id,
@@ -240,7 +238,7 @@ function createTokenVerifier(
             domainId: null,
           },
           userId: claims.data.sub,
-          role: membership.role,
+          role,
         };
       }
       return {
@@ -473,7 +471,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     "emails:read",
     {
       description:
-        "Get the team's plan and quota picture before bulk work: effective plan, daily send and domain limits, emails accepted so far today (UTC) and when that counter resets. A self-hosted instance reports cloud=false with null plan and limits.",
+        "Get the team's plan and quota picture before bulk work: effective plan, its send limit (emails_per_day on Free and Starter, emails_per_month on Pro and Scale) and domain limit, emails accepted so far today (UTC) and when that counter resets, and on a monthly plan a `period` object with the billing period's emails_sent, included volume, whether overage is on and when the period ends. A self-hosted instance reports cloud=false with null plan, limits and period.",
       inputSchema: z.object({}),
       readOnly: true,
     },

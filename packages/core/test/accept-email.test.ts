@@ -12,7 +12,8 @@ import {
   verifyOnboardingSender,
 } from "../src/accept-email.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
-import { PLAN_DAILY_LIMIT, QUOTA_TOLERANCE } from "../src/plans.js";
+import { QUOTA_TOLERANCE, type QuotaTeamRow, teamRung } from "../src/plans.js";
+import { readPeriodUsage } from "../src/quota.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
 let db: Db;
@@ -94,7 +95,14 @@ const deps = () => ({
     enqueued.push(id);
   },
 });
-const auth = () => ({ teamId, plan: "free" as const, apiKeyId: null });
+const FREE: QuotaTeamRow = {
+  plan: "free",
+  planQuota: null,
+  currentPeriodStart: null,
+  currentPeriodEnd: null,
+  stripeOverageItemId: null,
+};
+const auth = () => ({ teamId, billing: FREE, apiKeyId: null });
 const payload = (over: Partial<AcceptEmailPayload> = {}): AcceptEmailPayload => ({
   from: "a@acme.dev",
   to: ["r@example.com"],
@@ -157,7 +165,7 @@ describe("acceptEmail", () => {
   });
 
   it("parks over-quota mail until the backlog cap, then refuses", async () => {
-    const limit = PLAN_DAILY_LIMIT.free as number;
+    const limit = teamRung("free", null).included;
     // Sends pass through up to the tolerance ceiling before parking starts.
     await db
       .update(schema.usageCounters)
@@ -187,5 +195,47 @@ describe("acceptEmail", () => {
     expect(parked).toMatchObject({ ok: true, parked: true });
     const refused = await acceptEmail(deps(), auth(), payload());
     expect(refused).toEqual({ ok: false, reason: "quota_backlog_full" });
+  });
+
+  it("refuses a monthly plan at its included volume with overage off, and bills past it with overage on", async () => {
+    const monthly = await createTeam(db, "monthly");
+    const periodStart = new Date(Date.now() - DAY_MS);
+    const periodEnd = new Date(Date.now() + 20 * DAY_MS);
+    const billing: QuotaTeamRow = {
+      plan: "pro",
+      planQuota: 100_000,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+      stripeOverageItemId: null,
+    };
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId: monthly, periodStart, accepted: 100_000 });
+    const refused = await acceptEmail(
+      deps(),
+      { teamId: monthly, billing, apiKeyId: null },
+      payload({ domainId: null }),
+    );
+    expect(refused).toEqual({ ok: false, reason: "monthly_quota_exceeded", periodEnd });
+    expect(
+      await db
+        .select({ id: schema.emails.id })
+        .from(schema.emails)
+        .where(eq(schema.emails.teamId, monthly)),
+    ).toEqual([]);
+    const billed = await acceptEmail(
+      deps(),
+      { teamId: monthly, billing: { ...billing, stripeOverageItemId: "si_1" }, apiKeyId: null },
+      payload({ domainId: null }),
+    );
+    expect(billed).toMatchObject({
+      ok: true,
+      parked: false,
+      quota: { kind: "month", overage: true },
+    });
+    expect(await readPeriodUsage(db, monthly, periodStart)).toEqual({
+      accepted: 100_001,
+      reportedOverage: 0,
+    });
   });
 });
