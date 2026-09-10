@@ -24,7 +24,7 @@
     "@millionsend/ses": "workspace:*",
     "@modelcontextprotocol/server": "2.0.0",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.13.2",
+    "hono": "^4.13.5",
     "jose": "6.2.8",
     "tsx": "^4.23.12"
   },
