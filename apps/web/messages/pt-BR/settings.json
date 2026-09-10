@@ -310,7 +310,7 @@
       "domainsUnlimited": "Domínios de envio ilimitados",
       "contacts": "Contatos, segmentos e tópicos ilimitados",
       "contactsLimit": "Até {n, number} contatos",
-      "broadcasts": "Campanhas de e-mail para seus contatos, personalizadas por pessoa",
+      "broadcasts": "Broadcasts: newsletters e campanhas, personalizados por contato",
       "integrations": "Webhooks e chaves de API",
       "agents": "Servidor MCP, CLI e nove SDKs",
       "teams": "Até {n} equipes"
