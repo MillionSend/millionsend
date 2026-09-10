@@ -12,9 +12,12 @@ hospedada.
 
 Uma escada, do mais barato ao mais caro. Free e Starter limitam os envios por
 dia UTC; Pro e Scale incluem um volume mensal por período de cobrança do
-Stripe e podem cobrar excedente além dele. Contatos, segmentos e tópicos são
-ilimitados em todos os planos; domínios de envio são limitados a 3 no Free e
-10 no Starter, ilimitados acima.
+Stripe e podem cobrar excedente além dele. O Free guarda até 1.000 contatos;
+segmentos e tópicos são ilimitados em todos os planos, e contatos também a
+partir do Starter. Domínios de envio são limitados a 3 no Free e 10 no
+Starter, ilimitados acima. Em qualquer um desses limites a API responde
+`403 plan_limit_reached` ("Your plan allows up to 1000 contacts") e o painel
+mostra a mesma frase.
 
 | Degrau | Plano | Preço | Incluído | Limite | Excedente por 1.000 |
 | --- | --- | --- | --- | --- | --- |
@@ -49,8 +52,8 @@ um upgrade de plano libera o que estava estacionado em poucos minutos.
 
 O contador é o período de cobrança do Stripe — a tabela `usage_periods`,
 chaveada pelo `current_period_start` do time — sem tolerância. O que acontece
-no volume incluído depende da chave **excedente** em Cobrança, desligada por
-padrão:
+no volume incluído depende da chave **excedente** em Cobrança, ligada por
+padrão (o cliente a desliga lá):
 
 - **Excedente desligado**: a API recusa com `429 monthly_quota_exceeded`
   ("Monthly sending quota exceeded; turn on overage in Billing or wait for the
@@ -58,9 +61,14 @@ padrão:
   estacionam o que sobra como `queued_quota`, e o drain o reconfere contra o
   período a cada rodada: sai quando o período renova, quando o excedente é
   ligado ou quando o plano sobe.
-- **Excedente ligado**: as reservas nunca falham. Os envios além do volume
-  incluído são reportados a um medidor do Stripe e cobrados por 1.000 na taxa
-  do degrau, na próxima fatura (veja [o cron de excedente](#o-cron-de-excedente)).
+- **Excedente ligado**: os envios além do volume incluído são reportados a um
+  medidor do Stripe e cobrados por 1.000 na taxa do degrau, na próxima fatura
+  (veja [o cron de excedente](#o-cron-de-excedente)) — até um teto rígido de
+  5× o volume incluído (`OVERAGE_HARD_CAP`), para uma integração descontrolada
+  ou uma chave roubada nunca gerar uma conta sem fim. Nesse teto a API recusa
+  com o mesmo `429 monthly_quota_exceeded` ("Monthly sending quota exceeded:
+  sends stop at 5 times the included volume even with overage on; the period
+  renews on `<data>`") até o período renovar.
 
 Os owners recebem `quota.warning` em 80% e `quota.reached` em 100% do volume
 incluído, uma vez por período; o e-mail de limite atingido diz se os envios
@@ -125,8 +133,8 @@ linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
 
    A chave de **excedente** (`billing.setOverage`) vira `overage_enabled`;
    desligar reporta antes o que ainda não foi reportado. Uma assinatura
-   anterior à escada não tem item medido; ligar o excedente pela primeira
-   vez o adiciona.
+   anterior à escada não tem item medido; ligar o excedente o adiciona
+   (desligar e ligar de novo, já que a chave começa ligada).
 5. **Gerenciar cobrança** abre o Customer Portal do Stripe para forma de
    pagamento, faturas, id fiscal e cancelamento ao fim do período (o portal
    pede o motivo do cancelamento). Trocas de plano não são oferecidas lá: o
@@ -165,6 +173,11 @@ Regras adicionais:
   registrados e respondidos com `200` para o Stripe parar de reenviar.
 - Stripe inacessível ou falha no banco lançam erro; a linha do evento é
   desfeita e a nova tentativa do Stripe é processada normalmente.
+- `billing.reconcile` rebusca no Stripe a assinatura de todo time assinante
+  uma vez por dia, e mais uma vez a cada boot do worker: um deploy que
+  reinicia o processo com um evento em voo é alcançado na hora, não horas
+  depois. Um plano que o reconcile move é reportado aos owners como o webhook
+  teria feito.
 - `stripe_customer_id`, `stripe_subscription_id`, `current_period_start`,
   `current_period_end`, `stripe_overage_item_id` e `pending_rung` (o degrau
   da última fase de um schedule pendente, quando difere do atual) são
@@ -191,10 +204,12 @@ Uma queda entre os dois últimos deixa a fixação, então a próxima rodada
 reenvia o mesmo `to` com o mesmo identificador e o Stripe o descarta como
 duplicata; uma falha do Stripe também deixa a fixação para a próxima rodada.
 Com o excedente desligado nada passa do volume incluído, então não há o que
-reportar. O uso de um período que já terminou é carimbado um segundo dentro
-desse período, onde o Stripe o fatura (a fatura fica em rascunho por cerca de
-uma hora após o fim do período; linhas com mais de 35 dias não podem mais ser
-medidas e vão para o log). O mesmo relato roda antes de a chave desligar,
+reportar; com ele ligado nada passa de 5× o volume, então um período cobra no
+máximo quatro volumes de excedente. O uso de um período que já terminou é
+carimbado um segundo dentro desse período, onde o Stripe o fatura (a fatura
+fica em rascunho por cerca de uma hora após o fim do período; linhas com mais
+de 35 dias não podem mais ser medidas e vão para o log). O mesmo relato roda
+antes de a chave desligar,
 antes de uma subida (os envios feitos no degrau antigo acertam na taxa dele)
 e quando o item medido sai da assinatura, para nada ficar sem cobrar.
 
@@ -219,13 +234,14 @@ escada, não de flags:
 ```sh
 STRIPE_SECRET_KEY=sk_test_… pnpm --filter @millionsend/billing provision \
   --webhook-url https://app.example.com/api/billing/webhook \
-  --portal
+  --portal --app-url https://app.example.com
 ```
 
 | Flag | Efeito |
 | --- | --- |
 | `--webhook-url` | Localiza ou cria o endpoint de webhook para essa URL com exatamente os eventos que o handler consome. Omita em desenvolvimento local. |
 | `--portal` | Localiza ou cria a configuração do Customer Portal e imprime o id para `STRIPE_PORTAL_CONFIG`. |
+| `--app-url` | Origem do painel: a URL de retorno padrão do portal passa a ser `<app-url>/settings/billing`. Omita para usar o padrão do Stripe. |
 | `--dry-run` | Lê a conta e imprime o que seria escrito, sem escrever. |
 
 O que ele faz, e por que rodar de novo é seguro:
@@ -248,10 +264,13 @@ O que ele faz, e por que rodar de novo é seguro:
   única vez, na criação** — o Stripe nunca o devolve de novo. Para rotacionar,
   gere um novo no dashboard (Developers → Webhooks → o endpoint → Roll secret)
   e copie o novo valor em `STRIPE_WEBHOOK_SECRET`.
-- **Configuração do portal** é localizada por metadata e tem os recursos
-  atualizados: histórico de faturas, forma de pagamento, dados do cliente
-  incluindo id fiscal e cancelamento ao fim do período com coleta do motivo;
-  atualização de assinatura fica desligada (veja [o fluxo](#o-fluxo)).
+- **Configuração do portal** é localizada por metadata e tem as
+  configurações atualizadas: os recursos (histórico de faturas, forma de
+  pagamento, dados do cliente incluindo id fiscal e cancelamento ao fim do
+  período com coleta do motivo; atualização de assinatura fica desligada,
+  veja [o fluxo](#o-fluxo)), os links de termos e privacidade do perfil da
+  empresa (`millionsend.com/terms`, `/privacy`) e, com `--app-url`, a URL de
+  retorno.
 
 Teste e produção são contas Stripe separadas: rode uma vez com cada chave.
 
@@ -276,15 +295,17 @@ O script termina imprimindo estes itens; a API não consegue fazê-los:
 
 A migração `0035_pricing_ladder` adiciona o valor de plano `starter`, as
 colunas de `teams` `plan_quota`, `current_period_start`,
-`stripe_overage_item_id`, `overage_enabled` (padrão false) e `pending_rung`,
+`stripe_overage_item_id`, `overage_enabled` (padrão true) e `pending_rung`,
 e a tabela `usage_periods` (`accepted`, `reported_overage`,
 `pending_overage`). Times `scale` existentes passam a Scale 500k
 (`plan_quota` 500000) e times `pro` a Pro 100k (100000);
 `current_period_start` é preenchido como `current_period_end − 1 mês`. As
 assinaturas deles ficam nos preços legados, resolvidos pelo metadata do
-produto, até serem movidas, e não têm item medido: ligar o excedente pela
-primeira vez o adiciona. O contador do período começa vazio: envios aceitos
-antes da migração contam no dia em que saíram, não no período.
+produto, até serem movidas, e não têm item medido, então os envios delas além
+do volume incluído passam (a chave começa ligada) mas não cobram nada até um
+ser adicionado: desligar e ligar o excedente de novo em Cobrança o adiciona,
+e uma subida na escada também. O contador do período começa vazio: envios
+aceitos antes da migração contam no dia em que saíram, não no período.
 
 ## Testando localmente
 

@@ -199,8 +199,11 @@ export type AcceptEmailResult =
   | { ok: false; reason: "all_suppressed" }
   | { ok: false; reason: "attachments_too_large"; maxBytes: number }
   | { ok: false; reason: "quota_backlog_full" }
-  /** A monthly plan at its included volume with overage off: refused outright, nothing parks for a month. */
-  | { ok: false; reason: "monthly_quota_exceeded"; periodEnd: Date };
+  /**
+   * A monthly plan at its cap: the included volume with overage off, or the
+   * hard cap past it with overage on. Refused outright, nothing parks for a month.
+   */
+  | { ok: false; reason: "monthly_quota_exceeded"; periodEnd: Date; overage: boolean };
 
 /**
  * The single accept pipeline behind every send surface: suppression strip,
@@ -355,6 +358,7 @@ export async function acceptEmail(
       ok: false,
       reason: "monthly_quota_exceeded",
       periodEnd: quota.kind === "month" ? quota.periodEnd : deliveryAt,
+      overage: quota.kind === "month" && quota.overage,
     };
   }
   // After commit: hand the send to the queue (quota-parked emails wait for

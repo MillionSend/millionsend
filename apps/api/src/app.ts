@@ -17,6 +17,7 @@ import {
   clearUnsubscribeSuppression,
   completeIdempotent,
   contactPropertiesChange,
+  contactRoom,
   contactSnapshotColumns,
   DAY_MS,
   decryptEmailBody,
@@ -34,8 +35,10 @@ import {
   MAX_ATTACHMENT_BYTES,
   makeUnsubscribeToken,
   markSegmentsStale,
+  OVERAGE_HARD_CAP,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
+  PLAN_CONTACT_LIMIT,
   parseScheduledAt,
   QUOTA_BACKLOG_DAYS,
   quotaRoom,
@@ -283,6 +286,14 @@ function emailScopeConditions(auth: ApiKeyAuth): SQL[] {
   return conditions;
 }
 
+/** The monthly refusal names the cap it hit: the plan's volume, or the overage hard cap past it. */
+function monthlyQuotaMessage(result: { periodEnd: Date; overage: boolean }): string {
+  const renews = result.periodEnd.toISOString();
+  return result.overage
+    ? `Monthly sending quota exceeded: sends stop at ${OVERAGE_HARD_CAP} times the included volume even with overage on; the period renews on ${renews}`
+    : `Monthly sending quota exceeded; turn on overage in Billing or wait for the period to renew on ${renews}`;
+}
+
 /** Wire status + body for an accept the pipeline refused. */
 function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
   switch (result.reason) {
@@ -298,11 +309,7 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
     case "monthly_quota_exceeded":
       return {
         status: 429 as const,
-        body: errorBody(
-          429,
-          "monthly_quota_exceeded",
-          `Monthly sending quota exceeded; turn on overage in Billing or wait for the period to renew on ${result.periodEnd.toISOString()}`,
-        ),
+        body: errorBody(429, "monthly_quota_exceeded", monthlyQuotaMessage(result)),
       };
     case "attachments_too_large":
       return {
@@ -807,7 +814,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
 
   // "validation_error" for 409 (not "conflict"): the name must be a
   // RESEND_ERROR_CODE_KEY member for SDK clients.
-  type BatchItemError = { ok: false; status: 404 | 409 | 422; name: string; message: string };
+  type BatchItemError = {
+    ok: false;
+    status: 403 | 404 | 409 | 422;
+    name: string;
+    message: string;
+  };
   type BatchItemResult =
     | { ok: true; id: string; status: "created" | "updated" | "skipped" }
     | BatchItemError;
@@ -857,13 +869,16 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
    * between fails the transaction with a unique/FK violation, and the batch is
    * re-classified against the new state — so the item lands as a conflict or
    * not-found, never as a 500.
+   *
+   * A plan's contact cap applies to inserts only: past it every new contact
+   * fails as plan_limit_reached while existing ones still update or skip.
    */
   const batchContactsOp = async (
     teamId: string,
     items: (CreateContactRequest | BatchItemError)[],
-    opts: { onConflict: ContactConflictMode; strict: boolean },
+    opts: { onConflict: ContactConflictMode; strict: boolean; plan: ApiKeyAuth["plan"] },
   ): Promise<(BatchItemResult | undefined)[]> => {
-    const { onConflict, strict } = opts;
+    const { onConflict, strict, plan } = opts;
     const results: (BatchItemResult | undefined)[] = items.map(() => undefined);
     const types = await loadContactPropertyTypes(db, teamId);
     const rows = new Map<string, BatchContactRow>();
@@ -999,6 +1014,21 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             });
           } else if (onConflict === "skip") succeed(row, found.id, "skipped");
           else updates.push({ row, found });
+        }
+      }
+      if (inserts.length > 0) {
+        const room = await contactRoom(db, teamId, plan, deps.isCloud);
+        if (room !== null && inserts.length > room) {
+          const limit = PLAN_CONTACT_LIMIT[plan];
+          for (const row of inserts) {
+            fail(row, {
+              ok: false,
+              status: 403,
+              name: "plan_limit_reached",
+              message: `Your plan allows up to ${limit} contacts`,
+            });
+          }
+          inserts.length = 0;
         }
       }
       if (strict && results.some((r) => r !== undefined && !r.ok)) return results;
@@ -1169,9 +1199,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
   /** Creation shared by POST /contacts and its legacy audiences alias. */
   const createContactOp = async (
     teamId: string,
+    plan: ApiKeyAuth["plan"],
     body: CreateContactRequest,
   ): Promise<BatchItemResult> => {
-    const [result] = await batchContactsOp(teamId, [body], { onConflict: "error", strict: true });
+    const [result] = await batchContactsOp(teamId, [body], {
+      onConflict: "error",
+      strict: true,
+      plan,
+    });
     if (!result) throw new Error("contact batch returned no result");
     return result;
   };
@@ -1303,6 +1338,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           content: { "application/json": { schema: contactIdResponseSchema } },
           description: "Contact created",
         },
+        403: jsonErr("Plan limit reached"),
         404: jsonErr("Unknown segment or topic"),
         409: jsonErr("Contact already exists"),
         422: jsonErr("Validation error"),
@@ -1310,7 +1346,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     }),
     async (c) => {
       const auth = c.get("auth");
-      const result = await createContactOp(auth.teamId, c.req.valid("json"));
+      const result = await createContactOp(auth.teamId, auth.plan, c.req.valid("json"));
       if (!result.ok) {
         return c.json(errorBody(result.status, result.name, result.message), result.status);
       }
@@ -1464,6 +1500,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           content: { "application/json": { schema: batchContactsResponseSchema } },
           description: "Batch processed",
         },
+        403: jsonErr("Plan limit reached (strict mode)"),
         404: jsonErr("Unknown segment or topic (strict mode)"),
         409: jsonErr("Contact already exists (strict mode, on_conflict=error)"),
         422: jsonErr("Validation error"),
@@ -1487,6 +1524,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       const results = await batchContactsOp(auth.teamId, items, {
         onConflict: on_conflict,
         strict,
+        plan: auth.plan,
       });
       if (strict) {
         const index = results.findIndex((r) => r !== undefined && !r.ok);
@@ -1911,6 +1949,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           content: { "application/json": { schema: contactIdResponseSchema } },
           description: "Contact created in the audience",
         },
+        403: jsonErr("Plan limit reached"),
         404: jsonErr("Not found"),
         409: jsonErr("Contact already exists"),
         422: jsonErr("Validation error"),
@@ -1920,7 +1959,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       const auth = c.get("auth");
       const { audienceId } = c.req.valid("param");
       const body = c.req.valid("json");
-      const result = await createContactOp(auth.teamId, {
+      const result = await createContactOp(auth.teamId, auth.plan, {
         ...body,
         segments: [...(body.segments ?? []), { id: audienceId }],
       });
@@ -3581,7 +3620,12 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           // with overage off refuses the whole batch.
           if (quota.kind === "month") {
             throw new AcceptRejectedError(
-              { ok: false, reason: "monthly_quota_exceeded", periodEnd: quota.periodEnd },
+              {
+                ok: false,
+                reason: "monthly_quota_exceeded",
+                periodEnd: quota.periodEnd,
+                overage: quota.overage,
+              },
               first.index,
             );
           }

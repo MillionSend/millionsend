@@ -273,6 +273,6 @@ describe("setOverage", () => {
       "monthly plans only",
     );
     expect(state.itemCreates).toEqual([]);
-    expect((await team(teamId))?.overageEnabled).toBe(false);
+    expect((await team(teamId))?.overageEnabled).toBe(true);
   });
 });

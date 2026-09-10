@@ -2,7 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { sql } from "drizzle-orm";
 import { firstRow } from "./driver-result.js";
-import { QUOTA_TOLERANCE, type TeamQuota } from "./plans.js";
+import { OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type TeamQuota } from "./plans.js";
 import { bumpHourlyUsage } from "./usage-hourly.js";
 import { utcDay } from "./utc-day.js";
 
@@ -105,9 +105,9 @@ export async function releaseDailyQuota(
  * Atomically reserve `count` sends against a monthly plan's billing period,
  * the same single-upsert shape as the daily table. No tolerance: at the
  * included volume the reservation is refused unless overage is on, in which
- * case the counter keeps growing and the excess is what the meter bills.
- * The daily counters are bumped alongside (uncapped) so Metrics and the
- * history table see every send.
+ * case the counter keeps growing (the excess is what the meter bills) until
+ * OVERAGE_HARD_CAP times the volume. The daily counters are bumped alongside
+ * (uncapped) so Metrics and the history table see every send.
  */
 export async function reservePeriodQuota(
   db: Db,
@@ -123,7 +123,7 @@ export async function reservePeriodQuota(
 ): Promise<QuotaResult> {
   const { teamId, count, periodStart } = params;
   if (count <= 0) throw new Error("count must be positive");
-  const ceiling = params.overage ? null : params.included;
+  const ceiling = params.overage ? params.included * OVERAGE_HARD_CAP : params.included;
   const t = schema.usagePeriods;
   const current = async () => {
     const [row] = await db
@@ -132,10 +132,10 @@ export async function reservePeriodQuota(
       .where(sql`${t.teamId} = ${teamId} and ${t.periodStart} = ${periodStart}`);
     return row?.accepted ?? 0;
   };
-  if (ceiling !== null && count > ceiling) {
+  if (count > ceiling) {
     return { reserved: false, accepted: await current(), ceiling };
   }
-  const guard = ceiling === null ? sql`true` : sql`${t.accepted} + ${count} <= ${ceiling}`;
+  const guard = sql`${t.accepted} + ${count} <= ${ceiling}`;
   const rows = await db.execute<{ accepted: number }>(sql`
     insert into ${t} (team_id, period_start, accepted)
     values (${teamId}, ${periodStart}, ${count})

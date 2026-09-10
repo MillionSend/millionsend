@@ -42,11 +42,11 @@ it("puts existing paid teams on their plan's first rung and backfills the period
   ]);
 });
 
-it("adds the overage switch (off), the pending rung and the pending overage counter", async () => {
+it("adds the overage switch (on), the pending rung and the pending overage counter", async () => {
   const teams = await client.query(
     "select overage_enabled, pending_rung from teams where slug = 'p'",
   );
-  expect(teams.rows).toEqual([{ overage_enabled: false, pending_rung: null }]);
+  expect(teams.rows).toEqual([{ overage_enabled: true, pending_rung: null }]);
   const period = await client.query(
     "insert into usage_periods (team_id, period_start) select id, now() from teams where slug = 'p' returning accepted, reported_overage, pending_overage",
   );

@@ -1,6 +1,7 @@
 import { createRoute, type OpenAPIHono } from "@hono/zod-openapi";
 import {
   nextUtcDayStart,
+  PLAN_CONTACT_LIMIT,
   PLAN_DOMAIN_LIMIT,
   readPeriodUsage,
   teamQuota,
@@ -23,7 +24,7 @@ export function registerUsageRoutes(
         200: {
           content: { "application/json": { schema: usageResponseSchema } },
           description:
-            "Effective plan, its send and domain limits, today's accepted send count (UTC day) and, on a monthly plan, the billing period's usage. MillionSend extension; plan, limits and period are null on a self-hosted instance.",
+            "Effective plan, its send, domain and contact limits, today's accepted send count (UTC day) and, on a monthly plan, the billing period's usage. MillionSend extension; plan, limits and period are null on a self-hosted instance.",
         },
         403: {
           content: { "application/json": { schema: errorSchema } },
@@ -57,6 +58,7 @@ export function registerUsageRoutes(
             emails_per_day: quota.kind === "day" ? quota.limit : null,
             emails_per_month: quota.kind === "month" ? quota.included : null,
             domains: plan ? PLAN_DOMAIN_LIMIT[plan] : null,
+            contacts: plan ? PLAN_CONTACT_LIMIT[plan] : null,
           },
           today: {
             emails_sent: today?.accepted ?? 0,

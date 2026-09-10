@@ -51,8 +51,9 @@ export const teams = pgTable(
     // carries one); what it bills is what the worker reports, so the switch
     // below is the customer's choice, not the item's presence.
     stripeOverageItemId: text("stripe_overage_item_id"),
-    // Sends past the included volume bill instead of stopping. Default off.
-    overageEnabled: boolean("overage_enabled").notNull().default(false),
+    // Sends past the included volume bill instead of stopping, up to the hard
+    // cap. On by default, like the market; the customer turns it off in Billing.
+    overageEnabled: boolean("overage_enabled").notNull().default(true),
     // The rung a scheduled downgrade moves to when the period renews; null
     // while none is pending. Mirrors the Stripe subscription schedule.
     pendingRung: text("pending_rung"),

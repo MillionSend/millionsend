@@ -12,7 +12,7 @@ import {
   verifyOnboardingSender,
 } from "../src/accept-email.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
-import { QUOTA_TOLERANCE, type QuotaTeamRow, teamRung } from "../src/plans.js";
+import { OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type QuotaTeamRow, teamRung } from "../src/plans.js";
 import { readPeriodUsage } from "../src/quota.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
@@ -197,7 +197,7 @@ describe("acceptEmail", () => {
     expect(refused).toEqual({ ok: false, reason: "quota_backlog_full" });
   });
 
-  it("refuses a monthly plan at its included volume with overage off, and bills past it with overage on", async () => {
+  it("refuses a monthly plan at its included volume with overage off, bills past it with overage on, and stops at the hard cap", async () => {
     const monthly = await createTeam(db, "monthly");
     const periodStart = new Date(Date.now() - DAY_MS);
     const periodEnd = new Date(Date.now() + 20 * DAY_MS);
@@ -216,7 +216,12 @@ describe("acceptEmail", () => {
       { teamId: monthly, billing, apiKeyId: null },
       payload({ domainId: null }),
     );
-    expect(refused).toEqual({ ok: false, reason: "monthly_quota_exceeded", periodEnd });
+    expect(refused).toEqual({
+      ok: false,
+      reason: "monthly_quota_exceeded",
+      periodEnd,
+      overage: false,
+    });
     expect(
       await db
         .select({ id: schema.emails.id })
@@ -236,6 +241,21 @@ describe("acceptEmail", () => {
     expect(await readPeriodUsage(db, monthly, periodStart)).toEqual({
       accepted: 100_001,
       reportedOverage: 0,
+    });
+    await db
+      .update(schema.usagePeriods)
+      .set({ accepted: 100_000 * OVERAGE_HARD_CAP })
+      .where(eq(schema.usagePeriods.teamId, monthly));
+    const capped = await acceptEmail(
+      deps(),
+      { teamId: monthly, billing: { ...billing, overageEnabled: true }, apiKeyId: null },
+      payload({ domainId: null }),
+    );
+    expect(capped).toEqual({
+      ok: false,
+      reason: "monthly_quota_exceeded",
+      periodEnd,
+      overage: true,
     });
   });
 });

@@ -2,6 +2,8 @@
 
 import {
   formatVolume,
+  OVERAGE_HARD_CAP,
+  PLAN_CONTACT_LIMIT,
   PLAN_DOMAIN_LIMIT,
   PLAN_RUNGS,
   PLAN_TEAM_LIMIT,
@@ -221,14 +223,14 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
 
   const features = (p: Plan): string[] => {
     const domains = PLAN_DOMAIN_LIMIT[p];
+    const contacts = PLAN_CONTACT_LIMIT[p];
     return [
       domains === null ? t("features.domainsUnlimited") : t("features.domains", { n: domains }),
-      t(p === "free" ? "features.contactsFairUse" : "features.contacts"),
+      contacts === null ? t("features.contacts") : t("features.contactsLimit", { n: contacts }),
       t("features.broadcasts"),
       t("features.integrations"),
+      t("features.agents"),
       t("features.teams", { n: PLAN_TEAM_LIMIT[p] }),
-      t("features.history"),
-      t(`features.support.${p}`),
     ];
   };
 
@@ -361,7 +363,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 14, color: "var(--ms-bone)" }}>{t("overage")}</div>
                 <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>
-                  {t("overageCopy", { price: usd(quota.overageCentsPer1k) })}
+                  {t("overageCopy", { price: usd(quota.overageCentsPer1k), cap: OVERAGE_HARD_CAP })}
                 </div>
                 {over > 0 ? (
                   <div style={{ fontSize: 12.5, color: "var(--ms-bone)", marginTop: 6 }}>
@@ -466,9 +468,10 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
                   </span>
                 </div>
                 <div style={{ fontSize: 13, color: "var(--ms-bone)" }}>{capLine(r)}</div>
+                {/* Daily plans have no overage line; a blank one keeps the four cards' rows aligned. */}
                 <div style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
                   {r.overageCentsPer1k === null
-                    ? t("noOverage")
+                    ? "\u00a0"
                     : t("overagePer1k", { price: usd(r.overageCentsPer1k) })}
                 </div>
                 <ul

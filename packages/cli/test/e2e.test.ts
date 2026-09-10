@@ -598,7 +598,7 @@ describe("millionsend (built bundle)", () => {
       });
       expect(code).toBe(0);
       expect(stdout).toContain(cloud.baseUrl);
-      expect(stdout).toMatch(/Contacts\s+1,250/);
+      expect(stdout).toMatch(new RegExp(`Contacts\\s+${CONTACT_COUNT.toLocaleString("en-US")}`));
       expect(stdout).toMatch(/Enriched\s+complete/);
     },
     QUICK,
@@ -714,7 +714,9 @@ describe("millionsend (built bundle)", () => {
       const { code, stdout, stderr } = await run(["migrate", "rollback", "--yes"]);
       expect(stderr.replace(/^warning: retry .*\n?/gm, "")).toBe("");
       expect(code).toBe(0);
-      expect(stdout).toContain("1,250  Contacts (one request each)");
+      expect(stdout).toContain(
+        `${CONTACT_COUNT.toLocaleString("en-US")}  Contacts (one request each)`,
+      );
       expect(stdout).toMatch(/^About 2 min at 10 req\/s\.$/m);
       expect(stdout).toContain("Rolled back. Rows this tool only updated were left as they are.");
       expect(Object.values(readState().created).every((ids) => ids.length === 0)).toBe(true);

@@ -70,9 +70,14 @@ deliberadas e explícitas:
   incluído com o excedente desligado; ative o excedente em Cobrança ou espere
   o período renovar (a mensagem informa a data). Um lote é aceito ou recusado
   por inteiro.
+- `POST /contacts`, `POST /contacts/batch` e o alias de audience retornam
+  `403 plan_limit_reached` quando um contato novo levaria o time além do
+  limite de contatos do plano (1.000 no Free; planos pagos são ilimitados).
+  Contatos existentes continuam sendo atualizados; em um lote só os novos
+  falham.
 - `GET /usage` existe (o Resend não tem endpoint de uso): o plano efetivo,
   seus limites (`emails_per_day` em planos diários, `emails_per_month` em
-  planos mensais, `domains`), o total aceito hoje e, em um plano mensal, um
+  planos mensais, `domains`, `contacts`), o total aceito hoje e, em um plano mensal, um
   objeto `period` — `emails_sent`, `included`, `overage_enabled`,
   `overage_usd_per_1k`, `starts_at`, `ends_at`. Instâncias auto-hospedadas
   reportam `cloud: false` com plano, limites e period nulos.

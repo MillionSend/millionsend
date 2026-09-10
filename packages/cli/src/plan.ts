@@ -333,6 +333,14 @@ export function buildPlan({
       count: contactCount,
       detail: `batch upsert, ${pluralize(memberships, "segment membership")}`,
     });
+    // The target's own count is not on the wire; the source alone exceeding
+    // the cap is already a sure overflow (upserts of existing rows aside).
+    const limit = target.usage.limits.contacts;
+    if (limit !== null && contactCount > limit) {
+      warnings.push(
+        `${pluralize(contactCount, "contact")} to create; the ${capitalize(target.usage.plan ?? "current")} plan allows ${formatNumber(limit)}`,
+      );
+    }
   }
 
   // Facets in pass order: opt-outs first, so a broadcast sent early reaches nobody who left.

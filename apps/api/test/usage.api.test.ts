@@ -65,7 +65,7 @@ describe("GET /usage", () => {
       object: "usage",
       cloud: true,
       plan: "free",
-      limits: { emails_per_day: 100, emails_per_month: null, domains: 3 },
+      limits: { emails_per_day: 100, emails_per_month: null, domains: 3, contacts: 1000 },
       today: { emails_sent: 0, resets_at: expect.any(String) },
       period: null,
       team: { id: teamId, name: "usage-team" },
@@ -92,7 +92,7 @@ describe("GET /usage", () => {
     await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, teamId));
     expect(await (await get(cloud)).json()).toMatchObject({
       plan: "starter",
-      limits: { emails_per_day: 1500, emails_per_month: null, domains: 10 },
+      limits: { emails_per_day: 1500, emails_per_month: null, domains: 10, contacts: null },
       period: null,
     });
     await db.update(schema.teams).set({ plan: "free" }).where(eq(schema.teams.id, teamId));
@@ -108,11 +108,11 @@ describe("GET /usage", () => {
     await db.insert(schema.usagePeriods).values({ teamId, periodStart: start, accepted: 42 });
     expect(await (await get(cloud)).json()).toMatchObject({
       plan: "pro",
-      limits: { emails_per_day: null, emails_per_month: 100_000, domains: null },
+      limits: { emails_per_day: null, emails_per_month: 100_000, domains: null, contacts: null },
       period: {
         emails_sent: 42,
         included: 100_000,
-        overage_enabled: false,
+        overage_enabled: true,
         overage_usd_per_1k: 0.3,
         starts_at: start.toISOString(),
         ends_at: end.toISOString(),
@@ -128,7 +128,7 @@ describe("GET /usage", () => {
     expect(await (await get(selfHost)).json()).toMatchObject({
       cloud: false,
       plan: null,
-      limits: { emails_per_day: null, emails_per_month: null, domains: null },
+      limits: { emails_per_day: null, emails_per_month: null, domains: null, contacts: null },
       today: { emails_sent: 1 },
       period: null,
       app_url: null,

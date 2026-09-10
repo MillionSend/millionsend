@@ -3,6 +3,8 @@ import {
   effectivePlan,
   formatVolume,
   monthlyCapacity,
+  OVERAGE_HARD_CAP,
+  PLAN_CONTACT_LIMIT,
   PLAN_GRACE_DAYS,
   PLAN_RUNGS,
   planLabel,
@@ -57,6 +59,12 @@ describe("PLAN_RUNGS", () => {
       ["scale_1_5m", "scale", 1_500_000, "month", 20_000, 18],
       ["scale_2_5m", "scale", 2_500_000, "month", 33_000, 16],
     ]);
+  });
+});
+
+describe("PLAN_CONTACT_LIMIT", () => {
+  it("caps contacts on Free only", () => {
+    expect(PLAN_CONTACT_LIMIT).toEqual({ free: 1_000, starter: null, pro: null, scale: null });
   });
 });
 
@@ -153,7 +161,7 @@ describe("teamQuota", () => {
     });
   });
 
-  it("caps monthly plans by the bought volume over the billing period, overage off until the switch is on", () => {
+  it("caps monthly plans by the bought volume over the billing period, overage as the row flag says", () => {
     expect(teamQuota(row(), true, now)).toEqual({
       kind: "month",
       plan: "pro",
@@ -205,12 +213,14 @@ describe("monthlyCapacity and raisesQuota", () => {
     overageCentsPer1k: 30,
   });
 
-  it("measures a quota in emails per month, unlimited where nothing stops sends", () => {
+  it("measures a quota in emails per month, unlimited only where nothing stops sends", () => {
     expect(monthlyCapacity(none)).toBe(Number.POSITIVE_INFINITY);
     expect(monthlyCapacity(free)).toBe(3_000);
     expect(monthlyCapacity(starter)).toBe(45_000);
     expect(monthlyCapacity(month(100_000))).toBe(100_000);
-    expect(monthlyCapacity(month(100_000, true))).toBe(Number.POSITIVE_INFINITY);
+    // Overage on still stops at the hard cap, never an open-ended bill.
+    expect(OVERAGE_HARD_CAP).toBe(5);
+    expect(monthlyCapacity(month(100_000, true))).toBe(500_000);
   });
 
   it("is true only when the move lets more mail through", () => {

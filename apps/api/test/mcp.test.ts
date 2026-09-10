@@ -838,6 +838,7 @@ describe("REST parity tools", () => {
       object: "usage",
       cloud: false,
       plan: null,
+      limits: { emails_per_day: null, emails_per_month: null, domains: null, contacts: null },
       team: { id: teamId },
     });
     await client.close();
@@ -862,11 +863,11 @@ describe("REST parity tools", () => {
     expect(resultJson(await client.callTool({ name: "get_usage", arguments: {} }))).toMatchObject({
       cloud: true,
       plan: "pro",
-      limits: { emails_per_day: null, emails_per_month: 100_000, domains: null },
+      limits: { emails_per_day: null, emails_per_month: 100_000, domains: null, contacts: null },
       period: {
         emails_sent: 4321,
         included: 100_000,
-        overage_enabled: false,
+        overage_enabled: true,
         starts_at: start.toISOString(),
         ends_at: end.toISOString(),
       },

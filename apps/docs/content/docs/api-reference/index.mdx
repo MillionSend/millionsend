@@ -66,9 +66,13 @@ remaining deltas are deliberate and loud:
   volume with overage off; turn on overage in Billing or wait for the period
   to renew (the message names the date). A batch is accepted or refused
   whole.
+- `POST /contacts`, `POST /contacts/batch` and the audience alias return
+  `403 plan_limit_reached` when a new contact would take the team past its
+  plan's contact cap (1,000 on Free; paid plans are unlimited). Existing
+  contacts still update; in a batch only the new ones fail.
 - `GET /usage` exists (Resend has no usage endpoint): the effective plan, its
   limits (`emails_per_day` on daily plans, `emails_per_month` on monthly ones,
-  `domains`), today's accepted count and, on a monthly plan, a `period` object
+  `domains`, `contacts`), today's accepted count and, on a monthly plan, a `period` object
   — `emails_sent`, `included`, `overage_enabled`, `overage_usd_per_1k`,
   `starts_at`, `ends_at`. Self-hosted instances report `cloud: false` with
   null plan, limits and period.

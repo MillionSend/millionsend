@@ -1,5 +1,5 @@
 {
-  "id": "0b856bf4-bac4-4368-b329-a5664278c303",
+  "id": "997dd49d-b112-4277-b965-b68903fa1041",
   "prevId": "eef7b755-0e42-4685-8a8b-c50e87c969a1",
   "version": "7",
   "dialect": "postgresql",
@@ -4328,7 +4328,7 @@
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
-          "default": false
+          "default": true
         },
         "pending_rung": {
           "name": "pending_rung",

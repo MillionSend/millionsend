@@ -471,7 +471,7 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     "emails:read",
     {
       description:
-        "Get the team's plan and quota picture before bulk work: effective plan, its send limit (emails_per_day on Free and Starter, emails_per_month on Pro and Scale) and domain limit, emails accepted so far today (UTC) and when that counter resets, and on a monthly plan a `period` object with the billing period's emails_sent, included volume, whether overage is on and when the period ends. A self-hosted instance reports cloud=false with null plan, limits and period.",
+        "Get the team's plan and quota picture before bulk work: effective plan, its send limit (emails_per_day on Free and Starter, emails_per_month on Pro and Scale), domain limit and contact limit (`limits.contacts`, null when unlimited), emails accepted so far today (UTC) and when that counter resets, and on a monthly plan a `period` object with the billing period's emails_sent, included volume, whether overage is on and when the period ends. A self-hosted instance reports cloud=false with null plan, limits and period.",
       inputSchema: z.object({}),
       readOnly: true,
     },

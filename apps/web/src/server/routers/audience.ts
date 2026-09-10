@@ -1,3 +1,4 @@
+import { isCloudDeployment } from "@millionsend/config";
 import {
   CONTACT_PROPERTY_KEY_MAX_LENGTH,
   CONTACT_PROPERTY_MAX_KEYS,
@@ -5,11 +6,14 @@ import {
   type ContactEventContext,
   clearUnsubscribeSuppression,
   contactPropertiesChange,
+  contactRoom,
   contactSnapshotColumns,
   emitContactEvents,
   emitSuppressionEvents,
   eraseRecipient,
+  fetchEffectivePlan,
   markSegmentsStale,
+  PLAN_CONTACT_LIMIT,
   recordContactActivity,
   resultRows,
   type WebhookEnqueue,
@@ -49,6 +53,23 @@ async function assertContact(ctx: { db: Db; teamId: string }, contactId: string)
     .where(and(eq(c.id, contactId), eq(c.teamId, ctx.teamId)))
     .limit(1);
   if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+}
+
+/**
+ * Refuses `count` new contacts when they would pass the plan's cap. A CSV
+ * import is judged whole: the user is never left with half a file in.
+ */
+async function assertContactRoom(ctx: { db: Db; teamId: string }, count: number): Promise<void> {
+  if (!isCloudDeployment()) return;
+  const plan = await fetchEffectivePlan(ctx.db, ctx.teamId);
+  if (!plan) return;
+  const room = await contactRoom(ctx.db, ctx.teamId, plan, true);
+  if (room !== null && count > room) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `Your plan allows up to ${PLAN_CONTACT_LIMIT[plan]} contacts`,
+    });
+  }
 }
 
 // Bulk selection ceiling: the contacts table's client batches larger
@@ -291,6 +312,7 @@ export const audienceRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const t = schema.contacts;
+        await assertContactRoom(ctx, 1);
         const [row] = await ctx.db
           .insert(t)
           .values({
@@ -355,6 +377,7 @@ export const audienceRouter = router({
           });
         }
         if (valid.length === 0) return { created: 0, skipped };
+        await assertContactRoom(ctx, valid.length);
         // ON CONFLICT, not a pre-SELECT: a concurrent import racing the same
         // address must count as skipped, never abort the batch on the unique
         // violation. Targetless is exact here — the only conflict a generated

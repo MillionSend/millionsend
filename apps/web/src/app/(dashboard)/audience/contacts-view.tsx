@@ -880,7 +880,9 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
             <p className="ms-field-error">
               {addMutation.error.data?.code === "CONFLICT"
                 ? t("contacts.addExists")
-                : t("contacts.addInvalid")}
+                : addMutation.error.data?.code === "PRECONDITION_FAILED"
+                  ? t("contacts.planLimit")
+                  : t("contacts.addInvalid")}
             </p>
           ) : null}
           <ModalFooter>
@@ -959,7 +961,13 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                   : t("contacts.importPreview", { count: importRows.length })}
               </p>
             ) : null}
-            {importError ? <p className="ms-field-error">{t("contacts.importError")}</p> : null}
+            {importError ? (
+              <p className="ms-field-error">
+                {addManyMutation.error?.data?.code === "PRECONDITION_FAILED"
+                  ? t("contacts.planLimit")
+                  : t("contacts.importError")}
+              </p>
+            ) : null}
             <ModalFooter>
               <button type="button" className="ms-btn ms-btn-secondary" onClick={closeImport}>
                 {common("cancel")} <span className="ms-keycap">Esc</span>

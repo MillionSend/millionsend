@@ -439,6 +439,7 @@ it("cloud fan-out on a monthly plan parks at the included volume and names the r
       planQuota: 100_000,
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
+      overageEnabled: false,
     })
     .where(eq(schema.teams.id, mTeamId));
   // No tolerance on a monthly plan: one slot left means one of three goes.

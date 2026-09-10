@@ -65,7 +65,7 @@ describe("authenticateApiKey billing", () => {
       planQuota: null,
       currentPeriodStart: null,
       currentPeriodEnd: null,
-      overageEnabled: false,
+      overageEnabled: true,
     });
     const currentPeriodStart = new Date("2026-09-01T00:00:00Z");
     const currentPeriodEnd = new Date("2026-10-01T00:00:00Z");

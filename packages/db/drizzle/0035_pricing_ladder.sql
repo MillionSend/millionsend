@@ -10,7 +10,7 @@ CREATE TABLE "usage_periods" (
 --> statement-breakpoint
 ALTER TABLE "teams" ADD COLUMN "plan_quota" integer;--> statement-breakpoint
 ALTER TABLE "teams" ADD COLUMN "stripe_overage_item_id" text;--> statement-breakpoint
-ALTER TABLE "teams" ADD COLUMN "overage_enabled" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "teams" ADD COLUMN "overage_enabled" boolean DEFAULT true NOT NULL;--> statement-breakpoint
 ALTER TABLE "teams" ADD COLUMN "pending_rung" text;--> statement-breakpoint
 ALTER TABLE "teams" ADD COLUMN "current_period_start" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "usage_periods" ADD CONSTRAINT "usage_periods_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

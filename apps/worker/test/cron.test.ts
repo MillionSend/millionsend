@@ -690,6 +690,7 @@ it("drain on a monthly plan releases while the period has room and holds at the 
       planQuota: included,
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
+      overageEnabled: false,
     })
     .where(eq(schema.teams.id, teamId));
   await db.insert(schema.usagePeriods).values({ teamId, periodStart, accepted: included - 1 });

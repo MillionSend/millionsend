@@ -223,6 +223,9 @@ it("monthly quota reached with overage on says sends now bill", async () => {
   expect(sends[0]?.text).toContain(
     "Sends past the quota now bill at your plan's overage rate and show on the next invoice.",
   );
+  expect(sends[0]?.text).toContain(
+    "They stop at 5 times the included volume (500,000) until the period renews on",
+  );
   const [row] = await deliveries();
   expect(row?.payload).toMatchObject({
     type: "quota.reached",

@@ -2,6 +2,7 @@ import {
   accountMailCard,
   formatMailDate,
   type MailContent,
+  OVERAGE_HARD_CAP,
   QUOTA_TOLERANCE,
 } from "@millionsend/core";
 
@@ -127,7 +128,7 @@ export function quotaMonthlyReachedMail(input: {
     paragraphs: [
       `${input.team} has used the ${count(input.limit)} emails included in its plan this billing period (${count(input.used)} accepted).`,
       input.overage
-        ? `Sends past the quota now bill at your plan's overage rate and show on the next invoice. The period renews on ${renews}; a higher plan includes more emails at a lower rate.`
+        ? `Sends past the quota now bill at your plan's overage rate and show on the next invoice. They stop at ${OVERAGE_HARD_CAP} times the included volume (${count(input.limit * OVERAGE_HARD_CAP)}) until the period renews on ${renews}; a higher plan includes more emails at a lower rate.`
         : `New API sends are refused until the period renews on ${renews} or overage is turned on in Billing; broadcasts park until then. A higher plan raises the quota immediately and releases parked mail within minutes.`,
     ],
     button: { label: "Review your plan", url: input.url },

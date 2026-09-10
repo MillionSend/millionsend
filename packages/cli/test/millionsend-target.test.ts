@@ -79,7 +79,7 @@ describe("probe", () => {
     expect(await target.probe()).toEqual({
       cloud: true,
       plan: "free",
-      limits: { emailsPerDay: 100, emailsPerMonth: null, domains: 3 },
+      limits: { emailsPerDay: 100, emailsPerMonth: null, domains: 3, contacts: 1000 },
       today: { emailsSent: 0 },
       period: null,
       appUrl: "https://app.example.test",
@@ -91,7 +91,7 @@ describe("probe", () => {
     expect(await targetFor(selfHost).probe()).toEqual({
       cloud: false,
       plan: null,
-      limits: { emailsPerDay: null, emailsPerMonth: null, domains: null },
+      limits: { emailsPerDay: null, emailsPerMonth: null, domains: null, contacts: null },
       today: { emailsSent: 0 },
       period: null,
       appUrl: null,
@@ -360,6 +360,11 @@ describe("writers", () => {
   });
 
   it("splits contacts into chunks of 1000 with indices over the whole input", async () => {
+    // More rows than the Free plan holds: the team needs an uncapped plan.
+    await cloud.db
+      .update(schema.teams)
+      .set({ plan: "starter" })
+      .where(eq(schema.teams.id, cloud.teamId));
     const many = Array.from({ length: BATCH_MAX + 2 }, (_, i) => ({
       email: i === BATCH_MAX + 1 ? "broken" : `bulk-${i}@example.com`,
     }));
@@ -372,6 +377,10 @@ describe("writers", () => {
     expect(out.errors).toEqual([
       { index: BATCH_MAX + 1, message: expect.stringMatching(/^email/) },
     ]);
+    await cloud.db
+      .update(schema.teams)
+      .set({ plan: "free" })
+      .where(eq(schema.teams.id, cloud.teamId));
   }, 60_000);
 
   it("adds suppressions with their origin in one request per 1000 and lists them back", async () => {

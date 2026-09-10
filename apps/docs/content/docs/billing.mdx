@@ -11,8 +11,11 @@ Stripe key. This page is for operating a hosted deployment.
 
 One ladder, cheapest first. Free and Starter cap sends per UTC day; Pro and
 Scale include a monthly volume per Stripe billing period and can bill overage
-past it. Contacts, segments and topics are unlimited on every plan; sending
-domains are capped at 3 on Free and 10 on Starter, unlimited above.
+past it. Free holds up to 1,000 contacts; segments and topics are unlimited
+everywhere, and so are contacts from Starter up. Sending domains are capped
+at 3 on Free and 10 on Starter, unlimited above. At either cap the API
+answers `403 plan_limit_reached` ("Your plan allows up to 1000 contacts")
+and the dashboard shows the same sentence.
 
 | Rung | Plan | Price | Included | Cap | Overage per 1,000 |
 | --- | --- | --- | --- | --- | --- |
@@ -46,7 +49,8 @@ UTC day; a plan upgrade releases parked mail within minutes.
 
 The counter is the Stripe billing period — the `usage_periods` table, keyed by
 the team's `current_period_start` — with no tolerance. What happens at the
-included volume depends on the **overage** switch in Billing, off by default:
+included volume depends on the **overage** switch in Billing, on by default
+(the customer turns it off there):
 
 - **Overage off**: the API refuses with `429 monthly_quota_exceeded`
   ("Monthly sending quota exceeded; turn on overage in Billing or wait for the
@@ -54,9 +58,14 @@ included volume depends on the **overage** switch in Billing, off by default:
   still park their overflow as `queued_quota`, and the drain re-checks it
   against the period each run: it goes out when the period renews, when
   overage is turned on, or when the plan moves up.
-- **Overage on**: reservations never fail. Sends past the included volume are
-  reported to a Stripe meter and billed per 1,000 at the rung's rate on the
-  next invoice (see [the overage cron](#the-overage-cron)).
+- **Overage on**: sends past the included volume are reported to a Stripe
+  meter and billed per 1,000 at the rung's rate on the next invoice (see
+  [the overage cron](#the-overage-cron)) — up to a hard cap of 5× the
+  included volume (`OVERAGE_HARD_CAP`), so a runaway integration or a stolen
+  key can never run up an open-ended bill. At that cap the API refuses with
+  the same `429 monthly_quota_exceeded` ("Monthly sending quota exceeded:
+  sends stop at 5 times the included volume even with overage on; the period
+  renews on `<date>`") until the period renews.
 
 Owners hear `quota.warning` at 80% and `quota.reached` at 100% of the included
 volume, once per period; the reached mail says whether sends now bill overage
@@ -120,7 +129,8 @@ worker reports, so the customer's **overage** switch is a plain row flag,
 
    The **overage** switch (`billing.setOverage`) flips `overage_enabled`; off
    reports what is still unreported first. A subscription from before the
-   ladder has no metered item; the first time overage is turned on adds it.
+   ladder has no metered item; switching overage on adds it (off and back
+   on, since the switch starts on).
 5. **Manage billing** opens the Stripe Customer Portal for the payment
    method, invoices, tax id and cancel at period end (the portal asks for a
    cancellation reason). Plan changes are not offered there: Stripe's portal
@@ -159,6 +169,11 @@ Additional rules:
   consume, are logged and answered `200` so Stripe stops retrying them.
 - Stripe being unreachable or a database failure throws; the event row rolls
   back and Stripe's retry is processed normally.
+- `billing.reconcile` re-fetches every subscribed team's subscription from
+  Stripe once a day, and once more each time the worker boots: a deploy that
+  restarts the process while an event is mid-flight is caught up at once
+  instead of hours later. A plan the reconcile moves is reported to the
+  owners as the webhook would have.
 - `stripe_customer_id`, `stripe_subscription_id`, `current_period_start`,
   `current_period_end`, `stripe_overage_item_id` and `pending_rung` (the rung
   of a pending schedule's last phase when it differs from the current one)
@@ -183,10 +198,12 @@ at any point costs nothing:
 A crash between the last two leaves the pin, so the next run re-sends the
 same `to` under the same identifier and Stripe drops it as a duplicate; a
 Stripe failure leaves the pin for the next run too. With overage off nothing
-passes the included volume, so there is nothing to report. Usage of a period
-that already ended is stamped one second inside that period, where Stripe
-invoices it (the invoice stays a draft for about an hour after the period
-closes; rows older than 35 days can no longer be metered and are logged).
+passes the included volume, so there is nothing to report; with it on nothing
+passes 5× the volume, so a period bills at most four volumes of overage.
+Usage of a period that already ended is stamped one second inside that
+period, where Stripe invoices it (the invoice stays a draft for about an hour
+after the period closes; rows older than 35 days can no longer be metered and
+are logged).
 The same report runs before the switch turns off, before a move up (sends
 made under the old rung settle at its rate) and when the metered item leaves
 the subscription, so nothing unbilled is lost.
@@ -212,13 +229,14 @@ from the ladder, not from flags:
 ```sh
 STRIPE_SECRET_KEY=sk_test_… pnpm --filter @millionsend/billing provision \
   --webhook-url https://app.example.com/api/billing/webhook \
-  --portal
+  --portal --app-url https://app.example.com
 ```
 
 | Flag | Effect |
 | --- | --- |
 | `--webhook-url` | Find-or-create the webhook endpoint for this URL with exactly the events the handler consumes. Omit for local development. |
 | `--portal` | Find-or-create the Customer Portal configuration and print its id for `STRIPE_PORTAL_CONFIG`. |
+| `--app-url` | Dashboard origin: the portal's default return URL becomes `<app-url>/settings/billing`. Omit for Stripe's default. |
 | `--dry-run` | Read the account and print what would be written, without writing. |
 
 What it does, and why re-running is safe:
@@ -240,10 +258,12 @@ What it does, and why re-running is safe:
   it again. To rotate it, roll it in the dashboard (Developers → Webhooks →
   the endpoint → Roll secret) and copy the new value into
   `STRIPE_WEBHOOK_SECRET`.
-- **Portal configuration** is found by metadata and its features refreshed:
-  invoice history, payment method, customer details including tax id, and
-  cancel at period end with a cancellation reason collected; subscription
-  updates are off (see [the flow](#the-flow)).
+- **Portal configuration** is found by metadata and its settings refreshed:
+  the features (invoice history, payment method, customer details including
+  tax id, and cancel at period end with a cancellation reason collected;
+  subscription updates are off, see [the flow](#the-flow)), the business
+  profile's terms and privacy links (`millionsend.com/terms`, `/privacy`)
+  and, with `--app-url`, the return URL.
 
 Test and live are separate Stripe accounts: run once with each key.
 
@@ -268,15 +288,17 @@ The script ends by printing these; the API cannot do them:
 
 Migration `0035_pricing_ladder` adds the `starter` plan value, the `teams`
 columns `plan_quota`, `current_period_start`, `stripe_overage_item_id`,
-`overage_enabled` (default false) and `pending_rung`, and the `usage_periods`
+`overage_enabled` (default true) and `pending_rung`, and the `usage_periods`
 table (`accepted`, `reported_overage`, `pending_overage`). Existing `scale`
 teams map to Scale 500k (`plan_quota` 500000) and `pro` teams to Pro 100k
 (100000); `current_period_start` is backfilled as `current_period_end − 1
 month`. Their subscriptions stay on the legacy prices, resolved through the
-product's metadata, until they are moved, and carry no metered item: the
-first time overage is turned on adds it. The period counter starts empty:
-sends accepted before the migration count against the day they were sent,
-not against the period.
+product's metadata, until they are moved, and carry no metered item, so
+their sends past the included volume pass (the switch is on by default) but
+bill nothing until one is added: switching overage off and back on in
+Billing adds it, and so does a move up the ladder. The period counter starts
+empty: sends accepted before the migration count against the day they were
+sent, not against the period.
 
 ## Local testing
 

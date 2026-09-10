@@ -58,7 +58,7 @@ interface ListPage<T> {
   has_more: boolean;
 }
 
-/** Instances that predate monthly plans send neither emails_per_month nor period. */
+/** Instances that predate monthly plans send neither emails_per_month nor period; those before the contact cap send no contacts limit. */
 interface UsageWire {
   cloud: boolean;
   plan: string | null;
@@ -66,6 +66,7 @@ interface UsageWire {
     emails_per_day: number | null;
     emails_per_month?: number | null;
     domains: number | null;
+    contacts?: number | null;
   };
   today: { emails_sent: number };
   period?: {
@@ -206,6 +207,7 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
         emailsPerDay: body.limits.emails_per_day,
         emailsPerMonth: body.limits.emails_per_month ?? null,
         domains: body.limits.domains,
+        contacts: body.limits.contacts ?? null,
       },
       today: { emailsSent: body.today.emails_sent },
       period: period && {

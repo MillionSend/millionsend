@@ -172,6 +172,8 @@ function fakeStripe() {
             active: true,
             metadata: p.metadata ?? {},
             features: p.features,
+            business_profile: p.business_profile ?? null,
+            default_return_url: p.default_return_url ?? null,
           });
           state.portals.push(config);
           return config;
@@ -182,6 +184,13 @@ function fakeStripe() {
           if (!config) throw new Error(`no portal config ${configId}`);
           if (p.features)
             config.features = p.features as unknown as Stripe.BillingPortal.Configuration.Features;
+          if (p.business_profile) {
+            config.business_profile =
+              p.business_profile as unknown as Stripe.BillingPortal.Configuration.BusinessProfile;
+          }
+          if (p.default_return_url !== undefined) {
+            config.default_return_url = p.default_return_url;
+          }
           return config;
         },
       },
@@ -262,7 +271,23 @@ describe("provision", () => {
     expect(portal?.features.subscription_update.enabled).toBe(false);
     expect(portal?.features.subscription_cancel.mode).toBe("at_period_end");
     expect(portal?.features.subscription_cancel.cancellation_reason.enabled).toBe(true);
+    expect(portal?.business_profile).toEqual({
+      terms_of_service_url: "https://millionsend.com/terms",
+      privacy_policy_url: "https://millionsend.com/privacy",
+    });
+    expect(portal?.default_return_url).toBeNull();
     expect(log.some((l) => l.startsWith("Dashboard-only steps"))).toBe(true);
+  });
+
+  it("points the portal's return URL at the dashboard's billing page once the app URL is known", async () => {
+    const { stripe, state } = fakeStripe();
+    await provision(stripe, opts({ portal: true, appUrl: undefined }));
+    expect(state.portals[0]?.default_return_url).toBeNull();
+
+    await provision(stripe, opts({ appUrl: "https://app.example.com/" }));
+    expect(state.portals).toHaveLength(1);
+    expect(state.portals[0]?.default_return_url).toBe("https://app.example.com/settings/billing");
+    expect(state.calls.filter((c) => c.startsWith("portal.update"))).toHaveLength(1);
   });
 
   it("is idempotent: a second identical run writes nothing new", async () => {

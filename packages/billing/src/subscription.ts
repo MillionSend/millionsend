@@ -80,7 +80,8 @@ export async function applySubscription(
   // arrive in any order.
   if (!entitled && team.stripeSubscriptionId && team.stripeSubscriptionId !== sub.id) return;
 
-  const { base, overage } = subscriptionItems(sub);
+  const { base, overage: existingOverage } = subscriptionItems(sub);
+  let overage = existingOverage;
   let plan: Plan;
   let planQuota: number | null;
   let rung: PlanRung | null = null;
@@ -92,6 +93,16 @@ export async function applySubscription(
     }
     plan = rung.plan;
     planQuota = rung.period === "month" ? rung.included : null;
+    // A monthly subscription from before the ladder has no metered item, so
+    // its overage (on by default) would go unbilled; the first sync adds it.
+    if (stripe && !overage && rung.period === "month") {
+      try {
+        const price = await resolvePriceId(stripe, overageLookupKey(rung));
+        overage = await stripe.subscriptionItems.create({ subscription: sub.id, price });
+      } catch (err) {
+        log(`overage item not added to ${sub.id}: ${String(err)}`);
+      }
+    }
     if (stripe && overage && rung.period === "month") {
       const expected = overageLookupKey(rung);
       if (rungFromPrice(overage.price)?.key !== rung.key) {

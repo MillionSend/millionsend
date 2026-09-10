@@ -488,6 +488,11 @@ export const usageResponseSchema = z
           "Emails included per billing period on Pro and Scale; null on daily plans and self-hosted",
         ),
       domains: z.number().int().nullable().describe("null = unlimited or self-hosted"),
+      contacts: z
+        .number()
+        .int()
+        .nullable()
+        .describe("Contacts the team may hold; null = unlimited or self-hosted"),
     }),
     today: z.object({
       emails_sent: z.number().int().describe("Emails accepted so far this UTC day"),

@@ -245,7 +245,7 @@ export function teamQuota(team: QuotaTeamRow, isCloud: boolean, now: Date = new 
 export function monthlyCapacity(quota: TeamQuota): number {
   if (quota.kind === "none") return Number.POSITIVE_INFINITY;
   if (quota.kind === "day") return quota.limit * 30;
-  return quota.overage ? Number.POSITIVE_INFINITY : quota.included;
+  return quota.overage ? quota.included * OVERAGE_HARD_CAP : quota.included;
 }
 
 /** Whether a quota change lets more mail through, so parked sends deserve an immediate drain. */
@@ -273,3 +273,18 @@ export const PLAN_DOMAIN_LIMIT: Record<Plan, number | null> = {
   pro: null,
   scale: null,
 };
+
+/** Contacts a team may hold per plan; null = unlimited. Self-host ignores plans entirely. */
+export const PLAN_CONTACT_LIMIT: Record<Plan, number | null> = {
+  free: 1_000,
+  starter: null,
+  pro: null,
+  scale: null,
+};
+
+/**
+ * With overage on, sends still stop at this multiple of the included volume
+ * until the period renews: a runaway integration (or a stolen key) can run
+ * up at most a few times the plan, never an open-ended bill.
+ */
+export const OVERAGE_HARD_CAP = 5;

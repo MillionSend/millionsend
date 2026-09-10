@@ -3,6 +3,7 @@ import {
   DAY_MS,
   EnvKeyring,
   generateApiKey,
+  OVERAGE_HARD_CAP,
   QUOTA_TOLERANCE,
   teamRung,
   utcDay,
@@ -130,7 +131,13 @@ describe("monthly plan", () => {
   beforeAll(async () => {
     await db
       .update(schema.teams)
-      .set({ plan: "pro", planQuota: included, currentPeriodStart: start, currentPeriodEnd: end })
+      .set({
+        plan: "pro",
+        planQuota: included,
+        currentPeriodStart: start,
+        currentPeriodEnd: end,
+        overageEnabled: false,
+      })
       .where(eq(schema.teams.id, teamId));
     await db.insert(schema.usagePeriods).values({ teamId, periodStart: start, accepted: included });
   });
@@ -162,5 +169,27 @@ describe("monthly plan", () => {
       .from(schema.usagePeriods)
       .where(eq(schema.usagePeriods.teamId, teamId));
     expect(period?.accepted).toBe(included + 3);
+  });
+
+  it("with overage on, sends stop at the hard cap until the period renews", async () => {
+    const cap = included * OVERAGE_HARD_CAP;
+    const setAccepted = (accepted: number) =>
+      db
+        .update(schema.usagePeriods)
+        .set({ accepted })
+        .where(eq(schema.usagePeriods.teamId, teamId));
+    await setAccepted(cap);
+    const res = await post(base);
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({
+      name: "monthly_quota_exceeded",
+      message: expect.stringContaining(`${OVERAGE_HARD_CAP} times the included volume`),
+    });
+    expect((await batch()).status).toBe(429);
+    expect(enqueued).toEqual([]);
+
+    await setAccepted(cap - 1);
+    expect((await post(base)).status).toBe(200);
+    expect(enqueued).toHaveLength(1);
   });
 });

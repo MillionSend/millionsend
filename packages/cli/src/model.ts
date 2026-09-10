@@ -157,7 +157,12 @@ export interface TargetUsage {
   cloud: boolean;
   plan: string | null;
   /** A daily plan sets emailsPerDay, a monthly one emailsPerMonth; null = unlimited or self-hosted. */
-  limits: { emailsPerDay: number | null; emailsPerMonth: number | null; domains: number | null };
+  limits: {
+    emailsPerDay: number | null;
+    emailsPerMonth: number | null;
+    domains: number | null;
+    contacts: number | null;
+  };
   today: { emailsSent: number };
   /** The billing period on a monthly plan; null on daily plans and self-host. */
   period: {

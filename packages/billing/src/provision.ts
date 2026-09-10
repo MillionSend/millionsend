@@ -72,6 +72,8 @@ export interface ProvisionOptions {
   webhookUrl?: string | undefined;
   /** Create/refresh the customer-portal configuration referenced by STRIPE_PORTAL_CONFIG. */
   portal?: boolean | undefined;
+  /** Dashboard origin the portal returns to (its Billing page); omitted = Stripe's default. */
+  appUrl?: string | undefined;
   log?: ((line: string) => void) | undefined;
 }
 
@@ -301,17 +303,31 @@ function portalFeatures(): Stripe.BillingPortal.ConfigurationCreateParams.Featur
   };
 }
 
-async function ensurePortal(stripe: ProvisionStripe, log: (line: string) => void): Promise<string> {
-  const features = portalFeatures();
+/** The legal links the portal shows; the marketing site hosts them. */
+const PORTAL_BUSINESS_PROFILE = {
+  terms_of_service_url: "https://millionsend.com/terms",
+  privacy_policy_url: "https://millionsend.com/privacy",
+} as const;
+
+async function ensurePortal(
+  stripe: ProvisionStripe,
+  appUrl: string | undefined,
+  log: (line: string) => void,
+): Promise<string> {
+  const settings = {
+    features: portalFeatures(),
+    business_profile: PORTAL_BUSINESS_PROFILE,
+    ...(appUrl ? { default_return_url: `${appUrl.replace(/\/+$/, "")}/settings/billing` } : {}),
+  };
   const { data } = await stripe.billingPortal.configurations.list({ active: true, limit: 100 });
   const existing = data.find((c) => c.metadata?.millionsend === PORTAL_METADATA.millionsend);
   if (existing) {
-    await stripe.billingPortal.configurations.update(existing.id, { features });
-    log(`portal: ${existing.id} (existing, features refreshed)`);
+    await stripe.billingPortal.configurations.update(existing.id, settings);
+    log(`portal: ${existing.id} (existing, settings refreshed)`);
     return existing.id;
   }
   const created = await stripe.billingPortal.configurations.create({
-    features,
+    ...settings,
     metadata: PORTAL_METADATA,
   });
   log(`portal: ${created.id} (created)`);
@@ -362,7 +378,7 @@ export async function provision(
   const result: ProvisionResult = { products, prices, overagePrices, meter };
   if (options.webhookUrl) result.webhook = await ensureWebhook(stripe, options.webhookUrl, log);
   if (options.portal) {
-    result.portalConfiguration = await ensurePortal(stripe, log);
+    result.portalConfiguration = await ensurePortal(stripe, options.appUrl, log);
     log(`portal: STRIPE_PORTAL_CONFIG=${result.portalConfiguration}`);
   }
   log("");

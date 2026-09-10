@@ -236,7 +236,9 @@ export {
   formatVolume,
   isPlanRungKey,
   monthlyCapacity,
+  OVERAGE_HARD_CAP,
   PAID_RUNGS,
+  PLAN_CONTACT_LIMIT,
   PLAN_DOMAIN_LIMIT,
   PLAN_GRACE_DAYS,
   PLAN_NAME,
@@ -352,6 +354,7 @@ export {
 } from "./team-invitations.js";
 export {
   committedDailyVolume,
+  contactRoom,
   fetchBestOwnedPlan,
   fetchEffectivePlan,
   fetchTeamQuota,

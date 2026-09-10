@@ -357,6 +357,15 @@ await queue.scheduleCrons({
   },
 });
 
+// A deploy can restart the process while a Stripe event is mid-flight; Stripe
+// retries it, but the daily reconcile is hours away. One pass at boot closes
+// the gap at once.
+if (stripe) {
+  queue.runCronNow("billing.reconcile").catch((err) => {
+    console.warn("billing.reconcile at boot failed; the daily run covers it", err);
+  });
+}
+
 // Retries exhausted: the row must not stay "queued" for the reconcile sweep
 // to resurrect forever.
 await queue.workDeadLetter("email.send", async ({ emailId }) => {

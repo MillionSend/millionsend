@@ -133,20 +133,23 @@ describe("handleWebhook", () => {
       stripeCustomerId: "cus_1",
       stripeSubscriptionId: "sub_1",
       stripeOverageItemId: "si_sub_1_overage",
-      overageEnabled: false,
+      overageEnabled: true,
       pendingRung: null,
       currentPeriodStart: new Date(PERIOD_START * 1000),
       currentPeriodEnd: new Date(PERIOD_END * 1000),
     });
     expect(state.itemUpdates).toEqual([]);
 
+    // A monthly subscription without a metered item (one from before the
+    // ladder) gets the rung's item on its first sync, so overage can bill.
     state.subscriptions.sub_1 = subscription("sub_1", "cus_1", "active");
     await deliver(subEvent("customer.subscription.updated", state.subscriptions.sub_1));
+    expect(state.calls.filter((c) => c === "subscriptionItems.create")).toHaveLength(1);
     expect(await team(teamId)).toMatchObject({
       plan: "pro",
       planQuota: 100_000,
       planStatus: "active",
-      stripeOverageItemId: null,
+      stripeOverageItemId: "si_sub_1_overage",
     });
 
     state.subscriptions.sub_1 = subscription(

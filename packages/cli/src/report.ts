@@ -60,20 +60,27 @@ interface PlanRow {
   /** Emails a rung lets through in 30 days: a daily cap times 30, or the monthly volume; null = unlimited. */
   perMonth: number | null;
   domains: number | null;
+  contacts: number | null;
 }
 
 /** Above the top rung the volume still fits: the rest bills as overage. */
-const TOP: PlanRow = { id: "scale", label: "Scale 2.5M", perMonth: 2_500_000, domains: null };
+const TOP: PlanRow = {
+  id: "scale",
+  label: "Scale 2.5M",
+  perMonth: 2_500_000,
+  domains: null,
+  contacts: null,
+};
 
-/** Mirror of packages/core/src/plans.ts PLAN_RUNGS / PLAN_DOMAIN_LIMIT, cheapest first. */
+/** Mirror of packages/core/src/plans.ts PLAN_RUNGS / PLAN_DOMAIN_LIMIT / PLAN_CONTACT_LIMIT, cheapest first. */
 const PLANS: PlanRow[] = [
-  { id: "free", label: "Free", perMonth: 3_000, domains: 3 },
-  { id: "starter", label: "Starter", perMonth: 45_000, domains: 10 },
-  { id: "pro", label: "Pro 100k", perMonth: 100_000, domains: null },
-  { id: "pro", label: "Pro 200k", perMonth: 200_000, domains: null },
-  { id: "scale", label: "Scale 500k", perMonth: 500_000, domains: null },
-  { id: "scale", label: "Scale 1M", perMonth: 1_000_000, domains: null },
-  { id: "scale", label: "Scale 1.5M", perMonth: 1_500_000, domains: null },
+  { id: "free", label: "Free", perMonth: 3_000, domains: 3, contacts: 1_000 },
+  { id: "starter", label: "Starter", perMonth: 45_000, domains: 10, contacts: null },
+  { id: "pro", label: "Pro 100k", perMonth: 100_000, domains: null, contacts: null },
+  { id: "pro", label: "Pro 200k", perMonth: 200_000, domains: null, contacts: null },
+  { id: "scale", label: "Scale 500k", perMonth: 500_000, domains: null, contacts: null },
+  { id: "scale", label: "Scale 1M", perMonth: 1_000_000, domains: null, contacts: null },
+  { id: "scale", label: "Scale 1.5M", perMonth: 1_500_000, domains: null, contacts: null },
   TOP,
 ];
 
@@ -100,6 +107,7 @@ function buildOffer(
     perMonth:
       included ?? (usage.limits.emailsPerDay === null ? null : usage.limits.emailsPerDay * 30),
     domains: usage.limits.domains,
+    contacts: usage.limits.contacts,
   };
   const url =
     usage.appUrl === null
@@ -112,6 +120,12 @@ function buildOffer(
   if (current.domains !== null && domains > current.domains) {
     short.push(
       `${current.label} allows ${pluralize(current.domains, "domain")}, you have ${domains}`,
+    );
+  }
+  const contacts = snapshot.contacts.length;
+  if (current.contacts !== null && contacts > current.contacts) {
+    short.push(
+      `${current.label} allows ${pluralize(current.contacts, "contact")}, you have ${formatNumber(contacts)}`,
     );
   }
   if (short.length === 0 && sent === null) return null;
@@ -132,7 +146,8 @@ function buildOffer(
     const fit = PLANS.find(
       (p) =>
         (p.perMonth === null || (sent ?? 0) <= p.perMonth) &&
-        (p.domains === null || domains <= p.domains),
+        (p.domains === null || domains <= p.domains) &&
+        (p.contacts === null || contacts <= p.contacts),
     );
     fits = fit?.id ?? TOP.id;
     const spec = (p: PlanRow) =>

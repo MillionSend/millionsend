@@ -126,9 +126,29 @@ describe("reservePeriodQuota", () => {
     expect(await readPeriodUsage(db, fresh, PERIOD)).toEqual({ accepted: 0, reportedOverage: 0 });
   });
 
-  it("records past the included volume with overage on", async () => {
-    expect(await reserve(50, true)).toEqual({ reserved: true, accepted: 150, ceiling: null });
+  it("records past the included volume with overage on, under the hard cap", async () => {
+    expect(await reserve(50, true)).toEqual({ reserved: true, accepted: 150, ceiling: 500 });
     expect(await acceptedOn(team, DAY)).toBe(150);
+  });
+
+  it("accepts up to exactly the hard cap with overage on, then refuses, leaving the counter intact", async () => {
+    const capped = await createTeam(db, "monthly-capped");
+    const reserveCapped = (count: number) =>
+      reservePeriodQuota(db, {
+        teamId: capped,
+        count,
+        included: 100,
+        periodStart: PERIOD,
+        overage: true,
+        day: DAY,
+      });
+    expect(await reserveCapped(500)).toEqual({ reserved: true, accepted: 500, ceiling: 500 });
+    expect(await reserveCapped(1)).toEqual({ reserved: false, accepted: 500, ceiling: 500 });
+    expect(await readPeriodUsage(db, capped, PERIOD)).toEqual({
+      accepted: 500,
+      reportedOverage: 0,
+    });
+    expect(await acceptedOn(capped, DAY)).toBe(500);
   });
 
   it("keys rows by period start", async () => {
