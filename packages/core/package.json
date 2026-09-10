@@ -58,7 +58,7 @@
     "@electric-sql/pglite": "^0.3.14",
     "@types/node": "^22.20.1",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4",
+    "vitest": "^4.1.11",
     "@millionsend/test-utils": "workspace:*"
   }
 }

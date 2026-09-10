@@ -40,6 +40,6 @@
     "drizzle-orm": "^0.45.2",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }
