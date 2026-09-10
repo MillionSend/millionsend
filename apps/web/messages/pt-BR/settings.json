@@ -312,8 +312,7 @@
       "contactsLimit": "Até {n, number} contatos",
       "broadcasts": "Broadcasts: newsletters e campanhas, personalizados por contato",
       "integrations": "Webhooks e chaves de API",
-      "agents": "Servidor MCP, CLI e nove SDKs",
-      "teams": "Até {n} equipes"
+      "agents": "Servidor MCP, CLI e nove SDKs"
     },
     "checkoutSuccess": "Obrigado! Seu plano é atualizado assim que o Stripe confirmar o pagamento — normalmente em poucos segundos.",
     "checkoutCancel": "Checkout cancelado. Seu plano não mudou.",

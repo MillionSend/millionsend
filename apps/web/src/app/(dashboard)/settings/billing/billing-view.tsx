@@ -6,7 +6,6 @@ import {
   PLAN_CONTACT_LIMIT,
   PLAN_DOMAIN_LIMIT,
   PLAN_RUNGS,
-  PLAN_TEAM_LIMIT,
   type Plan,
   type PlanRung,
   type PlanRungKey,
@@ -230,7 +229,6 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
       t("features.broadcasts"),
       t("features.integrations"),
       t("features.agents"),
-      t("features.teams", { n: PLAN_TEAM_LIMIT[p] }),
     ];
   };
 

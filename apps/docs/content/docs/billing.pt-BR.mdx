@@ -242,6 +242,7 @@ STRIPE_SECRET_KEY=sk_test_… pnpm --filter @millionsend/billing provision \
 | `--webhook-url` | Localiza ou cria o endpoint de webhook para essa URL com exatamente os eventos que o handler consome. Omita em desenvolvimento local. |
 | `--portal` | Localiza ou cria a configuração do Customer Portal e imprime o id para `STRIPE_PORTAL_CONFIG`. |
 | `--app-url` | Origem do painel: a URL de retorno padrão do portal passa a ser `<app-url>/settings/billing`. Omita para usar o padrão do Stripe. |
+| `--move-legacy` | Move toda assinatura ainda num preço anterior à escada para o seu degrau (Pro 100k, Scale 500k) na hora, sem rateio, adicionando o item medido do degrau; um desconto na assinatura permanece. Idempotente. |
 | `--dry-run` | Lê a conta e imprime o que seria escrito, sem escrever. |
 
 O que ele faz, e por que rodar de novo é seguro:

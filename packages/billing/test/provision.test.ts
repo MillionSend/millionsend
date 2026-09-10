@@ -29,6 +29,8 @@ function fakeStripe() {
     meters: [] as Stripe.Billing.Meter[],
     webhooks: [] as Stripe.WebhookEndpoint[],
     portals: [] as Stripe.BillingPortal.Configuration[],
+    subscriptions: [] as Stripe.Subscription[],
+    updates: [] as [string, Stripe.SubscriptionUpdateParams][],
     calls: [] as string[],
   };
   let seq = 0;
@@ -159,6 +161,28 @@ function fakeStripe() {
         return webhook;
       },
     },
+    subscriptions: {
+      async list(p) {
+        state.calls.push("subscriptions.list");
+        return list(
+          state.subscriptions.filter((s) => s.items.data.some((i) => i.price.id === p.price)),
+        );
+      },
+      async update(subscriptionId, p) {
+        state.calls.push("subscriptions.update");
+        state.updates.push([subscriptionId, p]);
+        const sub = state.subscriptions.find((s) => s.id === subscriptionId);
+        if (!sub) throw new Error(`no subscription ${subscriptionId}`);
+        for (const item of p.items ?? []) {
+          const price = state.prices.find((x) => x.id === item.price);
+          if (!price) throw new Error(`no price ${item.price}`);
+          const existing = item.id ? sub.items.data.find((i) => i.id === item.id) : undefined;
+          if (existing) existing.price = price;
+          else sub.items.data.push(row<Stripe.SubscriptionItem>({ id: id("si"), price }));
+        }
+        return sub;
+      },
+    },
     billingPortal: {
       configurations: {
         async list() {
@@ -196,7 +220,17 @@ function fakeStripe() {
       },
     },
   };
-  return { stripe, state, seedPrice };
+  /** A live subscription holding one price, as a pre-ladder customer would have. */
+  const seedSubscription = (price: Stripe.Price): Stripe.Subscription => {
+    const sub = row<Stripe.Subscription>({
+      id: id("sub"),
+      status: "active",
+      items: { data: [row<Stripe.SubscriptionItem>({ id: id("si"), price })] },
+    });
+    state.subscriptions.push(sub);
+    return sub;
+  };
+  return { stripe, state, seedPrice, seedSubscription };
 }
 
 const MONTHLY_RUNGS = PAID_RUNGS.filter((r) => r.overageCentsPer1k !== null);
@@ -417,5 +451,39 @@ describe("provision", () => {
       3 + 1 + PAID_RUNGS.length + MONTHLY_RUNGS.length + 2,
     );
     expect(state.calls.filter((c) => c.includes("create"))).toEqual([]);
+  });
+});
+
+describe("--move-legacy", () => {
+  it("moves a subscription on a pre-ladder price to its rung, adds the metered item, keeps going idempotently", async () => {
+    const { stripe, state, seedSubscription } = fakeStripe();
+    const product = await stripe.products.create({
+      name: "MillionSend Scale",
+      metadata: { [PRODUCT_METADATA_KEY]: "scale" },
+    });
+    const legacy =
+      state.prices.find((p) => p.lookup_key === "millionsend_scale_monthly") ??
+      (await stripe.prices.create({
+        product: product.id,
+        currency: "usd",
+        unit_amount: 5000,
+        recurring: { interval: "month" },
+        lookup_key: "millionsend_scale_monthly",
+      }));
+    // The fake's product lookup resolves the rung through the product's metadata.
+    (legacy as { product: unknown }).product = product;
+    const sub = seedSubscription(legacy);
+    const first = await provision(stripe, { moveLegacy: true, log: () => {} });
+    expect(first.moved).toEqual([sub.id]);
+    const update = state.updates[0];
+    expect(update?.[0]).toBe(sub.id);
+    expect(update?.[1].proration_behavior).toBe("none");
+    expect(update?.[1].items).toEqual([
+      { id: sub.items.data[0]?.id, price: first.prices.scale_500k },
+      { price: first.overagePrices.scale_500k },
+    ]);
+    const second = await provision(stripe, { moveLegacy: true, log: () => {} });
+    expect(second.moved).toEqual([]);
+    expect(state.updates).toHaveLength(1);
   });
 });

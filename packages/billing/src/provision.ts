@@ -5,7 +5,9 @@ import {
   overageLookupKey,
   PRODUCT_METADATA_KEY,
   priceMetadata,
+  rungFromPrice,
   rungLookupKey,
+  subscriptionItems,
 } from "./prices.js";
 
 /** The Stripe surface provisioning touches; the real client satisfies it, tests inject a fake. */
@@ -24,6 +26,10 @@ export interface ProvisionStripe {
       list(params: Stripe.Billing.MeterListParams): Promise<Stripe.ApiList<Stripe.Billing.Meter>>;
       create(params: Stripe.Billing.MeterCreateParams): Promise<Stripe.Billing.Meter>;
     };
+  };
+  subscriptions: {
+    list(params: Stripe.SubscriptionListParams): Promise<Stripe.ApiList<Stripe.Subscription>>;
+    update(id: string, params: Stripe.SubscriptionUpdateParams): Promise<Stripe.Subscription>;
   };
   webhookEndpoints: {
     list(params: Stripe.WebhookEndpointListParams): Promise<Stripe.ApiList<Stripe.WebhookEndpoint>>;
@@ -74,6 +80,8 @@ export interface ProvisionOptions {
   portal?: boolean | undefined;
   /** Dashboard origin the portal returns to (its Billing page); omitted = Stripe's default. */
   appUrl?: string | undefined;
+  /** Move every subscription still on a pre-ladder price to its rung, at once and without proration. */
+  moveLegacy?: boolean | undefined;
   log?: ((line: string) => void) | undefined;
 }
 
@@ -86,6 +94,8 @@ export interface ProvisionResult {
   meter: string;
   webhook?: { id: string; secret?: string | undefined } | undefined;
   portalConfiguration?: string | undefined;
+  /** Subscriptions moved off a pre-ladder price this run. */
+  moved?: string[] | undefined;
 }
 
 /** Everything the API cannot do; printed after every run so nothing is forgotten. */
@@ -94,7 +104,7 @@ export const DASHBOARD_CHECKLIST = [
   "Business profile: legal name, support email/URL, and the statement descriptor shown on card statements (Settings → Public details).",
   "Branding: logo, icon, and colors used by Checkout, the customer portal, invoices, and emails (Settings → Branding).",
   "Customer emails: turn on successful-payment receipts and failed-payment notices (Settings → Emails).",
-  "Existing subscriptions on an archived price keep it; move each one to its new rung price from the subscription page (no proration, at period end).",
+  "Existing subscriptions on an archived price keep it until --move-legacy runs (or you move each one from its subscription page).",
   "Live mode: repeat the provisioning with the live secret key; test and live objects are separate.",
 ] as const;
 
@@ -230,6 +240,55 @@ async function archiveLegacyPrices(
       log(`price ${price.lookup_key}: ${price.id} (already archived)`);
     }
   }
+}
+
+/**
+ * Subscriptions still on a pre-ladder price move to the rung that price
+ * resolves to (the plan's first: Pro 100k, Scale 500k), at once and without
+ * proration, and gain the rung's metered item when they lack one. A
+ * subscription-level discount stays as it is: Stripe keeps a coupon on the
+ * subscription through an item change, so a permanently discounted
+ * subscription stays discounted, overage line included. The webhook that
+ * follows writes the team row.
+ */
+async function moveLegacySubscriptions(
+  stripe: ProvisionStripe,
+  prices: Record<string, string>,
+  overagePrices: Record<string, string>,
+  log: (line: string) => void,
+): Promise<string[]> {
+  const { data: legacy } = await stripe.prices.list({
+    lookup_keys: LEGACY_PRICE_LOOKUP_KEYS,
+    limit: 10,
+  });
+  const moved: string[] = [];
+  for (const price of legacy) {
+    const rung = rungFromPrice(price);
+    if (!rung) {
+      log(`legacy price ${price.id}: no rung resolves from it; skipped`);
+      continue;
+    }
+    const newPrice = prices[rung.key];
+    if (!newPrice) throw new Error(`no provisioned price for rung ${rung.key}`);
+    const { data: subs } = await stripe.subscriptions.list({
+      price: price.id,
+      status: "all",
+      limit: 100,
+    });
+    for (const sub of subs) {
+      if (sub.status === "canceled" || sub.status === "incomplete_expired") continue;
+      const { base, overage } = subscriptionItems(sub);
+      if (!base || base.price.id !== price.id) continue;
+      const items: Stripe.SubscriptionUpdateParams.Item[] = [{ id: base.id, price: newPrice }];
+      const overagePrice = overagePrices[rung.key];
+      if (overagePrice && !overage) items.push({ price: overagePrice });
+      await stripe.subscriptions.update(sub.id, { items, proration_behavior: "none" });
+      log(`subscription ${sub.id}: moved to ${rung.key} (was ${price.lookup_key})`);
+      moved.push(sub.id);
+    }
+  }
+  if (moved.length === 0) log("legacy subscriptions: none left to move");
+  return moved;
 }
 
 function sameEvents(a: readonly string[], b: readonly string[]): boolean {
@@ -376,6 +435,9 @@ export async function provision(
   }
   await archiveLegacyPrices(stripe, log);
   const result: ProvisionResult = { products, prices, overagePrices, meter };
+  if (options.moveLegacy) {
+    result.moved = await moveLegacySubscriptions(stripe, prices, overagePrices, log);
+  }
   if (options.webhookUrl) result.webhook = await ensureWebhook(stripe, options.webhookUrl, log);
   if (options.portal) {
     result.portalConfiguration = await ensurePortal(stripe, options.appUrl, log);
@@ -407,6 +469,10 @@ export function dryRunStripe(
     },
     billing: {
       meters: { list: (p) => stripe.billing.meters.list(p), create: stub("billing.meters.create") },
+    },
+    subscriptions: {
+      list: (p) => stripe.subscriptions.list(p),
+      update: stub("subscriptions.update"),
     },
     webhookEndpoints: {
       list: (p) => stripe.webhookEndpoints.list(p),
