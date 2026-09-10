@@ -187,8 +187,8 @@ importers:
         specifier: ^3.5.13
         version: 3.5.13
       nodemailer:
-        specifier: ^9.0.5
-        version: 9.0.5
+        specifier: ^9.1.1
+        version: 9.1.1
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -332,8 +332,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@electric-sql/pglite@0.3.16)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
       nodemailer:
-        specifier: ^9.0.5
-        version: 9.0.5
+        specifier: ^9.1.1
+        version: 9.1.1
       tsx:
         specifier: ^4.23.12
         version: 4.23.12
@@ -4506,6 +4506,10 @@ packages:
 
   nodemailer@9.0.5:
     resolution: {integrity: sha512-wvjiKvjczmsN7U/8006JOdXubgBk2XFAbioDMbT+sM7cPs0QrhJTa6KBRX7P5REGGkDcLUz/EarWidb8G8C1jQ==}
+    engines: {node: '>=6.0.0'}
+
+  nodemailer@9.1.1:
+    resolution: {integrity: sha512-izw9mVKFix6YSnC9eLgV6g1opl9DUlRio9ZNcq+Wu9Ujn2UwF+8Nl0B8nz22kEC+CTZCvinkxwJ0DeFbb6NwcQ==}
     engines: {node: '>=6.0.0'}
 
   non-error@0.1.0:
@@ -9406,6 +9410,8 @@ snapshots:
       he: 1.2.0
 
   nodemailer@9.0.5: {}
+
+  nodemailer@9.1.1: {}
 
   non-error@0.1.0: {}
 
