@@ -1,5 +1,5 @@
 {
-  "id": "c1ac9b45-d607-4863-a5c3-b40a276017e9",
+  "id": "0b856bf4-bac4-4368-b329-a5664278c303",
   "prevId": "eef7b755-0e42-4685-8a8b-c50e87c969a1",
   "version": "7",
   "dialect": "postgresql",
@@ -4323,6 +4323,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "overage_enabled": {
+          "name": "overage_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "pending_rung": {
+          "name": "pending_rung",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "plan_status": {
           "name": "plan_status",
           "type": "plan_status",
@@ -5060,6 +5073,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "pending_overage": {
+          "name": "pending_overage",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},

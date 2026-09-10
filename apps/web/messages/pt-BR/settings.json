@@ -302,6 +302,10 @@
     "choose": "Escolher",
     "switch": "Trocar",
     "freeHint": "Para voltar ao Free, cancele no portal de cobrança; o plano segue até o fim do período.",
+    "pendingChange": "Muda para {plan} em {date}.",
+    "keepPlan": "Manter {plan}",
+    "switchAtPeriodEnd": "Trocar no fim do período",
+    "changeHint": "Subir de plano vale na hora, com a diferença rateada na próxima fatura. Descer vale quando o período renovar; nada é reembolsado.",
     "features": {
       "domains": "{n, plural, one {# domínio de envio} other {# domínios de envio}}",
       "domainsUnlimited": "Domínios de envio ilimitados",

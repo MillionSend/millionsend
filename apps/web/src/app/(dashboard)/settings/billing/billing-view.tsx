@@ -194,6 +194,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     plan,
     planQuota,
     rung: currentKey,
+    pendingRung,
     planStatus,
     currentPeriodEnd,
     quota,
@@ -202,6 +203,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     hasLiveSubscription,
   } = status.data;
   const current = PLAN_RUNGS.find((r) => r.key === currentKey) ?? PLAN_RUNGS[0];
+  const pending = PLAN_RUNGS.find((r) => r.key === pendingRung) ?? null;
   const selected = PLAN_RUNGS.find((r) => r.key === picked) ?? current;
   const over = quota.kind === "month" ? Math.max(0, usage.accepted - quota.included) : 0;
 
@@ -279,6 +281,40 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
             </div>
           ) : null}
         </div>
+
+        {pending && currentPeriodEnd ? (
+          <div
+            className="ms-wrap-row"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              marginTop: 16,
+              fontSize: 13,
+              color: "var(--ms-muted)",
+            }}
+          >
+            <span>
+              {t("pendingChange", {
+                plan: planLabel(pending.plan, pending.period === "month" ? pending.included : null),
+                date: formatDay(currentPeriodEnd, locale),
+              })}
+            </span>
+            {canManage ? (
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                disabled={busy}
+                onClick={() => changePlan.mutate({ rung: current.key })}
+              >
+                <BtnSpinner
+                  on={changePlan.isPending && changePlan.variables?.rung === current.key}
+                />
+                {t("keepPlan", { plan: planLabel(plan, planQuota) })}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {planStatus === "past_due" ? (
           <WarnCard action={canManage ? portalButton(t("updateCard"), "ms-btn-secondary") : null}>
@@ -472,7 +508,11 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
                         (changePlan.isPending && changePlan.variables?.rung === r.key)
                       }
                     />
-                    {hasLiveSubscription ? t("switch") : t("choose")}
+                    {hasLiveSubscription
+                      ? r.priceCents < current.priceCents
+                        ? t("switchAtPeriodEnd")
+                        : t("switch")
+                      : t("choose")}
                   </button>
                 ) : p === "free" && canManage && hasLiveSubscription ? (
                   <p style={{ margin: 0, fontSize: 12, color: "var(--ms-muted)" }}>
@@ -483,6 +523,11 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
             );
           })}
         </div>
+        {canManage && hasLiveSubscription ? (
+          <p style={{ margin: "14px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
+            {t("changeHint")}
+          </p>
+        ) : null}
       </Card>
     </div>
   );

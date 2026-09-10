@@ -717,10 +717,7 @@ it("drain on a monthly plan releases while the period has room and holds at the 
   expect(await drainQuotaParked(db, deps)).toEqual({ drained: 0, stillParked: 2 });
 
   // Overage on: the rest go out and the period counter keeps growing.
-  await db
-    .update(schema.teams)
-    .set({ stripeOverageItemId: "si_over" })
-    .where(eq(schema.teams.id, teamId));
+  await db.update(schema.teams).set({ overageEnabled: true }).where(eq(schema.teams.id, teamId));
   expect(await drainQuotaParked(db, deps)).toEqual({ drained: 2, stillParked: 0 });
   expect(enqueued).toEqual([oldest, middle, newest]);
   const [after] = await db

@@ -24,6 +24,14 @@ export interface BillingStripe {
       params?: Stripe.SubscriptionItemDeleteParams,
     ): Promise<Stripe.DeletedSubscriptionItem>;
   };
+  subscriptionSchedules: {
+    create(params: Stripe.SubscriptionScheduleCreateParams): Promise<Stripe.SubscriptionSchedule>;
+    update(
+      id: string,
+      params: Stripe.SubscriptionScheduleUpdateParams,
+    ): Promise<Stripe.SubscriptionSchedule>;
+    release(id: string): Promise<Stripe.SubscriptionSchedule>;
+  };
   billing: {
     meterEvents: {
       create(params: Stripe.Billing.MeterEventCreateParams): Promise<Stripe.Billing.MeterEvent>;

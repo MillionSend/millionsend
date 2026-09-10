@@ -47,8 +47,15 @@ export const teams = pgTable(
     // Cloud-only Stripe linkage; all null/"none" on self-host.
     stripeCustomerId: text("stripe_customer_id").unique(),
     stripeSubscriptionId: text("stripe_subscription_id"),
-    // The metered overage item on the subscription; null while overage is off.
+    // The metered overage item on the subscription (every monthly plan
+    // carries one); what it bills is what the worker reports, so the switch
+    // below is the customer's choice, not the item's presence.
     stripeOverageItemId: text("stripe_overage_item_id"),
+    // Sends past the included volume bill instead of stopping. Default off.
+    overageEnabled: boolean("overage_enabled").notNull().default(false),
+    // The rung a scheduled downgrade moves to when the period renews; null
+    // while none is pending. Mirrors the Stripe subscription schedule.
+    pendingRung: text("pending_rung"),
     planStatus: planStatusEnum("plan_status").notNull().default("none"),
     // The Stripe billing period: monthly quotas count sends from its start.
     currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),

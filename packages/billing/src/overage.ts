@@ -1,7 +1,6 @@
 import { DAY_MS, teamRung } from "@millionsend/core";
-import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import type { BillingDeps } from "./checkout.js";
 import { METER_EVENT_NAME } from "./prices.js";
 
@@ -16,13 +15,15 @@ export interface OverageReport {
 /**
  * Sends past the included volume, for every period row that has more of
  * them than the meter already knows about, one event per team and period
- * per run. The event's identifier is the counter it advances from, so a
- * report whose commit is lost is re-sent under the same identifier and
- * Stripe drops it as a duplicate; the row is advanced inside the same
- * transaction as the Stripe call, so a Stripe failure leaves it for the
- * next run. Usage of a period that already ended is stamped inside that
- * period, which is where Stripe invoices it (the invoice stays a draft for
- * about an hour after the period closes).
+ * per run. Three steps per row, each its own statement: the row first pins
+ * the counter the event will advance to (`pendingOverage`), the event goes
+ * out with an identifier naming both ends of the step, then the row catches
+ * up. A crash between the last two leaves the pin, so the next run re-sends
+ * the same value under the same identifier and Stripe drops it as a
+ * duplicate; a Stripe failure leaves the pin for the next run too. Usage of
+ * a period that already ended is stamped inside that period, which is where
+ * Stripe invoices it (the invoice stays a draft for about an hour after the
+ * period closes).
  */
 export async function reportOverage(
   deps: BillingDeps,
@@ -43,6 +44,7 @@ export async function reportOverage(
       periodStart: p.periodStart,
       accepted: p.accepted,
       reportedOverage: p.reportedOverage,
+      pendingOverage: p.pendingOverage,
     })
     .from(p)
     .innerJoin(t, eq(t.id, p.teamId))
@@ -58,8 +60,10 @@ export async function reportOverage(
   for (const row of rows) {
     const rung = teamRung(row.plan, row.planQuota);
     if (rung.period !== "month" || !row.customerId) continue;
-    const delta = row.accepted - rung.included - row.reportedOverage;
-    if (delta <= 0) continue;
+    const from = row.reportedOverage;
+    // A pinned step is finished before a new one starts.
+    const to = row.pendingOverage ?? row.accepted - rung.included;
+    if (to <= from) continue;
     // A period before the current one ended where the current one starts;
     // the current one ends at the recorded period end. A row keyed at or past
     // that end (the renewal webhook not landed yet) is still running.
@@ -78,31 +82,28 @@ export async function reportOverage(
       failed += 1;
       continue;
     }
-    const customerId = row.customerId;
+    const key = and(eq(p.teamId, row.teamId), eq(p.periodStart, row.periodStart));
     try {
-      await deps.db.transaction(async (tx) => {
-        const txDb = tx as unknown as Db;
-        const advanced = await txDb
+      if (row.pendingOverage === null) {
+        const pinned = await deps.db
           .update(p)
-          .set({ reportedOverage: sql`${p.reportedOverage} + ${delta}` })
-          .where(
-            and(
-              eq(p.teamId, row.teamId),
-              eq(p.periodStart, row.periodStart),
-              eq(p.reportedOverage, row.reportedOverage),
-            ),
-          )
-          .returning({ reportedOverage: p.reportedOverage });
-        // Another run advanced the row first; its event carries this usage.
-        if (advanced.length === 0) return;
-        await deps.stripe.billing.meterEvents.create({
-          event_name: METER_EVENT_NAME,
-          identifier: `${row.teamId}:${row.periodStart.getTime()}:${row.reportedOverage}`,
-          timestamp: Math.floor(at.getTime() / 1000),
-          payload: { stripe_customer_id: customerId, value: String(delta) },
-        });
-        reported += 1;
+          .set({ pendingOverage: to })
+          .where(and(key, eq(p.reportedOverage, from), isNull(p.pendingOverage)))
+          .returning({ pendingOverage: p.pendingOverage });
+        // Another run pinned this row first; its event carries the usage.
+        if (pinned.length === 0) continue;
+      }
+      await deps.stripe.billing.meterEvents.create({
+        event_name: METER_EVENT_NAME,
+        identifier: `${row.teamId}:${row.periodStart.getTime()}:${from}:${to}`,
+        timestamp: Math.floor(at.getTime() / 1000),
+        payload: { stripe_customer_id: row.customerId, value: String(to - from) },
       });
+      await deps.db
+        .update(p)
+        .set({ reportedOverage: to, pendingOverage: null })
+        .where(and(key, eq(p.reportedOverage, from)));
+      reported += 1;
     } catch (err) {
       failed += 1;
       log(`overage: team ${row.teamId} report failed: ${String(err)}`);

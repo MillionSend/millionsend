@@ -25,7 +25,7 @@ afterEach(() => close());
 
 const deps = () => ({ db, stripe, log: () => {} });
 
-/** A Pro 100k team with one usage row; `overageItem: null` models overage off. */
+/** A Pro 100k team with one usage row; `overageItem: null` models a subscription without the metered item. */
 async function proTeam(
   slug: string,
   opts: {
@@ -42,6 +42,7 @@ async function proTeam(
     .set({
       plan: "pro",
       planQuota: 100_000,
+      overageEnabled: true,
       stripeCustomerId: `cus_${slug}`,
       stripeOverageItemId: opts.overageItem === undefined ? `si_${slug}` : opts.overageItem,
       currentPeriodStart: opts.start ?? START,
@@ -54,21 +55,24 @@ async function proTeam(
   return teamId;
 }
 
-async function reported(teamId: string, periodStart = START): Promise<number | undefined> {
+/** What the period row says the meter knows (`reportedOverage`) and is being told (`pendingOverage`). */
+async function periodRow(teamId: string, periodStart = START) {
   const t = schema.usagePeriods;
   const [row] = await db
-    .select({ reportedOverage: t.reportedOverage })
+    .select({ reportedOverage: t.reportedOverage, pendingOverage: t.pendingOverage })
     .from(t)
     .where(and(eq(t.teamId, teamId), eq(t.periodStart, periodStart)));
-  return row?.reportedOverage;
+  return row;
 }
 
-async function setAccepted(teamId: string, accepted: number) {
-  await db
-    .update(schema.usagePeriods)
-    .set({ accepted })
-    .where(eq(schema.usagePeriods.teamId, teamId));
+async function setPeriod(
+  teamId: string,
+  values: { accepted?: number; reportedOverage?: number; pendingOverage?: number | null },
+) {
+  await db.update(schema.usagePeriods).set(values).where(eq(schema.usagePeriods.teamId, teamId));
 }
+
+const settled = (reportedOverage: number) => ({ reportedOverage, pendingOverage: null });
 
 describe("reportOverage", () => {
   it("meters what is past the included volume once, advancing from the last report", async () => {
@@ -78,38 +82,70 @@ describe("reportOverage", () => {
     expect(state.meterEvents).toEqual([
       {
         event_name: "emails_over_quota",
-        identifier: `${teamId}:${START.getTime()}:0`,
+        identifier: `${teamId}:${START.getTime()}:0:500`,
         timestamp: Math.floor(NOW.getTime() / 1000),
         payload: { stripe_customer_id: "cus_acme", value: "500" },
       },
     ]);
-    expect(await reported(teamId)).toBe(500);
+    expect(await periodRow(teamId)).toEqual(settled(500));
 
     expect(await reportOverage(deps(), { now: NOW })).toEqual({ reported: 0, failed: 0 });
     expect(state.meterEvents).toHaveLength(1);
 
-    await setAccepted(teamId, 101_200);
+    await setPeriod(teamId, { accepted: 101_200 });
     expect(await reportOverage(deps(), { now: NOW })).toEqual({ reported: 1, failed: 0 });
     expect(state.meterEvents[1]).toMatchObject({
-      identifier: `${teamId}:${START.getTime()}:500`,
+      identifier: `${teamId}:${START.getTime()}:500:1200`,
       payload: { stripe_customer_id: "cus_acme", value: "700" },
     });
-    expect(await reported(teamId)).toBe(1200);
+    expect(await periodRow(teamId)).toEqual(settled(1200));
   });
 
-  it("leaves the row for the next run when Stripe fails", async () => {
+  it("keeps the pin when Stripe fails, so the next run re-sends the same step", async () => {
     const teamId = await proTeam("acme", { accepted: 100_500 });
     state.meterError = new Error("stripe down");
     expect(await reportOverage(deps(), { now: NOW })).toEqual({ reported: 0, failed: 1 });
-    expect(await reported(teamId)).toBe(0);
+    expect(await periodRow(teamId)).toEqual({ reportedOverage: 0, pendingOverage: 500 });
 
     state.meterError = null;
     expect(await reportOverage(deps(), { now: NOW })).toEqual({ reported: 1, failed: 0 });
     expect(state.meterEvents[0]).toMatchObject({
-      identifier: `${teamId}:${START.getTime()}:0`,
+      identifier: `${teamId}:${START.getTime()}:0:500`,
       payload: { value: "500" },
     });
-    expect(await reported(teamId)).toBe(500);
+    expect(await periodRow(teamId)).toEqual(settled(500));
+  });
+
+  it("a pinned row re-sends the pinned value under the same identifier even after more sends", async () => {
+    const teamId = await proTeam("acme", { accepted: 100_500 });
+    // The event went out but the row never caught up (crash after the send).
+    await setPeriod(teamId, { pendingOverage: 500, accepted: 101_200 });
+    expect(await reportOverage(deps(), { now: NOW })).toEqual({ reported: 1, failed: 0 });
+    expect(state.meterEvents[0]).toMatchObject({
+      identifier: `${teamId}:${START.getTime()}:0:500`,
+      payload: { value: "500" },
+    });
+    expect(await periodRow(teamId)).toEqual(settled(500));
+
+    // The step that follows picks up the rest.
+    expect(await reportOverage(deps(), { now: NOW })).toEqual({ reported: 1, failed: 0 });
+    expect(state.meterEvents[1]).toMatchObject({
+      identifier: `${teamId}:${START.getTime()}:500:1200`,
+      payload: { value: "700" },
+    });
+    expect(await periodRow(teamId)).toEqual(settled(1200));
+  });
+
+  it("two runs over the same row: the one that pins sends, the other skips", async () => {
+    const teamId = await proTeam("acme", { accepted: 100_500 });
+    const results = await Promise.all([
+      reportOverage(deps(), { now: NOW }),
+      reportOverage(deps(), { now: NOW }),
+    ]);
+    expect(results.map((r) => r.reported + r.failed).sort()).toEqual([0, 1]);
+    expect(results.map((r) => r.failed)).toEqual([0, 0]);
+    expect(state.meterEvents).toHaveLength(1);
+    expect(await periodRow(teamId)).toEqual(settled(500));
   });
 
   it("stamps usage of an ended period one second before the current one began", async () => {
@@ -117,11 +153,11 @@ describe("reportOverage", () => {
     const teamId = await proTeam("acme", { accepted: 100_500, periodStart: previous });
     expect(await reportOverage(deps(), { now: NOW })).toEqual({ reported: 1, failed: 0 });
     expect(state.meterEvents[0]).toMatchObject({
-      identifier: `${teamId}:${previous.getTime()}:0`,
+      identifier: `${teamId}:${previous.getTime()}:0:500`,
       timestamp: START.getTime() / 1000 - 1,
       payload: { value: "500" },
     });
-    expect(await reported(teamId, previous)).toBe(500);
+    expect(await periodRow(teamId, previous)).toEqual(settled(500));
   });
 
   it("stamps a row keyed at the recorded period end (renewal webhook not landed) at now", async () => {
@@ -129,14 +165,14 @@ describe("reportOverage", () => {
     const teamId = await proTeam("acme", { accepted: 100_500, periodStart: END });
     expect(await reportOverage(deps(), { now: later })).toEqual({ reported: 1, failed: 0 });
     expect(state.meterEvents[0]).toMatchObject({
-      identifier: `${teamId}:${END.getTime()}:0`,
+      identifier: `${teamId}:${END.getTime()}:0:500`,
       timestamp: Math.floor(later.getTime() / 1000),
       payload: { value: "500" },
     });
-    expect(await reported(teamId, END)).toBe(500);
+    expect(await periodRow(teamId, END)).toEqual(settled(500));
   });
 
-  it("skips teams without overage or under their volume, and narrows to one team", async () => {
+  it("skips teams without the metered item or under their volume, and narrows to one team", async () => {
     const off = await proTeam("off", { accepted: 100_500, overageItem: null });
     const under = await proTeam("under", { accepted: 99_000 });
     const a = await proTeam("a", { accepted: 100_100 });
@@ -147,11 +183,11 @@ describe("reportOverage", () => {
       failed: 0,
     });
     expect(state.meterEvents.map((e) => e.payload.stripe_customer_id)).toEqual(["cus_a"]);
-    expect(await reported(b)).toBe(0);
+    expect(await periodRow(b)).toEqual(settled(0));
 
     expect(await reportOverage(deps(), { now: NOW })).toEqual({ reported: 1, failed: 0 });
     expect(state.meterEvents.map((e) => e.payload.stripe_customer_id)).toEqual(["cus_a", "cus_b"]);
-    expect(await reported(off)).toBe(0);
-    expect(await reported(under)).toBe(0);
+    expect(await periodRow(off)).toEqual(settled(0));
+    expect(await periodRow(under)).toEqual(settled(0));
   });
 });

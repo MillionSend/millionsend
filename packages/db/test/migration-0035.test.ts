@@ -42,6 +42,17 @@ it("puts existing paid teams on their plan's first rung and backfills the period
   ]);
 });
 
+it("adds the overage switch (off), the pending rung and the pending overage counter", async () => {
+  const teams = await client.query(
+    "select overage_enabled, pending_rung from teams where slug = 'p'",
+  );
+  expect(teams.rows).toEqual([{ overage_enabled: false, pending_rung: null }]);
+  const period = await client.query(
+    "insert into usage_periods (team_id, period_start) select id, now() from teams where slug = 'p' returning accepted, reported_overage, pending_overage",
+  );
+  expect(period.rows).toEqual([{ accepted: 0, reported_overage: 0, pending_overage: null }]);
+});
+
 it("adds the starter plan", async () => {
   const { rows } = await client.query<{ plan: string }>(
     "update teams set plan = 'starter' where slug = 'f' returning plan",

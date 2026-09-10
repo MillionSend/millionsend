@@ -18,7 +18,7 @@ export const QUOTA_COLUMNS = {
   planQuota: schema.teams.planQuota,
   currentPeriodStart: schema.teams.currentPeriodStart,
   currentPeriodEnd: schema.teams.currentPeriodEnd,
-  stripeOverageItemId: schema.teams.stripeOverageItemId,
+  overageEnabled: schema.teams.overageEnabled,
 } as const;
 
 /** teamQuota for a team row; null when the team does not exist. */

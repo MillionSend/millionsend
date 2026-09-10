@@ -100,7 +100,7 @@ const row = (over: Partial<QuotaTeamRow> = {}): QuotaTeamRow => ({
   planQuota: 100_000,
   currentPeriodStart: START,
   currentPeriodEnd: END,
-  stripeOverageItemId: null,
+  overageEnabled: false,
   ...over,
 });
 
@@ -153,7 +153,7 @@ describe("teamQuota", () => {
     });
   });
 
-  it("caps monthly plans by the bought volume over the billing period, overage off until a Stripe item exists", () => {
+  it("caps monthly plans by the bought volume over the billing period, overage off until the switch is on", () => {
     expect(teamQuota(row(), true, now)).toEqual({
       kind: "month",
       plan: "pro",
@@ -163,15 +163,11 @@ describe("teamQuota", () => {
       overage: false,
       overageCentsPer1k: 30,
     });
-    expect(teamQuota(row({ stripeOverageItemId: "si_1" }), true, now)).toMatchObject({
+    expect(teamQuota(row({ overageEnabled: true }), true, now)).toMatchObject({
       overage: true,
     });
     expect(
-      teamQuota(
-        row({ plan: "scale", planQuota: 1_500_000, stripeOverageItemId: "si_1" }),
-        true,
-        now,
-      ),
+      teamQuota(row({ plan: "scale", planQuota: 1_500_000, overageEnabled: true }), true, now),
     ).toMatchObject({ included: 1_500_000, overageCentsPer1k: 18, overage: true });
     // A monthly row written before rungs existed sits on the plan's first rung.
     expect(teamQuota(row({ plan: "scale", planQuota: null }), true, now)).toMatchObject({

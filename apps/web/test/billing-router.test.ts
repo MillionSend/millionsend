@@ -36,11 +36,18 @@ let calls: {
   updates: Stripe.SubscriptionUpdateParams[];
   itemCreates: Stripe.SubscriptionItemCreateParams[];
   itemDeletes: string[];
+  scheduleCreates: Stripe.SubscriptionScheduleCreateParams[];
+  scheduleUpdates: Stripe.SubscriptionScheduleUpdateParams[];
+  scheduleReleases: string[];
+  meterEvents: Stripe.Billing.MeterEventCreateParams[];
 };
 let onCustomerCreate: (() => Promise<void>) | undefined;
 
-const PERIOD_START = new Date(Date.now() - 10 * DAY_MS);
-const PERIOD_END = new Date(Date.now() + 20 * DAY_MS);
+// Stripe stamps whole seconds; rows and the fake agree from the start.
+const wholeSeconds = (ms: number) => new Date(Math.floor(ms / 1000) * 1000);
+const PERIOD_START = wholeSeconds(Date.now() - 10 * DAY_MS);
+const PERIOD_END = wholeSeconds(Date.now() + 20 * DAY_MS);
+const seconds = (d: Date) => d.getTime() / 1000;
 
 /** A ladder price as Stripe returns it; the rung is read back off the metadata. */
 function price(key: PlanRungKey, metered = false): Stripe.Price {
@@ -66,10 +73,14 @@ function item(id: string, p: Stripe.Price): Stripe.SubscriptionItem {
   return {
     id,
     price: p,
-    current_period_start: Math.floor(PERIOD_START.getTime() / 1000),
-    current_period_end: Math.floor(PERIOD_END.getTime() / 1000),
+    ...(p.recurring?.usage_type === "metered" ? {} : { quantity: 1 }),
+    current_period_start: seconds(PERIOD_START),
+    current_period_end: seconds(PERIOD_END),
   } as unknown as Stripe.SubscriptionItem;
 }
+/** The one subscription the fake Stripe holds and the schedule pending on it; every change rewrites them like Stripe would. */
+let sub: Stripe.Subscription;
+let schedule: Stripe.SubscriptionSchedule | null;
 function subscription(items: Stripe.SubscriptionItem[]): Stripe.Subscription {
   return {
     id: "sub_1",
@@ -77,10 +88,9 @@ function subscription(items: Stripe.SubscriptionItem[]): Stripe.Subscription {
     status: "active",
     cancel_at: null,
     items: { data: items },
+    schedule,
   } as unknown as Stripe.Subscription;
 }
-/** The one subscription the fake Stripe holds; item changes rewrite it like Stripe would. */
-let sub: Stripe.Subscription;
 
 const stripe = {
   prices: {
@@ -103,8 +113,10 @@ const stripe = {
         (i) => !params.items?.some((u) => u.id === i.id && u.deleted),
       );
       for (const u of params.items ?? []) {
+        if (u.deleted || !u.price) continue;
         const existing = kept.find((i) => i.id === u.id);
-        if (existing && u.price) existing.price = priceById(u.price);
+        if (existing) existing.price = priceById(u.price);
+        else kept.push(item("si_overage", priceById(u.price)));
       }
       sub = subscription(kept);
       return sub;
@@ -123,7 +135,42 @@ const stripe = {
       return { id, deleted: true };
     },
   },
-  billing: { meterEvents: { create: async () => ({}) } },
+  subscriptionSchedules: {
+    create: async (params: Stripe.SubscriptionScheduleCreateParams) => {
+      calls.scheduleCreates.push(params);
+      schedule = { id: "sub_sched_1", phases: [] } as unknown as Stripe.SubscriptionSchedule;
+      sub = subscription(sub.items.data);
+      return schedule;
+    },
+    update: async (_id: string, params: Stripe.SubscriptionScheduleUpdateParams) => {
+      calls.scheduleUpdates.push(params);
+      schedule = {
+        id: "sub_sched_1",
+        phases: (params.phases ?? []).map((phase) => ({
+          items: (phase.items ?? []).map((i) => ({
+            price: priceById(i.price ?? ""),
+            quantity: i.quantity,
+          })),
+        })),
+      } as unknown as Stripe.SubscriptionSchedule;
+      sub = subscription(sub.items.data);
+      return schedule;
+    },
+    release: async (id: string) => {
+      calls.scheduleReleases.push(id);
+      schedule = null;
+      sub = subscription(sub.items.data);
+      return { id };
+    },
+  },
+  billing: {
+    meterEvents: {
+      create: async (params: Stripe.Billing.MeterEventCreateParams) => {
+        calls.meterEvents.push(params);
+        return {};
+      },
+    },
+  },
   checkout: {
     sessions: {
       create: async (
@@ -159,13 +206,22 @@ function callerFor(teamId: string, role: TeamRole) {
   });
 }
 
-/** A team mid-period on `key`, with the matching subscription in the fake Stripe. */
-async function subscribedTeam(key: PlanRungKey, overage = false): Promise<string> {
+/**
+ * A team mid-period on `key`, with the matching subscription in the fake
+ * Stripe. A monthly rung carries its metered item unless `metered` is false
+ * (a subscription from before the ladder); `overage` is the row's switch.
+ */
+async function subscribedTeam(
+  key: PlanRungKey,
+  opts: { overage?: boolean; metered?: boolean } = {},
+): Promise<string> {
   const teamId = await createTeam(db);
   const rung = rungByKey(key);
+  const metered = opts.metered ?? rung.period === "month";
+  schedule = null;
   sub = subscription([
     item("si_base", price(key)),
-    ...(overage ? [item("si_overage", price(key, true))] : []),
+    ...(metered ? [item("si_overage", price(key, true))] : []),
   ]);
   await db
     .update(schema.teams)
@@ -175,7 +231,8 @@ async function subscribedTeam(key: PlanRungKey, overage = false): Promise<string
       planStatus: "active",
       stripeCustomerId: "cus_1",
       stripeSubscriptionId: "sub_1",
-      stripeOverageItemId: overage ? "si_overage" : null,
+      stripeOverageItemId: metered ? "si_overage" : null,
+      overageEnabled: opts.overage ?? false,
       currentPeriodStart: PERIOD_START,
       currentPeriodEnd: PERIOD_END,
     })
@@ -191,6 +248,11 @@ async function teamRow(teamId: string) {
 const auditRows = () =>
   db.select({ action: schema.auditLog.action, data: schema.auditLog.data }).from(schema.auditLog);
 
+const notificationRows = () =>
+  db
+    .select({ kind: schema.teamNotifications.kind, key: schema.teamNotifications.periodKey })
+    .from(schema.teamNotifications);
+
 beforeEach(async () => {
   ({ db, close } = await createTestDb());
   calls = {
@@ -201,7 +263,12 @@ beforeEach(async () => {
     updates: [],
     itemCreates: [],
     itemDeletes: [],
+    scheduleCreates: [],
+    scheduleUpdates: [],
+    scheduleReleases: [],
+    meterEvents: [],
   };
+  schedule = null;
   onCustomerCreate = undefined;
   vi.stubEnv("IS_CLOUD", "true");
   vi.stubEnv("APP_BASE_URL", "https://app.example.com");
@@ -239,6 +306,7 @@ describe("billing router", () => {
       plan: "free",
       planQuota: null,
       rung: "free",
+      pendingRung: null,
       planStatus: "none",
       currentPeriodEnd: null,
       quota: { kind: "day", plan: "free", limit: 100 },
@@ -249,7 +317,7 @@ describe("billing router", () => {
   });
 
   it("status counts a monthly plan against its billing period", async () => {
-    const teamId = await subscribedTeam("pro_200k", true);
+    const teamId = await subscribedTeam("pro_200k", { overage: true });
     await db
       .insert(schema.usagePeriods)
       .values({ teamId, periodStart: PERIOD_START, accepted: 1234, reportedOverage: 0 });
@@ -257,6 +325,7 @@ describe("billing router", () => {
       plan: "pro",
       planQuota: 200_000,
       rung: "pro_200k",
+      pendingRung: null,
       planStatus: "active",
       currentPeriodEnd: PERIOD_END,
       quota: {
@@ -289,7 +358,7 @@ describe("billing router", () => {
     await expect(member.billing.portal()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("checkout creates the customer once, stores it, and sells the rung's price", async () => {
+  it("checkout creates the customer once, stores it, and sells the rung's price with its metered item", async () => {
     const teamId = await createTeam(db, "acme");
     const admin = callerFor(teamId, "admin");
     expect(await admin.billing.checkout({ rung: "scale_1m" })).toEqual({
@@ -302,7 +371,7 @@ describe("billing router", () => {
       mode: "subscription",
       customer: "cus_new",
       client_reference_id: teamId,
-      line_items: [{ price: "price_scale_1m", quantity: 1 }],
+      line_items: [{ price: "price_scale_1m", quantity: 1 }, { price: "price_scale_1m_overage" }],
       success_url: "https://app.example.com/settings/billing?checkout=success",
       cancel_url: "https://app.example.com/settings/billing",
       automatic_tax: { enabled: true },
@@ -327,8 +396,12 @@ describe("billing router", () => {
     expect(calls.customers).toHaveLength(1);
     expect(calls.checkouts[1]).toMatchObject({
       customer: "cus_new",
-      line_items: [{ price: "price_pro_100k", quantity: 1 }],
+      line_items: [{ price: "price_pro_100k", quantity: 1 }, { price: "price_pro_100k_overage" }],
     });
+
+    // A daily rung has nothing to meter.
+    await admin.billing.checkout({ rung: "starter" });
+    expect(calls.checkouts[2]?.line_items).toEqual([{ price: "price_starter", quantity: 1 }]);
   });
 
   it("checkout refuses the free rung: Free is reached by cancelling", async () => {
@@ -375,57 +448,106 @@ describe("billing router", () => {
     });
   });
 
-  it("changePlan moves the live subscription to the rung with prorations and drains on a raise", async () => {
+  it("changePlan moves up at once with prorations, re-pricing the metered item, and drains on a raise", async () => {
     const teamId = await subscribedTeam("pro_100k");
     const owner = callerFor(teamId, "owner");
-    await owner.billing.changePlan({ rung: "scale_500k" });
+    expect(await owner.billing.changePlan({ rung: "scale_500k" })).toEqual({ applied: "now" });
     expect(calls.updates).toEqual([
       {
-        items: [{ id: "si_base", price: "price_scale_500k" }],
+        items: [
+          { id: "si_base", price: "price_scale_500k" },
+          { id: "si_overage", price: "price_scale_500k_overage" },
+        ],
         proration_behavior: "create_prorations",
+      },
+    ]);
+    expect(calls.scheduleCreates).toEqual([]);
+    expect(await teamRow(teamId)).toMatchObject({
+      plan: "scale",
+      planQuota: 500_000,
+      stripeOverageItemId: "si_overage",
+      pendingRung: null,
+    });
+    expect(h.runCronNow).toHaveBeenCalledWith("quota.drain");
+    expect(await auditRows()).toEqual([
+      { action: "billing.plan_changed", data: { rung: "scale_500k", applied: "now" } },
+    ]);
+  });
+
+  it("changePlan adds the metered item a subscription from before the ladder lacks", async () => {
+    const teamId = await subscribedTeam("pro_100k", { metered: false });
+    await callerFor(teamId, "owner").billing.changePlan({ rung: "pro_200k" });
+    expect(calls.updates[0]?.items).toEqual([
+      { id: "si_base", price: "price_pro_200k" },
+      { price: "price_pro_200k_overage" },
+    ]);
+    expect(await teamRow(teamId)).toMatchObject({
+      planQuota: 200_000,
+      stripeOverageItemId: "si_overage",
+    });
+  });
+
+  it("changePlan schedules a move down for the period end and leaves the row alone until then; the current rung drops it", async () => {
+    const teamId = await subscribedTeam("scale_500k");
+    const owner = callerFor(teamId, "owner");
+    expect(await owner.billing.changePlan({ rung: "pro_100k" })).toEqual({
+      applied: "period_end",
+      at: PERIOD_END,
+    });
+    expect(calls.updates).toEqual([]);
+    expect(calls.scheduleCreates).toEqual([{ from_subscription: "sub_1" }]);
+    expect(calls.scheduleUpdates).toEqual([
+      {
+        end_behavior: "release",
+        phases: [
+          {
+            items: [
+              { price: "price_scale_500k", quantity: 1 },
+              { price: "price_scale_500k_overage" },
+            ],
+            start_date: seconds(PERIOD_START),
+            end_date: seconds(PERIOD_END),
+            proration_behavior: "none",
+          },
+          {
+            items: [{ price: "price_pro_100k", quantity: 1 }, { price: "price_pro_100k_overage" }],
+            duration: { interval: "month", interval_count: 1 },
+            proration_behavior: "none",
+          },
+        ],
       },
     ]);
     expect(await teamRow(teamId)).toMatchObject({
       plan: "scale",
       planQuota: 500_000,
-      stripeOverageItemId: null,
+      pendingRung: "pro_100k",
     });
-    expect(h.runCronNow).toHaveBeenCalledWith("quota.drain");
-    expect(await auditRows()).toEqual([
-      { action: "billing.plan_changed", data: { rung: "scale_500k" } },
-    ]);
-
-    // A move down leaves the schedule alone.
-    h.runCronNow.mockClear();
-    await owner.billing.changePlan({ rung: "pro_100k" });
-    expect((await teamRow(teamId))?.planQuota).toBe(100_000);
+    expect((await owner.billing.status()).pendingRung).toBe("pro_100k");
     expect(h.runCronNow).not.toHaveBeenCalled();
-  });
 
-  it("changePlan keeps the metered item in step: re-priced for a monthly rung, dropped for a daily one", async () => {
-    const teamId = await subscribedTeam("pro_100k", true);
-    const owner = callerFor(teamId, "owner");
-    await owner.billing.changePlan({ rung: "pro_200k" });
-    expect(calls.updates[0]?.items).toEqual([
-      { id: "si_base", price: "price_pro_200k" },
-      { id: "si_overage", price: "price_pro_200k_overage" },
-    ]);
-    expect(await teamRow(teamId)).toMatchObject({
-      plan: "pro",
-      planQuota: 200_000,
-      stripeOverageItemId: "si_overage",
-    });
-
+    // Another move down rewrites the same schedule; a daily rung's phase carries no metered item.
     await owner.billing.changePlan({ rung: "starter" });
-    expect(calls.updates[1]?.items).toEqual([
-      { id: "si_base", price: "price_starter" },
-      { id: "si_overage", deleted: true },
+    expect(calls.scheduleCreates).toHaveLength(1);
+    expect(calls.scheduleUpdates[1]?.phases?.[1]?.items).toEqual([
+      { price: "price_starter", quantity: 1 },
     ]);
-    expect(await teamRow(teamId)).toMatchObject({
-      plan: "starter",
-      planQuota: null,
-      stripeOverageItemId: null,
+    expect((await teamRow(teamId))?.pendingRung).toBe("starter");
+
+    // Keeping the current rung releases the schedule.
+    expect(await owner.billing.changePlan({ rung: "scale_500k" })).toEqual({
+      applied: "unscheduled",
     });
+    expect(calls.scheduleReleases).toEqual(["sub_sched_1"]);
+    expect(await teamRow(teamId)).toMatchObject({
+      plan: "scale",
+      planQuota: 500_000,
+      pendingRung: null,
+    });
+    expect(await auditRows()).toEqual([
+      { action: "billing.plan_changed", data: { rung: "pro_100k", applied: "period_end" } },
+      { action: "billing.plan_changed", data: { rung: "starter", applied: "period_end" } },
+      { action: "billing.plan_changed", data: { rung: "scale_500k", applied: "unscheduled" } },
+    ]);
   });
 
   it("changePlan tells the owners about a move once per period, keyed like the webhook's own report", async () => {
@@ -440,21 +562,20 @@ describe("billing router", () => {
     ]);
     expect(h.sent[0]?.from).toBe("MillionSend <notices@mail.example.com>");
     expect(h.sent[0]?.text).toContain("https://app.example.com/settings/billing");
-    // Keyed by the period end as the row holds it (Stripe stamps whole seconds).
-    const periodEnd = (await teamRow(teamId))?.currentPeriodEnd?.toISOString();
-    expect(
-      await db
-        .select({ kind: schema.teamNotifications.kind, key: schema.teamNotifications.periodKey })
-        .from(schema.teamNotifications),
-    ).toEqual([{ kind: "billing.plan_changed", key: `pro_100k>scale_500k:${periodEnd}` }]);
+    expect(await notificationRows()).toEqual([
+      { kind: "billing.plan_changed", key: `pro_100k>scale_500k:${PERIOD_END.toISOString()}` },
+    ]);
 
-    // Back and forth inside one period: the return trip is news, the same move again is not.
-    await owner.billing.changePlan({ rung: "pro_100k" });
-    await owner.billing.changePlan({ rung: "scale_500k" });
+    // A scheduled move down is not a move yet; the move up that drops it is news of its own.
+    await owner.billing.changePlan({ rung: "pro_200k" });
+    expect(h.sent).toHaveLength(1);
+    await owner.billing.changePlan({ rung: "scale_1m" });
+    expect(calls.scheduleReleases).toEqual(["sub_sched_1"]);
     expect(h.sent.map((m) => m.subject)).toEqual([
       "acme moved from Pro 100k to Scale 500k",
-      "acme moved from Scale 500k to Pro 100k",
+      "acme moved from Scale 500k to Scale 1M",
     ]);
+    expect((await teamRow(teamId))?.pendingRung).toBeNull();
   });
 
   it("changePlan needs a live subscription", async () => {
@@ -465,26 +586,60 @@ describe("billing router", () => {
     expect(calls.updates).toEqual([]);
   });
 
-  it("setOverage adds the rung's metered item and removes it again", async () => {
+  it("setOverage is a switch on the row; off first reports what the meter has not seen", async () => {
     const teamId = await subscribedTeam("pro_100k");
     const owner = callerFor(teamId, "owner");
     await owner.billing.setOverage({ enabled: true });
-    expect(calls.itemCreates).toEqual([{ subscription: "sub_1", price: "price_pro_100k_overage" }]);
-    expect((await teamRow(teamId))?.stripeOverageItemId).toBe("si_overage");
+    expect(calls.itemCreates).toEqual([]);
+    expect(calls.updates).toEqual([]);
+    expect(await teamRow(teamId)).toMatchObject({
+      overageEnabled: true,
+      stripeOverageItemId: "si_overage",
+    });
     expect((await owner.billing.status()).quota).toMatchObject({ kind: "month", overage: true });
     // Overage lets parked broadcast mail through: drained at once.
     expect(h.runCronNow).toHaveBeenCalledWith("quota.drain");
 
     h.runCronNow.mockClear();
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: PERIOD_START, accepted: 100_500 });
     await owner.billing.setOverage({ enabled: false });
-    expect(calls.itemDeletes).toEqual(["si_overage"]);
-    expect((await teamRow(teamId))?.stripeOverageItemId).toBeNull();
+    expect(calls.meterEvents).toEqual([
+      expect.objectContaining({
+        event_name: "emails_over_quota",
+        payload: { stripe_customer_id: "cus_1", value: "500" },
+      }),
+    ]);
+    expect(
+      await db
+        .select({
+          reportedOverage: schema.usagePeriods.reportedOverage,
+          pendingOverage: schema.usagePeriods.pendingOverage,
+        })
+        .from(schema.usagePeriods),
+    ).toEqual([{ reportedOverage: 500, pendingOverage: null }]);
+    expect(calls.itemDeletes).toEqual([]);
+    expect(await teamRow(teamId)).toMatchObject({
+      overageEnabled: false,
+      stripeOverageItemId: "si_overage",
+    });
     expect((await owner.billing.status()).quota).toMatchObject({ kind: "month", overage: false });
     expect(h.runCronNow).not.toHaveBeenCalled();
     expect(await auditRows()).toEqual([
       { action: "billing.overage_toggled", data: { enabled: true } },
       { action: "billing.overage_toggled", data: { enabled: false } },
     ]);
+  });
+
+  it("setOverage on adds the metered item to a subscription from before the ladder", async () => {
+    const teamId = await subscribedTeam("pro_100k", { metered: false });
+    await callerFor(teamId, "owner").billing.setOverage({ enabled: true });
+    expect(calls.itemCreates).toEqual([{ subscription: "sub_1", price: "price_pro_100k_overage" }]);
+    expect(await teamRow(teamId)).toMatchObject({
+      overageEnabled: true,
+      stripeOverageItemId: "si_overage",
+    });
   });
 
   it("setOverage is refused on a daily plan and without a live subscription", async () => {

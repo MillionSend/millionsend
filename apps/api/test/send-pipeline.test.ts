@@ -153,10 +153,7 @@ describe("monthly plan", () => {
   });
 
   it("with overage on, sends past the included volume go out and count against the period", async () => {
-    await db
-      .update(schema.teams)
-      .set({ stripeOverageItemId: "si_test" })
-      .where(eq(schema.teams.id, teamId));
+    await db.update(schema.teams).set({ overageEnabled: true }).where(eq(schema.teams.id, teamId));
     expect((await post(base)).status).toBe(200);
     expect((await batch()).status).toBe(200);
     expect(enqueued).toHaveLength(3);

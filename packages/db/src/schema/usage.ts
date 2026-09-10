@@ -89,6 +89,10 @@ export const usagePeriods = pgTable(
     periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
     accepted: integer("accepted").notNull().default(0),
     reportedOverage: integer("reported_overage").notNull().default(0),
+    // The counter a meter event in flight advances to: set before the event
+    // is sent and cleared once the row caught up, so a report whose commit
+    // was lost is re-sent with the same value under the same identifier.
+    pendingOverage: integer("pending_overage"),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.periodStart] })],
 );

@@ -9,9 +9,12 @@ import { cancelTeamSubscription, reconcileTeamPlan } from "../src/subscription.j
 import { handleWebhook, purgeStripeEvents } from "../src/webhook.js";
 import {
   fakeStripe,
+  legacyProduct,
   PERIOD_END,
   PERIOD_START,
+  price,
   priceId,
+  schedule,
   subscription,
   teamRow,
   webhooks,
@@ -103,7 +106,9 @@ describe("handleWebhook", () => {
     const payload = subEvent("customer.subscription.created", state.subscriptions.sub_1);
     expect(await deliver(payload)).toBe(200);
     expect((await team(teamId))?.plan).toBe("pro");
-    expect(state.retrieveParams).toEqual({ expand: ["items.data.price.product"] });
+    expect(state.retrieveParams).toEqual({
+      expand: ["items.data.price.product", "schedule.phases.items.price"],
+    });
 
     state.subscriptions.sub_1 = subscription("sub_1", "cus_1", "canceled");
     expect(await deliver(payload)).toBe(200);
@@ -128,6 +133,8 @@ describe("handleWebhook", () => {
       stripeCustomerId: "cus_1",
       stripeSubscriptionId: "sub_1",
       stripeOverageItemId: "si_sub_1_overage",
+      overageEnabled: false,
+      pendingRung: null,
       currentPeriodStart: new Date(PERIOD_START * 1000),
       currentPeriodEnd: new Date(PERIOD_END * 1000),
     });
@@ -152,20 +159,56 @@ describe("handleWebhook", () => {
     expect(await team(teamId)).toMatchObject({ plan: "starter", planQuota: null });
   });
 
-  it("legacy lookup keys land on the first rung of their plan", async () => {
+  it("pre-ladder prices land on the first rung of their product's plan", async () => {
     const teamId = await customerTeam();
     state.subscriptions.sub_1 = subscription(
       "sub_1",
       "cus_1",
       "active",
       "millionsend_scale_monthly",
+      { product: legacyProduct("scale") },
     );
     await deliver(subEvent("customer.subscription.created", state.subscriptions.sub_1));
     expect(await team(teamId)).toMatchObject({ plan: "scale", planQuota: 500_000 });
 
-    state.subscriptions.sub_1 = subscription("sub_1", "cus_1", "active", "millionsend_pro_monthly");
+    state.subscriptions.sub_1 = subscription(
+      "sub_1",
+      "cus_1",
+      "active",
+      "millionsend_pro_monthly",
+      {
+        product: legacyProduct("pro"),
+      },
+    );
     await deliver(subEvent("customer.subscription.updated", state.subscriptions.sub_1));
     expect(await team(teamId)).toMatchObject({ plan: "pro", planQuota: 100_000 });
+  });
+
+  it("mirrors a scheduled downgrade in pending_rung and clears it once the schedule is gone", async () => {
+    const teamId = await customerTeam();
+    const pending = schedule([
+      price("millionsend_pro_100k_monthly"),
+      price("millionsend_pro_100k_overage", { metered: true }),
+    ]);
+    state.subscriptions.sub_1 = subscription(
+      "sub_1",
+      "cus_1",
+      "active",
+      "millionsend_pro_200k_monthly",
+      { overageKey: "millionsend_pro_200k_overage", schedule: pending },
+    );
+    await deliver(subEvent("customer.subscription.updated", state.subscriptions.sub_1));
+    expect(await team(teamId)).toMatchObject({ planQuota: 200_000, pendingRung: "pro_100k" });
+
+    state.subscriptions.sub_1.schedule = null;
+    await deliver(subEvent("customer.subscription.updated", state.subscriptions.sub_1));
+    expect(await team(teamId)).toMatchObject({ planQuota: 200_000, pendingRung: null });
+
+    // A subscription that is no longer entitled has nothing pending.
+    state.subscriptions.sub_1.schedule = pending;
+    state.subscriptions.sub_1.status = "unpaid";
+    await deliver(subEvent("customer.subscription.updated", state.subscriptions.sub_1));
+    expect(await team(teamId)).toMatchObject({ plan: "free", pendingRung: null });
   });
 
   it("price metadata names the rung ahead of the lookup key", async () => {
@@ -255,7 +298,7 @@ describe("handleWebhook", () => {
     // event at all means it ran before the column was cleared.
     expect(state.meterEvents).toHaveLength(1);
     expect(state.meterEvents[0]).toMatchObject({
-      identifier: `${teamId}:${PERIOD_START * 1000}:0`,
+      identifier: `${teamId}:${PERIOD_START * 1000}:0:500`,
       payload: { stripe_customer_id: "cus_1", value: "500" },
     });
     expect(await team(teamId)).toMatchObject({
@@ -462,7 +505,10 @@ describe("reconcileTeamPlan", () => {
       "millionsend_scale_500k_monthly",
     );
     await reconcileTeamPlan(deps(), teamId);
-    expect(state.listParams?.expand).toEqual(["data.items.data.price.product"]);
+    expect(state.listParams?.expand).toEqual([
+      "data.items.data.price.product",
+      "data.schedule.phases.items.price",
+    ]);
     expect(await team(teamId)).toMatchObject({
       plan: "scale",
       planQuota: 500_000,
@@ -491,6 +537,8 @@ describe("cancelTeamSubscription", () => {
       stripeCustomerId: "cus_1",
       stripeSubscriptionId: null,
       stripeOverageItemId: null,
+      overageEnabled: false,
+      pendingRung: null,
       currentPeriodStart: null,
       currentPeriodEnd: null,
     });

@@ -1,7 +1,6 @@
 import { PAID_RUNGS, PLAN_NAME, type Plan, type PlanRung } from "@millionsend/core";
 import Stripe from "stripe";
 import {
-  LEGACY_LOOKUP_KEYS,
   METER_EVENT_NAME,
   overageLookupKey,
   PRODUCT_METADATA_KEY,
@@ -207,15 +206,18 @@ async function ensurePrice(
 }
 
 /**
- * The two pre-ladder prices are archived, not deleted: the subscriptions
- * still on them keep working (and keep resolving through LEGACY_LOOKUP_KEYS)
- * until each is moved; only new checkouts stop seeing them.
+ * Lookup keys of the two prices sold before the ladder. Stripe never deletes
+ * a price a subscription has used, so they are archived: the subscriptions
+ * still on them keep working (resolving to the plan's first rung through the
+ * product's metadata) until each is moved; only new checkouts stop seeing them.
  */
+const LEGACY_PRICE_LOOKUP_KEYS = ["millionsend_pro_monthly", "millionsend_scale_monthly"];
+
 async function archiveLegacyPrices(
   stripe: ProvisionStripe,
   log: (line: string) => void,
 ): Promise<void> {
-  const keys = Object.keys(LEGACY_LOOKUP_KEYS);
+  const keys = LEGACY_PRICE_LOOKUP_KEYS;
   const { data } = await stripe.prices.list({ lookup_keys: keys, limit: 10 });
   for (const price of data) {
     if (!price.lookup_key || !keys.includes(price.lookup_key)) continue;
@@ -278,7 +280,23 @@ function portalFeatures(): Stripe.BillingPortal.ConfigurationCreateParams.Featur
     invoice_history: { enabled: true },
     payment_method_update: { enabled: true },
     customer_update: { enabled: true, allowed_updates: ["email", "name", "address", "tax_id"] },
-    subscription_cancel: { enabled: true, mode: "at_period_end" },
+    subscription_cancel: {
+      enabled: true,
+      mode: "at_period_end",
+      cancellation_reason: {
+        enabled: true,
+        options: [
+          "too_expensive",
+          "missing_features",
+          "switched_service",
+          "unused",
+          "customer_service",
+          "too_complex",
+          "low_quality",
+          "other",
+        ],
+      },
+    },
     subscription_update: { enabled: false },
   };
 }

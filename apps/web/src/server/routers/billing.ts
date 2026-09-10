@@ -48,6 +48,7 @@ async function loadTeam(db: Db, teamId: string) {
       planStatus: schema.teams.planStatus,
       stripeCustomerId: schema.teams.stripeCustomerId,
       cancelAt: schema.teams.cancelAt,
+      pendingRung: schema.teams.pendingRung,
     })
     .from(schema.teams)
     .where(eq(schema.teams.id, teamId));
@@ -98,6 +99,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         plan: team.plan,
         planQuota: team.planQuota,
         rung: teamRung(team.plan, team.planQuota).key,
+        pendingRung: team.pendingRung,
         planStatus: team.planStatus,
         currentPeriodEnd: team.currentPeriodEnd,
         quota,
@@ -148,14 +150,14 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         if (!hasLiveSubscription(team.planStatus)) {
           throw new TRPCError({ code: "PRECONDITION_FAILED" });
         }
-        await changeRung(
+        const change = await changeRung(
           { db: ctx.db, stripe: deps.stripe() },
           { teamId: ctx.teamId, rung: input.rung },
         );
         await recordAudit(ctx, {
           action: "billing.plan_changed",
           target: { type: "team", id: ctx.teamId },
-          metadata: { rung: input.rung },
+          metadata: { rung: input.rung, applied: change.applied },
         });
         const after = await loadTeam(ctx.db, ctx.teamId);
         if (raisesQuota(teamQuota(team, true), teamQuota(after, true))) await kickQuotaDrain();
@@ -166,7 +168,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         } catch (err) {
           console.error("billing: plan change mail skipped", err);
         }
-        return { rung: input.rung };
+        return change;
       }),
 
     setOverage: adminProcedure

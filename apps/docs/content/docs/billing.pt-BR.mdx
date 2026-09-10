@@ -83,10 +83,11 @@ mensais. Um envio agendado conta no período em que foi aceito.
 
 Os preços são localizados por lookup key, nunca por id de preço, então o
 mesmo build roda em qualquer conta Stripe (teste ou produção) sem configurar
-preços por ambiente. A assinatura carrega o preço do degrau e, enquanto o
-excedente está ligado, o preço medido do degrau como segundo item, cujo id
-fica em `teams.stripe_overage_item_id` — essa coluna é a chave de excedente
-que toda superfície de envio lê.
+preços por ambiente. Uma assinatura num degrau mensal carrega o preço do
+degrau e o preço medido dele como segundo item desde o Checkout (o id do item
+fica em `teams.stripe_overage_item_id`); o item medido só cobra o que o worker
+reporta, então a chave de **excedente** do cliente é uma simples flag na
+linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
 
 ## O fluxo
 
@@ -103,18 +104,34 @@ que toda superfície de envio lê.
    assinatura no corpo bruto, registra o id do evento (duplicatas são
    confirmadas e ignoradas), busca a assinatura de novo no Stripe e só então
    grava `teams.plan`, `plan_quota`, `current_period_start`,
-   `current_period_end` e `stripe_overage_item_id`.
-4. **Trocar de degrau** acontece no painel (`billing.changePlan`): os itens
-   da assinatura são atualizados com rateio — o item do plano para o preço do
-   novo degrau, o item de excedente reprecificado para um degrau mensal ou
-   removido para um diário depois de reportar o uso — e o resultado é
-   aplicado na hora; o webhook que vem em seguida reaplica o mesmo estado. A
-   chave de **excedente** (`billing.setOverage`) adiciona ou remove o item
-   medido; desligar reporta antes o que ainda não foi reportado.
+   `current_period_end`, `stripe_overage_item_id` e `pending_rung`.
+4. **Trocar de degrau** acontece no painel (`billing.changePlan`), e a
+   direção decide quando:
+   - **Subir** vale na hora: os itens da assinatura são atualizados — o item
+     do plano para o preço do novo degrau, o item medido reprecificado para
+     um degrau mensal ou removido para um diário depois de reportar o uso —
+     com a diferença rateada na próxima fatura, e o webhook que vem em
+     seguida reaplica o mesmo estado. Os envios já aceitos dentro do volume
+     antigo são marcados como acertados na linha do período, então o novo
+     degrau nunca os cobra como excedente.
+   - **Descer** vale ao fim do período, sem rateio e sem reembolso: um
+     subscription schedule do Stripe é criado a partir da assinatura (ou o
+     pendente é reaproveitado) com duas fases — os itens atuais até
+     `current_period_end`, depois os itens do novo degrau — e a linha do
+     plano não muda até o webhook aplicar a troca de fase. Até lá, a página
+     de cobrança mostra "Muda para X em `<data>`" com um botão **Manter
+     `<atual>`**: escolher o degrau atual libera o schedule, e uma subida
+     posterior também.
+
+   A chave de **excedente** (`billing.setOverage`) vira `overage_enabled`;
+   desligar reporta antes o que ainda não foi reportado. Uma assinatura
+   anterior à escada não tem item medido; ligar o excedente pela primeira
+   vez o adiciona.
 5. **Gerenciar cobrança** abre o Customer Portal do Stripe para forma de
-   pagamento, faturas, id fiscal e cancelamento ao fim do período. Trocas de
-   plano não são oferecidas lá: o portal do Stripe não consegue atualizar uma
-   assinatura com mais de um item, e uma com excedente ligado tem dois.
+   pagamento, faturas, id fiscal e cancelamento ao fim do período (o portal
+   pede o motivo do cancelamento). Trocas de plano não são oferecidas lá: o
+   portal do Stripe não consegue atualizar uma assinatura com mais de um
+   item, e um degrau mensal tem dois.
 
 As colunas de plano são escritas a partir de uma assinatura buscada no
 Stripe — pelo handler do webhook e pelos dois procedimentos do painel acima —
@@ -129,10 +146,10 @@ não medido da assinatura nomeia o degrau, nesta ordem:
 
 1. o `metadata.millionsend_rung` do preço;
 2. a lookup key do preço (`millionsend_<degrau>_monthly`);
-3. as chaves legadas `millionsend_pro_monthly` → `pro_100k` e
-   `millionsend_scale_monthly` → `scale_500k`;
-4. o `metadata.millionsend_plan` do produto, caindo no primeiro degrau desse
-   plano.
+3. o `metadata.millionsend_plan` do produto, caindo no primeiro degrau desse
+   plano — é assim que os dois preços vendidos antes da escada resolvem
+   (`millionsend_pro_monthly` → `pro_100k`, `millionsend_scale_monthly` →
+   `scale_500k`).
 
 | Status da assinatura rebuscada | `plan`, `plan_quota` | `plan_status` |
 | --- | --- | --- |
@@ -149,25 +166,37 @@ Regras adicionais:
 - Stripe inacessível ou falha no banco lançam erro; a linha do evento é
   desfeita e a nova tentativa do Stripe é processada normalmente.
 - `stripe_customer_id`, `stripe_subscription_id`, `current_period_start`,
-  `current_period_end` e `stripe_overage_item_id` são guardados junto com o
-  plano. Um item de excedente ainda num preço legado é reapontado para o
-  preço medido do degrau ao ser aplicado.
+  `current_period_end`, `stripe_overage_item_id` e `pending_rung` (o degrau
+  da última fase de um schedule pendente, quando difere do atual) são
+  guardados junto com o plano. Um item medido precificado para outro degrau
+  é reapontado para o preço medido do degrau ao ser aplicado.
 
 ## O cron de excedente
 
 `billing.overage` roda no worker a cada 10 minutos. Para cada linha de
-período com mais envios além do volume incluído do que o medidor já conhece
-(`accepted − incluído − reported_overage`), envia um evento de medidor por
-time e período. O identificador do evento é o contador de onde ele avança
-(`<time>:<início do período>:<reportado até então>`), e a linha avança na
-mesma transação da chamada ao Stripe: um relato cujo commit se perdeu é
-reenviado com o mesmo identificador e o Stripe o descarta como duplicata, e
-uma falha do Stripe deixa a linha para a próxima rodada. O uso de um período
-que já terminou é carimbado um segundo dentro desse período, onde o Stripe o
-fatura (a fatura fica em rascunho por cerca de uma hora após o fim do
-período; linhas com mais de 35 dias não podem mais ser medidas e vão para o
-log). O mesmo relato roda antes de um item de excedente ser removido, para
-nada ficar sem cobrar.
+período de um time com item medido que tem mais envios além do volume
+incluído do que o medidor já conhece (`accepted − incluído −
+reported_overage`), envia um evento de medidor por time e período, em três
+comandos, para uma queda em qualquer ponto não custar nada:
+
+1. a linha fixa o contador até onde o evento vai avançar: `pending_overage =
+   to` onde `reported_overage = from` e não há fixação (uma linha que outra
+   rodada fixou antes é pulada);
+2. o evento de medidor sai com o identificador
+   `<time>:<início do período>:<from>:<to>` (o início do período em
+   milissegundos de época) e valor `to − from`;
+3. a linha alcança: `reported_overage = to, pending_overage = null`.
+
+Uma queda entre os dois últimos deixa a fixação, então a próxima rodada
+reenvia o mesmo `to` com o mesmo identificador e o Stripe o descarta como
+duplicata; uma falha do Stripe também deixa a fixação para a próxima rodada.
+Com o excedente desligado nada passa do volume incluído, então não há o que
+reportar. O uso de um período que já terminou é carimbado um segundo dentro
+desse período, onde o Stripe o fatura (a fatura fica em rascunho por cerca de
+uma hora após o fim do período; linhas com mais de 35 dias não podem mais ser
+medidas e vão para o log). O mesmo relato roda antes de a chave desligar,
+antes de uma subida (os envios feitos no degrau antigo acertam na taxa dele)
+e quando o item medido sai da assinatura, para nada ficar sem cobrar.
 
 ## Ambiente
 
@@ -212,8 +241,8 @@ O que ele faz, e por que rodar de novo é seguro:
   lugar. Os preços são `tax_behavior: exclusive`.
 - **Preços legados** `millionsend_pro_monthly` e `millionsend_scale_monthly`
   são arquivados, não excluídos: assinaturas ainda neles continuam
-  funcionando pelas chaves legadas até cada uma ser movida; só os novos
-  checkouts deixam de vê-los.
+  funcionando, resolvidas para o primeiro degrau do plano pelo metadata do
+  produto, até cada uma ser movida; só os novos checkouts deixam de vê-los.
 - **Endpoint de webhook** é localizado pela URL; listas de eventos que
   divergiram são ressincronizadas. O segredo de assinatura é impresso **uma
   única vez, na criação** — o Stripe nunca o devolve de novo. Para rotacionar,
@@ -221,8 +250,8 @@ O que ele faz, e por que rodar de novo é seguro:
   e copie o novo valor em `STRIPE_WEBHOOK_SECRET`.
 - **Configuração do portal** é localizada por metadata e tem os recursos
   atualizados: histórico de faturas, forma de pagamento, dados do cliente
-  incluindo id fiscal e cancelamento ao fim do período; atualização de
-  assinatura fica desligada (veja [o fluxo](#o-fluxo)).
+  incluindo id fiscal e cancelamento ao fim do período com coleta do motivo;
+  atualização de assinatura fica desligada (veja [o fluxo](#o-fluxo)).
 
 Teste e produção são contas Stripe separadas: rode uma vez com cada chave.
 
@@ -246,13 +275,16 @@ O script termina imprimindo estes itens; a API não consegue fazê-los:
 ## Migrando uma implantação existente
 
 A migração `0035_pricing_ladder` adiciona o valor de plano `starter`, as
-colunas `plan_quota`, `current_period_start` e `stripe_overage_item_id` e a
-tabela `usage_periods`. Times `scale` existentes passam a Scale 500k
+colunas de `teams` `plan_quota`, `current_period_start`,
+`stripe_overage_item_id`, `overage_enabled` (padrão false) e `pending_rung`,
+e a tabela `usage_periods` (`accepted`, `reported_overage`,
+`pending_overage`). Times `scale` existentes passam a Scale 500k
 (`plan_quota` 500000) e times `pro` a Pro 100k (100000);
 `current_period_start` é preenchido como `current_period_end − 1 mês`. As
-assinaturas deles ficam nos preços legados, resolvidos pelas lookup keys
-legadas, até serem movidas. O contador do período começa vazio: envios
-aceitos antes da migração contam no dia em que saíram, não no período.
+assinaturas deles ficam nos preços legados, resolvidos pelo metadata do
+produto, até serem movidas, e não têm item medido: ligar o excedente pela
+primeira vez o adiciona. O contador do período começa vazio: envios aceitos
+antes da migração contam no dia em que saíram, não no período.
 
 ## Testando localmente
 

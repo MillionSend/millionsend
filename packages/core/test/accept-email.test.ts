@@ -100,7 +100,7 @@ const FREE: QuotaTeamRow = {
   planQuota: null,
   currentPeriodStart: null,
   currentPeriodEnd: null,
-  stripeOverageItemId: null,
+  overageEnabled: false,
 };
 const auth = () => ({ teamId, billing: FREE, apiKeyId: null });
 const payload = (over: Partial<AcceptEmailPayload> = {}): AcceptEmailPayload => ({
@@ -206,7 +206,7 @@ describe("acceptEmail", () => {
       planQuota: 100_000,
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
-      stripeOverageItemId: null,
+      overageEnabled: false,
     };
     await db
       .insert(schema.usagePeriods)
@@ -225,7 +225,7 @@ describe("acceptEmail", () => {
     ).toEqual([]);
     const billed = await acceptEmail(
       deps(),
-      { teamId: monthly, billing: { ...billing, stripeOverageItemId: "si_1" }, apiKeyId: null },
+      { teamId: monthly, billing: { ...billing, overageEnabled: true }, apiKeyId: null },
       payload({ domainId: null }),
     );
     expect(billed).toMatchObject({

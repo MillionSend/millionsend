@@ -261,6 +261,7 @@ describe("provision", () => {
     expect(result.portalConfiguration).toBe(portal?.id);
     expect(portal?.features.subscription_update.enabled).toBe(false);
     expect(portal?.features.subscription_cancel.mode).toBe("at_period_end");
+    expect(portal?.features.subscription_cancel.cancellation_reason.enabled).toBe(true);
     expect(log.some((l) => l.startsWith("Dashboard-only steps"))).toBe(true);
   });
 

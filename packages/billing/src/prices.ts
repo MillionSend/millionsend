@@ -1,11 +1,4 @@
-import {
-  isPlanRungKey,
-  PAID_RUNGS,
-  PLAN_RUNGS,
-  type PlanRung,
-  type PlanRungKey,
-  rungByKey,
-} from "@millionsend/core";
+import { isPlanRungKey, PAID_RUNGS, PLAN_RUNGS, type PlanRung, rungByKey } from "@millionsend/core";
 import type Stripe from "stripe";
 import type { BillingStripe } from "./stripe.js";
 
@@ -22,17 +15,6 @@ export const METER_EVENT_NAME = "emails_over_quota";
  */
 export const rungLookupKey = (rung: PlanRung): string => `millionsend_${rung.key}_monthly`;
 export const overageLookupKey = (rung: PlanRung): string => `millionsend_${rung.key}_overage`;
-
-/**
- * Lookup keys of the prices sold before the ladder existed, and the rung
- * each one entitles: the old Pro is the first Pro rung, the old unlimited
- * Scale is the first Scale rung. A subscription still on one keeps its
- * entitlement until it is moved.
- */
-export const LEGACY_LOOKUP_KEYS: Record<string, PlanRungKey> = {
-  millionsend_pro_monthly: "pro_100k",
-  millionsend_scale_monthly: "scale_500k",
-};
 
 /** The metadata every ladder price carries; the rung key is what the code reads back. */
 export function priceMetadata(rung: PlanRung): Record<string, string> {
@@ -59,8 +41,8 @@ export async function resolvePriceId(stripe: BillingStripe, lookupKey: string): 
   return price.id;
 }
 
-/** Expansion rungFromSubscription needs on a retrieved subscription. */
-export const SUBSCRIPTION_EXPAND = ["items.data.price.product"];
+/** Expansions applySubscription needs on a retrieved subscription: the rung, and a scheduled change. */
+export const SUBSCRIPTION_EXPAND = ["items.data.price.product", "schedule.phases.items.price"];
 
 export const isMeteredPrice = (price: Stripe.Price): boolean =>
   price.recurring?.usage_type === "metered";
@@ -68,9 +50,9 @@ export const isMeteredPrice = (price: Stripe.Price): boolean =>
 /**
  * Which rung a price (plan or metered overage) belongs to. The price's own
  * metadata is the durable link; the lookup key covers prices provisioned
- * before metadata was written; the legacy keys cover the two pre-ladder
- * prices; and the product's metadata catches a rotated price that lost its
- * key, landing on the plan's first rung.
+ * before metadata was written; and the product's metadata catches a price
+ * with neither (a rotated one, or the two sold before the ladder), landing
+ * on the plan's first rung.
  */
 export function rungFromPrice(price: Stripe.Price): PlanRung | null {
   const tagged = price.metadata?.[RUNG_METADATA_KEY];
@@ -79,8 +61,6 @@ export function rungFromPrice(price: Stripe.Price): PlanRung | null {
   if (key) {
     const byKey = PLAN_RUNGS.find((r) => rungLookupKey(r) === key || overageLookupKey(r) === key);
     if (byKey) return byKey;
-    const legacy = LEGACY_LOOKUP_KEYS[key];
-    if (legacy) return rungByKey(legacy);
   }
   const product = price.product;
   const plan =
@@ -105,4 +85,24 @@ export function subscriptionItems(sub: Stripe.Subscription): {
 export function rungFromSubscription(sub: Stripe.Subscription): PlanRung | null {
   const { base } = subscriptionItems(sub);
   return base ? rungFromPrice(base.price) : null;
+}
+
+/**
+ * The rung a scheduled downgrade moves to when the current phase ends:
+ * the plan price of the schedule's last phase, when it differs from the
+ * subscription's own. Null without a schedule or when the schedule only
+ * mirrors the current plan.
+ */
+export function pendingRungOf(sub: Stripe.Subscription, current: PlanRung | null): string | null {
+  const schedule = sub.schedule;
+  if (!schedule || typeof schedule === "string") return null;
+  const last = schedule.phases.at(-1);
+  if (!last) return null;
+  for (const item of last.items) {
+    const price = item.price;
+    if (typeof price !== "object" || "deleted" in price || isMeteredPrice(price)) continue;
+    const rung = rungFromPrice(price);
+    return rung && rung.key !== current?.key ? rung.key : null;
+  }
+  return null;
 }

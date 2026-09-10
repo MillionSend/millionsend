@@ -65,7 +65,7 @@ describe("authenticateApiKey billing", () => {
       planQuota: null,
       currentPeriodStart: null,
       currentPeriodEnd: null,
-      stripeOverageItemId: null,
+      overageEnabled: false,
     });
     const currentPeriodStart = new Date("2026-09-01T00:00:00Z");
     const currentPeriodEnd = new Date("2026-10-01T00:00:00Z");
@@ -76,7 +76,7 @@ describe("authenticateApiKey billing", () => {
         planQuota: 200_000,
         currentPeriodStart,
         currentPeriodEnd,
-        stripeOverageItemId: "si_1",
+        overageEnabled: true,
       })
       .where(eq(schema.teams.id, teamId));
     const auth = await authenticateApiKey(db, token);
@@ -85,7 +85,7 @@ describe("authenticateApiKey billing", () => {
       planQuota: 200_000,
       currentPeriodStart,
       currentPeriodEnd,
-      stripeOverageItemId: "si_1",
+      overageEnabled: true,
     });
     expect(auth?.plan).toBe("pro");
   });

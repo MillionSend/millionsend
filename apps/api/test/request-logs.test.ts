@@ -177,7 +177,7 @@ describe("api request logging", () => {
         planQuota: null,
         currentPeriodStart: null,
         currentPeriodEnd: null,
-        stripeOverageItemId: null,
+        overageEnabled: false,
       },
       apiKeyId: null,
       userId: "u1",

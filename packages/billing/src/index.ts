@@ -7,10 +7,10 @@ export {
 } from "./checkout.js";
 export { type OverageReport, reportOverage } from "./overage.js";
 export {
-  LEGACY_LOOKUP_KEYS,
   METER_EVENT_NAME,
   overageLookupKey,
   PRODUCT_METADATA_KEY,
+  pendingRungOf,
   priceMetadata,
   RUNG_METADATA_KEY,
   resolvePriceId,
@@ -24,6 +24,7 @@ export { type BillingStripe, createStripe, isLiveKey } from "./stripe.js";
 export {
   cancelTeamSubscription,
   changeRung,
+  type RungChange,
   reconcileTeamPlan,
   setOverage,
 } from "./subscription.js";

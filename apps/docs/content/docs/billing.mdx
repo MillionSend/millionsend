@@ -79,10 +79,11 @@ counts against the period it is accepted in.
 
 Prices are found by lookup key, never by price id, so the same build runs
 against any Stripe account (test or live) with no per-environment price
-configuration. A subscription carries the rung's price and, while overage is
-on, the rung's metered price as a second item, whose id is stored in
-`teams.stripe_overage_item_id` — that column is the overage switch every send
-surface reads.
+configuration. A subscription on a monthly rung carries the rung's price and
+its metered price as a second item from Checkout on (the item's id is stored
+in `teams.stripe_overage_item_id`); the metered item bills only what the
+worker reports, so the customer's **overage** switch is a plain row flag,
+`teams.overage_enabled`, which is what every send surface reads.
 
 ## The flow
 
@@ -98,18 +99,33 @@ surface reads.
    signature on the raw body, records the event id (duplicates are
    acknowledged and ignored), re-fetches the subscription from Stripe, and
    only then writes `teams.plan`, `plan_quota`, `current_period_start`,
-   `current_period_end` and `stripe_overage_item_id`.
-4. **Switching rung** happens in the dashboard (`billing.changePlan`): the
-   subscription's items are updated with prorations — the plan item to the
-   new rung's price, the overage item re-priced for a monthly rung or dropped
-   for a daily one after its usage is reported — and the result applied at
-   once; the webhook that follows re-applies the same state. The **overage**
-   switch (`billing.setOverage`) adds or removes the metered item; off
-   reports what is still unreported first.
+   `current_period_end`, `stripe_overage_item_id` and `pending_rung`.
+4. **Switching rung** happens in the dashboard (`billing.changePlan`), and
+   the direction decides when:
+   - **Up** applies now: the subscription's items are updated — the plan
+     item to the new rung's price, the metered item re-priced for a monthly
+     rung or dropped for a daily one after its usage is reported — with the
+     difference prorated on the next invoice, and the webhook that follows
+     re-applies the same state. Sends already accepted inside the old volume
+     are marked settled on the period row, so the new rung never bills them
+     as overage.
+   - **Down** applies at the period end, with no proration and no refund: a
+     Stripe subscription schedule is created from the subscription (or the
+     pending one reused) with two phases — the current items until
+     `current_period_end`, then the new rung's items — and the plan row does
+     not move until the webhook applies the phase change. Until then the
+     billing page shows "Moves to X on `<date>`" with a **Keep `<current>`**
+     button: choosing the current rung releases the schedule, and so does a
+     later move up.
+
+   The **overage** switch (`billing.setOverage`) flips `overage_enabled`; off
+   reports what is still unreported first. A subscription from before the
+   ladder has no metered item; the first time overage is turned on adds it.
 5. **Manage billing** opens the Stripe Customer Portal for the payment
-   method, invoices, tax id and cancel at period end. Plan changes are not
-   offered there: Stripe's portal cannot update a subscription with more than
-   one item, and one with overage on has two.
+   method, invoices, tax id and cancel at period end (the portal asks for a
+   cancellation reason). Plan changes are not offered there: Stripe's portal
+   cannot update a subscription with more than one item, and a monthly rung
+   has two.
 
 The plan columns are written from a subscription fetched from Stripe — by
 the webhook handler and by the two dashboard procedures above — never from a
@@ -123,10 +139,10 @@ The subscription's non-metered item names the rung, tried in this order:
 
 1. the price's `metadata.millionsend_rung`;
 2. the price's lookup key (`millionsend_<rung>_monthly`);
-3. the legacy keys `millionsend_pro_monthly` → `pro_100k` and
-   `millionsend_scale_monthly` → `scale_500k`;
-4. the product's `metadata.millionsend_plan`, landing on that plan's first
-   rung.
+3. the product's `metadata.millionsend_plan`, landing on that plan's first
+   rung — this is how the two prices sold before the ladder resolve
+   (`millionsend_pro_monthly` → `pro_100k`, `millionsend_scale_monthly` →
+   `scale_500k`).
 
 | Re-fetched subscription status | `plan`, `plan_quota` | `plan_status` |
 | --- | --- | --- |
@@ -144,24 +160,36 @@ Additional rules:
 - Stripe being unreachable or a database failure throws; the event row rolls
   back and Stripe's retry is processed normally.
 - `stripe_customer_id`, `stripe_subscription_id`, `current_period_start`,
-  `current_period_end` and `stripe_overage_item_id` are stored alongside the
-  plan. An overage item still on a legacy price is re-pointed to the rung's
-  metered price as it is applied.
+  `current_period_end`, `stripe_overage_item_id` and `pending_rung` (the rung
+  of a pending schedule's last phase when it differs from the current one)
+  are stored alongside the plan. A metered item priced for another rung is
+  re-pointed to the rung's metered price as it is applied.
 
 ## The overage cron
 
 `billing.overage` runs in the worker every 10 minutes. For every period row
-with more sends past the included volume than the meter already knows about
-(`accepted − included − reported_overage`), it sends one meter event per team
-and period. The event's identifier is the counter it advances from
-(`<team>:<period start>:<reported so far>`), and the row advances inside the
-same transaction as the Stripe call: a report whose commit is lost is re-sent
-under the same identifier and Stripe drops it as a duplicate, and a Stripe
-failure leaves the row for the next run. Usage of a period that already ended
-is stamped one second inside that period, where Stripe invoices it (the
-invoice stays a draft for about an hour after the period closes; rows older
-than 35 days can no longer be metered and are logged). The same report runs
-before an overage item is removed, so nothing unbilled is lost.
+of a team with a metered item that has more sends past the included volume
+than the meter already knows about (`accepted − included − reported_overage`),
+it sends one meter event per team and period, in three statements so a crash
+at any point costs nothing:
+
+1. the row pins the counter the event will advance to: `pending_overage = to`
+   where `reported_overage = from` and no pin is set (a row another run
+   pinned first is skipped);
+2. the meter event goes out with identifier `<team>:<period start>:<from>:<to>`
+   (the period start as epoch milliseconds) and value `to − from`;
+3. the row catches up: `reported_overage = to, pending_overage = null`.
+
+A crash between the last two leaves the pin, so the next run re-sends the
+same `to` under the same identifier and Stripe drops it as a duplicate; a
+Stripe failure leaves the pin for the next run too. With overage off nothing
+passes the included volume, so there is nothing to report. Usage of a period
+that already ended is stamped one second inside that period, where Stripe
+invoices it (the invoice stays a draft for about an hour after the period
+closes; rows older than 35 days can no longer be metered and are logged).
+The same report runs before the switch turns off, before a move up (sends
+made under the old rung settle at its rate) and when the metered item leaves
+the subscription, so nothing unbilled is lost.
 
 ## Environment
 
@@ -204,8 +232,9 @@ What it does, and why re-running is safe:
   metadata), new checkouts get the new one. Metadata alone is refreshed in
   place. Prices are `tax_behavior: exclusive`.
 - **Legacy prices** `millionsend_pro_monthly` and `millionsend_scale_monthly`
-  are archived, not deleted: subscriptions still on them keep working through
-  the legacy keys until each is moved; only new checkouts stop seeing them.
+  are archived, not deleted: subscriptions still on them keep working,
+  resolved to the plan's first rung through the product's metadata, until
+  each is moved; only new checkouts stop seeing them.
 - **Webhook endpoint** is found by URL; drifted event lists are re-synced.
   The signing secret is printed **once, at creation** — Stripe never returns
   it again. To rotate it, roll it in the dashboard (Developers → Webhooks →
@@ -213,8 +242,8 @@ What it does, and why re-running is safe:
   `STRIPE_WEBHOOK_SECRET`.
 - **Portal configuration** is found by metadata and its features refreshed:
   invoice history, payment method, customer details including tax id, and
-  cancel at period end; subscription updates are off (see
-  [the flow](#the-flow)).
+  cancel at period end with a cancellation reason collected; subscription
+  updates are off (see [the flow](#the-flow)).
 
 Test and live are separate Stripe accounts: run once with each key.
 
@@ -237,14 +266,17 @@ The script ends by printing these; the API cannot do them:
 
 ## Migrating an existing deployment
 
-Migration `0035_pricing_ladder` adds the `starter` plan value, the
-`plan_quota`, `current_period_start` and `stripe_overage_item_id` columns and
-the `usage_periods` table. Existing `scale` teams map to Scale 500k
-(`plan_quota` 500000) and `pro` teams to Pro 100k (100000);
-`current_period_start` is backfilled as `current_period_end − 1 month`. Their
-subscriptions stay on the legacy prices, resolved by the legacy lookup keys,
-until they are moved. The period counter starts empty: sends accepted before
-the migration count against the day they were sent, not against the period.
+Migration `0035_pricing_ladder` adds the `starter` plan value, the `teams`
+columns `plan_quota`, `current_period_start`, `stripe_overage_item_id`,
+`overage_enabled` (default false) and `pending_rung`, and the `usage_periods`
+table (`accepted`, `reported_overage`, `pending_overage`). Existing `scale`
+teams map to Scale 500k (`plan_quota` 500000) and `pro` teams to Pro 100k
+(100000); `current_period_start` is backfilled as `current_period_end − 1
+month`. Their subscriptions stay on the legacy prices, resolved through the
+product's metadata, until they are moved, and carry no metered item: the
+first time overage is turned on adds it. The period counter starts empty:
+sends accepted before the migration count against the day they were sent,
+not against the period.
 
 ## Local testing
 

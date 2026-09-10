@@ -1,4 +1,4 @@
-import { type PlanRungKey, rungByKey } from "@millionsend/core";
+import { type PlanRung, type PlanRungKey, rungByKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, sql } from "drizzle-orm";
@@ -7,6 +7,7 @@ import type { BillingDeps } from "./checkout.js";
 import { reportOverage } from "./overage.js";
 import {
   overageLookupKey,
+  pendingRungOf,
   resolvePriceId,
   rungFromPrice,
   rungFromSubscription,
@@ -82,8 +83,9 @@ export async function applySubscription(
   const { base, overage } = subscriptionItems(sub);
   let plan: Plan;
   let planQuota: number | null;
+  let rung: PlanRung | null = null;
   if (entitled) {
-    const rung = rungFromSubscription(sub);
+    rung = rungFromSubscription(sub);
     if (!rung) {
       log(`subscription ${sub.id} has no known plan price`);
       return;
@@ -123,6 +125,7 @@ export async function applySubscription(
       planStatus: planStatusOf(sub.status),
       stripeSubscriptionId: sub.id,
       stripeOverageItemId: overageItemId,
+      pendingRung: entitled ? pendingRungOf(sub, rung) : null,
       currentPeriodStart: stamp(base?.current_period_start),
       currentPeriodEnd: stamp(base?.current_period_end),
       cancelAt: stamp(sub.cancel_at),
@@ -187,64 +190,126 @@ async function applyLocked(deps: BillingDeps, customerId: string, subscriptionId
   });
 }
 
+/** Drops a pending downgrade: the subscription keeps its current items. */
+async function releaseSchedule(deps: BillingDeps, sub: Stripe.Subscription): Promise<void> {
+  const id = idOf(sub.schedule);
+  if (id) await deps.stripe.subscriptionSchedules.release(id);
+}
+
+/** The items a rung puts on a subscription: its plan price and, on a monthly rung, its metered price. */
+async function rungItems(
+  deps: BillingDeps,
+  rung: PlanRung,
+): Promise<{ price: string; quantity?: number }[]> {
+  const base = await resolvePriceId(deps.stripe, rungLookupKey(rung));
+  if (rung.period !== "month") return [{ price: base, quantity: 1 }];
+  return [
+    { price: base, quantity: 1 },
+    { price: await resolvePriceId(deps.stripe, overageLookupKey(rung)) },
+  ];
+}
+
+export type RungChange =
+  | { applied: "now" }
+  | { applied: "period_end"; at: Date }
+  | { applied: "unscheduled" };
+
 /**
- * Moves a live subscription to another rung, prorated, keeping the metered
- * overage item in step (re-priced for a monthly rung, dropped for a daily
- * one after its usage is reported). Stripe's customer portal cannot switch
- * plans on a subscription with more than one item, so this is the one place
- * plan changes happen; the webhook that follows re-applies the same state.
+ * Moves a live subscription to another rung. Up (or across): at once, with
+ * prorations on the next invoice, and any pending downgrade dropped. Down: a
+ * subscription schedule swaps the items when the current period ends, with
+ * no proration, so the paid volume is kept to the day it was paid for; a
+ * later move up releases the schedule. Choosing the current rung while a
+ * downgrade is pending drops it. Stripe's customer portal cannot switch
+ * plans on a subscription carrying more than one item, so this is the one
+ * place plan changes happen; the webhook that follows re-applies the state.
  */
 export async function changeRung(
   deps: BillingDeps,
   input: { teamId: string; rung: PlanRungKey },
-): Promise<void> {
+): Promise<RungChange> {
   const rung = rungByKey(input.rung);
   if (rung.priceCents <= 0) throw new Error(`rung ${input.rung} is not for sale`);
   const { customerId, sub } = await liveSubscription(deps, input.teamId);
   const { base, overage } = subscriptionItems(sub);
   if (!base) throw new Error(`subscription ${sub.id} has no plan item`);
-  const items: Stripe.SubscriptionUpdateParams.Item[] = [
-    { id: base.id, price: await resolvePriceId(deps.stripe, rungLookupKey(rung)) },
-  ];
-  // Sends made under the old rung settle at its rate before the move.
-  if (overage) await reportOverage(deps, { teamId: input.teamId });
-  if (overage) {
+  const current = rungFromPrice(base.price);
+  if (!current) throw new Error(`subscription ${sub.id} has no known plan price`);
+
+  let result: RungChange;
+  if (rung.key === current.key) {
+    await releaseSchedule(deps, sub);
+    result = { applied: "unscheduled" };
+  } else if (rung.priceCents < current.priceCents) {
+    const periodEnd = base.current_period_end;
+    const scheduleId =
+      idOf(sub.schedule) ??
+      (await deps.stripe.subscriptionSchedules.create({ from_subscription: sub.id })).id;
+    await deps.stripe.subscriptionSchedules.update(scheduleId, {
+      end_behavior: "release",
+      phases: [
+        {
+          items: sub.items.data.map((item) => ({
+            price: item.price.id,
+            ...(item.quantity ? { quantity: item.quantity } : {}),
+          })),
+          start_date: base.current_period_start,
+          end_date: periodEnd,
+          proration_behavior: "none",
+        },
+        {
+          items: await rungItems(deps, rung),
+          duration: { interval: "month", interval_count: 1 },
+          proration_behavior: "none",
+        },
+      ],
+    });
+    result = { applied: "period_end", at: new Date(periodEnd * 1000) };
+  } else {
+    await releaseSchedule(deps, sub);
+    // Sends made under the old rung settle at its rate before the move.
+    if (overage) await reportOverage(deps, { teamId: input.teamId });
+    const items: Stripe.SubscriptionUpdateParams.Item[] = [
+      { id: base.id, price: await resolvePriceId(deps.stripe, rungLookupKey(rung)) },
+    ];
     if (rung.period === "month") {
-      items.push({
-        id: overage.id,
-        price: await resolvePriceId(deps.stripe, overageLookupKey(rung)),
-      });
-    } else {
+      const price = await resolvePriceId(deps.stripe, overageLookupKey(rung));
+      items.push(overage ? { id: overage.id, price } : { price });
+    } else if (overage) {
       items.push({ id: overage.id, deleted: true });
     }
-  }
-  await deps.stripe.subscriptions.update(sub.id, {
-    items,
-    proration_behavior: "create_prorations",
-  });
-  // What was accepted inside the old volume is never re-judged as overage
-  // under a smaller one: the period row counts it as already settled.
-  if (rung.period === "month" && base.current_period_start) {
-    const p = schema.usagePeriods;
-    await deps.db
-      .update(p)
-      .set({
-        reportedOverage: sql`greatest(${p.reportedOverage}, ${p.accepted} - ${rung.included})`,
-      })
-      .where(
-        and(
-          eq(p.teamId, input.teamId),
-          eq(p.periodStart, new Date(base.current_period_start * 1000)),
-        ),
-      );
+    await deps.stripe.subscriptions.update(sub.id, {
+      items,
+      proration_behavior: "create_prorations",
+    });
+    // What was accepted inside the old volume is never re-judged as overage
+    // under the new one: the period row counts it as already settled.
+    if (rung.period === "month" && base.current_period_start) {
+      const p = schema.usagePeriods;
+      await deps.db
+        .update(p)
+        .set({
+          reportedOverage: sql`greatest(${p.reportedOverage}, ${p.accepted} - ${rung.included})`,
+        })
+        .where(
+          and(
+            eq(p.teamId, input.teamId),
+            eq(p.periodStart, new Date(base.current_period_start * 1000)),
+          ),
+        );
+    }
+    result = { applied: "now" };
   }
   await applyLocked(deps, customerId, sub.id);
+  return result;
 }
 
 /**
- * Turns overage billing on or off for a monthly plan by adding or removing
- * the rung's metered item. Off reports what is still unreported first, so
- * the usage reaches the invoice before the item goes.
+ * The customer's overage switch. The metered item stays on the subscription
+ * either way and bills only what the worker reports, so the switch is a row
+ * flag: off reports what is still unreported first, so the usage reaches the
+ * invoice, then stops the reporting. A subscription from before the ladder
+ * has no metered item yet; on adds it once.
  */
 export async function setOverage(
   deps: BillingDeps,
@@ -259,13 +324,13 @@ export async function setOverage(
       subscription: sub.id,
       price: await resolvePriceId(deps.stripe, overageLookupKey(rung)),
     });
-  } else if (!input.enabled && overage) {
-    await reportOverage(deps, { teamId: input.teamId });
-    await deps.stripe.subscriptionItems.del(overage.id);
-  } else {
-    return;
+    await applyLocked(deps, customerId, sub.id);
   }
-  await applyLocked(deps, customerId, sub.id);
+  if (!input.enabled) await reportOverage(deps, { teamId: input.teamId });
+  await deps.db
+    .update(schema.teams)
+    .set({ overageEnabled: input.enabled })
+    .where(eq(schema.teams.id, input.teamId));
 }
 
 /**
@@ -288,6 +353,8 @@ export async function cancelTeamSubscription(deps: BillingDeps, teamId: string):
       planStatus: "canceled",
       stripeSubscriptionId: null,
       stripeOverageItemId: null,
+      overageEnabled: false,
+      pendingRung: null,
       currentPeriodStart: null,
       currentPeriodEnd: null,
       cancelAt: null,

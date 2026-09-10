@@ -181,7 +181,7 @@ export interface QuotaTeamRow {
   planQuota: number | null;
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
-  stripeOverageItemId: string | null;
+  overageEnabled: boolean;
 }
 
 /** What limits a team's sends right now. */
@@ -236,7 +236,7 @@ export function teamQuota(team: QuotaTeamRow, isCloud: boolean, now: Date = new 
     included: rung.included,
     periodStart: period.start,
     periodEnd: period.end,
-    overage: team.stripeOverageItemId !== null,
+    overage: team.overageEnabled,
     overageCentsPer1k: rung.overageCentsPer1k ?? 0,
   };
 }

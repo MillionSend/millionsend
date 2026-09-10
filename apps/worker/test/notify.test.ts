@@ -156,7 +156,7 @@ async function monthlyPlan(overage = false) {
       planQuota: 100_000,
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
-      stripeOverageItemId: overage ? "si_over" : null,
+      overageEnabled: overage,
     })
     .where(eq(schema.teams.id, teamId));
   const used = async (accepted: number) => {

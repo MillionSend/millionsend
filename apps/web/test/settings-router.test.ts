@@ -538,7 +538,7 @@ describe("settings.usage", () => {
         planQuota: 500_000,
         currentPeriodStart: start,
         currentPeriodEnd: end,
-        stripeOverageItemId: "si_1",
+        overageEnabled: true,
       })
       .where(eq(schema.teams.id, teamId));
     await db
