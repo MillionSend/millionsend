@@ -1,4 +1,10 @@
-import { accountMailCard, type MailContent, QUOTA_TOLERANCE } from "@millionsend/core";
+import {
+  accountMailCard,
+  formatMailDate,
+  type MailContent,
+  OVERAGE_HARD_CAP,
+  QUOTA_TOLERANCE,
+} from "@millionsend/core";
 
 export type { MailContent };
 
@@ -82,6 +88,51 @@ export function quotaPausedMail(input: {
     ],
     button: { label: "Review your plan", url: input.url },
     footnote: "You get this once per day when a team you own passes the ceiling of its quota.",
+  });
+}
+
+const count = (n: number) => n.toLocaleString("en-US");
+
+export function quotaMonthlyWarningMail(input: {
+  team: string;
+  used: number;
+  limit: number;
+  renewsAt: Date;
+  overage: boolean;
+  url: string;
+}): MailContent {
+  return layout({
+    subject: `${input.team}: 80% of this period's sending quota used`,
+    paragraphs: [
+      `${input.team} has used ${count(input.used)} of the ${count(input.limit)} emails included in its plan this billing period, which renews on ${formatMailDate("en", input.renewsAt)}.`,
+      input.overage
+        ? "Sends past the quota bill at your plan's overage rate and show on the next invoice. A higher plan includes more emails at a lower rate."
+        : "At the quota, new API sends are refused and broadcasts park until the period renews. Turn on overage in Billing to keep sending past it, or move to a higher plan.",
+    ],
+    button: { label: "Review your plan", url: input.url },
+    footnote: "You get this once per billing period when a team you own nears its quota.",
+  });
+}
+
+export function quotaMonthlyReachedMail(input: {
+  team: string;
+  used: number;
+  limit: number;
+  renewsAt: Date;
+  overage: boolean;
+  url: string;
+}): MailContent {
+  const renews = formatMailDate("en", input.renewsAt);
+  return layout({
+    subject: `${input.team}: this period's sending quota reached`,
+    paragraphs: [
+      `${input.team} has used the ${count(input.limit)} emails included in its plan this billing period (${count(input.used)} accepted).`,
+      input.overage
+        ? `Sends past the quota now bill at your plan's overage rate and show on the next invoice. They stop at ${OVERAGE_HARD_CAP} times the included volume (${count(input.limit * OVERAGE_HARD_CAP)}) until the period renews on ${renews}; a higher plan includes more emails at a lower rate.`
+        : `New API sends are refused until the period renews on ${renews} or overage is turned on in Billing; broadcasts park until then. A higher plan raises the quota immediately and releases parked mail within minutes.`,
+    ],
+    button: { label: "Review your plan", url: input.url },
+    footnote: "You get this once per billing period when a team you own reaches its quota.",
   });
 }
 

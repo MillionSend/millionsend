@@ -396,7 +396,7 @@ describe("millionsend (built bundle)", () => {
         "Run `millionsend migrate --from resend` again right before cutover to sync new contacts.",
       );
       expect(stdout.replace(/\n/g, " ")).toContain(
-        `On Resend you sent ${EMAILS_SENT_30D.toLocaleString("en-US")} emails in the last 30 days (~1,374/day). Free allows 100/day; Pro (3,000/day, 20 domains) fits. Upgrade: https://app.example.test/settings/billing`,
+        `On Resend you sent ${EMAILS_SENT_30D.toLocaleString("en-US")} emails in the last 30 days (~1,374/day). Free allows 3,000/month; Starter (45,000/month, 10 domains) fits. Upgrade: https://app.example.test/settings/billing`,
       );
       expect(stdout).not.toContain("Webhook signing secrets");
 
@@ -441,7 +441,7 @@ describe("millionsend (built bundle)", () => {
         emailsLast30Days: EMAILS_SENT_30D,
         perDay: 1374,
         plan: "free",
-        fits: "pro",
+        fits: "starter",
       });
       expect(readFileSync(paths.reportMd, "utf8")).toContain(
         "### DNS records for news.example.com",
@@ -598,7 +598,7 @@ describe("millionsend (built bundle)", () => {
       });
       expect(code).toBe(0);
       expect(stdout).toContain(cloud.baseUrl);
-      expect(stdout).toMatch(/Contacts\s+1,250/);
+      expect(stdout).toMatch(new RegExp(`Contacts\\s+${CONTACT_COUNT.toLocaleString("en-US")}`));
       expect(stdout).toMatch(/Enriched\s+complete/);
     },
     QUICK,
@@ -714,7 +714,9 @@ describe("millionsend (built bundle)", () => {
       const { code, stdout, stderr } = await run(["migrate", "rollback", "--yes"]);
       expect(stderr.replace(/^warning: retry .*\n?/gm, "")).toBe("");
       expect(code).toBe(0);
-      expect(stdout).toContain("1,250  Contacts (one request each)");
+      expect(stdout).toContain(
+        `${CONTACT_COUNT.toLocaleString("en-US")}  Contacts (one request each)`,
+      );
       expect(stdout).toMatch(/^About 2 min at 10 req\/s\.$/m);
       expect(stdout).toContain("Rolled back. Rows this tool only updated were left as they are.");
       expect(Object.values(readState().created).every((ids) => ids.length === 0)).toBe(true);

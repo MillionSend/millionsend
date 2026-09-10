@@ -137,7 +137,7 @@ and admins.
 | --- | --- | --- |
 | `list_emails` | `emails:read` | List sent, queued and scheduled emails. |
 | `get_email` | `emails:read` | Get one email with its delivery status. |
-| `get_usage` | `emails:read` | Plan, daily send and domain limits, and today's accepted count — check before bulk work. |
+| `get_usage` | `emails:read` | Plan, send limit (daily on Free and Starter, monthly on Pro and Scale), domain limit, today's accepted count and, on monthly plans, the billing period's usage — check before bulk work. |
 | `list_contacts` | `audience:read` | List contacts, optionally one segment's members. |
 | `get_contact` | `audience:read` | Get a contact by id or email address. |
 | `get_contact_topics` | `audience:read` | Every topic with the contact's effective subscription and whether it was explicit. |

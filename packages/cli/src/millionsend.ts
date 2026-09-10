@@ -58,11 +58,24 @@ interface ListPage<T> {
   has_more: boolean;
 }
 
+/** Instances that predate monthly plans send neither emails_per_month nor period; those before the contact cap send no contacts limit. */
 interface UsageWire {
   cloud: boolean;
   plan: string | null;
-  limits: { emails_per_day: number | null; domains: number | null };
+  limits: {
+    emails_per_day: number | null;
+    emails_per_month?: number | null;
+    domains: number | null;
+    contacts?: number | null;
+  };
   today: { emails_sent: number };
+  period?: {
+    emails_sent: number;
+    included: number;
+    overage_enabled: boolean;
+    starts_at: string;
+    ends_at: string;
+  } | null;
   app_url: string | null;
 }
 
@@ -186,11 +199,24 @@ export function createMillionSendTarget(http: Http, log: Logger, baseUrl = "the 
       }
       throw error;
     }
+    const period = body.period ?? null;
     return {
       cloud: body.cloud,
       plan: body.plan,
-      limits: { emailsPerDay: body.limits.emails_per_day, domains: body.limits.domains },
+      limits: {
+        emailsPerDay: body.limits.emails_per_day,
+        emailsPerMonth: body.limits.emails_per_month ?? null,
+        domains: body.limits.domains,
+        contacts: body.limits.contacts ?? null,
+      },
       today: { emailsSent: body.today.emails_sent },
+      period: period && {
+        emailsSent: period.emails_sent,
+        included: period.included,
+        overageEnabled: period.overage_enabled,
+        startsAt: period.starts_at,
+        endsAt: period.ends_at,
+      },
       appUrl: body.app_url,
     };
   }

@@ -9,6 +9,7 @@ import {
   enqueueWebhookDeliveries,
   evaluateEmailInsights,
   extractAddrSpec,
+  fetchTeamQuota,
   findSuppressed,
   hashRecipient,
   isOnboardingSender,
@@ -18,7 +19,7 @@ import {
   openAttachments,
   parseSingleSender,
   purgedEmailBodyColumns,
-  releaseDailyQuota,
+  releaseQuota,
   rewriteForTracking,
   SCORE_VERSION,
   SYSTEM_MAIL_TAG,
@@ -268,7 +269,12 @@ async function parkForSesQuota(db: Db, email: { id: string; teamId: string }): P
       from: "queued",
       to: "queued_quota",
     });
-    if (moved) await releaseDailyQuota(txDb, { teamId: email.teamId, count: 1 });
+    if (!moved) return;
+    // Against the same counter accept charged: on a monthly plan that is the
+    // billing period, which the drain will charge again on release. The cap
+    // itself is irrelevant here, so the row is read as Cloud reads it.
+    const quota = await fetchTeamQuota(txDb, email.teamId, true);
+    if (quota) await releaseQuota(txDb, { teamId: email.teamId, count: 1, quota });
   });
   console.warn(`email.send: SES 24h quota reached, parked ${email.id}`);
 }

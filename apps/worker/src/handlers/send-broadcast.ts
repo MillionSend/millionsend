@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type AccountMailKind,
+  accountMailPhrase,
   applyMergeFields,
   broadcastSendSpacingMs,
   buildAccountMail,
@@ -8,18 +9,18 @@ import {
   claimNotification,
   encryptEmailBody,
   fetchDeliverabilityHealth,
-  fetchEffectivePlan,
+  fetchTeamQuota,
   findSuppressed,
+  formatMailDate,
   injectPreheader,
   isSubscribedToTopic,
   type Keyring,
   type MailLocale,
   makeUnsubscribeToken,
   nextUtcDayStart,
-  PLAN_DAILY_LIMIT,
   parseSingleSender,
   regionPause,
-  reserveDailyQuota,
+  reserveQuota,
   segmentContactsWhere,
   substituteUnsubscribeUrl,
 } from "@millionsend/core";
@@ -205,9 +206,10 @@ export async function sendBroadcast(
   // and fanning out anyway would mail a canceled audience.
   if (!claimed) return "skipped";
 
-  const plan = await fetchEffectivePlan(db, broadcast.teamId);
-  if (!plan) throw new Error(`broadcast ${broadcast.id}: team ${broadcast.teamId} not found`);
-  const dailyLimit = deps.isCloud ? PLAN_DAILY_LIMIT[plan] : null;
+  const initialQuota = await fetchTeamQuota(db, broadcast.teamId, deps.isCloud);
+  if (!initialQuota)
+    throw new Error(`broadcast ${broadcast.id}: team ${broadcast.teamId} not found`);
+  let quota = initialQuota;
 
   // Topic-scoped send: fetch the topic's default once (it gates every contact
   // with no explicit override) and hydrate per-batch override rows below. A
@@ -271,6 +273,9 @@ export async function sendBroadcast(
   for (;;) {
     // Checked after the previous page's enqueue, so no enqueued page is lost.
     if (deps.signal?.aborted) throw new Error(`broadcast ${broadcast.id}: fan-out aborted`);
+    // A billing period can renew under a long walk (the daily counter follows
+    // the clock by itself); each page reserves against the period current now.
+    quota = (await fetchTeamQuota(db, broadcast.teamId, deps.isCloud)) ?? quota;
     const contacts = await db
       .select({
         id: schema.contacts.id,
@@ -372,7 +377,7 @@ export async function sendBroadcast(
       const startAfter = spacingMs > 0 ? new Date(startMs + emitted * spacingMs) : undefined;
       // Quota reservation and email insert commit atomically (the quota
       // contract), same as the API accept path — a broadcast must not
-      // bypass the plan's daily cap.
+      // bypass the plan's cap.
       const accepted = await db.transaction(async (tx) => {
         // Insert before reserving: a conflict means a previous run already
         // fanned this contact out (and reserved quota for it), so a re-run
@@ -405,15 +410,15 @@ export async function sendBroadcast(
           })
           .returning({ id: schema.emails.id });
         if (!row) return null;
-        const quota = await reserveDailyQuota(tx as unknown as Db, {
+        const reservation = await reserveQuota(tx as unknown as Db, {
           teamId: broadcast.teamId,
           count: 1,
-          limit: dailyLimit,
+          quota,
         });
-        if (quota.reserved) return { id: row.id, parked: false };
+        if (reservation.reserved) return { id: row.id, parked: false };
         // Over the plan cap: park as queued_quota — accepted but not
-        // enqueued; the daily quota drain moves it to queued after the UTC
-        // rollover.
+        // enqueued; the quota drain moves it to queued once the cap has
+        // room again (the UTC rollover, the period renewal, overage on).
         await tx
           .update(schema.emails)
           .set({ latestStatus: "queued_quota" })
@@ -473,22 +478,31 @@ export async function sendBroadcast(
       );
     const name = broadcast.name ?? broadcast.subject;
     if (parked > 0) {
-      await report(
-        db,
-        deps,
-        broadcast,
-        "broadcast.held_quota",
-        "/settings/billing",
-        (locale, team) => ({
-          name,
-          team,
-          count: count.toLocaleString(locale),
-          parked: parked.toLocaleString(locale),
-          sent: (count - parked).toLocaleString(locale),
-          limit: (dailyLimit ?? 0).toLocaleString(locale),
-          resetsAt: nextUtcDayStart(Date.now()).toISOString().slice(11, 16),
-        }),
-      );
+      const kind = "broadcast.held_quota";
+      const limit =
+        quota.kind === "month" ? quota.included : quota.kind === "day" ? quota.limit : 0;
+      await report(db, deps, broadcast, kind, "/settings/billing", (locale, team) => ({
+        name,
+        team,
+        count: count.toLocaleString(locale),
+        parked: parked.toLocaleString(locale),
+        sent: (count - parked).toLocaleString(locale),
+        limit: limit.toLocaleString(locale),
+        release:
+          quota.kind === "month"
+            ? accountMailPhrase({
+                locale,
+                kind,
+                key: "releaseMonthly",
+                values: { date: formatMailDate(locale, quota.periodEnd) },
+              })
+            : accountMailPhrase({
+                locale,
+                kind,
+                key: "releaseDaily",
+                values: { resetsAt: nextUtcDayStart(Date.now()).toISOString().slice(11, 16) },
+              }),
+      }));
     } else {
       await report(
         db,

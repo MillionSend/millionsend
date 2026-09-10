@@ -17,9 +17,9 @@ import {
   clearUnsubscribeSuppression,
   completeIdempotent,
   contactPropertiesChange,
+  contactRoom,
   contactSnapshotColumns,
   DAY_MS,
-  dailyCeiling,
   decryptEmailBody,
   emitContactEvents,
   emitSuppressionEvents,
@@ -35,20 +35,23 @@ import {
   MAX_ATTACHMENT_BYTES,
   makeUnsubscribeToken,
   markSegmentsStale,
+  OVERAGE_HARD_CAP,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
-  PLAN_DAILY_LIMIT,
+  PLAN_CONTACT_LIMIT,
   parseScheduledAt,
   QUOTA_BACKLOG_DAYS,
+  quotaRoom,
   recordContactActivity,
   recountSegment,
   regionPause,
   releaseIdempotent,
-  reserveDailyQuota,
+  reserveQuota,
   SCHEDULED_AT_FORMS,
   scoreBand,
   segmentContactsWhere,
   segmentFilterSchema,
+  teamQuota,
   verifyOnboardingSender,
   verifySenderDomain,
   type WebhookEnqueue,
@@ -283,6 +286,14 @@ function emailScopeConditions(auth: ApiKeyAuth): SQL[] {
   return conditions;
 }
 
+/** The monthly refusal names the cap it hit: the plan's volume, or the overage hard cap past it. */
+function monthlyQuotaMessage(result: { periodEnd: Date; overage: boolean }): string {
+  const renews = result.periodEnd.toISOString();
+  return result.overage
+    ? `Monthly sending quota exceeded: sends stop at ${OVERAGE_HARD_CAP} times the included volume even with overage on; the period renews on ${renews}`
+    : `Monthly sending quota exceeded; turn on overage in Billing or wait for the period to renew on ${renews}`;
+}
+
 /** Wire status + body for an accept the pipeline refused. */
 function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
   switch (result.reason) {
@@ -294,6 +305,11 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
           "daily_quota_exceeded",
           "Daily sending quota exceeded and the queued backlog is full; retry after the UTC day rolls over",
         ),
+      };
+    case "monthly_quota_exceeded":
+      return {
+        status: 429 as const,
+        body: errorBody(429, "monthly_quota_exceeded", monthlyQuotaMessage(result)),
       };
     case "attachments_too_large":
       return {
@@ -798,7 +814,12 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
 
   // "validation_error" for 409 (not "conflict"): the name must be a
   // RESEND_ERROR_CODE_KEY member for SDK clients.
-  type BatchItemError = { ok: false; status: 404 | 409 | 422; name: string; message: string };
+  type BatchItemError = {
+    ok: false;
+    status: 403 | 404 | 409 | 422;
+    name: string;
+    message: string;
+  };
   type BatchItemResult =
     | { ok: true; id: string; status: "created" | "updated" | "skipped" }
     | BatchItemError;
@@ -848,13 +869,16 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
    * between fails the transaction with a unique/FK violation, and the batch is
    * re-classified against the new state — so the item lands as a conflict or
    * not-found, never as a 500.
+   *
+   * A plan's contact cap applies to inserts only: past it every new contact
+   * fails as plan_limit_reached while existing ones still update or skip.
    */
   const batchContactsOp = async (
     teamId: string,
     items: (CreateContactRequest | BatchItemError)[],
-    opts: { onConflict: ContactConflictMode; strict: boolean },
+    opts: { onConflict: ContactConflictMode; strict: boolean; plan: ApiKeyAuth["plan"] },
   ): Promise<(BatchItemResult | undefined)[]> => {
-    const { onConflict, strict } = opts;
+    const { onConflict, strict, plan } = opts;
     const results: (BatchItemResult | undefined)[] = items.map(() => undefined);
     const types = await loadContactPropertyTypes(db, teamId);
     const rows = new Map<string, BatchContactRow>();
@@ -990,6 +1014,21 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             });
           } else if (onConflict === "skip") succeed(row, found.id, "skipped");
           else updates.push({ row, found });
+        }
+      }
+      if (inserts.length > 0) {
+        const room = await contactRoom(db, teamId, plan, deps.isCloud);
+        if (room !== null && inserts.length > room) {
+          const limit = PLAN_CONTACT_LIMIT[plan];
+          for (const row of inserts) {
+            fail(row, {
+              ok: false,
+              status: 403,
+              name: "plan_limit_reached",
+              message: `Your plan allows up to ${limit} contacts`,
+            });
+          }
+          inserts.length = 0;
         }
       }
       if (strict && results.some((r) => r !== undefined && !r.ok)) return results;
@@ -1160,9 +1199,14 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
   /** Creation shared by POST /contacts and its legacy audiences alias. */
   const createContactOp = async (
     teamId: string,
+    plan: ApiKeyAuth["plan"],
     body: CreateContactRequest,
   ): Promise<BatchItemResult> => {
-    const [result] = await batchContactsOp(teamId, [body], { onConflict: "error", strict: true });
+    const [result] = await batchContactsOp(teamId, [body], {
+      onConflict: "error",
+      strict: true,
+      plan,
+    });
     if (!result) throw new Error("contact batch returned no result");
     return result;
   };
@@ -1294,6 +1338,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           content: { "application/json": { schema: contactIdResponseSchema } },
           description: "Contact created",
         },
+        403: jsonErr("Plan limit reached"),
         404: jsonErr("Unknown segment or topic"),
         409: jsonErr("Contact already exists"),
         422: jsonErr("Validation error"),
@@ -1301,7 +1346,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     }),
     async (c) => {
       const auth = c.get("auth");
-      const result = await createContactOp(auth.teamId, c.req.valid("json"));
+      const result = await createContactOp(auth.teamId, auth.plan, c.req.valid("json"));
       if (!result.ok) {
         return c.json(errorBody(result.status, result.name, result.message), result.status);
       }
@@ -1455,6 +1500,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           content: { "application/json": { schema: batchContactsResponseSchema } },
           description: "Batch processed",
         },
+        403: jsonErr("Plan limit reached (strict mode)"),
         404: jsonErr("Unknown segment or topic (strict mode)"),
         409: jsonErr("Contact already exists (strict mode, on_conflict=error)"),
         422: jsonErr("Validation error"),
@@ -1478,6 +1524,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       const results = await batchContactsOp(auth.teamId, items, {
         onConflict: on_conflict,
         strict,
+        plan: auth.plan,
       });
       if (strict) {
         const index = results.findIndex((r) => r !== undefined && !r.ok);
@@ -1902,6 +1949,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           content: { "application/json": { schema: contactIdResponseSchema } },
           description: "Contact created in the audience",
         },
+        403: jsonErr("Plan limit reached"),
         404: jsonErr("Not found"),
         409: jsonErr("Contact already exists"),
         422: jsonErr("Validation error"),
@@ -1911,7 +1959,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       const auth = c.get("auth");
       const { audienceId } = c.req.valid("param");
       const body = c.req.valid("json");
-      const result = await createContactOp(auth.teamId, {
+      const result = await createContactOp(auth.teamId, auth.plan, {
         ...body,
         segments: [...(body.segments ?? []), { id: audienceId }],
       });
@@ -3214,7 +3262,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       },
       429: {
         content: { "application/json": { schema: errorSchema } },
-        description: "Daily quota exceeded",
+        description: "Sending quota exceeded",
       },
     },
   });
@@ -3389,7 +3437,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       404: jsonErr("Not found"),
       409: jsonErr("Idempotency conflict"),
       422: jsonErr("Validation error"),
-      429: jsonErr("Daily quota exceeded"),
+      429: jsonErr("Sending quota exceeded"),
     },
   });
 
@@ -3520,7 +3568,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         return c.json(paused, 403);
       }
-      const limit = deps.isCloud ? PLAN_DAILY_LIMIT[auth.plan] : null;
+      const quota = teamQuota(auth.billing, deps.isCloud);
       const accepted = await deps.db.transaction(async (dbTx) => {
         const txDb = dbTx as unknown as Db;
         const out: {
@@ -3543,50 +3591,67 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             ...(payload.scheduledAt ? { startAfter: payload.scheduledAt } : {}),
           });
         }
-        // One reservation per delivery day for the whole batch, after the
-        // inserts: the team's daily counter row is shared with every send
-        // lane and event, so it is locked for one statement and the commit
-        // instead of the whole loop. A batch that does not fit parks whole.
-        // Days in one global order so two concurrent batches never lock the
-        // team's counter rows in opposite orders.
-        for (const day of [...new Set(out.map((o) => o.day))].sort()) {
-          const items = out.filter((o) => o.day === day);
-          // Items in one day-group share a delivery day; the first one's
-          // instant places the hourly mirror like a single send's would.
-          const at = items[0]?.startAfter ?? new Date();
-          const quota = await reserveDailyQuota(txDb, {
+        // One reservation for the whole batch, after the inserts: the team's
+        // counter row is shared with every send lane and event, so it is
+        // locked for one statement and the commit instead of the whole loop.
+        // One reservation per delivery day, days in one global order so two
+        // concurrent batches never lock the team's counter rows in opposite
+        // orders. A monthly plan reserves each day's group against the same
+        // period row, so the daily mirror lands on each item's own day like a
+        // single send's would.
+        const groups = [...new Set(out.map((o) => o.day))]
+          .sort()
+          .map((day) => out.filter((o) => o.day === day));
+        for (const items of groups) {
+          const first = items[0];
+          if (!first) continue;
+          // Items in one group share a delivery day; the first one's instant
+          // places the hourly mirror like a single send's would.
+          const at = first.startAfter ?? new Date();
+          const reservation = await reserveQuota(txDb, {
             teamId: auth.teamId,
             count: items.reduce((n, o) => n + o.recipientCount, 0),
-            limit,
-            day,
+            quota,
+            day: first.day,
             at,
           });
-          if (quota.reserved) continue;
-          // The whole batch did not fit: the longest run of items that does,
-          // in request order, still goes out, and only the tail parks, as a
-          // per-item reservation would have done.
-          let toPark = items;
-          if (limit !== null) {
-            const room = dailyCeiling(limit) - quota.acceptedToday;
-            let sum = 0;
-            let fit = 0;
-            for (const o of items) {
-              if (sum + o.recipientCount > room) break;
-              sum += o.recipientCount;
-              fit += 1;
-            }
-            if (fit > 0) {
-              const head = await reserveDailyQuota(txDb, {
-                teamId: auth.teamId,
-                count: sum,
-                limit,
-                day,
-                at,
-              });
-              if (head.reserved) toPark = items.slice(fit);
-            }
+          if (reservation.reserved) continue;
+          // Nothing parks for a month: a monthly plan at its included volume
+          // with overage off refuses the whole batch.
+          if (quota.kind === "month") {
+            throw new AcceptRejectedError(
+              {
+                ok: false,
+                reason: "monthly_quota_exceeded",
+                periodEnd: quota.periodEnd,
+                overage: quota.overage,
+              },
+              first.index,
+            );
           }
-          if (limit !== null) {
+          // The whole batch did not fit the day: the longest run of items
+          // that does, in request order, still goes out, and only the tail
+          // parks, as a per-item reservation would have done.
+          let toPark = items;
+          const room = quotaRoom(reservation) ?? 0;
+          let sum = 0;
+          let fit = 0;
+          for (const o of items) {
+            if (sum + o.recipientCount > room) break;
+            sum += o.recipientCount;
+            fit += 1;
+          }
+          if (fit > 0) {
+            const head = await reserveQuota(txDb, {
+              teamId: auth.teamId,
+              count: sum,
+              quota,
+              day: first.day,
+              at,
+            });
+            if (head.reserved) toPark = items.slice(fit);
+          }
+          if (quota.kind === "day") {
             const [parked] = await txDb
               .select({ n: count() })
               .from(schema.emails)
@@ -3596,10 +3661,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
                   eq(schema.emails.latestStatus, "queued_quota"),
                 ),
               );
-            if ((parked?.n ?? 0) >= limit * QUOTA_BACKLOG_DAYS) {
+            if ((parked?.n ?? 0) >= quota.limit * QUOTA_BACKLOG_DAYS) {
               throw new AcceptRejectedError(
                 { ok: false, reason: "quota_backlog_full" },
-                items[0]?.index ?? 0,
+                first.index,
               );
             }
           }

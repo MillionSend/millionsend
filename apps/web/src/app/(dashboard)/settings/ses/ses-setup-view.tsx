@@ -582,6 +582,12 @@ export function SesSetupView() {
               </div>
               <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 18 }}>
                 <QuotaFigure label={t("test.quotaMax")} value={fmt.format(result.quota.max24h)} />
+                {result.committedPerDay !== null ? (
+                  <QuotaFigure
+                    label={t("test.committedPerDay")}
+                    value={fmt.format(result.committedPerDay)}
+                  />
+                ) : null}
                 <QuotaFigure
                   label={t("test.quotaSent")}
                   value={fmt.format(result.quota.sentLast24h)}

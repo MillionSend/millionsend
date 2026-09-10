@@ -116,6 +116,7 @@
     "importConfirm": "Importar",
     "importResult": "{created, plural, one {# contato adicionado} other {# contatos adicionados}} · {skipped} ignorados.",
     "importError": "Não foi possível importar os contatos.",
+    "planLimit": "Isso ultrapassaria o limite de contatos do seu plano.",
     "importDone": "Concluir",
     "deleteTitle": "Excluir contato",
     "deleteBody": "{email} será removido dos seus contatos. E-mails já enviados continuam no log.",

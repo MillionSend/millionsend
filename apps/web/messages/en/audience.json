@@ -116,6 +116,7 @@
     "importConfirm": "Import",
     "importResult": "{created, plural, one {# contact added} other {# contacts added}} · {skipped} skipped.",
     "importError": "Could not import contacts.",
+    "planLimit": "This would pass your plan's contact limit.",
     "importDone": "Done",
     "deleteTitle": "Delete contact",
     "deleteBody": "{email} is removed from your contacts. Emails already sent stay in the log.",

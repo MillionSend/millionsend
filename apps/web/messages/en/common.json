@@ -41,7 +41,9 @@
   },
   "sidebar": {
     "today": "today",
-    "resetsIn": "resets in {time}"
+    "resetsIn": "resets in {time}",
+    "period": "this period",
+    "renewsOn": "renews on {date}"
   },
   "commandPalette": {
     "placeholder": "Type a command or jump to a resource…",

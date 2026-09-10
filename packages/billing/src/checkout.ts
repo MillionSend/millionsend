@@ -1,7 +1,8 @@
+import { type PlanRungKey, rungByKey } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { eq, sql } from "drizzle-orm";
-import { type PaidPlan, resolvePrices } from "./prices.js";
+import { overageLookupKey, resolvePriceId, rungLookupKey } from "./prices.js";
 import type { BillingStripe } from "./stripe.js";
 
 export interface BillingDeps {
@@ -21,7 +22,7 @@ type PlanStatus = (typeof schema.planStatusEnum.enumValues)[number];
 /**
  * Stripe still holds a subscription for the team under these statuses; a
  * second Checkout would stack another one and bill twice. Changes go through
- * the portal instead.
+ * changeRung instead.
  */
 const LIVE_SUBSCRIPTION_STATUSES: ReadonlySet<PlanStatus> = new Set<PlanStatus>([
   "active",
@@ -63,14 +64,19 @@ export async function createCheckoutSession(
   deps: BillingDeps,
   input: {
     team: BillingTeam;
-    plan: PaidPlan;
+    rung: PlanRungKey;
     email: string;
     successUrl: string;
     cancelUrl: string;
   },
 ): Promise<string> {
-  const [prices, customer] = await Promise.all([
-    resolvePrices(deps.stripe),
+  const rung = rungByKey(input.rung);
+  if (rung.priceCents <= 0) throw new Error(`rung ${input.rung} is not for sale`);
+  // A monthly plan carries its metered overage item from the first day;
+  // it bills only what the worker reports, so the customer's switch decides.
+  const [price, overagePrice, customer] = await Promise.all([
+    resolvePriceId(deps.stripe, rungLookupKey(rung)),
+    rung.period === "month" ? resolvePriceId(deps.stripe, overageLookupKey(rung)) : null,
     ensureCustomer(deps, input.team, input.email),
   ]);
   const session = await deps.stripe.checkout.sessions.create(
@@ -78,7 +84,7 @@ export async function createCheckoutSession(
       mode: "subscription",
       customer,
       client_reference_id: input.team.id,
-      line_items: [{ price: prices[input.plan], quantity: 1 }],
+      line_items: [{ price, quantity: 1 }, ...(overagePrice ? [{ price: overagePrice }] : [])],
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
       automatic_tax: { enabled: true },
@@ -92,7 +98,7 @@ export async function createCheckoutSession(
     // A double-click or two tabs within the same minute replay one session
     // instead of minting several.
     {
-      idempotencyKey: `checkout:${input.team.id}:${input.plan}:${Math.floor(Date.now() / 60_000)}`,
+      idempotencyKey: `checkout:${input.team.id}:${input.rung}:${Math.floor(Date.now() / 60_000)}`,
     },
   );
   if (!session.url) throw new Error("Stripe checkout session has no url");

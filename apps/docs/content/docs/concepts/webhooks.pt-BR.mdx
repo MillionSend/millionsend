@@ -27,9 +27,9 @@ Eventos de conta não carregam email; `data` descreve a situação do time:
 | --- | --- | --- |
 | `deliverability.warning` | A taxa de hard bounce ou de reclamação do time cruzou a linha de risco (uma vez por episódio). | `{ metric, rate, limit, window_days, dashboard_url }` |
 | `deliverability.paused` | A taxa cruzou a linha de pausa; novos envios são recusados até se recuperar. | igual ao anterior |
-| `quota.warning` | 80% da cota diária de hoje foi usada (uma vez por dia UTC, só na nuvem). | `{ used, limit, ceiling, resets_at, dashboard_url }` — `ceiling` é onde os envios começam a estacionar |
-| `quota.reached` | A cota de hoje foi usada; os envios passam até 50% a mais e depois estacionam até a meia-noite UTC. | igual ao anterior |
-| `quota.paused` | 50% além da cota: novos envios ficam estacionados até a meia-noite UTC, ou até um upgrade de plano liberá-los (uma vez por dia UTC, só na nuvem). | igual ao anterior |
+| `quota.warning` | 80% da cota foi usada: a cota diária de hoje no Free e no Starter, o volume incluído do período de cobrança no Pro e no Scale (uma vez por dia UTC ou por período, só na nuvem). | `{ used, limit, period, resets_at, dashboard_url }` — `period` é `"day"` ou `"month"`; `resets_at` é a próxima meia-noite UTC ou o fim do período. No dia, `ceiling` é onde os envios começam a estacionar; no mês, `overage` diz se os envios além de `limit` são cobrados ou recusados. |
+| `quota.reached` | A cota foi usada. Planos diários passam até 50% a mais e depois estacionam até a meia-noite UTC; planos mensais cobram excedente quando ele está ativo e, senão, recusam envios pela API e estacionam broadcasts até o período renovar. | igual ao anterior |
+| `quota.paused` | Só em planos diários: 50% além da cota, novos envios ficam estacionados até a meia-noite UTC, ou até um upgrade de plano liberá-los (uma vez por dia UTC, só na nuvem). | igual ao anterior, sempre `period: "day"` |
 
 Eventos de audiência disparam quando um contato ou a lista de supressão muda,
 seja quem for que mudou. `data` traz o contato no formato do Resend — `id`,

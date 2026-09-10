@@ -9,6 +9,7 @@ import { EllipsisGlyph, NavGlyph, type NavIconName } from "@/components/icons/na
 import { useDismiss } from "@/components/popover-menu";
 import { TeamSwitcher } from "@/components/team-switcher";
 import { authClient } from "@/lib/auth-client";
+import { formatDay } from "@/lib/format";
 import { isAppLocale, LOCALES, setLocaleCookie } from "@/lib/locale-cookie";
 import { isActive } from "@/lib/nav";
 import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
@@ -188,7 +189,13 @@ export function Sidebar({
   }
 
   const fmt = new Intl.NumberFormat(locale);
-  const today = usage?.today;
+  // A monthly plan's meter is its billing period; a daily cap's is the UTC day.
+  const period = usage?.period;
+  const today = usage
+    ? period
+      ? { accepted: period.accepted, limit: period.overage ? null : period.included }
+      : usage.today
+    : undefined;
   const ratio = today?.limit ? today.accepted / today.limit : 0;
   const meterState = today && today.limit !== null ? meterClass(ratio) : "";
 
@@ -251,7 +258,7 @@ export function Sidebar({
           style={{ padding: "12px 10px 10px", borderTop: "1px solid var(--ms-line)" }}
         >
           <div className="ms-meter-label">
-            <span>{tCommon("sidebar.today")}</span>
+            <span>{tCommon(period ? "sidebar.period" : "sidebar.today")}</span>
             <span className="ms-digits" style={{ fontSize: 13, color: "var(--ms-bone)" }}>
               {fmt.format(today.accepted)}
               <span style={{ color: "var(--ms-muted)", fontWeight: 500 }}>
@@ -272,7 +279,9 @@ export function Sidebar({
           </div>
           {meterState ? (
             <div style={{ fontSize: 11, color: "var(--ms-muted)", marginTop: 6 }}>
-              {tCommon("sidebar.resetsIn", { time: formatUtcDayReset() })}
+              {period
+                ? tCommon("sidebar.renewsOn", { date: formatDay(period.end, locale) })
+                : tCommon("sidebar.resetsIn", { time: formatUtcDayReset() })}
             </div>
           ) : null}
         </div>

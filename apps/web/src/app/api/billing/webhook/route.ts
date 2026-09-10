@@ -7,25 +7,24 @@ import {
   claimNotification,
   clearNotifications,
   DAY_MS,
-  effectivePlan,
   formatMailDate,
+  freeCapText,
   listTeamOwners,
   type MailLocale,
-  PLAN_DAILY_LIMIT,
-  PLAN_NAME,
   planCapPhrase,
+  planLabel,
   planMove,
-  raisesDailyLimit,
+  QUOTA_COLUMNS,
+  raisesQuota,
   recordAudit,
+  teamQuota,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
 import { appBaseUrl } from "@/lib/api-base-url";
-import { getStripe } from "@/server/billing";
+import { BILLING_PATH, getStripe, mailPlanMove } from "@/server/billing";
 import { getQueue } from "@/server/queue";
 import { buildAccountEmail, sendAccountMail } from "@/server/system-mail";
-
-const BILLING_PATH = "/settings/billing";
 
 /**
  * Stripe webhook endpoint. Unauthenticated by design: the raw body is
@@ -48,25 +47,32 @@ export async function POST(request: Request) {
   });
   if (status === 200 && event && before) {
     const after = await planOf(db, event.customerId);
-    if (after && (after.plan !== before.plan || after.planStatus !== before.planStatus)) {
-      await recordAudit(db, {
-        teamId: after.id,
-        actor: "stripe",
-        action: "billing.subscription_updated",
-        target: { type: "team", id: after.id },
-        metadata: { eventType: event.type, plan: after.plan, planStatus: after.planStatus },
-      });
-      // Mail parked over the old cap would otherwise wait for the next
-      // scheduled drain; a paying upgrade should release it at once. The cap
-      // that parked it is the effective one (a lapsed period counts as free),
-      // so the comparison uses that. Best-effort: the plan is already
-      // committed, and the scheduled drain releases the mail regardless.
+    if (after) {
       if (
-        raisesDailyLimit(
-          effectivePlan(before.plan, before.currentPeriodEnd),
-          effectivePlan(after.plan, after.currentPeriodEnd),
-        )
+        after.plan !== before.plan ||
+        after.planQuota !== before.planQuota ||
+        after.planStatus !== before.planStatus
       ) {
+        await recordAudit(db, {
+          teamId: after.id,
+          actor: "stripe",
+          action: "billing.subscription_updated",
+          target: { type: "team", id: after.id },
+          metadata: {
+            eventType: event.type,
+            plan: after.plan,
+            planQuota: after.planQuota,
+            planStatus: after.planStatus,
+          },
+        });
+      }
+      // Mail parked over the old cap would otherwise wait for the next
+      // scheduled drain; a paying upgrade (or overage turning on) should
+      // release it at once. The cap that parked it is the effective one (a
+      // lapsed period counts as free), which teamQuota derives. Best-effort:
+      // the plan is already committed, and the scheduled drain releases the
+      // mail regardless.
+      if (raisesQuota(teamQuota(before, true), teamQuota(after, true))) {
         try {
           await (await getQueue()).runCronNow("quota.drain");
         } catch (err) {
@@ -76,8 +82,6 @@ export async function POST(request: Request) {
           );
         }
       }
-    }
-    if (after) {
       try {
         await mailOwners(db, event, before, after);
       } catch (err) {
@@ -149,9 +153,8 @@ async function planOf(db: Db, customerId: string) {
     .select({
       id: schema.teams.id,
       name: schema.teams.name,
-      plan: schema.teams.plan,
+      ...QUOTA_COLUMNS,
       planStatus: schema.teams.planStatus,
-      currentPeriodEnd: schema.teams.currentPeriodEnd,
       cancelAt: schema.teams.cancelAt,
     })
     .from(schema.teams)
@@ -175,7 +178,6 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
   const from = notificationsEmailFrom();
   if (!from) return;
   const team = after.name;
-  const freeCap = (locale: MailLocale) => (PLAN_DAILY_LIMIT.free ?? 0).toLocaleString(locale);
   const claim = (kind: AccountMailKind, periodKey: string) =>
     claimNotification(db, { teamId: after.id, kind, periodKey });
   const send = async (
@@ -205,9 +207,9 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
         "billing.payment_failed",
         (locale) => ({
           team,
-          plan: PLAN_NAME[after.plan],
-          cap: planCapPhrase(locale, after.plan),
-          freeCap: freeCap(locale),
+          plan: planLabel(after.plan, after.planQuota),
+          cap: planCapPhrase(locale, after.plan, after.planQuota),
+          freeCap: freeCapText(locale),
           retry: nextAttempt
             ? accountMailPhrase({
                 locale,
@@ -223,12 +225,11 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
     }
   }
 
-  // The daily reconcile and the grace sweep claim a move with the same key.
+  // The dashboard's plan change, the daily reconcile and the grace sweep
+  // claim a move with the same key.
   const move = planMove(before, after);
   if (move) {
-    if (await claim(move.kind, move.periodKey)) {
-      await send(move.kind, (locale) => move.values(locale, team));
-    }
+    await mailPlanMove(db, { id: after.id, name: team }, before, after);
     if (move.kind === "billing.downgraded") return;
   }
   if (before.cancelAt !== null && after.cancelAt === null) {
@@ -246,9 +247,9 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
     }
     await send("billing.cancel_scheduled", (locale) => ({
       team,
-      plan: PLAN_NAME[after.plan],
+      plan: planLabel(after.plan, after.planQuota),
       date: formatMailDate(locale, endsAt),
-      freeCap: freeCap(locale),
+      freeCap: freeCapText(locale),
     }));
   }
 }

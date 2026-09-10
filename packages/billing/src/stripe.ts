@@ -10,7 +10,32 @@ export interface BillingStripe {
   subscriptions: {
     retrieve(id: string, params?: Stripe.SubscriptionRetrieveParams): Promise<Stripe.Subscription>;
     list(params: Stripe.SubscriptionListParams): Promise<Stripe.ApiList<Stripe.Subscription>>;
+    update(id: string, params?: Stripe.SubscriptionUpdateParams): Promise<Stripe.Subscription>;
     cancel(id: string, params?: Stripe.SubscriptionCancelParams): Promise<Stripe.Subscription>;
+  };
+  subscriptionItems: {
+    create(params: Stripe.SubscriptionItemCreateParams): Promise<Stripe.SubscriptionItem>;
+    update(
+      id: string,
+      params?: Stripe.SubscriptionItemUpdateParams,
+    ): Promise<Stripe.SubscriptionItem>;
+    del(
+      id: string,
+      params?: Stripe.SubscriptionItemDeleteParams,
+    ): Promise<Stripe.DeletedSubscriptionItem>;
+  };
+  subscriptionSchedules: {
+    create(params: Stripe.SubscriptionScheduleCreateParams): Promise<Stripe.SubscriptionSchedule>;
+    update(
+      id: string,
+      params: Stripe.SubscriptionScheduleUpdateParams,
+    ): Promise<Stripe.SubscriptionSchedule>;
+    release(id: string): Promise<Stripe.SubscriptionSchedule>;
+  };
+  billing: {
+    meterEvents: {
+      create(params: Stripe.Billing.MeterEventCreateParams): Promise<Stripe.Billing.MeterEvent>;
+    };
   };
   checkout: {
     sessions: {

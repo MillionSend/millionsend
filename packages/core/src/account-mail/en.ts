@@ -99,10 +99,16 @@ export const en = {
   "broadcast.held_quota": {
     subject: '"{name}": {parked} of {count} recipients are waiting for the quota',
     body: [
-      "{sent} emails went out; {parked} are parked because {team} reached its daily quota of {limit}.",
-      "They go out after the reset at {resetsAt} UTC, or within minutes of a higher plan.",
+      "{sent} emails went out; {parked} are parked because {team} reached its quota of {limit}.",
+      "{release}",
     ],
     button: "Review your plan",
+    extra: {
+      releaseDaily:
+        "They go out after the reset at {resetsAt} UTC, or within minutes of a higher plan.",
+      releaseMonthly:
+        "They go out when the period renews on {date}, as soon as overage is turned on in Billing, or within minutes of a higher plan.",
+    },
   },
   "broadcast.held": {
     subject: '"{name}" is on hold',
@@ -136,7 +142,7 @@ export const en = {
   "billing.plan_changed": {
     subject: "{team} moved from {old} to {new}",
     body: [
-      "From now on {team} sends {cap}. On a lower cap, sends already accepted are unaffected; anything over the new cap waits for the next UTC day.",
+      "From now on {team} sends {cap}. On a lower cap, sends already accepted are unaffected; past the new cap, daily plans wait for the next UTC day and monthly plans either bill overage (when it is on) or refuse new API sends until the period renews.",
       "Proration shows on the next Stripe invoice.",
     ],
     button: "Open billing",
@@ -169,6 +175,6 @@ export const en = {
 
 /** Sentences several kinds share, filled by the builders. */
 export const enPhrases = {
-  capUpTo: "up to {n} emails a day",
-  capNone: "with no daily cap",
+  capUpToDay: "up to {n} emails a day",
+  capUpToMonth: "up to {n} emails a month",
 } as const satisfies Record<MailPhraseKey, string>;

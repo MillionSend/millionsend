@@ -6,7 +6,7 @@ import { Odometer } from "@/components/odometer";
 import { Skeleton } from "@/components/skeleton";
 import { StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
-import { formatDayUtc } from "@/lib/format";
+import { formatDay, formatDayUtc } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 
 /* Ring geometry — 40px face, 4px stroke, faint full-circle track. */
@@ -174,14 +174,24 @@ export function UsageView() {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       <section className="ms-card" style={{ padding: "20px 24px" }}>
-        {/* The deployment's one real quota — the instance/plan daily cap.
-            Self-host has none, reported honestly as unlimited. */}
-        <QuotaRow
-          label={t("sentToday")}
-          hint={t("resetsMidnightUtc")}
-          used={accepted}
-          limit={limit}
-        />
+        {/* The deployment's one real quota — the plan's cap, per billing
+            period on a monthly plan and per UTC day otherwise. Self-host
+            has none, reported honestly as unlimited. */}
+        {data.period ? (
+          <QuotaRow
+            label={t("sentThisPeriod")}
+            hint={t("renewsOn", { date: formatDay(data.period.end, locale) })}
+            used={data.period.accepted}
+            limit={data.period.included}
+          />
+        ) : (
+          <QuotaRow
+            label={t("sentToday")}
+            hint={t("resetsMidnightUtc")}
+            used={accepted}
+            limit={limit}
+          />
+        )}
       </section>
 
       <section>

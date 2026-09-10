@@ -1,7 +1,7 @@
 import { en, enPhrases } from "./account-mail/en.js";
 import { ptBR, ptBRPhrases } from "./account-mail/pt-BR.js";
 import { accountMailCard, fillTemplate } from "./html.js";
-import { PLAN_DAILY_LIMIT, type Plan } from "./plans.js";
+import { type Plan, planLabel, teamRung } from "./plans.js";
 
 /** The languages account mail is written in; the dashboard's own two. */
 export const MAIL_LOCALES = ["en", "pt-BR"] as const;
@@ -55,22 +55,24 @@ const CATALOGS: Record<MailLocale, Record<AccountMailKind, AccountMailEntry>> = 
   "pt-BR": ptBR,
 };
 
-export type MailPhraseKey = "capUpTo" | "capNone";
+export type MailPhraseKey = "capUpToDay" | "capUpToMonth";
 
 const PHRASES: Record<MailLocale, Record<MailPhraseKey, string>> = {
   en: enPhrases,
   "pt-BR": ptBRPhrases,
 };
 
-/** Plan names as the mails say them: the same word in every language. */
-export const PLAN_NAME: Record<Plan, string> = { free: "Free", pro: "Pro", scale: "Scale" };
+/** The free plan's daily cap as the mails print it. */
+export function freeCapText(locale: MailLocale): string {
+  return teamRung("free", null).included.toLocaleString(locale);
+}
 
-/** What a plan lets a team send, as a clause: "up to 3,000 emails a day", or the no-cap phrase. */
-export function planCapPhrase(locale: MailLocale, plan: Plan): string {
-  const limit = PLAN_DAILY_LIMIT[plan];
-  return limit === null
-    ? PHRASES[locale].capNone
-    : fillTemplate(PHRASES[locale].capUpTo, { n: limit.toLocaleString(locale) });
+/** What a plan lets a team send, as a clause: "up to 1,500 emails a day" / "up to 100,000 emails a month". */
+export function planCapPhrase(locale: MailLocale, plan: Plan, planQuota: number | null): string {
+  const rung = teamRung(plan, planQuota);
+  return fillTemplate(PHRASES[locale][rung.period === "day" ? "capUpToDay" : "capUpToMonth"], {
+    n: rung.included.toLocaleString(locale),
+  });
 }
 
 /** A calendar date in the reader's language, on the UTC day billing and quotas run on. */
@@ -83,6 +85,7 @@ export const CANCEL_REMINDER_DAYS = 3;
 
 export interface PlanSnapshot {
   plan: Plan;
+  planQuota: number | null;
   currentPeriodEnd: Date | null;
   cancelAt: Date | null;
 }
@@ -104,7 +107,9 @@ export function planMove(
   after: PlanSnapshot,
   now: Date = new Date(),
 ): PlanMove | null {
-  const freeCap = (locale: MailLocale) => (PLAN_DAILY_LIMIT.free ?? 0).toLocaleString(locale);
+  const freeCap = freeCapText;
+  const beforeRung = teamRung(before.plan, before.planQuota);
+  const afterRung = teamRung(after.plan, after.planQuota);
   if (before.plan !== "free" && after.plan === "free") {
     // The plan cannot have outlived a scheduled cancellation, its period, or today.
     const ended = [before.cancelAt, before.currentPeriodEnd, now]
@@ -115,7 +120,7 @@ export function planMove(
       periodKey: before.currentPeriodEnd?.toISOString() ?? "none",
       values: (locale, team) => ({
         team,
-        plan: PLAN_NAME[before.plan],
+        plan: planLabel(before.plan, before.planQuota),
         date: formatMailDate(locale, ended),
         freeCap: freeCap(locale),
       }),
@@ -125,23 +130,24 @@ export function planMove(
   if (before.plan === "free" && after.plan !== "free") {
     return {
       kind: "billing.plan_activated",
-      periodKey: `${after.plan}:${period}`,
+      periodKey: `${afterRung.key}:${period}`,
       values: (locale, team) => ({
         team,
-        plan: PLAN_NAME[after.plan],
-        cap: planCapPhrase(locale, after.plan),
+        plan: planLabel(after.plan, after.planQuota),
+        cap: planCapPhrase(locale, after.plan, after.planQuota),
       }),
     };
   }
-  if (before.plan !== after.plan) {
+  // A move between rungs of one plan is a change like any other: the cap moved.
+  if (beforeRung.key !== afterRung.key) {
     return {
       kind: "billing.plan_changed",
-      periodKey: `${before.plan}>${after.plan}:${period}`,
+      periodKey: `${beforeRung.key}>${afterRung.key}:${period}`,
       values: (locale, team) => ({
         team,
-        old: PLAN_NAME[before.plan],
-        new: PLAN_NAME[after.plan],
-        cap: planCapPhrase(locale, after.plan),
+        old: planLabel(before.plan, before.planQuota),
+        new: planLabel(after.plan, after.planQuota),
+        cap: planCapPhrase(locale, after.plan, after.planQuota),
       }),
     };
   }

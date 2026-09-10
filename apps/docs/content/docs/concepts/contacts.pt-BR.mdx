@@ -7,6 +7,9 @@ Contatos são **globais ao time**: uma lista por time, uma linha por endereço
 de email (único, sem diferenciar maiúsculas). Não existe o conceito de
 "audiences" — um contato pertence diretamente ao seu time, e você segmenta
 com [segmentos](/pt-BR/concepts/segments) e [tópicos](/pt-BR/concepts/topics).
+No MillionSend Cloud o plano Free guarda até 1.000 contatos (criar um além
+disso retorna `403 plan_limit_reached`; contatos existentes continuam sendo
+atualizados); planos pagos não têm limite de contatos.
 
 Se você está migrando do Resend: os métodos de contato do SDK do Resend
 funcionam contra o MillionSend sempre que `audienceId` for omitido — os

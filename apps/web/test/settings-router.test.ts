@@ -47,7 +47,7 @@ function callerFor(userId: string, teamId: string, role: TeamRole) {
 }
 
 describe("settings.team", () => {
-  it("get returns name, slug, plan, and the plan's daily limit on cloud", async () => {
+  it("get returns name, slug, plan and the logo facts", async () => {
     stubCloud();
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "owner");
@@ -56,17 +56,9 @@ describe("settings.team", () => {
       name: "acme",
       slug: "acme",
       plan: "free",
-      planDailyLimit: 100,
       logoUrl: null,
       logoUploadsEnabled: false,
     });
-  });
-
-  it("get reports no daily limit on self-host, where the cap is not enforced", async () => {
-    const teamId = await createTeam(db, "acme");
-    await addMember(teamId, "u1", "owner");
-    const team = await callerFor("u1", teamId, "owner").settings.team.get();
-    expect(team.planDailyLimit).toBeNull();
   });
 
   it("rename updates the team for owners", async () => {
@@ -521,6 +513,7 @@ describe("settings.usage", () => {
       [dayAgo(1), 7],
     ]);
     expect(usage.today).toEqual({ accepted: 42, limit: 100 });
+    expect(usage.period).toBeNull();
   });
 
   it("widens the window when days is passed", async () => {
@@ -533,20 +526,36 @@ describe("settings.usage", () => {
     expect(usage.today.accepted).toBe(0);
   });
 
-  it("reports a null limit for unlimited plans", async () => {
+  it("reports the billing period instead of a daily limit on a monthly plan", async () => {
     stubCloud();
     const teamId = await createTeam(db, "acme");
-    await db.update(schema.teams).set({ plan: "scale" }).where(eq(schema.teams.id, teamId));
+    const start = new Date(Date.now() - 10 * DAY_MS);
+    const end = new Date(Date.now() + 20 * DAY_MS);
+    await db
+      .update(schema.teams)
+      .set({
+        plan: "scale",
+        planQuota: 500_000,
+        currentPeriodStart: start,
+        currentPeriodEnd: end,
+        overageEnabled: true,
+      })
+      .where(eq(schema.teams.id, teamId));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId, periodStart: start, accepted: 777, reportedOverage: 0 });
     await addMember(teamId, "u1", "owner");
     const usage = await callerFor("u1", teamId, "owner").settings.usage.recent();
     expect(usage.today.limit).toBeNull();
+    expect(usage.period).toEqual({ accepted: 777, included: 500_000, start, end, overage: true });
   });
 
-  it("reports a null limit on self-host even for capped plans", async () => {
+  it("reports no limit and no period on self-host, where plans are not enforced", async () => {
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "u1", "owner");
     const usage = await callerFor("u1", teamId, "owner").settings.usage.recent();
     expect(usage.today.limit).toBeNull();
+    expect(usage.period).toBeNull();
   });
 
   it("never returns another team's counters", async () => {

@@ -22,8 +22,9 @@ const emptyTarget: TargetState = {
   usage: {
     cloud: false,
     plan: null,
-    limits: { emailsPerDay: null, domains: null },
+    limits: { emailsPerDay: null, emailsPerMonth: null, domains: null, contacts: null },
     today: { emailsSent: 0 },
+    period: null,
     appUrl: null,
   },
   domains: [],
@@ -40,8 +41,9 @@ const goldenTarget: TargetState = {
   usage: {
     cloud: true,
     plan: "free",
-    limits: { emailsPerDay: 100, domains: 1 },
+    limits: { emailsPerDay: 100, emailsPerMonth: null, domains: 1, contacts: 1000 },
     today: { emailsSent: 0 },
+    period: null,
     appUrl: "https://app.millionsend.com",
   },
   domains: [
@@ -480,7 +482,11 @@ describe("buildPlan diffs against existing rows", () => {
     const plan = buildPlan({
       snapshot,
       target: withRows({
-        usage: { ...emptyTarget.usage, plan: "pro", limits: { emailsPerDay: 3000, domains: 2 } },
+        usage: {
+          ...emptyTarget.usage,
+          plan: "pro",
+          limits: { emailsPerDay: 3000, emailsPerMonth: null, domains: 2, contacts: null },
+        },
         domains: [
           {
             id: "d1",
@@ -516,7 +522,7 @@ describe("buildPlan diffs against existing rows", () => {
           ...emptyTarget.usage,
           cloud: true,
           plan: "free",
-          limits: { emailsPerDay: 100, domains: 1 },
+          limits: { emailsPerDay: 100, emailsPerMonth: null, domains: 1, contacts: 1000 },
         },
       }),
       options: options({ include: only("domains") }),
@@ -530,6 +536,23 @@ describe("buildPlan diffs against existing rows", () => {
       options: options({ include: only("domains") }),
     });
     expect(selfHosted.warnings).toEqual([]);
+  });
+
+  it("warns when the contacts to import exceed the plan's contact cap", () => {
+    const capped = buildPlan({
+      snapshot,
+      target: withRows({
+        usage: { ...goldenTarget.usage, limits: { ...goldenTarget.usage.limits, contacts: 4 } },
+      }),
+      options: options({ include: only("contacts") }),
+    });
+    expect(capped.warnings).toEqual(["5 contacts to create; the Free plan allows 4"]);
+    const fits = buildPlan({
+      snapshot,
+      target: goldenTarget,
+      options: options({ include: only("contacts") }),
+    });
+    expect(fits.warnings).toEqual([]);
   });
 
   it("leaves an existing draft broadcast alone", () => {

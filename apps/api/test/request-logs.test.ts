@@ -172,6 +172,13 @@ describe("api request logging", () => {
     INTERNAL_AUTH.set(req, {
       teamId,
       plan: "free",
+      billing: {
+        plan: "free",
+        planQuota: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        overageEnabled: false,
+      },
       apiKeyId: null,
       userId: "u1",
       oauthClientId: "client-abc",

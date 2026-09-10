@@ -138,7 +138,8 @@ const JOB_RETRY = { retryLimit: 10, retryBackoff: true, retryDelay: 5 } as const
 
 export const CRON_JOBS = {
   // Every 15 min: quota-parked emails drain back into the send queue as the
-  // plan's UTC day rolls over or SES's rolling 24-hour window frees up.
+  // plan's UTC day rolls over, its billing period renews or gains overage,
+  // or SES's rolling 24-hour window frees up.
   "quota.drain": "*/15 * * * *",
   // Every 15 min: re-enqueue accepted emails whose send job was lost.
   "sends.reconcile": "*/15 * * * *",
@@ -171,6 +172,10 @@ export const CRON_JOBS = {
   // Daily: re-read each Stripe customer's subscription so a dropped webhook
   // cannot leave a team on the wrong plan. No-op off cloud.
   "billing.reconcile": "20 3 * * *",
+  // Every 10 min: report sends past the included volume to the Stripe meter.
+  // A period's tail must land before Stripe finalizes the invoice, about an
+  // hour after the period ends. No-op off cloud.
+  "billing.overage": "*/10 * * * *",
 } as const;
 
 export type CronJobName = keyof typeof CRON_JOBS;

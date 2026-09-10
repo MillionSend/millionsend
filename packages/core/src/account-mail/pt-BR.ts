@@ -99,10 +99,16 @@ export const ptBR = {
   "broadcast.held_quota": {
     subject: '"{name}": {parked} de {count} destinatários aguardam a cota',
     body: [
-      "{sent} e-mails saíram; {parked} estão retidos porque {team} atingiu a cota diária de {limit}.",
-      "Eles saem após a virada às {resetsAt} UTC, ou minutos depois de um plano maior.",
+      "{sent} e-mails saíram; {parked} estão retidos porque {team} atingiu a cota de {limit}.",
+      "{release}",
     ],
     button: "Revisar plano",
+    extra: {
+      releaseDaily:
+        "Eles saem após a virada às {resetsAt} UTC, ou minutos depois de um plano maior.",
+      releaseMonthly:
+        "Eles saem quando o período renovar em {date}, assim que o excedente for ativado em Cobrança, ou minutos depois de um plano maior.",
+    },
   },
   "broadcast.held": {
     subject: '"{name}" está em espera',
@@ -136,7 +142,7 @@ export const ptBR = {
   "billing.plan_changed": {
     subject: "{team} mudou de {old} para {new}",
     body: [
-      "A partir de agora {team} envia {cap}. Num limite menor, os envios já aceitos não mudam; o que passar do novo limite espera o próximo dia UTC.",
+      "A partir de agora {team} envia {cap}. Num limite menor, os envios já aceitos não mudam; o que passar do novo limite, em planos diários espera o próximo dia UTC e, em planos mensais, cobra excedente (quando ativado) ou é recusado pela API até o período renovar.",
       "O rateio aparece na próxima fatura da Stripe.",
     ],
     button: "Abrir cobrança",
@@ -168,6 +174,6 @@ export const ptBR = {
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 export const ptBRPhrases = {
-  capUpTo: "até {n} e-mails por dia",
-  capNone: "sem limite diário",
+  capUpToDay: "até {n} e-mails por dia",
+  capUpToMonth: "até {n} e-mails por mês",
 } as const satisfies Record<MailPhraseKey, string>;

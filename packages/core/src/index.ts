@@ -25,12 +25,12 @@ export {
   CANCEL_REMINDER_DAYS,
   formatMailDate,
   formatMailDateTime,
+  freeCapText,
   isMailLocale,
   MAIL_LOCALES,
   type MailContent,
   type MailLocale,
   type MailPhraseKey,
-  PLAN_NAME,
   type PlanMove,
   type PlanSnapshot,
   planCapPhrase,
@@ -233,14 +233,31 @@ export { isRootDomainSend, registrableDomain } from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";
 export {
   effectivePlan,
-  PLAN_DAILY_LIMIT,
+  formatVolume,
+  isPlanRungKey,
+  monthlyCapacity,
+  OVERAGE_HARD_CAP,
+  PAID_RUNGS,
+  PLAN_CONTACT_LIMIT,
   PLAN_DOMAIN_LIMIT,
   PLAN_GRACE_DAYS,
+  PLAN_NAME,
+  PLAN_RUNG_KEYS,
+  PLAN_RUNGS,
   PLAN_TEAM_LIMIT,
   type Plan,
+  type PlanRung,
+  type PlanRungKey,
   planCanHidePoweredBy,
+  planLabel,
   QUOTA_TOLERANCE,
-  raisesDailyLimit,
+  type QuotaTeamRow,
+  quotaPeriod,
+  raisesQuota,
+  rungByKey,
+  type TeamQuota,
+  teamQuota,
+  teamRung,
 } from "./plans.js";
 export {
   applyRegionBreakers,
@@ -260,8 +277,14 @@ export {
 export {
   dailyCeiling,
   type QuotaResult,
+  quotaRoom,
+  readPeriodUsage,
   releaseDailyQuota,
+  releasePeriodQuota,
+  releaseQuota,
   reserveDailyQuota,
+  reservePeriodQuota,
+  reserveQuota,
 } from "./quota.js";
 export { parseScheduledAt, SCHEDULED_AT_FORMS } from "./scheduled-at.js";
 export {
@@ -329,7 +352,14 @@ export {
   signInviteToken,
   verifyInviteToken,
 } from "./team-invitations.js";
-export { fetchBestOwnedPlan, fetchEffectivePlan } from "./team-plan.js";
+export {
+  committedDailyVolume,
+  contactRoom,
+  fetchBestOwnedPlan,
+  fetchEffectivePlan,
+  fetchTeamQuota,
+  QUOTA_COLUMNS,
+} from "./team-plan.js";
 export { findTopicOptOuts, isSubscribedToTopic } from "./topics.js";
 export {
   deriveTrackingKey,

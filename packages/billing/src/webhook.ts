@@ -79,8 +79,11 @@ export async function handleWebhook(
     const sub = await deps.stripe.subscriptions.retrieve(ref.subscriptionId, {
       expand: SUBSCRIPTION_EXPAND,
     });
-    await applySubscription(tx as unknown as Db, sub, (m) =>
-      log(`stripe webhook ${event.id}: ${m}`),
+    await applySubscription(
+      tx as unknown as Db,
+      sub,
+      (m) => log(`stripe webhook ${event.id}: ${m}`),
+      deps.stripe,
     );
   });
   return 200;

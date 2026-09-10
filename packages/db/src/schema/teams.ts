@@ -1,9 +1,18 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  check,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 // Billing concept only — deployment mode lives exclusively in env.IS_CLOUD;
 // self-host ignores plan entirely (quota code guards on IS_CLOUD first).
-export const planEnum = pgEnum("plan", ["free", "pro", "scale"]);
+export const planEnum = pgEnum("plan", ["free", "starter", "pro", "scale"]);
 
 // Mirrors Stripe subscription statuses; "none" = never subscribed. The
 // entitlement is `teams.plan`, written only by the verified Stripe webhook.
@@ -32,10 +41,25 @@ export const teams = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull().unique(),
     plan: planEnum("plan").notNull().default("free"),
+    // Emails included per billing period on a monthly plan — the rung the
+    // team bought; null on daily plans. Written by the Stripe webhook only.
+    planQuota: integer("plan_quota"),
     // Cloud-only Stripe linkage; all null/"none" on self-host.
     stripeCustomerId: text("stripe_customer_id").unique(),
     stripeSubscriptionId: text("stripe_subscription_id"),
+    // The metered overage item on the subscription (every monthly plan
+    // carries one); what it bills is what the worker reports, so the switch
+    // below is the customer's choice, not the item's presence.
+    stripeOverageItemId: text("stripe_overage_item_id"),
+    // Sends past the included volume bill instead of stopping, up to the hard
+    // cap. On by default, like the market; the customer turns it off in Billing.
+    overageEnabled: boolean("overage_enabled").notNull().default(true),
+    // The rung a scheduled downgrade moves to when the period renews; null
+    // while none is pending. Mirrors the Stripe subscription schedule.
+    pendingRung: text("pending_rung"),
     planStatus: planStatusEnum("plan_status").notNull().default("none"),
+    // The Stripe billing period: monthly quotas count sends from its start.
+    currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     // When Stripe will end the subscription (cancel_at); null while it renews.
     // Mirrored so a scheduled cancellation is a visible transition and the

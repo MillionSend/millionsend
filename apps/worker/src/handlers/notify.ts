@@ -9,24 +9,26 @@ import {
   clearNotifications,
   DAY_MS,
   type DeliverabilityReason,
+  dailyCeiling,
   effectivePlan,
   enqueueTeamWebhookDeliveries,
   fetchDeliverabilityHealth,
   formatMailDate,
   formatMailDateTime,
+  freeCapText,
   type MailLocale,
   nextUtcDayStart,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
-  PLAN_DAILY_LIMIT,
-  PLAN_NAME,
   type PlanSnapshot,
   parseAuditActor,
   planCapPhrase,
+  planLabel,
   planMove,
-  QUOTA_TOLERANCE,
+  QUOTA_COLUMNS,
   resultRows,
   type SystemMailKind,
+  teamQuota,
   utcDay,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
@@ -55,6 +57,8 @@ import {
   deliverabilityPausedMail,
   deliverabilityWarningMail,
   type MailContent,
+  quotaMonthlyReachedMail,
+  quotaMonthlyWarningMail,
   quotaPausedMail,
   quotaReachedMail,
   quotaWarningMail,
@@ -73,7 +77,7 @@ export interface NotifyDeps {
   now?: Date;
 }
 
-/** Share of the daily quota at which owners hear about it. */
+/** Share of the quota (daily limit or monthly included volume) at which owners hear about it. */
 export const QUOTA_WARNING_RATIO = 0.8;
 /** Audit actions owners hear about; rows older than a day are never read. */
 const AUDIT_MAILED = ["api_key.created", "webhook.secret_rotated", "member.joined"] as const;
@@ -341,23 +345,26 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
   }
 
   if (deps.isCloud) {
+    const url = `${base}/settings/billing`;
+    // Daily plans: the day's counter against the plan's limit and its ceiling.
+    // A monthly plan's daily counter is uncapped and judged below instead.
     const rows = await db
       .select({
         teamId: schema.usageCounters.teamId,
         accepted: schema.usageCounters.accepted,
         name: schema.teams.name,
-        plan: schema.teams.plan,
-        currentPeriodEnd: schema.teams.currentPeriodEnd,
+        ...QUOTA_COLUMNS,
       })
       .from(schema.usageCounters)
       .innerJoin(schema.teams, eq(schema.teams.id, schema.usageCounters.teamId))
       .where(and(eq(schema.usageCounters.day, today), gt(schema.usageCounters.accepted, 0)));
     for (const row of rows) {
-      const limit = PLAN_DAILY_LIMIT[effectivePlan(row.plan, row.currentPeriodEnd, now)];
-      if (limit === null) continue;
+      const quota = teamQuota(row, deps.isCloud, now);
+      if (quota.kind !== "day") continue;
+      const limit = quota.limit;
       // The ceiling is where reserveDailyQuota starts parking: reaching it
       // means new sends now wait for the reset (or a higher plan).
-      const ceiling = Math.floor(limit * (1 + QUOTA_TOLERANCE));
+      const ceiling = dailyCeiling(limit);
       const kind =
         row.accepted >= ceiling
           ? "quota.paused"
@@ -369,7 +376,6 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       if (!kind) continue;
       if (!(await claimNotification(db, { teamId: row.teamId, kind, periodKey: today }))) continue;
       const resetsAt = nextUtcDayStart(now.getTime());
-      const url = `${base}/settings/billing`;
       const input = { team: row.name, used: row.accepted, limit, ceiling, resetsAt, url };
       await notify(
         row.teamId,
@@ -378,6 +384,7 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
           used: row.accepted,
           limit,
           ceiling,
+          period: "day",
           resets_at: resetsAt.toISOString(),
           dashboard_url: url,
         },
@@ -386,6 +393,66 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
           : kind === "quota.reached"
             ? quotaReachedMail(input)
             : quotaWarningMail(input),
+      );
+    }
+    // Monthly plans: the period's counter against the included volume, once
+    // per billing period. No tolerance and no pause: at the volume sends
+    // either bill overage or are refused, which the reached mail says.
+    const periods = await db
+      .select({
+        teamId: schema.teams.id,
+        name: schema.teams.name,
+        ...QUOTA_COLUMNS,
+        periodStart: schema.usagePeriods.periodStart,
+        accepted: schema.usagePeriods.accepted,
+      })
+      .from(schema.teams)
+      .innerJoin(schema.usagePeriods, eq(schema.usagePeriods.teamId, schema.teams.id))
+      .where(
+        and(
+          isNotNull(schema.teams.planQuota),
+          gt(schema.usagePeriods.accepted, 0),
+          gte(schema.usagePeriods.periodStart, new Date(now.getTime() - 62 * DAY_MS)),
+        ),
+      );
+    for (const row of periods) {
+      const quota = teamQuota(row, deps.isCloud, now);
+      // The current period's row may be keyed by the previous period's end
+      // (renewal webhook not landed yet) or by a calendar month (no Stripe
+      // period); teamQuota names it, older rows are last period's.
+      if (quota.kind !== "month" || quota.periodStart.getTime() !== row.periodStart.getTime()) {
+        continue;
+      }
+      const limit = quota.included;
+      const kind =
+        row.accepted >= limit
+          ? "quota.reached"
+          : row.accepted >= Math.ceil(limit * QUOTA_WARNING_RATIO)
+            ? "quota.warning"
+            : null;
+      if (!kind) continue;
+      const periodKey = quota.periodStart.toISOString();
+      if (!(await claimNotification(db, { teamId: row.teamId, kind, periodKey }))) continue;
+      const input = {
+        team: row.name,
+        used: row.accepted,
+        limit,
+        renewsAt: quota.periodEnd,
+        overage: quota.overage,
+        url,
+      };
+      await notify(
+        row.teamId,
+        kind,
+        {
+          used: row.accepted,
+          limit,
+          period: "month",
+          overage: quota.overage,
+          resets_at: quota.periodEnd.toISOString(),
+          dashboard_url: url,
+        },
+        kind === "quota.reached" ? quotaMonthlyReachedMail(input) : quotaMonthlyWarningMail(input),
       );
     }
   }
@@ -680,12 +747,12 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
     // past its grace without Stripe saying so (the day effectivePlan starts
     // answering free). The downgrade claim is keyed by the period end, the
     // key the webhook route uses, so whichever notices first is the one.
-    const freeCap = (locale: MailLocale) => (PLAN_DAILY_LIMIT.free ?? 0).toLocaleString(locale);
     const paid = await db
       .select({
         id: schema.teams.id,
         name: schema.teams.name,
         plan: schema.teams.plan,
+        planQuota: schema.teams.planQuota,
         currentPeriodEnd: schema.teams.currentPeriodEnd,
         cancelAt: schema.teams.cancelAt,
       })
@@ -708,10 +775,10 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
           "billing.cancel_reminder",
           account("billing.cancel_reminder", "/settings/billing", (locale) => ({
             team: t.name,
-            plan: PLAN_NAME[t.plan],
+            plan: planLabel(t.plan, t.planQuota),
             date: formatMailDate(locale, endsAt),
-            cap: planCapPhrase(locale, t.plan),
-            freeCap: freeCap(locale),
+            cap: planCapPhrase(locale, t.plan, t.planQuota),
+            freeCap: freeCapText(locale),
           })),
         );
       }

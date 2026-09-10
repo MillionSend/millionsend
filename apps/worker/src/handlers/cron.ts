@@ -1,16 +1,18 @@
 import {
   countDistinctRecipients,
   DAY_MS,
-  effectivePlan,
   failQueuedEmailsForDomain,
   getInstanceSettings,
   isIdentitySharedByOtherDomains,
-  PLAN_DAILY_LIMIT,
   type PlanSnapshot,
   purgedEmailBodyColumns,
+  QUOTA_COLUMNS,
+  type QuotaTeamRow,
   recordAudit,
-  releaseDailyQuota,
-  reserveDailyQuota,
+  releaseQuota,
+  reserveQuota,
+  type TeamQuota,
+  teamQuota,
   transitionQueueState,
   WEBHOOK_BACKLOG_AGE_MS,
   WEBHOOK_MAX_AGE_MS,
@@ -155,11 +157,12 @@ const DRAIN_MAX_PER_RUN = 10_000;
 
 /**
  * Drain of quota-parked emails, every 15 minutes (which covers the UTC
- * midnight rollover that frees plan quota, and the rolling window that frees
- * SES's own). Parked emails hold NO reservation (accept-time reservation
- * failed, or the send handler handed it back when SES was full), so each one
- * must win a reservation against the day's cap before it may move to
- * "queued": without this, parking would be a quota bypass. Oldest first;
+ * midnight rollover that frees a daily quota, a billing period that renewed
+ * or gained overage, and the rolling window that frees SES's own). Parked
+ * emails hold NO reservation (accept-time reservation failed, or the send
+ * handler handed it back when SES was full), so each one must win a
+ * reservation against its team's cap before it may move to "queued":
+ * without this, parking would be a quota bypass. Oldest first;
  * once a team's cap fills, its remaining emails stay parked for later. While
  * SES's 24-hour quota is full nothing moves at all.
  *
@@ -184,8 +187,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
         id: schema.emails.id,
         teamId: schema.emails.teamId,
         broadcastId: schema.emails.broadcastId,
-        plan: schema.teams.plan,
-        currentPeriodEnd: schema.teams.currentPeriodEnd,
+        ...QUOTA_COLUMNS,
         scheduledAt: schema.emails.scheduledAt,
         to: schema.emails.to,
         cc: schema.emails.cc,
@@ -232,7 +234,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
         // A row a racing send lane already claimed keeps its reservation:
         // refunding it here would credit the team for a send that happened.
         if (await transitionQueueState(db, m.id, { from: "queued", to: "queued_quota" })) {
-          await releaseDailyQuota(db, { teamId: m.teamId, count: m.units });
+          await releaseQuota(db, { teamId: m.teamId, count: m.units, quota: m.quota });
         }
       }
       break;
@@ -259,18 +261,18 @@ interface MovedEmail {
   broadcastId: string | null;
   scheduledAt: Date | null;
   units: number;
+  /** The cap the reservation ran against, so a refund lands on the same counter. */
+  quota: TeamQuota;
 }
 
 /** Reserves quota and moves the email to queued; null when it stays parked. */
 async function releaseParked(
   db: Db,
   deps: DrainDeps,
-  email: {
+  email: QuotaTeamRow & {
     id: string;
     teamId: string;
     broadcastId: string | null;
-    plan: keyof typeof PLAN_DAILY_LIMIT;
-    currentPeriodEnd: Date | null;
     scheduledAt: Date | null;
     to: string[];
     cc: string[] | null;
@@ -280,17 +282,15 @@ async function releaseParked(
   failures: unknown[],
 ): Promise<MovedEmail | null> {
   if (exhausted.has(email.teamId)) return null;
-  const limit = deps.isCloud
-    ? PLAN_DAILY_LIMIT[effectivePlan(email.plan, email.currentPeriodEnd)]
-    : null;
+  const quota = teamQuota(email, deps.isCloud);
   // Charged the way accept charged it: one unit per distinct mailbox.
   const units = countDistinctRecipients(email.to, email.cc, email.bcc);
   try {
     const outcome = await db
       .transaction(async (tx) => {
         const txDb = tx as unknown as Db;
-        const quota = await reserveDailyQuota(txDb, { teamId: email.teamId, count: units, limit });
-        if (!quota.reserved) return "exhausted" as const;
+        const reservation = await reserveQuota(txDb, { teamId: email.teamId, count: units, quota });
+        if (!reservation.reserved) return "exhausted" as const;
         const moved = await transitionQueueState(txDb, email.id, {
           from: "queued_quota",
           to: "queued",
@@ -308,7 +308,7 @@ async function releaseParked(
     }
     if (outcome === "raced") return null;
     const { id, teamId, broadcastId, scheduledAt } = email;
-    return { id, teamId, broadcastId, scheduledAt, units };
+    return { id, teamId, broadcastId, scheduledAt, units, quota };
   } catch (err) {
     failures.push(err);
     return null;
@@ -991,6 +991,7 @@ export async function reconcileBillingPlans(
     id: schema.teams.id,
     name: schema.teams.name,
     plan: schema.teams.plan,
+    planQuota: schema.teams.planQuota,
     currentPeriodEnd: schema.teams.currentPeriodEnd,
     cancelAt: schema.teams.cancelAt,
   };
@@ -1008,7 +1009,9 @@ export async function reconcileBillingPlans(
           .select(columns)
           .from(schema.teams)
           .where(eq(schema.teams.id, team.id));
-        if (after && after.plan !== team.plan) await deps.onPlanMoved(team, team, after);
+        if (after && (after.plan !== team.plan || after.planQuota !== team.planQuota)) {
+          await deps.onPlanMoved(team, team, after);
+        }
       }
     } catch (err) {
       failed += 1;

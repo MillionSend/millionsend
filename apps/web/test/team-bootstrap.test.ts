@@ -93,6 +93,12 @@ describe("team.createTeam", () => {
     await expect(callerFor("u1").team.createTeam({ name: "Self-host" })).resolves.toBeTruthy();
   });
 
+  it("the ladder's team caps climb with the plan", () => {
+    expect(PLAN_TEAM_LIMIT.starter).toBeGreaterThan(PLAN_TEAM_LIMIT.free);
+    expect(PLAN_TEAM_LIMIT.starter).toBeLessThan(PLAN_TEAM_LIMIT.pro);
+    expect(PLAN_TEAM_LIMIT.pro).toBeLessThan(PLAN_TEAM_LIMIT.scale);
+  });
+
   it("owning a paid team raises the cap; being a member of one does not", async () => {
     vi.stubEnv("IS_CLOUD", "true");
     await insertUser("u1", "u1@example.com");

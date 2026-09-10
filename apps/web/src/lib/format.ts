@@ -117,6 +117,16 @@ export function formatDurationShort(ms: number): string {
   return `${trimFixed(ms / 86_400_000, 1)} d`;
 }
 
+/** Cents as US dollars ("$20", "$0.30"): whole dollars drop the decimals. */
+export function formatUsd(cents: number, locale: string): string {
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+}
+
 /** Payload size label ("512 B", "12.4 KB", "1.2 MB"): 1024-based, trailing zeros trimmed. */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

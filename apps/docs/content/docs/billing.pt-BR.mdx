@@ -4,61 +4,166 @@ description: Como planos, Stripe Checkout e o webhook se encaixam em uma implant
 ---
 
 A cobrança só existe quando `IS_CLOUD=true`. Uma instância auto-hospedada
-não tem planos, limites diários, aba de Cobrança nem rota de webhook — nunca
+não tem planos, limites de envio, aba de Cobrança nem rota de webhook — nunca
 precisa de uma chave do Stripe. Esta página é para operar uma implantação
 hospedada.
 
 ## Planos
 
-Níveis mensais fixos. O plano define o limite diário de envio do time; emails
-acima do limite ficam estacionados e são liberados após a virada de meia-noite
-UTC. Os envios continuam passando até 50% além do limite antes de estacionar,
-para um dia movimentado não ser cortado no limite. Os owners recebem e-mail em
-80% do limite, no limite e quando os envios começam a estacionar; um upgrade
-de plano libera o que estava estacionado em poucos minutos.
+Uma escada, do mais barato ao mais caro. Free e Starter limitam os envios por
+dia UTC; Pro e Scale incluem um volume mensal por período de cobrança do
+Stripe e podem cobrar excedente além dele. O Free guarda até 1.000 contatos;
+segmentos e tópicos são ilimitados em todos os planos, e contatos também a
+partir do Starter. Domínios de envio são limitados a 3 no Free e 10 no
+Starter, ilimitados acima. Em qualquer um desses limites a API responde
+`403 plan_limit_reached` ("Your plan allows up to 1000 contacts") e o painel
+mostra a mesma frase.
 
-| Plano | Limite diário | Lookup key no Stripe |
-| --- | --- | --- |
-| `free` | 100 | — |
-| `pro` | 3.000 | `millionsend_pro_monthly` |
-| `scale` | ilimitado | `millionsend_scale_monthly` |
+| Degrau | Plano | Preço | Incluído | Limite | Excedente por 1.000 |
+| --- | --- | --- | --- | --- | --- |
+| `free` | Free | US$ 0 | 100 | por dia | — |
+| `starter` | Starter | US$ 9 | 1.500 | por dia | — |
+| `pro_100k` | Pro | US$ 20 | 100.000 | por mês | US$ 0,30 |
+| `pro_200k` | Pro | US$ 35 | 200.000 | por mês | US$ 0,30 |
+| `scale_500k` | Scale | US$ 75 | 500.000 | por mês | US$ 0,25 |
+| `scale_1m` | Scale | US$ 140 | 1.000.000 | por mês | US$ 0,20 |
+| `scale_1_5m` | Scale | US$ 200 | 1.500.000 | por mês | US$ 0,18 |
+| `scale_2_5m` | Scale | US$ 330 | 2.500.000 | por mês | US$ 0,16 |
+
+A escada é `PLAN_RUNGS` em `packages/core/src/plans.ts`; Checkout, painel,
+`GET /usage` e os e-mails de conta leem tudo de lá. O relatório de migração da
+CLI mantém uma cópia em `packages/cli/src/report.ts` (ela roda sozinha contra
+qualquer instância), então uma mudança na escada é espelhada lá à mão. A linha do time
+carrega `plan` e, em plano mensal, `plan_quota` (o volume incluído que ele
+comprou); juntos, eles nomeiam o degrau.
+
+### Limites diários (Free, Starter)
+
+O contador é o dia UTC. Os envios continuam passando até 50% além do limite
+antes de estacionar, para um dia movimentado não ser cortado no limite; os
+e-mails acima desse teto ficam estacionados como `queued_quota` e o job
+`quota.drain`, a cada 15 minutos, libera-os após a meia-noite UTC. A API
+responde `429 daily_quota_exceeded` só quando a fila estacionada está cheia.
+Os owners recebem `quota.warning` em 80% do limite, `quota.reached` no limite
+e `quota.paused` quando os envios começam a estacionar, uma vez por dia UTC;
+um upgrade de plano libera o que estava estacionado em poucos minutos.
+
+### Volumes mensais (Pro, Scale)
+
+O contador é o período de cobrança do Stripe — a tabela `usage_periods`,
+chaveada pelo `current_period_start` do time — sem tolerância. O que acontece
+no volume incluído depende da chave **excedente** em Cobrança, ligada por
+padrão (o cliente a desliga lá):
+
+- **Excedente desligado**: a API recusa com `429 monthly_quota_exceeded`
+  ("Monthly sending quota exceeded; turn on overage in Billing or wait for the
+  period to renew on `<data>`"); nada estaciona pela API. Broadcasts ainda
+  estacionam o que sobra como `queued_quota`, e o drain o reconfere contra o
+  período a cada rodada: sai quando o período renova, quando o excedente é
+  ligado ou quando o plano sobe.
+- **Excedente ligado**: os envios além do volume incluído são reportados a um
+  medidor do Stripe e cobrados por 1.000 na taxa do degrau, na próxima fatura
+  (veja [o cron de excedente](#o-cron-de-excedente)) — até um teto rígido de
+  5× o volume incluído (`OVERAGE_HARD_CAP`), para uma integração descontrolada
+  ou uma chave roubada nunca gerar uma conta sem fim. Nesse teto a API recusa
+  com o mesmo `429 monthly_quota_exceeded` ("Monthly sending quota exceeded:
+  sends stop at 5 times the included volume even with overage on; the period
+  renews on `<data>`") até o período renovar.
+
+Os owners recebem `quota.warning` em 80% e `quota.reached` em 100% do volume
+incluído, uma vez por período; o e-mail de limite atingido diz se os envios
+agora cobram excedente ou são recusados. Não há `quota.paused` em planos
+mensais. Um envio agendado conta no período em que foi aceito.
+
+## O modelo no Stripe
+
+- Um **produto** por plano pago (Starter, Pro, Scale), localizado por
+  `metadata.millionsend_plan`.
+- Um **preço** recorrente por degrau, lookup key `millionsend_<degrau>_monthly`
+  (`millionsend_pro_100k_monthly`, …), com
+  `metadata.millionsend_rung = <degrau>` mais plano, volume incluído, período
+  e taxa de excedente.
+- Um **medidor**, evento `emails_over_quota`, que soma `value` por
+  `stripe_customer_id`.
+- Um **preço de excedente** medido por degrau mensal, lookup key
+  `millionsend_<degrau>_overage`, nesse medidor, cobrado por 1.000 e-mails
+  arredondando para cima (`transform_quantity: { divide_by: 1000, round: "up" }`).
 
 Os preços são localizados por lookup key, nunca por id de preço, então o
 mesmo build roda em qualquer conta Stripe (teste ou produção) sem configurar
-preços por ambiente.
+preços por ambiente. Uma assinatura num degrau mensal carrega o preço do
+degrau e o preço medido dele como segundo item desde o Checkout (o id do item
+fica em `teams.stripe_overage_item_id`); o item medido só cobra o que o worker
+reporta, então a chave de **excedente** do cliente é uma simples flag na
+linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
 
 ## O fluxo
 
-1. Um owner ou admin abre **Configurações → Cobrança** e escolhe um plano. O
-   servidor cria o Customer no Stripe para o time (uma única vez, guardado
-   no time com `metadata.team_id`) e redireciona para o Stripe Checkout.
+1. Um owner ou admin abre **Configurações → Cobrança** e escolhe um degrau.
+   O servidor cria o Customer no Stripe para o time (uma única vez, guardado
+   no time com `metadata.team_id`) e redireciona para o Stripe Checkout com o
+   preço desse degrau.
 2. O Checkout coleta pagamento, endereço e id fiscal (imposto automático
    ligado). O Stripe redireciona de volta para `/settings/billing`. **O
    redirecionamento não muda nada** — a página só consulta por alguns
    segundos.
-3. O Stripe entrega `checkout.session.completed` e
-   `customer.subscription.*` em `POST /api/billing/webhook`. O handler
-   verifica a assinatura no corpo bruto, registra o id do evento (duplicatas
-   são confirmadas e ignoradas), busca a assinatura de novo no Stripe e só
-   então grava `teams.plan`.
-4. **Gerenciar assinatura** abre o Customer Portal do Stripe (faturas, forma
-   de pagamento, cancelar ao fim do período, trocar entre Pro e Scale). Toda
-   mudança feita lá chega pelo mesmo webhook.
+3. O Stripe entrega `checkout.session.completed`, `customer.subscription.*`
+   e `invoice.*` em `POST /api/billing/webhook`. O handler verifica a
+   assinatura no corpo bruto, registra o id do evento (duplicatas são
+   confirmadas e ignoradas), busca a assinatura de novo no Stripe e só então
+   grava `teams.plan`, `plan_quota`, `current_period_start`,
+   `current_period_end`, `stripe_overage_item_id` e `pending_rung`.
+4. **Trocar de degrau** acontece no painel (`billing.changePlan`), e a
+   direção decide quando:
+   - **Subir** vale na hora: os itens da assinatura são atualizados — o item
+     do plano para o preço do novo degrau, o item medido reprecificado para
+     um degrau mensal ou removido para um diário depois de reportar o uso —
+     com a diferença rateada na próxima fatura, e o webhook que vem em
+     seguida reaplica o mesmo estado. Os envios já aceitos dentro do volume
+     antigo são marcados como acertados na linha do período, então o novo
+     degrau nunca os cobra como excedente.
+   - **Descer** vale ao fim do período, sem rateio e sem reembolso: um
+     subscription schedule do Stripe é criado a partir da assinatura (ou o
+     pendente é reaproveitado) com duas fases — os itens atuais até
+     `current_period_end`, depois os itens do novo degrau — e a linha do
+     plano não muda até o webhook aplicar a troca de fase. Até lá, a página
+     de cobrança mostra "Muda para X em `<data>`" com um botão **Manter
+     `<atual>`**: escolher o degrau atual libera o schedule, e uma subida
+     posterior também.
 
-A coluna de plano é escrita pelo handler do webhook e por nada mais — nunca
-por um redirecionamento, uma chamada do cliente ou um payload de evento
+   A chave de **excedente** (`billing.setOverage`) vira `overage_enabled`;
+   desligar reporta antes o que ainda não foi reportado. Uma assinatura
+   anterior à escada não tem item medido; ligar o excedente o adiciona
+   (desligar e ligar de novo, já que a chave começa ligada).
+5. **Gerenciar cobrança** abre o Customer Portal do Stripe para forma de
+   pagamento, faturas, id fiscal e cancelamento ao fim do período (o portal
+   pede o motivo do cancelamento). Trocas de plano não são oferecidas lá: o
+   portal do Stripe não consegue atualizar uma assinatura com mais de um
+   item, e um degrau mensal tem dois.
+
+As colunas de plano são escritas a partir de uma assinatura buscada no
+Stripe — pelo handler do webhook e pelos dois procedimentos do painel acima —
+nunca por um redirecionamento, uma chamada do cliente ou um payload de evento
 aceito sem verificação.
 
 ## Regras de direito ao plano
 
-O plano deriva da assinatura **rebuscada** do Stripe no momento do webhook,
-então entregas fora de ordem convergem para o estado atual do Stripe.
+O degrau deriva da assinatura **rebuscada** do Stripe no momento do webhook,
+então entregas fora de ordem convergem para o estado atual do Stripe. O item
+não medido da assinatura nomeia o degrau, nesta ordem:
 
-| Status da assinatura rebuscada | `plan` | `plan_status` |
+1. o `metadata.millionsend_rung` do preço;
+2. a lookup key do preço (`millionsend_<degrau>_monthly`);
+3. o `metadata.millionsend_plan` do produto, caindo no primeiro degrau desse
+   plano — é assim que os dois preços vendidos antes da escada resolvem
+   (`millionsend_pro_monthly` → `pro_100k`, `millionsend_scale_monthly` →
+   `scale_500k`).
+
+| Status da assinatura rebuscada | `plan`, `plan_quota` | `plan_status` |
 | --- | --- | --- |
-| `active`, `trialing` | Da lookup key do preço (`pro` / `scale`). Preço desconhecido: registrado em log, nada muda. | o mesmo |
+| `active`, `trialing` | O plano e o volume incluído do degrau (`plan_quota` é nulo num degrau diário). Preço desconhecido: registrado em log, nada muda. | o mesmo |
 | `past_due` | Inalterado (carência de pagamento; o Stripe continua tentando) | `past_due` |
-| `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, qualquer outro | `free` | `unpaid` / `canceled` / `incomplete` / `canceled` |
+| `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, qualquer outro | `free`, nulo | `unpaid` / `canceled` / `incomplete` / `canceled` |
 
 Regras adicionais:
 
@@ -68,8 +173,45 @@ Regras adicionais:
   registrados e respondidos com `200` para o Stripe parar de reenviar.
 - Stripe inacessível ou falha no banco lançam erro; a linha do evento é
   desfeita e a nova tentativa do Stripe é processada normalmente.
-- `stripe_customer_id`, `stripe_subscription_id` e `current_period_end` são
-  guardados junto com o plano.
+- `billing.reconcile` rebusca no Stripe a assinatura de todo time assinante
+  uma vez por dia, e mais uma vez a cada boot do worker: um deploy que
+  reinicia o processo com um evento em voo é alcançado na hora, não horas
+  depois. Um plano que o reconcile move é reportado aos owners como o webhook
+  teria feito.
+- `stripe_customer_id`, `stripe_subscription_id`, `current_period_start`,
+  `current_period_end`, `stripe_overage_item_id` e `pending_rung` (o degrau
+  da última fase de um schedule pendente, quando difere do atual) são
+  guardados junto com o plano. Um item medido precificado para outro degrau
+  é reapontado para o preço medido do degrau ao ser aplicado.
+
+## O cron de excedente
+
+`billing.overage` roda no worker a cada 10 minutos. Para cada linha de
+período de um time com item medido que tem mais envios além do volume
+incluído do que o medidor já conhece (`accepted − incluído −
+reported_overage`), envia um evento de medidor por time e período, em três
+comandos, para uma queda em qualquer ponto não custar nada:
+
+1. a linha fixa o contador até onde o evento vai avançar: `pending_overage =
+   to` onde `reported_overage = from` e não há fixação (uma linha que outra
+   rodada fixou antes é pulada);
+2. o evento de medidor sai com o identificador
+   `<time>:<início do período>:<from>:<to>` (o início do período em
+   milissegundos de época) e valor `to − from`;
+3. a linha alcança: `reported_overage = to, pending_overage = null`.
+
+Uma queda entre os dois últimos deixa a fixação, então a próxima rodada
+reenvia o mesmo `to` com o mesmo identificador e o Stripe o descarta como
+duplicata; uma falha do Stripe também deixa a fixação para a próxima rodada.
+Com o excedente desligado nada passa do volume incluído, então não há o que
+reportar; com ele ligado nada passa de 5× o volume, então um período cobra no
+máximo quatro volumes de excedente. O uso de um período que já terminou é
+carimbado um segundo dentro desse período, onde o Stripe o fatura (a fatura
+fica em rascunho por cerca de uma hora após o fim do período; linhas com mais
+de 35 dias não podem mais ser medidas e vão para o log). O mesmo relato roda
+antes de a chave desligar,
+antes de uma subida (os envios feitos no degrau antigo acertam na taxa dele)
+e quando o item medido sai da assinatura, para nada ficar sem cobrar.
 
 ## Ambiente
 
@@ -86,37 +228,50 @@ recusa a iniciar):
 
 ## Provisionando uma conta Stripe
 
-Um script idempotente cria tudo que a API consegue criar:
+Um script idempotente cria tudo que a API consegue criar. Os valores vêm da
+escada, não de flags:
 
 ```sh
 STRIPE_SECRET_KEY=sk_test_… pnpm --filter @millionsend/billing provision \
-  --pro-usd 20 --scale-usd 100 \
   --webhook-url https://app.example.com/api/billing/webhook \
-  --portal
+  --portal --app-url https://app.example.com
 ```
 
 | Flag | Efeito |
 | --- | --- |
-| `--pro-usd`, `--scale-usd` | Valores mensais em USD (obrigatórios). |
 | `--webhook-url` | Localiza ou cria o endpoint de webhook para essa URL com exatamente os eventos que o handler consome. Omita em desenvolvimento local. |
 | `--portal` | Localiza ou cria a configuração do Customer Portal e imprime o id para `STRIPE_PORTAL_CONFIG`. |
+| `--app-url` | Origem do painel: a URL de retorno padrão do portal passa a ser `<app-url>/settings/billing`. Omita para usar o padrão do Stripe. |
+| `--move-legacy` | Move toda assinatura ainda num preço anterior à escada para o seu degrau (Pro 100k, Scale 500k) na hora, sem rateio, adicionando o item medido do degrau; um desconto na assinatura permanece. Idempotente. |
 | `--dry-run` | Lê a conta e imprime o que seria escrito, sem escrever. |
 
 O que ele faz, e por que rodar de novo é seguro:
 
-- **Produtos** são localizados por `metadata.millionsend_plan` (`pro` /
-  `scale`), criados com o código do Stripe Tax para SaaS de uso empresarial.
-- **Preços** são localizados por lookup key. Um valor diferente cria um novo
-  preço, move a lookup key para ele e arquiva o antigo; assinaturas
-  existentes mantêm o preço antigo, novos checkouts recebem o novo. Os preços
-  são `tax_behavior: exclusive`.
+- **Produtos** são localizados por `metadata.millionsend_plan` (`starter` /
+  `pro` / `scale`), criados com o código do Stripe Tax para SaaS de uso
+  empresarial.
+- **O medidor** é localizado pelo nome do evento, `emails_over_quota`.
+- **Preços** são localizados por lookup key. Um valor diferente na escada
+  cria um novo preço, move a lookup key para ele e arquiva o antigo;
+  assinaturas existentes mantêm o preço antigo (ainda resolvido pelo
+  metadata), novos checkouts recebem o novo. Só o metadata é atualizado no
+  lugar. Os preços são `tax_behavior: exclusive`.
+- **Preços legados** `millionsend_pro_monthly` e `millionsend_scale_monthly`
+  são arquivados, não excluídos: assinaturas ainda neles continuam
+  funcionando, resolvidas para o primeiro degrau do plano pelo metadata do
+  produto, até cada uma ser movida; só os novos checkouts deixam de vê-los.
 - **Endpoint de webhook** é localizado pela URL; listas de eventos que
   divergiram são ressincronizadas. O segredo de assinatura é impresso **uma
   única vez, na criação** — o Stripe nunca o devolve de novo. Para rotacionar,
-  exclua o endpoint no dashboard e rode novamente.
-- **Configuração do portal** é localizada por metadata e sempre reapontada
-  para os ids de preço atuais, então rode com `--portal` de novo após mudar
-  um preço.
+  gere um novo no dashboard (Developers → Webhooks → o endpoint → Roll secret)
+  e copie o novo valor em `STRIPE_WEBHOOK_SECRET`.
+- **Configuração do portal** é localizada por metadata e tem as
+  configurações atualizadas: os recursos (histórico de faturas, forma de
+  pagamento, dados do cliente incluindo id fiscal e cancelamento ao fim do
+  período com coleta do motivo; atualização de assinatura fica desligada,
+  veja [o fluxo](#o-fluxo)), os links de termos e privacidade do perfil da
+  empresa (`millionsend.com/terms`, `/privacy`) e, com `--app-url`, a URL de
+  retorno.
 
 Teste e produção são contas Stripe separadas: rode uma vez com cada chave.
 
@@ -133,6 +288,25 @@ O script termina imprimindo estes itens; a API não consegue fazê-los:
   emails (Settings → Branding).
 - **Emails ao cliente**: recibos de pagamento aprovado e avisos de pagamento
   recusado (Settings → Emails).
+- **Assinaturas legadas**: uma assinatura num preço arquivado o mantém; mova
+  cada uma para o preço do seu degrau na página da assinatura (sem rateio, ao
+  fim do período).
+
+## Migrando uma implantação existente
+
+A migração `0035_pricing_ladder` adiciona o valor de plano `starter`, as
+colunas de `teams` `plan_quota`, `current_period_start`,
+`stripe_overage_item_id`, `overage_enabled` (padrão true) e `pending_rung`,
+e a tabela `usage_periods` (`accepted`, `reported_overage`,
+`pending_overage`). Times `scale` existentes passam a Scale 500k
+(`plan_quota` 500000) e times `pro` a Pro 100k (100000);
+`current_period_start` é preenchido como `current_period_end − 1 mês`. As
+assinaturas deles ficam nos preços legados, resolvidos pelo metadata do
+produto, até serem movidas, e não têm item medido, então os envios delas além
+do volume incluído passam (a chave começa ligada) mas não cobram nada até um
+ser adicionado: desligar e ligar o excedente de novo em Cobrança o adiciona,
+e uma subida na escada também. O contador do período começa vazio: envios
+aceitos antes da migração contam no dia em que saíram, não no período.
 
 ## Testando localmente
 

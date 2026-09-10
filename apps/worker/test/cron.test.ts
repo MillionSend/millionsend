@@ -1,4 +1,4 @@
-import { DAY_MS, PLAN_DAILY_LIMIT, QUOTA_TOLERANCE, utcDay } from "@millionsend/core";
+import { DAY_MS, dailyCeiling, teamRung, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -29,10 +29,8 @@ afterEach(() => close());
 
 const today = () => utcDay();
 
-const FREE_LIMIT = PLAN_DAILY_LIMIT.free;
-if (FREE_LIMIT === null) throw new Error("free plan is expected to have a daily cap");
-// Sends pass this far over the nominal cap before parking.
-const FREE_CEILING = Math.floor(FREE_LIMIT * (1 + QUOTA_TOLERANCE));
+// Sends pass this far over the nominal daily cap before parking.
+const FREE_CEILING = dailyCeiling(teamRung("free", null).included);
 
 async function insertParked(createdAt: Date, subject = "parked"): Promise<string> {
   const [row] = await db
@@ -679,6 +677,79 @@ it("billing reconcile reports a plan it moved, with the row before and after", a
   // Nothing moved the second time: nothing to report.
   await reconcileBillingPlans(db, deps);
   expect(moves).toHaveLength(1);
+});
+
+it("drain on a monthly plan releases while the period has room and holds at the included volume until overage is on", async () => {
+  const included = teamRung("pro", 100_000).included;
+  const periodStart = new Date(Date.now() - 10 * DAY_MS);
+  const periodEnd = new Date(Date.now() + 20 * DAY_MS);
+  await db
+    .update(schema.teams)
+    .set({
+      plan: "pro",
+      planQuota: included,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+      overageEnabled: false,
+    })
+    .where(eq(schema.teams.id, teamId));
+  await db.insert(schema.usagePeriods).values({ teamId, periodStart, accepted: included - 1 });
+  const oldest = await insertParked(new Date("2026-08-13T01:00:00Z"));
+  const middle = await insertParked(new Date("2026-08-13T02:00:00Z"));
+  const newest = await insertParked(new Date("2026-08-13T03:00:00Z"));
+  const enqueued: string[] = [];
+  const deps = {
+    isCloud: true,
+    enqueueSends: async (batch: readonly { emailId: string }[]) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  };
+
+  // One slot left in the period, no tolerance: exactly one row moves.
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 1, stillParked: 2 });
+  expect(enqueued).toEqual([oldest]);
+  expect(await statusOf(middle)).toBe("queued_quota");
+  const [period] = await db
+    .select({ accepted: schema.usagePeriods.accepted })
+    .from(schema.usagePeriods)
+    .where(eq(schema.usagePeriods.teamId, teamId));
+  expect(period?.accepted).toBe(included);
+  // At the volume with overage off nothing else moves, however many runs.
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 0, stillParked: 2 });
+
+  // Overage on: the rest go out and the period counter keeps growing.
+  await db.update(schema.teams).set({ overageEnabled: true }).where(eq(schema.teams.id, teamId));
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 2, stillParked: 0 });
+  expect(enqueued).toEqual([oldest, middle, newest]);
+  const [after] = await db
+    .select({ accepted: schema.usagePeriods.accepted })
+    .from(schema.usagePeriods)
+    .where(eq(schema.usagePeriods.teamId, teamId));
+  expect(after?.accepted).toBe(included + 2);
+});
+
+it("billing reconcile reports a rung change within one plan", async () => {
+  const teamId = await createTeam(db, "rung-team");
+  await db
+    .update(schema.teams)
+    .set({ stripeCustomerId: "cus_10", plan: "pro", planQuota: 100_000 })
+    .where(eq(schema.teams.id, teamId));
+  const moves: { before: number | null; after: number | null }[] = [];
+  const deps = {
+    reconcileTeam: async (id: string) => {
+      await db.update(schema.teams).set({ planQuota: 200_000 }).where(eq(schema.teams.id, id));
+    },
+    onPlanMoved: async (
+      _team: { id: string; name: string },
+      before: { planQuota: number | null },
+      after: { planQuota: number | null },
+    ) => {
+      moves.push({ before: before.planQuota, after: after.planQuota });
+    },
+  };
+  await reconcileBillingPlans(db, deps);
+  await reconcileBillingPlans(db, deps);
+  expect(moves).toEqual([{ before: 100_000, after: 200_000 }]);
 });
 
 it("holds every parked email while SES's own 24-hour quota is full", async () => {

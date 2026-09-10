@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authenticateApiKey } from "../src/api-key-auth.js";
 import { generateApiKey } from "../src/api-keys.js";
@@ -53,5 +54,39 @@ describe("authenticateApiKey scope", () => {
     const token = await insertKey({ domainId });
     const auth = await authenticateApiKey(db, token);
     expect(auth?.domainId).toBe(domainId);
+  });
+});
+
+describe("authenticateApiKey billing", () => {
+  it("carries the team's billing columns as written, and the effective plan beside them", async () => {
+    const token = await insertKey();
+    expect((await authenticateApiKey(db, token))?.billing).toEqual({
+      plan: "free",
+      planQuota: null,
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+      overageEnabled: true,
+    });
+    const currentPeriodStart = new Date("2026-09-01T00:00:00Z");
+    const currentPeriodEnd = new Date("2026-10-01T00:00:00Z");
+    await db
+      .update(schema.teams)
+      .set({
+        plan: "pro",
+        planQuota: 200_000,
+        currentPeriodStart,
+        currentPeriodEnd,
+        overageEnabled: true,
+      })
+      .where(eq(schema.teams.id, teamId));
+    const auth = await authenticateApiKey(db, token);
+    expect(auth?.billing).toEqual({
+      plan: "pro",
+      planQuota: 200_000,
+      currentPeriodStart,
+      currentPeriodEnd,
+      overageEnabled: true,
+    });
+    expect(auth?.plan).toBe("pro");
   });
 });

@@ -1,6 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { type AddressInfo, connect, type Socket } from "node:net";
-import { decryptEmailBody, EnvKeyring, generateApiKey, hashRecipient } from "@millionsend/core";
+import {
+  DAY_MS,
+  decryptEmailBody,
+  EnvKeyring,
+  generateApiKey,
+  hashRecipient,
+  OVERAGE_HARD_CAP,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -373,5 +380,53 @@ describe("smtp relay", () => {
         attachments: [{ filename: "x.txt", content: "attached" }],
       }),
     ).rejects.toMatchObject({ responseCode: 554 });
+  });
+
+  it("refuses a monthly plan at its included volume with 452 until overage is on", async () => {
+    const periodStart = new Date(Date.now() - 5 * DAY_MS);
+    const periodEnd = new Date(periodStart.getTime() + 30 * DAY_MS);
+    await db
+      .update(schema.teams)
+      .set({
+        plan: "pro",
+        planQuota: 100_000,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd,
+        overageEnabled: false,
+      })
+      .where(eq(schema.teams.id, teamId));
+    await db.insert(schema.usagePeriods).values({ teamId, periodStart, accepted: 100_000 });
+    const mail = { from: "a@acme.dev", to: "r@example.com", subject: "s", text: "t" };
+    await expect(
+      transport({ user: SMTP_USERNAME, pass: token }).sendMail(mail),
+    ).rejects.toMatchObject({
+      responseCode: 452,
+      response: expect.stringContaining("Monthly sending quota exceeded"),
+    });
+
+    await db.update(schema.teams).set({ overageEnabled: true }).where(eq(schema.teams.id, teamId));
+    const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail(mail);
+    expect(info.response).toContain("Queued as");
+  });
+
+  it("with overage on, refuses with 452 at the hard cap and accepts below it", async () => {
+    const cap = 100_000 * OVERAGE_HARD_CAP;
+    const setAccepted = (accepted: number) =>
+      db
+        .update(schema.usagePeriods)
+        .set({ accepted })
+        .where(eq(schema.usagePeriods.teamId, teamId));
+    const mail = { from: "a@acme.dev", to: "r@example.com", subject: "s", text: "t" };
+    await setAccepted(cap);
+    await expect(
+      transport({ user: SMTP_USERNAME, pass: token }).sendMail(mail),
+    ).rejects.toMatchObject({
+      responseCode: 452,
+      response: expect.stringContaining(`${OVERAGE_HARD_CAP} times the included volume`),
+    });
+
+    await setAccepted(cap - 1);
+    const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail(mail);
+    expect(info.response).toContain("Queued as");
   });
 });

@@ -13,6 +13,14 @@ const STAGGER_MS = 45;
 const FRAME_MS = 17;
 
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+/* Where the strip is right now, in em: mid-transition the computed transform
+   carries the animated value, so a roll interrupted midway reads its true
+   starting point. */
+const positionEm = (el: HTMLElement) => {
+  const cs = getComputedStyle(el);
+  const m = cs.transform.match(/-?[\d.]+/g);
+  return m ? -Number(m[5]) / Number.parseFloat(cs.fontSize) : 0;
+};
 
 /**
  * CSS odometer over .ms-odometer (components.css): each digit is a 1em
@@ -101,7 +109,14 @@ export function Odometer({ formatted }: { formatted: string }) {
   );
 }
 
-/** One column: the strip slides to `digit`, blurred for the roll's duration. */
+/**
+ * One column: the strip slides to `digit`, blurred while it moves. The blur
+ * is sized from the distance the strip still has to cover, read off its
+ * current position: a target that reverses mid-roll travels less than the
+ * digits suggest, and CSS shortens the reversed transition to match. The
+ * blur follows the transition's own start, end and cancel events, so it
+ * never outlives the motion.
+ */
 function Digit({
   digit,
   delayMs,
@@ -113,29 +128,30 @@ function Digit({
   filterId: string;
   lit: boolean;
 }) {
-  const shown = useRef(0);
+  const strip = useRef<HTMLSpanElement>(null);
+  const level = useRef(0);
   const [blur, setBlur] = useState(0);
 
   useEffect(() => {
-    const travel = Math.abs(digit - shown.current);
-    shown.current = digit;
-    if (travel === 0 || reducedMotion()) {
-      setBlur(0);
-      return;
-    }
-    const level = Math.min(BLUR_LEVELS.length, travel);
-    const on = window.setTimeout(() => setBlur(level), delayMs);
-    const off = window.setTimeout(() => setBlur(0), delayMs + DIGIT_MS);
-    return () => {
-      window.clearTimeout(on);
-      window.clearTimeout(off);
-    };
-  }, [digit, delayMs]);
+    if (!strip.current || reducedMotion()) return;
+    const travel = Math.abs(digit - positionEm(strip.current));
+    level.current = Math.min(BLUR_LEVELS.length, Math.round(travel));
+  }, [digit]);
+
+  // React's synthetic transitionstart and transitioncancel events carry no
+  // propertyName (only transitionend does); the native event always has it.
+  const onTransform = (e: React.TransitionEvent, moving: boolean) => {
+    if (e.nativeEvent.propertyName === "transform") setBlur(moving ? level.current : 0);
+  };
 
   return (
     <span className="ms-odo-col" aria-hidden style={lit ? { color: "var(--ms-steel)" } : undefined}>
       <span
+        ref={strip}
         className="ms-odo-strip"
+        onTransitionStart={(e) => onTransform(e, true)}
+        onTransitionEnd={(e) => onTransform(e, false)}
+        onTransitionCancel={(e) => onTransform(e, false)}
         style={
           {
             transform: `translateY(-${digit}em)`,

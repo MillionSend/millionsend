@@ -17,7 +17,8 @@ const KIND = {
   apiKey: 10,
 } as const;
 
-export const CONTACT_COUNT = 1250;
+/** Exactly what the Free plan holds: one more and the target's contact cap would refuse the import. */
+export const CONTACT_COUNT = 1000;
 
 export const TOPICS = [
   {
@@ -53,7 +54,7 @@ export const SEGMENTS = [
     members: [0, 400],
   },
   { name: "Beta testers", members: [200, 500] },
-  { name: "Enterprise", members: [1000, CONTACT_COUNT] },
+  { name: "Enterprise", members: [700, CONTACT_COUNT] },
 ] as const;
 
 export const API_KEY_NAMES = ["Production", "Staging", "CI", "Marketing site"] as const;
@@ -143,7 +144,7 @@ const TEXT = "Hi {{{contact.first_name|there}}}, news from Acme. {{{RESEND_UNSUB
 /**
  * A mid-sized Resend account: three domains (one custom return path), four
  * API keys, three properties, five topics, three overlapping segments,
- * 1,250 contacts, six broadcasts, four templates, two webhooks, forty
+ * 1,000 contacts, six broadcasts, four templates, two webhooks, forty
  * suppressions and thirty days of metrics.
  */
 export function realisticAccount(): FakeResendData {

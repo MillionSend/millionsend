@@ -1,4 +1,9 @@
-import { deriveUnsubscribeKey, hashRecipient, makeUnsubscribeToken } from "@millionsend/core";
+import {
+  deriveUnsubscribeKey,
+  hashRecipient,
+  makeUnsubscribeToken,
+  PLAN_CONTACT_LIMIT,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -27,6 +32,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await close();
 });
 
@@ -171,6 +177,63 @@ describe("audience.contacts.add", () => {
     const { id } = await caller.audience.contacts.add({ email: "ada@example.com" });
     expect((await contactRow(id))?.properties).toEqual({});
     expect((await caller.audience.contacts.get({ id })).properties).toEqual({});
+  });
+});
+
+describe("plan contact cap", () => {
+  const fill = (teamId: string, n: number) =>
+    db
+      .insert(schema.contacts)
+      .values(Array.from({ length: n }, (_, i) => ({ teamId, email: `c${i}@example.com` })));
+  const count = async (teamId: string) =>
+    (await callerFor(teamId).audience.contacts.stats()).contacts;
+
+  it("in cloud, a free team at the cap cannot add a contact", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const teamId = await createTeam(db, "team-a");
+    await fill(teamId, PLAN_CONTACT_LIMIT.free ?? 0);
+    await expect(
+      callerFor(teamId).audience.contacts.add({ email: "over@example.com" }),
+    ).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: `Your plan allows up to ${PLAN_CONTACT_LIMIT.free} contacts`,
+    });
+  });
+
+  it("in cloud, an import larger than the room left is refused whole", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const teamId = await createTeam(db, "team-a");
+    const limit = PLAN_CONTACT_LIMIT.free ?? 0;
+    await fill(teamId, limit - 1);
+    const caller = callerFor(teamId);
+    await expect(
+      caller.audience.contacts.addMany({
+        rows: [{ email: "one@example.com" }, { email: "two@example.com" }],
+      }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    expect(await count(teamId)).toBe(limit - 1);
+    // Exactly the room left still lands.
+    await expect(
+      caller.audience.contacts.addMany({ rows: [{ email: "one@example.com" }] }),
+    ).resolves.toEqual({ created: 1, skipped: 0 });
+  });
+
+  it("in cloud, a paid plan is uncapped", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const teamId = await createTeam(db, "team-a");
+    await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, teamId));
+    await fill(teamId, PLAN_CONTACT_LIMIT.free ?? 0);
+    await expect(
+      callerFor(teamId).audience.contacts.add({ email: "over@example.com" }),
+    ).resolves.toMatchObject({ id: expect.any(String) });
+  });
+
+  it("self-host ignores the cap", async () => {
+    const teamId = await createTeam(db, "team-a");
+    await fill(teamId, PLAN_CONTACT_LIMIT.free ?? 0);
+    await expect(
+      callerFor(teamId).audience.contacts.add({ email: "over@example.com" }),
+    ).resolves.toMatchObject({ id: expect.any(String) });
   });
 });
 

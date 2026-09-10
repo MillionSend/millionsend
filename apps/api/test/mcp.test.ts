@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { type ServerType, serve } from "@hono/node-server";
-import { EnvKeyring, MCP_SCOPES, mcpResourceUrl } from "@millionsend/core";
+import { DAY_MS, EnvKeyring, MCP_SCOPES, mcpResourceUrl } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -64,11 +64,11 @@ async function mintToken(
     .sign(privateKey);
 }
 
-async function connect(token: string): Promise<Client> {
+async function connect(token: string, via = app): Promise<Client> {
   const client = new Client({ name: "mcp-test", version: "0.0.0" });
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`${resource}`), {
-      fetch: async (url, init) => app.request(url, init),
+      fetch: async (url, init) => via.request(url, init),
       requestInit: { headers: { authorization: `Bearer ${token}` } },
     }),
   );
@@ -838,7 +838,39 @@ describe("REST parity tools", () => {
       object: "usage",
       cloud: false,
       plan: null,
+      limits: { emails_per_day: null, emails_per_month: null, domains: null, contacts: null },
       team: { id: teamId },
+    });
+    await client.close();
+  });
+
+  it("get_usage on a monthly plan reports the billing period instead of a daily limit", async () => {
+    const start = new Date(Date.now() - 5 * DAY_MS);
+    const end = new Date(start.getTime() + 30 * DAY_MS);
+    await db
+      .update(schema.teams)
+      .set({ plan: "pro", planQuota: 100_000, currentPeriodStart: start, currentPeriodEnd: end })
+      .where(eq(schema.teams.id, teamId));
+    await db.insert(schema.usagePeriods).values({ teamId, periodStart: start, accepted: 4321 });
+    const cloud = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: true,
+      appBaseUrl,
+      enqueueEmailSend: async () => {},
+    });
+    const client = await connect(await mintToken({ scope: "emails:read" }), cloud);
+    expect(resultJson(await client.callTool({ name: "get_usage", arguments: {} }))).toMatchObject({
+      cloud: true,
+      plan: "pro",
+      limits: { emails_per_day: null, emails_per_month: 100_000, domains: null, contacts: null },
+      period: {
+        emails_sent: 4321,
+        included: 100_000,
+        overage_enabled: true,
+        starts_at: start.toISOString(),
+        ends_at: end.toISOString(),
+      },
     });
     await client.close();
   });

@@ -103,11 +103,11 @@ const full: Report = {
     perDay: 1374,
     domains: 1,
     plan: "free",
-    fits: "pro",
+    fits: "starter",
     url: "https://app.example.test:3000/settings/billing",
     text: [
       "On Resend you sent 41,208 emails in the last 30 days (~1,374/day).",
-      "Free allows 100/day; Pro (3,000/day, 20 domains) fits. Upgrade: https://app.example.test:3000/settings/billing",
+      "Free allows 3,000/month; Starter (45,000/month, 10 domains) fits. Upgrade: https://app.example.test:3000/settings/billing",
     ],
   },
 };

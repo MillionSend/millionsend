@@ -6,7 +6,10 @@ description: Team-global contacts with subscribe state and custom properties.
 Contacts are **team-global**: one list per team, one row per email address
 (case-insensitive unique). There is no "audiences" concept — a contact belongs
 to your team directly, and you target subsets with
-[segments](/concepts/segments) and [topics](/concepts/topics).
+[segments](/concepts/segments) and [topics](/concepts/topics). On MillionSend
+Cloud the Free plan holds up to 1,000 contacts (creating one past that returns
+`403 plan_limit_reached`; existing contacts still update); paid plans have no
+contact limit.
 
 If you are migrating from Resend: the Resend SDK's contact methods work
 against MillionSend whenever `audienceId` is omitted — the contact paths are
