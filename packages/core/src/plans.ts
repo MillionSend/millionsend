@@ -150,14 +150,14 @@ export function teamRung(plan: Plan, planQuota: number | null): PlanRung {
   return rungs.find((r) => r.period === "month" && r.included === planQuota) ?? first;
 }
 
-/** "100k", "1M", "1.5M": a volume the way plan cards and mails print it. */
+/** "100K", "1M", "1.5M": a volume the way plan cards and mails print it. */
 export function formatVolume(n: number): string {
   if (n >= 1_000_000) return `${n / 1_000_000}M`;
-  if (n >= 1_000) return `${n / 1_000}k`;
+  if (n >= 1_000) return `${n / 1_000}K`;
   return String(n);
 }
 
-/** "Pro 100k" on a monthly plan, the bare plan name on a daily one. */
+/** "Pro 100K" on a monthly plan, the bare plan name on a daily one. */
 export function planLabel(plan: Plan, planQuota: number | null): string {
   const rung = teamRung(plan, planQuota);
   return rung.period === "month"

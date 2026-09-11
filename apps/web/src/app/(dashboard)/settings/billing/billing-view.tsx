@@ -466,7 +466,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
                   data-on={i === at || undefined}
                   onClick={() => setStep(i)}
                 >
-                  {formatVolume(stepVolume(r)).toUpperCase()}
+                  {formatVolume(stepVolume(r))}
                 </button>
               ))}
             </div>

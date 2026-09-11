@@ -245,7 +245,7 @@ async function archiveLegacyPrices(
 
 /**
  * Subscriptions still on a pre-ladder price move to the rung that price
- * resolves to (the plan's first: Pro 100k, Scale 500k), at once and without
+ * resolves to (the plan's first: Pro 100K, Scale 500K), at once and without
  * proration, and gain the rung's metered item when they lack one. A
  * subscription-level discount stays as it is: Stripe keeps a coupon on the
  * subscription through an item change, so a permanently discounted

@@ -719,7 +719,7 @@ it("a scheduled cancellation is recalled three days out, once, on the cloud only
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
   await sweepNotifications(db, deps());
   expect(sends.map((s) => s.subject)).toEqual([
-    `Reminder: notify-team's Pro 100k plan ends on ${formatMailDate("en", endsAt)}`,
+    `Reminder: notify-team's Pro 100K plan ends on ${formatMailDate("en", endsAt)}`,
   ]);
   expect(sends[0]?.text).toContain("to keep sending up to 100,000 emails a month");
 
@@ -736,7 +736,7 @@ it("a paid period that lapsed past its grace reads as the downgrade, keyed like 
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
   await sweepNotifications(db, deps());
   expect(sends.map((s) => s.subject)).toEqual(["notify-team is now on Free"]);
-  expect(sends[0]?.text).toContain("The Scale 500k plan ended on");
+  expect(sends[0]?.text).toContain("The Scale 500K plan ended on");
   expect(
     await db
       .select({ key: schema.teamNotifications.periodKey })

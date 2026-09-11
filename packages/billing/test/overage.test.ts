@@ -25,7 +25,7 @@ afterEach(() => close());
 
 const deps = () => ({ db, stripe, log: () => {} });
 
-/** A Pro 100k team with one usage row; `overageItem: null` models a subscription without the metered item. */
+/** A Pro 100K team with one usage row; `overageItem: null` models a subscription without the metered item. */
 async function proTeam(
   slug: string,
   opts: {
