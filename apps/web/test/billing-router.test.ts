@@ -558,7 +558,7 @@ describe("billing router", () => {
     const owner = callerFor(teamId, "owner");
     await owner.billing.changePlan({ rung: "scale_500k" });
     expect(h.sent.map((m) => [m.kind, m.to, m.subject])).toEqual([
-      ["billing.plan_changed", "ada@example.com", "acme moved from Pro 100k to Scale 500k"],
+      ["billing.plan_changed", "ada@example.com", "acme moved from Pro 100K to Scale 500K"],
     ]);
     expect(h.sent[0]?.from).toBe("MillionSend <notices@mail.example.com>");
     expect(h.sent[0]?.text).toContain("https://app.example.com/settings/billing");
@@ -572,8 +572,8 @@ describe("billing router", () => {
     await owner.billing.changePlan({ rung: "scale_1m" });
     expect(calls.scheduleReleases).toEqual(["sub_sched_1"]);
     expect(h.sent.map((m) => m.subject)).toEqual([
-      "acme moved from Pro 100k to Scale 500k",
-      "acme moved from Scale 500k to Scale 1M",
+      "acme moved from Pro 100K to Scale 500K",
+      "acme moved from Scale 500K to Scale 1M",
     ]);
     expect((await teamRow(teamId))?.pendingRung).toBeNull();
   });

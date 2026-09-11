@@ -1,4 +1,5 @@
-import { PAID_RUNGS, PLAN_NAME, type Plan, type PlanRung } from "@millionsend/core";
+// The plans subpath keeps the provision script free of the app env schema, so it runs from any checkout with only a Stripe key.
+import { PAID_RUNGS, PLAN_NAME, type Plan, type PlanRung } from "@millionsend/core/plans";
 import Stripe from "stripe";
 import {
   METER_EVENT_NAME,
@@ -244,7 +245,7 @@ async function archiveLegacyPrices(
 
 /**
  * Subscriptions still on a pre-ladder price move to the rung that price
- * resolves to (the plan's first: Pro 100k, Scale 500k), at once and without
+ * resolves to (the plan's first: Pro 100K, Scale 500K), at once and without
  * proration, and gain the rung's metered item when they lack one. A
  * subscription-level discount stays as it is: Stripe keeps a coupon on the
  * subscription through an item change, so a permanently discounted
@@ -358,7 +359,10 @@ function portalFeatures(): Stripe.BillingPortal.ConfigurationCreateParams.Featur
         ],
       },
     },
-    subscription_update: { enabled: false },
+    // A configuration written before the ladder still lists the prices it
+    // offered, archived since; Stripe validates that list even on a disabled
+    // feature, so the update clears it.
+    subscription_update: { enabled: false, products: "" },
   };
 }
 

@@ -190,10 +190,12 @@ export function Sidebar({
 
   const fmt = new Intl.NumberFormat(locale);
   // A monthly plan's meter is its billing period; a daily cap's is the UTC day.
+  // The included volume is the mark either way: with overage on, sends past
+  // it are billed rather than stopped, and the meter simply runs full.
   const period = usage?.period;
   const today = usage
     ? period
-      ? { accepted: period.accepted, limit: period.overage ? null : period.included }
+      ? { accepted: period.accepted, limit: period.included }
       : usage.today
     : undefined;
   const ratio = today?.limit ? today.accepted / today.limit : 0;

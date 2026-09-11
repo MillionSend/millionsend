@@ -119,7 +119,12 @@ export function AuditView() {
                   <span className="ms-chip">{t(`actors.${row.actor.kind}`)}</span>
                 )}
               </td>
-              <td>{isKnownAction(row.action) ? t(`actions.${row.action}`) : row.action}</td>
+              {/* next-intl reads "." as nesting, so the catalogue keys carry "_" in its place. */}
+              <td>
+                {isKnownAction(row.action)
+                  ? t(`actions.${row.action.replace(".", "_")}`)
+                  : row.action}
+              </td>
               <td
                 className="ms-mono"
                 title={row.target ?? undefined}

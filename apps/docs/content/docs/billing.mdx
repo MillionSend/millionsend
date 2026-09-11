@@ -237,7 +237,7 @@ STRIPE_SECRET_KEY=sk_test_… pnpm --filter @millionsend/billing provision \
 | `--webhook-url` | Find-or-create the webhook endpoint for this URL with exactly the events the handler consumes. Omit for local development. |
 | `--portal` | Find-or-create the Customer Portal configuration and print its id for `STRIPE_PORTAL_CONFIG`. |
 | `--app-url` | Dashboard origin: the portal's default return URL becomes `<app-url>/settings/billing`. Omit for Stripe's default. |
-| `--move-legacy` | Move every subscription still on a pre-ladder price to its rung (Pro 100k, Scale 500k) at once, without proration, adding the rung's metered item; a discount on the subscription stays. Idempotent. |
+| `--move-legacy` | Move every subscription still on a pre-ladder price to its rung (Pro 100K, Scale 500K) at once, without proration, adding the rung's metered item; a discount on the subscription stays. Idempotent. |
 | `--dry-run` | Read the account and print what would be written, without writing. |
 
 What it does, and why re-running is safe:
@@ -291,7 +291,7 @@ Migration `0035_pricing_ladder` adds the `starter` plan value, the `teams`
 columns `plan_quota`, `current_period_start`, `stripe_overage_item_id`,
 `overage_enabled` (default true) and `pending_rung`, and the `usage_periods`
 table (`accepted`, `reported_overage`, `pending_overage`). Existing `scale`
-teams map to Scale 500k (`plan_quota` 500000) and `pro` teams to Pro 100k
+teams map to Scale 500K (`plan_quota` 500000) and `pro` teams to Pro 100K
 (100000); `current_period_start` is backfilled as `current_period_end − 1
 month`. Their subscriptions stay on the legacy prices, resolved through the
 product's metadata, until `provision --move-legacy` (or a manual update)

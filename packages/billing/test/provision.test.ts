@@ -303,6 +303,8 @@ describe("provision", () => {
     expect(portal?.metadata).toEqual(PORTAL_METADATA);
     expect(result.portalConfiguration).toBe(portal?.id);
     expect(portal?.features.subscription_update.enabled).toBe(false);
+    // Sent as the empty string: the API's way to clear a stale product list.
+    expect(portal?.features.subscription_update.products).toBe("");
     expect(portal?.features.subscription_cancel.mode).toBe("at_period_end");
     expect(portal?.features.subscription_cancel.cancellation_reason.enabled).toBe(true);
     expect(portal?.business_profile).toEqual({

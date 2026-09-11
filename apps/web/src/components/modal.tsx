@@ -36,6 +36,7 @@ export function Modal({
   onClose,
   onConfirm,
   title,
+  size,
   children,
 }: {
   open: boolean;
@@ -48,6 +49,8 @@ export function Modal({
    */
   onConfirm?: () => void;
   title?: string;
+  /** "full" fills the viewport but for a margin, for content that needs the room (the plan ladder). */
+  size?: "full";
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -103,7 +106,13 @@ export function Modal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="ms-modal" role="dialog" aria-modal="true" ref={ref} tabIndex={-1}>
+      <div
+        className={size === "full" ? "ms-modal ms-modal-full" : "ms-modal"}
+        role="dialog"
+        aria-modal="true"
+        ref={ref}
+        tabIndex={-1}
+      >
         {title ? (
           <div
             style={{

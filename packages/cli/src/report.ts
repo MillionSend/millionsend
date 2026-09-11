@@ -76,9 +76,9 @@ const TOP: PlanRow = {
 const PLANS: PlanRow[] = [
   { id: "free", label: "Free", perMonth: 3_000, domains: 3, contacts: 1_000 },
   { id: "starter", label: "Starter", perMonth: 45_000, domains: 10, contacts: null },
-  { id: "pro", label: "Pro 100k", perMonth: 100_000, domains: null, contacts: null },
-  { id: "pro", label: "Pro 200k", perMonth: 200_000, domains: null, contacts: null },
-  { id: "scale", label: "Scale 500k", perMonth: 500_000, domains: null, contacts: null },
+  { id: "pro", label: "Pro 100K", perMonth: 100_000, domains: null, contacts: null },
+  { id: "pro", label: "Pro 200K", perMonth: 200_000, domains: null, contacts: null },
+  { id: "scale", label: "Scale 500K", perMonth: 500_000, domains: null, contacts: null },
   { id: "scale", label: "Scale 1M", perMonth: 1_000_000, domains: null, contacts: null },
   { id: "scale", label: "Scale 1.5M", perMonth: 1_500_000, domains: null, contacts: null },
   TOP,

@@ -84,8 +84,8 @@ describe("formatVolume and planLabel", () => {
   it("prints volumes the way plan cards do", () => {
     expect([100, 1_500, 100_000, 1_000_000, 1_500_000, 2_500_000].map(formatVolume)).toEqual([
       "100",
-      "1.5k",
-      "100k",
+      "1.5K",
+      "100K",
       "1M",
       "1.5M",
       "2.5M",
@@ -95,8 +95,8 @@ describe("formatVolume and planLabel", () => {
   it("labels a monthly rung with its volume and a daily plan by name alone", () => {
     expect(planLabel("free", null)).toBe("Free");
     expect(planLabel("starter", null)).toBe("Starter");
-    expect(planLabel("pro", 100_000)).toBe("Pro 100k");
-    expect(planLabel("pro", null)).toBe("Pro 100k");
+    expect(planLabel("pro", 100_000)).toBe("Pro 100K");
+    expect(planLabel("pro", null)).toBe("Pro 100K");
     expect(planLabel("scale", 2_500_000)).toBe("Scale 2.5M");
   });
 });

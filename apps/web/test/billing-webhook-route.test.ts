@@ -208,7 +208,7 @@ describe("owner mail", () => {
     expect(h.sent[0]).toMatchObject({
       from: "MillionSend <notices@mail.example.com>",
       to: "ada@example.com",
-      subject: "upgrader is on Pro 100k",
+      subject: "upgrader is on Pro 100K",
     });
     expect(h.sent[0]?.text).toContain("up to 100,000 emails a month");
     expect(h.sent[0]?.text).toContain("https://app.example.com/settings/billing");
@@ -220,7 +220,7 @@ describe("owner mail", () => {
     h.afterEvent = { plan: "scale", planQuota: 500_000 };
     await send("evt_2", "customer.subscription.updated");
     expect(kinds()).toEqual(["billing.plan_activated", "billing.plan_changed"]);
-    expect(h.sent[1]?.subject).toBe("upgrader moved from Pro 100k to Scale 500k");
+    expect(h.sent[1]?.subject).toBe("upgrader moved from Pro 100K to Scale 500K");
     expect(h.sent[1]?.text).toContain("up to 500,000 emails a month");
 
     // The plan column stays; only the bought volume moved.
@@ -228,7 +228,7 @@ describe("owner mail", () => {
     await send("evt_3", "customer.subscription.updated");
     await send("evt_3", "customer.subscription.updated");
     expect(kinds()).toHaveLength(3);
-    expect(h.sent[2]?.subject).toBe("upgrader moved from Scale 500k to Scale 1M");
+    expect(h.sent[2]?.subject).toBe("upgrader moved from Scale 500K to Scale 1M");
     expect(h.sent[2]?.text).toContain("up to 1,000,000 emails a month");
   });
 
@@ -245,7 +245,7 @@ describe("owner mail", () => {
     await failed("evt_1", 1, Date.UTC(2026, 9, 3) / 1000);
     await failed("evt_1", 1, Date.UTC(2026, 9, 3) / 1000);
     expect(kinds()).toEqual(["billing.payment_failed"]);
-    expect(h.sent[0]?.subject).toBe("Payment failed for upgrader's Pro 100k plan");
+    expect(h.sent[0]?.subject).toBe("Payment failed for upgrader's Pro 100K plan");
     expect(h.sent[0]?.text).toContain("keeps sending up to 100,000 emails a month");
     expect(h.sent[0]?.text).toContain("Stripe retries on October 3, 2026.");
     expect(h.sent[0]?.text).toContain("Pay the invoice: https://invoice.stripe.com/i/in_1");
@@ -274,7 +274,7 @@ describe("owner mail", () => {
     await send("evt_1", "customer.subscription.updated");
     await send("evt_2", "customer.subscription.updated");
     expect(kinds()).toEqual(["billing.cancel_scheduled"]);
-    expect(h.sent[0]?.subject).toBe("Your Pro 100k plan ends on September 30, 2026");
+    expect(h.sent[0]?.subject).toBe("Your Pro 100K plan ends on September 30, 2026");
     expect(h.sent[0]?.text).toContain("Free (100 emails a day)");
 
     // Resuming is the customer's own doing: nothing to tell them, and the
@@ -298,7 +298,7 @@ describe("owner mail", () => {
     ]);
     expect(h.sent[2]?.subject).toBe("upgrader is now on Free");
     expect(h.sent[2]?.text).toContain(
-      `The Pro 100k plan ended on ${formatMailDate("en", new Date())}.`,
+      `The Pro 100K plan ended on ${formatMailDate("en", new Date())}.`,
     );
   });
 
@@ -351,8 +351,8 @@ describe("owner mail", () => {
     h.afterEvent = { plan: "pro" };
     await send("evt_1", "customer.subscription.updated");
     expect(h.sent.map((m) => [m.to, m.subject]).sort()).toEqual([
-      ["ada@example.com", "upgrader is on Pro 100k"],
-      ["bia@example.com", "upgrader está no plano Pro 100k"],
+      ["ada@example.com", "upgrader is on Pro 100K"],
+      ["bia@example.com", "upgrader está no plano Pro 100K"],
     ]);
     expect(h.sent.find((m) => m.to === "bia@example.com")?.text).toContain(
       "até 100.000 e-mails por mês",

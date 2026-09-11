@@ -1,4 +1,10 @@
-import { isPlanRungKey, PAID_RUNGS, PLAN_RUNGS, type PlanRung, rungByKey } from "@millionsend/core";
+import {
+  isPlanRungKey,
+  PAID_RUNGS,
+  PLAN_RUNGS,
+  type PlanRung,
+  rungByKey,
+} from "@millionsend/core/plans";
 import type Stripe from "stripe";
 import type { BillingStripe } from "./stripe.js";
 
