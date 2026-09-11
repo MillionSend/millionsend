@@ -508,9 +508,12 @@ describe("reconcileTeamPlan", () => {
       "millionsend_scale_500k_monthly",
     );
     await reconcileTeamPlan(deps(), teamId);
-    expect(state.listParams?.expand).toEqual([
-      "data.items.data.price.product",
-      "data.schedule.phases.items.price",
+    // Expansions ride on the retrieve: a list nests them one level deeper than Stripe allows.
+    expect(state.listParams?.expand).toBeUndefined();
+    expect(state.retrieves).toContain("sub_new");
+    expect(state.retrieveParams?.expand).toEqual([
+      "items.data.price.product",
+      "schedule.phases.items.price",
     ]);
     expect(await team(teamId)).toMatchObject({
       plan: "scale",
