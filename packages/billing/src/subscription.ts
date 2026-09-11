@@ -166,14 +166,17 @@ export async function reconcileTeamPlan(deps: BillingDeps, teamId: string): Prom
   const customerId = team.stripeCustomerId;
   await deps.db.transaction(async (tx) => {
     await lockCustomer(tx as unknown as Db, customerId);
+    // A list expands from `data.`, one level deeper than a retrieve, and
+    // Stripe allows four: the list only names the newest subscription and
+    // the retrieve carries the expansions.
     const { data } = await deps.stripe.subscriptions.list({
       customer: customerId,
       status: "all",
       limit: 1,
-      expand: SUBSCRIPTION_EXPAND.map((path) => `data.${path}`),
     });
-    const sub = data[0];
-    if (!sub) return;
+    const id = data[0]?.id;
+    if (!id) return;
+    const sub = await deps.stripe.subscriptions.retrieve(id, { expand: SUBSCRIPTION_EXPAND });
     await applySubscription(tx as unknown as Db, sub, deps.log ?? console.warn, deps.stripe);
   });
 }
