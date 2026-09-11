@@ -2416,45 +2416,9 @@ summary:focus-visible,
 }
 
 /* Plan ladder — the landing page's pricing section (millionsend-lp site.css,
-   "Pricing"), kept in step by hand: a native range slider over the volumes,
-   four cards, the card the volume lands on recommended (pill, raised panel,
-   running border beam), the others held back until pointed at; the first
-   stop recommends nothing. */
-@property --ms-beam-a {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-/* A bone highlight travelling the 1px border; still (paused) unless the
-   element says otherwise. Needs position: relative and a border-radius. */
-.ms-beam::before {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  padding: 1px;
-  background: conic-gradient(
-    from var(--ms-beam-a),
-    transparent 0 64%,
-    color-mix(in srgb, var(--ms-bone) 85%, transparent) 84%,
-    transparent 100%
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  pointer-events: none;
-  animation: ms-beam 11s linear infinite paused;
-}
-@keyframes ms-beam {
-  to {
-    --ms-beam-a: 360deg;
-  }
-}
+   "Pricing") without its recommendation: a native range slider over the
+   volumes and four level cards; the card the volume lands on carries the
+   primary button and, on phones, is the one that unfolds. */
 .ms-volume {
   max-width: 640px;
   margin: 0 auto 28px;
@@ -2554,7 +2518,6 @@ summary:focus-visible,
   gap: 16px;
 }
 .ms-plan {
-  position: relative;
   border: 1px solid var(--ms-line);
   border-radius: var(--ms-r-card);
   padding: 22px;
@@ -2562,46 +2525,10 @@ summary:focus-visible,
   flex-direction: column;
   gap: 16px;
   background: var(--ms-panel);
-  transition:
-    border-color var(--ms-dur-base) var(--ms-ease),
-    background var(--ms-dur-base) var(--ms-ease),
-    opacity var(--ms-dur-base) var(--ms-ease);
-}
-/* The card the selected volume lands on; the others step back until pointed at. */
-.ms-plans[data-recommended] .ms-plan:not([data-active]) {
-  opacity: 0.55;
-}
-.ms-plans[data-recommended] .ms-plan:not([data-active]):hover,
-.ms-plans[data-recommended] .ms-plan:not([data-active]):focus-within {
-  opacity: 1;
-}
-.ms-plan[data-active] {
-  border-color: var(--ms-line-strong);
-  background: var(--ms-panel-raised);
-}
-/* Every card wears the beam; only the recommended one's travels. */
-.ms-plan[data-active]::before {
-  animation-play-state: running;
-}
-.ms-plan-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
 }
 .ms-plan-name {
   font: 600 var(--ms-fs-section) var(--ms-font-sans);
   color: var(--ms-bone);
-}
-/* Kept in the flow while hidden so the four headers stay one height. */
-.ms-plan-pill {
-  visibility: hidden;
-  opacity: 0;
-  transition: opacity var(--ms-dur-base) var(--ms-ease);
-}
-.ms-plan[data-active] .ms-plan-pill {
-  visibility: visible;
-  opacity: 1;
 }
 .ms-plan-price .ms-digits {
   font-size: var(--ms-fs-price);
@@ -2634,9 +2561,6 @@ summary:focus-visible,
   margin-top: -8px;
   font-size: 12.5px;
   color: var(--ms-muted);
-}
-.ms-plan:not([data-open]) {
-  cursor: pointer;
 }
 /* The list and button share one body, which the phone layout folds on the
    other cards; the list takes the slack so the four buttons sit level. */
@@ -2693,17 +2617,8 @@ summary:focus-visible,
     gap: 0 12px;
     padding: 14px 16px;
   }
-  .ms-plans[data-recommended] .ms-plan:not([data-active]) {
-    opacity: 1;
-  }
-  .ms-plan-head {
-    display: contents;
-  }
   .ms-plan-name {
     font-size: 15px;
-  }
-  .ms-plan-pill {
-    display: none;
   }
   .ms-plan-price .ms-digits {
     font-size: 18px;
@@ -2755,9 +2670,6 @@ summary:focus-visible,
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ms-beam::before {
-    animation: none;
-  }
   .ms-plan-more {
     transition: none;
   }

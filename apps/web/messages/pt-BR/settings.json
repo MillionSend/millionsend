@@ -297,7 +297,6 @@
     "comparePlans": "Comparar planos",
     "fromPrice": "a partir de {price}",
     "volume": "E-mails por mês",
-    "recommended": "Recomendado",
     "sliderHint": "Mova o slider para comparar planos",
     "emailsADay": "e-mails por dia",
     "emailsAMonth": "e-mails por mês",
@@ -310,7 +309,7 @@
     "pendingChange": "Muda para {plan} em {date}.",
     "keepPlan": "Manter {plan}",
     "switchAtPeriodEnd": "Trocar no fim do período",
-    "changeHint": "Subir de plano vale na hora, com a diferença rateada na próxima fatura. Descer vale quando o período renovar; nada é reembolsado.",
+    "changeHint": "Subir de plano vale na hora, com a diferença rateada na próxima fatura. Descer vale quando o período renovar.",
     "features": {
       "domains": "{n, plural, one {# domínio de envio} other {# domínios de envio}}",
       "domainsUnlimited": "Domínios de envio ilimitados",

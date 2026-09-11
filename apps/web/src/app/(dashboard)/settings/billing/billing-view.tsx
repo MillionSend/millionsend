@@ -472,40 +472,17 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
             </div>
             <p className="ms-slider-hint">{t("sliderHint")}</p>
           </div>
-          {/* The first stop names Free without recommending it, as on the site:
-            every card stays level and no pill, highlight or beam singles one out. */}
-          <div className="ms-plans" data-recommended={at > 0 || undefined}>
+          <div className="ms-plans">
             {PLANS.map((p) => {
               const active = selected.plan === p;
-              const recommended = active && at > 0;
               // A plan shows the rung the slider landed on when it is one of
               // its own, else its entry rung.
               const r = active ? selected : (PLAN_RUNGS.find((x) => x.plan === p) ?? selected);
               const isCurrent = r.key === current.key;
               const forSale = canManage && r.priceCents > 0 && !isCurrent;
-              // A click on another plan's card moves the slider to that plan's
-              // first step; the slider itself stays the keyboard control.
-              const select = () => {
-                if (active) return;
-                const i = PLAN_RUNGS.findIndex((x) => x.plan === p);
-                if (i >= 0) setStep(i);
-              };
               return (
-                // biome-ignore lint/a11y/noStaticElementInteractions: a pointer shortcut; the slider is the keyboard control
-                // biome-ignore lint/a11y/useKeyWithClickEvents: same
-                <div
-                  key={p}
-                  className="ms-plan ms-beam"
-                  data-active={recommended || undefined}
-                  data-open={active || undefined}
-                  onClick={select}
-                >
-                  <div className="ms-plan-head">
-                    <div className="ms-plan-name">{planName(p)}</div>
-                    <span className="ms-badge ms-badge-success ms-plan-pill">
-                      {t("recommended")}
-                    </span>
-                  </div>
+                <div key={p} className="ms-plan" data-open={active || undefined}>
+                  <div className="ms-plan-name">{planName(p)}</div>
                   <div className="ms-plan-price">
                     <span className="ms-digits">
                       <Odometer formatted={usd(r.priceCents)} lit={false} />
@@ -544,7 +521,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
                       ) : forSale ? (
                         <button
                           type="button"
-                          className={`ms-btn ${recommended ? "ms-btn-primary" : "ms-btn-secondary"}`}
+                          className={`ms-btn ${active ? "ms-btn-primary" : "ms-btn-secondary"}`}
                           disabled={busy}
                           onClick={() =>
                             hasLiveSubscription
@@ -577,7 +554,14 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
             })}
           </div>
           {canManage && hasLiveSubscription ? (
-            <p style={{ margin: "14px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
+            <p
+              style={{
+                margin: "14px 0 0",
+                fontSize: 12.5,
+                color: "var(--ms-muted)",
+                textAlign: "center",
+              }}
+            >
               {t("changeHint")}
             </p>
           ) : null}

@@ -297,7 +297,6 @@
     "comparePlans": "Compare plans",
     "fromPrice": "from {price}",
     "volume": "Emails a month",
-    "recommended": "Recommended",
     "sliderHint": "Move the slider to compare plans",
     "emailsADay": "emails a day",
     "emailsAMonth": "emails a month",
@@ -310,7 +309,7 @@
     "pendingChange": "Moves to {plan} on {date}.",
     "keepPlan": "Keep {plan}",
     "switchAtPeriodEnd": "Switch at period end",
-    "changeHint": "Moving up applies now, with the difference prorated on your next invoice. Moving down applies when the period renews; nothing is refunded.",
+    "changeHint": "Moving up applies now, with the difference prorated on your next invoice. Moving down applies when the period renews.",
     "features": {
       "domains": "{n, plural, one {# sending domain} other {# sending domains}}",
       "domainsUnlimited": "Unlimited sending domains",
