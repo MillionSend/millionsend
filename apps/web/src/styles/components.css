@@ -2414,3 +2414,351 @@ summary:focus-visible,
 .ms-code-editor-marks mark[data-current] {
   background: color-mix(in srgb, var(--ms-warn) 52%, transparent);
 }
+
+/* Plan ladder — the landing page's pricing section (millionsend-lp site.css,
+   "Pricing"), kept in step by hand: a native range slider over the volumes,
+   four cards, the card the volume lands on recommended (pill, raised panel,
+   running border beam), the others held back until pointed at; the first
+   stop recommends nothing. */
+@property --ms-beam-a {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+/* A bone highlight travelling the 1px border; still (paused) unless the
+   element says otherwise. Needs position: relative and a border-radius. */
+.ms-beam::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--ms-beam-a),
+    transparent 0 64%,
+    color-mix(in srgb, var(--ms-bone) 85%, transparent) 84%,
+    transparent 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: ms-beam 11s linear infinite paused;
+}
+@keyframes ms-beam {
+  to {
+    --ms-beam-a: 360deg;
+  }
+}
+.ms-volume {
+  max-width: 640px;
+  margin: 0 auto 28px;
+  text-align: center;
+}
+.ms-volume .ms-microlabel {
+  display: block;
+  margin-bottom: 14px;
+}
+/* The fill follows --ms-slider-p, set from the step; the marks under the
+   track are click shortcuts, laid out with a thumb-radius gutter so each sits
+   under the thumb's centre at its step. */
+.ms-slider {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.ms-slider:focus-visible {
+  outline: none;
+}
+.ms-slider::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(to right, var(--ms-bone) var(--ms-slider-p), var(--ms-line) 0);
+}
+.ms-slider::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ms-line);
+}
+.ms-slider::-moz-range-progress {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ms-bone);
+}
+.ms-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -9px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ms-bone);
+}
+.ms-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ms-bone);
+}
+.ms-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-slider:focus-visible::-moz-range-thumb {
+  box-shadow: var(--ms-focus-ring);
+}
+.ms-slider-marks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding: 0 10px;
+}
+/* Zero-width in the flex math (width cancelled by the margins), so the marks
+   land on the snap points, yet a 3.6em hit area. */
+.ms-slider-marks button {
+  flex: none;
+  width: 3.6em;
+  margin: 0 -1.8em;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  color: var(--ms-muted);
+  cursor: pointer;
+  transition: color var(--ms-dur-fast) var(--ms-ease);
+}
+.ms-slider-marks button:hover,
+.ms-slider-marks button[data-on] {
+  color: var(--ms-bone);
+}
+.ms-slider-hint {
+  display: none;
+  margin: 10px 0 0;
+  font-family: var(--ms-font-mono);
+  font-size: 11.5px;
+  color: var(--ms-muted);
+}
+.ms-plans {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.ms-plan {
+  position: relative;
+  border: 1px solid var(--ms-line);
+  border-radius: var(--ms-r-card);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--ms-panel);
+  transition:
+    border-color var(--ms-dur-base) var(--ms-ease),
+    background var(--ms-dur-base) var(--ms-ease),
+    opacity var(--ms-dur-base) var(--ms-ease);
+}
+/* The card the selected volume lands on; the others step back until pointed at. */
+.ms-plans[data-recommended] .ms-plan:not([data-active]) {
+  opacity: 0.55;
+}
+.ms-plans[data-recommended] .ms-plan:not([data-active]):hover,
+.ms-plans[data-recommended] .ms-plan:not([data-active]):focus-within {
+  opacity: 1;
+}
+.ms-plan[data-active] {
+  border-color: var(--ms-line-strong);
+  background: var(--ms-panel-raised);
+}
+/* Every card wears the beam; only the recommended one's travels. */
+.ms-plan[data-active]::before {
+  animation-play-state: running;
+}
+.ms-plan-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ms-plan-name {
+  font: 600 var(--ms-fs-section) var(--ms-font-sans);
+  color: var(--ms-bone);
+}
+/* Kept in the flow while hidden so the four headers stay one height. */
+.ms-plan-pill {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity var(--ms-dur-base) var(--ms-ease);
+}
+.ms-plan[data-active] .ms-plan-pill {
+  visibility: visible;
+  opacity: 1;
+}
+.ms-plan-price .ms-digits {
+  font-size: var(--ms-fs-price);
+  line-height: 1;
+  color: var(--ms-bone);
+}
+.ms-plan-cap {
+  padding-top: 16px;
+  border-top: 1px solid var(--ms-line);
+}
+.ms-plan-cap .ms-digits {
+  font-size: 26px;
+  line-height: 1.1;
+  color: var(--ms-bone);
+  display: block;
+}
+.ms-plan-per {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--ms-muted);
+}
+.ms-plan-price .ms-plan-per {
+  display: inline;
+  margin-left: 8px;
+}
+/* Sits under the cap block; the card's own gap already opens 16px, so it pulls up. */
+.ms-plan-over {
+  display: block;
+  margin-top: -8px;
+  font-size: 12.5px;
+  color: var(--ms-muted);
+}
+.ms-plan:not([data-open]) {
+  cursor: pointer;
+}
+/* The list and button share one body, which the phone layout folds on the
+   other cards; the list takes the slack so the four buttons sit level. */
+.ms-plan-more {
+  flex: 1;
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 320ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.ms-plan-more > div {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+.ms-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ms-muted);
+  flex: 1;
+  align-content: start;
+}
+.ms-checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+/* 14px glyph against a 13px/1.55 first line: 3px seats it on the baseline. */
+.ms-checklist-mark {
+  flex: none;
+  margin-top: 3px;
+  color: var(--ms-success);
+}
+@media (max-width: 899px) {
+  .ms-plans {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 767px) {
+  /* One header row per card (name and price, the cap under them); the
+     selected card unfolds its list and button, the others stay a slim row. */
+  .ms-plans {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .ms-plan {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: baseline;
+    gap: 0 12px;
+    padding: 14px 16px;
+  }
+  .ms-plans[data-recommended] .ms-plan:not([data-active]) {
+    opacity: 1;
+  }
+  .ms-plan-head {
+    display: contents;
+  }
+  .ms-plan-name {
+    font-size: 15px;
+  }
+  .ms-plan-pill {
+    display: none;
+  }
+  .ms-plan-price .ms-digits {
+    font-size: 18px;
+  }
+  .ms-plan-price .ms-plan-per {
+    margin-left: 4px;
+    font-size: 12px;
+  }
+  .ms-plan-cap {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+    padding: 0;
+    border: 0;
+  }
+  .ms-plan-cap .ms-digits {
+    display: inline;
+    font-size: 14px;
+  }
+  .ms-plan-cap .ms-plan-per {
+    display: inline;
+    margin: 0 0 0 4px;
+    font-size: 12px;
+  }
+  .ms-plan-over {
+    display: none;
+  }
+  .ms-plan[data-open] .ms-plan-over:not([data-empty]) {
+    display: block;
+    grid-column: 1 / -1;
+    margin-top: 4px;
+  }
+  .ms-plan-more {
+    grid-column: 1 / -1;
+  }
+  /* The 3px bleed keeps the button's focus ring out of the clip. */
+  .ms-plan-more > div {
+    overflow: hidden;
+    padding: 0 3px 3px;
+    margin: 0 -3px -3px;
+  }
+  .ms-plan-more .ms-checklist {
+    margin-top: 12px;
+  }
+  .ms-plan:not([data-open]) .ms-plan-more {
+    grid-template-rows: 0fr;
+  }
+  .ms-slider-hint {
+    display: block;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-beam::before {
+    animation: none;
+  }
+  .ms-plan-more {
+    transition: none;
+  }
+}

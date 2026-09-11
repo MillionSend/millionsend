@@ -8,12 +8,11 @@ import {
   PLAN_RUNGS,
   type Plan,
   type PlanRung,
-  type PlanRungKey,
   planLabel,
 } from "@millionsend/core/plans";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { type ReactNode, useState } from "react";
+import { type CSSProperties, type ReactNode, useState } from "react";
 import { Odometer } from "@/components/odometer";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -25,6 +24,9 @@ import { useTRPC } from "@/lib/trpc";
 import { QuotaRow } from "../usage/usage-view";
 
 const PLANS = ["free", "starter", "pro", "scale"] as const satisfies readonly Plan[];
+/* The slider's stops are the rungs themselves; a daily cap sits on the monthly axis as thirty days of it. */
+const LAST_STEP = PLAN_RUNGS.length - 1;
+const stepVolume = (r: PlanRung) => (r.period === "day" ? r.included * 30 : r.included);
 
 /** Subscription status → badge tone: paying reads healthy, grace warns, lapsed is a danger. */
 const STATUS_TONE = {
@@ -91,15 +93,23 @@ function BillingSkeleton({ title }: { title: string }) {
   );
 }
 
+/** The green check in front of every feature line (color comes from .ms-checklist-mark). */
 function Check() {
   return (
-    <span
-      className="ms-mono"
+    <svg
+      className="ms-checklist-mark"
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
-      style={{ fontSize: 11, color: "var(--ms-success)", flex: "none", lineHeight: "18px" }}
     >
-      ✓
-    </span>
+      <path d="m4 12.5 5 5L20 6.5" />
+    </svg>
   );
 }
 
@@ -140,13 +150,11 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const busy = mutations.some((m) => m.isPending);
   const failed = mutations.some((m) => m.isError);
 
-  // The selector follows the team's own rung until the viewer picks another.
-  const [picked, setPicked] = useState<PlanRungKey | null>(null);
+  // The slider follows the team's own rung until the viewer moves it.
+  const [step, setStep] = useState<number | null>(null);
 
   const fmt = new Intl.NumberFormat(locale);
   const usd = (cents: number) => formatUsd(cents, locale);
-  const capLine = (rung: PlanRung) =>
-    t(rung.period === "day" ? "capPerDay" : "capPerMonth", { n: fmt.format(rung.included) });
 
   const notice =
     checkout === "success" ? (
@@ -205,7 +213,13 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   } = status.data;
   const current = PLAN_RUNGS.find((r) => r.key === currentKey) ?? PLAN_RUNGS[0];
   const pending = PLAN_RUNGS.find((r) => r.key === pendingRung) ?? null;
-  const selected = PLAN_RUNGS.find((r) => r.key === picked) ?? current;
+  const at =
+    step ??
+    Math.max(
+      0,
+      PLAN_RUNGS.findIndex((r) => r.key === current.key),
+    );
+  const selected = PLAN_RUNGS[at] ?? current;
   const over = quota.kind === "month" ? Math.max(0, usage.accepted - quota.included) : 0;
 
   const portalButton = (label: string, className: string) => (
@@ -385,141 +399,135 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
       </Card>
 
       <Card title={t("plansTitle")}>
-        <div
-          className="ms-wrap-row"
-          style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}
-        >
-          <span className="ms-microlabel" style={{ fontSize: 10.5 }}>
+        <div className="ms-volume">
+          <label htmlFor="ms-volume" className="ms-microlabel">
             {t("volume")}
-          </span>
-          <div
-            style={{
-              display: "inline-flex",
-              flexWrap: "wrap",
-              gap: 2,
-              padding: 2,
-              background: "var(--ms-inset)",
-              border: "1px solid var(--ms-line)",
-              borderRadius: "var(--ms-r-pill)",
-            }}
-          >
-            {PLAN_RUNGS.map((r) => (
+          </label>
+          <input
+            id="ms-volume"
+            className="ms-slider"
+            type="range"
+            min={0}
+            max={LAST_STEP}
+            step={1}
+            value={at}
+            onChange={(e) => setStep(Number(e.target.value))}
+            aria-valuetext={`${fmt.format(stepVolume(selected))} ${t("emailsAMonth")}`}
+            style={{ "--ms-slider-p": `${(at / LAST_STEP) * 100}%` } as CSSProperties}
+          />
+          <div className="ms-slider-marks">
+            {PLAN_RUNGS.map((r, i) => (
               <button
                 key={r.key}
                 type="button"
-                className={r.key === selected.key ? "ms-code-tab active" : "ms-code-tab"}
-                aria-pressed={r.key === selected.key}
-                style={{ borderRadius: "var(--ms-r-pill)" }}
-                onClick={() => setPicked(r.key)}
+                tabIndex={-1}
+                className="ms-digits"
+                data-on={i === at || undefined}
+                onClick={() => setStep(i)}
               >
-                <span className="ms-digits">
-                  {formatVolume(r.period === "day" ? r.included * 30 : r.included)}
-                </span>
+                {formatVolume(stepVolume(r)).toUpperCase()}
               </button>
             ))}
           </div>
+          <p className="ms-slider-hint">{t("sliderHint")}</p>
         </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: 12,
-          }}
-        >
+        {/* The first stop names Free without recommending it, as on the site:
+            every card stays level and no pill, highlight or beam singles one out. */}
+        <div className="ms-plans" data-recommended={at > 0 || undefined}>
           {PLANS.map((p) => {
-            // A plan shows the rung the selector landed on when it is one of
+            const active = selected.plan === p;
+            const recommended = active && at > 0;
+            // A plan shows the rung the slider landed on when it is one of
             // its own, else its entry rung.
-            const r =
-              selected.plan === p ? selected : (PLAN_RUNGS.find((x) => x.plan === p) ?? selected);
-            const lit = r.key === selected.key;
+            const r = active ? selected : (PLAN_RUNGS.find((x) => x.plan === p) ?? selected);
             const isCurrent = r.key === current.key;
             const forSale = canManage && r.priceCents > 0 && !isCurrent;
+            // A click on another plan's card moves the slider to that plan's
+            // first step; the slider itself stays the keyboard control.
+            const select = () => {
+              if (active) return;
+              const i = PLAN_RUNGS.findIndex((x) => x.plan === p);
+              if (i >= 0) setStep(i);
+            };
             return (
+              // biome-ignore lint/a11y/noStaticElementInteractions: a pointer shortcut; the slider is the keyboard control
+              // biome-ignore lint/a11y/useKeyWithClickEvents: same
               <div
                 key={p}
-                style={{
-                  padding: "16px 18px",
-                  borderRadius: 12,
-                  border: `1px solid ${lit ? "var(--ms-steel)" : "var(--ms-line)"}`,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                }}
+                className="ms-plan ms-beam"
+                data-active={recommended || undefined}
+                data-open={active || undefined}
+                onClick={select}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span className="ms-display" style={{ fontSize: 16, color: "var(--ms-bone)" }}>
-                    {planName(p)}
-                  </span>
-                  {isCurrent ? (
-                    <span className="ms-badge ms-badge-neutral">{t("current")}</span>
-                  ) : null}
+                <div className="ms-plan-head">
+                  <div className="ms-plan-name">{planName(p)}</div>
+                  <span className="ms-badge ms-badge-success ms-plan-pill">{t("recommended")}</span>
                 </div>
-                <div
-                  className="ms-digits"
-                  style={{ fontSize: 26, color: "var(--ms-bone)", lineHeight: 1 }}
-                >
-                  <Odometer formatted={usd(r.priceCents)} />
-                  <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ms-muted)" }}>
-                    {" "}
-                    {t("perMonth")}
+                <div className="ms-plan-price">
+                  <span className="ms-digits">
+                    <Odometer formatted={usd(r.priceCents)} lit={false} />
+                  </span>
+                  <span className="ms-plan-per">{t("perMonth")}</span>
+                </div>
+                <div className="ms-plan-cap">
+                  <span className="ms-digits">{fmt.format(r.included)}</span>
+                  <span className="ms-plan-per">
+                    {t(r.period === "day" ? "emailsADay" : "emailsAMonth")}
                   </span>
                 </div>
-                <div style={{ fontSize: 13, color: "var(--ms-bone)" }}>{capLine(r)}</div>
                 {/* Daily plans have no overage line; a blank one keeps the four cards' rows aligned. */}
-                <div style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
+                <span
+                  className="ms-plan-over"
+                  data-empty={r.overageCentsPer1k === null || undefined}
+                >
                   {r.overageCentsPer1k === null
                     ? "\u00a0"
                     : t("overagePer1k", { price: usd(r.overageCentsPer1k) })}
+                </span>
+                <div className="ms-plan-more">
+                  <div>
+                    <ul className="ms-checklist">
+                      {features(p).map((f) => (
+                        <li key={f}>
+                          <Check />
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                    {isCurrent ? (
+                      <button type="button" className="ms-btn ms-btn-secondary" disabled>
+                        {t("current")}
+                      </button>
+                    ) : forSale ? (
+                      <button
+                        type="button"
+                        className={`ms-btn ${recommended ? "ms-btn-primary" : "ms-btn-secondary"}`}
+                        disabled={busy}
+                        onClick={() =>
+                          hasLiveSubscription
+                            ? changePlan.mutate({ rung: r.key })
+                            : startCheckout.mutate({ rung: r.key })
+                        }
+                      >
+                        <BtnSpinner
+                          on={
+                            (startCheckout.isPending && startCheckout.variables?.rung === r.key) ||
+                            (changePlan.isPending && changePlan.variables?.rung === r.key)
+                          }
+                        />
+                        {hasLiveSubscription
+                          ? r.priceCents < current.priceCents
+                            ? t("switchAtPeriodEnd")
+                            : t("switch")
+                          : t("choose")}
+                      </button>
+                    ) : p === "free" && canManage && hasLiveSubscription ? (
+                      <p style={{ margin: 0, fontSize: 12, color: "var(--ms-muted)" }}>
+                        {t("freeHint")}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
-                <ul
-                  style={{
-                    listStyle: "none",
-                    margin: 0,
-                    padding: 0,
-                    display: "grid",
-                    gap: 6,
-                    fontSize: 12.5,
-                    lineHeight: "18px",
-                    color: "var(--ms-muted)",
-                    flex: 1,
-                  }}
-                >
-                  {features(p).map((f) => (
-                    <li key={f} style={{ display: "flex", gap: 8 }}>
-                      <Check />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-                {forSale ? (
-                  <button
-                    type="button"
-                    className={`ms-btn ${lit ? "ms-btn-primary" : "ms-btn-secondary"}`}
-                    disabled={busy}
-                    onClick={() =>
-                      hasLiveSubscription
-                        ? changePlan.mutate({ rung: r.key })
-                        : startCheckout.mutate({ rung: r.key })
-                    }
-                  >
-                    <BtnSpinner
-                      on={
-                        (startCheckout.isPending && startCheckout.variables?.rung === r.key) ||
-                        (changePlan.isPending && changePlan.variables?.rung === r.key)
-                      }
-                    />
-                    {hasLiveSubscription
-                      ? r.priceCents < current.priceCents
-                        ? t("switchAtPeriodEnd")
-                        : t("switch")
-                      : t("choose")}
-                  </button>
-                ) : p === "free" && canManage && hasLiveSubscription ? (
-                  <p style={{ margin: 0, fontSize: 12, color: "var(--ms-muted)" }}>
-                    {t("freeHint")}
-                  </p>
-                ) : null}
               </div>
             );
           })}
