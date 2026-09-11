@@ -13,6 +13,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { type CSSProperties, type ReactNode, useState } from "react";
+import { Modal } from "@/components/modal";
 import { Odometer } from "@/components/odometer";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -152,6 +153,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
 
   // The slider follows the team's own rung until the viewer moves it.
   const [step, setStep] = useState<number | null>(null);
+  const [plansOpen, setPlansOpen] = useState(false);
 
   const fmt = new Intl.NumberFormat(locale);
   const usd = (cents: number) => formatUsd(cents, locale);
@@ -398,146 +400,189 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         )}
       </Card>
 
-      <Card title={t("plansTitle")}>
-        <div className="ms-volume">
-          <label htmlFor="ms-volume" className="ms-microlabel">
-            {t("volume")}
-          </label>
-          <input
-            id="ms-volume"
-            className="ms-slider"
-            type="range"
-            min={0}
-            max={LAST_STEP}
-            step={1}
-            value={at}
-            onChange={(e) => setStep(Number(e.target.value))}
-            aria-valuetext={`${fmt.format(stepVolume(selected))} ${t("emailsAMonth")}`}
-            style={{ "--ms-slider-p": `${(at / LAST_STEP) * 100}%` } as CSSProperties}
-          />
-          <div className="ms-slider-marks">
-            {PLAN_RUNGS.map((r, i) => (
-              <button
-                key={r.key}
-                type="button"
-                tabIndex={-1}
-                className="ms-digits"
-                data-on={i === at || undefined}
-                onClick={() => setStep(i)}
-              >
-                {formatVolume(stepVolume(r)).toUpperCase()}
-              </button>
-            ))}
-          </div>
-          <p className="ms-slider-hint">{t("sliderHint")}</p>
-        </div>
-        {/* The first stop names Free without recommending it, as on the site:
-            every card stays level and no pill, highlight or beam singles one out. */}
-        <div className="ms-plans" data-recommended={at > 0 || undefined}>
+      <Card
+        title={t("plansTitle")}
+        action={
+          <button
+            type="button"
+            className="ms-btn ms-btn-secondary"
+            onClick={() => setPlansOpen(true)}
+          >
+            {t("comparePlans")}
+          </button>
+        }
+      >
+        <div className="ms-plan-strip">
           {PLANS.map((p) => {
-            const active = selected.plan === p;
-            const recommended = active && at > 0;
-            // A plan shows the rung the slider landed on when it is one of
-            // its own, else its entry rung.
-            const r = active ? selected : (PLAN_RUNGS.find((x) => x.plan === p) ?? selected);
-            const isCurrent = r.key === current.key;
-            const forSale = canManage && r.priceCents > 0 && !isCurrent;
-            // A click on another plan's card moves the slider to that plan's
-            // first step; the slider itself stays the keyboard control.
-            const select = () => {
-              if (active) return;
-              const i = PLAN_RUNGS.findIndex((x) => x.plan === p);
-              if (i >= 0) setStep(i);
-            };
+            const rungs = PLAN_RUNGS.filter((x) => x.plan === p);
+            const price = usd(rungs[0]?.priceCents ?? 0);
             return (
-              // biome-ignore lint/a11y/noStaticElementInteractions: a pointer shortcut; the slider is the keyboard control
-              // biome-ignore lint/a11y/useKeyWithClickEvents: same
               <div
                 key={p}
-                className="ms-plan ms-beam"
-                data-active={recommended || undefined}
-                data-open={active || undefined}
-                onClick={select}
+                className="ms-plan-strip-item"
+                data-current={p === current.plan || undefined}
               >
-                <div className="ms-plan-head">
-                  <div className="ms-plan-name">{planName(p)}</div>
-                  <span className="ms-badge ms-badge-success ms-plan-pill">{t("recommended")}</span>
-                </div>
-                <div className="ms-plan-price">
-                  <span className="ms-digits">
-                    <Odometer formatted={usd(r.priceCents)} lit={false} />
-                  </span>
-                  <span className="ms-plan-per">{t("perMonth")}</span>
-                </div>
-                <div className="ms-plan-cap">
-                  <span className="ms-digits">{fmt.format(r.included)}</span>
-                  <span className="ms-plan-per">
-                    {t(r.period === "day" ? "emailsADay" : "emailsAMonth")}
-                  </span>
-                </div>
-                {/* Daily plans have no overage line; a blank one keeps the four cards' rows aligned. */}
-                <span
-                  className="ms-plan-over"
-                  data-empty={r.overageCentsPer1k === null || undefined}
-                >
-                  {r.overageCentsPer1k === null
-                    ? "\u00a0"
-                    : t("overagePer1k", { price: usd(r.overageCentsPer1k) })}
+                <span className="ms-plan-strip-name">{planName(p)}</span>
+                <span className="ms-plan-strip-price">
+                  {rungs.length > 1 ? t("fromPrice", { price }) : price} {t("perMonth")}
                 </span>
-                <div className="ms-plan-more">
-                  <div>
-                    <ul className="ms-checklist">
-                      {features(p).map((f) => (
-                        <li key={f}>
-                          <Check />
-                          {f}
-                        </li>
-                      ))}
-                    </ul>
-                    {isCurrent ? (
-                      <button type="button" className="ms-btn ms-btn-secondary" disabled>
-                        {t("current")}
-                      </button>
-                    ) : forSale ? (
-                      <button
-                        type="button"
-                        className={`ms-btn ${recommended ? "ms-btn-primary" : "ms-btn-secondary"}`}
-                        disabled={busy}
-                        onClick={() =>
-                          hasLiveSubscription
-                            ? changePlan.mutate({ rung: r.key })
-                            : startCheckout.mutate({ rung: r.key })
-                        }
-                      >
-                        <BtnSpinner
-                          on={
-                            (startCheckout.isPending && startCheckout.variables?.rung === r.key) ||
-                            (changePlan.isPending && changePlan.variables?.rung === r.key)
-                          }
-                        />
-                        {hasLiveSubscription
-                          ? r.priceCents < current.priceCents
-                            ? t("switchAtPeriodEnd")
-                            : t("switch")
-                          : t("choose")}
-                      </button>
-                    ) : p === "free" && canManage && hasLiveSubscription ? (
-                      <p style={{ margin: 0, fontSize: 12, color: "var(--ms-muted)" }}>
-                        {t("freeHint")}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
               </div>
             );
           })}
         </div>
-        {canManage && hasLiveSubscription ? (
-          <p style={{ margin: "14px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
-            {t("changeHint")}
-          </p>
-        ) : null}
       </Card>
+      {/* The ladder needs more width than the content column beside the
+          sidebar gives it, so it opens in a dialog that fills the viewport. */}
+      <Modal
+        open={plansOpen}
+        onClose={() => setPlansOpen(false)}
+        title={t("plansTitle")}
+        size="full"
+      >
+        <div className="ms-plan-dialog">
+          <div className="ms-volume">
+            <label htmlFor="ms-volume" className="ms-microlabel">
+              {t("volume")}
+            </label>
+            <input
+              id="ms-volume"
+              className="ms-slider"
+              type="range"
+              min={0}
+              max={LAST_STEP}
+              step={1}
+              value={at}
+              onChange={(e) => setStep(Number(e.target.value))}
+              aria-valuetext={`${fmt.format(stepVolume(selected))} ${t("emailsAMonth")}`}
+              style={{ "--ms-slider-p": `${(at / LAST_STEP) * 100}%` } as CSSProperties}
+            />
+            <div className="ms-slider-marks">
+              {PLAN_RUNGS.map((r, i) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  tabIndex={-1}
+                  className="ms-digits"
+                  data-on={i === at || undefined}
+                  onClick={() => setStep(i)}
+                >
+                  {formatVolume(stepVolume(r)).toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <p className="ms-slider-hint">{t("sliderHint")}</p>
+          </div>
+          {/* The first stop names Free without recommending it, as on the site:
+            every card stays level and no pill, highlight or beam singles one out. */}
+          <div className="ms-plans" data-recommended={at > 0 || undefined}>
+            {PLANS.map((p) => {
+              const active = selected.plan === p;
+              const recommended = active && at > 0;
+              // A plan shows the rung the slider landed on when it is one of
+              // its own, else its entry rung.
+              const r = active ? selected : (PLAN_RUNGS.find((x) => x.plan === p) ?? selected);
+              const isCurrent = r.key === current.key;
+              const forSale = canManage && r.priceCents > 0 && !isCurrent;
+              // A click on another plan's card moves the slider to that plan's
+              // first step; the slider itself stays the keyboard control.
+              const select = () => {
+                if (active) return;
+                const i = PLAN_RUNGS.findIndex((x) => x.plan === p);
+                if (i >= 0) setStep(i);
+              };
+              return (
+                // biome-ignore lint/a11y/noStaticElementInteractions: a pointer shortcut; the slider is the keyboard control
+                // biome-ignore lint/a11y/useKeyWithClickEvents: same
+                <div
+                  key={p}
+                  className="ms-plan ms-beam"
+                  data-active={recommended || undefined}
+                  data-open={active || undefined}
+                  onClick={select}
+                >
+                  <div className="ms-plan-head">
+                    <div className="ms-plan-name">{planName(p)}</div>
+                    <span className="ms-badge ms-badge-success ms-plan-pill">
+                      {t("recommended")}
+                    </span>
+                  </div>
+                  <div className="ms-plan-price">
+                    <span className="ms-digits">
+                      <Odometer formatted={usd(r.priceCents)} lit={false} />
+                    </span>
+                    <span className="ms-plan-per">{t("perMonth")}</span>
+                  </div>
+                  <div className="ms-plan-cap">
+                    <span className="ms-digits">{fmt.format(r.included)}</span>
+                    <span className="ms-plan-per">
+                      {t(r.period === "day" ? "emailsADay" : "emailsAMonth")}
+                    </span>
+                  </div>
+                  {/* Daily plans have no overage line; a blank one keeps the four cards' rows aligned. */}
+                  <span
+                    className="ms-plan-over"
+                    data-empty={r.overageCentsPer1k === null || undefined}
+                  >
+                    {r.overageCentsPer1k === null
+                      ? "\u00a0"
+                      : t("overagePer1k", { price: usd(r.overageCentsPer1k) })}
+                  </span>
+                  <div className="ms-plan-more">
+                    <div>
+                      <ul className="ms-checklist">
+                        {features(p).map((f) => (
+                          <li key={f}>
+                            <Check />
+                            {f}
+                          </li>
+                        ))}
+                      </ul>
+                      {isCurrent ? (
+                        <button type="button" className="ms-btn ms-btn-secondary" disabled>
+                          {t("current")}
+                        </button>
+                      ) : forSale ? (
+                        <button
+                          type="button"
+                          className={`ms-btn ${recommended ? "ms-btn-primary" : "ms-btn-secondary"}`}
+                          disabled={busy}
+                          onClick={() =>
+                            hasLiveSubscription
+                              ? changePlan.mutate({ rung: r.key })
+                              : startCheckout.mutate({ rung: r.key })
+                          }
+                        >
+                          <BtnSpinner
+                            on={
+                              (startCheckout.isPending &&
+                                startCheckout.variables?.rung === r.key) ||
+                              (changePlan.isPending && changePlan.variables?.rung === r.key)
+                            }
+                          />
+                          {hasLiveSubscription
+                            ? r.priceCents < current.priceCents
+                              ? t("switchAtPeriodEnd")
+                              : t("switch")
+                            : t("choose")}
+                        </button>
+                      ) : p === "free" && canManage && hasLiveSubscription ? (
+                        <p style={{ margin: 0, fontSize: 12, color: "var(--ms-muted)" }}>
+                          {t("freeHint")}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {canManage && hasLiveSubscription ? (
+            <p style={{ margin: "14px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
+              {t("changeHint")}
+            </p>
+          ) : null}
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -2762,3 +2762,54 @@ summary:focus-visible,
     transition: none;
   }
 }
+/* The card's compact form (one tile per plan) and the dialog the ladder opens in. */
+.ms-plan-more .ms-btn {
+  justify-content: center;
+}
+.ms-plan-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.ms-plan-strip-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--ms-line);
+  border-radius: var(--ms-r-card);
+  background: var(--ms-panel);
+}
+.ms-plan-strip-item[data-current] {
+  border-color: var(--ms-line-strong);
+  background: var(--ms-panel-raised);
+}
+.ms-plan-strip-name {
+  font: 600 var(--ms-fs-ui) var(--ms-font-sans);
+  color: var(--ms-bone);
+}
+.ms-plan-strip-price {
+  font-size: 13px;
+  color: var(--ms-muted);
+}
+.ms-modal-full {
+  width: calc(100vw - 48px);
+  max-width: 1440px;
+  height: calc(100dvh - 48px);
+  padding-bottom: 28px;
+}
+.ms-plan-dialog {
+  margin-top: 18px;
+}
+@media (max-width: 767px) {
+  .ms-plan-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ms-modal-full {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 20px 16px;
+  }
+}
