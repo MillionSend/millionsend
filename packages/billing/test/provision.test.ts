@@ -75,7 +75,15 @@ function fakeStripe() {
       async list(p) {
         state.calls.push("prices.list");
         const keys = p.lookup_keys ?? [];
-        return list(state.prices.filter((x) => keys.includes(x.lookup_key ?? "")));
+        const rows = state.prices.filter((x) => keys.includes(x.lookup_key ?? ""));
+        // Like Stripe, the product is an id unless the list asks for it.
+        if (!p.expand?.includes("data.product")) return list(rows);
+        return list(
+          rows.map((x) => ({
+            ...x,
+            product: state.products.find((pr) => pr.id === x.product) ?? x.product,
+          })),
+        );
       },
       async create(p) {
         state.calls.push("prices.create");
@@ -472,8 +480,9 @@ describe("--move-legacy", () => {
         recurring: { interval: "month" },
         lookup_key: "millionsend_scale_monthly",
       }));
-    // The fake's product lookup resolves the rung through the product's metadata.
-    (legacy as { product: unknown }).product = product;
+    // The rung resolves through the product's metadata, which only an
+    // expanded list carries; the stored price keeps the id, like Stripe.
+    expect(legacy.product).toBe(product.id);
     const sub = seedSubscription(legacy);
     const first = await provision(stripe, { moveLegacy: true, log: () => {} });
     expect(first.moved).toEqual([sub.id]);
