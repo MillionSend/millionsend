@@ -307,6 +307,8 @@
     "switch": "Trocar",
     "freeHint": "Para voltar ao Free, cancele no portal de cobrança; o plano segue até o fim do período.",
     "pendingChange": "Muda para {plan} em {date}.",
+    "switchedNow": "Agora você está no {plan}.",
+    "stayOn": "Você continua no {plan}.",
     "keepPlan": "Manter {plan}",
     "switchAtPeriodEnd": "Trocar no fim do período",
     "changeHint": "Subir de plano vale na hora, com a diferença rateada na próxima fatura. Descer vale quando o período renovar.",

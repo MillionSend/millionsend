@@ -307,6 +307,8 @@
     "switch": "Switch",
     "freeHint": "To return to Free, cancel in the billing portal; the plan runs until the period ends.",
     "pendingChange": "Moves to {plan} on {date}.",
+    "switchedNow": "You're on {plan} now.",
+    "stayOn": "You stay on {plan}.",
     "keepPlan": "Keep {plan}",
     "switchAtPeriodEnd": "Switch at period end",
     "changeHint": "Moving up applies now, with the difference prorated on your next invoice. Moving down applies when the period renews.",

@@ -1,5 +1,6 @@
 "use client";
 
+import type { RungChange } from "@millionsend/billing";
 import {
   formatVolume,
   PLAN_CONTACT_LIMIT,
@@ -7,6 +8,7 @@ import {
   PLAN_RUNGS,
   type Plan,
   type PlanRung,
+  type PlanRungKey,
   planLabel,
 } from "@millionsend/core/plans";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -142,46 +144,74 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         queryClient.invalidateQueries(trpc.team.list.queryFilter()),
       ]),
   };
+  // The slider follows the team's own rung until the viewer moves it.
+  const [step, setStep] = useState<number | null>(null);
+  const [plansOpen, setPlansOpen] = useState(false);
+  const [changed, setChanged] = useState<{ rung: PlanRungKey; result: RungChange } | null>(null);
   const startCheckout = useMutation(trpc.billing.checkout.mutationOptions(redirect));
   const openPortal = useMutation(trpc.billing.portal.mutationOptions(redirect));
-  const changePlan = useMutation(trpc.billing.changePlan.mutationOptions(refresh));
+  const changePlan = useMutation(
+    trpc.billing.changePlan.mutationOptions({
+      onSuccess: async (result, variables) => {
+        await refresh.onSuccess();
+        // The outcome shows on the plan card at the top of the page, so the
+        // dialog gives way to it and the page scrolls there with a notice.
+        setChanged({ rung: variables.rung, result });
+        setPlansOpen(false);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      },
+    }),
+  );
   const setOverage = useMutation(trpc.billing.setOverage.mutationOptions(refresh));
   const mutations = [startCheckout, openPortal, changePlan, setOverage];
   const busy = mutations.some((m) => m.isPending);
   const failed = mutations.some((m) => m.isError);
 
-  // The slider follows the team's own rung until the viewer moves it.
-  const [step, setStep] = useState<number | null>(null);
-  const [plansOpen, setPlansOpen] = useState(false);
-
   const fmt = new Intl.NumberFormat(locale);
   const usd = (cents: number) => formatUsd(cents, locale);
 
+  const rungLabel = (key: PlanRungKey) => {
+    const r = PLAN_RUNGS.find((x) => x.key === key);
+    return r ? planLabel(r.plan, r.period === "month" ? r.included : null) : key;
+  };
+  const changedText = changed
+    ? changed.result.applied === "now"
+      ? t("switchedNow", { plan: rungLabel(changed.rung) })
+      : changed.result.applied === "period_end"
+        ? t("pendingChange", {
+            plan: rungLabel(changed.rung),
+            date: formatDay(changed.result.at, locale),
+          })
+        : t("stayOn", { plan: rungLabel(changed.rung) })
+    : null;
+  const success = (text: string) => (
+    <div
+      role="status"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "11px 16px",
+        borderRadius: 12,
+        border: "1px solid var(--ms-success-border)",
+        backgroundColor: "var(--ms-ground)",
+        backgroundImage: statusGlow("success", 15),
+        fontSize: "var(--ms-fs-ui)",
+      }}
+    >
+      <span
+        className="ms-mono"
+        aria-hidden="true"
+        style={{ fontSize: 11, color: "var(--ms-success)" }}
+      >
+        ✓
+      </span>
+      {text}
+    </div>
+  );
   const notice =
     checkout === "success" ? (
-      <div
-        role="status"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "11px 16px",
-          borderRadius: 12,
-          border: "1px solid var(--ms-success-border)",
-          backgroundColor: "var(--ms-ground)",
-          backgroundImage: statusGlow("success", 15),
-          fontSize: "var(--ms-fs-ui)",
-        }}
-      >
-        <span
-          className="ms-mono"
-          aria-hidden="true"
-          style={{ fontSize: 11, color: "var(--ms-success)" }}
-        >
-          ✓
-        </span>
-        {t("checkoutSuccess")}
-      </div>
+      success(t("checkoutSuccess"))
     ) : checkout === "cancel" ? (
       <div role="status" className="ms-toast ms-toast-neutral">
         <span className="ms-toast-icon" aria-hidden="true">
@@ -189,6 +219,8 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         </span>
         {t("checkoutCancel")}
       </div>
+    ) : changedText ? (
+      success(changedText)
     ) : null;
 
   if (!status.data) {
