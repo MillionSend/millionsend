@@ -39,12 +39,6 @@
     "pro": "Pro",
     "scale": "Scale"
   },
-  "sidebar": {
-    "today": "hoje",
-    "resetsIn": "reinicia em {time}",
-    "period": "neste período",
-    "renewsOn": "renova em {date}"
-  },
   "commandPalette": {
     "placeholder": "Digite um comando ou vá para um recurso…",
     "navigate": "Navegar",
