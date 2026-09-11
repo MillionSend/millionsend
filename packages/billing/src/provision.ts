@@ -1,4 +1,5 @@
-import { PAID_RUNGS, PLAN_NAME, type Plan, type PlanRung } from "@millionsend/core";
+// The plans subpath keeps the provision script free of the app env schema, so it runs from any checkout with only a Stripe key.
+import { PAID_RUNGS, PLAN_NAME, type Plan, type PlanRung } from "@millionsend/core/plans";
 import Stripe from "stripe";
 import {
   METER_EVENT_NAME,
