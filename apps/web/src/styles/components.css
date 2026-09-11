@@ -2792,10 +2792,14 @@ summary:focus-visible,
   font-size: 13px;
   color: var(--ms-muted);
 }
+/* Sized with its padding inside the box (the base modal is content-box and
+   would grow past the viewport), leaving a rim of the page around it. */
 .ms-modal-full {
-  width: calc(100vw - 48px);
+  box-sizing: border-box;
+  width: calc(100vw - 72px);
   max-width: 1440px;
-  height: calc(100dvh - 48px);
+  height: calc(100dvh - 72px);
+  max-height: calc(100dvh - 72px);
   padding-bottom: 28px;
 }
 .ms-plan-dialog {
@@ -2806,10 +2810,10 @@ summary:focus-visible,
     grid-template-columns: 1fr 1fr;
   }
   .ms-modal-full {
-    width: calc(100vw - 16px);
-    max-width: calc(100vw - 16px);
-    height: calc(100dvh - 16px);
-    max-height: calc(100dvh - 16px);
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
     padding: 20px 16px;
   }
 }
