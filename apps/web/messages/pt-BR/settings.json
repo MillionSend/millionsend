@@ -291,7 +291,7 @@
     "updateCard": "Atualizar forma de pagamento",
     "usageTitle": "Uso",
     "overage": "Excedente",
-    "overageCopy": "{price} por 1.000 e-mails além da cota, cobrado na próxima fatura; os envios param em {cap}× o volume incluído. Desligado, os envios param na cota até o período renovar.",
+    "overageCopy": "{price} por 1.000 e-mails além da cota.",
     "overSoFar": "{n, plural, one {# e-mail} other {# e-mails}} além da cota até agora, cerca de {amount}.",
     "plansTitle": "Planos",
     "comparePlans": "Comparar planos",

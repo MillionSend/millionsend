@@ -291,7 +291,7 @@
     "updateCard": "Update payment method",
     "usageTitle": "Usage",
     "overage": "Overage",
-    "overageCopy": "{price} per 1,000 emails past the quota, billed with the next invoice; sends stop at {cap}× the included volume. Off, sends stop at the quota until the period renews.",
+    "overageCopy": "{price} per 1,000 emails past the quota.",
     "overSoFar": "{n, plural, one {# email} other {# emails}} over quota so far, about {amount}.",
     "plansTitle": "Plans",
     "comparePlans": "Compare plans",

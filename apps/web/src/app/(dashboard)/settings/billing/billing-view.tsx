@@ -2,7 +2,6 @@
 
 import {
   formatVolume,
-  OVERAGE_HARD_CAP,
   PLAN_CONTACT_LIMIT,
   PLAN_DOMAIN_LIMIT,
   PLAN_RUNGS,
@@ -377,7 +376,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 14, color: "var(--ms-bone)" }}>{t("overage")}</div>
                 <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 2 }}>
-                  {t("overageCopy", { price: usd(quota.overageCentsPer1k), cap: OVERAGE_HARD_CAP })}
+                  {t("overageCopy", { price: usd(quota.overageCentsPer1k) })}
                 </div>
                 {over > 0 ? (
                   <div style={{ fontSize: 12.5, color: "var(--ms-bone)", marginTop: 6 }}>
