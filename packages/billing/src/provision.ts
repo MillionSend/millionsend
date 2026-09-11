@@ -359,7 +359,10 @@ function portalFeatures(): Stripe.BillingPortal.ConfigurationCreateParams.Featur
         ],
       },
     },
-    subscription_update: { enabled: false },
+    // A configuration written before the ladder still lists the prices it
+    // offered, archived since; Stripe validates that list even on a disabled
+    // feature, so the update clears it.
+    subscription_update: { enabled: false, products: "" },
   };
 }
 
