@@ -135,7 +135,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   const canManage = role === "owner" || role === "admin";
 
   const redirect = { onSuccess: ({ url }: { url: string }) => window.location.assign(url) };
-  // The sidebar meter and the cap banner read usage.recent; team.list carries the plan.
+  // The cap banner reads usage.recent; team.list carries the plan.
   const refresh = {
     onSuccess: () =>
       Promise.all([

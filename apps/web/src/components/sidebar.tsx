@@ -1,6 +1,5 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -9,12 +8,9 @@ import { EllipsisGlyph, NavGlyph, type NavIconName } from "@/components/icons/na
 import { useDismiss } from "@/components/popover-menu";
 import { TeamSwitcher } from "@/components/team-switcher";
 import { authClient } from "@/lib/auth-client";
-import { formatDay } from "@/lib/format";
 import { isAppLocale, LOCALES, setLocaleCookie } from "@/lib/locale-cookie";
 import { isActive } from "@/lib/nav";
 import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
-import { useTRPC } from "@/lib/trpc";
-import { formatUtcDayReset, meterClass } from "@/lib/usage-meter";
 
 // Canvas nav order (Row 1 chrome): Settings lives in the main list.
 export const NAV_ITEMS: ReadonlyArray<{ key: string; href: string; icon: NavIconName }> = [
@@ -164,11 +160,8 @@ export function Sidebar({
 }) {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
-  const locale = useLocale();
   const pathname = usePathname();
   const router = useRouter();
-  const trpc = useTRPC();
-  const { data: usage } = useQuery(trpc.settings.usage.recent.queryOptions({}));
   const [menuOpen, setMenuOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   useDismiss(accountRef, menuOpen, () => setMenuOpen(false));
@@ -187,19 +180,6 @@ export function Sidebar({
     router.push("/login");
     router.refresh();
   }
-
-  const fmt = new Intl.NumberFormat(locale);
-  // A monthly plan's meter is its billing period; a daily cap's is the UTC day.
-  // The included volume is the mark either way: with overage on, sends past
-  // it are billed rather than stopped, and the meter simply runs full.
-  const period = usage?.period;
-  const today = usage
-    ? period
-      ? { accepted: period.accepted, limit: period.included }
-      : usage.today
-    : undefined;
-  const ratio = today?.limit ? today.accepted / today.limit : 0;
-  const meterState = today && today.limit !== null ? meterClass(ratio) : "";
 
   return (
     <aside
@@ -254,40 +234,6 @@ export function Sidebar({
         ))}
       </nav>
       <div style={{ flex: 1 }} />
-      {today ? (
-        <div
-          className={meterState || undefined}
-          style={{ padding: "12px 10px 10px", borderTop: "1px solid var(--ms-line)" }}
-        >
-          <div className="ms-meter-label">
-            <span>{tCommon(period ? "sidebar.period" : "sidebar.today")}</span>
-            <span className="ms-digits" style={{ fontSize: 13, color: "var(--ms-bone)" }}>
-              {fmt.format(today.accepted)}
-              <span style={{ color: "var(--ms-muted)", fontWeight: 500 }}>
-                {" "}
-                / {today.limit === null ? "∞" : fmt.format(today.limit)}
-              </span>
-            </span>
-          </div>
-          <div className="ms-meter-track">
-            <div
-              className="ms-meter-fill"
-              style={
-                today.limit === null
-                  ? { width: "100%", opacity: 0.25 }
-                  : { width: `${Math.min(100, ratio * 100)}%` }
-              }
-            />
-          </div>
-          {meterState ? (
-            <div style={{ fontSize: 11, color: "var(--ms-muted)", marginTop: 6 }}>
-              {period
-                ? tCommon("sidebar.renewsOn", { date: formatDay(period.end, locale) })
-                : tCommon("sidebar.resetsIn", { time: formatUtcDayReset() })}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
       <div ref={accountRef} style={{ position: "relative", borderTop: "1px solid var(--ms-line)" }}>
         {menuOpen ? (
           <div
