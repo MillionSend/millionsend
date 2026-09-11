@@ -258,9 +258,12 @@ async function moveLegacySubscriptions(
   overagePrices: Record<string, string>,
   log: (line: string) => void,
 ): Promise<string[]> {
+  // A pre-ladder price carries no rung of its own: it resolves through its
+  // product's plan metadata, so the product comes expanded.
   const { data: legacy } = await stripe.prices.list({
     lookup_keys: LEGACY_PRICE_LOOKUP_KEYS,
     limit: 10,
+    expand: ["data.product"],
   });
   const moved: string[] = [];
   for (const price of legacy) {
