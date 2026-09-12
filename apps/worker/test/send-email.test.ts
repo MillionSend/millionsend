@@ -659,6 +659,29 @@ it("account mail ships untracked on a tracking domain and loses its body once SE
   expect(row?.bodyPurgedAt).toBeInstanceOf(Date);
 });
 
+it("account mail without a credential ships untracked and keeps its body", async () => {
+  const { ses, sends } = fakeSes("mid-system-notice");
+  const url = "https://app.example.com/domains";
+  const emailId = await insertEmail(
+    { tags: { millionsend_system: "domain.verified" } },
+    `<a href="${url}">domains</a>`,
+  );
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    tracking: { secretKey: trackingSecret, defaultBaseUrl: "https://track.example.com" },
+  };
+  expect(await sendEmail(db, deps, { emailId })).toBe("sent");
+
+  const mime = unwrapQp(sends[0]?.raw.toString("utf8") ?? "");
+  expect(mime).toContain(url);
+  expect(mime).not.toContain("/t/c/");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("sent");
+  expect(row?.bodyCiphertext).not.toBeNull();
+  expect(row?.bodyPurgedAt).toBeNull();
+});
+
 it("openTracking on injects the pixel; a custom subdomain sets the tracking host", async () => {
   const [both] = await db
     .insert(schema.domains)

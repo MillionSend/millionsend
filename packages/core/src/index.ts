@@ -335,6 +335,7 @@ export {
   removeSystemContact,
 } from "./system-contacts.js";
 export {
+  CREDENTIAL_MAIL_KINDS,
   findSenderDomainOwner,
   type SenderDomainOwner,
   SYSTEM_MAIL_TAG,

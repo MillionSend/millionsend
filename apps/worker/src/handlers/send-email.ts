@@ -3,6 +3,7 @@ import {
   buildUnsubscribeHeaders,
   buildUnsubscribeUrl,
   bumpHourlyUsage,
+  CREDENTIAL_MAIL_KINDS,
   decryptEmailBody,
   type EmailAttachment,
   type EmailBody,
@@ -697,12 +698,14 @@ export async function sendEmail(
       set: { sent: sql`${counter.sent} + 1` },
     });
   await bumpHourlyUsage(db, { teamId: email.teamId, at: sentAt, counts: { sent: 1 } });
-  // Account mail's body is gone the moment SES holds it: a reset link is a
-  // live credential for thirty minutes, and the row's body is otherwise
+  // Credential-bearing account mail loses its body the moment SES holds it: a
+  // reset link is live for thirty minutes, and the row's body is otherwise
   // readable by every member of the owning team, any full-access key and
   // any connected app until the retention purge. Recipient, subject, status,
   // events and counters stay; insights below evaluate the in-memory body.
-  if (systemMail) {
+  // Other system kinds carry only dashboard links and keep their body for the
+  // normal retention window.
+  if (systemMail && CREDENTIAL_MAIL_KINDS.has(email.tags?.[SYSTEM_MAIL_TAG] ?? "")) {
     await db
       .update(schema.emails)
       .set(purgedEmailBodyColumns(new Date()))

@@ -307,7 +307,9 @@ read in the language of the owner's contact in the team below, else English; eac
 which notices they get under **Settings → Notifications** (account mail and security receipts are
 always sent). Verify the sender's domain under
 **Domains** in a team and those emails are logged and measured there, tagged
-`millionsend_system`, with their body purged once SES accepts them. Until a team holds the
+`millionsend_system`. Password-reset, verification, invitation and subscription-confirm
+emails lose their body once SES accepts them, since the link inside is a live credential;
+the other notices keep theirs for the usual retention window. Until a team holds the
 domain they go straight through SES and leave no trace.
 
 On an instance with `ALLOW_SIGNUP=true`, every new account becomes a contact of that team

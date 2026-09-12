@@ -8,10 +8,27 @@ import { parseSingleSender } from "./sender-address.js";
 /**
  * Tag every system email carries; the value names the kind. A label only:
  * the public API accepts any tag name, so nothing may grant quota, bypass a
- * suppression or gate a send on its presence. The worker reads it to purge
- * the body after SES accepts the message and to ship the links untracked.
+ * suppression or gate a send on its presence. The worker reads it to ship
+ * the links untracked and, for the kinds in CREDENTIAL_MAIL_KINDS, to purge
+ * the body after SES accepts the message.
  */
 export const SYSTEM_MAIL_TAG = "millionsend_system";
+
+/**
+ * Kinds whose body holds a live credential (a signed link that resets a
+ * password, verifies an address, accepts an invitation or confirms a
+ * subscription). The worker purges these the moment SES accepts the message:
+ * the row lives in the team that owns the sender domain, where every member,
+ * full-access key and connected app could otherwise read the link while it is
+ * valid. Every other kind carries plain dashboard links and keeps its body for
+ * the normal retention window.
+ */
+export const CREDENTIAL_MAIL_KINDS: ReadonlySet<string> = new Set<SystemMailKind>([
+  "password_reset",
+  "email_verification",
+  "invitation",
+  "updates.confirm",
+]);
 
 export type SystemMailKind =
   | "password_reset"
