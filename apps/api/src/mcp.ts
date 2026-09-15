@@ -30,7 +30,7 @@ import {
 import { and, asc, eq } from "drizzle-orm";
 import { createRemoteJWKSet, type JWTVerifyGetKey, jwtVerify } from "jose";
 import { type ApiDeps, type Env, errorBody } from "./app.js";
-import { servedRegion } from "./routes/domains.js";
+import { servedRegions } from "./routes/domains.js";
 import {
   batchAddSuppressionsRequestSchema,
   batchContactsRequestSchema,
@@ -1137,13 +1137,13 @@ function buildServer(app: OpenAPIHono<Env>, deps: ApiDeps, authInfo: AuthInfo): 
     ({ id }) => api("DELETE", `/api-keys/${enc(id)}`),
   );
   if (deps.ses) {
-    const region = servedRegion(deps.ses);
+    const regions = servedRegions(deps.ses);
     tool(
       "create_domain",
       "domains:write",
       {
-        description: `Add a sending domain. region is optional and must be ${region}, the only region this deployment serves (it is also the default). Returns the DNS records to create; the domain sends once they verify. Open and click tracking start off; pass open_tracking/click_tracking together with a tracking_subdomain to stand the domain up tracked in one call — its Tracking CNAME then comes back with the other records (same rules as update_domain).`,
-        inputSchema: createDomainRequestSchema([region]),
+        description: `Add a sending domain. region is optional: this deployment serves ${regions.join(", ")} (default ${regions[0]}) and refuses any other. A domain has one region; to move it, delete and re-add it. Returns the DNS records to create; the domain sends once they verify. Open and click tracking start off; pass open_tracking/click_tracking together with a tracking_subdomain to stand the domain up tracked in one call — its Tracking CNAME then comes back with the other records (same rules as update_domain).`,
+        inputSchema: createDomainRequestSchema(regions),
       },
       (body) => api("POST", "/domains", body),
     );

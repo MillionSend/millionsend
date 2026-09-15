@@ -93,6 +93,103 @@ export function envValue(content: string | null, key: string): string | null {
   return null;
 }
 
+/** Comma-separated .env value → trimmed entries. */
+function envList(content: string | null, key: string): string[] {
+  return (envValue(content, key) ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/** The SES regions an .env serves, read the way the app reads them: AWS_REGIONS, else AWS_REGION, else the built-in default. */
+export function servedRegionsInEnv(content: string | null): string[] {
+  const listed = envList(content, "AWS_REGIONS");
+  if (listed.length > 0) return listed;
+  return [envValue(content, "AWS_REGION") || "us-east-1"];
+}
+
+/**
+ * An install the wizard has already been through: the secrets are in place
+ * and AWS is at least partly set up. Such a run opens on a menu of things to
+ * do instead of walking every step again.
+ */
+export function setupDone(content: string | null): boolean {
+  return (
+    content !== null &&
+    missingSecrets(content).length === 0 &&
+    (Boolean(envValue(content, "AWS_ACCESS_KEY_ID")) ||
+      Boolean(envValue(content, "SNS_TOPIC_ARNS")))
+  );
+}
+
+export interface MenuOption {
+  value: string;
+  label: string;
+  hint?: string;
+}
+
+/** The menu a finished install opens on, shaped by what its .env already has. */
+export function menuOptions(content: string | null, cloud: boolean): MenuOption[] {
+  const keys = Boolean(envValue(content, "AWS_ACCESS_KEY_ID"));
+  const events = Boolean(envValue(content, "SNS_TOPIC_ARNS"));
+  const queue = Boolean(envValue(content, "SQS_QUEUE_URL"));
+  const options: MenuOption[] = [];
+  if (events && queue) {
+    options.push({
+      value: "region",
+      label: "Add an SES region",
+      hint: `served: ${servedRegionsInEnv(content).join(", ")}`,
+    });
+  }
+  options.push({
+    value: "aws",
+    label: "AWS resources",
+    hint: events
+      ? "re-run the AWS setup"
+      : keys
+        ? "add event ingestion (bounces, deliveries)"
+        : "IAM user + key, SNS events, SES configuration set",
+  });
+  options.push(
+    { value: "urls", label: "Base URLs", hint: "APP_BASE_URL, PUBLIC_API_URL" },
+    ...(cloud ? [{ value: "cloud", label: "Cloud values", hint: "KMS key, Stripe" }] : []),
+    { value: "storage", label: "Object storage & backups", hint: "S3-compatible buckets" },
+    { value: "social", label: "Social login", hint: "Google, GitHub" },
+    { value: "email", label: "Account email sender", hint: "AUTH_EMAIL_FROM" },
+    { value: "all", label: "Walk through every step" },
+    { value: "start", label: "Start the stack", hint: "docker compose up -d" },
+    { value: "exit", label: "Exit" },
+  );
+  return options;
+}
+
+/**
+ * Whether the AWS step may offer a full re-run: it recreates the events
+ * transport for one region and rewrites SNS_TOPIC_ARNS and the queue policy
+ * to that region's topic alone, which on a multi-region install would
+ * silently drop the other regions' events.
+ */
+export function fullRerunOffered(content: string | null): boolean {
+  return servedRegionsInEnv(content).length <= 1;
+}
+
+/**
+ * The .env entries that add a region to an existing install: the region
+ * joins AWS_REGIONS (seeded from the region already served when the list did
+ * not exist yet) and the topic joins SNS_TOPIC_ARNS. AWS_REGION and
+ * SQS_QUEUE_URL are left as they are.
+ */
+export function addRegionEnvEntries(
+  content: string | null,
+  region: string,
+  topicArn: string,
+): Record<string, string> {
+  return {
+    AWS_REGIONS: [...new Set([...servedRegionsInEnv(content), region])].join(","),
+    SNS_TOPIC_ARNS: [...new Set([...envList(content, "SNS_TOPIC_ARNS"), topicArn])].join(","),
+  };
+}
+
 /** The wizard-managed secrets that are missing or empty in the given .env content. */
 export function missingSecrets(content: string): string[] {
   return SECRET_KEYS.filter((key) => !envValue(content, key));
@@ -178,6 +275,11 @@ export function flowPlan(
   opts: { appBaseUrl: string; region: string; cloud?: boolean },
 ): string[] {
   const lines: string[] = [];
+  if (setupDone(state.envContent)) {
+    lines.push(
+      "menu: this install is set up — on a terminal the run opens on a menu (add an SES region, AWS resources, base URLs, storage, social login, account email, walk through every step, start); piped runs walk the steps below",
+    );
+  }
   lines.push(
     state.envContent === null
       ? "env: create .env from the built-in template (offered)"
@@ -198,8 +300,18 @@ export function flowPlan(
       `cloud: IS_CLOUD=true; prompt for ${CLOUD_REQUIRED_KEYS.join(", ")} and STRIPE_PORTAL_CONFIG; offer the docs profile`,
     );
   }
-  for (const line of setupPlan({ region: opts.region, appBaseUrl: opts.appBaseUrl })) {
-    lines.push(`aws: ${line}`);
+  if (
+    state.envContent !== null &&
+    envValue(state.envContent, "SNS_TOPIC_ARNS") &&
+    envValue(state.envContent, "SQS_QUEUE_URL")
+  ) {
+    lines.push(
+      `aws: already set up (${servedRegionsInEnv(state.envContent).join(", ")}) — offer to add a region (its topic and configuration set, events into the existing queue, no new key)${fullRerunOffered(state.envContent) ? " or a full re-run" : ""}`,
+    );
+  } else {
+    for (const line of setupPlan({ region: opts.region, appBaseUrl: opts.appBaseUrl })) {
+      lines.push(`aws: ${line}`);
+    }
   }
   const upCommand = `docker ${composeUpArgs(state.composeContent).join(" ")}`;
   lines.push(

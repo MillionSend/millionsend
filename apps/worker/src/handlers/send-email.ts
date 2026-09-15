@@ -72,9 +72,10 @@ export interface SendDeps {
   /**
    * Awaited right before the send claim, after every check that can still
    * skip or fail the email — a token spent on a row that never reaches SES
-   * is send capacity stolen from every other tenant.
+   * is send capacity stolen from every other tenant. Takes the domain's
+   * region: the send rate is per SES region.
    */
-  throttle?: (() => Promise<void>) | undefined;
+  throttle?: ((region?: string) => Promise<void>) | undefined;
   /** Re-enqueue a not-yet-due scheduled email at its due time. */
   reschedule?:
     | ((emailId: string, at: Date, priority: EmailSendPriority) => Promise<void>)
@@ -338,26 +339,12 @@ export async function sendEmail(
     await deps.reschedule?.(email.id, email.scheduledAt, emailSendPriority(email));
     return "deferred";
   }
-  // SES at its 24-hour ceiling: park before building anything, the way an
-  // over-plan email parks at accept. The drain releases it as the window frees.
-  if (deps.sesQuota?.exhausted()) {
-    await parkForSesQuota(db, email);
-    return "parked";
-  }
-
-  let eligibility = await checkSendEligibility(db, email);
-  if (!eligibility.eligible) {
-    return (await suppressQueuedEmail(db, email.id, eligibility.reason ?? "ineligible"))
-      ? "suppressed"
-      : "skipped";
-  }
-  if (eligibility.strip) await stripRecipients(db, email, eligibility.strip);
-
-  // SES identities are verified per region: the send must target the
-  // domain's region, not a single deployment-wide one. The name also seeds
-  // the broadcast List-Id below, so it is loaded here before header assembly.
-  // Checked before the body decrypt: an unsendable row must not cost a KMS
-  // call on every attempt.
+  // SES identities, the 24-hour quota and the send rate are all per region:
+  // the send must target the domain's region, not a single deployment-wide
+  // one, and so must the gate and bucket below. The name also seeds the
+  // broadcast List-Id, so it is loaded here before header assembly, and
+  // before the body decrypt: an unsendable row must not cost a KMS call on
+  // every attempt.
   const domain = email.domainId
     ? (
         await db
@@ -383,6 +370,22 @@ export async function sendEmail(
           )
       )[0]
     : undefined;
+  // SES at its 24-hour ceiling in this region: park before building anything,
+  // the way an over-plan email parks at accept. The drain releases it as the
+  // window frees.
+  if (deps.sesQuota?.exhausted(domain?.region)) {
+    await parkForSesQuota(db, email);
+    return "parked";
+  }
+
+  let eligibility = await checkSendEligibility(db, email);
+  if (!eligibility.eligible) {
+    return (await suppressQueuedEmail(db, email.id, eligibility.reason ?? "ineligible"))
+      ? "suppressed"
+      : "skipped";
+  }
+  if (eligibility.strip) await stripRecipients(db, email, eligibility.strip);
+
   // SES rejects a tenant send whose identity or configuration set is not
   // associated, so the tenant rides along only once the row is marked.
   // The shared onboarding sender is an identity of this instance's own SES
@@ -599,7 +602,7 @@ export async function sendEmail(
 
   // The rate-limit wait comes before the final re-check so that check stays
   // immediately ahead of the claim.
-  await deps.throttle?.();
+  await deps.throttle?.(domain?.region);
 
   // Re-check immediately before the atomic claim: quota delays and throttling
   // can leave a row queued long enough for a recipient to opt out after the
@@ -667,7 +670,9 @@ export async function sendEmail(
     // is full. Either way the email parks; a plain rate refusal keeps retrying.
     if (
       isSesQuotaRefusal(err) ||
-      (isSesThrottle(err) && deps.sesQuota !== undefined && (await deps.sesQuota.refresh()))
+      (isSesThrottle(err) &&
+        deps.sesQuota !== undefined &&
+        (await deps.sesQuota.refresh(domain?.region)))
     ) {
       await parkForSesQuota(db, email);
       return "parked";

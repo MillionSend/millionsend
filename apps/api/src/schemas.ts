@@ -1170,11 +1170,12 @@ const TRACKING_SUBDOMAIN_DESC =
   'DNS label of the branded tracking host, e.g. "links" for links.<domain>. Setting it adds a Tracking CNAME to records[]; links are tracked through it once that CNAME resolves. Required on MillionSend Cloud to turn tracking on.';
 
 /**
- * Built per deployment so `region` lists only what it serves: SES
- * configuration sets, SNS topics and tenants are all regional, so an identity
- * anywhere else would hand out DNS records but never send or report events.
- * The narrowed enum is what MCP clients and the live /openapi.json read, and
- * an unserved region fails validation (422) before any SES call.
+ * Built per deployment so `region` lists only what it serves (the default
+ * first): SES configuration sets, SNS topics and tenants are all regional, so
+ * an identity anywhere else would hand out DNS records but never send or
+ * report events. The narrowed enum is what MCP clients and the live
+ * /openapi.json read, and an unserved region fails validation (422) before
+ * any SES call.
  */
 export const createDomainRequestSchema = (regions: readonly [string, ...string[]]) =>
   z
@@ -1187,7 +1188,7 @@ export const createDomainRequestSchema = (regions: readonly [string, ...string[]
         .enum(regions)
         .optional()
         .describe(
-          "SES region of the identity. Each deployment serves one region and rejects any other with 422; omit to use it.",
+          "SES region of the identity, one of the regions this deployment serves (the values listed here; the first is the default). Any other region is rejected with 422. A domain has one region: to move it, delete and re-add it.",
         ),
       custom_return_path: z
         .string()

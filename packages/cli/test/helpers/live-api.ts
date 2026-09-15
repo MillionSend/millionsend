@@ -55,7 +55,7 @@ export async function startLiveApi(
         resolveMx: async () => [],
         resolveCname: async () => [],
       },
-      defaultRegion: "us-east-1",
+      regions: ["us-east-1"],
     },
   });
   let server: ReturnType<typeof serve> | undefined;

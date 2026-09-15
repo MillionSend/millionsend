@@ -6,61 +6,60 @@ import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 // @millionsend/setup and run under tsx from the repo root, and neither path
 // resolves package names. The prompt kit lives in the MIT package so the
 // AGPL wizard consumes it, never the reverse.
-import { bold, dim, err, info } from "../../cli/src/theme.js";
-import {
-  banner,
-  type LineReader,
-  lineReader,
-  pickBannerTier,
-  selectPrompt,
-  wrapText,
-} from "../../cli/src/tty-ui.js";
+import { createFlow, type Flow } from "../../cli/src/flow.js";
+import { banner, isInteractive, lineReader, pickBannerTier } from "../../cli/src/tty-ui.js";
 import { SES_REGIONS, type SesRegion } from "./domain-identity.js";
 import {
+  addRegionPlan,
+  cancelPricingPlan,
   createSetupClients,
   createStorageClient,
+  ESSENTIALS_WARNING,
   ensureBucket,
   envTemplate,
   eventsPlan,
   httpsOrigin,
+  parseSqsQueueUrl,
+  readPricingPlan,
   runEventsSetup,
   runSetup,
   runTeardown,
   SETUP_NAMES,
+  type SetupSesClient,
   STORAGE_BUCKET_DEFAULTS,
   setupEnvEntries,
   setupPlan,
+  setupPolicyArn,
   storageEnvEntries,
+  syncAdoptedPolicy,
   teardownPlan,
   upsertEnv,
 } from "./setup.js";
 import {
+  addRegionEnvEntries,
   CLOUD_REQUIRED_KEYS,
   COMPOSE_DOWNLOAD_URL,
   composeUpArgs,
-  confirmed,
   type DirState,
   detectDirState,
   envValue,
   flowPlan,
   freshDatabaseEntries,
+  fullRerunOffered,
   generateSecret,
   isCloudEnv,
+  menuOptions,
   missingSecrets,
   secretLaterHint,
+  servedRegionsInEnv,
   sesEventsProxyHint,
+  setupDone,
   stateSummary,
   withComposeProfile,
 } from "./setup-flow.js";
 
-// Wrapped at print time to the live terminal width — baked-in line breaks
-// double-wrap on narrow terminals (soft wrap first, then the hard break).
 const DESCRIPTION_TEXT =
-  "Sets up a self-hosted MillionSend end to end: a .env with generated secrets, the AWS resources (IAM user + key, SNS event topic, SES configuration set), and the Docker launch. Run it in the directory MillionSend should live in — an empty one works. Every step is offered, skippable, and safe to re-run.";
-const descriptionWidth = (): number => Math.min(process.stdout.columns || 80, 80) - 2;
-const DESCRIPTION = (): string => wrapText(DESCRIPTION_TEXT, descriptionWidth());
-
-const BANNER = (): string => `millionsend · setup\n\n${DESCRIPTION()}`;
+  "Sets up a self-hosted MillionSend end to end: a .env with generated secrets, the AWS resources (IAM user + key, SNS event topic, SES configuration set), and the Docker launch. Run it in the directory MillionSend should live in — an empty one works. Every step is offered, skippable, and safe to re-run. Sub-commands: add-region <region> (a further SES region on an existing install), teardown.";
 
 const REGION_RE = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -73,6 +72,8 @@ const REGION_HINTS: Record<SesRegion, string> = {
 
 /** selectPrompt value for the free-form region escape hatch (TTY only). */
 const OTHER_REGION = "__other__";
+
+const DEFAULT_APP_BASE_URL = "http://localhost:3000";
 
 export type AuthAction = "proceed" | "offer-login" | "hint-exit";
 
@@ -116,206 +117,259 @@ function readCwdFile(name: string): string | null {
   return existsSync(path) ? readFileSync(path, "utf8") : null;
 }
 
-function printHeader(): void {
+/** The banner art on a wide terminal; pipes and narrow terminals get nothing here. */
+function printBanner(): void {
   const tier = pickBannerTier(process.stdout.columns ?? 0, process.stdout.isTTY === true);
-  if (tier === "plain") {
-    console.log(`${BANNER()}\n`);
-    return;
-  }
+  if (tier === "plain") return;
   for (const line of banner(tier)) console.log(line);
-  console.log(`\n${dim(DESCRIPTION())}\n`);
+  console.log("");
 }
+
+/**
+ * What every step works on: the flow it prints through, the .env it reads
+ * and writes (written through to disk on every change so an aborted run
+ * loses nothing, owner-only so a pre-existing world-readable file is
+ * tightened too), and the answers the steps share.
+ */
+interface Wizard {
+  flow: Flow;
+  interactive: boolean;
+  cloud: boolean;
+  state: DirState;
+  env: string | null;
+  writeEnv(entries: Record<string, string>): boolean;
+  enableProfile(profile: string): boolean;
+  /** The dashboard origin: .env, then the process env, then the compose default. */
+  appBaseUrl(): string;
+  /** The api's own listen port, for the reverse-proxy hint the AWS step prints. */
+  apiPort(): number;
+}
+
+function createWizard(
+  flow: Flow,
+  state: DirState,
+  cloud: boolean,
+  env: string | null,
+  envPath: string | null,
+): Wizard {
+  const save = (): void => {
+    if (envPath === null || wizard.env === null) return;
+    writeFileSync(envPath, wizard.env, { mode: 0o600 });
+    chmodSync(envPath, 0o600);
+  };
+  const wizard: Wizard = {
+    flow,
+    interactive: isInteractive(),
+    cloud,
+    state,
+    env,
+    writeEnv(entries) {
+      if (wizard.env === null || envPath === null) return false;
+      wizard.env = upsertEnv(wizard.env, entries);
+      save();
+      return true;
+    },
+    enableProfile(profile) {
+      if (wizard.env === null || envPath === null) return false;
+      wizard.env = withComposeProfile(wizard.env, profile);
+      save();
+      return true;
+    },
+    appBaseUrl: () =>
+      envValue(wizard.env, "APP_BASE_URL") || process.env.APP_BASE_URL || DEFAULT_APP_BASE_URL,
+    apiPort: () => Number(envValue(wizard.env, "PORT")) || 3001,
+  };
+  return wizard;
+}
+
+/** `KEY=value` lines for an operator to paste when there is no .env to write. */
+const pasteBlock = (entries: Record<string, string>): string =>
+  Object.entries(entries)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
 
 /**
  * End-to-end self-host wizard behind `npx @millionsend/setup`, `pnpm
  * setup:aws`, and the container's `setup` argv mode. Works from an empty
  * directory: env → secrets → AWS → object storage → social login → launch,
- * each step offered, state-aware, and idempotent on re-runs.
+ * each step offered, state-aware, and idempotent on re-runs. An install that
+ * is already set up opens on a menu of things to do instead.
  */
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  const teardown = argv[0] === "teardown";
   const dryRun = argv.includes("--dry-run");
   const rl = lineReader();
+  const flow = createFlow(rl);
   try {
-    printHeader();
-    if (teardown) return await teardownMain(rl, dryRun);
+    printBanner();
+    if (argv[0] === "add-region") return await addRegionMain(flow, argv.slice(1), dryRun);
+    if (argv[0] === "teardown") return await teardownMain(flow, dryRun);
 
-    const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
     // --dry-run spawns nothing, so the docker probe is skipped there too.
     const state = detectDirState(readCwdFile, dryRun ? null : probeDocker);
     // Hosted-cloud mode adds the prompts boot demands under IS_CLOUD=true. An
     // .env that already says so keeps the mode on re-runs without the flag.
     const cloud = argv.includes("--cloud") || isCloudEnv(state.envContent);
-    console.log(`${dim(stateSummary(state))}${cloud ? " · cloud" : ""}\n`);
+    flow.intro("millionsend", "setup", cloud ? "cloud" : "self-host");
+    flow.note(DESCRIPTION_TEXT);
+    flow.note(stateSummary(state));
 
+    const wizard = createWizard(flow, state, cloud, state.envContent, join(process.cwd(), ".env"));
     if (dryRun) {
-      const appBaseUrl =
-        envValue(state.envContent, "APP_BASE_URL") ||
-        process.env.APP_BASE_URL ||
-        "http://localhost:3000";
-      console.log(bold("Plan:"));
       const region = process.env.AWS_REGION ?? "us-east-1";
-      for (const line of flowPlan(state, { appBaseUrl, region, cloud })) {
-        console.log(`  · ${line}`);
-      }
-      console.log("\n--dry-run: nothing was created, written, or started.");
+      flow.list("Plan:", flowPlan(state, { appBaseUrl: wizard.appBaseUrl(), region, cloud }));
+      flow.outro("--dry-run: nothing was created, written, or started.");
       return 0;
     }
-
-    // --- env step ---
-    const envPath = join(process.cwd(), ".env");
-    let env = state.envContent;
-    // The file holds every secret: owner-only on create, and re-asserted on
-    // each write so a pre-existing world-readable .env is tightened too.
-    const saveEnv = (): void => {
-      if (env === null) return;
-      writeFileSync(envPath, env, { mode: 0o600 });
-      chmodSync(envPath, 0o600);
-    };
-    if (env === null) {
-      if (await offer(rl, "No .env here — create one from the built-in template?", interactive)) {
-        env = upsertEnv(envTemplate(), freshDatabaseEntries());
-        saveEnv();
-        console.log(dim(`Wrote ${envPath}.`));
-      } else {
-        console.log(dim(`Skipped. Manual: curl -o .env ${ENV_EXAMPLE_URL}`));
-      }
-    } else {
-      console.log(dim(".env found — existing values are kept, setup only fills gaps."));
-    }
-    // Writes through to disk on every change so an aborted run loses nothing.
-    const writeEnv = (entries: Record<string, string>): boolean => {
-      if (env === null) return false;
-      env = upsertEnv(env, entries);
-      saveEnv();
-      return true;
-    };
-    const enableProfile = (profile: string): boolean => {
-      if (env === null) return false;
-      env = withComposeProfile(env, profile);
-      saveEnv();
-      return true;
-    };
-    if (cloud && !isCloudEnv(env)) writeEnv({ IS_CLOUD: "true" });
-
-    // One APP_BASE_URL prompt feeds both the .env write and the SES events
-    // transport in the AWS step: every deployment gets the SQS queue the
-    // worker polls; an https origin also gets a push subscription.
-    const defaultBase =
-      envValue(env, "APP_BASE_URL") || process.env.APP_BASE_URL || "http://localhost:3000";
-    const appBaseUrl =
-      (
-        await rl.question(
-          `APP_BASE_URL — the URL the dashboard is opened at (events land in an SQS queue the worker polls; an https URL also gets them pushed) [${defaultBase}]: `,
-        )
-      ).trim() || defaultBase;
-    if (env !== null && appBaseUrl !== envValue(env, "APP_BASE_URL")) {
-      writeEnv({ APP_BASE_URL: appBaseUrl });
-    }
-
-    // The API's public origin is what the dashboard prints and what MCP
-    // tokens are bound to. Unset it is derived as <dashboard host>:3001,
-    // which only holds while the api answers on that port — a reverse proxy
-    // serving it on its own hostname needs the explicit value.
-    const currentApiUrl = envValue(env, "PUBLIC_API_URL") || process.env.PUBLIC_API_URL || "";
-    const publicApiUrl =
-      (
-        await rl.question(
-          `PUBLIC_API_URL — the API's public origin when a reverse proxy serves it on its own hostname (empty: assumed at port 3001 of the dashboard host)${currentApiUrl ? ` [${currentApiUrl}]` : ""}: `,
-        )
-      ).trim() || currentApiUrl;
-    if (publicApiUrl !== "" && validUrl(publicApiUrl) === null) {
-      console.error(`Not a URL: ${publicApiUrl} — PUBLIC_API_URL left as it was.`);
-    } else if (env !== null && publicApiUrl !== (envValue(env, "PUBLIC_API_URL") ?? "")) {
-      writeEnv({ PUBLIC_API_URL: publicApiUrl });
-    }
-    // The api's own listen port, for the reverse-proxy hint the AWS step prints.
-    const apiPort = Number(envValue(env, "PORT")) || 3001;
-
-    // --- secrets ---
-    if (env !== null) {
-      const missing = missingSecrets(env);
-      if (missing.length === 0) {
-        console.log(dim("Secrets already set (MASTER_ENCRYPTION_KEY, BETTER_AUTH_SECRET)."));
-      }
-      for (const key of missing) {
-        const choice = await selectPrompt(rl, {
-          label: `Generate ${key} for you?`,
-          initial: interactive ? "generate" : "later",
-          options: [
-            { value: "generate", label: "Generate now" },
-            { value: "later", label: "I'll do it later", hint: "openssl rand -base64 32" },
-          ],
-        });
-        if (choice === "generate") {
-          writeEnv({ [key]: generateSecret() });
-          console.log(dim(`${key} written to .env.`));
-        } else {
-          console.log(secretLaterHint(key));
-        }
-      }
-    }
-
-    if (cloud) await cloudStep(rl, interactive, env, appBaseUrl, writeEnv, enableProfile);
-
-    // --- aws step ---
-    const hasKeys = (envValue(env, "AWS_ACCESS_KEY_ID") ?? "") !== "";
-    const hasEvents = (envValue(env, "SNS_TOPIC_ARNS") ?? "") !== "";
-    if (hasKeys) console.log(dim("\nAWS access key already in .env."));
-    if (hasKeys && !hasEvents) {
-      // The common re-run trap: sends work but events were never set up, and
-      // a full re-run both mints an unwanted key and can hit the 2-key IAM
-      // limit. Offer the events-only path first — it touches no IAM.
-      const choice = await selectPrompt(rl, {
-        label: "Event ingestion (delivered/bounce tracking) is not set up. Add it?",
-        initial: interactive ? "events" : "skip",
-        options: [
-          {
-            value: "events",
-            label: "Add event ingestion",
-            hint: "SNS topic + queue + configuration set; keeps the existing key",
-          },
-          { value: "full", label: "Full AWS re-run", hint: "also mints a NEW access key" },
-          { value: "skip", label: "Skip" },
-        ],
-      });
-      if (choice === "skip") {
-        console.log(dim("AWS step skipped."));
-      } else {
-        await awsStep(rl, interactive, appBaseUrl, writeEnv, choice === "events", apiPort);
-      }
-    } else {
-      const awsPrompt = hasKeys
-        ? "Re-run the AWS setup (mints a NEW access key)?"
-        : "\nCreate the AWS resources now (IAM user + key, SNS events, SES configuration set)?";
-      if (await offer(rl, awsPrompt, interactive && !hasKeys)) {
-        await awsStep(rl, interactive, appBaseUrl, writeEnv, false, apiPort);
-      } else {
-        console.log(dim("AWS step skipped."));
-      }
-    }
-
-    // --- object storage & backups step ---
-    await storageStep(rl, writeEnv, enableProfile);
-
-    // --- social login step (before launch, so the stack starts with it) ---
-    await socialLoginStep(rl, appBaseUrl, writeEnv);
-
-    // --- account email (password recovery sender) ---
-    await accountEmailStep(rl, writeEnv);
-
-    // --- release notes opt-in (the operator's own request, not the instance's) ---
-    await updatesStep(rl, interactive);
-
-    return await launchStep(
-      rl,
-      interactive,
-      state,
-      env === null ? [] : missingSecrets(env),
-      appBaseUrl,
-    );
+    if (wizard.interactive && setupDone(wizard.env)) return await menuLoop(wizard);
+    return await walkSteps(wizard);
   } finally {
     rl.close();
+  }
+}
+
+/** Every step in order, the first-run path and the "walk through every step" menu item. */
+async function walkSteps(wizard: Wizard): Promise<number> {
+  await envStep(wizard);
+  await baseUrlsStep(wizard);
+  await secretsStep(wizard);
+  if (wizard.cloud) await cloudStep(wizard);
+  await awsMenuStep(wizard);
+  await storageStep(wizard);
+  // Before launch, so the stack starts with it.
+  await socialLoginStep(wizard);
+  await accountEmailStep(wizard);
+  // The operator's own request, not the instance's.
+  await updatesStep(wizard);
+  return await launchStep(wizard);
+}
+
+/**
+ * The menu an already-set-up install opens on: one step at a time, back to
+ * the menu after each, until the operator starts the stack or leaves.
+ */
+async function menuLoop(wizard: Wizard): Promise<number> {
+  const { flow } = wizard;
+  for (;;) {
+    const options = menuOptions(wizard.env, wizard.cloud);
+    const first = options[0];
+    const choice = await flow.select({
+      label: "This install is set up. What would you like to do?",
+      ...(first ? { initial: first.value } : {}),
+      options,
+    });
+    switch (choice) {
+      case "region": {
+        const queueUrl = envValue(wizard.env, "SQS_QUEUE_URL") ?? "";
+        await addRegionStep(wizard, queueUrl, null);
+        break;
+      }
+      case "aws":
+        await awsMenuStep(wizard);
+        break;
+      case "urls":
+        await baseUrlsStep(wizard);
+        break;
+      case "cloud":
+        await cloudStep(wizard);
+        break;
+      case "storage":
+        await storageStep(wizard);
+        break;
+      case "social":
+        await socialLoginStep(wizard);
+        break;
+      case "email":
+        await accountEmailStep(wizard);
+        break;
+      case "all":
+        return await walkSteps(wizard);
+      case "start":
+        return await launchStep(wizard);
+      default:
+        flow.outro("Nothing else changed. Start or restart with: docker compose up -d");
+        return 0;
+    }
+  }
+}
+
+const ENV_EXAMPLE_URL =
+  "https://raw.githubusercontent.com/MillionSend/millionsend/main/.env.example";
+
+/** Creates .env from the built-in template when there is none. */
+async function envStep(wizard: Wizard): Promise<void> {
+  const { flow } = wizard;
+  if (wizard.env !== null) {
+    flow.note(".env found — existing values are kept, setup only fills gaps.");
+  } else if (
+    await flow.confirm("No .env here — create one from the built-in template?", wizard.interactive)
+  ) {
+    wizard.env = "";
+    wizard.writeEnv(freshDatabaseEntries());
+    wizard.env = upsertEnv(envTemplate(), freshDatabaseEntries());
+    wizard.writeEnv({});
+    flow.note(`Wrote ${join(process.cwd(), ".env")}.`);
+  } else {
+    flow.note(`Skipped. Manual: curl -o .env ${ENV_EXAMPLE_URL}`);
+  }
+  if (wizard.cloud && !isCloudEnv(wizard.env)) wizard.writeEnv({ IS_CLOUD: "true" });
+}
+
+/**
+ * APP_BASE_URL feeds both the .env write and the SES events transport in the
+ * AWS step: every deployment gets the SQS queue the worker polls; an https
+ * origin also gets a push subscription. PUBLIC_API_URL is what the dashboard
+ * prints and what MCP tokens are bound to; unset it is derived as
+ * <dashboard host>:3001, which only holds while the api answers on that port.
+ */
+async function baseUrlsStep(wizard: Wizard): Promise<void> {
+  const { flow } = wizard;
+  const appBaseUrl = await flow.ask({
+    label: "APP_BASE_URL",
+    hint: "the URL the dashboard is opened at; an https URL also gets SES events pushed",
+    initial: wizard.appBaseUrl(),
+  });
+  if (wizard.env !== null && appBaseUrl !== envValue(wizard.env, "APP_BASE_URL")) {
+    wizard.writeEnv({ APP_BASE_URL: appBaseUrl });
+  }
+  const currentApiUrl = envValue(wizard.env, "PUBLIC_API_URL") || process.env.PUBLIC_API_URL || "";
+  const publicApiUrl = await flow.ask({
+    label: "PUBLIC_API_URL",
+    hint: "the API's public origin behind a reverse proxy; empty: port 3001 of the dashboard host",
+    initial: currentApiUrl,
+  });
+  if (publicApiUrl !== "" && validUrl(publicApiUrl) === null) {
+    flow.error(`Not a URL: ${publicApiUrl} — PUBLIC_API_URL left as it was.`);
+  } else if (
+    wizard.env !== null &&
+    publicApiUrl !== (envValue(wizard.env, "PUBLIC_API_URL") ?? "")
+  ) {
+    wizard.writeEnv({ PUBLIC_API_URL: publicApiUrl });
+  }
+}
+
+/** The two generated secrets, offered one by one when missing. */
+async function secretsStep(wizard: Wizard): Promise<void> {
+  const { flow } = wizard;
+  if (wizard.env === null) return;
+  const missing = missingSecrets(wizard.env);
+  if (missing.length === 0) {
+    flow.note("Secrets already set (MASTER_ENCRYPTION_KEY, BETTER_AUTH_SECRET).");
+  }
+  for (const key of missing) {
+    const choice = await flow.select({
+      label: `Generate ${key} for you?`,
+      initial: wizard.interactive ? "generate" : "later",
+      options: [
+        { value: "generate", label: "Generate now" },
+        { value: "later", label: "I'll do it later", hint: "openssl rand -base64 32" },
+      ],
+    });
+    if (choice === "generate") {
+      wizard.writeEnv({ [key]: generateSecret() });
+      flow.note(`${key} written to .env.`);
+    } else {
+      flow.warn(secretLaterHint(key));
+    }
   }
 }
 
@@ -326,62 +380,48 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
  * touches AWS or Stripe; the values are pasted from their consoles, and an
  * empty answer keeps what .env already has.
  */
-async function cloudStep(
-  rl: LineReader,
-  interactive: boolean,
-  env: string | null,
-  appBaseUrl: string,
-  writeEnv: (entries: Record<string, string>) => boolean,
-  enableProfile: (profile: string) => boolean,
-): Promise<void> {
-  console.log(
-    "\nHosted cloud (IS_CLOUD=true) — boot needs every value below except the portal id.",
-  );
+async function cloudStep(wizard: Wizard): Promise<void> {
+  const { flow } = wizard;
+  flow.note("Hosted cloud (IS_CLOUD=true) — boot needs every value below except the portal id.");
   const prompts = [
     {
       key: "KMS_KEY_ID",
-      label:
-        "KMS_KEY_ID — key ARN or id that wraps email bodies; the SES access key must be allowed to use it",
+      hint: "key ARN or id that wraps email bodies; the SES access key must be allowed to use it",
     },
-    {
-      key: "STRIPE_SECRET_KEY",
-      label: "STRIPE_SECRET_KEY — live secret key (Stripe → Developers → API keys)",
-    },
+    { key: "STRIPE_SECRET_KEY", hint: "live secret key (Stripe → Developers → API keys)" },
     {
       key: "STRIPE_WEBHOOK_SECRET",
-      label: `STRIPE_WEBHOOK_SECRET — signing secret of the webhook endpoint at ${appBaseUrl}/api/billing/webhook (Stripe → Developers → Webhooks)`,
+      hint: `signing secret of the webhook endpoint at ${wizard.appBaseUrl()}/api/billing/webhook`,
     },
     {
       key: "STRIPE_PORTAL_CONFIG",
-      label:
-        "STRIPE_PORTAL_CONFIG — customer-portal configuration id, bpc_… (empty: the account default)",
+      hint: "customer-portal configuration id, bpc_… (empty: the account default)",
     },
   ] as const;
   const entries: Record<string, string> = {};
-  for (const { key, label } of prompts) {
-    const current = envValue(env, key) ?? "";
-    const value =
-      (await rl.question(`${label}${current ? ` [${current}]` : ""}: `)).trim() || current;
+  for (const { key, hint } of prompts) {
+    const current = envValue(wizard.env, key) ?? "";
+    const value = await flow.ask({ label: key, hint, initial: current });
     if (value !== "" && value !== current) entries[key] = value;
   }
   if (Object.keys(entries).length > 0) {
-    if (writeEnv(entries)) {
-      console.log(dim(`${Object.keys(entries).join(", ")} written to .env.`));
+    if (wizard.writeEnv(entries)) {
+      flow.note(`${Object.keys(entries).join(", ")} written to .env.`);
     } else {
-      const block = Object.entries(entries)
-        .map(([key, value]) => `${key}=${value}`)
-        .join("\n");
-      console.log(`No .env here — paste into .env where MillionSend runs:\n\n${block}\n`);
+      flow.log(`No .env here — paste into .env where MillionSend runs:\n\n${pasteBlock(entries)}`);
     }
   }
-  const missing = CLOUD_REQUIRED_KEYS.filter((key) => !(entries[key] ?? envValue(env, key)));
+  const missing = CLOUD_REQUIRED_KEYS.filter((key) => !(entries[key] ?? envValue(wizard.env, key)));
   if (missing.length > 0) {
-    console.log(
-      `note: ${missing.join(", ")} still empty — IS_CLOUD=true refuses to boot without them.`,
-    );
+    flow.warn(`${missing.join(", ")} still empty — IS_CLOUD=true refuses to boot without them.`);
   }
-  if (await offer(rl, "Serve the documentation site too (docs compose profile)?", interactive)) {
-    if (enableProfile("docs")) console.log(dim("docs added to COMPOSE_PROFILES."));
+  if (
+    await flow.confirm(
+      "Serve the documentation site too (docs compose profile)?",
+      wizard.interactive,
+    )
+  ) {
+    if (wizard.enableProfile("docs")) flow.note("docs added to COMPOSE_PROFILES.");
   }
 }
 
@@ -408,40 +448,34 @@ const SOCIAL_PROVIDERS = [
  * dashboard's "Continue with …" buttons. Env-only (touches no AWS resource);
  * every question defaults to skip, so piped/EOF runs sail through unchanged.
  */
-async function socialLoginStep(
-  rl: LineReader,
-  appBaseUrl: string,
-  writeEnv: (entries: Record<string, string>) => boolean,
-): Promise<void> {
-  console.log("");
-  const wanted = await offer(
-    rl,
-    'Optional: social login. Google/GitHub OAuth credentials add "Continue with …" buttons to the dashboard sign-in. Configure now?',
+async function socialLoginStep(wizard: Wizard): Promise<void> {
+  const { flow } = wizard;
+  const wanted = await flow.confirm(
+    "Social login?",
     false,
+    'Google/GitHub OAuth credentials add "Continue with …" buttons to the sign-in',
   );
   if (!wanted) {
-    console.log(dim("Skipped — set GOOGLE_/GITHUB_CLIENT_ID and _SECRET in .env any time."));
+    flow.note("Skipped — set GOOGLE_/GITHUB_CLIENT_ID and _SECRET in .env any time.");
     return;
   }
   for (const provider of SOCIAL_PROVIDERS) {
-    if (!(await offer(rl, `\nSet up ${provider.name} sign-in?`, false))) continue;
-    console.log(dim(`Create the OAuth app: ${provider.consoleHint}`));
-    console.log(dim(`Register this callback URL: ${appBaseUrl}${provider.callbackPath}`));
-    const id = (await rl.question(`${provider.idKey} (empty skips): `)).trim();
+    if (!(await flow.confirm(`Set up ${provider.name} sign-in?`, false))) continue;
+    flow.note(
+      `Create the OAuth app: ${provider.consoleHint}\nRegister this callback URL: ${wizard.appBaseUrl()}${provider.callbackPath}`,
+    );
+    const id = await flow.ask({ label: provider.idKey, hint: "empty skips" });
     if (id === "") continue;
-    const secret = (await rl.question(`${provider.secretKey}: `)).trim();
+    const secret = await flow.ask({ label: provider.secretKey, secret: true });
     if (secret === "") {
-      console.log(dim("No secret — skipped."));
+      flow.note("No secret — skipped.");
       continue;
     }
     const entries = { [provider.idKey]: id, [provider.secretKey]: secret };
-    if (writeEnv(entries)) {
-      console.log(dim(`${provider.name} credentials written to .env.`));
+    if (wizard.writeEnv(entries)) {
+      flow.note(`${provider.name} credentials written to .env.`);
     } else {
-      const block = Object.entries(entries)
-        .map(([key, value]) => `${key}=${value}`)
-        .join("\n");
-      console.log(`No .env here — paste into .env where MillionSend runs:\n\n${block}\n`);
+      flow.log(`No .env here — paste into .env where MillionSend runs:\n\n${pasteBlock(entries)}`);
     }
   }
 }
@@ -458,19 +492,16 @@ const UPDATES_PAGE_URL = "https://app.millionsend.com/updates";
  * posting the answer once; the instance it sets up never calls home. The
  * cloud replies with a confirmation link, so a typo enrolls nobody.
  */
-async function updatesStep(rl: LineReader, interactive: boolean): Promise<void> {
-  if (!interactive) return;
-  console.log("");
-  const value = (
-    await rl.question(
-      "Optional: MillionSend release notes by email? A confirmation link is sent first; nothing else ever leaves this machine. Your email (empty skips): ",
-    )
-  ).trim();
+async function updatesStep(wizard: Wizard): Promise<void> {
+  const { flow } = wizard;
+  if (!wizard.interactive) return;
+  const value = await flow.ask({
+    label: "Release notes by email?",
+    hint: "your address; a confirmation link comes first, nothing else leaves this machine; empty skips",
+  });
   if (value === "") return;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-    console.log(
-      dim(`Doesn't look like an address — skipped. Subscribe any time at ${UPDATES_PAGE_URL}.`),
-    );
+    flow.note(`Doesn't look like an address — skipped. Subscribe any time at ${UPDATES_PAGE_URL}.`);
     return;
   }
   try {
@@ -481,9 +512,9 @@ async function updatesStep(rl: LineReader, interactive: boolean): Promise<void> 
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    console.log(dim("Check your inbox for the confirmation link."));
+    flow.note("Check your inbox for the confirmation link.");
   } catch {
-    console.log(dim(`Couldn't reach millionsend.com — subscribe any time at ${UPDATES_PAGE_URL}.`));
+    flow.note(`Couldn't reach millionsend.com — subscribe any time at ${UPDATES_PAGE_URL}.`);
   }
 }
 
@@ -493,42 +524,34 @@ async function updatesStep(rl: LineReader, interactive: boolean): Promise<void> 
  * is safe. The domain must be a verified identity — usually added later in
  * the dashboard, which is why this only sanity-checks the address shape.
  */
-async function accountEmailStep(
-  rl: LineReader,
-  writeEnv: (entries: Record<string, string>) => boolean,
-): Promise<void> {
-  console.log("");
-  const wanted = await offer(
-    rl,
-    'Optional: account emails. AUTH_EMAIL_FROM is the sender for password-reset mail; without it the "Forgot password?" link stays hidden. Set it now?',
+async function accountEmailStep(wizard: Wizard): Promise<void> {
+  const { flow } = wizard;
+  const wanted = await flow.confirm(
+    "Account emails?",
     false,
+    'AUTH_EMAIL_FROM sends password-reset mail; without it "Forgot password?" stays hidden',
   );
   if (!wanted) {
-    console.log(
-      dim(
-        "Skipped — set AUTH_EMAIL_FROM (and ONBOARDING_EMAIL_FROM for the onboarding Send email button) in .env any time; their domains must be verified in the dashboard.",
-      ),
+    flow.note(
+      "Skipped — set AUTH_EMAIL_FROM (and ONBOARDING_EMAIL_FROM for the onboarding Send email button) in .env any time; their domains must be verified in the dashboard.",
     );
     return;
   }
-  const value = (
-    await rl.question('AUTH_EMAIL_FROM ("Name <user@domain>" or a bare address; empty skips): ')
-  ).trim();
+  const value = await flow.ask({
+    label: "AUTH_EMAIL_FROM",
+    hint: '"Name <user@domain>" or a bare address; empty skips',
+  });
   if (value === "") return;
   if (!EMAIL_FROM_RE.test(value)) {
-    console.log(dim("Doesn't look like an address — skipped. Set AUTH_EMAIL_FROM in .env later."));
+    flow.note("Doesn't look like an address — skipped. Set AUTH_EMAIL_FROM in .env later.");
     return;
   }
-  if (writeEnv({ AUTH_EMAIL_FROM: value })) {
-    console.log(
-      dim(
-        "AUTH_EMAIL_FROM written to .env. Its domain must be a verified sending domain in this instance.",
-      ),
+  if (wizard.writeEnv({ AUTH_EMAIL_FROM: value })) {
+    flow.note(
+      "AUTH_EMAIL_FROM written to .env. Its domain must be a verified sending domain in this instance.",
     );
   } else {
-    console.log(
-      `No .env here — paste into .env where MillionSend runs:\n\nAUTH_EMAIL_FROM=${value}\n`,
-    );
+    flow.log(`No .env here — paste into .env where MillionSend runs:\n\nAUTH_EMAIL_FROM=${value}`);
   }
 }
 
@@ -551,92 +574,83 @@ function validUrl(value: string): string | null {
  * only once the operator has a public URL (boot rejects one without the
  * other). Every question defaults to skip; failures warn and return.
  */
-async function storageStep(
-  rl: LineReader,
-  writeEnv: (entries: Record<string, string>) => boolean,
-  enableProfile: (profile: string) => boolean,
-): Promise<void> {
-  console.log("");
-  const wanted = await offer(
-    rl,
-    "Optional: object storage & backups. One S3-compatible credential set (Cloudflare R2 works out of the box) enables team logo uploads and scheduled database backups. Configure now?",
+async function storageStep(wizard: Wizard): Promise<void> {
+  const { flow } = wizard;
+  const wanted = await flow.confirm(
+    "Object storage & backups?",
     false,
+    "one S3-compatible credential set (Cloudflare R2 works out of the box) enables logo uploads and scheduled database backups",
   );
   if (!wanted) {
-    console.log(dim("Skipped — set the S3_* block in .env any time."));
+    flow.note("Skipped — set the S3_* block in .env any time.");
     return;
   }
-  const endpoint = (
-    await rl.question(
-      "S3_ENDPOINT — R2: https://<accountid>.r2.cloudflarestorage.com (empty skips): ",
-    )
-  ).trim();
+  const endpoint = await flow.ask({
+    label: "S3_ENDPOINT",
+    hint: "R2: https://<accountid>.r2.cloudflarestorage.com; empty skips",
+  });
   if (endpoint === "") return;
   if (validUrl(endpoint) === null) {
-    console.error(`Not a URL: ${endpoint} — storage step skipped.`);
+    flow.error(`Not a URL: ${endpoint} — storage step skipped.`);
     return;
   }
-  const accessKeyId = (await rl.question("S3_ACCESS_KEY_ID (empty skips): ")).trim();
+  const accessKeyId = await flow.ask({ label: "S3_ACCESS_KEY_ID", hint: "empty skips" });
   if (accessKeyId === "") return;
-  const secretAccessKey = (await rl.question("S3_SECRET_ACCESS_KEY: ")).trim();
+  const secretAccessKey = await flow.ask({ label: "S3_SECRET_ACCESS_KEY", secret: true });
   if (secretAccessKey === "") {
-    console.log(dim("No secret — skipped."));
+    flow.note("No secret — skipped.");
     return;
   }
-  const storageBucket =
-    (await rl.question(`Uploads bucket name [${STORAGE_BUCKET_DEFAULTS.storage}]: `)).trim() ||
-    STORAGE_BUCKET_DEFAULTS.storage;
-  const backupBucket =
-    (await rl.question(`Backups bucket name [${STORAGE_BUCKET_DEFAULTS.backup}]: `)).trim() ||
-    STORAGE_BUCKET_DEFAULTS.backup;
+  const storageBucket = await flow.ask({
+    label: "Uploads bucket name",
+    initial: STORAGE_BUCKET_DEFAULTS.storage,
+  });
+  const backupBucket = await flow.ask({
+    label: "Backups bucket name",
+    initial: STORAGE_BUCKET_DEFAULTS.backup,
+  });
 
   const credentials = { endpoint, accessKeyId, secretAccessKey };
   const client = createStorageClient(credentials);
   try {
     for (const bucket of [storageBucket, backupBucket]) {
-      console.log(`${info("==>")} bucket ${bucket}: ${await ensureBucket(client, bucket)}`);
+      flow.step(`bucket ${bucket}: ${await ensureBucket(client, bucket)}`);
     }
   } catch (error) {
     // Connection failures surface as AggregateErrors with an empty message.
     const reason = (error as Error).message || (error as Error).name || String(error);
-    console.error(
-      `${err("Bucket setup failed:")} ${reason}\nCheck the endpoint and credentials, or create the buckets yourself and set the S3_* lines in .env by hand — storage step skipped.`,
+    flow.error(
+      `Bucket setup failed: ${reason}\nCheck the endpoint and credentials, or create the buckets yourself and set the S3_* lines in .env by hand — storage step skipped.`,
     );
     return;
   }
 
-  console.log(
-    `Uploads serve straight from the bucket, so ${storageBucket} must serve objects\npublicly — the S3 API cannot enable that. R2: bucket → Settings → enable\npublic access (or attach a custom domain), then use that URL below.\nKeep ${backupBucket} PRIVATE — dumps contain the whole database.`,
+  flow.note(
+    `Uploads serve straight from the bucket, so ${storageBucket} must serve objects publicly — the S3 API cannot enable that. R2: bucket → Settings → enable public access (or attach a custom domain), then use that URL below. Keep ${backupBucket} PRIVATE — dumps contain the whole database.`,
   );
-  let publicUrl = (
-    await rl.question("S3_STORAGE_PUBLIC_URL (the bucket's public base URL; empty to add later): ")
-  ).trim();
+  let publicUrl = await flow.ask({
+    label: "S3_STORAGE_PUBLIC_URL",
+    hint: "the bucket's public base URL; empty to add later",
+  });
   if (publicUrl !== "" && validUrl(publicUrl) === null) {
-    console.error(`Not a URL: ${publicUrl} — add S3_STORAGE_PUBLIC_URL to .env later instead.`);
+    flow.error(`Not a URL: ${publicUrl} — add S3_STORAGE_PUBLIC_URL to .env later instead.`);
     publicUrl = "";
   }
 
   const entries = storageEnvEntries({ credentials, backupBucket, storageBucket, publicUrl });
-  if (writeEnv(entries)) {
-    console.log(dim("S3 values written to .env."));
+  if (wizard.writeEnv(entries)) {
+    flow.note("S3 values written to .env.");
     // The standalone compose keeps the backup service behind a profile, so
     // configuring backups also has to switch its container on.
-    if (enableProfile("backup")) {
-      console.log(
-        dim("backup added to COMPOSE_PROFILES — the scheduled dumps start with the stack."),
-      );
+    if (wizard.enableProfile("backup")) {
+      flow.note("backup added to COMPOSE_PROFILES — the scheduled dumps start with the stack.");
     }
   } else {
-    const block = Object.entries(entries)
-      .map(([key, value]) => `${key}=${value}`)
-      .join("\n");
-    console.log(`No .env here — paste into .env where MillionSend runs:\n\n${block}\n`);
+    flow.log(`No .env here — paste into .env where MillionSend runs:\n\n${pasteBlock(entries)}`);
   }
   if (publicUrl === "") {
-    console.log(
-      dim(
-        `Uploads stay off until public access is enabled and .env has S3_STORAGE_BUCKET=${storageBucket} and S3_STORAGE_PUBLIC_URL=<public URL> (set together).`,
-      ),
+    flow.note(
+      `Uploads stay off until public access is enabled and .env has S3_STORAGE_BUCKET=${storageBucket} and S3_STORAGE_PUBLIC_URL=<public URL> (set together).`,
     );
   }
 }
@@ -646,8 +660,8 @@ async function storageStep(
  * the aws CLI installed. Returns the account id, or null after the manual
  * hint. STS is global; the probe region does not constrain the SES region.
  */
-async function resolveIdentity(rl: LineReader): Promise<string | null> {
-  const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+async function resolveIdentity(flow: Flow): Promise<string | null> {
+  const interactive = isInteractive();
   // Two login attempts, then the manual hint — a third rarely goes better.
   for (let attempt = 0; ; attempt++) {
     // Fresh client per attempt: a login may have just minted credentials,
@@ -656,10 +670,10 @@ async function resolveIdentity(rl: LineReader): Promise<string | null> {
     try {
       const identity = await sts.send(new GetCallerIdentityCommand({}));
       if (!identity.Account) throw new Error("GetCallerIdentity returned no account");
-      console.log(`${dim(`aws: ${identity.Arn ?? "?"} (account ${identity.Account})`)}\n`);
+      flow.step(`aws: ${identity.Arn ?? "?"} (account ${identity.Account})`);
       return identity.Account;
     } catch (error) {
-      console.error(`${err("Could not verify AWS credentials:")} ${(error as Error).message}`);
+      flow.error(`Could not verify AWS credentials: ${(error as Error).message}`);
       const action = authAction({
         identityOk: false,
         // Pipes never get the offer, so skip probing for the CLI there.
@@ -667,12 +681,12 @@ async function resolveIdentity(rl: LineReader): Promise<string | null> {
         isTTY: interactive,
       });
       if (action !== "offer-login" || attempt >= 2) {
-        console.error(
+        flow.error(
           "Run this where the AWS CLI/SDK finds admin credentials — `aws configure`, AWS_PROFILE, or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY in the environment.",
         );
         return null;
       }
-      const choice = await selectPrompt(rl, {
+      const choice = await flow.select({
         label: "Not authenticated",
         // aws login (browser sign-in for IAM users) is the common case;
         // aws sso login only works for Identity Center profiles with
@@ -692,9 +706,9 @@ async function resolveIdentity(rl: LineReader): Promise<string | null> {
 }
 
 /** SES region prompt; null when the typed free-form region is not a region name. */
-async function chooseRegion(rl: LineReader): Promise<string | null> {
+async function chooseRegion(flow: Flow): Promise<string | null> {
   const defaultRegion = process.env.AWS_REGION ?? "us-east-1";
-  let region = await selectPrompt(rl, {
+  let region = await flow.select({
     label: "AWS region",
     initial: defaultRegion,
     options: [
@@ -703,13 +717,87 @@ async function chooseRegion(rl: LineReader): Promise<string | null> {
     ],
   });
   if (region === OTHER_REGION) {
-    region = (await rl.question(`AWS region [${defaultRegion}]: `)).trim() || defaultRegion;
+    region = await flow.ask({ label: "AWS region", initial: defaultRegion });
   }
   if (!REGION_RE.test(region)) {
-    console.error(`Not an AWS region name: ${region}`);
+    flow.error(`Not an AWS region name: ${region}`);
     return null;
   }
   return region;
+}
+
+/**
+ * The AWS decision on an install that already has some of it: add a region
+ * when events and the queue exist (a full re-run only on a single-region
+ * install — it rewrites the topic list and the queue policy for one region),
+ * add event ingestion when only the key exists (a full re-run would mint an
+ * unwanted key and can hit the 2-key IAM limit), else the first setup.
+ */
+async function awsMenuStep(wizard: Wizard): Promise<void> {
+  const { flow } = wizard;
+  const hasKeys = (envValue(wizard.env, "AWS_ACCESS_KEY_ID") ?? "") !== "";
+  const hasEvents = (envValue(wizard.env, "SNS_TOPIC_ARNS") ?? "") !== "";
+  const queueUrl = envValue(wizard.env, "SQS_QUEUE_URL") ?? "";
+  if (hasKeys) flow.note("AWS access key already in .env.");
+  if (hasEvents && queueUrl !== "") {
+    const served = servedRegionsInEnv(wizard.env);
+    const rerun = fullRerunOffered(wizard.env);
+    const choice = await flow.select({
+      label: `AWS is set up (${served.join(", ")}). Add another SES region?`,
+      initial: "skip",
+      options: [
+        {
+          value: "region",
+          label: "Add a region",
+          hint: "topic + configuration set there; events join the existing queue; no new key",
+        },
+        ...(rerun
+          ? [{ value: "full", label: "Full AWS re-run", hint: "also mints a NEW access key" }]
+          : []),
+        { value: "skip", label: "Skip" },
+      ],
+    });
+    if (choice === "region") {
+      await addRegionStep(wizard, queueUrl, null);
+    } else if (choice === "full") {
+      await awsStep(wizard, false);
+    } else {
+      flow.note("AWS step skipped.");
+      if (!rerun) {
+        flow.note(
+          `To rotate the access key on a multi-region install, create one for the ${SETUP_NAMES.user} IAM user in the IAM console and update .env; a full re-run here would keep only one region's events.`,
+        );
+      }
+    }
+    return;
+  }
+  if (hasKeys && !hasEvents) {
+    const choice = await flow.select({
+      label: "Event ingestion (delivered/bounce tracking) is not set up. Add it?",
+      initial: wizard.interactive ? "events" : "skip",
+      options: [
+        {
+          value: "events",
+          label: "Add event ingestion",
+          hint: "SNS topic + queue + configuration set; keeps the existing key",
+        },
+        { value: "full", label: "Full AWS re-run", hint: "also mints a NEW access key" },
+        { value: "skip", label: "Skip" },
+      ],
+    });
+    if (choice === "skip") flow.note("AWS step skipped.");
+    else await awsStep(wizard, choice === "events");
+    return;
+  }
+  const wanted = hasKeys
+    ? await flow.confirm("Re-run the AWS setup?", false, "mints a NEW access key")
+    : await flow.confirm(
+        "Create the AWS resources now?",
+        wizard.interactive,
+        "IAM user + key, SNS events, SES configuration set",
+      );
+  if (wanted) await awsStep(wizard, false);
+  else flow.note("AWS step skipped.");
 }
 
 /**
@@ -719,30 +807,18 @@ async function chooseRegion(rl: LineReader): Promise<string | null> {
  * continues to the launch step, since a stack can boot (not send) without
  * AWS keys.
  */
-async function awsStep(
-  rl: LineReader,
-  interactive: boolean,
-  appBaseUrl: string,
-  writeEnv: (entries: Record<string, string>) => boolean,
-  eventsOnly = false,
-  apiPort = 3001,
-): Promise<void> {
-  const accountId = await resolveIdentity(rl);
+async function awsStep(wizard: Wizard, eventsOnly: boolean): Promise<void> {
+  const { flow } = wizard;
+  const accountId = await resolveIdentity(flow);
   if (accountId === null) return;
-  const region = await chooseRegion(rl);
+  const region = await chooseRegion(flow);
   if (region === null) return;
+  const appBaseUrl = wizard.appBaseUrl();
 
-  console.log(`\n${bold("Plan:")}`);
-  const plan = eventsOnly ? eventsPlan : setupPlan;
-  for (const line of plan({ region, appBaseUrl })) console.log(`  · ${line}`);
-  if (!(await offer(rl, "\nProceed?", interactive))) return;
+  flow.list("Plan:", (eventsOnly ? eventsPlan : setupPlan)({ region, appBaseUrl }));
+  if (!(await flow.confirm("Proceed?", wizard.interactive))) return;
 
-  const input = {
-    region,
-    accountId,
-    appBaseUrl,
-    onStep: (line: string) => console.log(`${info("==>")} ${line}`),
-  };
+  const input = { region, accountId, appBaseUrl, onStep: (line: string) => flow.step(line) };
   let entries: Record<string, string>;
   try {
     if (eventsOnly) {
@@ -756,26 +832,232 @@ async function awsStep(
       entries = setupEnvEntries(region, await runSetup(createSetupClients(region), input));
     }
   } catch (error) {
-    console.error(
-      `${err("AWS setup failed:")} ${(error as Error).message}\nFix that and re-run — resources it already created are adopted, not duplicated.`,
+    flow.error(
+      `AWS setup failed: ${(error as Error).message}\nFix that and re-run — resources it already created are adopted, not duplicated.`,
     );
     return;
   }
 
-  if (writeEnv(entries)) {
-    console.log(`\n${eventsOnly ? "Event ingestion values" : "AWS keys"} written to .env.`);
+  if (wizard.writeEnv(entries)) {
+    flow.step(`${eventsOnly ? "Event ingestion values" : "AWS keys"} written to .env.`);
   } else {
-    const block = Object.entries(entries)
-      .map(([key, value]) => `${key}=${value}`)
-      .join("\n");
-    console.log(`\nDone. Paste into .env where MillionSend runs, then restart it:\n\n${block}\n`);
+    flow.log(
+      `Done. Paste into .env where MillionSend runs, then restart it:\n\n${pasteBlock(entries)}`,
+    );
   }
   const origin = httpsOrigin(appBaseUrl);
   if (origin) {
-    console.log(
-      "The SNS subscription confirms itself once the app runs with these values;\nif it stays pending, use 'Request confirmation' on it in the SNS console.",
+    flow.note(
+      "The SNS subscription confirms itself once the app runs with these values; if it stays pending, use 'Request confirmation' on it in the SNS console.",
     );
-    console.log(`\n${sesEventsProxyHint(origin, apiPort)}`);
+    flow.note(sesEventsProxyHint(origin, wizard.apiPort()));
+  }
+}
+
+/**
+ * Adds an SES region to an install that already has one. IAM is global, so
+ * the user and policy are kept (the policy document is synced); the region
+ * gets its own SNS topic, configuration set and bounce suppression; the topic
+ * delivers into the existing events queue across regions; .env gains the
+ * region and the topic ARN while AWS_REGION and SQS_QUEUE_URL stay as they
+ * are. Failures print their hint and return, like the AWS step.
+ */
+async function addRegionStep(
+  wizard: Wizard,
+  queueUrl: string,
+  preset: string | null,
+): Promise<void> {
+  const { flow } = wizard;
+  const queue = parseSqsQueueUrl(queueUrl);
+  if (!queue) {
+    flow.error(
+      `SQS_QUEUE_URL is not a standard queue URL (${queueUrl}); add the region by hand — SELF_HOSTING.md, "Adding a region".`,
+    );
+    return;
+  }
+  const accountId = await resolveIdentity(flow);
+  if (accountId === null) return;
+  const served = servedRegionsInEnv(wizard.env);
+  const region = preset ?? (await chooseRegion(flow));
+  if (region === null) return;
+  if (served.includes(region)) {
+    flow.note(`${region} is already served (${served.join(", ")}) — nothing to add.`);
+    return;
+  }
+  const appBaseUrl = wizard.appBaseUrl();
+
+  flow.list("Plan:", addRegionPlan({ region, queueUrl, appBaseUrl }));
+  if (!(await flow.confirm("Proceed?", wizard.interactive))) return;
+
+  const clients = createSetupClients(region, queue.region);
+  const onStep = (line: string): void => flow.step(line);
+  let topicArn: string;
+  try {
+    onStep(`IAM policy ${SETUP_NAMES.policy}`);
+    try {
+      if (await syncAdoptedPolicy(clients.iam, setupPolicyArn(accountId))) {
+        onStep(`IAM policy ${SETUP_NAMES.policy}: updated to the current document`);
+      }
+    } catch (error) {
+      // An install that brought its own IAM (the events-only path) has no
+      // wizard-named policy; the region's resources need none.
+      if ((error as { name?: string }).name !== "NoSuchEntityException") throw error;
+      onStep(
+        `IAM policy ${SETUP_NAMES.policy}: not found, this install brought its own IAM — kept`,
+      );
+    }
+    const existingTopics = (envValue(wizard.env, "SNS_TOPIC_ARNS") ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    ({ topicArn } = await runEventsSetup(clients, {
+      region,
+      accountId,
+      appBaseUrl,
+      onStep,
+      existingQueue: { url: queueUrl, topicArns: existingTopics },
+    }));
+  } catch (error) {
+    flow.error(
+      `Adding the region failed: ${(error as Error).message}\nFix that and re-run — resources it already created are adopted, not duplicated.`,
+    );
+    return;
+  }
+  await essentialsPlanPrompt(flow, clients.ses, region);
+
+  const entries = addRegionEnvEntries(wizard.env, region, topicArn);
+  if (wizard.writeEnv(entries)) {
+    flow.step(
+      `${region} added to .env (AWS_REGIONS, SNS_TOPIC_ARNS). Restart the stack (docker compose up -d) so the worker and dashboard pick it up; the region reads as Sandbox until AWS grants production access there.`,
+    );
+  } else {
+    flow.log(
+      `Done. Paste into .env where MillionSend runs, then restart it:\n\n${pasteBlock(entries)}`,
+    );
+  }
+  if (httpsOrigin(appBaseUrl)) {
+    flow.note(
+      "The SNS subscription confirms itself once the app runs with these values; if it stays pending, use 'Request confirmation' on it in the SNS console.",
+    );
+  }
+}
+
+/**
+ * `setup add-region [region]`: the add-region step on its own, without the
+ * rest of the wizard. Where the install's .env is — the deploy directory, or
+ * the container's `setup` mode on the server — it edits that file; anywhere
+ * else it asks for the install's queue, topics and regions and prints the
+ * two lines to apply. --dry-run prints the plan and touches nothing.
+ */
+async function addRegionMain(flow: Flow, args: string[], dryRun: boolean): Promise<number> {
+  const preset = args.find((arg) => !arg.startsWith("--")) ?? null;
+  if (preset !== null && !REGION_RE.test(preset)) {
+    flow.error(`Not an AWS region name: ${preset}`);
+    return 1;
+  }
+  flow.intro("millionsend", "add-region", preset ?? undefined);
+  const envPath = join(process.cwd(), ".env");
+  const state = detectDirState(readCwdFile, null);
+  let queueUrl = envValue(state.envContent, "SQS_QUEUE_URL") || process.env.SQS_QUEUE_URL || "";
+  if (state.envContent !== null && queueUrl === "") {
+    flow.error("This .env has no SQS_QUEUE_URL — run the full setup first, then add regions.");
+    return 1;
+  }
+  if (dryRun) {
+    const wizard = createWizard(flow, state, false, state.envContent, null);
+    flow.list(
+      "Plan:",
+      addRegionPlan({
+        region: preset ?? "<region>",
+        queueUrl: queueUrl || "<SQS_QUEUE_URL>",
+        appBaseUrl: envValue(state.envContent, "APP_BASE_URL") || process.env.APP_BASE_URL || "",
+      }),
+    );
+    flow.outro(`--dry-run: nothing was created or written${wizard.env ? "" : " (no .env here)"}.`);
+    return 0;
+  }
+  if (state.envContent === null) {
+    flow.note(
+      "No .env here — the install's current values are asked for and the result is printed, not written.",
+    );
+    queueUrl =
+      queueUrl || (await flow.ask({ label: "SQS_QUEUE_URL", hint: "the install's events queue" }));
+    if (queueUrl === "") {
+      flow.error("An events queue is required: the new region's topic delivers into it.");
+      return 1;
+    }
+    const topics = await flow.ask({
+      label: "SNS_TOPIC_ARNS",
+      hint: "the topic ARNs the install already allows, comma-separated",
+    });
+    if (topics === "") {
+      flow.error(
+        "The queue policy is rewritten with the topics listed here; an empty list would cut off the existing regions' events.",
+      );
+      return 1;
+    }
+    const regions = await flow.ask({
+      label: "AWS_REGIONS",
+      hint: "the regions the install serves today, comma-separated",
+      initial: parseSqsQueueUrl(queueUrl)?.region ?? "",
+    });
+    const appBaseUrl = await flow.ask({
+      label: "APP_BASE_URL",
+      hint: "for the optional https push of events; empty: queue only",
+      initial: process.env.APP_BASE_URL ?? "",
+    });
+    const env = upsertEnv("", {
+      AWS_REGIONS: regions,
+      SNS_TOPIC_ARNS: topics,
+      SQS_QUEUE_URL: queueUrl,
+      ...(appBaseUrl ? { APP_BASE_URL: appBaseUrl } : {}),
+    });
+    // No path: nothing is written, the step prints the lines instead.
+    const wizard = createWizard(flow, state, false, env, null);
+    await addRegionStep(wizard, queueUrl, preset);
+    return 0;
+  }
+  flow.note(`Found ${envPath} — the region is written into it.`);
+  const wizard = createWizard(flow, state, isCloudEnv(state.envContent), state.envContent, envPath);
+  await addRegionStep(wizard, queueUrl, preset);
+  return 0;
+}
+
+/**
+ * A region with no prior sending starts on the Essentials plan, which costs
+ * more per message than à la carte: say so and offer the cancel. Nothing is
+ * changed without an explicit yes; a plan that cannot be read is left alone.
+ * Exported for tests.
+ */
+export async function essentialsPlanPrompt(
+  flow: Flow,
+  ses: SetupSesClient,
+  region: string,
+): Promise<"kept" | "cancelled" | "not_essentials" | "unknown"> {
+  let plan: string | null;
+  try {
+    plan = await readPricingPlan(ses);
+  } catch (error) {
+    flow.note(`Could not read the SES pricing plan in ${region}: ${(error as Error).message}`);
+    return "unknown";
+  }
+  if (plan !== "ESSENTIALS") return "not_essentials";
+  flow.warn(`Pricing plan: ${ESSENTIALS_WARNING}`);
+  if (!(await flow.confirm(`Cancel the Essentials plan in ${region} now?`, false, "Plan=NONE"))) {
+    flow.note(
+      `Kept. Cancel later with: aws sesv2 put-account-pricing-attributes --plan NONE --region ${region}`,
+    );
+    return "kept";
+  }
+  try {
+    await cancelPricingPlan(ses);
+    flow.step(`${region} is now on à la carte SES pricing.`);
+    return "cancelled";
+  } catch (error) {
+    flow.error(
+      `Cancel failed: ${(error as Error).message}\nCancel it in the SES console (Pricing plan → Cancel plan) or with the CLI line above.`,
+    );
+    return "kept";
   }
 }
 
@@ -785,27 +1067,18 @@ async function download(url: string): Promise<string> {
   return response.text();
 }
 
-const ENV_EXAMPLE_URL =
-  "https://raw.githubusercontent.com/MillionSend/millionsend/main/.env.example";
-
 /** The launch step: optional compose download, then docker compose up. */
-async function launchStep(
-  rl: LineReader,
-  interactive: boolean,
-  state: DirState,
-  secretsMissing: string[],
-  appBaseUrl: string,
-): Promise<number> {
-  console.log("");
+async function launchStep(wizard: Wizard): Promise<number> {
+  const { flow, state } = wizard;
   if (state.docker === null) {
-    console.log(
+    flow.outro(
       "docker not found — install it (https://docs.docker.com/get-docker/), then run: docker compose up -d",
     );
     return 0;
   }
-  const choice = await selectPrompt(rl, {
+  const choice = await flow.select({
     label: "Start MillionSend now?",
-    initial: interactive ? "start" : "later",
+    initial: wizard.interactive ? "start" : "later",
     options: [
       { value: "start", label: "Start", hint: "docker compose up" },
       { value: "later", label: "Later" },
@@ -815,104 +1088,84 @@ async function launchStep(
   let composeContent = state.composeContent;
   if (choice === "start" && composeContent === null) {
     if (
-      await offer(
-        rl,
+      await flow.confirm(
         "No compose file here — download the standalone deploy/docker-compose.yml?",
-        interactive,
+        wizard.interactive,
       )
     ) {
       try {
         composeContent = await download(COMPOSE_DOWNLOAD_URL);
         writeFileSync(join(process.cwd(), "docker-compose.yml"), composeContent);
-        console.log(dim("Wrote docker-compose.yml."));
+        flow.step("Wrote docker-compose.yml.");
       } catch (error) {
-        console.error(`Download failed (${(error as Error).message}).`);
+        flow.error(`Download failed (${(error as Error).message}).`);
       }
     }
   }
 
   const command = `docker ${composeUpArgs(composeContent).join(" ")}`;
   if (choice !== "start" || composeContent === null) {
-    const curlLine =
+    const curl =
       composeContent === null && state.composeFile === null
-        ? `
-  curl -O ${COMPOSE_DOWNLOAD_URL}`
+        ? `\n  curl -O ${COMPOSE_DOWNLOAD_URL}`
         : "";
-    console.log(`Start later with:${curlLine}
-  ${command}`);
+    flow.outro(`Start later with:${curl}\n  ${command}`);
     return 0;
   }
 
+  const secretsMissing = wizard.env === null ? [] : missingSecrets(wizard.env);
   if (secretsMissing.length > 0) {
-    console.log(`note: ${secretsMissing.join(", ")} still empty in .env — the app needs them.`);
+    flow.warn(`${secretsMissing.join(", ")} still empty in .env — the app needs them.`);
   }
-  console.log(`
-$ ${command}`);
+  flow.step(`$ ${command}`);
   if (!runInherit("docker", composeUpArgs(composeContent))) {
-    console.error(`${err("docker compose failed")} — fix the error above and re-run the setup.`);
+    flow.error("docker compose failed — fix the error above and re-run the setup.");
     return 1;
   }
+  const appBaseUrl = wizard.appBaseUrl();
   const origin = httpsOrigin(appBaseUrl);
-  console.log(
-    `
-${bold("Running. Next steps:")}
-  · ${appBaseUrl} — sign up (the first user becomes the owner)
-  · SES sandbox account? Set the send rate to 1 in Settings → Instance
-  · Verify a sending domain in the dashboard, then send${
-    origin
-      ? `
-  · Reverse proxy in front? Route ${origin}/ses/events to the api (SELF_HOSTING.md, SES events)`
-      : ""
-  }`,
+  flow.outro(
+    [
+      "Running. Next steps:",
+      `  · ${appBaseUrl} — sign up (the first user becomes the owner)`,
+      "  · SES sandbox account? Recipients must be verified until AWS grants production access",
+      "  · Verify a sending domain in the dashboard, then send",
+      ...(origin
+        ? [
+            `  · Reverse proxy in front? Route ${origin}/ses/events to the api (SELF_HOSTING.md, SES events)`,
+          ]
+        : []),
+    ].join("\n"),
   );
   return 0;
 }
 
 /** The pre-wizard teardown flow, unchanged: identity, region, delete. */
-async function teardownMain(rl: LineReader, dryRun: boolean): Promise<number> {
+async function teardownMain(flow: Flow, dryRun: boolean): Promise<number> {
+  flow.intro("millionsend", "teardown");
   let accountId = "";
   if (dryRun) {
-    console.log("--dry-run: skipping the AWS credential check.\n");
+    flow.note("--dry-run: skipping the AWS credential check.");
   } else {
-    const resolved = await resolveIdentity(rl);
+    const resolved = await resolveIdentity(flow);
     if (resolved === null) return 1;
     accountId = resolved;
   }
-  const region = await chooseRegion(rl);
+  const region = await chooseRegion(flow);
   if (region === null) return 1;
-  return await teardownFlow(rl, region, accountId, dryRun);
-}
-
-async function teardownFlow(
-  rl: LineReader,
-  region: string,
-  accountId: string,
-  dryRun: boolean,
-): Promise<number> {
-  console.log(`\n${bold("Teardown deletes:")}`);
-  for (const line of teardownPlan(region)) console.log(`  · ${line}`);
+  flow.list("Teardown deletes:", teardownPlan(region));
   if (dryRun) {
-    console.log("\n--dry-run: nothing was deleted.");
+    flow.outro("--dry-run: nothing was deleted.");
     return 0;
   }
-  if (!(await confirm(rl, "\nDelete these? The access keys stop working immediately."))) return 1;
+  if (!(await flow.confirm("Delete these?", false, "the access keys stop working immediately"))) {
+    return 1;
+  }
   await runTeardown(createSetupClients(region), {
     region,
     accountId,
-    onStep: (line) => console.log(`${info("==>")} deleting ${line}`),
+    onStep: (line) => flow.step(`deleting ${line}`),
   });
-  console.log("\nDone. Remove the AWS_* / SNS_TOPIC_ARNS / SES_CONFIGURATION_SET lines from .env.");
+  flow.outro("Done. Remove the AWS_* / SNS_TOPIC_ARNS / SES_CONFIGURATION_SET lines from .env.");
   return 0;
-}
-
-async function confirm(rl: LineReader, prompt: string): Promise<boolean> {
-  return confirmed(await rl.question(`${prompt} [y/N] `), false);
-}
-
-/**
- * A wizard offer: defaults to yes on interactive terminals (Enter accepts),
- * to no otherwise — piped/EOF runs skip every offer deterministically.
- */
-async function offer(rl: LineReader, prompt: string, defaultYes: boolean): Promise<boolean> {
-  return confirmed(await rl.question(`${prompt} ${defaultYes ? "[Y/n]" : "[y/N]"} `), defaultYes);
 }

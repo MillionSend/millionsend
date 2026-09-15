@@ -4,6 +4,7 @@ import {
   env,
   isCloudDeployment,
   notificationsEmailFrom,
+  servedRegions,
 } from "@millionsend/config";
 import {
   type AccountMailKind,
@@ -293,8 +294,9 @@ export interface SystemMailDeps {
 /**
  * Account mail rides the team pipeline when a team holds the sender's
  * verified domain (core sendSystemMail), else SESv2 Simple content as
- * before. Clients are built per send: system mail is rare, so there is
- * nothing worth caching.
+ * before — in that domain's region when a team holds it, else the default
+ * served region. Clients are built per send: system mail is rare, so there
+ * is nothing worth caching.
  */
 export const defaultSystemMailDeps: SystemMailDeps = {
   send: async (message) => {
@@ -304,10 +306,10 @@ export const defaultSystemMailDeps: SystemMailDeps = {
         keyring: getKeyring(),
         isCloud: isCloudDeployment(),
         enqueueEmailSend,
-        raw: (m) =>
+        raw: (m, owner) =>
           sendSimpleEmail(
             createSesSendClient({
-              region: env.AWS_REGION,
+              region: owner?.region ?? servedRegions()[0] ?? env.AWS_REGION,
               accessKeyId: env.AWS_ACCESS_KEY_ID,
               secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
             }),

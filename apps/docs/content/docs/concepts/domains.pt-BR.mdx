@@ -40,14 +40,22 @@ dizendo por quê.
 
 ## Regiões
 
-Cada instalação provisiona identidades em uma única região do SES — a sua
-`AWS_REGION`; o MillionSend Cloud atende `sa-east-1` (São Paulo). O dashboard
-oferece só essa região, e o campo opcional `region` da API (inclusive na
-ferramenta MCP `create_domain`) só a aceita: omita o campo para usá-la, e
-qualquer outro valor é recusado com `422` informando a região atendida.
-Configuration sets, tópicos de eventos e tenants do SES são regionais, então um
-domínio em outra região receberia registros DNS, mas nunca enviaria nem
-reportaria eventos.
+Uma instalação provisiona identidades nas regiões do SES que atende — a sua
+`AWS_REGIONS`, ou a única região em `AWS_REGION`; o MillionSend Cloud atende
+`sa-east-1` (São Paulo) hoje. O formulário de novo domínio do dashboard lista
+as regiões atendidas, segura uma que ainda está no sandbox do SES enquanto
+outra tem acesso de produção, e usa por padrão a primeira região em produção.
+O campo opcional `region` da API (inclusive na ferramenta MCP `create_domain`)
+aceita qualquer região atendida — os valores que o schema lista — e usa a
+primeira por padrão; qualquer outro valor é recusado com `422` informando as
+regiões atendidas. Configuration sets, tópicos de eventos e tenants do SES são
+regionais, então um domínio em outra região receberia registros DNS, mas nunca
+enviaria nem reportaria eventos.
+
+Um domínio tem exatamente uma região. Para mudá-la, exclua o domínio e
+adicione de novo na outra região — os registros DNS mudam, já que as
+identidades do SES são por região. No MillionSend Cloud, um nome de domínio
+que outro time já tem está tomado em todas as regiões.
 
 ## Configuração por domínio
 

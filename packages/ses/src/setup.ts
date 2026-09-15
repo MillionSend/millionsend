@@ -25,6 +25,9 @@ import {
   CreateConfigurationSetCommand,
   CreateConfigurationSetEventDestinationCommand,
   DeleteConfigurationSetCommand,
+  GetAccountCommand,
+  type GetAccountCommandOutput,
+  PutAccountPricingAttributesCommand,
   PutAccountSuppressionAttributesCommand,
   SESv2Client,
 } from "@aws-sdk/client-sesv2";
@@ -99,7 +102,9 @@ type SetupSesCommand =
   | CreateConfigurationSetCommand
   | CreateConfigurationSetEventDestinationCommand
   | DeleteConfigurationSetCommand
-  | PutAccountSuppressionAttributesCommand;
+  | PutAccountSuppressionAttributesCommand
+  | GetAccountCommand
+  | PutAccountPricingAttributesCommand;
 
 /**
  * Structural subsets of the AWS clients so tests inject fakes
@@ -128,14 +133,37 @@ export interface SetupClients {
 /**
  * Real clients on the SDK default provider chain — the setup CLI runs with the
  * operator's own admin credentials (profile/env), never the app's send key.
+ * The SQS client follows the events queue, which lives in the first region
+ * an install was set up in when a later region is added.
  */
-export function createSetupClients(region: string): SetupClients {
+export function createSetupClients(region: string, queueRegion = region): SetupClients {
   return {
     iam: new IAMClient({ region }),
     sns: new SNSClient({ region }),
-    sqs: new SQSClient({ region }),
+    sqs: new SQSClient({ region: queueRegion }),
     ses: new SESv2Client({ region }),
   };
+}
+
+/**
+ * The queue's region and ARN from its standard URL
+ * (https://sqs.<region>.amazonaws.com/<account>/<name>); null for any other
+ * shape, which the add-region flow then leaves to the operator.
+ */
+export function parseSqsQueueUrl(url: string): { region: string; arn: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = /^sqs\.([a-z0-9-]+)\.amazonaws\.com$/.exec(parsed.hostname);
+  const path = /^\/(\d{12})\/([\w-]+)$/.exec(parsed.pathname);
+  const region = host?.[1];
+  const account = path?.[1];
+  const name = path?.[2];
+  if (!region || !account || !name) return null;
+  return { region, arn: `arn:aws:sqs:${region}:${account}:${name}` };
 }
 
 export interface SetupInput {
@@ -144,6 +172,12 @@ export interface SetupInput {
   /** Events always land in an SQS queue the worker polls; an https URL is pushed to as well. */
   appBaseUrl?: string | null | undefined;
   onStep?: ((line: string) => void) | undefined;
+  /**
+   * Adding a region: subscribe its topic to this existing events queue
+   * (another region's) instead of creating one, and keep the topics its
+   * policy already allows alongside the new one.
+   */
+  existingQueue?: { url: string; topicArns: readonly string[] } | undefined;
 }
 
 export interface SetupResult {
@@ -160,6 +194,22 @@ export function eventsPlan(input: Pick<SetupInput, "region" | "appBaseUrl">): st
   return [
     `SNS topic ${SETUP_NAMES.topic} in ${input.region}, delivering to SQS queue ${SETUP_NAMES.queue} (the worker polls it)${origin ? `, also subscribed to ${origin}/ses/events` : ""}`,
     `SES configuration set ${SETUP_NAMES.configurationSet} publishing ${SES_EVENT_TYPES.length} event types to the topic`,
+  ];
+}
+
+/** Plan lines for adding a region to an install that already has one. */
+export function addRegionPlan(input: {
+  region: string;
+  queueUrl: string;
+  appBaseUrl?: string | null | undefined;
+}): string[] {
+  const origin = httpsOrigin(input.appBaseUrl);
+  return [
+    `IAM user ${SETUP_NAMES.user} and policy ${SETUP_NAMES.policy}: kept (IAM is global; the policy document is brought up to date), no new access key`,
+    `SNS topic ${SETUP_NAMES.topic} in ${input.region}, delivering into the existing events queue ${input.queueUrl}${origin ? `, also subscribed to ${origin}/ses/events` : ""}`,
+    `SES configuration set ${SETUP_NAMES.configurationSet} in ${input.region} publishing ${SES_EVENT_TYPES.length} event types to the topic`,
+    `SES account-level suppression in ${input.region}: bounces only`,
+    `.env: ${input.region} appended to AWS_REGIONS and the topic ARN to SNS_TOPIC_ARNS (AWS_REGION and SQS_QUEUE_URL unchanged)`,
   ];
 }
 
@@ -208,7 +258,7 @@ function isCurrentPolicyDocument(encoded: string | undefined): boolean {
  * dropping the oldest non-default version first when IAM's cap is reached.
  * Returns true when a new version was published.
  */
-async function syncAdoptedPolicy(iam: SetupIamClient, policyArn: string): Promise<boolean> {
+export async function syncAdoptedPolicy(iam: SetupIamClient, policyArn: string): Promise<boolean> {
   const policy = (await iam.send(
     new GetPolicyCommand({ PolicyArn: policyArn }),
   )) as GetPolicyCommandOutput;
@@ -336,34 +386,49 @@ export async function runEventsSetup(
   // The queue is the transport every deployment gets: it buffers through
   // restarts and deploys and needs no inbound reachability, so switching the
   // base URL later can never silently orphan the events. A same-account
-  // SNS→SQS subscription needs no confirmation handshake.
-  step(`SQS events queue ${SETUP_NAMES.queue}`);
-  let queueUrl: string | undefined;
-  try {
-    const created = (await clients.sqs.send(
-      new CreateQueueCommand({ QueueName: SETUP_NAMES.queue }),
-    )) as CreateQueueCommandOutput;
-    queueUrl = created.QueueUrl;
-  } catch (error) {
-    // Attribute drift on an existing queue: adopt it instead of failing.
-    if (!["QueueNameExists", "QueueAlreadyExists"].includes(errorName(error))) throw error;
-    const existing = (await clients.sqs.send(
-      new GetQueueUrlCommand({ QueueName: SETUP_NAMES.queue }),
-    )) as GetQueueUrlCommandOutput;
-    queueUrl = existing.QueueUrl;
+  // SNS→SQS subscription needs no confirmation handshake, across regions
+  // too, so an added region's topic joins the one existing queue.
+  let queueUrl: string;
+  let queueArn: string;
+  if (input.existingQueue) {
+    const queue = parseSqsQueueUrl(input.existingQueue.url);
+    if (!queue) throw new Error(`not a standard SQS queue URL: ${input.existingQueue.url}`);
+    queueUrl = input.existingQueue.url;
+    queueArn = queue.arn;
+    step(`SQS events queue ${queueArn} (existing, in ${queue.region})`);
+  } else {
+    step(`SQS events queue ${SETUP_NAMES.queue}`);
+    let created: string | undefined;
+    try {
+      const out = (await clients.sqs.send(
+        new CreateQueueCommand({ QueueName: SETUP_NAMES.queue }),
+      )) as CreateQueueCommandOutput;
+      created = out.QueueUrl;
+    } catch (error) {
+      // Attribute drift on an existing queue: adopt it instead of failing.
+      if (!["QueueNameExists", "QueueAlreadyExists"].includes(errorName(error))) throw error;
+      const existing = (await clients.sqs.send(
+        new GetQueueUrlCommand({ QueueName: SETUP_NAMES.queue }),
+      )) as GetQueueUrlCommandOutput;
+      created = existing.QueueUrl;
+    }
+    if (!created) throw new Error("CreateQueue returned no URL");
+    queueUrl = created;
+    const attrs = (await clients.sqs.send(
+      new GetQueueAttributesCommand({ QueueUrl: queueUrl, AttributeNames: ["QueueArn"] }),
+    )) as GetQueueAttributesCommandOutput;
+    const arn = attrs.Attributes?.QueueArn;
+    if (!arn) throw new Error("GetQueueAttributes returned no QueueArn");
+    queueArn = arn;
   }
-  if (!queueUrl) throw new Error("CreateQueue returned no URL");
-  const attrs = (await clients.sqs.send(
-    new GetQueueAttributesCommand({ QueueUrl: queueUrl, AttributeNames: ["QueueArn"] }),
-  )) as GetQueueAttributesCommandOutput;
-  const queueArn = attrs.Attributes?.QueueArn;
-  if (!queueArn) throw new Error("GetQueueAttributes returned no QueueArn");
-  // Overwritten on every run, so re-runs heal a hand-edited policy.
+  // Overwritten on every run, so re-runs heal a hand-edited policy; the
+  // topics of the other served regions stay allowed.
+  const topicArns = [...new Set([...(input.existingQueue?.topicArns ?? []), topicArn])];
   await clients.sqs.send(
     new SetQueueAttributesCommand({
       QueueUrl: queueUrl,
       Attributes: {
-        Policy: JSON.stringify(sqsQueuePolicy(queueArn, topicArn, input.accountId)),
+        Policy: JSON.stringify(sqsQueuePolicy(queueArn, topicArns, input.accountId)),
       },
     }),
   );
@@ -419,6 +484,24 @@ export async function runEventsSetup(
   );
 
   return { topicArn, queueUrl };
+}
+
+/**
+ * Since 2026-07-21 an SES account × region with no prior sending starts on
+ * the Essentials pricing plan; nothing MillionSend uses needs a plan.
+ */
+export const ESSENTIALS_WARNING =
+  "This region is on the SES Essentials pricing plan: $0.16 per 1,000 messages instead of the à la carte $0.10. Since 2026-07-21 an SES account × region with no prior sending starts on Essentials. Nothing MillionSend uses needs a plan, and cancelling a defaulted plan takes effect immediately.";
+
+/** The region's SES pricing plan (PricingAttributes.CurrentPlan); null when SES reports none. */
+export async function readPricingPlan(ses: SetupSesClient): Promise<string | null> {
+  const out = (await ses.send(new GetAccountCommand({}))) as GetAccountCommandOutput;
+  return out.PricingAttributes?.CurrentPlan ?? null;
+}
+
+/** Moves the region to à la carte pricing (plan NONE). */
+export async function cancelPricingPlan(ses: SetupSesClient): Promise<void> {
+  await ses.send(new PutAccountPricingAttributesCommand({ Plan: "NONE" }));
 }
 
 /** Human-readable plan of what runTeardown deletes. */

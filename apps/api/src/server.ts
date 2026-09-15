@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import {
   accountMailDeliverable,
   env,
+  servedRegions,
   sesTenantsEnabled,
   trackingSubdomainsSupported,
   unsubscribeBaseUrl,
@@ -72,7 +73,7 @@ const app = createApi({
   trackingSubdomains: trackingSubdomainsSupported(),
   ses: {
     clientForRegion,
-    defaultRegion: env.AWS_REGION,
+    regions: servedRegions(),
     authEmailFrom: env.AUTH_EMAIL_FROM,
     onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
     notificationsEmailFrom: env.NOTIFICATIONS_EMAIL_FROM,

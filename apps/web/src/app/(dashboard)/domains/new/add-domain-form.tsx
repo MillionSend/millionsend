@@ -21,7 +21,7 @@ import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
 import { AwsCredentialsBanner } from "../aws-credentials-banner";
-import { DOMAIN_REGIONS, type DomainRegion, regionFlag } from "../regions";
+import { regionFlag, regionName } from "../regions";
 import { TrackingSetup } from "../tracking-setup";
 
 // Client-side pre-check only; the router's zod schema is authoritative.
@@ -236,11 +236,16 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
   const team = useQuery(trpc.settings.team.get.queryOptions());
   const [name, setName] = useState("");
   const features = useQuery(trpc.system.features.queryOptions());
-  const provisionedRegion = features.data?.region as DomainRegion | undefined;
-  const [region, setRegion] = useState<DomainRegion>("us-east-1");
+  const served = features.data?.regions;
+  // A sandbox region is held back only next to a production one: a fresh
+  // self-host whose single region is still in sandbox must get its domain in.
+  const anyProduction = served?.some((r) => r.production) ?? false;
+  const [region, setRegion] = useState("");
   useEffect(() => {
-    if (provisionedRegion) setRegion(provisionedRegion);
-  }, [provisionedRegion]);
+    if (served && region === "") {
+      setRegion((served.find((r) => r.production) ?? served[0])?.code ?? "");
+    }
+  }, [served, region]);
   const [returnPath, setReturnPath] = useState("send");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -263,7 +268,7 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setTouched(true);
-    if (!nameValid || create.isPending) return;
+    if (!nameValid || create.isPending || region === "") return;
     create.mutate({ name, region, mailFromSubdomain: returnPath });
   }
 
@@ -327,14 +332,17 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
               id="domain-region"
               width="100%"
               value={region}
-              disabled={create.isPending}
-              onChange={(value) => setRegion(value as DomainRegion)}
+              disabled={create.isPending || !served}
+              onChange={setRegion}
               ariaLabel={t("new.region")}
-              // Only the provisioned region: configuration sets and SNS
-              // topics are regional, so other regions would send blind.
-              options={(provisionedRegion ? [provisionedRegion] : DOMAIN_REGIONS).map((code) => ({
+              // Only served regions: configuration sets and SNS topics are
+              // regional, so any other region would send blind.
+              options={(served ?? []).map(({ code, production }) => ({
                 value: code,
-                label: `${regionFlag(code)} ${t(`regions.${code}`)} (${code})`,
+                label: `${regionFlag(code)} ${regionName(code, t)} (${code})`,
+                ...(anyProduction && !production
+                  ? { hint: t("new.regionSandbox"), disabled: true }
+                  : {}),
               }))}
             />
           </div>
@@ -399,7 +407,7 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
             type="submit"
             className="ms-btn ms-btn-primary"
             style={{ marginTop: 20 }}
-            disabled={create.isPending || name.length === 0}
+            disabled={create.isPending || name.length === 0 || region === ""}
           >
             <BtnSpinner on={create.isPending} />
             {t("new.submit")}

@@ -39,13 +39,21 @@ what public DNS answers right now) and, when a row is not verified, a one-line
 
 ## Regions
 
-Each deployment provisions identities in a single SES region — its
-`AWS_REGION`; MillionSend Cloud serves `sa-east-1` (São Paulo). The dashboard
-offers only that region, and the API's optional `region` field (the
-`create_domain` MCP tool included) accepts only it: omit the field to use it,
-and any other value is rejected with `422` naming the served region.
+A deployment provisions identities in the SES regions it serves — its
+`AWS_REGIONS`, or the one region in `AWS_REGION`; MillionSend Cloud serves
+`sa-east-1` (São Paulo) today. The dashboard's add-domain form lists the
+served regions, holds back one still in the SES sandbox while another has
+production access, and defaults to the first production region. The API's
+optional `region` field (the `create_domain` MCP tool included) accepts any
+served region — the values its schema lists — and defaults to the first;
+any other value is rejected with `422` naming the served regions.
 Configuration sets, event topics and SES tenants are regional, so a domain
 anywhere else would hand out DNS records but never send or report events.
+
+A domain has exactly one region. To move it, delete it and add it again in
+the other region — its DNS records change, since SES identities are per
+region. On MillionSend Cloud a domain name another team holds is taken in
+every region.
 
 ## Per-domain configuration
 

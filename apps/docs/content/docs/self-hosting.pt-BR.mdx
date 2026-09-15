@@ -30,7 +30,7 @@ partir de um template embutido com segredos gerados, provisionar os recursos
 da AWS e os buckets S3 para uploads e backups (ambos abaixo), baixar o
 arquivo compose standalone e rodar `docker compose up -d`. Toda etapa pode
 ser pulada e é segura de repetir; `--dry-run` imprime o plano completo sem
-tocar em nada.
+tocar em nada. Em uma instalação já configurada, uma execução no terminal abre um menu (adicionar uma região do SES, recursos da AWS, URLs base, storage, login social, e-mail da conta, o passo a passo completo ou iniciar a stack).
 
 O equivalente manual usa a mesma imagem multi-arch pré-construída:
 
@@ -134,7 +134,8 @@ auto-hospedada não tem limites de plano.
 
 | Variável | Propósito |
 | --- | --- |
-| `AWS_REGION` | Região do SES (padrão `us-east-1`). |
+| `AWS_REGION` | Região do SES (padrão `us-east-1`); também a região dos clientes KMS e SQS. |
+| `AWS_REGIONS` | Regiões do SES pelas quais esta instalação envia, separadas por vírgula, a primeira sendo a padrão; sem definir, a única região em `AWS_REGION`. Cada região precisa do próprio tópico SNS e configuration set — veja [Adicionando uma região](#adicionando-uma-região). |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Credenciais IAM com `ses:SendEmail` / `ses:SendRawEmail`. Omita para usar a cadeia padrão de credenciais da AWS (instance profile, SSO, …). |
 | `SNS_TOPIC_ARNS` | ARNs de tópicos SNS (separados por vírgula) autorizados a entregar eventos do SES. Sem definir, a ingestão de eventos fica desativada. |
 | `SQS_QUEUE_URL` | Fila SQS que o worker consome por long polling para eventos do SES. O setup sempre a cria; mantenha definida mesmo quando o SNS também faz push em `https://<seu-host>/ses/events` (o app deduplica os dois). |
@@ -225,6 +226,62 @@ docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/home/ms -v ~/.aws:/home/
 Prefere não rodar um CLI? A página **Configurações → SES** do painel oferece
 um link de quick-create do CloudFormation e um shell script pré-preenchido
 que criam os mesmos recursos.
+
+## Adicionando uma região
+
+Uma instalação pode enviar por várias regiões do SES. Um domínio vive em uma
+região, a escolhida ao adicioná-lo (para mudá-la, exclua o domínio e adicione
+de novo); identidades, cota de 24 horas, taxa de envio e status de sandbox são
+todos por região; os eventos de todas as regiões caem na única fila SQS,
+porque o SNS entrega entre regiões.
+
+Rode o comando `add-region` do assistente onde o `.env` está — o diretório de
+deploy, ou no servidor pela imagem, com credenciais de admin de curta duração
+no ambiente (nada fica gravado):
+
+```sh
+npx @millionsend/setup add-region us-east-1
+# ou, no servidor, a partir do diretório de deploy:
+docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/home/ms \
+  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
+  -v "$PWD":/work -w /work ghcr.io/millionsend/millionsend:latest setup add-region us-east-1
+```
+
+O assistente interativo oferece a mesma etapa como **Add a region** na etapa
+de AWS. Rodado em qualquer outro lugar, sem `.env`, o comando pergunta
+`SQS_QUEUE_URL`, `SNS_TOPIC_ARNS` e `AWS_REGIONS` da instalação e imprime as
+duas linhas em vez de gravá-las.
+
+Ele mantém o usuário IAM, a política e a chave de acesso (nenhuma chave nova),
+cria na nova região o tópico SNS, o configuration set do SES com seu event
+destination e a supressão apenas de bounces, inscreve o tópico na fila
+existente e acrescenta ao `.env`:
+
+```sh
+AWS_REGIONS=sa-east-1,us-east-1   # a primeira entrada continua sendo a região padrão
+SNS_TOPIC_ARNS=<ARN do primeiro tópico>,<ARN do novo tópico>
+```
+
+`AWS_REGION` e `SQS_QUEUE_URL` ficam como estão. Reinicie a stack
+(`docker compose up -d`): a região passa a aparecer no formulário de novo
+domínio e em Configurações → SES, marcada como **Sandbox** até a AWS conceder
+acesso de produção lá — peça por região, como na primeira. Enquanto uma região
+tem acesso de produção, uma região em sandbox aparece no formulário mas não
+pode ser escolhida; uma região em sandbox ritma os próprios envios a 1/s e
+segura só os próprios domínios quando sua cota de 24 horas acaba.
+
+Preço: desde 2026-07-21 uma conta × região do SES sem envios anteriores começa
+no plano Essentials (US$ 0,16 por 1.000 mensagens em vez dos US$ 0,10 à la
+carte). Depois de provisionar, o assistente lê o plano da região e, se for
+Essentials, pergunta se deve cancelá-lo; nada que o MillionSend usa precisa de
+plano, e o cancelamento de um plano atribuído por padrão vale na hora. À mão:
+`aws sesv2 put-account-pricing-attributes --plan NONE --region <região>`.
+
+Equivalente manual: na nova região, o tópico SNS, o configuration set e a
+supressão exatamente como em [Eventos do SES](#eventos-do-ses-bounces-reclamações-e-entregas); uma inscrição `sqs` desse
+tópico no ARN da fila existente, e a política da fila estendida para permitir
+`sqs:SendMessage` também a partir do ARN do novo tópico; depois as duas linhas
+de `.env` acima e um reinício.
 
 ## Eventos do SES (bounces, reclamações e entregas)
 

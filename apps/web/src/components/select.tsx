@@ -20,6 +20,8 @@ export interface SelectOption {
   group?: string;
   /** A member of its group rather than the group itself: indented and quieter, so "All API keys" reads as the parent of the keys under it. */
   sub?: boolean;
+  /** Listed but not selectable, with `hint` saying why. */
+  disabled?: boolean;
 }
 
 /* Search input appears only when the list is long enough for scanning to hurt. */
@@ -193,7 +195,7 @@ export function Select({
       case "Enter": {
         event.preventDefault();
         const option = filtered[activeIndex];
-        if (option) pick(option.value);
+        if (option && !option.disabled) pick(option.value);
         break;
       }
       case "Escape":
@@ -397,8 +399,12 @@ export function SelectOptionList({
         ]
           .filter(Boolean)
           .join(" ")}
+        aria-disabled={option.disabled}
+        style={option.disabled ? { opacity: 0.5, cursor: "default" } : undefined}
         onMouseEnter={() => onHover(index)}
-        onClick={() => onPick(option.value)}
+        onClick={() => {
+          if (!option.disabled) onPick(option.value);
+        }}
       >
         <span
           style={{

@@ -4,15 +4,20 @@ import { describe, expect, it } from "vitest";
 import { upsertEnv } from "../src/setup.js";
 import { envTemplate } from "../src/setup-constants.js";
 import {
+  addRegionEnvEntries,
   composeUpArgs,
   confirmed,
   detectDirState,
   envValue,
   flowPlan,
   freshDatabaseEntries,
+  fullRerunOffered,
   generateSecret,
+  menuOptions,
   missingSecrets,
   secretLaterHint,
+  servedRegionsInEnv,
+  setupDone,
   stateSummary,
 } from "../src/setup-flow.js";
 
@@ -162,5 +167,106 @@ const envExamplePath = fileURLToPath(new URL("../../../.env.example", import.met
 describe("envTemplate", () => {
   it.skipIf(!existsSync(envExamplePath))("is byte-identical to the repo's .env.example", () => {
     expect(envTemplate()).toBe(readFileSync(envExamplePath, "utf8"));
+  });
+});
+
+describe("addRegionEnvEntries / servedRegionsInEnv", () => {
+  const topic = "arn:aws:sns:us-east-1:123456789012:millionsend-events";
+
+  it("reads the served regions the way the app does", () => {
+    expect(servedRegionsInEnv("AWS_REGIONS=sa-east-1, us-east-1\nAWS_REGION=sa-east-1\n")).toEqual([
+      "sa-east-1",
+      "us-east-1",
+    ]);
+    expect(servedRegionsInEnv("AWS_REGION=eu-west-1\n")).toEqual(["eu-west-1"]);
+    expect(servedRegionsInEnv("AWS_REGIONS=\n")).toEqual(["us-east-1"]);
+    expect(servedRegionsInEnv(null)).toEqual(["us-east-1"]);
+  });
+
+  it("seeds AWS_REGIONS from the region already served and appends the topic", () => {
+    const content = "AWS_REGION=sa-east-1\nSNS_TOPIC_ARNS=arn:first\nSQS_QUEUE_URL=https://q\n";
+    expect(addRegionEnvEntries(content, "us-east-1", topic)).toEqual({
+      AWS_REGIONS: "sa-east-1,us-east-1",
+      SNS_TOPIC_ARNS: `arn:first,${topic}`,
+    });
+    // Applied through upsertEnv the alias and the queue stay untouched.
+    expect(upsertEnv(content, addRegionEnvEntries(content, "us-east-1", topic))).toBe(
+      `AWS_REGION=sa-east-1\nSNS_TOPIC_ARNS=arn:first,${topic}\nSQS_QUEUE_URL=https://q\nAWS_REGIONS=sa-east-1,us-east-1\n`,
+    );
+  });
+
+  it("extends an existing list without duplicating a region or a topic", () => {
+    const content = `AWS_REGIONS=sa-east-1,us-east-1\nSNS_TOPIC_ARNS=arn:first,${topic}\n`;
+    expect(addRegionEnvEntries(content, "us-east-1", topic)).toEqual({
+      AWS_REGIONS: "sa-east-1,us-east-1",
+      SNS_TOPIC_ARNS: `arn:first,${topic}`,
+    });
+    expect(addRegionEnvEntries(content, "eu-west-1", "arn:eu")).toEqual({
+      AWS_REGIONS: "sa-east-1,us-east-1,eu-west-1",
+      SNS_TOPIC_ARNS: `arn:first,${topic},arn:eu`,
+    });
+  });
+});
+
+describe("flowPlan on a finished install", () => {
+  it("names the menu first, then the steps a piped run walks", () => {
+    const envContent =
+      "MASTER_ENCRYPTION_KEY=k\nBETTER_AUTH_SECRET=s\nAWS_ACCESS_KEY_ID=AKIA\nSNS_TOPIC_ARNS=arn:a\nSQS_QUEUE_URL=https://q\n";
+    const state = detectDirState((name) => (name === ".env" ? envContent : null), null);
+    const plan = flowPlan(state, { appBaseUrl: "http://x", region: "us-east-1" });
+    expect(plan[0]).toContain("menu: this install is set up");
+    expect(plan.join("\n")).toContain("aws: already set up");
+  });
+});
+
+describe("fullRerunOffered", () => {
+  it("is offered on a single-region install only", () => {
+    expect(fullRerunOffered("AWS_REGION=sa-east-1\n")).toBe(true);
+    expect(fullRerunOffered(null)).toBe(true);
+    expect(fullRerunOffered("AWS_REGIONS=sa-east-1,us-east-1\n")).toBe(false);
+  });
+});
+
+describe("setupDone / menuOptions", () => {
+  const secrets = "MASTER_ENCRYPTION_KEY=k\nBETTER_AUTH_SECRET=s\n";
+
+  it("counts an install as done once its secrets and some AWS are in place", () => {
+    expect(setupDone(null)).toBe(false);
+    expect(setupDone(secrets)).toBe(false);
+    expect(setupDone(`${secrets}AWS_ACCESS_KEY_ID=AKIA\n`)).toBe(true);
+    expect(setupDone(`${secrets}SNS_TOPIC_ARNS=arn:x\n`)).toBe(true);
+    expect(setupDone("AWS_ACCESS_KEY_ID=AKIA\n")).toBe(false);
+  });
+
+  it("offers Add an SES region only with events and a queue, and cloud values only on cloud", () => {
+    const values = (content: string, cloud = false) =>
+      menuOptions(content, cloud).map((o) => o.value);
+    expect(values(`${secrets}AWS_ACCESS_KEY_ID=AKIA\n`)).toEqual([
+      "aws",
+      "urls",
+      "storage",
+      "social",
+      "email",
+      "all",
+      "start",
+      "exit",
+    ]);
+    const full = `${secrets}AWS_REGIONS=sa-east-1,us-east-1\nSNS_TOPIC_ARNS=arn:a,arn:b\nSQS_QUEUE_URL=https://q\n`;
+    expect(values(full, true)).toEqual([
+      "region",
+      "aws",
+      "urls",
+      "cloud",
+      "storage",
+      "social",
+      "email",
+      "all",
+      "start",
+      "exit",
+    ]);
+    expect(menuOptions(full, false)[0]?.hint).toBe("served: sa-east-1, us-east-1");
+    expect(menuOptions(`${secrets}AWS_ACCESS_KEY_ID=AKIA\n`, false)[0]?.hint).toContain(
+      "event ingestion",
+    );
   });
 });

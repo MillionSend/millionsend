@@ -86,6 +86,41 @@ it("drain reserves against the NEW day's cap — parking is not a quota bypass",
   expect(counter?.accepted).toBe(FREE_CEILING);
 });
 
+it("holds only the rows of a region whose SES quota is full; domain-less rows count as the default region", async () => {
+  const [held, open] = await db
+    .insert(schema.domains)
+    .values([
+      { teamId, name: "us.acme.dev", region: "us-east-1" },
+      { teamId, name: "br.acme.dev", region: "sa-east-1" },
+    ])
+    .returning({ id: schema.domains.id });
+  if (!held || !open) throw new Error("domain insert failed");
+  const inUs = await insertParked(new Date("2026-08-13T01:00:00Z"));
+  await db.update(schema.emails).set({ domainId: held.id }).where(eq(schema.emails.id, inUs));
+  const inBr = await insertParked(new Date("2026-08-13T02:00:00Z"));
+  await db.update(schema.emails).set({ domainId: open.id }).where(eq(schema.emails.id, inBr));
+  const platform = await insertParked(new Date("2026-08-13T03:00:00Z"));
+
+  const enqueued: string[] = [];
+  const deps = {
+    isCloud: false,
+    enqueueSends: async (batch: readonly { emailId: string }[]) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  };
+  const full = new Set(["us-east-1"]);
+  const sesQuota = { regions: ["sa-east-1", "us-east-1"], exhausted: (r: string) => full.has(r) };
+  expect(await drainQuotaParked(db, { ...deps, sesQuota })).toEqual({ drained: 2, stillParked: 1 });
+  expect(enqueued).toEqual([inBr, platform]);
+  expect(await statusOf(inUs)).toBe("queued_quota");
+
+  // Every region full: nothing moves and nothing is walked.
+  full.add("sa-east-1");
+  const back = await insertParked(new Date("2026-08-13T04:00:00Z"));
+  expect(await drainQuotaParked(db, { ...deps, sesQuota })).toEqual({ drained: 0, stillParked: 2 });
+  expect(await statusOf(back)).toBe("queued_quota");
+});
+
 it("self-host drain (no caps) releases everything", async () => {
   const a = await insertParked(new Date("2026-08-13T01:00:00Z"));
   const b = await insertParked(new Date("2026-08-13T02:00:00Z"));
@@ -760,7 +795,7 @@ it("holds every parked email while SES's own 24-hour quota is full", async () =>
     enqueueSends: async (batch) => {
       enqueued.push(...batch.map((j) => j.emailId));
     },
-    sesQuotaExhausted: () => true,
+    sesQuota: { regions: ["us-east-1"], exhausted: () => true },
   });
   expect(result).toEqual({ drained: 0, stillParked: 1 });
   expect(enqueued).toEqual([]);

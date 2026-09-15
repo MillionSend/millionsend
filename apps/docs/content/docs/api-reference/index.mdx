@@ -52,6 +52,10 @@ remaining deltas are deliberate and loud:
 - Contacts are team-global — audience endpoints are served as aliases of
   segments, and contact endpoints work with or without an audience id (see
   [Contacts](/concepts/contacts)).
+- `POST /domains` takes an optional `region`, which must be one of the SES
+  regions the deployment serves — the values its request schema lists, the
+  first being the default — and is rejected with `422` otherwise. A domain
+  has one region: to move it, delete it and add it again.
 - Broadcasts support `canceled`, a status outside Resend's union, and
   broadcast sends, `POST /emails` and `POST /emails/batch` can return
   `403 sending_paused` when your bounce or complaint rate crosses the SES

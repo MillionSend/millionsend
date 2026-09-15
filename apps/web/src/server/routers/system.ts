@@ -1,8 +1,10 @@
 import {
+  AWS_REGION_DEFAULT,
   EMAIL_RETENTION_DAYS_DEFAULT,
   env,
   isCloudDeployment,
   SES_MAX_SEND_RATE_DEFAULT,
+  servedRegions,
   trackingSubdomainsSupported,
 } from "@millionsend/config";
 import {
@@ -67,21 +69,47 @@ async function assertInstanceVisible(ctx: OperatorCtx): Promise<void> {
  * createSystemRouter(deps) instead of stubbing the AWS SDK.
  */
 export interface SystemSesDeps {
-  accountClient(): SesAccountClient;
+  accountClient(region: string): SesAccountClient;
 }
 
 const defaultSesDeps: SystemSesDeps = {
-  // Built per call: GetAccount only runs when the operator clicks
-  // "Test connection", so there is nothing worth caching.
-  accountClient: () =>
+  // Built per call: GetAccount runs when the operator clicks "Test
+  // connection" and once a minute per region for the features probe, so
+  // there is nothing worth caching.
+  accountClient: (region) =>
     createSesAccountClient({
-      region: env.AWS_REGION,
+      region,
       accessKeyId: env.AWS_ACCESS_KEY_ID,
       secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
     }),
 };
 
+/** How long a region's production-access answer is reused by `features`. */
+const PRODUCTION_PROBE_TTL_MS = 60_000;
+
 export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
+  // Production access per served region, for the add-domain form: one
+  // GetAccount per region at most once a minute — features runs on every
+  // dashboard page and the non-send SES API is throttled at one request per
+  // second per region. Only a region's first probe is awaited (bounded by
+  // the client's timeouts); an expired answer is served at once while the
+  // probe refreshes it, so a region that stops answering never stalls the
+  // screens. A failed probe keeps the last answer; without credentials
+  // nothing is probed (the SDK chain fails slowly) and every region reads
+  // alike.
+  const productionProbes = new Map<string, { at: number; value: Promise<boolean> }>();
+  const productionAccess = (region: string): Promise<boolean> => {
+    const cached = productionProbes.get(region);
+    if (cached && Date.now() - cached.at < PRODUCTION_PROBE_TTL_MS) return cached.value;
+    const value = awsCredentialsConfigured()
+      ? getAccountOverview(deps.accountClient(region)).then(
+          (overview) => overview.productionAccess,
+          () => cached?.value ?? false,
+        )
+      : Promise.resolve(false);
+    productionProbes.set(region, { at: Date.now(), value });
+    return cached ? cached.value : value;
+  };
   return router({
     /**
      * Env-level deployment readiness, behind team auth like everything else.
@@ -92,9 +120,12 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
      */
     awsReadiness: teamProcedure.query(async ({ ctx }) => {
       await assertInstanceVisible(ctx);
+      const regions = servedRegions();
       return {
         credentialsConfigured: awsCredentialsConfigured(),
-        region: env.AWS_REGION,
+        // The default region, first of the served list.
+        region: regions[0] ?? AWS_REGION_DEFAULT,
+        regions,
       };
     }),
 
@@ -102,9 +133,12 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
      * Deployment facts every tenant's screens need, cloud included — nothing
      * here describes the operator's account.
      */
-    features: teamProcedure.query(() => ({
-      // Region new domain identities are provisioned in.
-      region: env.AWS_REGION,
+    features: teamProcedure.query(async () => ({
+      // Regions new domain identities may be provisioned in, the default
+      // first, and whether AWS has granted production access in each.
+      regions: await Promise.all(
+        servedRegions().map(async (code) => ({ code, production: await productionAccess(code) })),
+      ),
       // Local tracking hosts get a "links will not resolve" warning.
       appBaseUrl: env.APP_BASE_URL ?? null,
       // Why the domain screen may omit the branded tracking subdomain field.
@@ -174,25 +208,39 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
     }),
 
     /**
-     * Live SESv2 GetAccount, run on demand from the SES setup page. AWS
-     * failures come back as a typed { ok: false } value — raw SDK errors
-     * never propagate to the client as thrown tRPC errors.
+     * Live SESv2 GetAccount in one served region (the default when none is
+     * named), run on demand from the SES setup page. AWS failures come back
+     * as a typed { ok: false } value — raw SDK errors never propagate to the
+     * client as thrown tRPC errors.
      */
-    sesAccount: teamProcedure.query(async ({ ctx }) => {
-      await assertInstanceVisible(ctx);
-      const committed = isCloudDeployment() ? await committedDailyVolume(ctx.db) : null;
-      try {
-        const overview = await getAccountOverview(deps.accountClient());
-        return { ok: true as const, ...overview, committedPerDay: committed };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          ok: false as const,
-          kind: isAwsCredentialError(message) ? ("credentials" as const) : ("unreachable" as const),
-          message,
-        };
-      }
-    }),
+    sesAccount: teamProcedure
+      .input(z.object({ region: z.string().optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        await assertInstanceVisible(ctx);
+        const regions = servedRegions();
+        const region = input?.region ?? regions[0];
+        if (!region || !regions.includes(region)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `this deployment does not serve ${region}`,
+          });
+        }
+        const committed = isCloudDeployment() ? await committedDailyVolume(ctx.db) : null;
+        try {
+          const overview = await getAccountOverview(deps.accountClient(region));
+          return { ok: true as const, region, ...overview, committedPerDay: committed };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            ok: false as const,
+            region,
+            kind: isAwsCredentialError(message)
+              ? ("credentials" as const)
+              : ("unreachable" as const),
+            message,
+          };
+        }
+      }),
 
     /**
      * Instance-wide (NOT team-scoped) operator settings. Self-host members

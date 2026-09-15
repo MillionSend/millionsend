@@ -1,10 +1,10 @@
 "use client";
 
 import { httpsOrigin, SES_IAM_POLICY_JSON } from "@millionsend/ses/setup-constants";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CopyChip, CopyGlyph } from "@/components/copy-chip";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
 import { RelativeTime } from "@/components/relative-time";
@@ -16,6 +16,7 @@ import { buildAwsSetupScript, CFN_DEPLOY_COMMAND, cfnQuickCreateUrl } from "@/li
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { regionFlag } from "../../domains/regions";
 
 const PRODUCTION_ACCESS_DOCS_URL =
   "https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html";
@@ -297,20 +298,28 @@ export function SesSetupView() {
       refetchInterval: credentialsOk ? false : 5000,
     }),
   );
-  // On demand only: GetAccount runs when the operator clicks "Test connection".
-  const test = useQuery(
-    trpc.system.sesAccount.queryOptions(undefined, { enabled: false, retry: false }),
-  );
+  // On demand only: one GetAccount per served region when the operator
+  // clicks "Test connection".
+  const regions = readiness.data?.regions ?? [];
+  const tests = useQueries({
+    queries: regions.map((region) =>
+      trpc.system.sesAccount.queryOptions({ region }, { enabled: false, retry: false }),
+    ),
+  });
+  const testAll = useCallback(() => {
+    for (const test of tests) void test.refetch();
+  }, [tests]);
+  const testing = tests.some((test) => test.isFetching);
+  const anyOk = tests.some((test) => test.data?.ok);
   // Auto-run the connection test once when credentials flip from missing to
   // configured while the page is open (never on a page that loads configured).
-  const testRefetch = test.refetch;
   const prevCredentialsOk = useRef<boolean | null>(null);
   const hasReadiness = readiness.data !== undefined;
   useEffect(() => {
     if (!hasReadiness) return;
-    if (prevCredentialsOk.current === false && credentialsOk) void testRefetch();
+    if (prevCredentialsOk.current === false && credentialsOk) testAll();
     prevCredentialsOk.current = credentialsOk;
-  }, [hasReadiness, credentialsOk, testRefetch]);
+  }, [hasReadiness, credentialsOk, testAll]);
   if (!readiness.data || !sesEnv.data) {
     // Ghost of the stepper chrome while the env checks resolve — real rails
     // and titles (all static), card interiors as bars.
@@ -378,7 +387,6 @@ export function SesSetupView() {
   }
 
   const fmt = new Intl.NumberFormat(locale);
-  const result = test.data;
   const eventsHealth = sesEnv.data.eventsHealth;
   // Env vars set AND events actually arriving: a broken pipeline reads "Sent"
   // forever with every variable in place.
@@ -543,8 +551,8 @@ export function SesSetupView() {
             />
             <CheckRow
               ok
-              name="AWS_REGION"
-              detail={<span className="ms-mono">{readiness.data.region}</span>}
+              name={regions.length > 1 ? "AWS_REGIONS" : "AWS_REGION"}
+              detail={<span className="ms-mono">{regions.join(", ")}</span>}
             />
           </div>
 
@@ -552,10 +560,10 @@ export function SesSetupView() {
             <button
               type="button"
               className="ms-btn ms-btn-primary"
-              disabled={!credentialsOk || test.isFetching}
-              onClick={() => test.refetch()}
+              disabled={!credentialsOk || testing}
+              onClick={testAll}
             >
-              <BtnSpinner on={test.isFetching} />
+              <BtnSpinner on={testing} />
               {t("test.button")}
             </button>
             <Tooltip text={t.rich("test.note", codeRichTags)} />
@@ -566,104 +574,123 @@ export function SesSetupView() {
             )}
           </div>
 
-          {result?.ok ? (
-            <>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 18 }}>
-                <span
-                  className={`ms-badge ${result.sendingEnabled ? "ms-badge-success" : "ms-badge-danger"}`}
-                >
-                  {result.sendingEnabled ? t("test.sendingEnabled") : t("test.sendingDisabled")}
-                </span>
-                <span
-                  className={`ms-badge ${result.productionAccess ? "ms-badge-success" : "ms-badge-warn"}`}
-                >
-                  {result.productionAccess ? t("test.production") : t("test.sandbox")}
-                </span>
-              </div>
-              <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 18 }}>
-                <QuotaFigure label={t("test.quotaMax")} value={fmt.format(result.quota.max24h)} />
-                {result.committedPerDay !== null ? (
-                  <QuotaFigure
-                    label={t("test.committedPerDay")}
-                    value={fmt.format(result.committedPerDay)}
-                  />
-                ) : null}
-                <QuotaFigure
-                  label={t("test.quotaSent")}
-                  value={fmt.format(result.quota.sentLast24h)}
-                />
-                <QuotaFigure
-                  label={t("test.quotaRate")}
-                  value={fmt.format(result.quota.maxSendRate)}
-                  unit={t("test.ratePerSecond")}
-                />
-              </div>
-              {result.productionAccess ? null : (
-                <div
-                  style={{
-                    border: "1px solid var(--ms-warn-border)",
-                    background: "var(--ms-warn-bg)",
-                    borderRadius: "var(--ms-r-input)",
-                    padding: "11px 15px",
-                    marginTop: 18,
-                    fontSize: 13,
-                    lineHeight: 1.55,
-                  }}
-                >
-                  <span style={{ color: "var(--ms-warn)" }}>{t("test.sandboxTitle")}</span>{" "}
-                  <span style={{ color: "var(--ms-bone)" }}>{t("test.sandboxBody")}</span>{" "}
-                  <a href={PRODUCTION_ACCESS_DOCS_URL} target="_blank" rel="noreferrer">
-                    {t("test.sandboxLink")} ↗
-                  </a>
-                  <div style={{ marginTop: 12 }}>
-                    <MonoBlock
-                      title="production-access-request.txt"
-                      value={t("test.requestTemplate")}
-                      maxHeight={260}
-                      collapsible
-                    />
+          {tests.map((test, i) => {
+            const result = test.data;
+            const region = regions[i];
+            if (!result || region === undefined) return null;
+            return (
+              <div key={region}>
+                {regions.length > 1 ? (
+                  <div className="ms-microlabel" style={{ marginTop: 18 }}>
+                    {regionFlag(region)} {region}
                   </div>
-                  <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
-                    {t.rich("test.requestTemplateNote", codeRichTags)}
-                  </p>
-                </div>
-              )}
-              {sesEnv.data.maxSendRate !== result.quota.maxSendRate ? (
-                <p
-                  className="ms-mono"
-                  style={{ margin: "12px 0 0", fontSize: 12, color: "var(--ms-muted)" }}
-                >
-                  {t("test.rateHint", {
-                    envRate: sesEnv.data.maxSendRate,
-                    accountRate: result.quota.maxSendRate,
-                  })}
-                </p>
-              ) : null}
-            </>
-          ) : null}
-
-          {result && !result.ok ? (
-            <>
-              <p style={{ margin: "14px 0 0", fontSize: 13, color: "var(--ms-danger)" }}>
-                {t.rich(`test.errors.${result.kind}`, codeRichTags)}
-              </p>
-              <p
-                className="ms-mono"
-                style={{ margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" }}
-              >
-                {result.message}
-              </p>
-            </>
-          ) : null}
+                ) : null}
+                {result.ok ? (
+                  <>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        marginTop: regions.length > 1 ? 8 : 18,
+                      }}
+                    >
+                      <span
+                        className={`ms-badge ${result.sendingEnabled ? "ms-badge-success" : "ms-badge-danger"}`}
+                      >
+                        {result.sendingEnabled
+                          ? t("test.sendingEnabled")
+                          : t("test.sendingDisabled")}
+                      </span>
+                      <span
+                        className={`ms-badge ${result.productionAccess ? "ms-badge-success" : "ms-badge-warn"}`}
+                      >
+                        {result.productionAccess ? t("test.production") : t("test.sandbox")}
+                      </span>
+                    </div>
+                    <div className="ms-kpi-row" style={{ display: "flex", gap: 48, marginTop: 18 }}>
+                      <QuotaFigure
+                        label={t("test.quotaMax")}
+                        value={fmt.format(result.quota.max24h)}
+                      />
+                      {result.committedPerDay !== null ? (
+                        <QuotaFigure
+                          label={t("test.committedPerDay")}
+                          value={fmt.format(result.committedPerDay)}
+                        />
+                      ) : null}
+                      <QuotaFigure
+                        label={t("test.quotaSent")}
+                        value={fmt.format(result.quota.sentLast24h)}
+                      />
+                      <QuotaFigure
+                        label={t("test.quotaRate")}
+                        value={fmt.format(result.quota.maxSendRate)}
+                        unit={t("test.ratePerSecond")}
+                      />
+                    </div>
+                    {result.productionAccess ? null : (
+                      <div
+                        style={{
+                          border: "1px solid var(--ms-warn-border)",
+                          background: "var(--ms-warn-bg)",
+                          borderRadius: "var(--ms-r-input)",
+                          padding: "11px 15px",
+                          marginTop: 18,
+                          fontSize: 13,
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        <span style={{ color: "var(--ms-warn)" }}>{t("test.sandboxTitle")}</span>{" "}
+                        <span style={{ color: "var(--ms-bone)" }}>{t("test.sandboxBody")}</span>{" "}
+                        <a href={PRODUCTION_ACCESS_DOCS_URL} target="_blank" rel="noreferrer">
+                          {t("test.sandboxLink")} ↗
+                        </a>
+                        <div style={{ marginTop: 12 }}>
+                          <MonoBlock
+                            title="production-access-request.txt"
+                            value={t("test.requestTemplate")}
+                            maxHeight={260}
+                            collapsible
+                          />
+                        </div>
+                        <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--ms-muted)" }}>
+                          {t.rich("test.requestTemplateNote", codeRichTags)}
+                        </p>
+                      </div>
+                    )}
+                    {sesEnv.data.maxSendRate !== result.quota.maxSendRate ? (
+                      <p
+                        className="ms-mono"
+                        style={{ margin: "12px 0 0", fontSize: 12, color: "var(--ms-muted)" }}
+                      >
+                        {t("test.rateHint", {
+                          envRate: sesEnv.data.maxSendRate,
+                          accountRate: result.quota.maxSendRate,
+                        })}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <p style={{ margin: "14px 0 0", fontSize: 13, color: "var(--ms-danger)" }}>
+                      {t.rich(`test.errors.${result.kind}`, codeRichTags)}
+                    </p>
+                    <p
+                      className="ms-mono"
+                      style={{ margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" }}
+                    >
+                      {result.message}
+                    </p>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </section>
       </Step>
 
-      <Step
-        marker="03"
-        done={eventsOk}
-        last={!(credentialsOk || result?.ok)}
-        title={t("events.title")}
-      >
+      <Step marker="03" done={eventsOk} last={!(credentialsOk || anyOk)} title={t("events.title")}>
         {eventsOk ? (
           <StepDoneCard
             small
@@ -712,7 +739,7 @@ export function SesSetupView() {
         ) : null}
       </Step>
 
-      {credentialsOk || result?.ok ? (
+      {credentialsOk || anyOk ? (
         <Step marker="04" last title={t("next.title")}>
           <section className="ms-card" style={{ padding: 24 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>

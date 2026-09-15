@@ -138,8 +138,12 @@ export interface DrainDeps {
   isCloud: boolean;
   /** One call per page; startAfter defers emails scheduled beyond the drain time, priority keeps transactional rows ahead of broadcast ones. */
   enqueueSends: EnqueueEmailSends;
-  /** SES's own 24-hour quota is full: releasing anything would only park it again. */
-  sesQuotaExhausted?: (() => boolean) | undefined;
+  /**
+   * SES's own 24-hour quota, per region: rows whose region is full stay
+   * parked, since releasing them would only park them again. Rows with no
+   * domain send from the default region, the list's first entry.
+   */
+  sesQuota?: { regions: readonly string[]; exhausted(region: string): boolean } | undefined;
 }
 
 export interface DrainResult {
@@ -164,14 +168,18 @@ const DRAIN_MAX_PER_RUN = 10_000;
  * reservation against its team's cap before it may move to "queued":
  * without this, parking would be a quota bypass. Oldest first;
  * once a team's cap fills, its remaining emails stay parked for later. While
- * SES's 24-hour quota is full nothing moves at all.
+ * a region's SES 24-hour quota is full, its rows do not move at all.
  *
  * Reserve + transition commit atomically per email (no crash window that
  * burns quota or half-moves a row). One email's failure never blocks the
  * rest — errors are collected and rethrown at the end so the cron retries.
  */
 export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainResult> {
-  if (deps.sesQuotaExhausted?.()) return { drained: 0, stillParked: await countParked(db) };
+  const regions = deps.sesQuota?.regions ?? [];
+  const held = regions.filter((region) => deps.sesQuota?.exhausted(region));
+  if (regions.length > 0 && held.length === regions.length) {
+    return { drained: 0, stillParked: await countParked(db) };
+  }
   const exhausted = new Set<string>();
   const failures: unknown[] = [];
   let drained = 0;
@@ -195,10 +203,14 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       })
       .from(schema.emails)
       .innerJoin(schema.teams, eq(schema.emails.teamId, schema.teams.id))
+      .leftJoin(schema.domains, eq(schema.emails.domainId, schema.domains.id))
       .where(
         and(
           eq(schema.emails.latestStatus, "queued_quota"),
           exhausted.size > 0 ? notInArray(schema.emails.teamId, [...exhausted]) : undefined,
+          held.length > 0
+            ? notInArray(sql`coalesce(${schema.domains.region}, ${regions[0] ?? ""})`, held)
+            : undefined,
           cursorId
             ? keysetCursorWhere(schema.emails.createdAt, schema.emails.id, cursorId)
             : undefined,

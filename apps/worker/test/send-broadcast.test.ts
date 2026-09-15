@@ -1048,6 +1048,27 @@ it("applyMergeFields only lets web/mail URLs open an href or src; anything else 
   );
 });
 
+it("defers the fan-out while the sender domain's region is at its SES 24-hour quota", async () => {
+  const broadcastId = await insertBroadcast();
+  const rescheduled: Date[] = [];
+  const full = new Set(["us-east-1"]);
+  const { deps, enqueued } = makeDeps({
+    reschedule: async (_id, at) => {
+      rescheduled.push(at);
+    },
+    sesQuota: { exhausted: (region) => full.has(region ?? "") },
+  });
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("deferred");
+  expect(rescheduled).toHaveLength(1);
+  expect(enqueued).toEqual([]);
+  expect(await emailsOf(broadcastId)).toHaveLength(0);
+  // Another region's quota is not this domain's problem.
+  full.clear();
+  full.add("sa-east-1");
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+  expect(enqueued.length).toBeGreaterThan(0);
+});
+
 it("defers the fan-out while the sender domain's region is held by the platform breaker", async () => {
   await db.insert(schema.regionBreakers).values({ region: "us-east-1", paused: true });
   const broadcastId = await insertBroadcast();

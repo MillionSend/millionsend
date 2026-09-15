@@ -155,6 +155,12 @@ AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 
+# Serve more than one SES region from this deployment, comma-separated; the
+# first is the default (platform mail and sends with no domain row). Each
+# region needs its own SNS topic, configuration set and production access —
+# \`npx @millionsend/setup\` adds one to an existing install. Unset: AWS_REGION.
+# AWS_REGIONS=sa-east-1,us-east-1
+
 # Comma-separated SNS topic ARNs allowed to deliver SES events (bounces,
 # complaints, deliveries). Unset disables event ingestion entirely.
 # See SELF_HOSTING.md for the SNS setup checklist.
@@ -402,13 +408,19 @@ export function snsTopicPolicy(topicArn: string, accountId: string): object {
 }
 
 /**
- * Events-queue policy: only the events topic may write, and the millionsend
- * IAM user may consume. The consume grant lives here (resource policy) rather
- * than in SES_IAM_POLICY because a same-account resource policy suffices on
- * SQS, and the identity policy — created once, adopted on re-runs — could not
- * gain new statements on deployments that predate the queue.
+ * Events-queue policy: only the events topics may write (one per served
+ * region; SNS delivers across regions), and the millionsend IAM user may
+ * consume. The consume grant lives here (resource policy) rather than in
+ * SES_IAM_POLICY because a same-account resource policy suffices on SQS, and
+ * the identity policy — created once, adopted on re-runs — could not gain new
+ * statements on deployments that predate the queue.
  */
-export function sqsQueuePolicy(queueArn: string, topicArn: string, accountId: string): object {
+export function sqsQueuePolicy(
+  queueArn: string,
+  topicArns: string | readonly string[],
+  accountId: string,
+): object {
+  const arns = typeof topicArns === "string" ? [topicArns] : [...topicArns];
   return {
     Version: "2012-10-17",
     Statement: [
@@ -417,7 +429,9 @@ export function sqsQueuePolicy(queueArn: string, topicArn: string, accountId: st
         Principal: { Service: "sns.amazonaws.com" },
         Action: "sqs:SendMessage",
         Resource: queueArn,
-        Condition: { ArnEquals: { "aws:SourceArn": topicArn } },
+        // One topic stays a plain string: the generated shell script splices
+        // its ARN into exactly that shape.
+        Condition: { ArnEquals: { "aws:SourceArn": arns.length === 1 ? arns[0] : arns } },
       },
       {
         Effect: "Allow",

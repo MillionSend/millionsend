@@ -8,6 +8,7 @@ import { EnvKeyring } from "../src/crypto/keyring.js";
 import { hashRecipient } from "../src/suppressions.js";
 import {
   findSenderDomainOwner,
+  type SenderDomainOwner,
   SYSTEM_MAIL_TAG,
   type SystemMailMessage,
   SystemMailRefused,
@@ -57,9 +58,11 @@ const message = (over: Partial<SystemMailMessage> = {}): SystemMailMessage => ({
 function deps() {
   const enqueued: string[] = [];
   const raw: SystemMailMessage[] = [];
+  const rawOwners: (SenderDomainOwner | null)[] = [];
   return {
     enqueued,
     raw,
+    rawOwners,
     deps: {
       db,
       keyring,
@@ -67,8 +70,9 @@ function deps() {
       enqueueEmailSend: async (id: string) => {
         enqueued.push(id);
       },
-      raw: async (m: SystemMailMessage) => {
+      raw: async (m: SystemMailMessage, owner: SenderDomainOwner | null) => {
         raw.push(m);
+        rawOwners.push(owner);
       },
     },
   };
@@ -79,10 +83,12 @@ describe("findSenderDomainOwner", () => {
     expect(await findSenderDomainOwner(db, "Ops <ops@mail.example.com>")).toEqual({
       teamId: ownerTeam,
       domainId,
+      region: "us-east-1",
     });
     expect(await findSenderDomainOwner(db, "ops@MAIL.example.com")).toEqual({
       teamId: ownerTeam,
       domainId,
+      region: "us-east-1",
     });
   });
 
@@ -141,6 +147,8 @@ describe("sendSystemMail", () => {
     const m = message({ from: "no-reply@unowned.example.com" });
     expect(await sendSystemMail(d.deps, m)).toBe("raw");
     expect(d.raw).toEqual([m]);
+    // No owner: the raw send has no region of its own (the caller's default).
+    expect(d.rawOwners).toEqual([null]);
     expect(d.enqueued).toHaveLength(0);
   });
 
@@ -188,6 +196,9 @@ describe("sendSystemMail", () => {
     const m = message();
     expect(await sendSystemMail(broken, m)).toBe("raw");
     expect(d.raw).toEqual([m]);
+    // The owning domain's region rides along so the raw send targets the
+    // region its identity is verified in.
+    expect(d.rawOwners).toEqual([{ teamId: ownerTeam, domainId, region: "us-east-1" }]);
     expect(d.enqueued).toHaveLength(0);
   });
 });

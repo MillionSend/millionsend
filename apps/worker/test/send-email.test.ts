@@ -1107,6 +1107,34 @@ it("the send-rate token is taken only after every check that can still skip the 
   expect(throttled).toBe(1);
 });
 
+it("the rate bucket and the quota gate are asked for the domain's region", async () => {
+  const { ses } = fakeSes("mid-region-controls");
+  const throttled: (string | undefined)[] = [];
+  const gated: (string | undefined)[] = [];
+  const deps: SendDeps = {
+    keyring,
+    ses,
+    throttle: async (region) => {
+      throttled.push(region);
+    },
+    sesQuota: {
+      exhausted: (region) => {
+        gated.push(region);
+        return false;
+      },
+      refresh: async () => false,
+    },
+  };
+  expect(await sendEmail(db, deps, { emailId: await insertEmail() })).toBe("sent");
+  expect(throttled).toEqual(["us-east-1"]);
+  expect(gated).toEqual(["us-east-1"]);
+  // A parked region parks the row before any eligibility read or body decrypt.
+  const parked = await insertEmail();
+  deps.sesQuota = { exhausted: () => true, refresh: async () => true };
+  expect(await sendEmail(db, deps, { emailId: parked })).toBe("parked");
+  expect(throttled).toHaveLength(1);
+});
+
 async function insightsFor(emailId: string) {
   const [row] = await db
     .select()

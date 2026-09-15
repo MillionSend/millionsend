@@ -5,10 +5,14 @@
  * for a fresh read and lets the numbers decide.
  */
 export interface SesQuotaGate {
-  /** True while the account is at (or within the margin of) its 24-hour quota. */
-  exhausted(): boolean;
+  /**
+   * True while the account is at (or within the margin of) its 24-hour quota
+   * in the send's region. The quota is per region: a multi-region gate routes
+   * on it, a single-region gate ignores it.
+   */
+  exhausted(region?: string): boolean;
   /** Re-read the account now; resolves to the new `exhausted`. A failed read keeps the last answer. */
-  refresh(): Promise<boolean>;
+  refresh(region?: string): Promise<boolean>;
 }
 
 /** Hold sends from this share of the quota: the last messages of the window are SES's, not ours. */

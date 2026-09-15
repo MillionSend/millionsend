@@ -61,6 +61,12 @@ export interface BroadcastDeps {
   batchSize?: number | undefined;
   /** Owners hear when the broadcast went out or is held; absent = silent (tests). */
   mailer?: SystemMailer | undefined;
+  /**
+   * SES's own 24-hour quota, per region: while the sender domain's region is
+   * full the walk waits, instead of every fanned-out row parking one by one
+   * in the send handler.
+   */
+  sesQuota?: { exhausted(region?: string): boolean } | undefined;
   /** Dashboard origin for the links in those mails. */
   appBaseUrl?: string | undefined;
 }
@@ -101,6 +107,8 @@ export type BroadcastOutcome = "sent" | "skipped" | "deferred";
 
 /** How long a fan-out waits before re-checking a held region. */
 const REGION_HOLD_RETRY_MS = 15 * 60 * 1000;
+/** Before re-checking a region at its SES 24-hour quota: the rolling window frees gradually and the gate re-reads every minute. */
+const SES_QUOTA_RETRY_MS = 5 * 60 * 1000;
 
 // The merge and preheader helpers live in core so the dashboard's test send
 // renders exactly what the fan-out renders; re-exported for the callers that
@@ -188,6 +196,13 @@ export async function sendBroadcast(
       );
     }
     await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));
+    return "deferred";
+  }
+  if (deps.sesQuota?.exhausted(domain.region)) {
+    console.warn(
+      `broadcast ${broadcast.id}: SES 24-hour quota reached in ${domain.region}, fan-out deferred`,
+    );
+    await deps.reschedule?.(broadcast.id, new Date(Date.now() + SES_QUOTA_RETRY_MS));
     return "deferred";
   }
 

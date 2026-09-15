@@ -56,6 +56,10 @@ deliberadas e explícitas:
 - Contatos são globais ao time — os endpoints de audience são servidos como
   aliases de segments, e os endpoints de contato funcionam com ou sem id de
   audience (veja [Contatos](/pt-BR/concepts/contacts)).
+- `POST /domains` aceita um `region` opcional, que precisa ser uma das regiões
+  do SES que a instalação atende — os valores que o schema da requisição lista,
+  a primeira sendo a padrão — e é recusado com `422` caso contrário. Um domínio
+  tem uma região: para mudá-la, exclua o domínio e adicione de novo.
 - Broadcasts suportam `canceled`, um status fora da união do Resend, e o
   envio de broadcast, `POST /emails` e `POST /emails/batch` podem retornar
   `403 sending_paused` quando sua taxa de bounce ou reclamação cruza os

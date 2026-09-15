@@ -53,7 +53,7 @@ const PROCESSES = {
 const ALL_PROCESSES = ["api", "worker", "web"];
 
 // "setup" argv mode runs the interactive setup wizard instead of the app:
-//   docker run --rm -it -v "$PWD":/work -w /work <image> setup [--cloud] [teardown] [--dry-run]
+//   docker run --rm -it -v "$PWD":/work -w /work <image> setup [--cloud] [add-region <region>] [teardown] [--dry-run]
 // (the Dockerfile ENTRYPOINT forwards the args here). The wizard reads and
 // writes .env in the working directory, so -w decides where that is; the
 // script path is absolute and resolves the same from any cwd.

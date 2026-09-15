@@ -127,6 +127,23 @@ describe("domains.create", () => {
     });
     expect(calls).toHaveLength(0);
   });
+  it("accepts any served region when AWS_REGIONS lists several, and names them all in a refusal", async () => {
+    vi.stubEnv("AWS_REGIONS", "sa-east-1,us-east-1");
+    const teamId = await createTeam(db);
+    const { deps, calls } = fakeSes();
+    const { id } = await callerFor(teamId, deps).domains.create({
+      name: "us.example.com",
+      region: "us-east-1",
+    });
+    const [row] = await db.select().from(schema.domains).where(eq(schema.domains.id, id));
+    expect(row?.region).toBe("us-east-1");
+    expect(calls.map((c) => c.name)).toContain("CreateEmailIdentityCommand");
+    await expect(
+      callerFor(teamId, deps).domains.create({ name: "far.example.com", region: "eu-west-1" }),
+    ).rejects.toMatchObject({
+      message: "Region eu-west-1 is not available; this deployment serves sa-east-1, us-east-1",
+    });
+  });
   it("uploads a BYODKIM key to SES and stores only the selector and public half", async () => {
     const teamId = await createTeam(db);
     const { deps, calls } = fakeSes();
@@ -311,6 +328,23 @@ describe("domains.create", () => {
     ]);
   });
 
+  it("in cloud, a name another team holds in any served region is taken", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    vi.stubEnv("AWS_REGIONS", "sa-east-1,us-east-1");
+    const teamA = await createTeam(db, "holder");
+    const teamB = await createTeam(db, "claimant");
+    const { deps, calls } = fakeSes();
+    await callerFor(teamA, deps).domains.create({ name: "held.example.com", region: "sa-east-1" });
+    const created = calls.length;
+    await expect(
+      callerFor(teamB, deps).domains.create({ name: "held.example.com", region: "us-east-1" }),
+    ).rejects.toMatchObject({ code: "CONFLICT", message: "domain already registered" });
+    expect(calls).toHaveLength(created);
+    // The same team may not hold it twice either: one region per domain.
+    await expect(
+      callerFor(teamA, deps).domains.create({ name: "held.example.com", region: "us-east-1" }),
+    ).rejects.toMatchObject({ code: "CONFLICT", message: "domain already added" });
+  });
   it("in cloud, 409s a domain another team holds in the region and never adopts SES identities", async () => {
     vi.stubEnv("IS_CLOUD", "true");
     const teamA = await createTeam(db, "team-a");

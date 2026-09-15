@@ -1,5 +1,6 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
+import { setColorMode } from "../src/theme.js";
 import {
   answerLine,
   banner,
@@ -10,6 +11,7 @@ import {
   multiSelectPrompt,
   optionRow,
   pickBannerTier,
+  railOptionRow,
   rowsFor,
   secretPrompt,
   secretPromptMode,
@@ -279,6 +281,20 @@ describe("optionRow", () => {
     expect(cut).toBe("❯ [x] Enrichment — properties and topic subscriptions (12,…");
     const short = optionRow("  ", option, false, 20);
     expect(short).toBe("  Enrichment — pro…");
+  });
+});
+
+describe("railOptionRow", () => {
+  it("marks the highlighted row with a filled dot and cuts the hint before the label", () => {
+    setColorMode("never");
+    expect(railOptionRow({ value: "a", label: "Add a region", hint: "no new key" }, true, 80)).toBe(
+      "│  ● Add a region  no new key",
+    );
+    expect(railOptionRow({ value: "b", label: "Skip" }, false, 80)).toBe("│  ○ Skip");
+    expect(railOptionRow({ value: "c", label: "Label", hint: "a long hint" }, false, 20)).toBe(
+      "│  ○ Label  a long…",
+    );
+    setColorMode("auto");
   });
 });
 

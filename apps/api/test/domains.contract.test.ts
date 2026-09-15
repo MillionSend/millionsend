@@ -81,7 +81,7 @@ beforeAll(async () => {
             : [],
         resolveCname: async () => [],
       },
-      defaultRegion: "us-east-1",
+      regions: ["us-east-1"],
     },
   });
   await new Promise<void>((resolve) => {

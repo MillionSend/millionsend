@@ -30,6 +30,7 @@ export function parseCommaList(value: string | undefined): string[] | undefined 
 // display — the env proxy is raw process.env under SKIP_ENV_VALIDATION, so
 // consumers needing the default without zod's parsing read these.
 export const SES_MAX_SEND_RATE_DEFAULT = 14;
+export const AWS_REGION_DEFAULT = "us-east-1";
 export const EMAIL_RETENTION_DAYS_DEFAULT = 30;
 export const OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT = 10;
 
@@ -116,8 +117,14 @@ export const env = createEnv({
     // the composite keyring.
     KMS_KEY_ID: z.string().optional(),
 
-    // BYO-SES for self-host; cloud uses the platform account.
-    AWS_REGION: z.string().default("us-east-1"),
+    // BYO-SES for self-host; cloud uses the platform account. AWS_REGION is
+    // the KMS and SQS client region and the one-region alias of AWS_REGIONS;
+    // read the SES regions through servedRegions(), never from either directly.
+    AWS_REGION: z.string().default(AWS_REGION_DEFAULT),
+    // SES regions this deployment sends from, comma-separated; the first is
+    // the default (platform mail, sends with no domain row). Absent → the
+    // one region in AWS_REGION.
+    AWS_REGIONS: z.string().optional().transform(parseCommaList),
     AWS_ACCESS_KEY_ID: z.string().optional(),
     AWS_SECRET_ACCESS_KEY: z.string().optional(),
 
@@ -140,12 +147,14 @@ export const env = createEnv({
     // Unset follows IS_CLOUD; see sesTenantsEnabled().
     SES_TENANTS: z.enum(["true", "false", "1", "0"]).optional(),
 
-    // Messages/second ceiling for THE ONE worker process: the bucket is
+    // Messages/second ceiling for THE ONE worker process: the buckets are
     // in-memory, so running N worker replicas multiplies the real SES rate
     // by N. Until the bucket is shared (Postgres-backed), scale the worker
-    // vertically only, or divide this value by the replica count. 14/s is
-    // SES's standard production default; sandbox accounts must set 1.
-    // Bootstrap value only — the instance_settings row overrides it.
+    // vertically only, or divide this value by the replica count. Each
+    // region runs at the lower of its own SES MaxSendRate and this, so a
+    // sandbox region paces itself at 1/s without lowering it. 14/s is SES's
+    // standard production default. Bootstrap value only — the
+    // instance_settings row overrides it.
     SES_MAX_SEND_RATE: z.coerce.number().positive().default(SES_MAX_SEND_RATE_DEFAULT),
     // Concurrent send lanes in the worker. A lane spends most of a send
     // waiting on SES, so about 1.2 lanes per message/second of send rate
@@ -306,6 +315,19 @@ export function isCloudDeployment(e: Env = env): boolean {
 /** Where the hosted unsubscribe pages live: their own host when configured, else the dashboard's. */
 export function unsubscribeBaseUrl(e: Env = env): string | undefined {
   return e.UNSUBSCRIBE_BASE_URL ?? e.APP_BASE_URL;
+}
+
+/**
+ * The SES regions this deployment serves, the default first: AWS_REGIONS when
+ * set, else the one region in AWS_REGION. Under SKIP_ENV_VALIDATION the proxy
+ * carries the raw comma-separated string, so it is parsed here as well.
+ */
+export function servedRegions(e: Env = env): string[] {
+  const raw = e.AWS_REGIONS as unknown;
+  const listed = Array.isArray(raw)
+    ? (raw as string[])
+    : parseCommaList(typeof raw === "string" ? raw : undefined);
+  return listed ?? [e.AWS_REGION || AWS_REGION_DEFAULT];
 }
 
 /** Whether teams get their own SES tenant: explicit SES_TENANTS wins, else the cloud default. */

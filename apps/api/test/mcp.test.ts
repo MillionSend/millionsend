@@ -8,7 +8,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
 
 /**
@@ -132,7 +132,7 @@ beforeAll(async () => {
       clientForRegion: () => {
         throw new Error("SES is not exercised by these tests");
       },
-      defaultRegion: "sa-east-1",
+      regions: ["sa-east-1"],
     },
   });
 });
@@ -232,14 +232,14 @@ describe("auth middleware", () => {
 });
 
 describe("tool listing", () => {
-  it("create_domain advertises and accepts only the region this deployment serves", async () => {
+  it("create_domain advertises and accepts only the regions this deployment serves", async () => {
     const client = await connect(await mintToken());
     const tool = (await client.listTools()).tools.find((t) => t.name === "create_domain");
     const schema = tool?.inputSchema as {
       properties?: Record<string, { enum?: string[]; description?: string }>;
     };
     expect(schema.properties?.region?.enum).toEqual(["sa-east-1"]);
-    expect(tool?.description).toContain("must be sa-east-1");
+    expect(tool?.description).toContain("serves sa-east-1 (default sa-east-1)");
     // The SDK validates arguments against the narrowed schema before the tool
     // runs, so the refusal names the served region and no REST call is made.
     const refused = await client.callTool({
@@ -541,6 +541,13 @@ describe("tools", () => {
 });
 
 describe("rate limiting", () => {
+  // The limiter counts in fixed minute windows; a test whose calls straddle a
+  // boundary sees a fresh window and no 429. Wait out the last seconds of one.
+  beforeEach(async () => {
+    const left = 60_000 - (Date.now() % 60_000);
+    if (left < 3_000) await new Promise((resolve) => setTimeout(resolve, left));
+  });
+
   it("429s a user who exceeds the per-minute cap on /mcp", async () => {
     const limited = createApi({
       db,

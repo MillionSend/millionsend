@@ -117,10 +117,10 @@
       "sandboxLink": "Solicitar acesso de produção",
       "requestTemplate": "Use case: transactional email (account notifications, receipts, password resets) sent through MillionSend, a self-hosted sending platform we operate on our own infrastructure.\n\nRecipients: our own users. List subscriptions follow double-opt-in guidance before any sending.\n\nBounce and complaint handling: SES delivery events are ingested via SNS; hard bounces and complaints are suppressed automatically and are never mailed again.\n\nExpected volume: [VOLUME] emails/day, ramping up gradually.",
       "requestTemplateNote": "Substitua <code>[VOLUME]</code> e cole no formulário de acesso de produção da AWS — o formulário espera inglês.",
-      "rateHint": "SES_MAX_SEND_RATE={envRate} no .env · máximo da conta {accountRate}/s — os valores divergem.",
+      "rateHint": "SES_MAX_SEND_RATE={envRate} no .env · máximo da conta nesta região {accountRate}/s — o worker envia no menor dos dois.",
       "errors": {
         "credentials": "A AWS rejeitou as credenciais — verifique <code>AWS_ACCESS_KEY_ID</code> e <code>AWS_SECRET_ACCESS_KEY</code> no <code>.env</code>.",
-        "unreachable": "O SES não respondeu — verifique <code>AWS_REGION</code> e o caminho de rede."
+        "unreachable": "O SES não respondeu — verifique <code>AWS_REGION</code> / <code>AWS_REGIONS</code> e o caminho de rede."
       },
       "disabledHint": "Defina suas credenciais AWS primeiro.",
       "committedPerDay": "Comprometido por dia"

@@ -80,6 +80,7 @@ function makeApp(opts: {
   isCloud?: boolean;
   authEmailFrom?: string;
   tenants?: { configurationSet?: string | undefined };
+  regions?: string[];
 }) {
   const deps: ApiDeps = {
     db,
@@ -91,7 +92,7 @@ function makeApp(opts: {
     ses: {
       clientForRegion: () => opts.client,
       dns: opts.dns ?? fakeDns(),
-      defaultRegion: "sa-east-1",
+      regions: opts.regions ?? ["sa-east-1"],
       authEmailFrom: opts.authEmailFrom,
       tenants: opts.tenants,
     },
@@ -211,6 +212,21 @@ describe("POST /domains", () => {
     const app = makeApp(fakeSes());
     const body = await createDomain(app, "default-region.example.com");
     expect(body.region).toBe("sa-east-1");
+  });
+
+  it("accepts every served region and defaults to the first when several are served", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, regions: ["sa-east-1", "us-east-1"] });
+    const us = await createDomain(app, "us.example.com", { region: "us-east-1" });
+    expect(us.region).toBe("us-east-1");
+    const first = await createDomain(app, "first.example.com");
+    expect(first.region).toBe("sa-east-1");
+    expect(calls.filter((c) => c.name === "CreateEmailIdentityCommand")).toHaveLength(2);
+    const unserved = await call(app, fullKey, "POST", "/domains", {
+      name: "far.example.com",
+      region: "eu-west-1",
+    });
+    expect(unserved.status).toBe(422);
   });
 
   it("applies optional tracking settings at creation and returns the Tracking CNAME", async () => {
@@ -421,6 +437,20 @@ describe("POST /domains in cloud (shared AWS account)", () => {
     const id = await createTeam(db, slug);
     return { id, key: await insertKey(id) };
   }
+
+  it("in cloud, 409s a domain another team holds in another served region", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client, isCloud: true, regions: ["sa-east-1", "us-east-1"] });
+    await db
+      .insert(schema.domains)
+      .values({ teamId: otherTeamId, name: "elsewhere.example.com", region: "sa-east-1" });
+    const res = await call(app, fullKey, "POST", "/domains", {
+      name: "elsewhere.example.com",
+      region: "us-east-1",
+    });
+    expect(res.status).toBe(409);
+    expect(calls.filter((c) => c.name === "CreateEmailIdentityCommand")).toHaveLength(0);
+  });
 
   it("409s a domain another team holds in the same region and never re-keys it", async () => {
     const a = await cloudTeam("cloud-a");

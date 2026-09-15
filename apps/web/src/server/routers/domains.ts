@@ -1,6 +1,7 @@
 import { resolveNs as dnsResolveNs } from "node:dns/promises";
 import {
   env,
+  servedRegions,
   sesTenantsEnabled,
   trackingCnameTarget,
   trackingSubdomainsSupported,
@@ -40,7 +41,6 @@ import {
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
@@ -229,7 +229,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
             .string()
             .trim()
             .refine((v) => HOSTNAME_RE.test(v), "must be a lowercase hostname"),
-          region: z.enum(DOMAIN_REGIONS),
+          region: z.string().trim(),
           mailFromSubdomain: z
             .string()
             .trim()
@@ -241,14 +241,15 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         // env is read per call (not at module load) so tests can stub the
         // deployment mode first.
         const isCloud = Boolean(env.IS_CLOUD);
-        // One region per deployment — the value the form reads as
-        // system.features.region. Configuration sets, SNS topics and tenants
+        // Any region this deployment serves — the list the form reads as
+        // system.features.regions. Configuration sets, SNS topics and tenants
         // are regional, so an identity anywhere else would verify but never
         // send or report events.
-        if (input.region !== env.AWS_REGION) {
+        const regions = servedRegions();
+        if (!regions.includes(input.region)) {
           throw new TRPCError({
             code: "UNPROCESSABLE_CONTENT",
-            message: `Region ${input.region} is not available; this deployment serves ${env.AWS_REGION}`,
+            message: `Region ${input.region} is not available; this deployment serves ${regions.join(", ")}`,
           });
         }
         const isOperator = isCloud && (await isOperatorTeam(ctx.db, ctx.teamId));
@@ -272,15 +273,14 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           .where(and(eq(schema.domains.teamId, ctx.teamId), eq(schema.domains.name, input.name)));
         if (existing) throw new TRPCError({ code: "CONFLICT", message: "domain already added" });
         if (isCloud) {
-          // SES identities are account-wide per region and every cloud tenant
-          // shares the account, so a domain another team holds in this region
-          // is taken — adopting it would re-key their DKIM.
+          // Every cloud tenant shares the SES account, so a domain another
+          // team holds is taken in every served region: in the same region
+          // adopting it would re-key their DKIM, and in another it would let
+          // a second team stand up the same sender elsewhere.
           const [taken] = await ctx.db
             .select({ id: schema.domains.id })
             .from(schema.domains)
-            .where(
-              and(eq(schema.domains.name, input.name), eq(schema.domains.region, input.region)),
-            );
+            .where(eq(schema.domains.name, input.name));
           if (taken) {
             throw new TRPCError({ code: "CONFLICT", message: "domain already registered" });
           }

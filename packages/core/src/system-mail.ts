@@ -60,6 +60,8 @@ export interface SystemMailMessage {
 export interface SenderDomainOwner {
   teamId: string;
   domainId: string;
+  /** The SES region the sender's identity is verified in. */
+  region: string;
 }
 
 /**
@@ -69,9 +71,10 @@ export interface SenderDomainOwner {
  * team is the designation. Exact host, as everywhere: owning `example.com`
  * does not cover `mail.example.com`.
  *
- * Cloud refuses the same (name, region) in two teams, so the answer is
- * single-valued there. Self-host may hold one name in several teams; the
- * oldest verified row wins, which is also the row a later re-key demotes last.
+ * Cloud refuses the same name in two teams, whatever the region, so the
+ * answer is single-valued there. Self-host may hold one name in several
+ * teams; the oldest verified row wins, which is also the row a later re-key
+ * demotes last.
  */
 export async function findSenderDomainOwner(
   db: Db,
@@ -81,7 +84,7 @@ export async function findSenderDomainOwner(
   if (!sender) return null;
   const d = schema.domains;
   const [row] = await db
-    .select({ teamId: d.teamId, domainId: d.id })
+    .select({ teamId: d.teamId, domainId: d.id, region: d.region })
     .from(d)
     .where(and(eq(d.name, sender.domain), eq(d.status, "verified")))
     .orderBy(sql`${d.verifiedAt} asc nulls last`, asc(d.createdAt))
@@ -98,8 +101,12 @@ export class SystemMailRefused extends Error {
 }
 
 export interface SystemSendDeps extends AcceptEmailDeps {
-  /** Today's SESv2 Simple send, for senders no team owns. */
-  raw(message: SystemMailMessage): Promise<void>;
+  /**
+   * SESv2 Simple send outside the pipeline: for senders no team owns (owner
+   * null — the deployment's default region), and as the fallback when the
+   * pipeline fails for a sender a team does own (that domain's region).
+   */
+  raw(message: SystemMailMessage, owner: SenderDomainOwner | null): Promise<void>;
 }
 
 const warnedSenders = new Set<string>();
@@ -132,7 +139,7 @@ export async function sendSystemMail(
         `system mail: no team holds a verified domain for ${message.from}; account emails are sent raw and not logged. Verify its domain in a team to log them there.`,
       );
     }
-    await deps.raw(message);
+    await deps.raw(message, null);
     return "raw";
   }
   let result: Awaited<ReturnType<typeof acceptEmail>>;
@@ -152,7 +159,7 @@ export async function sendSystemMail(
     );
   } catch (err) {
     console.error(`system mail: accept failed for ${message.kind}, sending raw`, err);
-    await deps.raw(message);
+    await deps.raw(message, owner);
     return "raw";
   }
   if (!result.ok) throw new SystemMailRefused(result.reason);

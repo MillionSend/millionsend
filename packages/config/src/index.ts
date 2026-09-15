@@ -1,4 +1,5 @@
 export {
+  AWS_REGION_DEFAULT,
   accountEmailFrom,
   accountMailDeliverable,
   assertEnvConsistency,
@@ -12,6 +13,7 @@ export {
   parseEmailFrom,
   parseSnsTopicArns,
   SES_MAX_SEND_RATE_DEFAULT,
+  servedRegions,
   sesTenantsEnabled,
   signupOpen,
   trackingCnameTarget,

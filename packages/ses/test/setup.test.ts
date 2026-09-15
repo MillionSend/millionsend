@@ -19,6 +19,8 @@ import {
   CreateConfigurationSetCommand,
   CreateConfigurationSetEventDestinationCommand,
   DeleteConfigurationSetCommand,
+  GetAccountCommand,
+  PutAccountPricingAttributesCommand,
   PutAccountSuppressionAttributesCommand,
 } from "@aws-sdk/client-sesv2";
 import {
@@ -36,8 +38,12 @@ import {
 } from "@aws-sdk/client-sqs";
 import { describe, expect, it } from "vitest";
 import {
+  addRegionPlan,
+  cancelPricingPlan,
   ensureBucket,
   httpsOrigin,
+  parseSqsQueueUrl,
+  readPricingPlan,
   runEventsSetup,
   runSetup,
   runTeardown,
@@ -46,6 +52,7 @@ import {
   type StorageClient,
   setupEnvEntries,
   setupPlan,
+  sqsQueuePolicy,
   storageEnvEntries,
   upsertEnv,
 } from "../src/setup.js";
@@ -308,6 +315,115 @@ describe("runSetup", () => {
       errors: { CreatePolicyCommand: namedError("AccessDeniedException") },
     });
     await expect(runSetup(clients, input)).rejects.toThrow("AccessDeniedException");
+  });
+});
+
+describe("adding a region", () => {
+  const queueUrl = "https://sqs.sa-east-1.amazonaws.com/123456789012/millionsend-events";
+  const queueArn = "arn:aws:sqs:sa-east-1:123456789012:millionsend-events";
+  const firstTopic = "arn:aws:sns:sa-east-1:123456789012:millionsend-events";
+
+  it("parses the standard queue URL into its region and ARN, and nothing else", () => {
+    expect(parseSqsQueueUrl(queueUrl)).toEqual({ region: "sa-east-1", arn: queueArn });
+    expect(parseSqsQueueUrl("https://example.com/123456789012/q")).toBeNull();
+    expect(parseSqsQueueUrl("https://sqs.sa-east-1.amazonaws.com/abc/q")).toBeNull();
+    expect(parseSqsQueueUrl("not a url")).toBeNull();
+  });
+
+  it("keeps one topic a plain string in the queue policy and lists several", () => {
+    const one = sqsQueuePolicy(queueArn, firstTopic, "123456789012") as {
+      Statement: Array<{ Condition?: { ArnEquals: { "aws:SourceArn": unknown } } }>;
+    };
+    expect(one.Statement[0]?.Condition?.ArnEquals["aws:SourceArn"]).toBe(firstTopic);
+    const two = sqsQueuePolicy(queueArn, [firstTopic, "arn:two"], "123456789012") as typeof one;
+    expect(two.Statement[0]?.Condition?.ArnEquals["aws:SourceArn"]).toEqual([
+      firstTopic,
+      "arn:two",
+    ]);
+  });
+
+  it("subscribes the new region's topic to the existing queue and keeps the other topics allowed", async () => {
+    const { clients, calls } = fakeClients();
+    const result = await runEventsSetup(clients, {
+      ...input,
+      appBaseUrl: null,
+      existingQueue: { url: queueUrl, topicArns: [firstTopic] },
+    });
+    expect(result.queueUrl).toBe(queueUrl);
+    expect(calls.map((c) => c.constructor)).toEqual([
+      CreateTopicCommand,
+      SetTopicAttributesCommand,
+      SetQueueAttributesCommand,
+      SubscribeCommand,
+      CreateConfigurationSetCommand,
+      CreateConfigurationSetEventDestinationCommand,
+      PutAccountSuppressionAttributesCommand,
+    ]);
+    const policy = calls.find(
+      (c) => c instanceof SetQueueAttributesCommand,
+    ) as SetQueueAttributesCommand;
+    expect(policy.input.QueueUrl).toBe(queueUrl);
+    const doc = JSON.parse(policy.input.Attributes?.Policy ?? "{}") as {
+      Statement: Array<{
+        Resource: string;
+        Condition?: { ArnEquals: { "aws:SourceArn": unknown } };
+      }>;
+    };
+    expect(doc.Statement[0]?.Resource).toBe(queueArn);
+    expect(doc.Statement[0]?.Condition?.ArnEquals["aws:SourceArn"]).toEqual([
+      firstTopic,
+      result.topicArn,
+    ]);
+    const subscribe = calls.find((c) => c instanceof SubscribeCommand) as SubscribeCommand;
+    expect(subscribe.input).toMatchObject({ Protocol: "sqs", Endpoint: queueArn });
+  });
+
+  it("refuses a queue URL it cannot turn into an ARN before creating anything", async () => {
+    const { clients, calls } = fakeClients();
+    await expect(
+      runEventsSetup(clients, {
+        ...input,
+        existingQueue: { url: "https://example.com/q", topicArns: [] },
+      }),
+    ).rejects.toThrow("not a standard SQS queue URL");
+    expect(calls.some((c) => c instanceof SubscribeCommand)).toBe(false);
+  });
+
+  it("plans the region's resources against the existing queue and the env changes", () => {
+    const plan = addRegionPlan({ region: "us-east-1", queueUrl, appBaseUrl: "http://x" }).join(
+      "\n",
+    );
+    expect(plan).toContain("no new access key");
+    expect(plan).toContain(
+      `SNS topic millionsend-events in us-east-1, delivering into the existing events queue ${queueUrl}`,
+    );
+    expect(plan).toContain("SES configuration set millionsend in us-east-1");
+    expect(plan).toContain("us-east-1 appended to AWS_REGIONS");
+    expect(plan).not.toContain("/ses/events");
+    expect(
+      addRegionPlan({ region: "us-east-1", queueUrl, appBaseUrl: "https://mail.example.com" }).join(
+        "\n",
+      ),
+    ).toContain("also subscribed to https://mail.example.com/ses/events");
+  });
+
+  it("reads the pricing plan and cancels it with Plan NONE", async () => {
+    const calls: object[] = [];
+    const ses = {
+      send: async (command: object) => {
+        calls.push(command);
+        return command instanceof GetAccountCommand
+          ? { PricingAttributes: { CurrentPlan: "ESSENTIALS" } }
+          : {};
+      },
+    };
+    expect(await readPricingPlan(ses)).toBe("ESSENTIALS");
+    expect(await readPricingPlan({ send: async () => ({}) })).toBeNull();
+    await cancelPricingPlan(ses);
+    const cancel = calls.find(
+      (c) => c instanceof PutAccountPricingAttributesCommand,
+    ) as PutAccountPricingAttributesCommand;
+    expect(cancel.input).toEqual({ Plan: "NONE" });
   });
 });
 

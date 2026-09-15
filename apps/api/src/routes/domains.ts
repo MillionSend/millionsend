@@ -62,10 +62,11 @@ export interface DomainsSesDeps {
   /** Live per-record DNS lookups; omitted falls back to node:dns/promises. */
   dns?: DnsResolver | undefined;
   /**
-   * The SES region this deployment serves (AWS_REGION): the only region a
-   * create accepts, and its default.
+   * The SES regions this deployment serves (servedRegions()), the default
+   * first: the only regions a create accepts. Absent, every SES region is
+   * offered — the docs generator's case.
    */
-  defaultRegion?: string | undefined;
+  regions?: readonly string[] | undefined;
   /** The AUTH_EMAIL_FROM sender; in cloud its domain is reserved for system mail. */
   authEmailFrom?: string | undefined;
   /** The ONBOARDING_EMAIL_FROM sender; reserved in cloud the same way. */
@@ -254,13 +255,16 @@ function trackingSettingsError(
 }
 
 /**
- * The one SES region this deployment provisions identities in — the same
- * value the dashboard form reads as system.features.region. The configuration
- * set, SNS topics and tenants are regional, so a domain anywhere else would
- * verify but never send or report events.
+ * The SES regions this deployment provisions identities in, the default
+ * first — the list the dashboard form reads as system.features.regions.
+ * Configuration sets, SNS topics and tenants are regional, so a domain
+ * anywhere else would verify but never send or report events.
  */
-export function servedRegion(ses: Pick<DomainsSesDeps, "defaultRegion">): string {
-  return ses.defaultRegion ?? "us-east-1";
+export function servedRegions(
+  ses: Pick<DomainsSesDeps, "regions">,
+): readonly [string, ...string[]] {
+  const [first, ...rest] = ses.regions ?? [];
+  return first ? [first, ...rest] : SES_REGIONS;
 }
 
 export function registerDomainRoutes(
@@ -276,10 +280,10 @@ export function registerDomainRoutes(
   const idParam = z.object({ id: z.uuid() });
   const d = schema.domains;
 
-  const served = servedRegion(ses);
-  // Only the docs generator registers routes with no region configured; its
+  // Only the docs generator registers routes with no regions configured; its
   // published schema then lists every region a deployment may serve.
-  const createRequestSchema = createDomainRequestSchema(ses.defaultRegion ? [served] : SES_REGIONS);
+  const regions = servedRegions(ses);
+  const createRequestSchema = createDomainRequestSchema(regions);
 
   const findDomain = async (teamId: string, id: string): Promise<DomainRow | undefined> =>
     (
@@ -359,7 +363,7 @@ export function registerDomainRoutes(
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
-      const region = body.region ?? served;
+      const region = body.region ?? regions[0];
       const isOperator = deps.isCloud && (await isOperatorTeam(db, auth.teamId));
       if (
         isReservedSenderDomain(body.name, {
@@ -395,13 +399,11 @@ export function registerDomainRoutes(
         .where(and(eq(d.teamId, auth.teamId), eq(d.name, body.name)));
       if (existing) return c.json(errorBody(409, "conflict", "domain already added"), 409);
       if (deps.isCloud) {
-        // SES identities are account-wide per region and every cloud tenant
-        // shares the account, so a domain another team holds in this region
-        // is taken — adopting it would re-key their DKIM.
-        const [taken] = await db
-          .select({ id: d.id })
-          .from(d)
-          .where(and(eq(d.name, body.name), eq(d.region, region)));
+        // Every cloud tenant shares the SES account, so a domain another team
+        // holds is taken in every served region: in the same region adopting
+        // it would re-key their DKIM, and in another it would let a second
+        // team stand up the same sender elsewhere.
+        const [taken] = await db.select({ id: d.id }).from(d).where(eq(d.name, body.name));
         if (taken) return c.json(errorBody(409, "conflict", "domain already registered"), 409);
         const limit = PLAN_DOMAIN_LIMIT[auth.plan];
         const [owned] = await db.select({ n: count() }).from(d).where(eq(d.teamId, auth.teamId));

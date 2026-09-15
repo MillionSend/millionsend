@@ -7,6 +7,7 @@ import {
 } from "@millionsend/billing";
 import {
   env,
+  servedRegions,
   sesTenantsEnabled,
   trackingCnameTarget,
   trackingSubdomainsSupported,
@@ -61,8 +62,8 @@ import { reportPlanMove, sweepNotifications } from "./handlers/notify.js";
 import { runPlatformBreaker } from "./handlers/platform-breaker.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
 import { sendBroadcast } from "./handlers/send-broadcast.js";
-import { createTokenBucket, failQueuedEmail, sendEmail } from "./handlers/send-email.js";
-import { createSesQuotaGate } from "./handlers/ses-quota.js";
+import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
+import { createRegionSendControls } from "./handlers/ses-regions.js";
 import { syncTenants } from "./handlers/tenants.js";
 import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
@@ -98,7 +99,9 @@ const unsubscribeHost = unsubscribeBaseUrl();
 const unsubscribe = unsubscribeHost
   ? { secretKey: unsubscribeSecretKey, baseUrl: unsubscribeHost }
   : undefined;
-const ses = createSesSender(env.AWS_REGION);
+// Platform mail (no domain row) goes out in the default region, the first served.
+const regions = servedRegions();
+const ses = createSesSender(regions[0] ?? env.AWS_REGION);
 // SESv2 identity clients (GetEmailIdentity) for domain re-verification, cached
 // per region since identities live in the domain's region. Distinct from the
 // send client above (SendEmail); credentials fall back to the provider chain.
@@ -116,35 +119,40 @@ const clientForRegion = (region: string): SesIdentityClient => {
   }
   return client;
 };
-// The bucket is the messages/second control; worker concurrency is not a
-// rate limit and must never be treated as one. In-memory ⇒ single worker
-// process only (see SES_MAX_SEND_RATE in @millionsend/config). The db-backed
-// instance setting overrides env; polled so a Settings → Instance change
-// applies within a minute, without a restart.
-// Each worker process takes its share of the account's rate: the bucket is
-// per process, so WORKER_REPLICAS keeps N processes at the account's total.
-const bucket = createTokenBucket(env.SES_MAX_SEND_RATE / env.WORKER_REPLICAS);
-const applySendRate = async (): Promise<void> => {
-  const { sesMaxSendRate } = await getInstanceSettings(db);
-  bucket.setRate((sesMaxSendRate ?? env.SES_MAX_SEND_RATE) / env.WORKER_REPLICAS);
+// One GetAccount client per served region: the 24-hour quota and the send
+// rate are both per region.
+const accountClients = new Map<string, ReturnType<typeof createSesAccountClient>>();
+const accountClientFor = (region: string) => {
+  let client = accountClients.get(region);
+  if (!client) {
+    client = createSesAccountClient({
+      region,
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+    });
+    accountClients.set(region, client);
+  }
+  return client;
 };
-await applySendRate();
-setInterval(() => {
-  // Transient db failure keeps the last applied rate.
-  applySendRate().catch((err) => console.warn("send-rate refresh failed", err));
-}, 60_000).unref();
-
-// SES's rolling 24-hour quota, read once a minute with the send rate: sends
-// park as queued_quota before SES starts refusing them, and the drain holds
-// until the window has headroom again. A failed read keeps the last answer.
-const accountClient = createSesAccountClient({
-  region: env.AWS_REGION,
-  accessKeyId: env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+// The buckets are the messages/second control; worker concurrency is not a
+// rate limit and must never be treated as one. In-memory ⇒ single worker
+// process only (see SES_MAX_SEND_RATE in @millionsend/config); each process
+// takes its share of the rate, so WORKER_REPLICAS keeps N processes at the
+// account's total. A region's rate is its own MaxSendRate under the ceiling
+// the db-backed instance setting (else env) sets — a sandbox region paces
+// itself at 1/s without holding the others back. Polled once a minute
+// together with the rolling 24-hour quota, so sends park as queued_quota
+// before SES starts refusing them and a Settings → Instance change applies
+// without a restart. A failed read keeps the region's last answers.
+const sendControls = createRegionSendControls({
+  regions,
+  read: async (region) => (await getAccountOverview(accountClientFor(region))).quota,
+  ceiling: async () => (await getInstanceSettings(db)).sesMaxSendRate ?? env.SES_MAX_SEND_RATE,
+  initialRate: env.SES_MAX_SEND_RATE,
+  replicas: env.WORKER_REPLICAS,
 });
-const sesQuota = createSesQuotaGate(async () => (await getAccountOverview(accountClient)).quota);
-await sesQuota.refresh();
-setInterval(() => void sesQuota.refresh(), 60_000).unref();
+await sendControls.refreshAll();
+setInterval(() => void sendControls.refreshAll(), 60_000).unref();
 
 const queue = await Queue.start(env.DATABASE_URL, { workers: true });
 
@@ -208,7 +216,7 @@ await queue.scheduleCrons({
     const result = await drainQuotaParked(db, {
       isCloud: env.IS_CLOUD,
       enqueueSends,
-      sesQuotaExhausted: () => sesQuota.exhausted(),
+      sesQuota: sendControls,
     });
     console.log(`quota.drain: drained=${result.drained} stillParked=${result.stillParked}`);
   },
@@ -261,14 +269,18 @@ await queue.scheduleCrons({
         await reportPlanMove(db, mailer, env.APP_BASE_URL ?? "", team, before, after);
       },
     });
-    // Sold capacity against the shared SES quota, once a day where the operator reads logs.
+    // Sold capacity against the shared SES quotas, once a day where the operator reads logs.
     const committed = await committedDailyVolume(db);
-    const sesDaily = await getAccountOverview(accountClient).then(
-      (o) => o.quota.max24h,
-      () => "unknown",
+    const sesDaily = await Promise.all(
+      regions.map((region) =>
+        getAccountOverview(accountClientFor(region)).then(
+          (o) => `${region}:${o.quota.max24h}`,
+          () => `${region}:unknown`,
+        ),
+      ),
     );
     console.log(
-      `billing.reconcile: reconciled=${result.reconciled} failed=${result.failed} committedPerDay=${committed} sesDailyQuota=${sesDaily}`,
+      `billing.reconcile: reconciled=${result.reconciled} failed=${result.failed} committedPerDay=${committed} sesDailyQuota=${sesDaily.join(",")}`,
     );
   },
   "billing.overage": async () => {
@@ -398,9 +410,9 @@ await queue.work(
         ses,
         defaultConfigurationSet: env.SES_CONFIGURATION_SET,
         onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
-        throttle: () => bucket.take(),
+        throttle: (region) => sendControls.throttle(region),
         reschedule: (emailId, at, priority) => enqueueSend(emailId, at, priority),
-        sesQuota,
+        sesQuota: sendControls,
         enqueueWebhookDelivery: enqueueWebhook,
         tracking,
         ...(unsubscribe ? { unsubscribe } : {}),
@@ -426,6 +438,7 @@ await queue.work(
         signal: ctx.signal,
         mailer,
         appBaseUrl: env.APP_BASE_URL,
+        sesQuota: sendControls,
       },
       payload,
     );

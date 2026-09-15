@@ -48,6 +48,8 @@ export const bold = sgr("1", "22");
 export const accent = sgr("1;97", "22;39");
 /** Bright white — the selected row in a list prompt. */
 export const bone = sgr("97", "39");
+/** Inverse video — the product mark at the head of a guided flow; renders on every theme. */
+export const badge = sgr("7", "27");
 
 export const SYM = {
   ok: "✓",

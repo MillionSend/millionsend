@@ -1,9 +1,10 @@
-import { accountEmailFrom, env, notificationsEmailFrom } from "@millionsend/config";
+import { accountEmailFrom, env, notificationsEmailFrom, servedRegions } from "@millionsend/config";
 import {
   type Keyring,
   listTeamOwners,
   type MailContent,
   type MailLocale,
+  type SenderDomainOwner,
   type SystemMailKind,
   type SystemMailMessage,
   sendSystemMail,
@@ -22,9 +23,10 @@ export interface SystemMailer {
 /**
  * Account notifications to team owners and the instance operator. They ride
  * the team pipeline into whichever team holds the sender's verified domain
- * (core sendSystemMail) and go out raw when no team does. Without a
- * configured sender the mailer is a no-op: the webhook events still carry
- * the same facts.
+ * (core sendSystemMail) and go out raw when no team does — from that
+ * domain's region when a team holds it, else the default served region.
+ * Without a configured sender the mailer is a no-op: the webhook events
+ * still carry the same facts.
  */
 export function createSystemMailer(deps: {
   db: Db;
@@ -38,12 +40,17 @@ export function createSystemMailer(deps: {
     );
     return { send: async () => {} };
   }
-  const client = createSesSendClient({
-    region: env.AWS_REGION,
-    ...(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
-      ? { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY }
-      : {}),
-  });
+  // Built per send: raw account mail is rare, so there is nothing worth caching.
+  const raw = (m: SystemMailMessage, owner: SenderDomainOwner | null) =>
+    sendSimpleEmail(
+      createSesSendClient({
+        region: owner?.region ?? servedRegions()[0] ?? env.AWS_REGION,
+        ...(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
+          ? { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY }
+          : {}),
+      }),
+      m,
+    );
   const sendDeps = {
     db: deps.db,
     keyring: deps.keyring,
@@ -52,7 +59,7 @@ export function createSystemMailer(deps: {
     // not queue behind a broadcast fan-out.
     enqueueEmailSend: (emailId: string, opts?: { startAfter?: Date }) =>
       deps.enqueueSend(emailId, opts?.startAfter, EMAIL_SEND_PRIORITY.transactional),
-    raw: (m: SystemMailMessage) => sendSimpleEmail(client, m),
+    raw,
   };
   return {
     send: async (to, message) => {
