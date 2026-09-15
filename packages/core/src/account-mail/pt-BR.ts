@@ -176,4 +176,5 @@ export const ptBR = {
 export const ptBRPhrases = {
   capUpToDay: "até {n} e-mails por dia",
   capUpToMonth: "até {n} e-mails por mês",
+  capNone: "sem limite de envio",
 } as const satisfies Record<MailPhraseKey, string>;

@@ -560,3 +560,25 @@ describe("cancelTeamSubscription", () => {
     expect(await team(teamId)).toMatchObject({ plan: "free", stripeSubscriptionId: null });
   });
 });
+
+describe("the system plan", () => {
+  it("is never written by Stripe: a webhook or a reconcile for its customer leaves the row alone", async () => {
+    const teamId = await customerTeam();
+    await db.update(schema.teams).set({ plan: "system" }).where(eq(schema.teams.id, teamId));
+    state.subscriptions.sub_1 = subscription("sub_1", "cus_1", "active");
+    expect(
+      await deliver(subEvent("customer.subscription.created", state.subscriptions.sub_1)),
+    ).toBe(200);
+    await reconcileTeamPlan(deps(), teamId);
+    expect(await team(teamId)).toMatchObject({
+      plan: "system",
+      planQuota: null,
+      planStatus: "none",
+      stripeSubscriptionId: null,
+      stripeOverageItemId: null,
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+    });
+    expect(logs.filter((m) => m.includes("system plan"))).toHaveLength(2);
+  });
+});

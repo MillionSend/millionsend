@@ -646,6 +646,21 @@ uma credencial válida, e os links nunca são reescritos para rastreio de
 cliques. Enquanto nenhum time tiver o domínio, eles saem direto pelo SES sem
 deixar rastro, como antes.
 
+Esse time é o da própria instância. Dê a ele o plano `system` e ele nunca
+tem limite nem cobrança, o selo diz System, a aba Cobrança mostra um aviso
+no lugar dos planos e o Stripe nunca escreve na linha dele (numa instância
+auto-hospedada os planos não impõem limites, então isso só o rotula; com
+`IS_CLOUD=true` também remove os limites de envio, domínios, contatos e
+times). O comando não altera nada enquanto o time ainda tiver cliente ou
+assinatura no Stripe:
+
+```sql
+update teams
+set plan = 'system', plan_quota = null, current_period_start = null, current_period_end = null,
+    plan_status = 'none', pending_rung = null, cancel_at = null
+where id = '<id do time>' and stripe_customer_id is null and stripe_subscription_id is null;
+```
+
 O mesmo time é a audiência das novidades do produto. Em uma instância com
 `ALLOW_SIGNUP=true`, toda conta nova vira um contato ali com a propriedade
 `source: signup` (nome, endereço, data do cadastro e idioma do painel) assim
@@ -681,8 +696,11 @@ Nada em uma instância auto-hospedada contata millionsend.com por conta
 própria. O assistente de configuração oferece, uma vez e só de forma
 interativa, inscrever o e-mail do operador nas notas de lançamento do
 MillionSend; é o assistente na sua máquina enviando a sua resposta, e um link
-de confirmação chega antes de qualquer coisa ser armazenada.
-**Configurações → Instância** leva à mesma página.
+de confirmação chega antes de qualquer coisa ser armazenada. Quando não
+consegue alcançar millionsend.com, ele imprime a página,
+[app.millionsend.com/updates?source=self-host](https://app.millionsend.com/updates?source=self-host), e **Configurações →
+Instância** leva à mesma página; o `source` marca você como auto-hospedado
+nos dois casos.
 
 ## Operações
 

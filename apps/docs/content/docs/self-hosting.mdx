@@ -637,6 +637,20 @@ since a reset link is a live credential, and their links are never rewritten
 for click tracking. Until a team holds the domain they are sent straight
 through SES and leave no trace, as before.
 
+That team is the instance's own. Give it the `system` plan and it is never
+capped or billed, its badge reads System, the Billing tab shows a notice
+instead of plans, and Stripe never writes its row (on a self-hosted instance
+plans carry no limits, so this only labels it; with `IS_CLOUD=true` it also
+lifts the send, domain, contact and team caps). The statement changes
+nothing while the team still has a Stripe customer or subscription:
+
+```sql
+update teams
+set plan = 'system', plan_quota = null, current_period_start = null, current_period_end = null,
+    plan_status = 'none', pending_rung = null, cancel_at = null
+where id = '<team id>' and stripe_customer_id is null and stripe_subscription_id is null;
+```
+
 The same team is the audience for product updates. On an instance with
 `ALLOW_SIGNUP=true`, every new account becomes a contact there with a
 `source: signup` property (name, address, sign-up date and dashboard
@@ -676,7 +690,10 @@ Nothing on a self-hosted instance contacts millionsend.com on its own. The
 setup wizard offers, once and interactively, to subscribe the operator's
 address to MillionSend release notes; that is the wizard on your machine
 posting your answer, and a confirmation link is sent before anything is
-stored. **Settings → Instance** links to the same page.
+stored. When it cannot reach millionsend.com it prints the page instead,
+[app.millionsend.com/updates?source=self-host](https://app.millionsend.com/updates?source=self-host), and **Settings →
+Instance** links to the same page; the `source` tags you as a self-hoster
+either way.
 
 ## Operations
 

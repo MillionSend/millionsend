@@ -73,6 +73,12 @@ export async function applySubscription(
     log(`no team for customer ${customerId}`);
     return;
   }
+  // The instance's own team is never billed; a Stripe customer pointing at
+  // it is a misconfiguration, and Stripe's state must not overwrite the plan.
+  if (team.plan === "system") {
+    log(`team ${team.id} is on the system plan; subscription ${sub.id} ignored`);
+    return;
+  }
 
   const entitled = sub.status === "active" || sub.status === "trialing";
   // A superseded subscription ending must not revoke what the team's

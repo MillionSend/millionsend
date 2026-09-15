@@ -168,7 +168,8 @@
     "free": "Free",
     "starter": "Starter",
     "pro": "Pro",
-    "scale": "Scale"
+    "scale": "Scale",
+    "system": "System"
   },
   "members": {
     "title": "Membros",
@@ -287,6 +288,7 @@
     "manage": "Gerenciar cobrança",
     "manageHint": "Os planos mudam aqui. Faturas, forma de pagamento, CNPJ/CPF e cancelamento ficam no portal de cobrança.",
     "readOnly": "Apenas proprietários e administradores podem alterar a cobrança.",
+    "systemNotice": "Este é o time da própria instância: envia os e-mails de conta e as novidades, nunca é cobrado e não tem limite de envio. O plano é definido pelo operador.",
     "pastDue": "O pagamento falhou — atualize seu cartão para manter o plano.",
     "updateCard": "Atualizar forma de pagamento",
     "usageTitle": "Uso",

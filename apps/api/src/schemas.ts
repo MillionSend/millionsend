@@ -473,7 +473,7 @@ export const usageResponseSchema = z
     plan: z
       .enum(["free", "starter", "pro", "scale"])
       .nullable()
-      .describe("Effective plan; null self-hosted"),
+      .describe("Effective plan; null self-hosted or on the instance's own (system) team"),
     limits: z.object({
       emails_per_day: z
         .number()

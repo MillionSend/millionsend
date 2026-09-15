@@ -168,7 +168,8 @@
     "free": "Free",
     "starter": "Starter",
     "pro": "Pro",
-    "scale": "Scale"
+    "scale": "Scale",
+    "system": "System"
   },
   "members": {
     "title": "Members",
@@ -287,6 +288,7 @@
     "manage": "Manage billing",
     "manageHint": "Plans change here. Invoices, payment method, tax ID and cancellation live in the billing portal.",
     "readOnly": "Only owners and admins can change billing.",
+    "systemNotice": "This is the instance's own team: it sends the account mail and product updates, is never billed and has no sending cap. Its plan is set by the operator.",
     "pastDue": "Payment failed — update your card to keep your plan.",
     "updateCard": "Update payment method",
     "usageTitle": "Usage",

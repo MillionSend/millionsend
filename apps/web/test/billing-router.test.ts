@@ -673,3 +673,35 @@ describe("billing router", () => {
     expect(calls.portals[1]).toMatchObject({ configuration: "bpc_1" });
   });
 });
+
+describe("the system team", () => {
+  async function systemTeam(): Promise<string> {
+    const teamId = await createTeam(db);
+    await db.update(schema.teams).set({ plan: "system" }).where(eq(schema.teams.id, teamId));
+    return teamId;
+  }
+
+  it("reports its plan with no rung and no cap", async () => {
+    const owner = callerFor(await systemTeam(), "owner");
+    expect(await owner.billing.status()).toMatchObject({
+      plan: "system",
+      rung: null,
+      quota: { kind: "none" },
+      hasCustomer: false,
+      hasLiveSubscription: false,
+    });
+  });
+
+  it("refuses checkout, plan changes, the overage switch and the portal", async () => {
+    const owner = callerFor(await systemTeam(), "owner");
+    const forbidden = { code: "FORBIDDEN" };
+    await expect(owner.billing.checkout({ rung: "pro_100k" })).rejects.toMatchObject(forbidden);
+    await expect(owner.billing.changePlan({ rung: "pro_100k" })).rejects.toMatchObject(forbidden);
+    await expect(owner.billing.setOverage({ enabled: true })).rejects.toMatchObject(forbidden);
+    await expect(owner.billing.portal()).rejects.toMatchObject(forbidden);
+    expect(calls.customers).toEqual([]);
+    expect(calls.checkouts).toEqual([]);
+    expect(calls.portals).toEqual([]);
+    expect(await auditRows()).toEqual([]);
+  });
+});

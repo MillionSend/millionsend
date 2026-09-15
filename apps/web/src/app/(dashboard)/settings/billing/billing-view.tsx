@@ -244,6 +244,21 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     hasCustomer,
     hasLiveSubscription,
   } = status.data;
+  if (plan === "system") {
+    return (
+      <Card title={t("plan")}>
+        <span
+          className="ms-display"
+          style={{ fontSize: "var(--ms-fs-h1)", color: "var(--ms-bone)", lineHeight: 1 }}
+        >
+          {planLabel(plan, planQuota)}
+        </span>
+        <p style={{ margin: "14px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
+          {t("systemNotice")}
+        </p>
+      </Card>
+    );
+  }
   const current = PLAN_RUNGS.find((r) => r.key === currentKey) ?? PLAN_RUNGS[0];
   const pending = PLAN_RUNGS.find((r) => r.key === pendingRung) ?? null;
   const at =

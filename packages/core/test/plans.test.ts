@@ -5,8 +5,11 @@ import {
   monthlyCapacity,
   OVERAGE_HARD_CAP,
   PLAN_CONTACT_LIMIT,
+  PLAN_DOMAIN_LIMIT,
   PLAN_GRACE_DAYS,
   PLAN_RUNGS,
+  PLAN_TEAM_LIMIT,
+  planCanHidePoweredBy,
   planLabel,
   type QuotaTeamRow,
   quotaPeriod,
@@ -36,6 +39,11 @@ describe("effectivePlan", () => {
     expect(effectivePlan("pro", null, now)).toBe("pro");
     expect(effectivePlan("free", new Date(0), now)).toBe("free");
   });
+
+  it("never lapses the system plan, whatever period end is left on the row", () => {
+    expect(effectivePlan("system", new Date(0), now)).toBe("system");
+    expect(effectivePlan("system", null, now)).toBe("system");
+  });
 });
 
 describe("PLAN_RUNGS", () => {
@@ -64,7 +72,22 @@ describe("PLAN_RUNGS", () => {
 
 describe("PLAN_CONTACT_LIMIT", () => {
   it("caps contacts on Free only", () => {
-    expect(PLAN_CONTACT_LIMIT).toEqual({ free: 1_000, starter: null, pro: null, scale: null });
+    expect(PLAN_CONTACT_LIMIT).toEqual({
+      free: 1_000,
+      starter: null,
+      pro: null,
+      scale: null,
+      system: null,
+    });
+  });
+});
+
+describe("the system plan", () => {
+  it("has no rung and no limits", () => {
+    expect(() => teamRung("system", null)).toThrow("has no rungs");
+    expect(PLAN_DOMAIN_LIMIT.system).toBeNull();
+    expect(PLAN_TEAM_LIMIT.system).toBe(Number.POSITIVE_INFINITY);
+    expect(planCanHidePoweredBy("system")).toBe(true);
   });
 });
 
@@ -98,6 +121,8 @@ describe("formatVolume and planLabel", () => {
     expect(planLabel("pro", 100_000)).toBe("Pro 100K");
     expect(planLabel("pro", null)).toBe("Pro 100K");
     expect(planLabel("scale", 2_500_000)).toBe("Scale 2.5M");
+    expect(planLabel("system", null)).toBe("System");
+    expect(planLabel("system", 500_000)).toBe("System");
   });
 });
 
@@ -146,6 +171,19 @@ describe("teamQuota", () => {
 
   it("caps nothing off Cloud", () => {
     expect(teamQuota(row(), false, now)).toEqual({ kind: "none" });
+  });
+
+  it("caps nothing on the system plan, whatever the billing columns hold", () => {
+    const system = row({
+      plan: "system",
+      planQuota: null,
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+    });
+    expect(teamQuota(system, true, now)).toEqual({ kind: "none" });
+    // A stale period end or a leftover volume never turns it into a capped plan.
+    const lapsed = new Date(END.getTime() + (PLAN_GRACE_DAYS + 1) * DAY_MS);
+    expect(teamQuota(row({ plan: "system" }), true, lapsed)).toEqual({ kind: "none" });
   });
 
   it("caps daily plans by their rung's volume", () => {

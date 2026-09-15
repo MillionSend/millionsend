@@ -1,3 +1,4 @@
+import { UPDATES_SOURCES } from "@millionsend/core";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import styles from "@/components/auth/auth.module.css";
@@ -13,15 +14,17 @@ const MESSAGES = { en, "pt-BR": ptBR } as const;
 /**
  * Public page: subscribe to product updates. A plain form, so it works from
  * the docs' link and the wizard's fallback alike; the endpoint answers with
- * a redirect back here.
+ * a redirect back here. `?source=` tags where the reader came from (the
+ * wizard's fallback link says self-host); anything else is the page itself.
  */
 export default async function UpdatesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sent?: string; error?: string }>;
+  searchParams: Promise<{ sent?: string; error?: string; source?: string }>;
 }) {
   const [query, headerList] = await Promise.all([searchParams, headers()]);
   const m = MESSAGES[localeFromHeaders(headerList)].page;
+  const source = UPDATES_SOURCES.find((s) => s === query.source) ?? "updates";
   return (
     <AuthScreen title={m.title}>
       {query.sent ? (
@@ -32,6 +35,7 @@ export default async function UpdatesPage({
         <>
           <p className={styles.subline}>{m.intro}</p>
           <form method="post" action="/api/updates/subscribe" className={styles.form}>
+            <input type="hidden" name="source" value={source} />
             <div className={`ms-field ${styles.field}`}>
               <label htmlFor="email">{m.email}</label>
               <input

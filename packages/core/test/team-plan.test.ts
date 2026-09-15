@@ -27,8 +27,9 @@ describe("contactRoom", () => {
     expect(await contactRoom(db, teamId, "free", true)).toBe(0);
   });
 
-  it("caps nothing on an uncapped plan or off Cloud", async () => {
+  it("caps nothing on an uncapped plan, on the system plan, or off Cloud", async () => {
     expect(await contactRoom(db, teamId, "pro", true)).toBeNull();
+    expect(await contactRoom(db, teamId, "system", true)).toBeNull();
     expect(await contactRoom(db, teamId, "free", false)).toBeNull();
   });
 });

@@ -58,6 +58,9 @@ export async function reportOverage(
   let reported = 0;
   let failed = 0;
   for (const row of rows) {
+    // The system plan has no rung and is never metered, whatever Stripe ids
+    // its row still carries; one throw here would stop the run for every team.
+    if (row.plan === "system") continue;
     const rung = teamRung(row.plan, row.planQuota);
     if (rung.period !== "month" || !row.customerId) continue;
     const from = row.reportedOverage;

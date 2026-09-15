@@ -12,7 +12,10 @@ import {
 
 // Billing concept only — deployment mode lives exclusively in env.IS_CLOUD;
 // self-host ignores plan entirely (quota code guards on IS_CLOUD first).
-export const planEnum = pgEnum("plan", ["free", "starter", "pro", "scale"]);
+// "system" marks the instance's own team (the one holding the account-mail
+// sender domain): never billed, never capped, set by an operator, never by
+// Stripe.
+export const planEnum = pgEnum("plan", ["free", "starter", "pro", "scale", "system"]);
 
 // Mirrors Stripe subscription statuses; "none" = never subscribed. The
 // entitlement is `teams.plan`, written only by the verified Stripe webhook.

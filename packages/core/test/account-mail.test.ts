@@ -207,6 +207,8 @@ describe("billing phrases", () => {
     expect(planCapPhrase("en", "pro", 100_000)).toBe("up to 100,000 emails a month");
     expect(planCapPhrase("pt-BR", "pro", 100_000)).toBe("até 100.000 e-mails por mês");
     expect(planCapPhrase("en", "scale", 2_500_000)).toBe("up to 2,500,000 emails a month");
+    expect(planCapPhrase("en", "system", null)).toBe("with no sending cap");
+    expect(planCapPhrase("pt-BR", "system", null)).toBe("sem limite de envio");
     const lateUtc = new Date("2026-09-30T23:30:00Z");
     expect(formatMailDate("en", lateUtc)).toBe("September 30, 2026");
     expect(formatMailDate("pt-BR", lateUtc)).toBe("30 de setembro de 2026");
@@ -216,7 +218,7 @@ describe("billing phrases", () => {
 describe("planMove", () => {
   const now = new Date("2026-09-08T12:00:00Z");
   const row = (
-    plan: "free" | "pro" | "scale",
+    plan: "free" | "pro" | "scale" | "system",
     periodEnd: string | null,
     cancelAt: string | null = null,
     planQuota: number | null = null,
@@ -266,6 +268,14 @@ describe("planMove", () => {
     expect(down?.kind).toBe("billing.downgraded");
     expect(down?.periodKey).toBe("2026-09-30T00:00:00.000Z");
     expect(planMove(row("pro", null), row("pro", null), now)).toBeNull();
+  });
+
+  it("says nothing about a move into or out of the system plan", () => {
+    expect(
+      planMove(row("scale", "2026-10-08T00:00:00Z", null, 500_000), row("system", null), now),
+    ).toBeNull();
+    expect(planMove(row("system", null), row("free", null), now)).toBeNull();
+    expect(planMove(row("system", null), row("system", null), now)).toBeNull();
   });
 
   it("dates a downgrade at the earliest of the scheduled cancel, the period end and today", () => {

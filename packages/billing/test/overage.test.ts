@@ -75,6 +75,19 @@ async function setPeriod(
 const settled = (reportedOverage: number) => ({ reportedOverage, pendingOverage: null });
 
 describe("reportOverage", () => {
+  it("skips a system team that still carries Stripe ids and meters the rest", async () => {
+    const systemTeam = await proTeam("own", { accepted: 100_500 });
+    await db
+      .update(schema.teams)
+      .set({ plan: "system", planQuota: null })
+      .where(eq(schema.teams.id, systemTeam));
+    const paying = await proTeam("acme", { accepted: 100_200 });
+    expect(await reportOverage(deps(), { now: NOW })).toEqual({ reported: 1, failed: 0 });
+    expect(state.meterEvents.map((e) => e.payload.stripe_customer_id)).toEqual(["cus_acme"]);
+    expect(await periodRow(paying)).toEqual(settled(200));
+    expect(await periodRow(systemTeam)).toEqual(settled(0));
+  });
+
   it("meters what is past the included volume once, advancing from the last report", async () => {
     const teamId = await proTeam("acme", { accepted: 100_500 });
 

@@ -24,7 +24,7 @@ export function registerUsageRoutes(
         200: {
           content: { "application/json": { schema: usageResponseSchema } },
           description:
-            "Effective plan, its send, domain and contact limits, today's accepted send count (UTC day) and, on a monthly plan, the billing period's usage. MillionSend extension; plan, limits and period are null on a self-hosted instance.",
+            "Effective plan, its send, domain and contact limits, today's accepted send count (UTC day) and, on a monthly plan, the billing period's usage. MillionSend extension; plan, limits and period are null on a self-hosted instance and on the instance's own (system) team.",
         },
         403: {
           content: { "application/json": { schema: errorSchema } },

@@ -13,14 +13,15 @@ import { useTRPC } from "@/lib/trpc";
 
 function PlanBadge({ plan }: { plan: string }) {
   const t = useTranslations("common");
-  const paid = plan !== "free";
+  // A paid plan reads as a success, the instance's own team as information; free is muted.
+  const tone = plan === "system" ? "info" : plan === "free" ? null : "success";
   return (
     <span
       style={{
         fontSize: 11,
-        color: paid ? "var(--ms-success)" : "var(--ms-muted)",
-        background: paid ? "var(--ms-success-bg)" : undefined,
-        border: `1px solid ${paid ? "var(--ms-success-border)" : "var(--ms-line)"}`,
+        color: tone ? `var(--ms-${tone})` : "var(--ms-muted)",
+        background: tone ? `var(--ms-${tone}-bg)` : undefined,
+        border: `1px solid ${tone ? `var(--ms-${tone}-border)` : "var(--ms-line)"}`,
         borderRadius: 999,
         padding: "1px 8px",
         flex: "none",

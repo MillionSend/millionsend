@@ -302,10 +302,10 @@ function TeamSection({ billing }: { billing: boolean }) {
               {t("team.plan")}
             </span>
             <div style={{ height: 30, display: "flex", alignItems: "center" }}>
-              {/* The pill is the way into billing; a paid plan reads as a success. */}
+              {/* The pill is the way into billing; a paid plan reads as a success, the system team as information. */}
               <Link
                 href="/settings/billing"
-                className={`ms-badge ${team.plan === "free" ? "ms-badge-neutral" : "ms-badge-success"}`}
+                className={`ms-badge ${team.plan === "free" ? "ms-badge-neutral" : team.plan === "system" ? "ms-badge-info" : "ms-badge-success"}`}
                 style={{ textDecoration: "none" }}
               >
                 {t(`plans.${team.plan}`)}

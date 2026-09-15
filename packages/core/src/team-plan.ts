@@ -41,7 +41,7 @@ export async function fetchTeamQuota(
   return team ? teamQuota(team, isCloud, now) : null;
 }
 
-const PLAN_RANK: Record<Plan, number> = { free: 0, starter: 1, pro: 2, scale: 3 };
+const PLAN_RANK: Record<Plan, number> = { free: 0, starter: 1, pro: 2, scale: 3, system: 4 };
 
 /** The highest effective plan among the teams a user owns; free when they own none. */
 export async function fetchBestOwnedPlan(db: Db, userId: string): Promise<Plan> {

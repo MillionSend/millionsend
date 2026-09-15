@@ -39,7 +39,10 @@ export async function POST(request: Request) {
     ? Object.fromEntries((await request.formData()).entries())
     : await request.json().catch(() => null);
   const parsed = input.safeParse(raw);
-  const page = (query: string) => new URL(`/updates?${query}`, appBaseUrl());
+  // The form's round trip keeps its source, so a retry is tagged like the first try.
+  const source = UPDATES_SOURCES.find((s) => s === (raw as { source?: unknown } | null)?.source);
+  const back = source && source !== "updates" ? `&source=${source}` : "";
+  const page = (query: string) => new URL(`/updates?${query}${back}`, appBaseUrl());
   if (!parsed.success) {
     return form
       ? Response.redirect(page("error=invalid"), 303)

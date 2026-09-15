@@ -55,7 +55,7 @@ const CATALOGS: Record<MailLocale, Record<AccountMailKind, AccountMailEntry>> = 
   "pt-BR": ptBR,
 };
 
-export type MailPhraseKey = "capUpToDay" | "capUpToMonth";
+export type MailPhraseKey = "capUpToDay" | "capUpToMonth" | "capNone";
 
 const PHRASES: Record<MailLocale, Record<MailPhraseKey, string>> = {
   en: enPhrases,
@@ -69,6 +69,7 @@ export function freeCapText(locale: MailLocale): string {
 
 /** What a plan lets a team send, as a clause: "up to 1,500 emails a day" / "up to 100,000 emails a month". */
 export function planCapPhrase(locale: MailLocale, plan: Plan, planQuota: number | null): string {
+  if (plan === "system") return PHRASES[locale].capNone;
   const rung = teamRung(plan, planQuota);
   return fillTemplate(PHRASES[locale][rung.period === "day" ? "capUpToDay" : "capUpToMonth"], {
     n: rung.included.toLocaleString(locale),
@@ -107,6 +108,9 @@ export function planMove(
   after: PlanSnapshot,
   now: Date = new Date(),
 ): PlanMove | null {
+  // The instance's own team is never billed: a move into or out of the
+  // system plan is an operator's action, not news for the owners.
+  if (before.plan === "system" || after.plan === "system") return null;
   const freeCap = freeCapText;
   const beforeRung = teamRung(before.plan, before.planQuota);
   const afterRung = teamRung(after.plan, after.planQuota);

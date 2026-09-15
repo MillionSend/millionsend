@@ -177,4 +177,5 @@ export const en = {
 export const enPhrases = {
   capUpToDay: "up to {n} emails a day",
   capUpToMonth: "up to {n} emails a month",
+  capNone: "with no sending cap",
 } as const satisfies Record<MailPhraseKey, string>;

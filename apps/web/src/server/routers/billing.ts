@@ -9,6 +9,7 @@ import {
 import { env } from "@millionsend/config";
 import {
   PLAN_RUNG_KEYS,
+  type Plan,
   QUOTA_COLUMNS,
   raisesQuota,
   readPeriodUsage,
@@ -56,6 +57,16 @@ async function loadTeam(db: Db, teamId: string) {
   return team;
 }
 
+/** The instance's own team has no subscription to start, move or manage. */
+function assertBillable(team: { plan: Plan }): void {
+  if (team.plan === "system") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "The system team is never billed; its plan is set by the operator.",
+    });
+  }
+}
+
 /** Sends counted against the quota so far: the UTC day on a daily cap, the billing period on a monthly one. */
 async function readUsage(db: Db, teamId: string, quota: TeamQuota) {
   if (quota.kind === "month") return readPeriodUsage(db, teamId, quota.periodStart);
@@ -98,7 +109,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
       return {
         plan: team.plan,
         planQuota: team.planQuota,
-        rung: teamRung(team.plan, team.planQuota).key,
+        rung: team.plan === "system" ? null : teamRung(team.plan, team.planQuota).key,
         pendingRung: team.pendingRung,
         planStatus: team.planStatus,
         currentPeriodEnd: team.currentPeriodEnd,
@@ -114,6 +125,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
       .mutation(async ({ ctx, input }) => {
         requireCloud();
         const team = await loadTeam(ctx.db, ctx.teamId);
+        assertBillable(team);
         // Plan changes on a live subscription go through changePlan; a second
         // Checkout would create a second subscription.
         if (hasLiveSubscription(team.planStatus)) {
@@ -147,6 +159,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
       .mutation(async ({ ctx, input }) => {
         requireCloud();
         const team = await loadTeam(ctx.db, ctx.teamId);
+        assertBillable(team);
         if (!hasLiveSubscription(team.planStatus)) {
           throw new TRPCError({ code: "PRECONDITION_FAILED" });
         }
@@ -176,6 +189,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
       .mutation(async ({ ctx, input }) => {
         requireCloud();
         const team = await loadTeam(ctx.db, ctx.teamId);
+        assertBillable(team);
         if (
           !hasLiveSubscription(team.planStatus) ||
           teamRung(team.plan, team.planQuota).period !== "month"
@@ -198,6 +212,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
     portal: adminProcedure.mutation(async ({ ctx }) => {
       requireCloud();
       const team = await loadTeam(ctx.db, ctx.teamId);
+      assertBillable(team);
       if (!team.stripeCustomerId) throw new TRPCError({ code: "PRECONDITION_FAILED" });
       const url = await createPortalSession(deps.stripe(), {
         customerId: team.stripeCustomerId,

@@ -312,6 +312,19 @@ emails lose their body once SES accepts them, since the link inside is a live cr
 the other notices keep theirs for the usual retention window. Until a team holds the
 domain they go straight through SES and leave no trace.
 
+That team is the instance's own. Give it the `system` plan and it is never capped or
+billed, its badge reads System and Stripe never touches its row (on a self-hosted instance
+plans carry no limits, so this only labels it; with `IS_CLOUD=true` it also lifts every
+cap). The statement changes nothing while the team still has a Stripe customer or
+subscription:
+
+```sql
+update teams
+set plan = 'system', plan_quota = null, current_period_start = null, current_period_end = null,
+    plan_status = 'none', pending_rung = null, cancel_at = null
+where id = '<team id>' and stripe_customer_id is null and stripe_subscription_id is null;
+```
+
 On an instance with `ALLOW_SIGNUP=true`, every new account becomes a contact of that team
 (`source: signup`) once its address is verified; the sign-up screen says so, and deleting the
 account removes the contact and scrubs the address from that team's history. A closed instance enrolls nobody. Email
@@ -320,8 +333,9 @@ verify at their next sign-in.
 
 Nothing on the instance contacts millionsend.com on its own. The wizard offers, once and
 interactively, to subscribe your address to release notes (a confirmation link comes first);
-**Settings → Instance** links to the same page. Full text: docs, "Account mail, contacts and
-product updates".
+when it cannot reach millionsend.com it prints the page instead,
+<https://app.millionsend.com/updates?source=self-host>, and **Settings → Instance** links to
+the same page. Full text: docs, "Account mail, contacts and product updates".
 
 </details>
 
