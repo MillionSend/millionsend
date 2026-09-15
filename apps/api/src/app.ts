@@ -29,8 +29,10 @@ import {
   fetchAccountScore,
   fetchDeliverabilityHealth,
   fetchEmailInsights,
+  fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
+  isTeamSuspended,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
   makeUnsubscribeToken,
@@ -341,6 +343,15 @@ async function sendingPausedError(
   deps: Pick<ApiDeps, "db">,
   auth: ApiKeyAuth,
 ): Promise<ReturnType<typeof errorBody> | null> {
+  // An operator suspension outranks the rates: keys still authenticate so
+  // the caller learns why, but nothing leaves.
+  if (await isTeamSuspended(deps.db, auth.teamId)) {
+    return errorBody(
+      403,
+      "team_suspended",
+      "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
+    );
+  }
   const health = await fetchDeliverabilityHealth(deps.db, auth.teamId);
   const paused = health.reasons.find((r) => r.tier === "paused");
   if (!paused) return null;
@@ -2617,7 +2628,18 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
       return fail(
         403,
         "broadcasts_paused",
-        `Broadcast sending is paused in ${domain.region} while the platform's ${metric} rate recovers. Transactional email is unaffected. Try again later.`,
+        regionHold.manualReason
+          ? `Broadcast sending is paused in ${domain.region} by the instance operator. Transactional email is unaffected. Try again later.`
+          : `Broadcast sending is paused in ${domain.region} while the platform's ${metric} rate recovers. Transactional email is unaffected. Try again later.`,
+      );
+    }
+    // The operator's pause is the team's own hold, transactional mail aside.
+    const standing = await fetchTeamStanding(db, auth.teamId);
+    if (standing?.broadcastsPausedByOperatorAt) {
+      return fail(
+        403,
+        "broadcasts_paused",
+        "Broadcast sending is paused for this team by the instance operator. Transactional email is unaffected.",
       );
     }
     // Schema-validated, so parseScheduledAt always resolves (the ?? only
@@ -3617,8 +3639,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           });
           if (reservation.reserved) continue;
           // Nothing parks for a month: a monthly plan at its included volume
-          // with overage off refuses the whole batch.
-          if (quota.kind === "month") {
+          // with overage off refuses the whole batch. A full day under an
+          // operator ceiling is the daily case below, tail parked.
+          if (quota.kind === "month" && reservation.cap !== "day") {
             throw new AcceptRejectedError(
               {
                 ok: false,

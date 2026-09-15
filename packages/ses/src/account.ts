@@ -40,6 +40,10 @@ export interface SesAccountOverview {
     /** Messages per second. */
     maxSendRate: number;
   };
+  /** SES's own standing for the account in this region (HEALTHY, PROBATION, SHUTDOWN); null when unreported. */
+  enforcementStatus: string | null;
+  /** The SES pricing plan in this region ("NONE" = à la carte); null when unreported. */
+  pricingPlan: string | null;
 }
 
 /** SESv2 GetAccount mapped to the fields the dashboard shows. */
@@ -53,5 +57,7 @@ export async function getAccountOverview(client: SesAccountClient): Promise<SesA
       sentLast24h: out.SendQuota?.SentLast24Hours ?? 0,
       maxSendRate: out.SendQuota?.MaxSendRate ?? 0,
     },
+    enforcementStatus: out.EnforcementStatus ?? null,
+    pricingPlan: out.PricingAttributes?.CurrentPlan ?? null,
   };
 }

@@ -13,7 +13,10 @@
   "sendGuard": {
     "bounce": "As transmissões estão pausadas: sua taxa de bounce permanente é {rate} nos últimos {days} dias, acima do limite de {limit}. Resolva antes de enviar.",
     "complaint": "As transmissões estão pausadas: sua taxa de reclamação é {rate} nos últimos {days} dias, acima do limite de {limit}. Resolva antes de enviar.",
-    "regionPaused": "As transmissões estão pausadas em {region} enquanto a taxa de {metric} da plataforma se recupera. E-mails transacionais não são afetados. Tente de novo mais tarde."
+    "regionPaused": "As transmissões estão pausadas em {region} enquanto a taxa de {metric} da plataforma se recupera. E-mails transacionais não são afetados. Tente de novo mais tarde.",
+    "suspended": "Esta equipe está suspensa pelo operador da instância. O envio fica desativado até a reativação.",
+    "operatorPaused": "Os broadcasts desta equipe estão pausados pelo operador da instância. E-mails transacionais não são afetados.",
+    "regionHeld": "Os broadcasts estão pausados em {region} pelo operador da instância. E-mails transacionais não são afetados. Tente novamente mais tarde."
   },
   "metric": {
     "bounce": "bounce permanente",

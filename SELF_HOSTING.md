@@ -574,6 +574,46 @@ docker compose start millionsend smtp
 </details>
 
 <details>
+<summary><b>Console</b></summary>
+
+The instance console at `/console` is the operator's view of the whole
+deployment, outside any team: an overview (sends, deliverability, teams,
+contacts, domains, queue, one card per SES region with its quota, pricing
+plan and enforcement status, and the health probes with their history), a
+Regions page (served and not-yet-provisioned regions, the steps to add one),
+a Teams page with operator actions (change plan or type, a daily send
+ceiling, pause broadcasts, suspend and reinstate), a Trust & safety page
+built on the guardrail, the account score, the 7-day rates and the stored
+content insights (never email bodies), and an instance-wide audit log.
+
+- **Who can open it:** only the instance operator — the first registered
+  user. Anyone else, signed in or not, gets the same 404 as a route that
+  does not exist. Nothing in the team sidebar or the command palette links
+  to it.
+- **How to open it:** **Settings → SES** shows the operator an "Instance
+  console" card with an "Open console" button; the direct URL
+  `https://<your-host>/console` works as well.
+- **What it costs:** every number comes from Postgres or from a free SESv2
+  `GetAccount` read per region (cached for a minute). No Cost Explorer, no
+  CloudWatch; the cost per region is a local estimate (sends this month ×
+  the region's pricing-plan rate).
+- **Probes:** the worker samples the instance every minute
+  (`instance_probes`: Postgres latency and size, the worker heartbeat,
+  pg-boss depth, SES events lag, webhook success rate, KMS wrap latency on
+  cloud, the last Stripe event, retention purges) and refreshes every active
+  team's standing and the automatic trust & safety flags every 15 minutes.
+  History is kept 90 days.
+- **Operator actions and the team:** a suspended team's API keys still
+  authenticate but every send answers `403 team_suspended` (SMTP `550`),
+  broadcasts in flight park, webhooks keep delivering and data stays; a
+  broadcast pause parks broadcasts while transactional mail flows; a daily
+  ceiling caps the team's UTC day under its plan. Owners are emailed about
+  each of these (never for a phishing suspension), and every action is
+  recorded in the audit log with its reason.
+
+</details>
+
+<details>
 <summary><b>Operations</b></summary>
 
 - Send rate and email retention are managed in the dashboard: Settings → Instance

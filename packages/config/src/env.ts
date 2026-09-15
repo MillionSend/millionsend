@@ -118,6 +118,9 @@ export const env = createEnv({
 
     // BYO-SES for self-host; cloud uses the platform account.
     AWS_REGION: z.string().default("us-east-1"),
+    // Every SES region this deployment sends through (comma-separated);
+    // absent, AWS_REGION alone. Read through servedRegions().
+    AWS_REGIONS: z.string().optional().transform(parseCommaList),
     AWS_ACCESS_KEY_ID: z.string().optional(),
     AWS_SECRET_ACCESS_KEY: z.string().optional(),
 
@@ -296,6 +299,19 @@ export type Env = typeof env;
 // this instead of tested for truthiness.
 function envFlag(value: unknown): boolean {
   return value === true || value === "true" || value === "1";
+}
+
+/**
+ * The SES regions this deployment sends through, first entry the default.
+ * Under SKIP_ENV_VALIDATION the proxy carries the raw string, so both forms
+ * are read.
+ */
+export function servedRegions(e: Env = env): string[] {
+  const raw = e.AWS_REGIONS as unknown;
+  const list = Array.isArray(raw)
+    ? (raw as string[])
+    : parseCommaList(typeof raw === "string" ? raw : undefined);
+  return list ?? [e.AWS_REGION ?? "us-east-1"];
 }
 
 /** The single seam between the hosted SaaS and self-host. */

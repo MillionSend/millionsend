@@ -12,6 +12,7 @@ export {
   parseEmailFrom,
   parseSnsTopicArns,
   SES_MAX_SEND_RATE_DEFAULT,
+  servedRegions,
   sesTenantsEnabled,
   signupOpen,
   trackingCnameTarget,

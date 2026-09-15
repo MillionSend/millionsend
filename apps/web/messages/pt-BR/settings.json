@@ -143,7 +143,8 @@
       "metric": {
         "bounce": "bounce permanente",
         "complaint": "reclamação"
-      }
+      },
+      "held": "As transmissões estão pausadas em {region} pelo operador da instância. E-mails transacionais continuam; as transmissões retomam quando o operador liberar a retenção."
     }
   },
   "team": {
@@ -418,7 +419,19 @@
       "billing_portal_opened": "Abriu portal de cobrança",
       "billing_subscription_updated": "Assinatura alterada",
       "billing_plan_changed": "Alterou o plano",
-      "billing_overage_toggled": "Alterou a cobrança de excedente"
+      "billing_overage_toggled": "Alterou a cobrança de excedente",
+      "team_type_changed": "Alterou o tipo da equipe",
+      "team_limits_updated": "Ajustou limites da equipe",
+      "team_broadcasts_paused": "Pausou transmissões",
+      "team_broadcasts_resumed": "Retomou transmissões",
+      "team_suspended": "Suspendeu a equipe",
+      "team_reinstated": "Reativou a equipe",
+      "console_flag_opened": "Sinalizou a equipe",
+      "console_flag_cleared": "Limpou a sinalização",
+      "console_flag_reopened": "Reabriu a sinalização",
+      "region_breaker_opened": "Pausou transmissões na região",
+      "region_breaker_closed": "Retomou transmissões na região",
+      "region_quota_requested": "Solicitou aumento de cota do SES"
     },
     "empty": "Nada registrado ainda.",
     "loadMore": "Carregar mais",

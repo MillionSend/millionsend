@@ -34,6 +34,14 @@ export const unsubscribeLogoRadiusEnum = pgEnum("unsubscribe_logo_radius", [
   "circle",
 ]);
 
+/** Why an operator suspended a team; owners hear about every reason but phishing. */
+export const suspensionReasonEnum = pgEnum("suspension_reason", [
+  "manual",
+  "reputation",
+  "phishing",
+  "non_payment",
+]);
+
 export const teams = pgTable(
   "teams",
   {
@@ -89,6 +97,18 @@ export const teams = pgTable(
     // Public URL of the uploaded team logo (S3-compatible storage), including a
     // ?v= cache-buster stamped at upload. Null = the initial-letter tile.
     logoUrl: text("logo_url"),
+    // Operator overrides (instance console). A ceiling caps the team's UTC
+    // day under its plan's limit (min of the two), on monthly plans too.
+    dailySendCeiling: integer("daily_send_ceiling"),
+    // While set, broadcasts park like a guardrail pause; transactional mail flows.
+    broadcastsPausedByOperatorAt: timestamp("broadcasts_paused_by_operator_at", {
+      withTimezone: true,
+    }),
+    // While set, every send is refused (API 403 team_suspended, SMTP 5xx) and
+    // broadcasts in flight park; keys still authenticate, data stays.
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    suspensionReason: suspensionReasonEnum("suspension_reason"),
+    suspensionNote: text("suspension_note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

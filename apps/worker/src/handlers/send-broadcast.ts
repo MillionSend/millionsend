@@ -10,6 +10,7 @@ import {
   encryptEmailBody,
   fetchDeliverabilityHealth,
   fetchTeamQuota,
+  fetchTeamStanding,
   findSuppressed,
   formatMailDate,
   injectPreheader,
@@ -190,6 +191,13 @@ export async function sendBroadcast(
     await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));
     return "deferred";
   }
+  // An operator's pause or suspension parks the fan-out the way a region
+  // hold does; the owners heard about it when the operator acted.
+  const standing = await fetchTeamStanding(db, broadcast.teamId);
+  if (standing?.suspended || standing?.broadcastsPausedByOperatorAt) {
+    await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));
+    return "deferred";
+  }
 
   const [claimed] = await db
     .update(schema.broadcasts)
@@ -307,6 +315,13 @@ export async function sendBroadcast(
       .where(and(eq(schema.broadcasts.id, broadcast.id), eq(schema.broadcasts.status, "sending")))
       .returning({ id: schema.broadcasts.id });
     if (!alive) return "skipped";
+    // A suspension or pause landing mid-walk stops the fan-out at the page
+    // edge; the resumed walk skips the contacts already inserted.
+    const standingNow = await fetchTeamStanding(db, broadcast.teamId);
+    if (standingNow?.suspended || standingNow?.broadcastsPausedByOperatorAt) {
+      await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));
+      return "deferred";
+    }
 
     // Suppression mirrors the API accept path: a bounced or complained
     // address must never receive bulk mail again, or SES reputation pays.

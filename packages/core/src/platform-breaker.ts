@@ -291,12 +291,15 @@ export async function applyRegionBreakers(
   now = new Date(),
 ): Promise<{ tripped: string[]; resumed: string[] }> {
   const current = new Map(
-    (await db.select().from(schema.regionBreakers)).map((r) => [r.region, r.paused]),
+    (await db.select().from(schema.regionBreakers)).map((r) => [r.region, r]),
   );
   const tripped: string[] = [];
   const resumed: string[] = [];
   for (const d of decisions) {
-    const paused = current.get(d.region) ?? false;
+    const row = current.get(d.region);
+    // An operator's hold outlives the rates: only the operator releases it.
+    if (row?.manualReason) continue;
+    const paused = row?.paused ?? false;
     if (d.trip === paused) continue;
     await db
       .insert(schema.regionBreakers)
@@ -324,16 +327,21 @@ export async function applyRegionBreakers(
 export interface PausedRegion {
   region: string;
   reason: RegionBreakerReason | null;
+  /** Set when an operator holds the region by hand rather than the rates. */
+  manualReason: string | null;
   pausedAt: Date | null;
 }
 
+const PAUSED_COLUMNS = {
+  region: schema.regionBreakers.region,
+  reason: schema.regionBreakers.reason,
+  manualReason: schema.regionBreakers.manualReason,
+  pausedAt: schema.regionBreakers.pausedAt,
+};
+
 export async function pausedRegions(db: Db): Promise<PausedRegion[]> {
   return db
-    .select({
-      region: schema.regionBreakers.region,
-      reason: schema.regionBreakers.reason,
-      pausedAt: schema.regionBreakers.pausedAt,
-    })
+    .select(PAUSED_COLUMNS)
     .from(schema.regionBreakers)
     .where(eq(schema.regionBreakers.paused, true));
 }
@@ -341,12 +349,36 @@ export async function pausedRegions(db: Db): Promise<PausedRegion[]> {
 /** The pause behind a region, or null when broadcasts flow there. */
 export async function regionPause(db: Db, region: string): Promise<PausedRegion | null> {
   const [row] = await db
-    .select({
-      region: schema.regionBreakers.region,
-      reason: schema.regionBreakers.reason,
-      pausedAt: schema.regionBreakers.pausedAt,
-    })
+    .select(PAUSED_COLUMNS)
     .from(schema.regionBreakers)
     .where(and(eq(schema.regionBreakers.region, region), eq(schema.regionBreakers.paused, true)));
   return row ?? null;
+}
+
+/** Hold a region's broadcasts by hand; the breaker cron leaves it alone until released. */
+export async function holdRegion(
+  db: Db,
+  region: string,
+  reason: string,
+  now = new Date(),
+): Promise<void> {
+  const values = {
+    paused: true,
+    reason: null,
+    manualReason: reason,
+    pausedAt: now,
+    updatedAt: now,
+  };
+  await db
+    .insert(schema.regionBreakers)
+    .values({ region, ...values })
+    .onConflictDoUpdate({ target: schema.regionBreakers.region, set: values });
+}
+
+/** Release an operator's hold; the next breaker run judges the region on its rates again. */
+export async function releaseRegion(db: Db, region: string, now = new Date()): Promise<void> {
+  await db
+    .update(schema.regionBreakers)
+    .set({ paused: false, reason: null, manualReason: null, pausedAt: null, updatedAt: now })
+    .where(eq(schema.regionBreakers.region, region));
 }

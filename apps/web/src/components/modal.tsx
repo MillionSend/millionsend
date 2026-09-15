@@ -49,8 +49,8 @@ export function Modal({
    */
   onConfirm?: () => void;
   title?: string;
-  /** "full" fills the viewport but for a margin, for content that needs the room (the plan ladder). */
-  size?: "full";
+  /** "full" fills the viewport but for a margin (the plan ladder); "wide" is the 760px chart dialog. */
+  size?: "full" | "wide";
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -107,7 +107,13 @@ export function Modal({
       }}
     >
       <div
-        className={size === "full" ? "ms-modal ms-modal-full" : "ms-modal"}
+        className={
+          size === "full"
+            ? "ms-modal ms-modal-full"
+            : size === "wide"
+              ? "ms-modal ms-modal-wide"
+              : "ms-modal"
+        }
         role="dialog"
         aria-modal="true"
         ref={ref}

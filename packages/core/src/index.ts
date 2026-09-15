@@ -205,6 +205,21 @@ export {
   releaseIdempotent,
 } from "./idempotency.js";
 export { findInstanceOperator, isInstanceOperator } from "./instance-operator.js";
+export {
+  isProbeKey,
+  type LatestProbe,
+  latestProbes,
+  PROBE_HISTORY_DAYS,
+  PROBE_KEYS,
+  PROBES,
+  type ProbeKey,
+  type ProbePoint,
+  type ProbeSample,
+  type ProbeSeverity,
+  probeHistory,
+  pruneProbes,
+  recordProbes,
+} from "./instance-probes.js";
 export { getInstanceSettings, type InstanceSettings } from "./instance-settings.js";
 export {
   ANCHOR_HREF,
@@ -273,13 +288,16 @@ export {
   BREAKER_MIN_SENT,
   BREAKER_WINDOWS_HOURS,
   evaluateRegionBreakers,
+  holdRegion,
   type PausedRegion,
   pausedRegions,
   type RegionContributor,
   type RegionDecision,
   type RegionWindowCounts,
+  regionCounterTotals,
   regionPause,
   regionWindowCounts,
+  releaseRegion,
 } from "./platform-breaker.js";
 export {
   dailyCeiling,
@@ -353,6 +371,23 @@ export {
   sendSystemMail,
 } from "./system-mail.js";
 export {
+  computeTeamStandings,
+  FLAG_COMPLAINT_RATE,
+  FLAG_HARD_BOUNCE_RATE,
+  FLAG_SCORE_TENTHS,
+  FLAG_WINDOW_DAYS,
+  type FlagTrigger,
+  flagTrigger,
+  pruneTeamStandings,
+  STANDING_WINDOW_DAYS,
+  saveTeamStandings,
+  syncTeamFlags,
+  TEAM_FLAG_REASONS,
+  type TeamFlagReason,
+  type TeamFlagStatus,
+  type TeamStandingRow,
+} from "./team-flags.js";
+export {
   INVITE_EMAILS_PER_HOUR,
   INVITE_MAX_SENDS,
   INVITE_RESEND_COOLDOWN_MS,
@@ -368,6 +403,15 @@ export {
   fetchTeamQuota,
   QUOTA_COLUMNS,
 } from "./team-plan.js";
+export {
+  fetchTeamStanding,
+  isTeamSuspended,
+  STANDING_COLUMNS,
+  SUSPENSION_REASONS,
+  type SuspensionReason,
+  type TeamStanding,
+  teamStandingOf,
+} from "./team-standing.js";
 export { findTopicOptOuts, isSubscribedToTopic } from "./topics.js";
 export {
   deriveTrackingKey,

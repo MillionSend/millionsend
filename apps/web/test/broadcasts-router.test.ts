@@ -272,6 +272,19 @@ describe("draft-only editing", () => {
 });
 
 describe("broadcasts.send", () => {
+  it.each([
+    ["suspended", { suspendedAt: new Date(), suspensionReason: "manual" as const }],
+    ["paused by the operator", { broadcastsPausedByOperatorAt: new Date() }],
+  ])("refuses to schedule while the team is %s", async (_label, hold) => {
+    const teamId = await createTeam(db, "team-a");
+    const { caller, id } = await seedDraft(teamId);
+    await db.update(schema.teams).set(hold).where(eq(schema.teams.id, teamId));
+    await expect(caller.broadcasts.send({ id })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    });
+    expect((await broadcastRow(id))?.status).toBe("draft");
+  });
+
   it("moves a draft to scheduled with an immediate scheduledAt", async () => {
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedDraft(teamId);

@@ -176,6 +176,11 @@ export const CRON_JOBS = {
   // A period's tail must land before Stripe finalizes the invoice, about an
   // hour after the period ends. No-op off cloud.
   "billing.overage": "*/10 * * * *",
+  // Every minute: instance health samples for the operator console; the
+  // run itself is the worker's heartbeat.
+  "instance.probe": "* * * * *",
+  // Every 15 min: per-team standings and the automatic trust & safety flags.
+  "safety.flags": "*/15 * * * *",
 } as const;
 
 export type CronJobName = keyof typeof CRON_JOBS;

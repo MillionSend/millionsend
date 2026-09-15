@@ -11,6 +11,7 @@ export function PageHeader({
   breadcrumb,
   actions,
   leading,
+  titleAdornment,
 }: {
   title: string;
   /** Mono proof strip under the H1 — the resource's own numbers. */
@@ -20,6 +21,8 @@ export function PageHeader({
   actions?: React.ReactNode;
   /** Identity mark beside the title block (e.g. the email's status tile). */
   leading?: React.ReactNode;
+  /** A small control right after the title text (an info tooltip). */
+  titleAdornment?: React.ReactNode;
 }) {
   const common = useTranslations("common");
   const appName = common("appName");
@@ -68,6 +71,11 @@ export function PageHeader({
             }}
           >
             {title}
+            {titleAdornment ? (
+              <span style={{ display: "inline-flex", verticalAlign: "middle", marginLeft: 8 }}>
+                {titleAdornment}
+              </span>
+            ) : null}
           </h1>
           {subtitle ? (
             <div

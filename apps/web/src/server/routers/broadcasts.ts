@@ -6,6 +6,7 @@ import {
   emailInsightsView,
   fetchBroadcastInsights,
   fetchDeliverabilityHealth,
+  fetchTeamStanding,
   injectPreheader,
   type MergeContact,
   PAUSE_BOUNCE_RATE,
@@ -88,7 +89,8 @@ async function deliverabilityGuard(ctx: { db: Db; teamId: string }): Promise<TRP
 /**
  * PRECONDITION_FAILED while the platform breaker holds broadcasts in the
  * sender domain's SES region (the account-wide rate is near SES's review
- * line); transactional mail is not affected, so only broadcasts check this.
+ * line, or the operator held it); transactional mail is not affected, so
+ * only broadcasts check this.
  */
 async function regionGuard(db: Db, region: string): Promise<TRPCError | null> {
   const pause = await regionPause(db, region);
@@ -96,10 +98,26 @@ async function regionGuard(db: Db, region: string): Promise<TRPCError | null> {
   const { t } = await sendGuardTranslator();
   return new TRPCError({
     code: "PRECONDITION_FAILED",
-    message: t("sendGuard.regionPaused", {
-      region,
-      metric: t(`metric.${pause.reason?.metric ?? "complaint"}`),
-    }),
+    message: pause.manualReason
+      ? t("sendGuard.regionHeld", { region })
+      : t("sendGuard.regionPaused", {
+          region,
+          metric: t(`metric.${pause.reason?.metric ?? "complaint"}`),
+        }),
+  });
+}
+
+/**
+ * PRECONDITION_FAILED while the instance operator suspended the team or
+ * paused its broadcasts; read per call so the action bites at once.
+ */
+async function standingGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | null> {
+  const standing = await fetchTeamStanding(ctx.db, ctx.teamId);
+  if (!standing?.suspended && !standing?.broadcastsPausedByOperatorAt) return null;
+  const { t } = await sendGuardTranslator();
+  return new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message: t(standing.suspended ? "sendGuard.suspended" : "sendGuard.operatorPaused"),
   });
 }
 
@@ -469,7 +487,9 @@ export const broadcastsRouter = router({
       // enqueued: a paused account must not schedule a new fan-out. "warning"
       // does not block.
       const guardError =
-        (await deliverabilityGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
+        (await standingGuard(ctx)) ??
+        (await deliverabilityGuard(ctx)) ??
+        (await regionGuard(ctx.db, sender.region));
       if (guardError) throw guardError;
       const scheduledAt = input.scheduledAt ?? new Date();
       // Same horizon as the API: a body must not sit out the retention purge.
@@ -534,7 +554,9 @@ export const broadcastsRouter = router({
         });
       }
       const guardError =
-        (await deliverabilityGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
+        (await standingGuard(ctx)) ??
+        (await deliverabilityGuard(ctx)) ??
+        (await regionGuard(ctx.db, sender.region));
       if (guardError) throw guardError;
       const e = schema.emails;
       const [recent] = await ctx.db

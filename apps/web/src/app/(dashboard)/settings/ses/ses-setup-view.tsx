@@ -276,6 +276,37 @@ function StepDoneCard({
   );
 }
 
+/** The way into the instance console on self-host: a card the operator alone sees. */
+function ConsoleCard() {
+  const t = useTranslations("console.settingsCard");
+  return (
+    <section
+      className="ms-card"
+      style={{
+        padding: 24,
+        // Sits in the stepper's content column (rail 30px + gap 18px), not under the rail.
+        marginLeft: 48,
+        marginBottom: 24,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 16,
+        flexWrap: "wrap",
+      }}
+    >
+      <div style={{ flex: "1 1 320px" }}>
+        <h2 className="ms-display" style={{ fontSize: "var(--ms-fs-section)", margin: "0 0 6px" }}>
+          {t("title")}
+        </h2>
+        <p style={{ margin: 0, fontSize: 13, color: "var(--ms-muted)" }}>{t("body")}</p>
+      </div>
+      <Link href="/console" className="ms-btn ms-btn-secondary">
+        {t("open")} →
+      </Link>
+    </section>
+  );
+}
+
 export function SesSetupView() {
   const t = useTranslations("settings.ses");
   const [manualOpen, setManualOpen] = useState(false);
@@ -291,6 +322,7 @@ export function SesSetupView() {
       refetchInterval: (query) => (query.state.data?.credentialsConfigured ? false : 5000),
     }),
   );
+  const operator = useQuery(trpc.system.operator.queryOptions());
   const credentialsOk = readiness.data?.credentialsConfigured ?? false;
   const sesEnv = useQuery(
     trpc.system.sesEnv.queryOptions(undefined, {
@@ -711,6 +743,8 @@ export function SesSetupView() {
           </section>
         ) : null}
       </Step>
+
+      {operator.data?.isOperator ? <ConsoleCard /> : null}
 
       {credentialsOk || result?.ok ? (
         <Step marker="04" last title={t("next.title")}>

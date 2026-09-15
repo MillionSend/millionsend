@@ -13,7 +13,13 @@ import { utcDay } from "./utc-day.js";
  */
 export type QuotaResult =
   | { reserved: true; accepted: number; ceiling: number | null }
-  | { reserved: false; accepted: number; ceiling: number | null };
+  | {
+      reserved: false;
+      accepted: number;
+      ceiling: number | null;
+      /** Set when the operator's daily ceiling, not the billing period, refused a monthly plan's send. */
+      cap?: "day";
+    };
 
 /**
  * Atomically reserve `count` sends against a team's daily limit (UTC day).
@@ -38,6 +44,8 @@ export async function reserveDailyQuota(
     teamId: string;
     count: number;
     limit: number | null;
+    /** An operator ceiling: a hard line the tolerance above `limit` never crosses. */
+    hardLimit?: number | null;
     day?: string;
     /** The instant the sends count against (their delivery time); noon of `day` when only that is known. */
     at?: Date;
@@ -48,7 +56,9 @@ export async function reserveDailyQuota(
   const day = params.day ?? utcDay();
   const at = params.at ?? (params.day ? new Date(`${params.day}T12:00:00Z`) : new Date());
   const t = schema.usageCounters;
-  const ceiling = limit === null ? null : dailyCeiling(limit);
+  const soft = limit === null ? null : dailyCeiling(limit);
+  const hard = params.hardLimit ?? null;
+  const ceiling = soft === null ? hard : hard === null ? soft : Math.min(soft, hard);
 
   if (ceiling !== null && count > ceiling) {
     const existing = await db
@@ -117,6 +127,8 @@ export async function reservePeriodQuota(
     included: number;
     periodStart: Date;
     overage: boolean;
+    /** Operator ceiling on the UTC day; the daily counter then caps as on a daily plan. */
+    dailyCeiling?: number | null | undefined;
     day?: string;
     at?: Date;
   },
@@ -146,13 +158,24 @@ export async function reservePeriodQuota(
   `);
   const row = firstRow<{ accepted: number }>(rows);
   if (!row) return { reserved: false, accepted: await current(), ceiling };
-  await reserveDailyQuota(db, {
+  const daily = await reserveDailyQuota(db, {
     teamId,
     count,
     limit: null,
+    hardLimit: params.dailyCeiling ?? null,
     ...(params.day ? { day: params.day } : {}),
     ...(params.at ? { at: params.at } : {}),
   });
+  if (!daily.reserved) {
+    // The day refused, not the period: hand the period its count back so a
+    // parked send is charged once, when the drain reserves it again.
+    await db.execute(sql`
+      update ${t}
+      set accepted = greatest(accepted - ${count}, 0)
+      where ${t.teamId} = ${teamId} and ${t.periodStart} = ${periodStart}
+    `);
+    return { reserved: false, accepted: daily.accepted, ceiling: daily.ceiling, cap: "day" };
+  }
   return { reserved: true, accepted: Number(row.accepted), ceiling };
 }
 
@@ -197,6 +220,7 @@ export async function reserveQuota(
       included: quota.included,
       periodStart: quota.periodStart,
       overage: quota.overage,
+      dailyCeiling: quota.dailyCeiling,
       ...when,
     });
   }
@@ -204,6 +228,7 @@ export async function reserveQuota(
     teamId,
     count,
     limit: quota.kind === "day" ? quota.limit : null,
+    hardLimit: quota.kind === "day" ? (quota.dailyCeiling ?? null) : null,
     ...when,
   });
 }

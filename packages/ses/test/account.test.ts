@@ -19,11 +19,15 @@ describe("getAccountOverview", () => {
       SendingEnabled: true,
       ProductionAccessEnabled: true,
       SendQuota: { Max24HourSend: 50000, SentLast24Hours: 1234, MaxSendRate: 14 },
+      EnforcementStatus: "HEALTHY",
+      PricingAttributes: { CurrentPlan: "ESSENTIALS" },
     });
     expect(await getAccountOverview(client)).toEqual({
       sendingEnabled: true,
       productionAccess: true,
       quota: { max24h: 50000, sentLast24h: 1234, maxSendRate: 14 },
+      enforcementStatus: "HEALTHY",
+      pricingPlan: "ESSENTIALS",
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toBeInstanceOf(GetAccountCommand);
@@ -39,6 +43,8 @@ describe("getAccountOverview", () => {
       sendingEnabled: true,
       productionAccess: false,
       quota: { max24h: 200, sentLast24h: 0, maxSendRate: 1 },
+      enforcementStatus: null,
+      pricingPlan: null,
     });
   });
 
@@ -48,6 +54,8 @@ describe("getAccountOverview", () => {
       sendingEnabled: false,
       productionAccess: false,
       quota: { max24h: 0, sentLast24h: 0, maxSendRate: 0 },
+      enforcementStatus: null,
+      pricingPlan: null,
     });
   });
 });

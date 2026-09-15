@@ -10,6 +10,7 @@ const NAMESPACES = [
   "block-editor",
   "auth",
   "broadcasts",
+  "console",
   "deliverability",
   "nav",
   "emails",

@@ -198,6 +198,10 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
       .where(
         and(
           eq(schema.emails.latestStatus, "queued_quota"),
+          // The operator's holds: a suspended team releases nothing, a paused
+          // team releases only its transactional rows.
+          isNull(schema.teams.suspendedAt),
+          or(isNull(schema.emails.broadcastId), isNull(schema.teams.broadcastsPausedByOperatorAt)),
           exhausted.size > 0 ? notInArray(schema.emails.teamId, [...exhausted]) : undefined,
           cursorId
             ? keysetCursorWhere(schema.emails.createdAt, schema.emails.id, cursorId)

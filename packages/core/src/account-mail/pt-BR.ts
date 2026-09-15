@@ -171,6 +171,42 @@ export const ptBR = {
     ],
     button: "Abrir cobrança",
   },
+  "team.broadcasts_paused": {
+    subject: "Broadcasts pausados para {team}",
+    body: [
+      "O operador da instância pausou os broadcasts de {team}: {reason}",
+      "E-mails transacionais continuam saindo pela API e pelo SMTP. Broadcasts agendados aguardam, e novos não podem ser enviados, até o operador retomá-los. Responda a este e-mail se tiver dúvidas.",
+    ],
+    button: "Abrir broadcasts",
+    extra: {
+      complaints: "a taxa de reclamações passou de 0,1% nos últimos 7 dias.",
+      report: "uma denúncia de abuso foi recebida.",
+      manual: "veja a observação abaixo.",
+      note: "Observação do operador: {note}",
+    },
+  },
+  "team.suspended": {
+    subject: "{team} foi suspensa",
+    body: [
+      "O operador da instância suspendeu {team}: {reason}",
+      "Todo envio é recusado e os broadcasts ficam em espera. Chaves de API, domínios, contatos e histórico permanecem como estão, e uma equipe reativada volta a enviar em um minuto. Responda a este e-mail para resolver.",
+    ],
+    button: "Abrir painel",
+    extra: {
+      reputation:
+        "suas taxas de bounce ou de reclamação ameaçam a reputação de envio que a plataforma compartilha.",
+      non_payment: "uma fatura ficou sem pagamento.",
+      manual: "veja a observação abaixo.",
+      note: "Observação do operador: {note}",
+    },
+  },
+  "team.reinstated": {
+    subject: "{team} foi reativada",
+    body: [
+      "O operador da instância reativou {team}. Os envios voltam a sair, e os broadcasts em espera retomam sozinhos em até 15 minutos.",
+    ],
+    button: "Abrir painel",
+  },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 export const ptBRPhrases = {

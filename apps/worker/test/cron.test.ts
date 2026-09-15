@@ -940,3 +940,61 @@ it("hourly usage purge drops rows older than 45 days in batches and reports the 
   const left = await db.select().from(schema.usageCountersHourly);
   expect(left).toHaveLength(1);
 });
+
+it("drain leaves a suspended team's rows parked until the operator reinstates it", async () => {
+  const parked = await insertParked(new Date("2026-08-13T01:00:00Z"));
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: new Date(), suspensionReason: "manual" })
+    .where(eq(schema.teams.id, teamId));
+  const enqueued: string[] = [];
+  const deps = {
+    isCloud: true,
+    enqueueSends: async (batch: readonly { emailId: string }[]) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  };
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 0, stillParked: 1 });
+  expect(await statusOf(parked)).toBe("queued_quota");
+
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: null, suspensionReason: null })
+    .where(eq(schema.teams.id, teamId));
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 1, stillParked: 0 });
+  expect(enqueued).toEqual([parked]);
+});
+
+it("drain holds a paused team's broadcast rows and releases its transactional ones", async () => {
+  const [bc] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId, from: "a@acme.dev", subject: "s", html: "<p>x</p>" })
+    .returning({ id: schema.broadcasts.id });
+  const plain = await insertParked(new Date("2026-08-13T01:00:00Z"));
+  const [bulk] = await db
+    .insert(schema.emails)
+    .values({
+      teamId,
+      broadcastId: bc?.id,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: "bulk",
+      latestStatus: "queued_quota",
+      createdAt: new Date("2026-08-13T00:30:00Z"),
+    })
+    .returning({ id: schema.emails.id });
+  await db
+    .update(schema.teams)
+    .set({ broadcastsPausedByOperatorAt: new Date() })
+    .where(eq(schema.teams.id, teamId));
+  const enqueued: string[] = [];
+  const result = await drainQuotaParked(db, {
+    isCloud: true,
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  });
+  expect(result).toEqual({ drained: 1, stillParked: 1 });
+  expect(enqueued).toEqual([plain]);
+  expect(await statusOf(bulk?.id ?? "")).toBe("queued_quota");
+});

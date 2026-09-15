@@ -31,6 +31,9 @@ export const ACCOUNT_MAIL_KINDS = [
   "billing.cancel_scheduled",
   "billing.cancel_reminder",
   "billing.downgraded",
+  "team.broadcasts_paused",
+  "team.suspended",
+  "team.reinstated",
 ] as const;
 export type AccountMailKind = (typeof ACCOUNT_MAIL_KINDS)[number];
 

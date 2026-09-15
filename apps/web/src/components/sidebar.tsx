@@ -54,7 +54,7 @@ function NavItem({
 
 /* Language row — the same segmented pill with the two language codes; the
    cookie is the whole setting, so the server re-renders the tree on refresh. */
-function LanguageRow() {
+export function LanguageRow() {
   const tCommon = useTranslations("common");
   const locale = useLocale();
   const router = useRouter();
@@ -86,7 +86,7 @@ function LanguageRow() {
 /* Appearance row — label + segmented sun/moon toggle, per the account-menu
    grammar. Mounts only inside the open menu, so document is available and the
    initial state can read the live attribute. */
-function AppearanceRow() {
+export function AppearanceRow() {
   const tCommon = useTranslations("common");
   const [theme, setTheme] = useState<Theme>(currentTheme);
   const pick = (next: Theme) => {

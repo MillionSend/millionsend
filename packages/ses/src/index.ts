@@ -48,6 +48,13 @@ export {
 } from "./domain-verification.js";
 export { createKeyringFromEnv, type KeyringEnv } from "./kms.js";
 export {
+  createQuotaRequestClient,
+  type QuotaRequestClient,
+  type QuotaRequestResult,
+  requestSesDailyQuota,
+  SES_DAILY_QUOTA_CODE,
+} from "./quotas.js";
+export {
   createSesSendClient,
   type SesSendClient,
   type SimpleEmail,

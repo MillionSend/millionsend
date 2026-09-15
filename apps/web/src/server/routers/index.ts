@@ -5,6 +5,7 @@ import { auditRouter } from "./audit";
 import { billingRouter } from "./billing";
 import { broadcastsRouter } from "./broadcasts";
 import { connectedAppsRouter } from "./connected-apps";
+import { consoleRouter } from "./console";
 import { domainsRouter } from "./domains";
 import { emailRouter } from "./email";
 import { emailsRouter } from "./emails";
@@ -25,6 +26,7 @@ export const appRouter = router({
   billing: billingRouter,
   broadcasts: broadcastsRouter,
   connectedApps: connectedAppsRouter,
+  console: consoleRouter,
   email: emailRouter,
   emails: emailsRouter,
   domains: domainsRouter,

@@ -98,6 +98,11 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       };
     }),
 
+    /** Whether the caller is the instance operator, for the Settings → SES console card. */
+    operator: teamProcedure.query(async ({ ctx }) => ({
+      isOperator: await isInstanceOperator(ctx.db, ctx.session.user.id),
+    })),
+
     /**
      * Deployment facts every tenant's screens need, cloud included — nothing
      * here describes the operator's account.
@@ -147,7 +152,10 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
         return null;
       }
       const paused = await pausedRegions(ctx.db);
-      return paused.length > 0 ? paused : null;
+      // The hold reason is the operator's own note; tenants learn only that it is a hold.
+      return paused.length > 0
+        ? paused.map(({ manualReason, ...row }) => ({ ...row, held: manualReason !== null }))
+        : null;
     }),
 
     /** Env-side SES settings the setup page reports alongside awsReadiness. */

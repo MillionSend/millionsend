@@ -1,0 +1,652 @@
+{
+  "nav": {
+    "console": "Console",
+    "overview": "Overview",
+    "regions": "Regions",
+    "teams": "Teams",
+    "safety": "Trust & safety",
+    "audit": "Audit",
+    "operator": "Operator"
+  },
+  "common": {
+    "loadMore": "Load more",
+    "perPage": "{n} per page",
+    "close": "Close",
+    "cancel": "Cancel",
+    "save": "Save",
+    "copy": "Copy",
+    "copied": "Copied",
+    "retry": "Retry",
+    "loadError": "Could not load this screen.",
+    "none": "—",
+    "yes": "yes",
+    "no": "no",
+    "reason": "Reason",
+    "note": "Note",
+    "noteHint": "What you saw. Goes to the audit log and, when the owner is emailed, to the owner.",
+    "notifyOwner": "Email the owner",
+    "presets": "Presets",
+    "custom": "Custom range",
+    "apply": "Apply",
+    "from": "From",
+    "to": "To",
+    "total": "total",
+    "average": "average",
+    "hoverHint": "Hover for exact values. Presets or a custom range.",
+    "vsPrevious": "{delta} vs previous",
+    "ofTeams": "{shown} of {total} teams",
+    "period": {
+      "24h": "Last 24h",
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "90d": "Last 90 days"
+    },
+    "periodShort": {
+      "24h": "24h",
+      "7d": "7d",
+      "30d": "30d",
+      "90d": "90d"
+    },
+    "sort": "Sort by {column}",
+    "actions": "Actions",
+    "regionCode": "{region}",
+    "unknownRegion": "No verified domain",
+    "system": "System",
+    "duration": {
+      "seconds": "{n}s",
+      "minutes": "{n} min",
+      "hours": "{n}h",
+      "days": "{n}d"
+    }
+  },
+  "plan": {
+    "free": "Free",
+    "starter": "Starter",
+    "pro": "Pro",
+    "scale": "Scale",
+    "system": "System"
+  },
+  "overview": {
+    "title": "Instance",
+    "proof": "{host} · {version} · {serving, plural, one {# region serving} other {# regions serving}} · {sandbox} sandbox",
+    "proofUnreachable": " · {count} unreachable",
+    "health": {
+      "title": "Health",
+      "subtitle": "Probed every minute · click a row for its history",
+      "allOk": "All {count} probes healthy",
+      "warnings": "{count, plural, one {# warning} other {# warnings}} · {total} probes",
+      "failing": "{count, plural, one {# probe failing} other {# probes failing}}",
+      "noProbes": "No probe has run yet",
+      "pillTip": "Derived from the Health probes below. Click to jump there.",
+      "stale": "The worker last probed {ago}. Is it running?",
+      "rows": {
+        "pg_latency_ms": "Postgres",
+        "worker_heartbeat": "Worker",
+        "boss_waiting": "pg-boss queue",
+        "ses_events_lag_s": "SES events",
+        "webhook_success_rate": "Webhook deliveries",
+        "kms_wrap_ms": "KMS",
+        "stripe_last_event_s": "Stripe webhook",
+        "retention_purged": "Retention cron"
+      },
+      "how": {
+        "pg": "{latency} · {size}",
+        "worker": "probed {ago}",
+        "boss": "{waiting} waiting · {failed} failed",
+        "events": "lag {lag}",
+        "eventsIdle": "idle",
+        "eventsUnhealthy": "sends out, no events back",
+        "eventsOff": "not configured",
+        "webhooks": "{rate} ok · {tripped} tripped",
+        "webhooksNone": "no deliveries this hour · {tripped} tripped",
+        "kms": "wrap {ms}",
+        "stripe": "event {ago}",
+        "stripeNever": "no event yet",
+        "retention": "{count} bodies purged",
+        "retentionNever": "not run yet",
+        "failed": "probe failed"
+      }
+    },
+    "kpi": {
+      "sent": "Emails sent",
+      "delivered": "Delivered",
+      "bounced": "Bounced",
+      "complained": "Complaints",
+      "deliveredOf": "{delivered} of {sent} delivered",
+      "hardOf": "hard {rate} · SES line 5%",
+      "complaintLines": "breaker 0.08% · SES 0.1%",
+      "period": "Period",
+      "noSends": "no sends in the window"
+    },
+    "tiles": {
+      "teams": "Teams",
+      "teamsSub": "{free} free · {paid} paid · {system} system · {new} new this week",
+      "contacts": "Contacts stored",
+      "contactsSub": "across {teams} teams · {unsubscribed} unsubscribed",
+      "contactsSubPlain": "across {teams} teams",
+      "contactsPending": "counted by the next probe",
+      "domains": "Domains",
+      "domainsSub": "verified · {pending} pending · {failed} failing DKIM",
+      "queue": "Queue",
+      "queueSub": "{waiting} queued · {held} quota-held · oldest {oldest}",
+      "queuePending": "counted by the next probe"
+    },
+    "sent": {
+      "title": "Sent per day",
+      "titleHourly": "Sent per hour",
+      "subtitle": "Every team, every region",
+      "legendSent": "Sent",
+      "legendSentTip": "Emails accepted and handed to SES, summed across teams and regions.",
+      "legendCommitted": "Committed by plans",
+      "legendCommittedTip": "The daily volume the sold plans could reach: daily caps as they are, monthly plans spread over 30 days. Compared against the SES quota it says how far the plans could go on a busy day.",
+      "legendQuota": "SES quota · {region}",
+      "legendQuotaTip": "The SES 24-hour sending quota of the region, from GetAccount.",
+      "committedLabel": "committed {value}",
+      "quotaLabel": "SES quota {value}"
+    },
+    "addRegion": {
+      "title": "Add a region",
+      "body": "Run the setup tool for the new region, add the lines it prints to .env, restart.",
+      "cta": "Provision {region}",
+      "open": "Open regions"
+    },
+    "charts": {
+      "sent": "Emails sent",
+      "delivered": "Delivered rate",
+      "bounced": "Bounce rate",
+      "complained": "Complaint rate",
+      "teams_total": "Teams",
+      "contacts_total": "Contacts stored",
+      "domains_verified": "Verified domains",
+      "queue_waiting": "Queue depth",
+      "pg_latency_ms": "Postgres latency",
+      "pg_size_bytes": "Database size",
+      "worker_heartbeat": "Worker heartbeat",
+      "boss_waiting": "pg-boss waiting jobs",
+      "boss_failed": "pg-boss failed jobs",
+      "ses_events_lag_s": "SES events lag",
+      "webhook_success_rate": "Webhook success rate",
+      "webhook_tripped": "Tripped webhook endpoints",
+      "kms_wrap_ms": "KMS wrap latency",
+      "stripe_last_event_s": "Time since last Stripe event",
+      "retention_purged": "Bodies purged per run",
+      "contacts_unsubscribed": "Unsubscribed contacts",
+      "queue_quota_held": "Quota-held emails",
+      "queue_oldest_s": "Oldest queued job",
+      "region_sent": "Sent per hour · {region}",
+      "noPoints": "Nothing recorded in this window yet."
+    }
+  },
+  "region": {
+    "serving": "Serving",
+    "sandbox": "Sandbox",
+    "unreachable": "Unreachable",
+    "notProvisioned": "Not provisioned",
+    "production": "production",
+    "sandboxLower": "sandbox",
+    "quota": "24h quota",
+    "quotaOf": "{used} / {max}",
+    "maxRate": "Max rate",
+    "rateValue": "{rate} /s · bucket {bucket}",
+    "plan": "Pricing plan",
+    "planNone": "à la carte · $0.10 /1k",
+    "planEssentials": "Essentials · $0.16 /1k",
+    "planOther": "{plan}",
+    "planUnknown": "unknown",
+    "enforcement": "Enforcement",
+    "domains": "Domains",
+    "domainsValue": "{count} verified",
+    "breaker": "Breaker",
+    "breakerClosed": "closed",
+    "breakerOpen": "open · {metric} {rate}",
+    "breakerManual": "held by operator",
+    "breakerRates": "{closed} · {bounce} / {complaint}",
+    "productionRow": "Production",
+    "productionPending": "sandbox · request access",
+    "events": "Events",
+    "eventsLag": "SQS lag {lag}",
+    "eventsIdle": "idle",
+    "eventsUnhealthy": "no events back",
+    "eventsOff": "not configured",
+    "cost": "Cost this month",
+    "costValue": "{amount} · {sent} sent × {rate}/1k",
+    "costTenants": " · incl. tenants",
+    "sparkLabel": "Sent per hour · 24h",
+    "error": "GetAccount failed: {message}",
+    "metric": {
+      "bounce": "bounce",
+      "complaint": "complaint"
+    },
+    "menu": {
+      "refresh": "Refresh probe",
+      "quota": "Request quota increase",
+      "template": "Production access template",
+      "pause": "Pause broadcasts in this region",
+      "resume": "Resume broadcasts in this region",
+      "stop": "Stop serving",
+      "stopHint": "{count, plural, one {# domain} other {# domains}}"
+    },
+    "toast": {
+      "probed": "Probed {region} · GetAccount answered in {ms} ms",
+      "probedAll": "Probed {count, plural, one {# region} other {# regions}}",
+      "probeFailed": "Probe of {region} failed: {message}",
+      "held": "Broadcasts paused in {region} by operator",
+      "released": "Broadcasts resumed in {region}",
+      "quotaFiled": "Quota request filed · {status}",
+      "quotaFiledNoStatus": "Quota request filed",
+      "copied": "Copied to clipboard"
+    },
+    "quotaDialog": {
+      "title": "Request quota increase · {region}",
+      "lead": "Filed through Service Quotas (L-804C8AE8). Small increases are approved automatically; larger ones open a support case.",
+      "desired": "Desired 24h quota",
+      "hint": "Current {current} · sent last 24h {sent} · AWS answers within 24 hours",
+      "justification": "Justification",
+      "justificationDefault": "Volume grows with the platform; committed plans reach {committed} a day and the 30-day peak was {peak}.",
+      "file": "File request",
+      "denied": "The instance's IAM policy cannot file quota requests (servicequotas:RequestServiceQuotaIncrease). Paste the request in the Service Quotas console instead:",
+      "failed": "The request failed: {message}",
+      "openConsole": "Open Service Quotas",
+      "requestText": "Service: Amazon SES\nQuota: Sending quota (L-804C8AE8)\nRegion: {region}\nCurrent value: {current}\nRequested value: {desired}\nJustification: {justification}"
+    },
+    "templateDialog": {
+      "title": "Production access request",
+      "lead": "Copy into the Service Quotas request for {region}. Numbers come from this instance.",
+      "text": "Use case: transactional and opt-in broadcast email for {teams} teams on a self-serve platform.\nVolume: {sent24h} sent in the last 24h ({region}), 30-day peak {peak30d} a day.\nBounce {bounceRate} hard, complaints {complaintRate} over 7 days; {domainsWithDmarc} of {domains} verified domains publish DMARC; every domain is DKIM+SPF aligned before it may send.\nSuppression: per-team bounce and complaint suppression plus the account-level BOUNCE list.\nRecipients: verified opt-in only; List-Unsubscribe and one-click unsubscribe on all marketing mail; hard-bounce and complaint guardrails pause a sender before SES's review lines."
+    },
+    "pauseDialog": {
+      "title": "Pause broadcasts · {region}",
+      "lead": "Trips the region breaker by hand. Transactional mail keeps flowing; broadcasts park until you resume.",
+      "reason": "Reason",
+      "reasonPlaceholder": "Why the region is held, for the audit log",
+      "confirm": "Pause broadcasts"
+    },
+    "resumeDialog": {
+      "title": "Resume broadcasts · {region}",
+      "lead": "Releases the hold. The breaker judges the region on its rates again at the next run.",
+      "confirm": "Resume broadcasts"
+    },
+    "stopDialog": {
+      "title": "Stop serving · {region}",
+      "lead": "A region leaves the deployment through its environment, not from here.",
+      "body": "Remove {region} from AWS_REGIONS (and its topic from SNS_TOPIC_ARNS), restart, then delete its configuration set and topic in AWS if nothing else uses them.",
+      "blocked": "{count, plural, one {# verified domain still sends} other {# verified domains still send}} from this region; move or delete them first."
+    }
+  },
+  "regions": {
+    "title": "Regions",
+    "proof": "{serving} serving · {sandbox} sandbox · {known} not provisioned · one AWS account",
+    "refresh": "Refresh probes",
+    "columns": {
+      "region": "Region",
+      "status": "Status",
+      "plan": "Plan",
+      "quota": "24h quota",
+      "domains": "Domains",
+      "sent24h": "Sent 24h",
+      "bounce7d": "Bounce 7d",
+      "complaints7d": "Complaints 7d",
+      "breaker": "Breaker"
+    },
+    "planCell": {
+      "NONE": "à la carte",
+      "ESSENTIALS": "Essentials"
+    },
+    "provision": "Provision",
+    "sparks": {
+      "title": "Sent per region",
+      "subtitle": "Last 7 days · shared scale",
+      "total": "{count} · 7d"
+    },
+    "perRegion": {
+      "title": "What is per region",
+      "subtitle": "Why a domain's region decides where it sends",
+      "rows": {
+        "quota": "24h quota & max rate",
+        "quotaValue": "per region",
+        "sandbox": "Sandbox / production",
+        "sandboxValue": "per region",
+        "plan": "Pricing plan",
+        "planValue": "per region",
+        "configSet": "Configuration set",
+        "configSetValue": "same name, one per region",
+        "topic": "SNS topic",
+        "topicValue": "per region → one SQS queue",
+        "suppression": "Suppression list",
+        "suppressionValue": "per region",
+        "tenants": "Tenants, reputation, breaker",
+        "tenantsValue": "per region",
+        "iam": "IAM user, KMS key",
+        "iamValue": "account-wide",
+        "postgres": "Postgres, bodies",
+        "postgresValue": "one, this deployment"
+      }
+    },
+    "add": {
+      "title": "Add region · {region}",
+      "subtitle": "Nothing in the serving regions changes while this runs.",
+      "notStarted": "Not started",
+      "step1": "Run the setup tool for the new region",
+      "step1Body": "The same interactive wizard as the first install. Pick the region at the AWS step; it adopts the IAM user and policy that already exist and creates only the regional pieces.",
+      "step2": "Add the lines it prints to .env, restart",
+      "step2Note": "AWS_REGION keeps working as the one-region alias, so an instance that never adds a region changes nothing.",
+      "step3": "The region appears here as Sandbox",
+      "step3Body": "Every region starts in the SES sandbox until AWS grants production access there. The console probes it each minute; teams can pick it only once the probe sees production access.",
+      "check1": "GetAccount answers · sandbox",
+      "check1Link": "production access template",
+      "check2": "Configuration set publishes {count} event types to the topic",
+      "check3": "The setup tool's test send reaches the SES simulator",
+      "check4": "Pricing plan · à la carte, or cancel Essentials when the wizard asks",
+      "queueNote": "# SQS_QUEUE_URL stays as it is: the new topic delivers cross-region into the same queue",
+      "cliAdopted": "Existing IAM user millionsend and policy millionsend-ses adopted.",
+      "cliPlan": "Plan for {region}:",
+      "cliTopic": "SNS topic millionsend-events",
+      "cliSubscription": "Subscription → SQS millionsend-events",
+      "cliCrossRegion": "(cross-region)",
+      "cliConfigSet": "SES configuration set millionsend",
+      "cliSuppression": "Account suppression: BOUNCE",
+      "cliPricing": "? Pricing plan is Essentials ($0.16/1k). Cancel to à la carte?",
+      "cliEnv": "Add to .env:",
+      "cliRegion": "? AWS region",
+      "check1Production": "GetAccount answers · production"
+    }
+  },
+  "teams": {
+    "title": "Teams",
+    "proof": "{total} teams · {free} free · {paid} paid · {system} system · {suspended} suspended",
+    "search": "Search teams, owners, domains, ids",
+    "filters": {
+      "type": "Type: {value}",
+      "region": "Region: {value}",
+      "guardrail": "Guardrail: {value}",
+      "all": "All"
+    },
+    "columns": {
+      "team": "Team",
+      "type": "Type",
+      "owner": "Owner",
+      "domains": "Domains",
+      "contacts": "Contacts",
+      "sent30d": "Sent 30d",
+      "score": "Score",
+      "guardrail": "Guardrail",
+      "region": "Region",
+      "created": "Created"
+    },
+    "guardrail": {
+      "ok": "ok",
+      "warning": "warning",
+      "paused": "paused",
+      "suspended": "Suspended",
+      "operatorPaused": "paused by operator"
+    },
+    "empty": "0 teams match.",
+    "menu": {
+      "open": "Open team",
+      "limits": "Adjust limits",
+      "plan": "Change plan",
+      "pause": "Pause broadcasts",
+      "resume": "Resume broadcasts",
+      "suspend": "Suspend team",
+      "reinstate": "Reinstate team"
+    },
+    "toast": {
+      "resumed": "Broadcasts resumed for {team}",
+      "paused": "Broadcasts paused for {team}",
+      "pausedNotified": "Broadcasts paused for {team} · owner notified",
+      "suspended": "{team} suspended · {reason}",
+      "reinstated": "{team} reinstated",
+      "limits": "Limits saved for {team}",
+      "plan": "{team} · {from} → {to}",
+      "error": "The action failed: {message}"
+    },
+    "detail": {
+      "lead": "Everything the console knows about the team. Bodies are not here.",
+      "sent30d": "Sent 30d",
+      "contacts": "Contacts",
+      "score": "Score",
+      "scoreOf": "{score} / 10",
+      "domains": "Domains",
+      "domainsValue": "{count} verified",
+      "type": "Type",
+      "owner": "Owner",
+      "members": "Members",
+      "region": "Region",
+      "guardrail": "Guardrail",
+      "created": "Created",
+      "stripe": "Stripe",
+      "stripeNone": "none",
+      "stripeSub": "{id} · {status}",
+      "ceiling": "Daily ceiling",
+      "ceilingNone": "plan decides",
+      "standingAt": "standing computed {ago}"
+    },
+    "limitsDialog": {
+      "title": "Adjust limits · {team}",
+      "lead": "Overrides sit beside the plan and never replace it. Empty means the plan decides.",
+      "ceiling": "Daily send ceiling",
+      "ceilingPlaceholder": "Plan default",
+      "ceilingPlaceholderDay": "Plan default ({limit} / day)",
+      "ceilingPlaceholderMonth": "Plan default ({included} / month)",
+      "ceilingPlaceholderNone": "Plan default (no cap)",
+      "broadcasts": "Broadcasts",
+      "allowed": "Allowed",
+      "allowedSub": "The guardrail decides",
+      "paused": "Paused by operator",
+      "pausedSub": "Transactional keeps flowing · the owner is told why"
+    },
+    "planDialog": {
+      "title": "Change plan · {team}",
+      "rung": "Rung",
+      "note": "Stripe is not touched. A plan set here stays until the next change; System never has a Stripe row.",
+      "managed": "Managed by Stripe: this team has a live subscription, so its plan changes through Stripe.",
+      "confirm": "Change plan",
+      "rungs": {
+        "free": "{limit} / day",
+        "starter": "{limit} / day · {price}",
+        "month": "{price} / mo",
+        "system": "no billing, no caps · operator only"
+      }
+    },
+    "pauseDialog": {
+      "title": "Pause broadcasts · {team}",
+      "lead": "Transactional mail keeps flowing. Broadcasts park until an operator resumes them.",
+      "reasons": {
+        "complaints": "Complaint rate over 0.1%",
+        "report": "Abuse report received",
+        "manual": "Other"
+      },
+      "noteLabel": "Note for the audit log",
+      "notify": "Email the owner with the reason and how to resolve it",
+      "confirm": "Pause broadcasts"
+    },
+    "suspendDialog": {
+      "title": "Suspend {team}",
+      "lead": "Stops every send, API key and broadcast. Data stays so the team can be reinstated.",
+      "reasons": {
+        "phishing": "Phishing or malware",
+        "phishingSub": "Confirmed by a provider report; the owner is not emailed",
+        "reputation": "Sending reputation",
+        "reputationSub": "Bounce or complaint rates threatening the region",
+        "non_payment": "Non-payment",
+        "manual": "Other, explained below"
+      },
+      "notePlaceholder": "What you saw. Goes to the audit log and, unless phishing, to the owner.",
+      "confirm": "Suspend team"
+    },
+    "reinstateDialog": {
+      "title": "Reinstate {team}",
+      "lead": "Sends go out again at once; held broadcasts resume within 15 minutes. The owner is emailed unless the suspension was for phishing.",
+      "confirm": "Reinstate team"
+    }
+  },
+  "safety": {
+    "title": "Trust & safety",
+    "info": "A team lands here when the deliverability guardrail turns warning or paused, complaints pass 0.1% or hard bounces 5% over 7 days, the account score drops under 5, or an operator flags it by hand. Automatic flags clear on their own once the trigger goes away; a flag you clear stays cleared while the same trigger holds.",
+    "proof": "{open} open · {guardrailPaused} paused by guardrail · {suspended} suspended",
+    "search": "Search teams, owners, domains",
+    "filters": {
+      "status": "Status: {value}",
+      "reason": "Reason: {value}",
+      "region": "Region: {value}",
+      "all": "All"
+    },
+    "status": {
+      "open": "Open",
+      "cleared": "Cleared",
+      "suspended": "Suspended",
+      "all": "All"
+    },
+    "reasons": {
+      "monitor": "Monitor",
+      "complaints": "Complaints",
+      "guardrail": "Guardrail",
+      "score": "Score",
+      "report": "Report",
+      "manual": "Manual"
+    },
+    "reasonTip": {
+      "monitor": "The automated monitor flagged sampled content.",
+      "complaints": "The complaint rate passed 0.1% or the hard-bounce rate 5% over the last 7 days (SES reviews accounts at those lines).",
+      "guardrail": "The deliverability guardrail turned warning or paused the team on its bounce or complaint rates.",
+      "score": "The account score dropped under 5 out of 10.",
+      "report": "A mailbox provider or a recipient reported abuse.",
+      "manual": "An operator flagged the team by hand."
+    },
+    "reasonLabel": {
+      "complaint": "Complaints {rate} · 7d",
+      "hard_bounce": "Hard bounces {rate} · 7d",
+      "guardrailWarning": "{metric} {rate} · guardrail warning",
+      "guardrailPaused": "{metric} {rate} · paused by guardrail",
+      "score": "Score {score} / 10",
+      "manual": "Flagged by operator",
+      "report": "Abuse report",
+      "monitor": "Monitor"
+    },
+    "columns": {
+      "team": "Team",
+      "type": "Type",
+      "score": "Score",
+      "complaints": "Complaints 7d",
+      "bounces": "Hard bounces 7d",
+      "guardrail": "Guardrail",
+      "reason": "Flagged for",
+      "status": "Status",
+      "region": "Region",
+      "since": "Since"
+    },
+    "scoreTip": "The customer-facing account score: content lint and bounce/complaint outcomes over 30 days. The team sees this one.",
+    "empty": "0 flagged teams.",
+    "count": "{shown} of {total} flagged teams",
+    "menu": {
+      "review": "Open review",
+      "pause": "Pause broadcasts",
+      "resume": "Resume broadcasts",
+      "clear": "Clear flag",
+      "reopen": "Reopen",
+      "suspend": "Suspend team",
+      "reinstate": "Reinstate team"
+    },
+    "toast": {
+      "cleared": "{team} · cleared",
+      "reopened": "{team} · reopened",
+      "flagged": "{team} · flagged"
+    },
+    "review": {
+      "crumb": "Trust & safety",
+      "proof": "{plan} · {region} · {domains, plural, one {# domain} other {# domains}} · owner {owner} · flagged {since}",
+      "proofNoFlag": "{plan} · {region} · {domains, plural, one {# domain} other {# domains}} · owner {owner}",
+      "badges": {
+        "suspended": "Suspended",
+        "guardrailPaused": "Guardrail paused",
+        "guardrailWarning": "Guardrail warning",
+        "guardrailOk": "Guardrail ok",
+        "operatorPaused": "Broadcasts paused by operator",
+        "flagOpen": "Flag open",
+        "flagCleared": "Flag cleared"
+      },
+      "tiles": {
+        "score": "Score",
+        "scoreTip": "Customer-facing account score over 30 days.",
+        "complaints": "Complaints 7d",
+        "bounces": "Hard bounces 7d",
+        "sent7d": "Sent 7d",
+        "contacts": "Contacts",
+        "scoreOf": "{score} / 10"
+      },
+      "checks": {
+        "title": "Content checks",
+        "subtitle": "From stored insights over 30 days, never the body",
+        "count": "{emails, plural, one {# email} other {# emails}}",
+        "none": "Every check passes on every scored email."
+      },
+      "emails": {
+        "title": "Flagged emails · {count}",
+        "subtitle": "Sent in the last 7 days with a failing critical or major check. Subject and body are content and stay encrypted; the pill explains itself on hover.",
+        "sent": "Sent",
+        "from": "From",
+        "recipients": "Recipients",
+        "insight": "Insight",
+        "more": "+{count} more",
+        "none": "0 flagged emails in the window."
+      },
+      "audit": {
+        "title": "Audit tail",
+        "subtitle": "The team's last 20 audit rows, operator actions included.",
+        "none": "No audit rows for this team."
+      },
+      "flagTitle": "Flag",
+      "flagNote": "Note: {note}",
+      "flagOpenedBy": "opened by operator",
+      "flagOpenedAuto": "opened by the safety cron",
+      "openFlag": "Flag this team",
+      "openFlagTitle": "Flag {team}",
+      "openFlagLead": "A manual flag lists the team on Trust & safety until you clear it; the safety cron never clears it.",
+      "openFlagConfirm": "Flag team"
+    },
+    "metric": {
+      "complaint": "Complaints",
+      "hard_bounce": "Hard bounces"
+    }
+  },
+  "audit": {
+    "title": "Instance audit",
+    "proof": "operator actions across every team · append-only",
+    "actionAll": "Action: All",
+    "action": "Action: {value}",
+    "columns": {
+      "when": "When",
+      "actor": "Actor",
+      "action": "Action",
+      "target": "Target",
+      "detail": "Detail",
+      "ip": "IP"
+    },
+    "actors": {
+      "api_key": "API key",
+      "oauth": "Connected app",
+      "stripe": "Stripe",
+      "system": "system",
+      "deletedUser": "Deleted user"
+    },
+    "count": "{shown} of {total} actions",
+    "instance": "instance",
+    "empty": "0 actions."
+  },
+  "settingsCard": {
+    "title": "Instance console",
+    "body": "Every team, region, probe and operator action of this instance, for the operator only. Nobody else can open it, and it is not linked from the app.",
+    "open": "Open console"
+  },
+  "banner": {
+    "suspended": "This team is suspended by the instance operator ({reason}). Sends are refused until it is reinstated; data stays.",
+    "suspendedNote": "This team is suspended by the instance operator: {note} Sends are refused until it is reinstated; data stays.",
+    "broadcastsPaused": "Broadcasts are paused for this team by the instance operator since {since}. Transactional email is unaffected.",
+    "reasons": {
+      "manual": "operator decision",
+      "reputation": "sending reputation",
+      "phishing": "abuse",
+      "non_payment": "non-payment"
+    }
+  }
+}

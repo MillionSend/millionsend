@@ -6,9 +6,11 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import {
   applyRegionBreakers,
   evaluateRegionBreakers,
+  holdRegion,
   pausedRegions,
   regionCounterTotals,
   regionPause,
+  releaseRegion,
 } from "../src/platform-breaker.js";
 import { DAY_MS, utcDay } from "../src/utc-day.js";
 
@@ -317,4 +319,18 @@ it("a team whose verified domains span regions is read from its rows, not the co
     reason: { metric: "complaint", windowHours: 168, sent: 1000, events: 5 },
   });
   expect(decisions[0]?.contributors.map((c) => [c.teamId, c.complained])).toEqual([[teamE, 5]]);
+});
+
+it("a region held by hand stays paused through the cron's resume decisions until released", async () => {
+  await holdRegion(db, "us-east-1", "incident");
+  expect((await pausedRegions(db)).find((r) => r.region === "us-east-1")).toMatchObject({
+    manualReason: "incident",
+  });
+  // us-east-1 never trips (under the floor), so the cron would resume it.
+  const decisions = await evaluateRegionBreakers(db, { now: NOW });
+  const applied = await applyRegionBreakers(db, decisions, NOW);
+  expect(applied.resumed).not.toContain("us-east-1");
+  expect(await regionPause(db, "us-east-1")).toMatchObject({ manualReason: "incident" });
+  await releaseRegion(db, "us-east-1");
+  expect(await regionPause(db, "us-east-1")).toBeNull();
 });

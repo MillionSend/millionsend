@@ -50,6 +50,7 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
       currentPeriodStart: schema.teams.currentPeriodStart,
       currentPeriodEnd: schema.teams.currentPeriodEnd,
       overageEnabled: schema.teams.overageEnabled,
+      dailySendCeiling: schema.teams.dailySendCeiling,
     })
     .from(schema.apiKeys)
     .innerJoin(schema.teams, eq(schema.apiKeys.teamId, schema.teams.id))
@@ -75,6 +76,7 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
       currentPeriodStart: match.currentPeriodStart,
       currentPeriodEnd: match.currentPeriodEnd,
       overageEnabled: match.overageEnabled,
+      dailySendCeiling: match.dailySendCeiling,
     },
     apiKeyId: match.id,
     permission: match.permission,

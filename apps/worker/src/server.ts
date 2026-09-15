@@ -20,8 +20,10 @@ import {
   getInstanceSettings,
   hashRecipient,
   postJson,
+  pruneProbes,
   purgeExpiredIdempotencyKeys,
   type QueuedWebhookDelivery,
+  recordProbes,
   recountStaleSegments,
   sesEventsHealth,
 } from "@millionsend/core";
@@ -57,9 +59,11 @@ import {
   stripExpiredEventPayloads,
 } from "./handlers/cron.js";
 import { drainWebhookEndpoint } from "./handlers/deliver-webhook.js";
+import { runInstanceProbes } from "./handlers/instance-probes.js";
 import { reportPlanMove, sweepNotifications } from "./handlers/notify.js";
 import { runPlatformBreaker } from "./handlers/platform-breaker.js";
 import { processSesEvent } from "./handlers/process-ses-event.js";
+import { runSafetyFlags } from "./handlers/safety-flags.js";
 import { sendBroadcast } from "./handlers/send-broadcast.js";
 import { createTokenBucket, failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createSesQuotaGate } from "./handlers/ses-quota.js";
@@ -233,8 +237,12 @@ await queue.scheduleCrons({
     const sessions = await purgeExpiredSessions(db);
     const hourlyUsage = await purgeStaleHourlyUsage(db);
     const stripeEvents = await purgeStripeEvents(db);
+    const probes = await pruneProbes(db);
+    // The console's retention row: how many bodies the last run purged.
+    await recordProbes(db, [{ probe: "retention_purged", value: purged, ok: true }]);
     const counts = {
       purged,
+      probes,
       hourlyUsage,
       apiRequests: requests,
       events: stripped.events,
@@ -308,6 +316,21 @@ await queue.scheduleCrons({
     // Without SES events there are no bounce/complaint counts to judge.
     if (!env.SNS_TOPIC_ARNS?.length) return;
     await runPlatformBreaker(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+  },
+  "instance.probe": async () => {
+    await runInstanceProbes(db, {
+      isCloud: env.IS_CLOUD,
+      keyring,
+      eventsConfigured: Boolean(env.SNS_TOPIC_ARNS?.length),
+    });
+  },
+  "safety.flags": async () => {
+    const result = await runSafetyFlags(db);
+    if (result.opened > 0 || result.cleared > 0) {
+      console.log(
+        `safety.flags: teams=${result.teams} opened=${result.opened} cleared=${result.cleared}`,
+      );
+    }
   },
   "events.health": async () => {
     // No topic allowlist = ingestion disabled on purpose; nothing to judge.

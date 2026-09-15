@@ -306,8 +306,19 @@ export async function acceptEmail(
             day,
             at: deliveryAt,
           });
-    if (!reservation.reserved && quota.kind === "month") return "monthly_quota_exceeded" as const;
-    if (!reservation.reserved && quota.kind === "day") {
+    // A monthly plan refuses at its period; its operator daily ceiling parks
+    // like a daily cap, since the day frees at midnight.
+    const dayRefused = "cap" in reservation && reservation.cap === "day";
+    if (!reservation.reserved && quota.kind === "month" && !dayRefused) {
+      return "monthly_quota_exceeded" as const;
+    }
+    const dayLimit =
+      quota.kind === "day"
+        ? quota.limit
+        : quota.kind === "month"
+          ? (quota.dailyCeiling ?? null)
+          : null;
+    if (!reservation.reserved && dayLimit !== null) {
       const [parked] = await txDb
         .select({ n: count() })
         .from(schema.emails)
@@ -317,8 +328,7 @@ export async function acceptEmail(
             eq(schema.emails.latestStatus, "queued_quota"),
           ),
         );
-      if ((parked?.n ?? 0) >= quota.limit * QUOTA_BACKLOG_DAYS)
-        return "quota_backlog_full" as const;
+      if ((parked?.n ?? 0) >= dayLimit * QUOTA_BACKLOG_DAYS) return "quota_backlog_full" as const;
     }
     const [row] = await txDb
       .insert(schema.emails)

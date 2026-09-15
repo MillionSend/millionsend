@@ -19,6 +19,9 @@ export const regionBreakers = pgTable("region_breakers", {
   region: text("region").primaryKey(),
   paused: boolean("paused").notNull().default(false),
   reason: jsonb("reason").$type<RegionBreakerReason>(),
+  // Set when an operator held the region by hand; the breaker cron leaves
+  // such a row alone until the operator releases it.
+  manualReason: text("manual_reason"),
   pausedAt: timestamp("paused_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

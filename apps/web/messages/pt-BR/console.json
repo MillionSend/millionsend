@@ -1,0 +1,652 @@
+{
+  "nav": {
+    "console": "Console",
+    "overview": "Visão geral",
+    "regions": "Regiões",
+    "teams": "Equipes",
+    "safety": "Confiança e segurança",
+    "audit": "Auditoria",
+    "operator": "Operador"
+  },
+  "common": {
+    "loadMore": "Carregar mais",
+    "perPage": "{n} por página",
+    "close": "Fechar",
+    "cancel": "Cancelar",
+    "save": "Salvar",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "retry": "Tentar de novo",
+    "loadError": "Não foi possível carregar esta tela.",
+    "none": "—",
+    "yes": "sim",
+    "no": "não",
+    "reason": "Motivo",
+    "note": "Observação",
+    "noteHint": "O que você viu. Vai para o log de auditoria e, quando o proprietário é avisado por e-mail, para ele.",
+    "notifyOwner": "Avisar o proprietário por e-mail",
+    "presets": "Períodos",
+    "custom": "Período personalizado",
+    "apply": "Aplicar",
+    "from": "De",
+    "to": "Até",
+    "total": "total",
+    "average": "média",
+    "hoverHint": "Passe o mouse para ver os valores exatos. Períodos prontos ou um intervalo personalizado.",
+    "vsPrevious": "{delta} vs. período anterior",
+    "ofTeams": "{shown} de {total} equipes",
+    "period": {
+      "24h": "Últimas 24h",
+      "7d": "Últimos 7 dias",
+      "30d": "Últimos 30 dias",
+      "90d": "Últimos 90 dias"
+    },
+    "periodShort": {
+      "24h": "24h",
+      "7d": "7d",
+      "30d": "30d",
+      "90d": "90d"
+    },
+    "sort": "Ordenar por {column}",
+    "actions": "Ações",
+    "regionCode": "{region}",
+    "unknownRegion": "Sem domínio verificado",
+    "system": "Sistema",
+    "duration": {
+      "seconds": "{n}s",
+      "minutes": "{n} min",
+      "hours": "{n}h",
+      "days": "{n}d"
+    }
+  },
+  "plan": {
+    "free": "Free",
+    "starter": "Starter",
+    "pro": "Pro",
+    "scale": "Scale",
+    "system": "System"
+  },
+  "overview": {
+    "title": "Instância",
+    "proof": "{host} · {version} · {serving, plural, one {# região em produção} other {# regiões em produção}} · {sandbox} em sandbox",
+    "proofUnreachable": " · {count} inacessível",
+    "health": {
+      "title": "Saúde",
+      "subtitle": "Sondada a cada minuto · clique em uma linha para ver o histórico",
+      "allOk": "Todas as {count} sondas saudáveis",
+      "warnings": "{count, plural, one {# alerta} other {# alertas}} · {total} sondas",
+      "failing": "{count, plural, one {# sonda falhando} other {# sondas falhando}}",
+      "noProbes": "Nenhuma sonda rodou ainda",
+      "pillTip": "Derivado das sondas de saúde abaixo. Clique para ir até elas.",
+      "stale": "O worker sondou pela última vez {ago}. Ele está rodando?",
+      "rows": {
+        "pg_latency_ms": "Postgres",
+        "worker_heartbeat": "Worker",
+        "boss_waiting": "Fila pg-boss",
+        "ses_events_lag_s": "Eventos do SES",
+        "webhook_success_rate": "Entregas de webhook",
+        "kms_wrap_ms": "KMS",
+        "stripe_last_event_s": "Webhook do Stripe",
+        "retention_purged": "Cron de retenção"
+      },
+      "how": {
+        "pg": "{latency} · {size}",
+        "worker": "sondado {ago}",
+        "boss": "{waiting} aguardando · {failed} com falha",
+        "events": "atraso {lag}",
+        "eventsIdle": "ocioso",
+        "eventsUnhealthy": "envios saem, nenhum evento volta",
+        "eventsOff": "não configurado",
+        "webhooks": "{rate} ok · {tripped} desativados",
+        "webhooksNone": "sem entregas nesta hora · {tripped} desativados",
+        "kms": "wrap {ms}",
+        "stripe": "evento {ago}",
+        "stripeNever": "nenhum evento ainda",
+        "retention": "{count} corpos removidos",
+        "retentionNever": "ainda não rodou",
+        "failed": "sonda falhou"
+      }
+    },
+    "kpi": {
+      "sent": "E-mails enviados",
+      "delivered": "Entregues",
+      "bounced": "Bounces",
+      "complained": "Reclamações",
+      "deliveredOf": "{delivered} de {sent} entregues",
+      "hardOf": "hard {rate} · linha do SES 5%",
+      "complaintLines": "breaker 0,08% · SES 0,1%",
+      "period": "Período",
+      "noSends": "nenhum envio no período"
+    },
+    "tiles": {
+      "teams": "Equipes",
+      "teamsSub": "{free} free · {paid} pagas · {system} sistema · {new} novas na semana",
+      "contacts": "Contatos armazenados",
+      "contactsSub": "em {teams} equipes · {unsubscribed} descadastrados",
+      "contactsSubPlain": "em {teams} equipes",
+      "contactsPending": "contado na próxima sonda",
+      "domains": "Domínios",
+      "domainsSub": "verificados · {pending} pendentes · {failed} com DKIM falhando",
+      "queue": "Fila",
+      "queueSub": "{waiting} na fila · {held} retidos por cota · mais antigo {oldest}",
+      "queuePending": "contado na próxima sonda"
+    },
+    "sent": {
+      "title": "Enviados por dia",
+      "titleHourly": "Enviados por hora",
+      "subtitle": "Todas as equipes, todas as regiões",
+      "legendSent": "Enviados",
+      "legendSentTip": "E-mails aceitos e entregues ao SES, somados entre equipes e regiões.",
+      "legendCommitted": "Comprometido pelos planos",
+      "legendCommittedTip": "O volume diário que os planos vendidos podem alcançar: caps diários como estão, planos mensais divididos por 30 dias. Comparado à cota do SES, diz até onde os planos podem ir num dia cheio.",
+      "legendQuota": "Cota do SES · {region}",
+      "legendQuotaTip": "A cota de envio de 24 horas do SES na região, vinda do GetAccount.",
+      "committedLabel": "comprometido {value}",
+      "quotaLabel": "cota do SES {value}"
+    },
+    "addRegion": {
+      "title": "Adicionar uma região",
+      "body": "Rode a ferramenta de configuração para a nova região, adicione as linhas que ela imprime ao .env e reinicie.",
+      "cta": "Provisionar {region}",
+      "open": "Abrir regiões"
+    },
+    "charts": {
+      "sent": "E-mails enviados",
+      "delivered": "Taxa de entrega",
+      "bounced": "Taxa de bounce",
+      "complained": "Taxa de reclamações",
+      "teams_total": "Equipes",
+      "contacts_total": "Contatos armazenados",
+      "domains_verified": "Domínios verificados",
+      "queue_waiting": "Tamanho da fila",
+      "pg_latency_ms": "Latência do Postgres",
+      "pg_size_bytes": "Tamanho do banco",
+      "worker_heartbeat": "Heartbeat do worker",
+      "boss_waiting": "Jobs aguardando no pg-boss",
+      "boss_failed": "Jobs com falha no pg-boss",
+      "ses_events_lag_s": "Atraso dos eventos do SES",
+      "webhook_success_rate": "Taxa de sucesso dos webhooks",
+      "webhook_tripped": "Endpoints de webhook desativados",
+      "kms_wrap_ms": "Latência do wrap no KMS",
+      "stripe_last_event_s": "Tempo desde o último evento do Stripe",
+      "retention_purged": "Corpos removidos por execução",
+      "contacts_unsubscribed": "Contatos descadastrados",
+      "queue_quota_held": "E-mails retidos por cota",
+      "queue_oldest_s": "Job mais antigo na fila",
+      "region_sent": "Enviados por hora · {region}",
+      "noPoints": "Nada registrado neste período ainda."
+    }
+  },
+  "region": {
+    "serving": "Em produção",
+    "sandbox": "Sandbox",
+    "unreachable": "Inacessível",
+    "notProvisioned": "Não provisionada",
+    "production": "produção",
+    "sandboxLower": "sandbox",
+    "quota": "Cota 24h",
+    "quotaOf": "{used} / {max}",
+    "maxRate": "Taxa máxima",
+    "rateValue": "{rate} /s · bucket {bucket}",
+    "plan": "Plano de preços",
+    "planNone": "à la carte · $0,10 /1k",
+    "planEssentials": "Essentials · $0,16 /1k",
+    "planOther": "{plan}",
+    "planUnknown": "desconhecido",
+    "enforcement": "Enforcement",
+    "domains": "Domínios",
+    "domainsValue": "{count} verificados",
+    "breaker": "Breaker",
+    "breakerClosed": "fechado",
+    "breakerOpen": "aberto · {metric} {rate}",
+    "breakerManual": "retido pelo operador",
+    "breakerRates": "{closed} · {bounce} / {complaint}",
+    "productionRow": "Produção",
+    "productionPending": "sandbox · solicitar acesso",
+    "events": "Eventos",
+    "eventsLag": "atraso do SQS {lag}",
+    "eventsIdle": "ocioso",
+    "eventsUnhealthy": "nenhum evento volta",
+    "eventsOff": "não configurado",
+    "cost": "Custo neste mês",
+    "costValue": "{amount} · {sent} enviados × {rate}/1k",
+    "costTenants": " · incl. tenants",
+    "sparkLabel": "Enviados por hora · 24h",
+    "error": "GetAccount falhou: {message}",
+    "metric": {
+      "bounce": "bounce",
+      "complaint": "reclamação"
+    },
+    "menu": {
+      "refresh": "Atualizar sonda",
+      "quota": "Solicitar aumento de cota",
+      "template": "Modelo de pedido de produção",
+      "pause": "Pausar transmissões nesta região",
+      "resume": "Retomar transmissões nesta região",
+      "stop": "Parar de servir",
+      "stopHint": "{count, plural, one {# domínio} other {# domínios}}"
+    },
+    "toast": {
+      "probed": "{region} sondada · GetAccount respondeu em {ms} ms",
+      "probedAll": "{count, plural, one {# região sondada} other {# regiões sondadas}}",
+      "probeFailed": "A sonda de {region} falhou: {message}",
+      "held": "Transmissões pausadas em {region} pelo operador",
+      "released": "Transmissões retomadas em {region}",
+      "quotaFiled": "Pedido de cota enviado · {status}",
+      "quotaFiledNoStatus": "Pedido de cota enviado",
+      "copied": "Copiado para a área de transferência"
+    },
+    "quotaDialog": {
+      "title": "Solicitar aumento de cota · {region}",
+      "lead": "Enviado pelo Service Quotas (L-804C8AE8). Aumentos pequenos são aprovados automaticamente; os maiores abrem um caso de suporte.",
+      "desired": "Cota de 24h desejada",
+      "hint": "Atual {current} · enviados nas últimas 24h {sent} · a AWS responde em até 24 horas",
+      "justification": "Justificativa",
+      "justificationDefault": "O volume cresce com a plataforma; os planos comprometidos chegam a {committed} por dia e o pico de 30 dias foi {peak}.",
+      "file": "Enviar pedido",
+      "denied": "A política IAM da instância não pode enviar pedidos de cota (servicequotas:RequestServiceQuotaIncrease). Cole o pedido no console do Service Quotas:",
+      "failed": "O pedido falhou: {message}",
+      "openConsole": "Abrir Service Quotas",
+      "requestText": "Service: Amazon SES\nQuota: Sending quota (L-804C8AE8)\nRegion: {region}\nCurrent value: {current}\nRequested value: {desired}\nJustification: {justification}"
+    },
+    "templateDialog": {
+      "title": "Pedido de acesso à produção",
+      "lead": "Copie no pedido do Service Quotas para {region}. Os números vêm desta instância.",
+      "text": "Use case: transactional and opt-in broadcast email for {teams} teams on a self-serve platform.\nVolume: {sent24h} sent in the last 24h ({region}), 30-day peak {peak30d} a day.\nBounce {bounceRate} hard, complaints {complaintRate} over 7 days; {domainsWithDmarc} of {domains} verified domains publish DMARC; every domain is DKIM+SPF aligned before it may send.\nSuppression: per-team bounce and complaint suppression plus the account-level BOUNCE list.\nRecipients: verified opt-in only; List-Unsubscribe and one-click unsubscribe on all marketing mail; hard-bounce and complaint guardrails pause a sender before SES's review lines."
+    },
+    "pauseDialog": {
+      "title": "Pausar transmissões · {region}",
+      "lead": "Abre o breaker da região manualmente. E-mails transacionais continuam saindo; as transmissões ficam retidas até você retomar.",
+      "reason": "Motivo",
+      "reasonPlaceholder": "Por que a região está retida, para o log de auditoria",
+      "confirm": "Pausar transmissões"
+    },
+    "resumeDialog": {
+      "title": "Retomar transmissões · {region}",
+      "lead": "Libera a retenção. O breaker volta a julgar a região pelas taxas na próxima execução.",
+      "confirm": "Retomar transmissões"
+    },
+    "stopDialog": {
+      "title": "Parar de servir · {region}",
+      "lead": "Uma região sai da implantação pelo ambiente, não daqui.",
+      "body": "Remova {region} de AWS_REGIONS (e o tópico dela de SNS_TOPIC_ARNS), reinicie e depois apague o configuration set e o tópico na AWS se nada mais os usar.",
+      "blocked": "{count, plural, one {# domínio verificado ainda envia} other {# domínios verificados ainda enviam}} por esta região; mova ou apague antes."
+    }
+  },
+  "regions": {
+    "title": "Regiões",
+    "proof": "{serving} em produção · {sandbox} em sandbox · {known} não provisionadas · uma conta AWS",
+    "refresh": "Atualizar sondas",
+    "columns": {
+      "region": "Região",
+      "status": "Status",
+      "plan": "Plano",
+      "quota": "Cota 24h",
+      "domains": "Domínios",
+      "sent24h": "Enviados 24h",
+      "bounce7d": "Bounce 7d",
+      "complaints7d": "Reclamações 7d",
+      "breaker": "Breaker"
+    },
+    "planCell": {
+      "NONE": "à la carte",
+      "ESSENTIALS": "Essentials"
+    },
+    "provision": "Provisionar",
+    "sparks": {
+      "title": "Enviados por região",
+      "subtitle": "Últimos 7 dias · escala compartilhada",
+      "total": "{count} · 7d"
+    },
+    "perRegion": {
+      "title": "O que é por região",
+      "subtitle": "Por que a região de um domínio decide por onde ele envia",
+      "rows": {
+        "quota": "Cota 24h e taxa máxima",
+        "quotaValue": "por região",
+        "sandbox": "Sandbox / produção",
+        "sandboxValue": "por região",
+        "plan": "Plano de preços",
+        "planValue": "por região",
+        "configSet": "Configuration set",
+        "configSetValue": "mesmo nome, um por região",
+        "topic": "Tópico SNS",
+        "topicValue": "por região → uma fila SQS",
+        "suppression": "Lista de supressão",
+        "suppressionValue": "por região",
+        "tenants": "Tenants, reputação, breaker",
+        "tenantsValue": "por região",
+        "iam": "Usuário IAM, chave KMS",
+        "iamValue": "da conta inteira",
+        "postgres": "Postgres, corpos",
+        "postgresValue": "um só, esta implantação"
+      }
+    },
+    "add": {
+      "title": "Adicionar região · {region}",
+      "subtitle": "Nada muda nas regiões em produção enquanto isso roda.",
+      "notStarted": "Não iniciado",
+      "step1": "Rode a ferramenta de configuração para a nova região",
+      "step1Body": "O mesmo assistente interativo da primeira instalação. Escolha a região na etapa da AWS; ele adota o usuário e a política IAM que já existem e cria só as peças regionais.",
+      "step2": "Adicione as linhas que ela imprime ao .env e reinicie",
+      "step2Note": "AWS_REGION continua funcionando como o apelido de região única, então uma instância que nunca adiciona região não muda nada.",
+      "step3": "A região aparece aqui como Sandbox",
+      "step3Body": "Toda região começa no sandbox do SES até a AWS conceder acesso à produção nela. O console a sonda a cada minuto; as equipes só podem escolhê-la quando a sonda vê acesso à produção.",
+      "check1": "GetAccount responde · sandbox",
+      "check1Link": "modelo de pedido de produção",
+      "check2": "O configuration set publica {count} tipos de evento no tópico",
+      "check3": "O envio de teste da ferramenta chega ao simulador do SES",
+      "check4": "Plano de preços · à la carte, ou cancele o Essentials quando o assistente perguntar",
+      "queueNote": "# SQS_QUEUE_URL fica como está: o novo tópico entrega entre regiões na mesma fila",
+      "cliAdopted": "Usuário IAM millionsend e política millionsend-ses existentes adotados.",
+      "cliPlan": "Plano para {region}:",
+      "cliTopic": "Tópico SNS millionsend-events",
+      "cliSubscription": "Assinatura → SQS millionsend-events",
+      "cliCrossRegion": "(entre regiões)",
+      "cliConfigSet": "Configuration set do SES millionsend",
+      "cliSuppression": "Supressão da conta: BOUNCE",
+      "cliPricing": "? O plano de preços é Essentials ($0,16/1k). Cancelar para à la carte?",
+      "cliEnv": "Adicione ao .env:",
+      "cliRegion": "? Região AWS",
+      "check1Production": "GetAccount responde · produção"
+    }
+  },
+  "teams": {
+    "title": "Equipes",
+    "proof": "{total} equipes · {free} free · {paid} pagas · {system} sistema · {suspended} suspensas",
+    "search": "Buscar equipes, proprietários, domínios, ids",
+    "filters": {
+      "type": "Tipo: {value}",
+      "region": "Região: {value}",
+      "guardrail": "Guardrail: {value}",
+      "all": "Todos"
+    },
+    "columns": {
+      "team": "Equipe",
+      "type": "Tipo",
+      "owner": "Proprietário",
+      "domains": "Domínios",
+      "contacts": "Contatos",
+      "sent30d": "Enviados 30d",
+      "score": "Score",
+      "guardrail": "Guardrail",
+      "region": "Região",
+      "created": "Criada"
+    },
+    "guardrail": {
+      "ok": "ok",
+      "warning": "alerta",
+      "paused": "pausada",
+      "suspended": "Suspensa",
+      "operatorPaused": "pausada pelo operador"
+    },
+    "empty": "0 equipes encontradas.",
+    "menu": {
+      "open": "Abrir equipe",
+      "limits": "Ajustar limites",
+      "plan": "Alterar plano",
+      "pause": "Pausar transmissões",
+      "resume": "Retomar transmissões",
+      "suspend": "Suspender equipe",
+      "reinstate": "Reativar equipe"
+    },
+    "toast": {
+      "resumed": "Transmissões retomadas para {team}",
+      "paused": "Transmissões pausadas para {team}",
+      "pausedNotified": "Transmissões pausadas para {team} · proprietário avisado",
+      "suspended": "{team} suspensa · {reason}",
+      "reinstated": "{team} reativada",
+      "limits": "Limites salvos para {team}",
+      "plan": "{team} · {from} → {to}",
+      "error": "A ação falhou: {message}"
+    },
+    "detail": {
+      "lead": "Tudo o que o console sabe sobre a equipe. Corpos de e-mail não estão aqui.",
+      "sent30d": "Enviados 30d",
+      "contacts": "Contatos",
+      "score": "Score",
+      "scoreOf": "{score} / 10",
+      "domains": "Domínios",
+      "domainsValue": "{count} verificados",
+      "type": "Tipo",
+      "owner": "Proprietário",
+      "members": "Membros",
+      "region": "Região",
+      "guardrail": "Guardrail",
+      "created": "Criada",
+      "stripe": "Stripe",
+      "stripeNone": "nenhum",
+      "stripeSub": "{id} · {status}",
+      "ceiling": "Teto diário",
+      "ceilingNone": "o plano decide",
+      "standingAt": "situação calculada {ago}"
+    },
+    "limitsDialog": {
+      "title": "Ajustar limites · {team}",
+      "lead": "Os ajustes ficam ao lado do plano e nunca o substituem. Vazio significa que o plano decide.",
+      "ceiling": "Teto diário de envio",
+      "ceilingPlaceholder": "Padrão do plano",
+      "ceilingPlaceholderDay": "Padrão do plano ({limit} / dia)",
+      "ceilingPlaceholderMonth": "Padrão do plano ({included} / mês)",
+      "ceilingPlaceholderNone": "Padrão do plano (sem cap)",
+      "broadcasts": "Transmissões",
+      "allowed": "Permitidas",
+      "allowedSub": "O guardrail decide",
+      "paused": "Pausadas pelo operador",
+      "pausedSub": "Transacionais continuam saindo · o proprietário sabe o motivo"
+    },
+    "planDialog": {
+      "title": "Alterar plano · {team}",
+      "rung": "Degrau",
+      "note": "O Stripe não é tocado. Um plano definido aqui fica até a próxima mudança; System nunca tem registro no Stripe.",
+      "managed": "Gerenciado pelo Stripe: esta equipe tem uma assinatura ativa, então o plano muda pelo Stripe.",
+      "confirm": "Alterar plano",
+      "rungs": {
+        "free": "{limit} / dia",
+        "starter": "{limit} / dia · {price}",
+        "month": "{price} / mês",
+        "system": "sem cobrança, sem caps · só o operador"
+      }
+    },
+    "pauseDialog": {
+      "title": "Pausar transmissões · {team}",
+      "lead": "E-mails transacionais continuam saindo. As transmissões ficam retidas até um operador retomá-las.",
+      "reasons": {
+        "complaints": "Taxa de reclamações acima de 0,1%",
+        "report": "Denúncia de abuso recebida",
+        "manual": "Outro"
+      },
+      "noteLabel": "Observação para o log de auditoria",
+      "notify": "Avisar o proprietário por e-mail com o motivo e como resolver",
+      "confirm": "Pausar transmissões"
+    },
+    "suspendDialog": {
+      "title": "Suspender {team}",
+      "lead": "Interrompe todo envio, chave de API e transmissão. Os dados ficam para que a equipe possa ser reativada.",
+      "reasons": {
+        "phishing": "Phishing ou malware",
+        "phishingSub": "Confirmado por relatório de provedor; o proprietário não é avisado",
+        "reputation": "Reputação de envio",
+        "reputationSub": "Taxas de bounce ou reclamação ameaçando a região",
+        "non_payment": "Inadimplência",
+        "manual": "Outro, explicado abaixo"
+      },
+      "notePlaceholder": "O que você viu. Vai para o log de auditoria e, exceto em phishing, para o proprietário.",
+      "confirm": "Suspender equipe"
+    },
+    "reinstateDialog": {
+      "title": "Reativar {team}",
+      "lead": "Os envios voltam a sair na hora; transmissões retidas retomam em até 15 minutos. O proprietário é avisado por e-mail, exceto se a suspensão foi por phishing.",
+      "confirm": "Reativar equipe"
+    }
+  },
+  "safety": {
+    "title": "Confiança e segurança",
+    "info": "Uma equipe entra aqui quando o guardrail de entregabilidade vira alerta ou pausa, as reclamações passam de 0,1% ou os hard bounces de 5% em 7 dias, o score da conta cai abaixo de 5, ou um operador a sinaliza à mão. Sinalizações automáticas somem sozinhas quando o gatilho passa; uma que você limpa fica limpa enquanto o mesmo gatilho durar.",
+    "proof": "{open} abertas · {guardrailPaused} pausadas pelo guardrail · {suspended} suspensas",
+    "search": "Buscar equipes, proprietários, domínios",
+    "filters": {
+      "status": "Status: {value}",
+      "reason": "Motivo: {value}",
+      "region": "Região: {value}",
+      "all": "Todos"
+    },
+    "status": {
+      "open": "Aberta",
+      "cleared": "Limpa",
+      "suspended": "Suspensa",
+      "all": "Todas"
+    },
+    "reasons": {
+      "monitor": "Monitor",
+      "complaints": "Reclamações",
+      "guardrail": "Guardrail",
+      "score": "Score",
+      "report": "Denúncia",
+      "manual": "Manual"
+    },
+    "reasonTip": {
+      "monitor": "O monitor automático sinalizou conteúdo amostrado.",
+      "complaints": "A taxa de reclamações passou de 0,1% ou a de hard bounces de 5% nos últimos 7 dias (o SES revisa contas nessas linhas).",
+      "guardrail": "O guardrail de entregabilidade virou alerta ou pausou a equipe pelas taxas de bounce ou reclamação.",
+      "score": "O score da conta caiu abaixo de 5 em 10.",
+      "report": "Um provedor de e-mail ou um destinatário denunciou abuso.",
+      "manual": "Um operador sinalizou a equipe à mão."
+    },
+    "reasonLabel": {
+      "complaint": "Reclamações {rate} · 7d",
+      "hard_bounce": "Hard bounces {rate} · 7d",
+      "guardrailWarning": "{metric} {rate} · alerta do guardrail",
+      "guardrailPaused": "{metric} {rate} · pausada pelo guardrail",
+      "score": "Score {score} / 10",
+      "manual": "Sinalizada pelo operador",
+      "report": "Denúncia de abuso",
+      "monitor": "Monitor"
+    },
+    "columns": {
+      "team": "Equipe",
+      "type": "Tipo",
+      "score": "Score",
+      "complaints": "Reclamações 7d",
+      "bounces": "Hard bounces 7d",
+      "guardrail": "Guardrail",
+      "reason": "Sinalizada por",
+      "status": "Status",
+      "region": "Região",
+      "since": "Desde"
+    },
+    "scoreTip": "O score da conta que o cliente vê: checagens de conteúdo e resultados de bounce/reclamação em 30 dias. A equipe vê este.",
+    "empty": "0 equipes sinalizadas.",
+    "count": "{shown} de {total} equipes sinalizadas",
+    "menu": {
+      "review": "Abrir revisão",
+      "pause": "Pausar transmissões",
+      "resume": "Retomar transmissões",
+      "clear": "Limpar sinalização",
+      "reopen": "Reabrir",
+      "suspend": "Suspender equipe",
+      "reinstate": "Reativar equipe"
+    },
+    "toast": {
+      "cleared": "{team} · limpa",
+      "reopened": "{team} · reaberta",
+      "flagged": "{team} · sinalizada"
+    },
+    "review": {
+      "crumb": "Confiança e segurança",
+      "proof": "{plan} · {region} · {domains, plural, one {# domínio} other {# domínios}} · proprietário {owner} · sinalizada {since}",
+      "proofNoFlag": "{plan} · {region} · {domains, plural, one {# domínio} other {# domínios}} · proprietário {owner}",
+      "badges": {
+        "suspended": "Suspensa",
+        "guardrailPaused": "Guardrail pausado",
+        "guardrailWarning": "Guardrail em alerta",
+        "guardrailOk": "Guardrail ok",
+        "operatorPaused": "Transmissões pausadas pelo operador",
+        "flagOpen": "Sinalização aberta",
+        "flagCleared": "Sinalização limpa"
+      },
+      "tiles": {
+        "score": "Score",
+        "scoreTip": "Score da conta que o cliente vê, em 30 dias.",
+        "complaints": "Reclamações 7d",
+        "bounces": "Hard bounces 7d",
+        "sent7d": "Enviados 7d",
+        "contacts": "Contatos",
+        "scoreOf": "{score} / 10"
+      },
+      "checks": {
+        "title": "Checagens de conteúdo",
+        "subtitle": "Dos insights armazenados em 30 dias, nunca do corpo",
+        "count": "{emails, plural, one {# e-mail} other {# e-mails}}",
+        "none": "Todas as checagens passam em todos os e-mails pontuados."
+      },
+      "emails": {
+        "title": "E-mails sinalizados · {count}",
+        "subtitle": "Enviados nos últimos 7 dias com uma checagem crítica ou importante falhando. Assunto e corpo são conteúdo e ficam criptografados; a pílula se explica ao passar o mouse.",
+        "sent": "Enviado",
+        "from": "De",
+        "recipients": "Destinatários",
+        "insight": "Insight",
+        "more": "+{count} mais",
+        "none": "0 e-mails sinalizados no período."
+      },
+      "audit": {
+        "title": "Cauda de auditoria",
+        "subtitle": "As últimas 20 linhas de auditoria da equipe, ações do operador incluídas.",
+        "none": "Nenhuma linha de auditoria para esta equipe."
+      },
+      "flagTitle": "Sinalização",
+      "flagNote": "Observação: {note}",
+      "flagOpenedBy": "aberta pelo operador",
+      "flagOpenedAuto": "aberta pelo cron de segurança",
+      "openFlag": "Sinalizar esta equipe",
+      "openFlagTitle": "Sinalizar {team}",
+      "openFlagLead": "Uma sinalização manual lista a equipe em Confiança e segurança até você limpá-la; o cron de segurança nunca a limpa.",
+      "openFlagConfirm": "Sinalizar equipe"
+    },
+    "metric": {
+      "complaint": "Reclamações",
+      "hard_bounce": "Hard bounces"
+    }
+  },
+  "audit": {
+    "title": "Auditoria da instância",
+    "proof": "ações do operador em todas as equipes · somente acréscimo",
+    "actionAll": "Ação: Todas",
+    "action": "Ação: {value}",
+    "columns": {
+      "when": "Quando",
+      "actor": "Ator",
+      "action": "Ação",
+      "target": "Alvo",
+      "detail": "Detalhe",
+      "ip": "IP"
+    },
+    "actors": {
+      "api_key": "Chave de API",
+      "oauth": "App conectado",
+      "stripe": "Stripe",
+      "system": "sistema",
+      "deletedUser": "Usuário removido"
+    },
+    "count": "{shown} de {total} ações",
+    "instance": "instância",
+    "empty": "0 ações."
+  },
+  "settingsCard": {
+    "title": "Console da instância",
+    "body": "Todas as equipes, regiões, sondas e ações do operador desta instância, só para o operador. Ninguém mais consegue abrir, e ele não aparece no app.",
+    "open": "Abrir console"
+  },
+  "banner": {
+    "suspended": "Esta equipe está suspensa pelo operador da instância ({reason}). Os envios são recusados até a reativação; os dados ficam.",
+    "suspendedNote": "Esta equipe está suspensa pelo operador da instância: {note} Os envios são recusados até a reativação; os dados ficam.",
+    "broadcastsPaused": "As transmissões desta equipe estão pausadas pelo operador da instância desde {since}. E-mails transacionais não são afetados.",
+    "reasons": {
+      "manual": "decisão do operador",
+      "reputation": "reputação de envio",
+      "phishing": "abuso",
+      "non_payment": "inadimplência"
+    }
+  }
+}

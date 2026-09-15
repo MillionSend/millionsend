@@ -364,7 +364,7 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
       const limit = quota.limit;
       // The ceiling is where reserveDailyQuota starts parking: reaching it
       // means new sends now wait for the reset (or a higher plan).
-      const ceiling = dailyCeiling(limit);
+      const ceiling = Math.min(dailyCeiling(limit), quota.dailyCeiling ?? Number.POSITIVE_INFINITY);
       const kind =
         row.accepted >= ceiling
           ? "quota.paused"

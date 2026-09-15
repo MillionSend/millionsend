@@ -171,6 +171,42 @@ export const en = {
     ],
     button: "Open billing",
   },
+  "team.broadcasts_paused": {
+    subject: "Broadcasts paused for {team}",
+    body: [
+      "The instance operator paused broadcasts for {team}: {reason}",
+      "Transactional email keeps flowing through the API and SMTP. Scheduled broadcasts wait, and new ones cannot be sent, until the operator resumes them. Reply to this email if you have questions.",
+    ],
+    button: "Open broadcasts",
+    extra: {
+      complaints: "the complaint rate passed 0.1% over the last 7 days.",
+      report: "an abuse report was received.",
+      manual: "see the note below.",
+      note: "Note from the operator: {note}",
+    },
+  },
+  "team.suspended": {
+    subject: "{team} is suspended",
+    body: [
+      "The instance operator suspended {team}: {reason}",
+      "Every send is refused and broadcasts are on hold. API keys, domains, contacts and history stay as they are, and a reinstated team sends again within a minute. Reply to this email to resolve it.",
+    ],
+    button: "Open dashboard",
+    extra: {
+      reputation:
+        "its bounce or complaint rates threaten the sending reputation the platform shares.",
+      non_payment: "an invoice stayed unpaid.",
+      manual: "see the note below.",
+      note: "Note from the operator: {note}",
+    },
+  },
+  "team.reinstated": {
+    subject: "{team} is reinstated",
+    body: [
+      "The instance operator reinstated {team}. Sends go out again, and held broadcasts resume on their own within 15 minutes.",
+    ],
+    button: "Open dashboard",
+  },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 /** Sentences several kinds share, filled by the builders. */

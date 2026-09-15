@@ -4,6 +4,7 @@ import {
   acceptEmail,
   authenticateApiKey,
   formatMailbox,
+  isTeamSuspended,
   OVERAGE_HARD_CAP,
   parseMailbox,
   verifySenderDomain,
@@ -111,6 +112,14 @@ async function handleMessage(
     throw smtpError(554, "Either an HTML or a text body is required");
   }
 
+  // Read per message, as the HTTP API does: a suspension lands on the next
+  // message of an open session, not on its next AUTH.
+  if (await isTeamSuspended(deps.db, auth.teamId)) {
+    throw smtpError(
+      550,
+      "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
+    );
+  }
   // The authenticated key's team decides which senders are allowed — the
   // MAIL FROM envelope identity is never trusted.
   const domain = await verifySenderDomain(deps.db, auth.teamId, from);

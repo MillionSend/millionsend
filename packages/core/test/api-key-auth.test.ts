@@ -66,6 +66,7 @@ describe("authenticateApiKey billing", () => {
       currentPeriodStart: null,
       currentPeriodEnd: null,
       overageEnabled: true,
+      dailySendCeiling: null,
     });
     const currentPeriodStart = new Date("2026-09-01T00:00:00Z");
     const currentPeriodEnd = new Date("2026-10-01T00:00:00Z");
@@ -77,6 +78,7 @@ describe("authenticateApiKey billing", () => {
         currentPeriodStart,
         currentPeriodEnd,
         overageEnabled: true,
+        dailySendCeiling: null,
       })
       .where(eq(schema.teams.id, teamId));
     const auth = await authenticateApiKey(db, token);
@@ -86,6 +88,7 @@ describe("authenticateApiKey billing", () => {
       currentPeriodStart,
       currentPeriodEnd,
       overageEnabled: true,
+      dailySendCeiling: null,
     });
     expect(auth?.plan).toBe("pro");
   });

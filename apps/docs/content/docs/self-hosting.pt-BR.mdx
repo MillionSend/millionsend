@@ -684,6 +684,32 @@ MillionSend; é o assistente na sua máquina enviando a sua resposta, e um link
 de confirmação chega antes de qualquer coisa ser armazenada.
 **Configurações → Instância** leva à mesma página.
 
+## Console
+
+`/console` é a visão do operador sobre toda a implantação: uma visão geral
+(envios, entregabilidade, equipes, contatos, domínios, fila, um cartão por
+região do SES com cota, plano de preços e status de enforcement, e as sondas
+de saúde com histórico), uma página de Regiões, uma página de Equipes com
+ações do operador (alterar plano ou tipo, teto diário de envio, pausar
+transmissões, suspender e reativar), uma página de Confiança e segurança
+construída sobre o guardrail, o score da conta e os insights de conteúdo
+armazenados (nunca o corpo dos e-mails), e um log de auditoria da instância.
+
+Só o operador da instância (o primeiro usuário cadastrado) consegue abri-lo;
+todos os outros recebem 404, e nada no app leva até ele. Em uma instância
+self-hosted, **Configurações → SES** mostra ao operador um cartão "Console da
+instância" com o botão "Abrir console"; a URL direta
+`https://<seu-host>/console` também funciona. Todo número vem do Postgres ou
+de uma leitura gratuita de `GetAccount` do SESv2 por região; nenhuma API paga
+da AWS é chamada, e o custo por região é uma estimativa local.
+
+Uma equipe suspensa mantém os dados e as chaves continuam autenticando, mas
+todo envio responde `403 team_suspended` (SMTP `550`); uma pausa de
+transmissões retém as transmissões enquanto o e-mail transacional continua;
+um teto diário limita o dia da equipe abaixo do plano. Os proprietários são
+avisados por e-mail a cada ação (exceto suspensão por phishing), e cada ação
+entra no log de auditoria com o motivo.
+
 ## Operações
 
 - Taxa de envio e retenção de emails são gerenciadas no painel:

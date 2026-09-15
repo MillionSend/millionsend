@@ -182,13 +182,21 @@ export interface QuotaTeamRow {
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
   overageEnabled: boolean;
+  /** Operator ceiling on the team's UTC day (instance console); null or absent = the plan decides. */
+  dailySendCeiling?: number | null | undefined;
 }
 
 /** What limits a team's sends right now. */
 export type TeamQuota =
   /** Self-host: counted, never capped. */
   | { kind: "none" }
-  | { kind: "day"; plan: Plan; limit: number }
+  | {
+      kind: "day";
+      plan: Plan;
+      limit: number;
+      /** An operator ceiling on the day, enforced as typed (the plan's tolerance never stretches it). */
+      dailyCeiling?: number | null | undefined;
+    }
   | {
       kind: "month";
       plan: Plan;
@@ -198,6 +206,8 @@ export type TeamQuota =
       /** Sends past `included` bill instead of stopping. */
       overage: boolean;
       overageCentsPer1k: number;
+      /** An operator ceiling on each UTC day inside the period; absent or null = the period alone caps. */
+      dailyCeiling?: number | null | undefined;
     };
 
 function addUtcMonth(date: Date): Date {
@@ -223,8 +233,7 @@ export function quotaPeriod(
   return { start: monthStart, end: addUtcMonth(monthStart) };
 }
 
-/** The cap that applies to a team row right now; every send surface derives it from here. */
-export function teamQuota(team: QuotaTeamRow, isCloud: boolean, now: Date = new Date()): TeamQuota {
+function planQuota(team: QuotaTeamRow, isCloud: boolean, now: Date): TeamQuota {
   if (!isCloud) return { kind: "none" };
   const plan = effectivePlan(team.plan, team.currentPeriodEnd, now);
   const rung = teamRung(plan, plan === team.plan ? team.planQuota : null);
@@ -241,11 +250,32 @@ export function teamQuota(team: QuotaTeamRow, isCloud: boolean, now: Date = new 
   };
 }
 
+/**
+ * The operator's daily ceiling sits beside the plan and never replaces it:
+ * a daily cap becomes the lower of the two, a monthly plan gains a per-day
+ * cap on top of its period, and an uncapped team (self-host) gets a plain
+ * daily cap.
+ */
+function withCeiling(quota: TeamQuota, plan: Plan, ceiling: number | null): TeamQuota {
+  if (ceiling === null) return quota;
+  if (quota.kind === "none") return { kind: "day", plan, limit: ceiling, dailyCeiling: ceiling };
+  if (quota.kind === "day") {
+    return { ...quota, limit: Math.min(quota.limit, ceiling), dailyCeiling: ceiling };
+  }
+  return { ...quota, dailyCeiling: ceiling };
+}
+
+/** The cap that applies to a team row right now; every send surface derives it from here. */
+export function teamQuota(team: QuotaTeamRow, isCloud: boolean, now: Date = new Date()): TeamQuota {
+  return withCeiling(planQuota(team, isCloud, now), team.plan, team.dailySendCeiling ?? null);
+}
+
 /** Emails a quota lets through in a month (a daily cap times 30); Infinity without a cap. */
 export function monthlyCapacity(quota: TeamQuota): number {
   if (quota.kind === "none") return Number.POSITIVE_INFINITY;
   if (quota.kind === "day") return quota.limit * 30;
-  return quota.overage ? quota.included * OVERAGE_HARD_CAP : quota.included;
+  const period = quota.overage ? quota.included * OVERAGE_HARD_CAP : quota.included;
+  return quota.dailyCeiling == null ? period : Math.min(period, quota.dailyCeiling * 30);
 }
 
 /** Whether a quota change lets more mail through, so parked sends deserve an immediate drain. */

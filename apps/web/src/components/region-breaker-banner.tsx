@@ -20,11 +20,15 @@ export function RegionBreakerBanner() {
         <NoticeStrip
           key={r.region}
           tone="danger"
-          text={t("paused", {
-            region: r.region,
-            metric: t(`metric.${r.reason?.metric ?? "complaint"}`),
-            rate: ((r.reason?.rate ?? 0) * 100).toFixed(2),
-          })}
+          text={
+            r.held
+              ? t("held", { region: r.region })
+              : t("paused", {
+                  region: r.region,
+                  metric: t(`metric.${r.reason?.metric ?? "complaint"}`),
+                  rate: ((r.reason?.rate ?? 0) * 100).toFixed(2),
+                })
+          }
         />
       ))}
     </>

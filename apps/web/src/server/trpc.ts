@@ -5,6 +5,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { cookies } from "next/headers";
 import superjson from "superjson";
 import { getAuth } from "./auth";
+import { isInstanceOperator } from "./instance-operator";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership, type TeamRole } from "./membership";
 import { enqueueEmailSend, enqueueWebhookDeliveries, getQueue } from "./queue";
 
@@ -115,4 +116,17 @@ export const teamProcedure = protectedProcedure.use(({ ctx, next }) => {
 export const adminProcedure = teamProcedure.use(({ ctx, next }) => {
   if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
   return next();
+});
+
+/**
+ * The instance console: only the first registered user, re-checked on every
+ * call. Anyone else gets the same NOT_FOUND a route that does not exist
+ * would give, signed-in members included — the console is not a thing
+ * they can see. No team scope: the console reads across every team.
+ */
+export const operatorProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  if (!(await isInstanceOperator(ctx.db, ctx.session.user.id))) {
+    throw new TRPCError({ code: "NOT_FOUND" });
+  }
+  return next({ ctx: { operator: ctx.session.user } });
 });

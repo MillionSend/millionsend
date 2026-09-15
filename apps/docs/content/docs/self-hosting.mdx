@@ -678,6 +678,31 @@ address to MillionSend release notes; that is the wizard on your machine
 posting your answer, and a confirmation link is sent before anything is
 stored. **Settings → Instance** links to the same page.
 
+## Console
+
+`/console` is the operator's view of the whole deployment: an overview
+(sends, deliverability, teams, contacts, domains, queue, one card per SES
+region with quota, pricing plan and enforcement status, and the health probes
+with their history), a Regions page, a Teams page with operator actions
+(change plan or type, daily send ceiling, pause broadcasts, suspend and
+reinstate), a Trust & safety page built on the guardrail, the account score
+and the stored content insights (never email bodies), and an instance-wide
+audit log.
+
+Only the instance operator (the first registered user) can open it; everyone
+else gets a 404, and nothing in the app links to it. On a self-hosted
+instance, **Settings → SES** shows the operator an "Instance console" card
+with an "Open console" button; the direct URL `https://<your-host>/console`
+works too. Every number comes from Postgres or a free SESv2 `GetAccount`
+read per region; no paid AWS API is called, and the per-region cost is a
+local estimate.
+
+A suspended team keeps its data and its keys authenticate, but every send
+answers `403 team_suspended` (SMTP `550`); a broadcast pause holds
+broadcasts while transactional mail flows; a daily ceiling caps the team's
+day under its plan. Owners are emailed about each action (except a phishing
+suspension), and every action lands in the audit log with its reason.
+
 ## Operations
 
 - Send rate and email retention are managed in the dashboard: **Settings →

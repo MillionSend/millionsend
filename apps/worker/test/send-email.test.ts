@@ -1401,3 +1401,31 @@ it("holds a send before SES while the account sits at its quota", async () => {
   const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
   expect(row?.latestStatus).toBe("queued_quota");
 });
+
+it("parks a suspended team's mail before SES, and a paused team's broadcast rows only", async () => {
+  const { ses, sends } = fakeSes("hold-mid");
+  const hold = (patch: Partial<typeof schema.teams.$inferInsert>) =>
+    db.update(schema.teams).set(patch).where(eq(schema.teams.id, teamId));
+  await hold({ suspendedAt: new Date(), suspensionReason: "manual" });
+  const emailId = await insertEmail();
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("parked");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, emailId));
+  expect(row?.latestStatus).toBe("queued_quota");
+  expect(sends).toHaveLength(0);
+
+  await hold({
+    suspendedAt: null,
+    suspensionReason: null,
+    broadcastsPausedByOperatorAt: new Date(),
+  });
+  // Transactional mail still leaves under a broadcast pause; broadcast rows wait.
+  expect(await sendEmail(db, { keyring, ses }, { emailId: await insertEmail() })).toBe("sent");
+  const [bc] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId, from: "Acme <a@acme.dev>", subject: "s", html: "<p>x</p>" })
+    .returning({ id: schema.broadcasts.id });
+  const held = await insertEmail({ broadcastId: bc?.id });
+  expect(await sendEmail(db, { keyring, ses }, { emailId: held })).toBe("parked");
+  expect(sends).toHaveLength(1);
+  await hold({ broadcastsPausedByOperatorAt: null });
+});
