@@ -18,7 +18,7 @@
     "mailparser": "^3.9.26",
     "smtp-server": "^3.19.12",
     "tsx": "^4.23.13",
-    "zod": "^4.6.3"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
@@ -26,7 +26,7 @@
     "@types/node": "^22.20.2",
     "@types/nodemailer": "^8.0.1",
     "@types/smtp-server": "^3.5.13",
-    "nodemailer": "^10.0.3",
+    "nodemailer": "^10.0.10",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   }
