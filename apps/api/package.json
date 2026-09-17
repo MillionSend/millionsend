@@ -32,7 +32,7 @@
     "@millionsend/test-utils": "workspace:*",
     "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "^22.20.2",
-    "resend": "^6.27.0",
+    "resend": "^6.28.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   }
