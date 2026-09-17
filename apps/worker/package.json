@@ -27,7 +27,7 @@
     "@millionsend/test-utils": "workspace:*",
     "@types/node": "^22.20.2",
     "@types/nodemailer": "^8.0.1",
-    "resend": "^6.27.0",
+    "resend": "^6.28.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   }
