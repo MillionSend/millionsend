@@ -9,17 +9,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.1130.0",
-    "@aws-sdk/client-sqs": "^3.1130.0",
+    "@aws-sdk/client-sesv2": "^3.1137.0",
+    "@aws-sdk/client-sqs": "^3.1137.0",
     "@millionsend/billing": "workspace:*",
     "@millionsend/config": "workspace:*",
     "@millionsend/core": "workspace:*",
     "@millionsend/db": "workspace:*",
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "nodemailer": "^10.0.3",
-    "tsx": "^4.23.13"
+    "drizzle-orm": "^0.45.3",
+    "nodemailer": "^10.0.10",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@hono/node-server": "^2.1.1",
