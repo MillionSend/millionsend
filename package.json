@@ -16,9 +16,9 @@
     "db:generate": "pnpm --filter @millionsend/db db:generate"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.13",
+    "@biomejs/biome": "^2.5.14",
     "tsx": "^4.23.13",
-    "turbo": "^2.10.12",
+    "turbo": "^2.11.2",
     "typescript": "^7.0.2"
   }
 }

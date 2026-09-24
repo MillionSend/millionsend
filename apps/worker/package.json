@@ -25,10 +25,10 @@
     "@hono/node-server": "^2.1.1",
     "@millionsend/api": "workspace:*",
     "@millionsend/test-utils": "workspace:*",
-    "@types/node": "^22.20.2",
+    "@types/node": "^22.20.4",
     "@types/nodemailer": "^8.0.1",
-    "resend": "^6.27.0",
+    "resend": "^6.28.1",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.1"
   }
 }
