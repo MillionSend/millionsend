@@ -16,6 +16,8 @@ export interface JudgeVerdict {
   /** Short reason codes, at most a handful. */
   reasons: string[];
   language: string;
+  /** The versioned model id that answered, when the provider reported one. */
+  model?: string;
 }
 
 export interface AbuseJudge {

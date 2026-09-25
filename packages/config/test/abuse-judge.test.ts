@@ -31,7 +31,7 @@ it("reads the judge's settings with their defaults, validated or raw", () => {
     ),
   ).toEqual({
     provider: "typesafe",
-    model: "jev-latest",
+    model: "jev-1.13.0",
     baseUrl: "https://api.typesafe.ai",
     apiKey: "k",
     timeoutMs: 5000,

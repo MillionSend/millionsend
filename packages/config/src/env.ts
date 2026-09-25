@@ -46,7 +46,7 @@ export type ContentRevealMode = (typeof CONTENT_REVEAL_MODES)[number];
 export const ABUSE_JUDGE_PROVIDERS = ["off", "typesafe"] as const;
 export type AbuseJudgeProvider = (typeof ABUSE_JUDGE_PROVIDERS)[number];
 export const ABUSE_JUDGE_BASE_URL_DEFAULT = "https://api.typesafe.ai";
-export const ABUSE_JUDGE_MODEL_DEFAULT = "jev-latest";
+export const ABUSE_JUDGE_MODEL_DEFAULT = "jev-1.13.0";
 export const ABUSE_JUDGE_TIMEOUT_MS_DEFAULT = 20_000;
 
 const emailAddress = z.email();

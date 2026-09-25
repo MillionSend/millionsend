@@ -188,10 +188,12 @@ SES_TENANTS=
 # SES took it (see "Content monitoring" in SELF_HOSTING.md). Off unless
 # ABUSE_JUDGE=typesafe; then ABUSE_JUDGE_API_KEY is required. Sending never
 # waits on it. Sampling rates and thresholds are edited in the console
-# (Trust & safety → Monitoring settings) or seeded as MONITOR_*.
+# (Trust & safety → Monitoring settings) or seeded as MONITOR_*. The model
+# is pinned because the thresholds are tuned against one version; jev-latest
+# moves whenever TypeSafe ships a new one.
 ABUSE_JUDGE=off
 ABUSE_JUDGE_API_KEY=
-ABUSE_JUDGE_MODEL=jev-latest
+ABUSE_JUDGE_MODEL=jev-1.13.0
 
 # Break-glass content access (see "Content access (break-glass)" in
 # SELF_HOSTING.md): with this on, the console can unwrap the subject and

@@ -90,7 +90,7 @@ export async function judgeSample(
   }
   const latencyMs = Date.now() - started;
   const settings = await deps.settings();
-  const model = deps.judge.model;
+  const model = verdict.model ?? deps.judge.model;
   // The verdict and its fold commit together: a crash between them would
   // leave a judged row the retry skips and a risk that never saw it.
   const outcome = await db.transaction(async (tx) => {
