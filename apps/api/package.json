@@ -23,10 +23,10 @@
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
     "@modelcontextprotocol/server": "2.0.0",
-    "drizzle-orm": "^0.45.2",
-    "hono": "^4.13.7",
+    "drizzle-orm": "^0.45.3",
+    "hono": "^4.13.8",
     "jose": "6.2.12",
-    "tsx": "^4.23.13"
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
