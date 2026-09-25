@@ -7,7 +7,13 @@ import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 // resolves package names. The prompt kit lives in the MIT package so the
 // AGPL wizard consumes it, never the reverse.
 import { createFlow, type Flow } from "../../cli/src/flow.js";
-import { banner, isInteractive, lineReader, pickBannerTier } from "../../cli/src/tty-ui.js";
+import {
+  banner,
+  isInteractive,
+  lineReader,
+  maskSecret,
+  pickBannerTier,
+} from "../../cli/src/tty-ui.js";
 import { SES_REGIONS, type SesRegion } from "./domain-identity.js";
 import {
   addRegionPlan,
@@ -393,21 +399,35 @@ async function cloudStep(wizard: Wizard): Promise<void> {
     {
       key: "KMS_KEY_ID",
       hint: "key ARN or id that wraps email bodies; the SES access key must be allowed to use it",
+      secret: false,
     },
-    { key: "STRIPE_SECRET_KEY", hint: "live secret key (Stripe → Developers → API keys)" },
+    {
+      key: "STRIPE_SECRET_KEY",
+      hint: "live secret key (Stripe → Developers → API keys)",
+      secret: true,
+    },
     {
       key: "STRIPE_WEBHOOK_SECRET",
       hint: `signing secret of the webhook endpoint at ${wizard.appBaseUrl()}/api/billing/webhook`,
+      secret: true,
     },
     {
       key: "STRIPE_PORTAL_CONFIG",
       hint: "customer-portal configuration id, bpc_… (empty: the account default)",
+      secret: false,
     },
   ] as const;
   const entries: Record<string, string> = {};
-  for (const { key, hint } of prompts) {
+  for (const { key, hint, secret } of prompts) {
     const current = envValue(wizard.env, key) ?? "";
-    const value = await flow.ask({ label: key, hint, initial: current });
+    // A secret's current value is shown masked, never as the [default].
+    const value = secret
+      ? await flow.ask({
+          label: key,
+          hint: current ? `${hint}; empty keeps ${maskSecret(current)}` : hint,
+          secret: true,
+        })
+      : await flow.ask({ label: key, hint, initial: current });
     if (value !== "" && value !== current) entries[key] = value;
   }
   if (Object.keys(entries).length > 0) {
@@ -872,7 +892,6 @@ async function addRegionStep(
   wizard: Wizard,
   queueUrl: string,
   preset: string | null,
-  proceedYes = wizard.interactive,
 ): Promise<"ok" | "skipped" | "failed"> {
   const { flow } = wizard;
   const served = servedRegionsInEnv(wizard.env);
@@ -898,7 +917,7 @@ async function addRegionStep(
   const appBaseUrl = wizard.appBaseUrl();
 
   flow.list("Plan:", addRegionPlan({ region, queueUrl, appBaseUrl }));
-  if (!(await flow.confirm("Proceed?", proceedYes))) return "skipped";
+  if (!(await flow.confirm("Proceed?", wizard.interactive))) return "skipped";
 
   const clients = createSetupClients(region, queue.region);
   const onStep = (line: string): void => flow.step(line);
@@ -959,9 +978,10 @@ async function addRegionStep(
  * rest of the wizard. Where the install's .env is — the deploy directory, or
  * the container's `setup` mode on the server — it edits that file; anywhere
  * else it asks for the install's queue, topics and regions and prints the
- * two lines to apply. --dry-run prints the plan and touches nothing.
+ * two lines to apply. --dry-run prints the plan and touches nothing. With
+ * stdin piped the region must be named and Proceed takes an explicit yes.
  */
-async function addRegionMain(flow: Flow, args: string[], dryRun: boolean): Promise<number> {
+export async function addRegionMain(flow: Flow, args: string[], dryRun: boolean): Promise<number> {
   const preset = args.find((arg) => !arg.startsWith("--")) ?? null;
   if (preset !== null && !REGION_RE.test(preset)) {
     flow.error(`Not an AWS region name: ${preset}`);
@@ -987,6 +1007,12 @@ async function addRegionMain(flow: Flow, args: string[], dryRun: boolean): Promi
     );
     flow.outro(`--dry-run: nothing was created or written${wizard.env ? "" : " (no .env here)"}.`);
     return 0;
+  }
+  if (preset === null && process.stdin.isTTY !== true) {
+    flow.error(
+      "No region given, and stdin is not a terminal to choose one on: run add-region <region>, e.g. add-region us-east-1.",
+    );
+    return 1;
   }
   if (state.envContent === null) {
     flow.note(
@@ -1026,11 +1052,11 @@ async function addRegionMain(flow: Flow, args: string[], dryRun: boolean): Promi
     });
     // No path: nothing is written, the step prints the lines instead.
     const wizard = createWizard(flow, state, false, env, null);
-    return (await addRegionStep(wizard, queueUrl, preset, true)) === "ok" ? 0 : 1;
+    return (await addRegionStep(wizard, queueUrl, preset)) === "ok" ? 0 : 1;
   }
   flow.note(`Found ${envPath} — the region is written into it.`);
   const wizard = createWizard(flow, state, isCloudEnv(state.envContent), state.envContent, envPath);
-  return (await addRegionStep(wizard, queueUrl, preset, true)) === "ok" ? 0 : 1;
+  return (await addRegionStep(wizard, queueUrl, preset)) === "ok" ? 0 : 1;
 }
 
 /**

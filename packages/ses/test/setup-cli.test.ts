@@ -2,13 +2,22 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { IAMClient } from "@aws-sdk/client-iam";
 import { GetAccountCommand, PutAccountPricingAttributesCommand } from "@aws-sdk/client-sesv2";
+import { STSClient } from "@aws-sdk/client-sts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFlow } from "../../cli/src/flow.js";
 import { setColorMode } from "../../cli/src/theme.js";
 import { lineReader } from "../../cli/src/tty-ui.js";
 import { upsertEnv } from "../src/setup.js";
-import { authAction, essentialsPlanPrompt, main, menuLoop, type Wizard } from "../src/setup-cli.js";
+import {
+  addRegionMain,
+  authAction,
+  essentialsPlanPrompt,
+  main,
+  menuLoop,
+  type Wizard,
+} from "../src/setup-cli.js";
 import { detectDirState, envValue } from "../src/setup-flow.js";
 
 describe("main --dry-run", () => {
@@ -97,6 +106,73 @@ describe("main add-region --dry-run", () => {
   });
 });
 
+describe("add-region with stdin piped", () => {
+  const stdin = process.stdin as { isTTY?: boolean | undefined };
+  const wasTty = stdin.isTTY;
+  afterEach(() => {
+    stdin.isTTY = wasTty;
+    vi.restoreAllMocks();
+  });
+
+  /** An install serving sa-east-1, AWS stubbed: STS answers, IAM (the first write) fails loudly. */
+  function install(answers: string) {
+    stdin.isTTY = false;
+    const dir = mkdtempSync(join(tmpdir(), "ms-setup-"));
+    writeFileSync(
+      join(dir, ".env"),
+      [
+        "MASTER_ENCRYPTION_KEY=k",
+        "BETTER_AUTH_SECRET=s",
+        "AWS_REGIONS=sa-east-1",
+        "SQS_QUEUE_URL=https://sqs.sa-east-1.amazonaws.com/123456789012/millionsend-events",
+        "SNS_TOPIC_ARNS=arn:aws:sns:sa-east-1:123456789012:millionsend-events",
+        "",
+      ].join("\n"),
+    );
+    vi.spyOn(process, "cwd").mockReturnValue(dir);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sts = vi.spyOn(STSClient.prototype, "send").mockResolvedValue({
+      Account: "123456789012",
+      Arn: "arn:aws:iam::123456789012:user/admin",
+    } as never);
+    const iam = vi.spyOn(IAMClient.prototype, "send").mockRejectedValue(new Error("stubbed IAM"));
+    const input = new PassThrough();
+    const output = new PassThrough();
+    input.end(answers);
+    const rl = lineReader(input, output);
+    return { flow: createFlow(rl, { rail: false }), rl, errors, sts, iam };
+  }
+
+  it.each([
+    ["an empty answer", "\n"],
+    ["EOF", ""],
+  ])("provisions nothing when Proceed gets %s", async (_, answers) => {
+    const { flow, rl, iam } = install(answers);
+    expect(await addRegionMain(flow, ["eu-west-1"], false)).toBe(1);
+    expect(iam).not.toHaveBeenCalled();
+    rl.close();
+  });
+
+  it("proceeds on an explicit yes", async () => {
+    const { flow, rl, errors, iam } = install("y\n");
+    expect(await addRegionMain(flow, ["eu-west-1"], false)).toBe(1);
+    expect(iam).toHaveBeenCalled();
+    expect(errors.mock.calls.flat().join("\n")).toContain("Adding the region failed: stubbed IAM");
+    rl.close();
+  });
+
+  it("refuses to pick a region itself", async () => {
+    const { flow, rl, errors, sts } = install("eu-west-1\ny\n");
+    expect(await addRegionMain(flow, [], false)).toBe(1);
+    expect(errors.mock.calls.flat().join("\n")).toContain(
+      "No region given, and stdin is not a terminal to choose one on: run add-region <region>",
+    );
+    expect(sts).not.toHaveBeenCalled();
+    rl.close();
+  });
+});
+
 describe("authAction", () => {
   it("proceeds when the identity check passed", () => {
     expect(authAction({ identityOk: true, hasAwsCli: false, isTTY: false })).toBe("proceed");
@@ -174,19 +250,20 @@ describe("menuLoop", () => {
   const env =
     "MASTER_ENCRYPTION_KEY=k\nBETTER_AUTH_SECRET=s\nAWS_ACCESS_KEY_ID=AKIA\nSNS_TOPIC_ARNS=arn:a\nSQS_QUEUE_URL=https://q\n";
 
-  function stub(answers: string, opts: { cloud?: boolean } = {}) {
+  function stub(answers: string, opts: { cloud?: boolean; env?: string } = {}) {
     setColorMode("never");
     const input = new PassThrough();
     const output = new PassThrough();
     input.end(answers);
     const rl = lineReader(input, output);
     const flow = createFlow(rl, { rail: false });
+    const content = opts.env ?? env;
     const wizard: Wizard = {
       flow,
       interactive: false,
       cloud: opts.cloud ?? false,
-      state: detectDirState((name) => (name === ".env" ? env : null), null),
-      env,
+      state: detectDirState((name) => (name === ".env" ? content : null), null),
+      env: content,
       typedAppBaseUrl: null,
       writeEnv(entries) {
         if (wizard.env === null) return false;
@@ -198,7 +275,7 @@ describe("menuLoop", () => {
         wizard.typedAppBaseUrl || envValue(wizard.env, "APP_BASE_URL") || "http://localhost:3000",
       apiPort: () => 3001,
     };
-    return { wizard, rl };
+    return { wizard, rl, output };
   }
 
   it("defaults to Exit so Enter does not provision AWS", async () => {
@@ -213,6 +290,25 @@ describe("menuLoop", () => {
     const { wizard, rl } = stub("\n", { cloud: true });
     expect(await menuLoop(wizard)).toBe(0);
     expect(envValue(wizard.env, "IS_CLOUD")).toBe("true");
+    rl.close();
+  });
+
+  it("never prints the current Stripe secrets, and an empty answer keeps them", async () => {
+    const logged: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logged.push(args.join(" "));
+    });
+    const stripeKey = ["sk", "live", "0123456789abcd"].join("_");
+    const webhookSecret = ["whsec", "0123456789wxyz"].join("_");
+    const secrets = `STRIPE_SECRET_KEY=${stripeKey}\nSTRIPE_WEBHOOK_SECRET=${webhookSecret}\n`;
+    const { wizard, rl, output } = stub("cloud\n", { cloud: true, env: `${env}${secrets}` });
+    expect(await menuLoop(wizard)).toBe(0);
+    const shown = `${logged.join("\n")}${output.read()?.toString() ?? ""}`;
+    expect(shown).toContain("STRIPE_SECRET_KEY: ");
+    expect(shown).not.toContain("0123456789abcd");
+    expect(shown).not.toContain("0123456789wxyz");
+    expect(envValue(wizard.env, "STRIPE_SECRET_KEY")).toBe(stripeKey);
+    expect(envValue(wizard.env, "STRIPE_WEBHOOK_SECRET")).toBe(webhookSecret);
     rl.close();
   });
 
