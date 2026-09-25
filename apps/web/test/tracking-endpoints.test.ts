@@ -298,8 +298,10 @@ describe("click bursts", () => {
 
   // The clock stands still so a burst's hits share one instant, however
   // long each request takes here; time moves only when a test says so.
+  // Half past noon UTC keeps every stamp, the inferred open a millisecond
+  // before its click included, inside one usage-counter day and hour.
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.useFakeTimers({ now: new Date().setUTCHours(12, 30, 0, 0), toFake: ["Date"] });
   });
   afterEach(() => {
     vi.useRealTimers();

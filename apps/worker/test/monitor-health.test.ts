@@ -15,7 +15,7 @@ const mailer = {
     sends.push({ to, kind: m.kind, text: m.text });
   },
 };
-const judge = { provider: "typesafe" as const, model: "jev-latest" };
+const judge = { provider: "typesafe" as const, model: "jev-1.13.0" };
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
@@ -30,6 +30,7 @@ async function seed(
   n: number,
   status: "judged" | "unjudged" | "pending",
   at: Date = new Date(NOW.getTime() - 60_000),
+  errorClass = "timeout",
 ) {
   await db.insert(schema.monitorSamples).values(
     Array.from({ length: n }, () => ({
@@ -37,8 +38,9 @@ async function seed(
       kind: "tier" as const,
       status,
       score: status === "judged" ? 10 : null,
-      errorClass: status === "unjudged" ? "timeout" : null,
+      errorClass: status === "unjudged" ? errorClass : null,
       createdAt: at,
+      judgedAt: status === "pending" ? null : at,
     })),
   );
 }
@@ -78,7 +80,7 @@ it("records the hour's probes, marks lost samples, and mails the operator once p
   expect(sends).toHaveLength(1);
   expect(sends[0]).toMatchObject({ to: "op@example.com", kind: "monitor.degraded" });
   expect(sends[0]?.text).toContain("15 of 35");
-  expect(sends[0]?.text).toContain("typesafe · jev-latest");
+  expect(sends[0]?.text).toContain("typesafe · jev-1.13.0");
   expect(state.degradedMailedAt).toEqual(later);
   const rate = await db
     .select()
@@ -95,4 +97,48 @@ it("records the hour's probes, marks lost samples, and mails the operator once p
   await seed(30, "unjudged", new Date(sixOn.getTime() - 60_000));
   await runMonitorHealth(db, { judge, mailer, state, now: sixOn });
   expect(sends).toHaveLength(2);
+});
+
+it("reports a rejected key as degraded below the sample floor, other failures only above it", async () => {
+  const at = new Date(NOW.getTime() + 2 * 86_400_000);
+  const minuteAgo = new Date(at.getTime() - 60_000);
+  await seed(3, "unjudged", minuteAgo);
+  await seed(1, "unjudged", new Date(at.getTime() - 2 * 3600_000), "no_credentials");
+  sends.length = 0;
+  const state = { degradedMailedAt: null as Date | null };
+  expect(await runMonitorHealth(db, { judge, mailer, state, now: at })).toMatchObject({
+    samples: 3,
+    unjudged: 3,
+    degraded: false,
+  });
+  expect(sends).toEqual([]);
+
+  await seed(1, "unjudged", minuteAgo, "no_credentials");
+  const later = new Date(at.getTime() + 60_000);
+  expect(await runMonitorHealth(db, { judge, mailer, state, now: later })).toMatchObject({
+    samples: 4,
+    unjudged: 4,
+    degraded: true,
+  });
+  expect(sends).toHaveLength(1);
+  expect(sends[0]).toMatchObject({ kind: "monitor.degraded" });
+  const probes = await db
+    .select()
+    .from(schema.instanceProbes)
+    .where(eq(schema.instanceProbes.takenAt, later));
+  expect(probes.find((p) => p.probe === "monitor_unjudged_rate")).toMatchObject({ ok: false });
+});
+
+it("clears a rejected key once a later sample is answered", async () => {
+  const at = new Date(NOW.getTime() + 4 * 86_400_000);
+  await seed(1, "unjudged", new Date(at.getTime() - 40 * 60_000), "no_credentials");
+  await seed(1, "judged", new Date(at.getTime() - 10 * 60_000));
+  sends.length = 0;
+  const state = { degradedMailedAt: null as Date | null };
+  expect(await runMonitorHealth(db, { judge, mailer, state, now: at })).toMatchObject({
+    samples: 2,
+    unjudged: 1,
+    degraded: false,
+  });
+  expect(sends).toEqual([]);
 });

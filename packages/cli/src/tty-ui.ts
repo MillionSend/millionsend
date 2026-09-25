@@ -5,6 +5,63 @@ import { stripControl, truncate } from "./utils.js";
 /** Structural subset of lineReader — the non-TTY fallback asker every prompt degrades to. */
 export interface Asker {
   question(prompt: string): Promise<string>;
+  /** A line typed or pasted ahead of its question on a terminal, taken without printing it. */
+  take?(): string | undefined;
+  /** Terminal rows from the last question's prompt row down to the cursor. */
+  rows?(): number;
+}
+
+/** One CSI sequence, one other escape pair, or one code point. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the control bytes are the target
+const TERMINAL_TOKEN_RE = /\x1b\[[?\d;]*[@-~]|\x1b[^[]|[\s\S]/gu;
+
+/**
+ * The cursor row, relative to the last reset, that a terminal reaches from
+ * the text it is sent: printable characters wrap at `columns` with the
+ * pending-wrap rule (a full row moves down on the next character, not on its
+ * last), CR, LF (the tty turns it into CRLF) and CSI cursor moves; other
+ * sequences do not move it.
+ */
+export function cursorTracker(columns: () => number) {
+  let row = 0;
+  let col = 0;
+  let pending = false;
+  return {
+    row: (): number => row,
+    reset(): void {
+      row = 0;
+      col = 0;
+      pending = false;
+    },
+    feed(text: string): void {
+      const width = columns();
+      for (const [token] of text.matchAll(TERMINAL_TOKEN_RE)) {
+        if (token === "\r" || token === "\n") {
+          if (token === "\n") row++;
+          col = 0;
+          pending = false;
+        } else if (token.startsWith("\x1b[")) {
+          const n = Number.parseInt(token.slice(2), 10) || 1;
+          const op = token.at(-1);
+          if (op === "A") row -= n;
+          else if (op === "B") row += n;
+          else if (op === "C") col = Math.min(width - 1, col + n);
+          else if (op === "D") col = Math.max(0, col - n);
+          else if (op === "G") col = Math.min(width - 1, n - 1);
+          else continue;
+          pending = false;
+        } else if (token >= " ") {
+          if (pending) {
+            row++;
+            col = 0;
+            pending = false;
+          }
+          if (col === width - 1) pending = true;
+          else col++;
+        }
+      }
+    },
+  };
 }
 
 /**
@@ -21,14 +78,47 @@ export function lineReader(
   input: NodeJS.ReadableStream = process.stdin,
   output: NodeJS.WritableStream = process.stdout,
 ) {
-  const rl = createInterface({ input, output });
+  const tty = (output as NodeJS.WriteStream).isTTY === true;
+  const cursor = cursorTracker(() => (output as NodeJS.WriteStream).columns ?? 80);
+  // readline writes through this too, so rows() counts its echo however it
+  // drew it: a typed line is repainted with a forced extra row at an exact
+  // multiple of the width, a pasted chunk is written as is, and lines pasted
+  // ahead land under the answer.
+  const tracked = new Proxy(output, {
+    get(target, key) {
+      if (key === "write") {
+        return (chunk: string) => {
+          cursor.feed(String(chunk));
+          return target.write(chunk);
+        };
+      }
+      const value = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  // Line editing only when both ends are terminals: in terminal mode readline
+  // echoes what it reads, which for piped stdin means printing piped answers,
+  // secrets included, onto the terminal.
+  const terminal = (input as NodeJS.ReadStream).isTTY === true && tty;
+  // No history: a line taken as a secret must not come back on Up.
+  const rl = createInterface({ input, output: tracked, terminal, historySize: 0 });
   const queue: string[] = [];
   let waiting: ((line: string) => void) | undefined;
   let ended = false;
+  // An answer readline did not echo at the prompt still ends the prompt's
+  // row on a terminal, as Enter would; pipes stay byte-identical.
+  const endRow = (): void => {
+    if (tty) tracked.write("\n");
+  };
   rl.on("line", (line) => {
+    // Raw mode without line editing means readKeys owns the keys (a masked
+    // secret): readline's data listener, attached before readKeys' keypress
+    // decoder, reads the same bytes, and they must not become an answer.
+    if (!terminal && (input as NodeJS.ReadStream).isRaw === true) return;
     if (waiting) {
       const resolve = waiting;
       waiting = undefined;
+      if (!terminal) endRow();
       resolve(line);
     } else {
       queue.push(line);
@@ -39,16 +129,19 @@ export function lineReader(
     if (waiting) {
       const resolve = waiting;
       waiting = undefined;
+      endRow();
       resolve("");
     }
   });
   rl.on("SIGINT", () => {
+    waiting = undefined;
     rl.close();
     output.write("\n");
     process.exit(130);
   });
   return {
     question(prompt: string): Promise<string> {
+      cursor.reset();
       // Hand the prompt to readline instead of writing it to output directly:
       // on a TTY, readline repaints the line on every edit (backspace, arrows)
       // using only the prompt it was given, so a prompt it never saw gets
@@ -57,23 +150,28 @@ export function lineReader(
       // After EOF readline has closed itself and prompt() would throw; the
       // direct write keeps the prompt-then-"" contract byte-identical.
       if (ended) {
-        output.write(prompt);
+        tracked.write(prompt);
       } else {
         rl.setPrompt(prompt);
         rl.prompt();
       }
-      const line = queue.shift();
+      const line = queue.shift() ?? (ended ? "" : undefined);
       if (line !== undefined) {
-        // Echo as if the operator typed it, so a later relative erase sees
-        // the same cursor as a real Enter. Pipes stay silent: answers must
-        // not leak into scripted stdout.
-        if ((output as NodeJS.WriteStream).isTTY === true) output.write(`${line}\n`);
+        // A line typed ahead was echoed by readline when it arrived; it is
+        // not printed again, so a secret never lands next to its label.
+        endRow();
         return Promise.resolve(line);
       }
-      if (ended) return Promise.resolve("");
       return new Promise((resolve) => {
         waiting = resolve;
       });
+    },
+    take(): string | undefined {
+      // Only with line editing are masked keystrokes kept out of the queue.
+      return terminal ? queue.shift() : undefined;
+    },
+    rows(): number {
+      return cursor.row();
     },
     close() {
       rl.close();
@@ -446,6 +544,8 @@ export function maskSecret(secret: string): string {
  * confirms); the masked value is printed afterwards so the transcript shows
  * which key was used. With stdin piped, a plain `label: ` question. `rail`
  * draws the input on the guided-flow rail under a head the caller printed.
+ * A line pasted before the prompt appeared is this prompt's answer, as it
+ * would be for any other question, and is never printed in clear.
  */
 export async function secretPrompt(
   rl: Asker,
@@ -454,18 +554,24 @@ export async function secretPrompt(
   const mode = secretPromptMode(process.stdin.isTTY === true, process.stdout.isTTY === true);
   if (!mode.masked) return (await rl.question(`${label}: `)).trim();
   const stdout = mode.toStderr ? process.stderr : process.stdout;
-  stdout.write(rail ? `${dim("│")}  ` : `${label}: `);
-  let value = "";
-  const secret = await readKeys<string>(
-    (str, key) => {
-      if (isEnter(key)) return value.trim();
-      if (key.name === "backspace" || key.name === "delete") value = value.slice(0, -1);
-      else if (str !== undefined && key.ctrl !== true && str >= " ") value += str;
-      return undefined;
-    },
-    () => stdout.write("\r\x1b[2K"),
-    stdout,
-  );
+  const ahead = rl.take?.();
+  let secret: string;
+  if (ahead !== undefined) {
+    secret = ahead.trim();
+  } else {
+    stdout.write(rail ? `${dim("│")}  ` : `${label}: `);
+    let value = "";
+    secret = await readKeys<string>(
+      (str, key) => {
+        if (isEnter(key)) return value.trim();
+        if (key.name === "backspace" || key.name === "delete") value = value.slice(0, -1);
+        else if (str !== undefined && key.ctrl !== true && str >= " ") value += str;
+        return undefined;
+      },
+      () => stdout.write("\r\x1b[2K"),
+      stdout,
+    );
+  }
   stdout.write(
     rail
       ? `${dim("│")}  ${dim(maskSecret(secret))}\n${dim("│")}\n`

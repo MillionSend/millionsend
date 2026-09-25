@@ -1,11 +1,12 @@
-import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { PassThrough, Writable } from "node:stream";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { setColorMode } from "../src/theme.js";
 import {
   answerLine,
   banner,
   bannerLines,
   confirmPrompt,
+  cursorTracker,
   lineReader,
   maskSecret,
   multiSelectPrompt,
@@ -20,7 +21,7 @@ import {
   visibleLength,
   wrapText,
 } from "../src/tty-ui.js";
-import { truncate } from "../src/utils.js";
+import { stripControl, truncate } from "../src/utils.js";
 
 describe("lineReader", () => {
   function reader() {
@@ -55,6 +56,118 @@ describe("lineReader", () => {
     expect(await rl.question("q2? ")).toBe("");
     expect(await rl.question("q3? ")).toBe("");
     rl.close();
+  });
+});
+
+/** A terminal output 80 columns wide that keeps what it is sent. */
+function ttyOutput() {
+  const chunks: string[] = [];
+  const out = Object.assign(
+    new Writable({
+      write(chunk, _encoding, done) {
+        chunks.push(String(chunk));
+        done();
+      },
+    }),
+    { isTTY: true, columns: 80 },
+  );
+  return { out, chunks };
+}
+
+const turn = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+describe("lineReader on a terminal", () => {
+  it("does not print a line typed ahead again at its question, and ends the prompt row", async () => {
+    const input = Object.assign(new PassThrough(), { isTTY: true });
+    const { out, chunks } = ttyOutput();
+    const rl = lineReader(input, out);
+    input.write("re_typed_ahead_123\r");
+    await turn();
+    chunks.length = 0;
+    expect(await rl.question("Key: ")).toBe("re_typed_ahead_123");
+    const shown = chunks.join("");
+    expect(shown).not.toContain("re_typed_ahead_123");
+    expect(stripControl(shown)).toBe("Key: \n");
+    expect(rl.rows()).toBe(1);
+    rl.close();
+  });
+
+  it("never prints piped answers onto a terminal stdout", async () => {
+    const input = new PassThrough();
+    const { out, chunks } = ttyOutput();
+    const rl = lineReader(input, out);
+    input.end("re_piped_secret_123\nsecond\n");
+    expect(await rl.question("Key: ")).toBe("re_piped_secret_123");
+    expect(await rl.question("Next: ")).toBe("second");
+    expect(chunks.join("")).toBe("Key: \nNext: \n");
+    rl.close();
+  });
+
+  it("ends the prompt row when a piped answer arrives after the question", async () => {
+    const input = new PassThrough();
+    const { out, chunks } = ttyOutput();
+    const rl = lineReader(input, out);
+    const pending = rl.question("Key: ");
+    await turn();
+    input.write("re_x\n");
+    expect(await pending).toBe("re_x");
+    expect(chunks.join("")).toBe("Key: \n");
+    rl.close();
+  });
+
+  it("does not recall a taken line with Up", async () => {
+    const input = Object.assign(new PassThrough(), { isTTY: true });
+    const { out, chunks } = ttyOutput();
+    const rl = lineReader(input, out);
+    input.write("re_SECRET_value_42\r");
+    await turn();
+    expect(rl.take()).toBe("re_SECRET_value_42");
+    chunks.length = 0;
+    const pending = rl.question("Bucket: ");
+    input.write("\x1b[A\r");
+    expect(await pending).toBe("");
+    expect(chunks.join("")).not.toContain("re_SECRET");
+    rl.close();
+  });
+
+  it("drops what it reads while a masked prompt holds stdin in raw mode", async () => {
+    const input = Object.assign(new PassThrough(), { isTTY: true, isRaw: true });
+    const rl = lineReader(input, new PassThrough());
+    input.write("s3cr3tKEYvalue\r");
+    await turn();
+    input.isRaw = false;
+    input.write("millionsend-uploads\n");
+    expect(await rl.question("Uploads bucket name: ")).toBe("millionsend-uploads");
+    rl.close();
+  });
+
+  it("takes nothing ahead without line editing", async () => {
+    const input = Object.assign(new PassThrough(), { isTTY: true });
+    const rl = lineReader(input, new PassThrough());
+    input.write("typed ahead\n");
+    await turn();
+    expect(rl.take()).toBeUndefined();
+    expect(await rl.question("Next: ")).toBe("typed ahead");
+    rl.close();
+  });
+});
+
+describe("cursorTracker", () => {
+  it("wraps a full row on the next character, not on its last", () => {
+    const cursor = cursorTracker(() => 10);
+    cursor.feed("0123456789\r\n");
+    expect(cursor.row()).toBe(1);
+    cursor.reset();
+    cursor.feed("0123456789x\r\n");
+    expect(cursor.row()).toBe(2);
+  });
+
+  it("follows readline's forced row and its cursor moves; styling does not move it", () => {
+    const cursor = cursorTracker(() => 10);
+    cursor.feed("\x1b[2m│\x1b[22m  0123456 \x1b[1G\r\n");
+    expect(cursor.row()).toBe(2);
+    cursor.feed("\x1b[3A\x1b[J");
+    expect(cursor.row()).toBe(-1);
   });
 });
 
@@ -199,6 +312,37 @@ describe("piped prompts", () => {
     expect(await secretPrompt(rl, { label: "Resend API key" })).toBe("re_abc123");
     expect(output.read()?.toString()).toBe("Resend API key: ");
     rl.close();
+  });
+
+  describe("secretPrompt with stdin on a terminal", () => {
+    const stdin = process.stdin as { isTTY?: boolean | undefined };
+    const stdout = process.stdout as unknown as { isTTY?: boolean | undefined };
+    const tty = { stdin: stdin.isTTY, stdout: stdout.isTTY };
+    afterEach(() => {
+      stdin.isTTY = tty.stdin;
+      stdout.isTTY = tty.stdout;
+      setColorMode("auto");
+      vi.restoreAllMocks();
+    });
+
+    it("takes a line pasted before it appeared as its answer, printed masked only", async () => {
+      setColorMode("never");
+      stdin.isTTY = true;
+      stdout.isTTY = true;
+      const written: string[] = [];
+      vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+        written.push(String(chunk));
+        return true;
+      });
+      const input = Object.assign(new PassThrough(), { isTTY: true });
+      const rl = lineReader(input, ttyOutput().out);
+      input.write("re_0123456789abcd\r");
+      await turn();
+      expect(await secretPrompt(rl, { label: "Resend API key" })).toBe("re_0123456789abcd");
+      expect(written.join("")).toBe("Resend API key: re_****…abcd\n");
+      expect(rl.take()).toBeUndefined();
+      rl.close();
+    });
   });
 
   it("confirmPrompt: y/yes accept, empty takes the initial, anything else declines", async () => {

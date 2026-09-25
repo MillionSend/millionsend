@@ -763,7 +763,7 @@
       "saved": "Monitoring settings saved",
       "error": "Could not save: {message}",
       "order": "The flag, alert and pause lines must climb in that order.",
-      "footnote": "Sampling only changes how fast the risk becomes confident: judging happens after SES accepts a message and never delays or holds it. The rubric, tiers and thresholds ship in the open; only the sampling key is secret.",
+      "footnote": "Sampling only changes how fast the risk becomes confident: judging happens after SES accepts a message and never delays or holds it. The judge's questions, tiers and thresholds ship in the open; only the sampling key is secret.",
       "on": "on",
       "off": "off",
       "reset": "Reset to default",
@@ -830,7 +830,7 @@
         "alertRisk": "emails the operator, once per team per day",
         "pauseRisk": "new tier only, with a verdict of 90 or more in the last day",
         "autoPause": "whether the pause above is applied; a human decides everything else",
-        "flagScore": "the rubric's own abuse band starts at 65"
+        "flagScore": "the judge's own abuse verdict starts at 65"
       },
       "kinds": {
         "count": "whole number",

@@ -239,11 +239,11 @@ export const en = {
     subject: "Content monitor: {rate} of samples went unjudged in the last hour",
     body: [
       "{unjudged} of {samples} samples drawn in the last hour came back unjudged ({provider} · {model}). Sending is unaffected: an unjudged sample changes no risk, opens no flag and holds no mail.",
-      "Common causes are a throttled or unreachable provider, missing credentials, or a model that answers outside the rubric's format. The console's Health card charts the unjudged share.",
+      "Common causes are a throttled or unreachable provider, an invalid or revoked API key, or answers the monitor could not read. The console's Health card charts the unjudged share.",
     ],
     button: "Open console",
     muted: [
-      "Sent to the instance operator at most once every six hours while the share stays over 20%.",
+      "Sent to the instance operator at most once every six hours while the share stays over 20% or the provider keeps rejecting the API key.",
     ],
   },
   "content.access_notice": {

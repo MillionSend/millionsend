@@ -763,7 +763,7 @@
       "saved": "Configurações de monitoramento salvas",
       "error": "Não foi possível salvar: {message}",
       "order": "As linhas de sinalização, alerta e pausa precisam subir nessa ordem.",
-      "footnote": "A amostragem só muda a rapidez com que o risco ganha confiança: o julgamento acontece depois que o SES aceita a mensagem e nunca a atrasa nem a retém. A rubrica, os níveis e as linhas são públicos; só a chave de amostragem é secreta.",
+      "footnote": "A amostragem só muda a rapidez com que o risco ganha confiança: o julgamento acontece depois que o SES aceita a mensagem e nunca a atrasa nem a retém. As perguntas do juiz, os níveis e as linhas são públicos; só a chave de amostragem é secreta.",
       "on": "ligada",
       "off": "desligada",
       "reset": "Restaurar padrão",
@@ -830,7 +830,7 @@
         "alertRisk": "avisa o operador por e-mail, uma vez por equipe por dia",
         "pauseRisk": "só no nível nova, com um veredicto de 90 ou mais no último dia",
         "autoPause": "se a pausa acima é aplicada; uma pessoa decide todo o resto",
-        "flagScore": "a faixa de abuso da própria rubrica começa em 65"
+        "flagScore": "o veredicto de abuso do próprio juiz começa em 65"
       },
       "kinds": {
         "count": "número inteiro",

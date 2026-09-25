@@ -1,11 +1,21 @@
+import { maskEmailLocalParts, redactRevealedText } from "../content-reveal-render.js";
 import { extractAnchors, extractImages, visibleText } from "../email-insights.js";
 import { registrableDomain } from "../org-domain.js";
 
 /**
  * The text block the judge sees: the sender's context, the headers, the
- * visible text and a link table, laid out exactly as the probe that chose
- * the rubric laid it out. No recipient address is ever part of it, and the
- * block itself is never stored anywhere: it exists in the judge call only.
+ * visible text and a link table. What the message says (subject, visible
+ * text, anchor text, attachment names) goes through the operator content
+ * view's redaction first, links cut to a domain and a path stub, known secret
+ * formats and codes that follow a code word masked, and every address in it
+ * keeps only its domain; names written in the text are not detected and go as
+ * written. The sender's own identity (team, From, Reply-To) goes as-is. Every
+ * field's whitespace is collapsed and the visible text is indented like the
+ * link rows, so nothing the sender writes can open a line posing as a header.
+ * No recipient address, raw HTML or attachment content is ever part of it,
+ * and the block itself is never stored anywhere: it exists in the judge
+ * call only. Section 5 of the landing page's privacy policy (millionsend-lp
+ * src/app/privacy/page.tsx) lists these fields; change them together.
  */
 
 export const JUDGE_TEXT_MAX_CHARS = 6000;
@@ -34,6 +44,9 @@ const OPEN_TAG = /<([a-z][a-z0-9-]*)\b([^<>]*)>/gi;
 const VOID_TAGS = new Set(["img", "br", "hr", "input", "meta", "link", "area", "col", "wbr"]);
 // Zero-width, soft-hyphen and bidi controls: invisible to the reader, used to split words the judge would otherwise read.
 const INVISIBLE = /[​-‏⁠﻿­‪-‮]/g;
+// \s leaves out NEL and the C0 separators, which some readers take for line breaks.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the control bytes are the target
+const ANY_SPACE = /[\s\x1c-\x1e\x85]+/g;
 const ENTITIES: Record<string, string> = {
   amp: "&",
   lt: "<",
@@ -106,8 +119,20 @@ function linkTarget(href: string): string {
   return "(other)";
 }
 
+function oneLine(s: string): string {
+  return s.replace(ANY_SPACE, " ").trim();
+}
+
+function redacted(s: string): string {
+  // Addresses are masked on both sides of the link pass: a path stub can end
+  // inside one before its @, and a mask written into a link would come back
+  // percent-encoded, so the first pass leaves a plain placeholder.
+  const { spans } = redactRevealedText(maskEmailLocalParts(oneLine(s), "x"));
+  return maskEmailLocalParts(spans.map((span) => span.text).join(""));
+}
+
 function label(text: string): string {
-  const t = text.replace(INVISIBLE, "").trim();
+  const t = redacted(text.replace(INVISIBLE, ""));
   return t ? t.slice(0, ANCHOR_TEXT_MAX) : "(image)";
 }
 
@@ -115,29 +140,28 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
   const stripped = input.html === null ? null : stripHiddenElements(input.html);
   const raw = stripped ? decodeEntities(visibleText(stripped.html)) : (input.text ?? "");
   const invisible = raw.match(INVISIBLE)?.length ?? 0;
-  const text = raw
-    .replace(INVISIBLE, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, JUDGE_TEXT_MAX_CHARS);
+  const text = redacted(raw.replace(INVISIBLE, "")).slice(0, JUDGE_TEXT_MAX_CHARS);
   const rows = new Set<string>();
   for (const a of stripped ? extractAnchors(stripped.html) : []) {
     rows.add(`  ${label(decodeEntities(a.text))} -> ${linkTarget(a.href)}`);
     if (rows.size >= JUDGE_LINK_ROWS_MAX) break;
   }
   const attachments = input.attachments
-    .map((a) => (a.contentType ? `${a.filename} (${a.contentType})` : a.filename))
+    .map((a) => {
+      const name = redacted(a.filename);
+      return a.contentType ? `${name} (${oneLine(a.contentType)})` : name;
+    })
     .join(", ");
   return [
-    `Team name: ${input.team.name}`,
-    `Verified domains: ${input.team.verifiedDomains.join(", ") || "(none)"}`,
+    `Team name: ${oneLine(input.team.name)}`,
+    `Verified domains: ${input.team.verifiedDomains.map(oneLine).join(", ") || "(none)"}`,
     `Team age (days): ${input.team.ageDays ?? "unknown"}`,
-    `Plan: ${input.team.plan}`,
-    `From: ${input.from}`,
-    `Reply-To: ${input.replyTo?.join(", ") || "(none)"}`,
-    `Subject: ${input.subject}`,
+    `Plan: ${oneLine(input.team.plan)}`,
+    `From: ${oneLine(input.from)}`,
+    `Reply-To: ${input.replyTo?.map(oneLine).join(", ") || "(none)"}`,
+    `Subject: ${redacted(input.subject)}`,
     "Visible text:",
-    text,
+    `  ${text}`,
     "Links (anchor text -> domain):",
     [...rows].join("\n") || "  (none)",
     `Image count: ${stripped ? extractImages(stripped.html).length : 0}`,

@@ -3,7 +3,9 @@ import { JudgeError, type JudgeVerdict } from "./types.js";
 /**
  * Typed questions for TypeSafe Jev. Policy lives in `state` so it is paid
  * once; each question is evaluated independently against that state.
- * Wording is tied to the labelled probe that measured recall and false-positive rate.
+ * The thresholds below are calibrated to this wording and to the block's
+ * shape: changing either changes recall and false-positive rate, so re-measure
+ * on the labelled set before shipping.
  */
 export const ABUSE_JUDGE_QUESTIONS_VERSION = "jev-1";
 
@@ -146,11 +148,14 @@ function noulOf(answers: Record<string, unknown>, key: string): number | null {
   return typeof noul === "number" && Number.isFinite(noul) ? noul : null;
 }
 
-function choiceOf(answers: Record<string, unknown>, key: string): string | null {
+/** Only one of the question's own options: anything else reads as no answer. */
+function choiceOf(answers: Record<string, unknown>, key: "category" | "language"): string | null {
   const raw = answers[key];
   if (!raw || typeof raw !== "object") return null;
   const choice = (raw as { choice?: unknown }).choice;
-  return typeof choice === "string" && choice ? choice : null;
+  return typeof choice === "string" && Object.hasOwn(ABUSE_JUDGE_QUESTIONS[key].criteria, choice)
+    ? choice
+    : null;
 }
 
 /**
@@ -180,6 +185,6 @@ export function composeJudgeVerdict(answers: unknown): JudgeVerdict {
     categories: category && category !== "clean" ? [category] : [],
     impersonatedBrand: null,
     reasons,
-    language: language.slice(0, 16),
+    language,
   };
 }

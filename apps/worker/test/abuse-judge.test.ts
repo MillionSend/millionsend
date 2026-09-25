@@ -99,7 +99,7 @@ const monitor = async () =>
   (await db.select().from(schema.teamMonitor).where(eq(schema.teamMonitor.teamId, teamId)))[0];
 
 function fakeJudge(
-  answer: (block: string) => Promise<{ score: number }>,
+  answer: (block: string) => Promise<{ score: number; model?: string }>,
 ): AbuseJudge & { blocks: string[] } {
   const blocks: string[] = [];
   return {
@@ -108,8 +108,9 @@ function fakeJudge(
     blocks,
     judge: async (block) => {
       blocks.push(block);
-      const { score } = await answer(block);
+      const { score, model } = await answer(block);
       return {
+        ...(model ? { model } : {}),
         score,
         verdict: score >= 65 ? "abuse" : "clean",
         categories: score >= 65 ? ["phishing"] : [],
@@ -173,11 +174,17 @@ it("judges a broadcast skeleton from the broadcast's own HTML", async () => {
     })
     .returning({ id: schema.broadcasts.id });
   const id = await insertSample({ kind: "broadcast_skeleton", broadcastId: broadcast?.id });
-  const judge = fakeJudge(async () => ({ score: 3 }));
+  const judge = fakeJudge(async () => ({ score: 3, model: "jev-1.13.0" }));
   expect(await judgeSample(db, deps(judge), { sampleId: id })).toBe("judged");
   expect(judge.blocks[0]).toContain("Hello {{first_name}}, read on.");
   expect(judge.blocks[0]).toContain("Reply-To: editor@acme.dev");
-  expect(await sample(id)).toMatchObject({ status: "judged", score: 3, verdict: "clean" });
+  // The versioned id that answered, not the configured name.
+  expect(await sample(id)).toMatchObject({
+    status: "judged",
+    score: 3,
+    verdict: "clean",
+    model: "jev-1.13.0",
+  });
 });
 
 it("records every judge failure as unjudged and moves nothing", async () => {

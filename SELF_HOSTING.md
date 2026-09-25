@@ -196,6 +196,11 @@ docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/home/ms \
   -v "$PWD":/work -w /work ghcr.io/millionsend/millionsend:latest setup add-region us-east-1
 ```
 
+`npx @millionsend/setup add-region` needs `@millionsend/setup` 0.9.0 or
+later; the image already carries it. Without a terminal (stdin piped), the
+region argument is required and the confirmation needs an explicit `yes`
+line: the command refuses to guess a region, and an empty answer means no.
+
 The interactive wizard offers the same step as **Add a region** at its AWS
 step. Run anywhere else, without a `.env`, the command asks for the install's
 `SQS_QUEUE_URL`, `SNS_TOPIC_ARNS`, `AWS_REGIONS`, and optional `APP_BASE_URL`
@@ -712,27 +717,55 @@ app; a restart applies it):
 ```sh
 ABUSE_JUDGE=typesafe
 ABUSE_JUDGE_API_KEY=...
-# Optional; jev-latest is the default.
-ABUSE_JUDGE_MODEL=jev-latest
+# Optional; jev-1.13.0 is the default.
+ABUSE_JUDGE_MODEL=jev-1.13.0
 ABUSE_JUDGE_TIMEOUT_MS=20000
 ```
 
-A missing API key fails the boot. The questions Jev answers ship in
-`packages/core/src/abuse-judge/questions.ts`. TypeSafe is a US sub-processor
-of the sampled text below; name it in the instance's terms and privacy
-notice before turning the judge on.
+A missing API key fails the boot. The default model is a pinned version, not
+the `jev-latest` alias, because the score thresholds are calibrated against
+one version's answers: move to a newer version deliberately, after checking
+its scores. Each sample records the versioned
+model id that answered. `ABUSE_JUDGE_BASE_URL` (default
+`https://api.typesafe.ai`) points the judge at another endpoint serving the
+same API; it posts to `<base>/v1/systemone`. The questions Jev answers ship in
+`packages/core/src/abuse-judge/questions.ts`.
 
-**Exactly what Jev sees**, built in memory per call and never stored:
-the team's name, verified domains, days since its first send and plan; the
-`From`, `Reply-To` and `Subject` headers; the rendered visible text with
-hidden elements stripped (up to 6,000 characters); a table of link anchor
-texts and their registrable domains (up to 30); the image count, the
-attachment names and types, and the count of hidden characters. Never a
-recipient address, never the raw HTML, never an attachment's content. The
+**Where the samples go.** Every sampled message is sent to TypeSafe, a
+sub-processor that hosts its service in the United States. Per its published
+terms, its data processing agreement keeps personal data for as long as
+necessary for the purpose of the processing; its customer agreement gives it
+a perpetual licence to use submitted data for fraud and abuse monitoring,
+telemetry and legal compliance; zero data retention is offered only on
+enterprise plans; submitted data is not used to train its models. Its DPA
+offers the EU standard contractual clauses and the UK Addendum as transfer
+mechanisms, and no Brazilian (ANPD) clauses. Before turning the judge on,
+accept TypeSafe's [data processing agreement](https://typesafe.ai/legal/data-processing),
+list TypeSafe as a sub-processor, and describe it in the instance's privacy
+notice (see also its [customer agreement](https://typesafe.ai/legal/mca) and
+[privacy policy](https://typesafe.ai/legal/privacy-policy)).
+
+**Exactly what Jev sees**, built in memory per call and never stored by
+MillionSend: the team's name, verified domains, days since its first send
+and plan; the `From` and `Reply-To` headers as sent; the `Subject`; the
+rendered visible text, without elements hidden by an inline style or the
+`hidden` attribute (up to 6,000
+characters); a table of link anchor texts and their registrable domains (up
+to 30 rows); the image count, the attachment names and content types, and
+the count of hidden characters. The subject, the visible text, the anchor
+texts and the attachment names are redacted first by the same pass the
+break-glass content access uses (links cut to their domain and a short path
+stub; credential-shaped strings and 4-to-8-digit codes in the 40 characters
+after words like *code*, *OTP*, *senha* or *token* masked); on top of that,
+email addresses in them keep only their domain. Whitespace in every field,
+line breaks included, collapses to one space. Other personal data written in
+these fields (names, phone numbers, tax ids such as CPF, postal addresses) is
+not removed: nothing detects it reliably. Never a recipient
+address or header, never the raw HTML, never an attachment's content. The
 stored record of a judged sample is the score, verdict, categories, reason
-codes, impersonated brand, language, model id, latency and error class;
-the review page shows those and never a subject or a body. Sample rows are
-metadata and are pruned after 90 days.
+codes, language, model version, latency and error class; the review page
+shows those and never a subject or a body. Sample rows are metadata and are
+pruned after 90 days.
 
 **Sampling.** After each accepted message, a keyed draw
 (HMAC of the team and message ids under a key derived from
@@ -765,9 +798,9 @@ The risk is a decayed mean of the verdicts (half-life 7 days) with a prior
 that starts new teams higher; the review page shows it beside the tier,
 the last samples and the judge's answer next to each flagged email, and
 offers "Sample everything for 7 days". The Overview's Monitoring card
-charts the hourly sample count, and the operator is emailed when more than
-20% of an hour's samples (at least 20 of them) went unjudged, at most once
-every six hours.
+charts the hourly sample count, and the operator is emailed, at most once
+every six hours, when more than 20% of an hour's samples (at least 20 of
+them) went unjudged, or as soon as TypeSafe rejects the API key.
 
 </details>
 
@@ -789,7 +822,7 @@ of path, with the query and the fragment dropped entirely, so a one-time
 link cannot be followed; anything shaped like a
 credential (a JWT, 32 or more hex characters, 40 or more of base64, one of
 this instance's own `ms_` API keys) is masked, as is a 4-to-8-digit run
-within 40 characters of a word like *code*, *código*, *OTP*, *PIN*, *token*,
+in the 40 characters after a word like *code*, *código*, *OTP*, *PIN*, *token*,
 *senha*, *password* or *verification*.
 Never the raw HTML, the recipient addresses, the headers, the attachments or
 the click-tracking targets, and the view offers no copy or download. A body

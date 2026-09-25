@@ -43,7 +43,8 @@ and re-running is safe:
 In a terminal every choice is interactive (arrow-key lists, Enter accepts the
 default). Piped input still works deterministically — answers one per line;
 on EOF every offer defaults to "skip", so scripted runs never create anything
-by surprise.
+by surprise. Piped, `add-region` needs its region argument (it refuses to
+guess one) and a `yes` line for its confirmation.
 
 Run it anywhere Node 18+ lives; the AWS step wants your admin AWS credentials
 (laptop or server — the MillionSend server itself never needs admin

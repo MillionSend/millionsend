@@ -1,7 +1,7 @@
-import { ABUSE_JUDGE_POLICY, ABUSE_JUDGE_QUESTIONS, JudgeError } from "@millionsend/core";
+import { ABUSE_JUDGE_POLICY, ABUSE_JUDGE_QUESTIONS } from "@millionsend/core";
 import { expect, it } from "vitest";
 import { createAbuseJudge } from "../src/abuse-judge/index.js";
-import { createTypesafeJudge } from "../src/abuse-judge/typesafe.js";
+import { createTypesafeJudge, type FetchLike } from "../src/abuse-judge/typesafe.js";
 
 const answers = {
   is_abuse: { type: "noul", noul: 0.88 },
@@ -38,6 +38,7 @@ it("posts state and typed questions, then composes the verdict", async () => {
     categories: ["brand_impersonation"],
     reasons: ["impersonation"],
     language: "en",
+    model: "jev-1.13.0",
   });
   expect(posted).toMatchObject({
     url: "https://api.typesafe.ai/v1/systemone",
@@ -50,37 +51,91 @@ it("posts state and typed questions, then composes the verdict", async () => {
   });
 });
 
-it("classes HTTP failures and a missing key", async () => {
-  const judge = (status: number) =>
-    createTypesafeJudge({
-      model: "jev-latest",
-      baseUrl: "https://api.typesafe.ai/",
-      apiKey: "k",
-      fetch: async () => new Response("nope", { status }),
-    });
-  await expect(
-    judge(401).judge("x", { signal: new AbortController().signal }),
-  ).rejects.toMatchObject({ class: "no_credentials" });
-  await expect(
-    judge(429).judge("x", { signal: new AbortController().signal }),
-  ).rejects.toMatchObject({ class: "throttled" });
-  await expect(
-    judge(529).judge("x", { signal: new AbortController().signal }),
-  ).rejects.toMatchObject({ class: "throttled" });
-  await expect(
-    judge(500).judge("x", { signal: new AbortController().signal }),
-  ).rejects.toMatchObject({ class: "upstream" });
-  const noKey = createTypesafeJudge({
-    model: "jev-latest",
+const signal = () => new AbortController().signal;
+const withFetch = (fetch: FetchLike) =>
+  createTypesafeJudge({
+    model: "jev-1.13.0",
+    baseUrl: "https://api.typesafe.ai/",
+    apiKey: "k",
+    fetch,
+  });
+
+it("refuses without a key before calling out", async () => {
+  let calls = 0;
+  const judge = createTypesafeJudge({
+    model: "jev-1.13.0",
     baseUrl: "https://api.typesafe.ai",
     apiKey: undefined,
     fetch: async () => {
-      throw new Error("should not fetch");
+      calls += 1;
+      return new Response("{}", { status: 200 });
     },
   });
-  await expect(noKey.judge("x", { signal: new AbortController().signal })).rejects.toBeInstanceOf(
-    JudgeError,
+  await expect(judge.judge("x", { signal: signal() })).rejects.toMatchObject({
+    class: "no_credentials",
+  });
+  expect(calls).toBe(0);
+});
+
+it("classes HTTP failures by status", async () => {
+  const judge = (status: number) => withFetch(async () => new Response("nope", { status }));
+  for (const [status, errorClass] of [
+    [401, "no_credentials"],
+    [403, "no_credentials"],
+    [429, "throttled"],
+    [529, "throttled"],
+    [500, "upstream"],
+  ] as const) {
+    await expect(judge(status).judge("x", { signal: signal() })).rejects.toMatchObject({
+      class: errorClass,
+    });
+  }
+});
+
+it("classes a network failure as upstream and an abort as a timeout, on the request or the body", async () => {
+  const down = withFetch(async () => {
+    throw new TypeError("fetch failed");
+  });
+  await expect(down.judge("x", { signal: signal() })).rejects.toMatchObject({ class: "upstream" });
+  const slow = withFetch(
+    (_url, init) =>
+      new Promise((_, reject) =>
+        init.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
+      ),
   );
+  await expect(slow.judge("x", { signal: AbortSignal.timeout(10) })).rejects.toMatchObject({
+    class: "timeout",
+  });
+  const slowBody = withFetch(
+    async (_url, init) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+          },
+        }),
+        { status: 200 },
+      ),
+  );
+  await expect(slowBody.judge("x", { signal: AbortSignal.timeout(10) })).rejects.toMatchObject({
+    class: "timeout",
+  });
+});
+
+it("is a parse error when a 200 is not JSON", async () => {
+  const judge = withFetch(async () => new Response("<html>oops</html>", { status: 200 }));
+  await expect(judge.judge("x", { signal: signal() })).rejects.toMatchObject({
+    class: "parse_error",
+  });
+});
+
+it("reports no model when the answer names none or an implausible one", async () => {
+  for (const model of [undefined, "", "x".repeat(101), 7]) {
+    const judge = withFetch(
+      async () => new Response(JSON.stringify({ model, answers }), { status: 200 }),
+    );
+    expect((await judge.judge("x", { signal: signal() })).model).toBeUndefined();
+  }
 });
 
 it("is a parse error when the body has no is_abuse noul", async () => {

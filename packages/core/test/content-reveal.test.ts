@@ -5,7 +5,11 @@ import {
   contentRevealExpiry,
   type RevealedContent,
 } from "../src/content-reveal.js";
-import { redactRevealedText, renderRevealedBody } from "../src/content-reveal-render.js";
+import {
+  maskEmailLocalParts,
+  redactRevealedText,
+  renderRevealedBody,
+} from "../src/content-reveal-render.js";
 
 const plain = (content: RevealedContent) => content.spans.map((s) => s.text).join("");
 const masked = (content: RevealedContent) =>
@@ -158,6 +162,17 @@ describe("renderRevealedBody", () => {
 
   it("holds an empty body without spans", () => {
     expect(renderRevealedBody({ html: null, text: null })).toEqual({ spans: [], redactions: 0 });
+  });
+});
+
+describe("maskEmailLocalParts", () => {
+  it("keeps an address's domain and masks the rest, leaving other @ alone", () => {
+    expect(maskEmailLocalParts("Write to joão.silva+x@exemplo.com.br. Ping @team, or a@ b")).toBe(
+      "Write to ••••••@exemplo.com.br. Ping @team, or a@ b",
+    );
+    expect(maskEmailLocalParts("joa\u0303o@gmail.com, youtube.com/@brand, /u/jo@acme.dev")).toBe(
+      "••••••@gmail.com, youtube.com/@brand, /u/••••••@acme.dev",
+    );
   });
 });
 

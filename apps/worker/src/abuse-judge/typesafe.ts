@@ -10,11 +10,20 @@ import {
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
+const MODEL_ID_MAX = 100;
+
 function throwIfAbort(err: unknown): void {
   const name = (err as { name?: string } | null)?.name;
   if (name === "AbortError" || name === "TimeoutError") {
     throw new JudgeError("timeout", "judge call timed out", { cause: err });
   }
+}
+
+/** The versioned id TypeSafe reports as having answered, when it looks like one. */
+function answeredModel(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && value.length <= MODEL_ID_MAX
+    ? value
+    : undefined;
 }
 
 function classForStatus(status: number): "throttled" | "no_credentials" | "upstream" {
@@ -60,9 +69,13 @@ export function createTypesafeJudge(
       try {
         json = (await res.json()) as { answers?: unknown; model?: unknown };
       } catch (err) {
+        // The timeout signal also covers reading the body.
+        throwIfAbort(err);
         throw new JudgeError("parse_error", "judge body was not JSON", { cause: err });
       }
-      return composeJudgeVerdict(json.answers);
+      const verdict = composeJudgeVerdict(json.answers);
+      const model = answeredModel(json.model);
+      return model ? { ...verdict, model } : verdict;
     },
   };
 }
