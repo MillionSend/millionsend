@@ -126,6 +126,8 @@ export function ReviewView({ teamId }: { teamId: string }) {
       flagLabel: safety(`reasons.${flag?.reason ?? "manual"}`),
     });
   const exempt = monitor.tier === "exempt";
+  const modelDetail = (reasons: string[] | null) => () =>
+    reasons ? <ReasonCodes codes={reasons} /> : t("emails.notFlagged");
   const percentRate = (rate: number) =>
     new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(rate);
   const monitorDone = (key: "override" | "overrideCleared" | "resumed") => () => {
@@ -218,22 +220,34 @@ export function ReviewView({ teamId }: { teamId: string }) {
               {safety(team.broadcastsPausedByOperatorAt ? "menu.resume" : "menu.pause")}
             </button>
             {flag ? (
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                disabled={clear.isPending || reopen.isPending}
-                onClick={() => {
-                  const done = (key: "cleared" | "reopened") => () => {
-                    toast(safety(`toast.${key}`, { team: team.name }));
-                    refetch();
-                  };
-                  if (flagOpen) clear.mutate({ flagId: flag.id }, { onSuccess: done("cleared") });
-                  else reopen.mutate({ flagId: flag.id }, { onSuccess: done("reopened") });
-                }}
+              <Tooltip
+                inline
+                focusableChild
+                text={safety(
+                  !flagOpen
+                    ? "menu.reopenTip"
+                    : flag.reason === "manual"
+                      ? "menu.clearManualTip"
+                      : "menu.clearTip",
+                )}
               >
-                <BtnSpinner on={clear.isPending || reopen.isPending} />
-                {safety(flagOpen ? "menu.clear" : "menu.reopen")}
-              </button>
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-secondary"
+                  disabled={clear.isPending || reopen.isPending}
+                  onClick={() => {
+                    const done = (key: "cleared" | "reopened") => () => {
+                      toast(safety(`toast.${key}`, { team: team.name }));
+                      refetch();
+                    };
+                    if (flagOpen) clear.mutate({ flagId: flag.id }, { onSuccess: done("cleared") });
+                    else reopen.mutate({ flagId: flag.id }, { onSuccess: done("reopened") });
+                  }}
+                >
+                  <BtnSpinner on={clear.isPending || reopen.isPending} />
+                  {safety(flagOpen ? "menu.clear" : "menu.reopen")}
+                </button>
+              </Tooltip>
             ) : null}
             <PopoverMenu
               boxed
@@ -255,7 +269,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         }
       />
 
-      <div className="ms-grid ms-grid-6" style={{ marginBottom: 16 }}>
+      <div className="ms-grid ms-grid-tiles" style={{ marginBottom: 16 }}>
         <Tile
           label={
             <Tooltip inline text={t("tiles.riskTip")}>
@@ -382,10 +396,10 @@ export function ReviewView({ teamId }: { teamId: string }) {
               <dt>{monitorT("verdicts")}</dt>
               <dd style={KV_VALUE}>
                 {monitor.topReasons.length > 0
-                  ? monitorT("verdictsReasons", {
+                  ? monitorT.rich("verdictsReasons", {
                       clean: monitor.judged7d - monitor.flagged7d,
                       flagged: monitor.flagged7d,
-                      reasons: monitor.topReasons.join(", "),
+                      reasons: () => <ReasonCodes codes={monitor.topReasons} />,
                     })
                   : monitorT("verdictsValue", {
                       clean: monitor.judged7d - monitor.flagged7d,
@@ -430,7 +444,11 @@ export function ReviewView({ teamId }: { teamId: string }) {
                   <th>{monitorT("cols.at")}</th>
                   <th>{monitorT("cols.kind")}</th>
                   <th className="right">{monitorT("cols.result")}</th>
-                  <th>{monitorT("cols.reasons")}</th>
+                  <th>
+                    <Tooltip inline text={monitorT("reasonsTip")}>
+                      {monitorT("cols.reasons")}
+                    </Tooltip>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -463,7 +481,11 @@ export function ReviewView({ teamId }: { teamId: string }) {
                             : monitorT("unjudged", { error: sample.errorClass ?? "" })}
                       </td>
                       <td className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)" }}>
-                        {(sample.reasons ?? []).join(", ") || common("none")}
+                        {sample.reasons?.length ? (
+                          <ReasonCodes codes={sample.reasons} />
+                        ) : (
+                          common("none")
+                        )}
                       </td>
                     </tr>
                   ))
@@ -585,12 +607,11 @@ export function ReviewView({ teamId }: { teamId: string }) {
                     {!email.model
                       ? common("none")
                       : email.model.status === "judged" && email.model.score !== null
-                        ? t("emails.modelScore", {
+                        ? t.rich("emails.modelScore", {
                             score: email.model.score,
-                            detail:
-                              email.model.score >= monitor.flagScore
-                                ? email.model.reasons.join(", ")
-                                : t("emails.notFlagged"),
+                            detail: modelDetail(
+                              email.model.score >= monitor.flagScore ? email.model.reasons : null,
+                            ),
                           })
                         : email.model.status === "pending"
                           ? monitorT("pending")
@@ -705,6 +726,23 @@ export function ReviewView({ teamId }: { teamId: string }) {
   );
 }
 
+/** Reason codes, each explained on hover; a code this build has no text for stays plain. */
+function ReasonCodes({ codes }: { codes: string[] }) {
+  const monitorT = useTranslations("console.safety.review.monitor");
+  return codes.map((code, i) => (
+    <span key={code}>
+      {i > 0 ? ", " : null}
+      {monitorT.has(`reasonCodes.${code}`) ? (
+        <Tooltip inline text={monitorT(`reasonCodes.${code}`)} triggerClassName="ms-reason-code">
+          {code}
+        </Tooltip>
+      ) : (
+        code
+      )}
+    </span>
+  ));
+}
+
 /** The header's primary action; the tooltip exists only when there is a reason to give. */
 function RequestAccessButton({
   on,
@@ -767,7 +805,7 @@ function ReviewSkeleton() {
           <Skeleton width={380} />
         </div>
       </div>
-      <div className="ms-grid ms-grid-6" style={{ marginBottom: 16 }}>
+      <div className="ms-grid ms-grid-tiles" style={{ marginBottom: 16 }}>
         {[0, 1, 2, 3, 4, 5].map((i) => (
           <div key={i} className="ms-card" style={TILE}>
             <div className="ms-microlabel" style={{ display: "flex" }}>

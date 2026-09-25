@@ -154,6 +154,19 @@ export function registrableDomain(hostname: string): string {
   return labels.slice(-take).join(".");
 }
 
+/**
+ * The registrable domain when the curated list can vouch for it: under a
+ * listed multi-part suffix, or under a generic TLD. Null under a two-letter
+ * ccTLD whose second level is not listed, where the last two labels may be a
+ * public suffix themselves (gov.br, com.ua) rather than one organisation.
+ */
+export function vouchedRegistrableDomain(hostname: string): string | null {
+  const name = registrableDomain(hostname);
+  const labels = name.split(".");
+  if (labels.length === 3) return name;
+  return labels.length === 2 && (labels[1]?.length ?? 0) > 2 ? name : null;
+}
+
 /** True when the hostname IS its registrable domain (apex send, no subdomain). */
 export function isRootDomainSend(hostname: string): boolean {
   const name = hostname.toLowerCase().replace(/\.$/, "");

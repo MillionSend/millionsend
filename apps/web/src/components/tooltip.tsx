@@ -26,17 +26,21 @@ export function CircleInfoGlyph() {
  *
  * `inline` swaps the button for a focusable <span> that only opens on
  * hover/focus — for passive content such as a time inside a clickable row,
- * where a click must keep falling through to the row.
+ * where a click must keep falling through to the row. With `focusableChild`
+ * the span adds no tab stop of its own: the child (an enabled button) takes
+ * focus, and that focus still opens the panel.
  */
 export function Tooltip({
   text,
   children,
   inline = false,
+  focusableChild = false,
   triggerClassName,
 }: {
   text: React.ReactNode;
   children?: React.ReactNode;
   inline?: boolean;
+  focusableChild?: boolean;
   /** Extra class on the inline trigger, for a trigger that must take its parent's width. */
   triggerClassName?: string;
 }) {
@@ -111,8 +115,8 @@ export function Tooltip({
               ? `ms-tooltip-trigger inline ${triggerClassName}`
               : "ms-tooltip-trigger inline"
           }
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: focus is how keyboard users reach the stamp; a button here would swallow the row's click
-          tabIndex={0}
+          // Focus is how keyboard users reach the stamp; a button here would swallow the row's click.
+          tabIndex={focusableChild ? undefined : 0}
           {...hoverProps}
         >
           {children}

@@ -14,6 +14,7 @@ import { SortableTh, type SortDir } from "@/components/sortable-th";
 import { StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
+import { Tooltip } from "@/components/tooltip";
 import { formatDay } from "@/lib/format";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
@@ -38,7 +39,7 @@ const GUARDRAIL_COLOR = {
   warning: "var(--ms-warn)",
   paused: "var(--ms-danger)",
 } as const;
-const COLUMNS = 11;
+const COLUMNS = 10;
 
 function scoreColor(tenths: number): string | undefined {
   if (tenths < 50) return "var(--ms-danger)";
@@ -60,9 +61,6 @@ function SkeletonRows() {
           </td>
           <td>
             <SkeletonBadge width={52} />
-          </td>
-          <td>
-            <Skeleton width={140} />
           </td>
           {[28, 48, 56, 28].map((w, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: placeholder cells, position is identity
@@ -258,7 +256,6 @@ export function TeamsView() {
               <tr>
                 {sortable("name", false, "asc")}
                 {sortable("type")}
-                <th>{t("columns.owner")}</th>
                 {sortable("domains", true)}
                 {sortable("contacts", true)}
                 {sortable("sent30d", true)}
@@ -286,24 +283,18 @@ export function TeamsView() {
                   rows.map((row) => (
                     <tr key={row.id} className="hoverable" onClick={(event) => openRow(event, row)}>
                       <td>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                          <TeamLogo name={row.name} logoUrl={row.logoUrl} size={22} />
-                          {row.name}
-                        </span>
+                        <Tooltip
+                          inline
+                          text={t("ownerTip", { email: row.ownerEmail ?? common("none") })}
+                        >
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                            <TeamLogo name={row.name} logoUrl={row.logoUrl} size={22} />
+                            {row.name}
+                          </span>
+                        </Tooltip>
                       </td>
                       <td>
                         <PlanBadge plan={row.plan} planQuota={row.planQuota} />
-                      </td>
-                      <td
-                        title={row.ownerEmail ?? undefined}
-                        style={{
-                          color: "var(--ms-muted)",
-                          maxWidth: 170,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {row.ownerEmail ?? common("none")}
                       </td>
                       <td className="right num">{nf.format(row.domains)}</td>
                       <td className="right num">{nf.format(row.contacts)}</td>

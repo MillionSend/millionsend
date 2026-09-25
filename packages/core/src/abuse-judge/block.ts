@@ -1,6 +1,6 @@
 import { maskEmailLocalParts, redactRevealedText } from "../content-reveal-render.js";
 import { extractAnchors, extractImages, visibleText } from "../email-insights.js";
-import { registrableDomain } from "../org-domain.js";
+import { registrableDomain, vouchedRegistrableDomain } from "../org-domain.js";
 
 /**
  * The text block the judge sees: the sender's context, the headers, the
@@ -123,6 +123,20 @@ function oneLine(s: string): string {
   return s.replace(ANY_SPACE, " ").trim();
 }
 
+/**
+ * Each verified domain and, where the suffix list can vouch for it, its
+ * registrable domain. Links are listed by registrable domain, so a team that
+ * verified only mail.acme.com.br must also be seen to own acme.com.br, or
+ * every link to its own site reads as off-domain. A name the list cannot
+ * vouch for is left out: under gov.br or com.ua the last two labels are a
+ * public suffix, and listing one would hand the team every brand under it.
+ */
+function verifiedDomains(names: string[]): string[] {
+  const verified = names.map(oneLine);
+  const owned = verified.flatMap((name) => vouchedRegistrableDomain(name) ?? []);
+  return [...new Set([...verified, ...owned])];
+}
+
 function redacted(s: string): string {
   // Addresses are masked on both sides of the link pass: a path stub can end
   // inside one before its @, and a mask written into a link would come back
@@ -154,7 +168,7 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
     .join(", ");
   return [
     `Team name: ${oneLine(input.team.name)}`,
-    `Verified domains: ${input.team.verifiedDomains.map(oneLine).join(", ") || "(none)"}`,
+    `Verified domains: ${verifiedDomains(input.team.verifiedDomains).join(", ") || "(none)"}`,
     `Team age (days): ${input.team.ageDays ?? "unknown"}`,
     `Plan: ${oneLine(input.team.plan)}`,
     `From: ${oneLine(input.from)}`,

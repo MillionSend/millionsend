@@ -412,7 +412,6 @@
     "columns": {
       "team": "Team",
       "type": "Type",
-      "owner": "Owner",
       "domains": "Domains",
       "contacts": "Contacts",
       "sent30d": "Sent 30d",
@@ -549,7 +548,8 @@
         "own_team": "You are a member of this team; open it from the team switcher instead.",
         "reference_required": "A ticket reference is required for this reason."
       }
-    }
+    },
+    "ownerTip": "Owner: {email}"
   },
   "safety": {
     "title": "Trust & safety",
@@ -618,7 +618,10 @@
       "reopen": "Reopen",
       "suspend": "Suspend team",
       "reinstate": "Reinstate team",
-      "reveal": "Request content access"
+      "reveal": "Request content access",
+      "clearTip": "Marks the flag reviewed and closes it, with an audit entry. Risk, sampling and any pause stay as they are. While the same trigger holds, the automatic check will not reopen it; if the trigger lapses and comes back, a new flag opens. Left alone, an automatic flag closes itself once its trigger is gone. A flag opened in the last 90 days keeps the team out of the Trusted tier either way.",
+      "reopenTip": "Opens it again as a manual flag, which the automatic check never closes.",
+      "clearManualTip": "Marks the flag reviewed and closes it, with an audit entry. Risk, sampling and any pause stay as they are. A manual flag has no trigger of its own: if an automatic trigger holds when it is cleared, the next check opens an automatic flag."
     },
     "toast": {
       "cleared": "{team} · cleared",
@@ -666,7 +669,7 @@
         "more": "+{count} more",
         "none": "0 flagged emails in the window.",
         "monitor": "Monitor",
-        "modelScore": "Model: {score} · {detail}",
+        "modelScore": "Model: {score} · <detail></detail>",
         "notFlagged": "not flagged",
         "modelUnjudged": "Model: unjudged · {error}",
         "content": "Content"
@@ -700,7 +703,7 @@
         "samplesValue": "{samples} · {flagged} flagged · {unjudged} unjudged",
         "verdicts": "Verdicts",
         "verdictsValue": "{clean} clean · {flagged} flagged",
-        "verdictsReasons": "{clean} clean · {flagged} flagged: {reasons}",
+        "verdictsReasons": "{clean} clean · {flagged} flagged: <reasons></reasons>",
         "lastSample": "Last sample",
         "model": "Model",
         "override": "Override",
@@ -738,7 +741,17 @@
           "resumed": "{team} · broadcasts resumed"
         },
         "modelOff": "off in this app's environment",
-        "unjudgedNoError": "unjudged"
+        "unjudgedNoError": "unjudged",
+        "reasonsTip": "Signals the model answered at 50% or more. They explain a sample; the score comes from the abuse question, raised to at least 80 when impersonation is at 80% or more.",
+        "reasonCodes": {
+          "impersonation": "Poses as a well-known brand, bank, government, carrier or platform whose real domains are not among the team’s verified domains.",
+          "off_domain_lure": "Has a sign-in, payment, verify, reset or download link on a domain that is neither the team’s (its verified domains and their registrable domains) nor the real domain of the service the message names.",
+          "harvests_secrets": "Asks the recipient to enter or reply with a password, one-time code, card number, PIN, CPF or other ID on a page or channel the team does not own.",
+          "payment_redirect": "Tries to redirect a payment: new bank details for an existing invoice, a Pix code, a boleto from a mismatched sender, a small parcel fee, or “pay somewhere else”.",
+          "no_link_lure": "Carries the lure without a link: a Pix payload, changed bank details, a callback phone, “reply with your ID or password”, or an attached invoice or zip.",
+          "unsolicited_bulk": "Reads as bulk mail to people who never opted in (spam-style promotion from a stranger) rather than opted-in marketing or cold B2B outreach. The model cannot see consent, so newsletters often land near this line.",
+          "prompt_injection": "The text tries to tell a reviewer or model to change its verdict or ignore the policy."
+        }
       }
     },
     "metric": {

@@ -412,7 +412,6 @@
     "columns": {
       "team": "Equipe",
       "type": "Tipo",
-      "owner": "Proprietário",
       "domains": "Domínios",
       "contacts": "Contatos",
       "sent30d": "Enviados 30d",
@@ -549,7 +548,8 @@
         "own_team": "Você é membro desta equipe; abra-a pelo seletor de equipes.",
         "reference_required": "Uma referência de chamado é obrigatória para este motivo."
       }
-    }
+    },
+    "ownerTip": "Proprietário: {email}"
   },
   "safety": {
     "title": "Confiança e segurança",
@@ -618,7 +618,10 @@
       "reopen": "Reabrir",
       "suspend": "Suspender equipe",
       "reinstate": "Reativar equipe",
-      "reveal": "Pedir acesso ao conteúdo"
+      "reveal": "Pedir acesso ao conteúdo",
+      "clearTip": "Marca a sinalização como revisada e a fecha, com registro na auditoria. Risco, amostragem e qualquer pausa continuam como estão. Enquanto o mesmo gatilho se mantiver, a checagem automática não a reabre; se o gatilho sumir e voltar, uma nova sinalização é aberta. Sem isso, uma sinalização automática se fecha sozinha quando o gatilho some. Uma sinalização aberta nos últimos 90 dias mantém a equipe fora do nível Confiável de qualquer forma.",
+      "reopenTip": "Abre de novo como sinalização manual, que a checagem automática nunca fecha.",
+      "clearManualTip": "Marca a sinalização como revisada e a fecha, com registro na auditoria. Risco, amostragem e qualquer pausa continuam como estão. Uma sinalização manual não tem gatilho próprio: se um gatilho automático estiver ativo quando ela for limpa, a próxima checagem abre uma sinalização automática."
     },
     "toast": {
       "cleared": "{team} · limpa",
@@ -666,7 +669,7 @@
         "more": "+{count} mais",
         "none": "0 e-mails sinalizados no período.",
         "monitor": "Monitor",
-        "modelScore": "Modelo: {score} · {detail}",
+        "modelScore": "Modelo: {score} · <detail></detail>",
         "notFlagged": "não sinalizado",
         "modelUnjudged": "Modelo: sem julgamento · {error}",
         "content": "Conteúdo"
@@ -700,7 +703,7 @@
         "samplesValue": "{samples} · {flagged} sinalizadas · {unjudged} sem julgamento",
         "verdicts": "Veredictos",
         "verdictsValue": "{clean} limpos · {flagged} sinalizados",
-        "verdictsReasons": "{clean} limpos · {flagged} sinalizados: {reasons}",
+        "verdictsReasons": "{clean} limpos · {flagged} sinalizados: <reasons></reasons>",
         "lastSample": "Última amostra",
         "model": "Modelo",
         "override": "Override",
@@ -738,7 +741,17 @@
           "resumed": "{team} · broadcasts retomados"
         },
         "modelOff": "desligado no ambiente deste app",
-        "unjudgedNoError": "sem julgamento"
+        "unjudgedNoError": "sem julgamento",
+        "reasonsTip": "Sinais que o modelo respondeu com 50% ou mais. Eles explicam uma amostra; a pontuação vem da pergunta de abuso, elevada a pelo menos 80 quando a imitação de marca chega a 80% ou mais.",
+        "reasonCodes": {
+          "impersonation": "Se passa por uma marca, banco, órgão de governo, transportadora ou plataforma conhecida cujos domínios reais não estão entre os domínios verificados da equipe.",
+          "off_domain_lure": "Tem um link de login, pagamento, verificação, redefinição ou download em um domínio que não é da equipe (seus domínios verificados e os domínios registráveis deles) nem o domínio real do serviço que a mensagem cita.",
+          "harvests_secrets": "Pede ao destinatário que digite ou responda com senha, código de uso único, número de cartão, PIN, CPF ou outro documento em uma página ou canal que não é da equipe.",
+          "payment_redirect": "Tenta desviar um pagamento: novos dados bancários para uma fatura existente, um código Pix, um boleto de remetente divergente, uma pequena taxa de encomenda ou “pague em outro lugar”.",
+          "no_link_lure": "Leva a isca sem link: um Pix copia e cola, dados bancários trocados, um telefone para retorno, “responda com seu documento ou senha”, ou uma fatura ou zip anexado.",
+          "unsolicited_bulk": "Parece envio em massa para quem nunca consentiu (promoção no estilo spam de um desconhecido), e não marketing com consentimento ou prospecção B2B. O modelo não vê o consentimento, então newsletters costumam ficar perto dessa linha.",
+          "prompt_injection": "O texto tenta instruir um revisor ou modelo a mudar o veredito ou ignorar a política."
+        }
       }
     },
     "metric": {

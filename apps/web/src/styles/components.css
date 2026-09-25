@@ -1190,8 +1190,9 @@ table.ms-table {
   display: grid;
   gap: 16px;
 }
-.ms-grid-6 {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+/* Stat tiles: three per row, two from tablet width down (see the 639px block). */
+.ms-grid-tiles {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .ms-grid-4 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1502,6 +1503,11 @@ summary:focus-visible,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A term explained on hover, such as a monitor reason code. */
+.ms-tooltip-trigger.inline.ms-reason-code {
+  cursor: help;
+}
+
 .ms-tooltip-trigger.inline.ms-truncate-host {
   display: block;
   min-width: 0;
@@ -1952,7 +1958,8 @@ summary:focus-visible,
     flex: 1 1 100%;
     flex-wrap: wrap;
   }
-  .ms-page-actions > * {
+  .ms-page-actions > *,
+  .ms-page-actions > .ms-tooltip-trigger > .ms-btn {
     flex: 1 1 auto;
     justify-content: center;
   }
@@ -2006,11 +2013,7 @@ summary:focus-visible,
     width: 100% !important;
   }
 
-  /* Console grids: 6-up drops to 3-up, 4-up and 3-up collapse to 2-up; the
-     2/1 splits stack. */
-  .ms-grid-6 {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+  /* Console grids: 4-up and 3-up collapse to 2-up; the 2/1 splits stack. */
   .ms-grid-4,
   .ms-grid-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2190,7 +2193,7 @@ summary:focus-visible,
     justify-content: center;
   }
   /* Stat tiles stay two per row down to phone width. */
-  .ms-grid-6 {
+  .ms-grid-tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   /* Side sheets run edge to edge; their code blocks scroll inside. */
