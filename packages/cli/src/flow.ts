@@ -2,10 +2,10 @@ import { badge, bold, dim, err, info, warn as warnColor, wrapIndent } from "./th
 import {
   type Asker,
   isInteractive,
+  rowsFor,
   type SelectOption,
   secretPrompt,
   selectPrompt,
-  visibleLength,
 } from "./tty-ui.js";
 
 /** Glyphs of a guided flow: a rail down the left margin, a diamond per step. */
@@ -54,8 +54,8 @@ const yes = (answer: string, initial: boolean): boolean => {
  * A guided flow over an Asker. On a terminal every block hangs off one rail
  * (`│`), the active question is a filled diamond and its answer is redrawn
  * under a hollow one, so the transcript reads as a form that was filled in.
- * On a pipe the same calls print plain lines and the classic
- * `label [default]: ` questions, byte for byte what scripted runs expect.
+ * On a pipe the same calls print plain lines and plain questions
+ * (`label — hint [default]: `, `label [y/N] `), one answer per line.
  */
 export function createFlow(
   rl: Asker,
@@ -78,18 +78,12 @@ export function createFlow(
     });
   const railed = (text: string, style: (s: string) => string = (s) => s): string[] =>
     wrapLines(text).map((line) => `${bar()}  ${style(line)}`);
+  /** Writes a glyph-led block; returns the terminal rows it took, a word too long to wrap included. */
   const marked = (glyph: string, text: string, style: (s: string) => string = (s) => s): number => {
     const [first = "", ...rest] = wrapLines(text);
-    write(`${glyph}  ${style(first)}`);
-    for (const line of rest) write(`${bar()}  ${style(line)}`);
-    return 1 + rest.length;
-  };
-  const lineRows = (line: string): number => {
-    const cols = columns();
-    const len = visibleLength(line);
-    if (len === 0) return 1;
-    const rows = Math.ceil(len / cols);
-    return len % cols === 0 ? rows + 1 : rows;
+    const rows = [`${glyph}  ${style(first)}`, ...rest.map((line) => `${bar()}  ${style(line)}`)];
+    for (const row of rows) write(row);
+    return rowsFor(rows, columns());
   };
   const plain = (text: string): void => {
     for (const line of text.split("\n")) console.log(line);
@@ -182,10 +176,9 @@ export function createFlow(
         answered(label, value ? "••••" : initial || "—", hint);
         return value || initial || "";
       }
-      const prompt = `${bar()}  `;
-      const raw = await rl.question(prompt);
+      const raw = await rl.question(`${bar()}  `);
       const answer = raw.trim() || initial || "";
-      out.write(`\x1b[${headRows + lineRows(`${prompt}${raw}`)}A\x1b[J`);
+      out.write(`\x1b[${headRows + (rl.rows?.() ?? 0)}A\x1b[J`);
       answered(label, answer || "—", hint);
       return answer;
     },
