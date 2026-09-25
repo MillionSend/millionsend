@@ -1,4 +1,4 @@
-import { formatMailDate, type SystemMailMessage } from "@millionsend/core";
+import type { SystemMailMessage } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -109,6 +109,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   h.afterEvent = null;
   h.sent = [];
@@ -266,6 +267,7 @@ describe("owner mail", () => {
   });
 
   it("reports a scheduled cancellation once, and an immediate one as the downgrade only", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-20T12:00:00Z"), toFake: ["Date"] });
     await h.db
       .update(schema.teams)
       .set({ plan: "pro", currentPeriodEnd: PERIOD_END })
@@ -297,9 +299,7 @@ describe("owner mail", () => {
       "billing.downgraded",
     ]);
     expect(h.sent[2]?.subject).toBe("upgrader is now on Free");
-    expect(h.sent[2]?.text).toContain(
-      `The Pro 100K plan ended on ${formatMailDate("en", new Date())}.`,
-    );
+    expect(h.sent[2]?.text).toContain("The Pro 100K plan ended on September 20, 2026.");
   });
 
   it("a cancellation scheduled inside the reminder window is its own reminder", async () => {

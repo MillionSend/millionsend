@@ -2,7 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { authenticateApiKey } from "../src/api-key-auth.js";
 import { generateApiKey } from "../src/api-keys.js";
 
@@ -58,6 +58,14 @@ describe("authenticateApiKey scope", () => {
 });
 
 describe("authenticateApiKey billing", () => {
+  // Mid-period, so the paid plan is still the effective one.
+  beforeEach(() => {
+    vi.useFakeTimers({ now: new Date("2026-09-15T00:00:00Z"), toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("carries the team's billing columns as written, and the effective plan beside them", async () => {
     const token = await insertKey();
     expect((await authenticateApiKey(db, token))?.billing).toEqual({
