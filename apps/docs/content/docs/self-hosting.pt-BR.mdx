@@ -248,6 +248,11 @@ docker run --rm -it --user "$(id -u):$(id -g)" -e HOME=/home/ms \
   -v "$PWD":/work -w /work ghcr.io/millionsend/millionsend:latest setup add-region us-east-1
 ```
 
+`npx @millionsend/setup add-region` precisa do `@millionsend/setup` 0.9.0 ou
+mais novo; a imagem já o traz. Sem terminal (stdin via pipe), o argumento de
+região é obrigatório e a confirmação precisa de uma linha `yes` explícita: o
+comando se recusa a adivinhar uma região, e uma resposta vazia vale não.
+
 O assistente interativo oferece a mesma etapa como **Add a region** na etapa
 de AWS. Rodado em qualquer outro lugar, sem `.env`, o comando pergunta
 `SQS_QUEUE_URL`, `SNS_TOPIC_ARNS`, `AWS_REGIONS` e o `APP_BASE_URL` opcional
@@ -809,28 +814,57 @@ reinício aplica):
 ```bash
 ABUSE_JUDGE=typesafe
 ABUSE_JUDGE_API_KEY=...
-# Opcional; jev-latest é o padrão.
-ABUSE_JUDGE_MODEL=jev-latest
+# Opcional; jev-1.13.0 é o padrão.
+ABUSE_JUDGE_MODEL=jev-1.13.0
 ABUSE_JUDGE_TIMEOUT_MS=20000
 ```
 
-Uma chave de API ausente falha a inicialização. As perguntas que o Jev
-responde estão em `packages/core/src/abuse-judge/questions.ts`. A TypeSafe é
-um subprocessador nos EUA do texto amostrado abaixo; nomeie-a nos termos e
-no aviso de privacidade da instância antes de ligar o juiz.
+Uma chave de API ausente falha a inicialização. O modelo padrão é uma versão
+fixa, não o alias `jev-latest`, porque os limites de pontuação são calibrados
+contra as respostas de uma versão: mude para uma versão mais nova de
+propósito, depois de conferir as pontuações dela. Cada amostra registra o id
+versionado do modelo que respondeu. `ABUSE_JUDGE_BASE_URL` (padrão
+`https://api.typesafe.ai`) aponta o juiz para outro endpoint que serve a
+mesma API; ele faz o POST em `<base>/v1/systemone`. As perguntas que o Jev
+responde estão em `packages/core/src/abuse-judge/questions.ts`.
+
+**Para onde vão as amostras.** Toda mensagem sorteada é enviada à TypeSafe, um
+subprocessador que hospeda o serviço nos Estados Unidos. Pelos termos
+publicados, o acordo de processamento de dados (DPA) dela guarda dados
+pessoais pelo tempo necessário à finalidade do tratamento; o contrato de
+cliente lhe dá uma licença perpétua para usar os dados enviados no
+monitoramento de fraude e abuso, em telemetria e no cumprimento da lei;
+retenção zero de dados só é oferecida nos planos enterprise; os dados
+enviados não são usados para treinar os modelos dela. O DPA oferece as
+cláusulas contratuais padrão da UE e o UK Addendum como mecanismos de
+transferência, e nenhuma cláusula brasileira (ANPD). Antes de ligar o juiz,
+aceite o [acordo de processamento de dados](https://typesafe.ai/legal/data-processing)
+da TypeSafe, liste-a como subprocessador e descreva-a no aviso de
+privacidade da instância (veja também o
+[contrato de cliente](https://typesafe.ai/legal/mca) e a
+[política de privacidade](https://typesafe.ai/legal/privacy-policy) dela).
 
 **Exatamente o que o Jev vê**, montado em memória a cada chamada e nunca
-armazenado: o nome da equipe, os domínios verificados, os dias desde o
-primeiro envio e o plano; os cabeçalhos `From`, `Reply-To` e `Subject`; o
-texto visível renderizado com os elementos ocultos removidos (até 6.000
-caracteres); uma tabela com os textos dos links e seus domínios registráveis
-(até 30); a contagem de imagens, os nomes e tipos dos anexos e a contagem de
-caracteres ocultos. Nunca um endereço de destinatário, nunca o HTML bruto,
-nunca o conteúdo de um anexo. Uma amostra julgada guarda a pontuação, o
-veredicto, as categorias, os códigos de motivo, a marca imitada, o idioma, o
-id do modelo, a latência e a classe de erro; a página de revisão mostra isso
-e nunca um assunto ou um corpo. As linhas de amostra são removidas após 90
-dias.
+armazenado pelo MillionSend: o nome da equipe, os domínios verificados, os
+dias desde o primeiro envio e o plano; os cabeçalhos `From` e `Reply-To` como
+enviados; o `Subject`; o texto visível renderizado, sem os elementos ocultos
+por estilo inline ou pelo atributo `hidden` (até 6.000 caracteres); uma tabela com os textos dos links e seus
+domínios registráveis (até 30 linhas); a contagem de imagens, os nomes e
+tipos de conteúdo dos anexos e a contagem de caracteres ocultos. O assunto, o
+texto visível, os textos dos links e os nomes dos anexos passam antes pela
+mesma ocultação que o acesso ao conteúdo abaixo usa (links cortados ao
+domínio e a um trecho curto do caminho; sequências com cara de credencial e
+códigos de 4 a 8 dígitos nos 40 caracteres depois de palavras como *code*,
+*OTP*, *senha* ou *token* mascarados); além disso, endereços de e-mail neles
+ficam só com o domínio. Os espaços em branco de cada campo, quebras de linha
+incluídas, viram um único espaço. Outros dados pessoais escritos nesses
+campos (nomes, telefones, documentos como o CPF, endereços postais) não são
+removidos: nada os detecta de forma confiável.
+Nunca um endereço ou cabeçalho de destinatário, nunca o HTML bruto, nunca o
+conteúdo de um anexo. Uma amostra julgada guarda a pontuação, o veredicto, as
+categorias, os códigos de motivo, o idioma, a versão do modelo, a latência e
+a classe de erro; a página de revisão mostra isso e nunca um assunto ou um
+corpo. As linhas de amostra são removidas após 90 dias.
 
 **Amostragem.** Depois de cada mensagem aceita, um sorteio com chave decide
 se ela é julgada. Cada valor abaixo é editado no console em Confiança e
@@ -861,8 +895,9 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 O risco é uma média decaída dos veredictos (meia-vida de 7 dias) com um
 prior que começa mais alto para equipes novas. O cartão Monitoramento da
 visão geral mostra a contagem de amostras por hora, e o operador é avisado
-por e-mail quando mais de 20% das amostras de uma hora (pelo menos 20 delas)
-ficaram sem julgamento, no máximo a cada seis horas.
+por e-mail, no máximo a cada seis horas, quando mais de 20% das amostras de
+uma hora (pelo menos 20 delas) ficaram sem julgamento, ou assim que a
+TypeSafe recusa a chave de API.
 
 ## Acesso ao conteúdo (quebra de vidro)
 
@@ -883,7 +918,7 @@ possa ser seguido; qualquer
 coisa com forma de credencial (um JWT, 32 ou mais caracteres hexadecimais,
 40 ou mais de base64, uma das chaves de API `ms_` da própria instância) é
 mascarada, assim como uma sequência de 4 a 8 dígitos
-a até 40 caracteres de uma palavra como *código*, *code*, *OTP*, *PIN*,
+nos 40 caracteres depois de uma palavra como *código*, *code*, *OTP*, *PIN*,
 *token*, *senha*, *password* ou *verification*. Nunca o HTML bruto, os
 endereços dos destinatários, os cabeçalhos, os anexos ou os destinos de
 rastreamento de cliques, e a tela não oferece copiar nem baixar. Um corpo

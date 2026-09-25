@@ -239,11 +239,11 @@ export const ptBR = {
     subject: "Monitor de conteúdo: {rate} das amostras ficaram sem julgamento na última hora",
     body: [
       "{unjudged} de {samples} amostras sorteadas na última hora voltaram sem julgamento ({provider} · {model}). O envio não é afetado: uma amostra sem julgamento não muda risco, não abre sinalização e não retém e-mail.",
-      "As causas comuns são um provedor limitado ou inacessível, credenciais ausentes, ou um modelo que responde fora do formato da rubrica. O cartão Saúde do console mostra a parcela sem julgamento.",
+      "As causas comuns são um provedor limitado ou inacessível, uma chave de API inválida ou revogada, ou respostas que o monitor não conseguiu ler. O cartão Saúde do console mostra a parcela sem julgamento.",
     ],
     button: "Abrir console",
     muted: [
-      "Enviado ao operador da instância no máximo a cada seis horas enquanto a parcela ficar acima de 20%.",
+      "Enviado ao operador da instância no máximo a cada seis horas enquanto a parcela ficar acima de 20% ou o provedor continuar recusando a chave de API.",
     ],
   },
   "content.access_notice": {
