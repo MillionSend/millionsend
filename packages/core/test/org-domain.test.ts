@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isRootDomainSend, registrableDomain } from "../src/org-domain.js";
+import {
+  isRootDomainSend,
+  registrableDomain,
+  vouchedRegistrableDomain,
+} from "../src/org-domain.js";
 
 describe("registrableDomain", () => {
   it("takes the last two labels on a plain TLD", () => {
@@ -36,5 +40,20 @@ describe("isRootDomainSend", () => {
     expect(isRootDomainSend("mail.acme.com")).toBe(false);
     expect(isRootDomainSend("news.acme.com.br")).toBe(false);
     expect(isRootDomainSend("mail.acme.co.il")).toBe(false);
+  });
+});
+
+describe("vouchedRegistrableDomain", () => {
+  it("vouches under a listed multi-part suffix or a generic TLD", () => {
+    expect(vouchedRegistrableDomain("news.dinzo.com.br")).toBe("dinzo.com.br");
+    expect(vouchedRegistrableDomain("mail.acme.co.uk")).toBe("acme.co.uk");
+    expect(vouchedRegistrableDomain("tx.acme.com")).toBe("acme.com");
+  });
+
+  it("does not vouch where the last two labels may be a public suffix", () => {
+    expect(vouchedRegistrableDomain("x.sp.gov.br")).toBeNull();
+    expect(vouchedRegistrableDomain("loja.app.br")).toBeNull();
+    expect(vouchedRegistrableDomain("pay.shop.com.ua")).toBeNull();
+    expect(vouchedRegistrableDomain("com.br")).toBeNull();
   });
 });

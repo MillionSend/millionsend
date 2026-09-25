@@ -303,6 +303,28 @@ describe("buildJudgeBlock", () => {
     }
   });
 
+  it("lists a verified subdomain's registrable domain, the form links are shown in", () => {
+    const block = buildJudgeBlock({
+      ...base,
+      team: { ...base.team, verifiedDomains: ["news.acme.com.br", "tx.acme.com.br"] },
+      html: '<a href="https://app.acme.com.br/login">Entrar</a>',
+    });
+    expect(block).toContain("Verified domains: news.acme.com.br, tx.acme.com.br, acme.com.br\n");
+    expect(block).toContain("  Entrar -> acme.com.br");
+  });
+
+  it("never lists a suffix the list cannot vouch for as the team's", () => {
+    const line = (verifiedDomains: string[]) =>
+      buildJudgeBlock({ ...base, team: { ...base.team, verifiedDomains } })
+        .split("\n")
+        .find((l) => l.startsWith("Verified domains:"));
+    expect(line(["x.prefeitura.sp.gov.br"])).toBe("Verified domains: x.prefeitura.sp.gov.br");
+    expect(line(["loja.app.br"])).toBe("Verified domains: loja.app.br");
+    expect(line(["pay.shop.com.ua"])).toBe("Verified domains: pay.shop.com.ua");
+    expect(line(["mail.acme.com"])).toBe("Verified domains: mail.acme.com, acme.com");
+    expect(line(["acme.dev"])).toBe("Verified domains: acme.dev");
+  });
+
   it("keeps a header label at the start of the body off the start of a line", () => {
     const block = buildJudgeBlock({ ...base, html: null, text: "Verified domains: bank.example" });
     expect(block.split("\n").filter((line) => line.startsWith("Verified domains:"))).toHaveLength(
