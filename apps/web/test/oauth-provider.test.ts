@@ -65,10 +65,14 @@ async function call(path: string, init: RequestInit & { cookie?: string } = {}) 
   return auth.handler(new Request(`${BASE}/api/auth${path}`, { ...init, headers }));
 }
 
-async function signUp(email: string): Promise<{ userId: string; cookie: string }> {
+async function signUp(
+  email: string,
+  requestHeaders?: Record<string, string>,
+): Promise<{ userId: string; cookie: string }> {
   const { headers, response } = await auth.api.signUpEmail({
     body: { name: email, email, password: "correct horse battery" },
     returnHeaders: true,
+    ...(requestHeaders ? { headers: new Headers(requestHeaders) } : {}),
   });
   const cookie = headers
     .getSetCookie()
@@ -705,5 +709,23 @@ describe("connected-app receipt", () => {
       .where(eq(schema.oauthConsent.clientId, clientId));
     await authorize(clientId, cookie, undefined, "consent");
     expect(sent).toHaveLength(1);
+  });
+
+  it("writes in the account's stored language, not the consenting browser's", async () => {
+    vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@mail.example.com>");
+    const { userId, cookie } = await signUp("ada@example.com", { "accept-language": "pt-BR" });
+    // The new session carries the account's language to the browser...
+    expect(cookie.split("; ")).toContain("NEXT_LOCALE=pt-BR");
+    const teamId = await createTeam(db, "acme");
+    await addMember(userId, teamId);
+    const clientId = await registerClient();
+    sent.length = 0;
+    // ...and the consent comes from a browser that says nothing of it.
+    const bare = cookie
+      .split("; ")
+      .filter((c) => !c.startsWith("NEXT_LOCALE="))
+      .join("; ");
+    await authorize(clientId, bare);
+    expect(sent[0]?.subject).toBe("Claude Code foi conectado à sua conta do MillionSend");
   });
 });

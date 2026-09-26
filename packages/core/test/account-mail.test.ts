@@ -16,7 +16,7 @@ import {
 } from "../src/account-mail.js";
 import { accountMailCard } from "../src/html.js";
 import { mailPreferenceOf } from "../src/mail-preferences.js";
-import { listTeamOwners } from "../src/notifications.js";
+import { accountLocale, listTeamOwners } from "../src/notifications.js";
 import type { SystemMailKind } from "../src/system-mail.js";
 
 const VALUES: Record<string, string> = Object.fromEntries(
@@ -178,6 +178,43 @@ describe("listTeamOwners", () => {
     expect((await listTeamOwners(db, teamId, "x@nobody.example.com")).map((o) => o.locale)).toEqual(
       ["en", "en"],
     );
+  });
+
+  it("prefers the account's stored language over its contact, with or without a sender team", async () => {
+    const teamId = await createTeam(db, "stored");
+    const home = await createTeam(db, "stored-home");
+    await db.insert(schema.domains).values({
+      teamId: home,
+      name: "stored.example.com",
+      region: "us-east-1",
+      status: "verified",
+    });
+    await db.insert(schema.user).values([
+      { id: "s1", name: "Sol", email: "sol@example.com", locale: "en" },
+      { id: "s2", name: "Tia", email: "tia@example.com", locale: "pt-BR" },
+    ]);
+    await db.insert(schema.teamMembers).values([
+      { teamId, userId: "s1", role: "owner" },
+      { teamId, userId: "s2", role: "owner" },
+    ]);
+    await db
+      .insert(schema.contacts)
+      .values({ teamId: home, email: "sol@example.com", properties: { locale: "pt-BR" } });
+    const sender = "MillionSend <account@stored.example.com>";
+    const locales = async (from?: string) =>
+      (await listTeamOwners(db, teamId, from)).map((o) => [o.email, o.locale]).sort();
+    const expected = [
+      ["sol@example.com", "en"],
+      ["tia@example.com", "pt-BR"],
+    ];
+    expect(await locales(sender)).toEqual(expected);
+    expect(await locales()).toEqual(expected);
+
+    expect(await accountLocale(db, sender, "SOL@example.com")).toBe("en");
+    expect(await accountLocale(db, undefined, "tia@example.com")).toBe("pt-BR");
+    // Nothing stored anywhere: the caller's fallback, English by default.
+    expect(await accountLocale(db, sender, "nobody@example.com", "pt-BR")).toBe("pt-BR");
+    expect(await accountLocale(db, sender, "nobody@example.com")).toBe("en");
   });
 
   it("leaves out an owner who turned a notice off, never for mail that is always sent", async () => {

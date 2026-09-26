@@ -19,7 +19,8 @@
     "themeDark": "Dark",
     "language": "Language",
     "language_en": "English",
-    "language_ptBR": "Português (Brasil)"
+    "language_ptBR": "Português (Brasil)",
+    "languageSaveFailed": "Could not save the language. Try again."
   },
   "teamSwitcher": {
     "teams": "Teams",

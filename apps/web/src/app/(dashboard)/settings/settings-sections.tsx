@@ -21,10 +21,11 @@ import { authClient } from "@/lib/auth-client";
 import { UPDATES_URL } from "@/lib/docs-links";
 import { formatDayTime, formatMmSs } from "@/lib/format";
 import { TEAM_LOGO_ACCEPT, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
-import { isAppLocale, LOCALES, setLocaleCookie } from "@/lib/locale-cookie";
+import { isAppLocale, LOCALES } from "@/lib/locale-cookie";
 import { removeTeamLogo, uploadTeamLogo } from "@/lib/team-logo-api";
 import { useTRPC } from "@/lib/trpc";
 import { useCountdown } from "@/lib/use-countdown";
+import { useSwitchLocale } from "@/lib/use-switch-locale";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter } from "../emails/list-parts";
 
@@ -850,7 +851,7 @@ function SupportAccessSection() {
 function LanguageSection() {
   const t = useTranslations("settings");
   const locale = useLocale();
-  const router = useRouter();
+  const switchLocale = useSwitchLocale();
 
   return (
     <SectionCard title={t("language.title")}>
@@ -862,8 +863,7 @@ function LanguageSection() {
           value={locale}
           onChange={(value) => {
             if (!isAppLocale(value)) return;
-            setLocaleCookie(value);
-            router.refresh();
+            switchLocale(value);
           }}
           ariaLabel={t("language.label")}
           options={LOCALES.map((value) => ({ value, label: t(`language.${value}`) }))}

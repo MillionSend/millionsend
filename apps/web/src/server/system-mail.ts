@@ -30,7 +30,7 @@ import ptBR from "../../messages/pt-BR/reset-email.json";
 import ptBRUpdates from "../../messages/pt-BR/updates.json";
 import ptBRVerify from "../../messages/pt-BR/verify-email.json";
 import { getKeyring } from "./keyring";
-import { localeFromHeaders } from "./locale";
+import { accountMailLocale } from "./locale";
 import { enqueueEmailSend } from "./queue";
 
 export const RESET_TOKEN_TTL_MINUTES = 30;
@@ -154,8 +154,9 @@ export function buildUpdatesConfirmEmail(input: {
 }
 
 /**
- * Exported for tests. The inviter's dashboard locale picks the language: the
- * invitee's own is unknown until they sign in, and teammates usually share one.
+ * Exported for tests. The invitee's stored language picks it when they
+ * already have an account; otherwise the inviter's dashboard locale does,
+ * since teammates usually share one.
  */
 export function buildInvitationEmail(input: {
   to: string;
@@ -353,15 +354,16 @@ export async function sendPasswordResetEmail(
       )
       .limit(1);
     if (recent) return;
-    const message = buildResetEmail({
-      to: data.user.email,
-      name: data.user.name,
-      url: data.url,
-      locale: localeFromHeaders(request?.headers),
-    });
-    void deps.send(message).catch((error) => {
-      console.error("Password reset email failed to send", error);
-    });
+    // The language lookup is detached with the send, for the same timing reason.
+    void accountMailLocale(db, data.user.email, request?.headers)
+      .then((locale) =>
+        deps.send(
+          buildResetEmail({ to: data.user.email, name: data.user.name, url: data.url, locale }),
+        ),
+      )
+      .catch((error) => {
+        console.error("Password reset email failed to send", error);
+      });
   } catch (error) {
     console.error("Password reset email skipped", error);
   }
@@ -375,20 +377,26 @@ export async function sendPasswordResetEmail(
  * the link again.
  */
 export function sendVerificationEmail(
+  db: Db,
   data: { user: { email: string; name: string }; url: string },
   request: Request | undefined,
   deps: SystemMailDeps = defaultSystemMailDeps,
 ): void {
   try {
-    const message = buildVerificationEmail({
-      to: data.user.email,
-      name: data.user.name,
-      url: data.url,
-      locale: localeFromHeaders(request?.headers),
-    });
-    void deps.send(message).catch((error) => {
-      console.error("Verification email failed to send", error);
-    });
+    void accountMailLocale(db, data.user.email, request?.headers)
+      .then((locale) =>
+        deps.send(
+          buildVerificationEmail({
+            to: data.user.email,
+            name: data.user.name,
+            url: data.url,
+            locale,
+          }),
+        ),
+      )
+      .catch((error) => {
+        console.error("Verification email failed to send", error);
+      });
   } catch (error) {
     console.error("Verification email skipped", error);
   }

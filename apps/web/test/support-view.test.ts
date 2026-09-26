@@ -388,6 +388,16 @@ describe("the read-only guard", () => {
     );
   });
 
+  it("lets the operator switch their own language during a view", async () => {
+    const grant = await start();
+    await viewer(grant).settings.locale.set({ locale: "pt-BR" });
+    const [row] = await db
+      .select({ locale: schema.user.locale })
+      .from(schema.user)
+      .where(eq(schema.user.id, OPERATOR));
+    expect(row?.locale).toBe("pt-BR");
+  });
+
   it("leaves the console's own procedures working during a view", async () => {
     const grant = await start();
     await viewer(grant).console.teams.adjustLimits({
