@@ -132,11 +132,17 @@ describe("sendPasswordResetEmail", () => {
 
   it("sends once, then silently skips repeats inside the throttle window", async () => {
     await requestReset("tok1");
-    expect(sent).toHaveLength(1);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.to).toBe(user.email);
 
     await requestReset("tok2");
-    expect(sent).toHaveLength(1);
+    // The send is detached, so the skip shows in what comes next: a stray
+    // tok2 would land before tok3, once the window has passed.
+    const beforeWindow = new Date(Date.now() - RESET_EMAIL_THROTTLE_MS - 1000);
+    await db.update(schema.verification).set({ createdAt: beforeWindow });
+    await requestReset("tok3");
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]?.text).toContain("/r/tok3");
   });
 
   it("sends again once the previous request left the throttle window", async () => {
@@ -148,20 +154,27 @@ describe("sendPasswordResetEmail", () => {
       .where(eq(schema.verification.id, "v-tok1"));
 
     await requestReset("tok2");
-    expect(sent).toHaveLength(2);
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
   });
 
   it("does nothing without a sender configured", async () => {
     vi.stubEnv("AUTH_EMAIL_FROM", "");
     await requestReset("tok1");
-    expect(sent).toHaveLength(0);
+    // Proven by the next send that does go out once a sender is back.
+    stubRecoveryEnv();
+    const beforeWindow = new Date(Date.now() - RESET_EMAIL_THROTTLE_MS - 1000);
+    await db.update(schema.verification).set({ createdAt: beforeWindow });
+    await requestReset("tok2");
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.text).toContain("/r/tok2");
   });
 
-  it("localizes from the NEXT_LOCALE cookie, then Accept-Language", async () => {
+  it("without a stored language, localizes from the NEXT_LOCALE cookie, then Accept-Language", async () => {
     await requestReset(
       "tok1",
       new Request("https://x.com", { headers: { cookie: "NEXT_LOCALE=pt-BR" } }),
     );
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.subject).toBe("Redefina sua senha do MillionSend");
 
     const beforeWindow = new Date(Date.now() - RESET_EMAIL_THROTTLE_MS - 1000);
@@ -170,6 +183,7 @@ describe("sendPasswordResetEmail", () => {
       "tok2",
       new Request("https://x.com", { headers: { "accept-language": "pt-BR,pt;q=0.9,en;q=0.5" } }),
     );
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
     expect(sent[1]?.subject).toBe("Redefina sua senha do MillionSend");
 
     await db.update(schema.verification).set({ createdAt: beforeWindow });
@@ -177,7 +191,18 @@ describe("sendPasswordResetEmail", () => {
       "tok3",
       new Request("https://x.com", { headers: { "accept-language": "de" } }),
     );
+    await vi.waitFor(() => expect(sent).toHaveLength(3));
     expect(sent[2]?.subject).toBe("Reset your MillionSend password");
+  });
+
+  it("writes in the account's stored language over the request's", async () => {
+    await db.update(schema.user).set({ locale: "pt-BR" }).where(eq(schema.user.id, user.id));
+    await requestReset(
+      "tok1",
+      new Request("https://x.com", { headers: { "accept-language": "en-US" } }),
+    );
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.subject).toBe("Redefina sua senha do MillionSend");
   });
 });
 
@@ -210,7 +235,7 @@ describe("request-password-reset endpoint", () => {
       expect(unknown.status).toBe(200);
       expect(await unknown.json()).toEqual(await known.json());
 
-      expect(sent).toHaveLength(1);
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
       expect(sent[0]?.to).toBe("ada@example.com");
       expect(sent[0]?.html).toContain("/reset-password/");
     } finally {
@@ -231,15 +256,18 @@ describe("password changed receipt", () => {
       const auth = createAuth(db, { send: async (m) => void sent.push(m) });
       await auth.api.signUpEmail({
         body: { name: "Ada", email: "ada@example.com", password: "correct horse battery" },
+        headers: new Headers({ "accept-language": "en-US" }),
       });
       sent.length = 0;
       await auth.api.requestPasswordReset({ body: { email: "ada@example.com", redirectTo: "/x" } });
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
       const token = sent[0]?.text.match(/reset-password\/([^?\s]+)/)?.[1] ?? "";
       await expect(
         auth.api.resetPassword({ body: { newPassword: "another horse battery", token: "nope" } }),
       ).rejects.toBeTruthy();
       expect(sent.map((m) => m.kind)).toEqual(["password_reset"]);
-      // Over HTTP, as the browser does it: the receipt reads the request's language.
+      // Over HTTP, from a browser reading Portuguese: the receipt keeps the
+      // language the account signed up in.
       const reset = await auth.handler(
         new Request("http://localhost:3000/api/auth/reset-password", {
           method: "POST",
@@ -252,10 +280,11 @@ describe("password changed receipt", () => {
         }),
       );
       expect(reset.status).toBe(200);
+      await vi.waitFor(() => expect(sent).toHaveLength(2));
       expect(sent.map((m) => m.kind)).toEqual(["password_reset", "password_changed"]);
       expect(sent[1]).toMatchObject({
         to: "ada@example.com",
-        subject: "Sua senha do MillionSend foi alterada",
+        subject: "Your MillionSend password was changed",
       });
       expect(sent[1]?.text).toContain("http://localhost:3000/forgot-password");
     } finally {

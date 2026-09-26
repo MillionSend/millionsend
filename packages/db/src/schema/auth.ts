@@ -27,6 +27,10 @@ export const user = pgTable("user", {
   // Owner notices this person turned off, by preference key (core
   // mail-preferences); mail about the account itself is never listed here.
   mailOptOuts: jsonb("mail_opt_outs").$type<string[]>().notNull().default([]),
+  // The language the dashboard and every account mail use for this person:
+  // set at sign-up from the request, changed by the language switcher. Null
+  // for accounts from before it existed; readers then fall back.
+  locale: text("locale"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -295,6 +295,13 @@
       "when": 1789612549115,
       "tag": "0041_paced_broadcasts",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1790458160356,
+      "tag": "0042_user_locale",
+      "breakpoints": true
     }
   ]
 }

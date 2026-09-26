@@ -295,6 +295,26 @@ describe("settings.team.delete", () => {
   });
 });
 
+describe("settings.locale", () => {
+  it("stores the caller's language on their own account only", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "u1", "owner");
+    await addMember(teamId, "u2", "member");
+    await callerFor("u1", teamId, "owner").settings.locale.set({ locale: "pt-BR" });
+    const rows = await db
+      .select({ id: schema.user.id, locale: schema.user.locale })
+      .from(schema.user)
+      .orderBy(schema.user.id);
+    expect(rows).toEqual([
+      { id: "u1", locale: "pt-BR" },
+      { id: "u2", locale: null },
+    ]);
+    await expect(
+      callerFor("u1", teamId, "owner").settings.locale.set({ locale: "de" as "en" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
 describe("settings.smtp", () => {
   it("exposes connection facts but never a real secret — the password is the placeholder", async () => {
     const teamId = await createTeam(db, "acme");
