@@ -131,19 +131,24 @@ export const createCallerFactory = t.createCallerFactory;
 
 /**
  * The procedures a live view may still reach, by exact path: the operator
- * ending their own session, and the banner asking whether it still holds.
+ * ending their own session, the banner asking whether it still holds, and
+ * the operator's own language switch, which writes only their user row.
  * Named one by one rather than by prefix, so a procedure added to the
  * support router later does not inherit the exemption.
  */
-const SUPPORT_VIEW_PASS: ReadonlySet<string> = new Set(["support.end", "support.current"]);
+const SUPPORT_VIEW_PASS: ReadonlySet<string> = new Set([
+  "support.end",
+  "support.current",
+  "settings.locale.set",
+]);
 
 /**
  * Read-only support view, enforced once for every procedure: a mutation is
  * refused whatever the router hides or disables, and each read is counted
  * on the grant by procedure path. The console's own procedures pass
  * untouched and uncounted — the operator is still the operator, and a
- * console read is not a read of the team — and so do the two procedures
- * above, which are about the session rather than the team's data.
+ * console read is not a read of the team — and so do the procedures above,
+ * which are about the operator rather than the team's data.
  */
 const supportViewGuard = t.middleware(async ({ ctx, type, path, next }) => {
   const view = ctx.supportView;

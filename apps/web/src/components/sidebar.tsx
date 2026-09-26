@@ -8,9 +8,10 @@ import { EllipsisGlyph, NavGlyph, type NavIconName } from "@/components/icons/na
 import { useDismiss } from "@/components/popover-menu";
 import { TeamSwitcher } from "@/components/team-switcher";
 import { authClient } from "@/lib/auth-client";
-import { isAppLocale, LOCALES, setLocaleCookie } from "@/lib/locale-cookie";
+import { isAppLocale, LOCALES } from "@/lib/locale-cookie";
 import { isActive } from "@/lib/nav";
 import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
+import { useSwitchLocale } from "@/lib/use-switch-locale";
 
 // Canvas nav order (Row 1 chrome): Settings lives in the main list.
 export const NAV_ITEMS: ReadonlyArray<{ key: string; href: string; icon: NavIconName }> = [
@@ -52,12 +53,11 @@ function NavItem({
   );
 }
 
-/* Language row — the same segmented pill with the two language codes; the
-   cookie is the whole setting, so the server re-renders the tree on refresh. */
+/* Language row — the same segmented pill with the two language codes. */
 export function LanguageRow() {
   const tCommon = useTranslations("common");
   const locale = useLocale();
-  const router = useRouter();
+  const switchLocale = useSwitchLocale();
   return (
     <div className="ms-menu-item static">
       {tCommon("accountMenu.language")}
@@ -71,8 +71,7 @@ export function LanguageRow() {
             aria-pressed={locale === value}
             onClick={() => {
               if (locale === value || !isAppLocale(value)) return;
-              setLocaleCookie(value);
-              router.refresh();
+              switchLocale(value);
             }}
           >
             {value === "en" ? "EN" : "PT"}

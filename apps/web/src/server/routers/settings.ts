@@ -1,6 +1,12 @@
 import { cancelTeamSubscription } from "@millionsend/billing";
-import { env, isCloudDeployment, notificationsEmailFrom } from "@millionsend/config";
 import {
+  accountEmailFrom,
+  env,
+  isCloudDeployment,
+  notificationsEmailFrom,
+} from "@millionsend/config";
+import {
+  accountLocale,
   createFixedWindowLimiter,
   DAY_MS,
   INVITE_EMAILS_PER_HOUR,
@@ -8,6 +14,7 @@ import {
   INVITE_RESEND_COOLDOWN_MS,
   INVITE_TTL_MS,
   isMailPreferenceKey,
+  MAIL_LOCALES,
   MAIL_PREFERENCE_KEYS,
   type MailPreferenceKey,
   QUOTA_COLUMNS,
@@ -247,7 +254,7 @@ export function createSettingsRouter(
       role: invite.role,
       url: inviteAcceptUrl(invite.id),
       expiresInDays: Math.round(INVITE_TTL_MS / DAY_MS),
-      locale: await activeLocale(),
+      locale: await accountLocale(ctx.db, accountEmailFrom(), invite.email, await activeLocale()),
     });
     try {
       await mail.send(message);
@@ -810,6 +817,21 @@ export function createSettingsRouter(
             })
             .where(eq(u.id, ctx.session.user.id));
           return { optOuts: await mailOptOuts(ctx.db, ctx.session.user.id) };
+        }),
+    }),
+
+    /**
+     * The account's language, which the dashboard and every account mail
+     * use; the language switcher writes it alongside the cookie.
+     */
+    locale: router({
+      set: protectedProcedure
+        .input(z.object({ locale: z.enum(MAIL_LOCALES) }))
+        .mutation(async ({ ctx, input }) => {
+          await ctx.db
+            .update(schema.user)
+            .set({ locale: input.locale, updatedAt: new Date() })
+            .where(eq(schema.user.id, ctx.session.user.id));
         }),
     }),
 

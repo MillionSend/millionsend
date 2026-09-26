@@ -67,14 +67,13 @@ describe("email verification", () => {
     const a = auth();
     const res = await signUp(a);
     expect(res.token).toBeNull();
-    expect(sent).toHaveLength(1);
-    // No Request object reaches the hook on a direct API call, so the
-    // default locale applies; the request rule is covered by the reset tests.
+    // Written in the language sign-up stored for the account from its request.
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({
       kind: "email_verification",
       to: "ada@example.com",
       from: "MillionSend <no-reply@mail.example.com>",
-      subject: "Verify your MillionSend email",
+      subject: "Confirme seu e-mail do MillionSend",
     });
     const url = new URL(sent[0]?.text.match(/https?:\/\/\S+/)?.[0] ?? "");
     expect(url.pathname).toBe("/api/auth/verify-email");
@@ -82,18 +81,18 @@ describe("email verification", () => {
 
     // Sign-in before verifying is refused and re-sends the link.
     await expect(signIn(a)).rejects.toMatchObject({ status: "FORBIDDEN" });
-    expect(sent).toHaveLength(2);
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
 
-    // Over HTTP, as the browser opens the link: the welcome reads its language.
-    const opened = await a.handler(new Request(url, { headers: { "accept-language": "pt-BR" } }));
+    // Over HTTP, as the browser opens the link — here one reading English,
+    // as a phone or a link scanner may: the account's stored language wins.
+    const opened = await a.handler(new Request(url, { headers: { "accept-language": "en-US" } }));
     expect(opened.status).toBe(302);
     const [user] = await db
       .select({ verified: schema.user.emailVerified })
       .from(schema.user)
       .where(eq(schema.user.email, "ada@example.com"));
     expect(user?.verified).toBe(true);
-    // The welcome waits for the address to be its owner's, then follows the
-    // language of the request that opened the link.
+    // The welcome waits for the address to be its owner's.
     expect(sent.map((m) => m.kind)).toEqual([
       "email_verification",
       "email_verification",
@@ -101,7 +100,10 @@ describe("email verification", () => {
     ]);
     expect(sent[2]).toMatchObject({ to: "ada@example.com", subject: "Bem-vindo ao MillionSend" });
     expect((await signIn(a)).token).toBeTruthy();
-    expect(sent).toHaveLength(3);
+    // The verified sign-in sends nothing: the next mail out is the reset.
+    await a.api.requestPasswordReset({ body: { email: "ada@example.com", redirectTo: "/x" } });
+    await vi.waitFor(() => expect(sent).toHaveLength(4));
+    expect(sent[3]?.kind).toBe("password_reset");
   });
 
   it("an account from before verification existed is asked at its next sign-in", async () => {
@@ -109,7 +111,7 @@ describe("email verification", () => {
     expect((await signUp(auth())).token).toBeTruthy();
     stubSender();
     await expect(signIn(auth())).rejects.toMatchObject({ status: "FORBIDDEN" });
-    expect(sent).toHaveLength(1);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.kind).toBe("email_verification");
   });
 

@@ -45,13 +45,12 @@ export interface TeamOwner {
 }
 
 /**
- * The addresses account notifications go to. With the account-mail sender
- * given, each owner's language is read off their contact in the team that
- * holds that sender's domain — the row sign-up enrolls, whose `locale`
- * property is the one language the instance knows for a person outside a
- * request. Owners without one, or an instance where no team holds the
- * sender, read English. With the kind given, an owner who turned that
- * notice off is left out; mail that is always sent names no switch.
+ * The addresses account notifications go to, each in the owner's own
+ * language: `user.locale`, which sign-up and the language switcher write.
+ * Accounts from before that column fall back to the `locale` property of
+ * their contact in the team holding the account-mail sender's domain (the
+ * row sign-up enrolls), then to English. With the kind given, an owner who
+ * turned that notice off is left out; mail that is always sent names no switch.
  */
 export async function listTeamOwners(
   db: Db,
@@ -69,8 +68,8 @@ export async function listTeamOwners(
       locale: home
         ? sql<
             string | null
-          >`(select ${c.properties}->>'locale' from ${c} where ${c.teamId} = ${home.teamId} and lower(${c.email}) = lower(${schema.user.email}) limit 1)`
-        : sql<string | null>`null`,
+          >`coalesce(${schema.user.locale}, (select ${c.properties}->>'locale' from ${c} where ${c.teamId} = ${home.teamId} and lower(${c.email}) = lower(${schema.user.email}) limit 1))`
+        : schema.user.locale,
     })
     .from(schema.teamMembers)
     .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
@@ -88,19 +87,32 @@ export async function listTeamOwners(
   }));
 }
 
-/** The language the instance knows for one address, read the same way; English when it knows none. */
+/**
+ * The language the instance knows for one address, read the same way;
+ * `fallback` when it knows none — the caller's request language, where
+ * there is a request.
+ */
 export async function accountLocale(
   db: Db,
   accountMailFrom: string | null | undefined,
   email: string,
+  fallback: MailLocale = "en",
 ): Promise<MailLocale> {
+  const u = schema.user;
+  const [account] = await db
+    .select({ locale: u.locale })
+    .from(u)
+    // Better Auth stores addresses lowercased; an exact match keeps the unique index.
+    .where(eq(u.email, email.toLowerCase()))
+    .limit(1);
+  if (isMailLocale(account?.locale)) return account.locale;
   const home = accountMailFrom ? await findSenderDomainOwner(db, accountMailFrom) : null;
-  if (!home) return "en";
+  if (!home) return fallback;
   const c = schema.contacts;
   const [row] = await db
     .select({ locale: sql<string | null>`${c.properties}->>'locale'` })
     .from(c)
     .where(and(eq(c.teamId, home.teamId), sql`lower(${c.email}) = lower(${email})`))
     .limit(1);
-  return isMailLocale(row?.locale) ? row.locale : "en";
+  return isMailLocale(row?.locale) ? row.locale : fallback;
 }

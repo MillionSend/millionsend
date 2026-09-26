@@ -12,6 +12,7 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Auth, createAuth } from "@/server/auth";
+import { accountMailLocale } from "@/server/locale";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -61,6 +62,27 @@ async function signUp(auth: Auth, email: string, name = "Ada Lovelace") {
 
 const contactsOf = (email: string) =>
   db.select().from(schema.contacts).where(eq(schema.contacts.email, email));
+
+describe("the language of mail to an account", () => {
+  it("reads the stored language, then the asking request's, then the sign-up contact", async () => {
+    await db.insert(schema.user).values([
+      { id: "old", name: "Old", email: "old@example.com" },
+      { id: "new", name: "New", email: "new@example.com", locale: "en" },
+    ]);
+    await db.insert(schema.contacts).values([
+      { teamId, email: "old@example.com", properties: { locale: "pt-BR" } },
+      { teamId, email: "new@example.com", properties: { locale: "pt-BR" } },
+    ]);
+    const english = new Headers({ cookie: "NEXT_LOCALE=en" });
+    const portuguese = new Headers({ cookie: "NEXT_LOCALE=pt-BR" });
+    // An account from before the stored language: a request outranks the contact.
+    expect(await accountMailLocale(db, "old@example.com", english)).toBe("en");
+    expect(await accountMailLocale(db, "old@example.com", undefined)).toBe("pt-BR");
+    // A stored language outranks both.
+    expect(await accountMailLocale(db, "new@example.com", portuguese)).toBe("en");
+    expect(await accountMailLocale(db, "new@example.com", undefined)).toBe("en");
+  });
+});
 
 describe("enrollment and the sign-up flag", () => {
   it("a self-host closed to sign-up enrolls nobody, but still welcomes the account it admits", async () => {
@@ -146,6 +168,7 @@ describe("accounts as contacts of the account-mail team", () => {
     });
     // The address was only typed: it may be anyone's inbox.
     expect(await contactsOf("ada@example.com")).toHaveLength(0);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
     const url = new URL(sent[0]?.text.match(/https?:\/\/\S+/)?.[0] ?? "");
     await auth.api.verifyEmail({ query: { token: url.searchParams.get("token") ?? "" } });
     expect(await contactsOf("ada@example.com")).toHaveLength(1);

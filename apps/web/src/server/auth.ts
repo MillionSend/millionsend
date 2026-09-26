@@ -18,7 +18,8 @@ import { alias } from "drizzle-orm/pg-core";
 import { headers } from "next/headers";
 import { mcpResourceUrl, resolveBaseUrl } from "@/lib/api-base-url";
 import { httpOrigin } from "@/lib/http-url";
-import { localeFromHeaders } from "./locale";
+import { isAppLocale, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE } from "@/lib/locale-cookie";
+import { accountMailLocale, localeFromHeaders } from "./locale";
 import { getActiveMembership, listMemberships } from "./membership";
 import { enqueueRecipientErase } from "./queue";
 import {
@@ -204,7 +205,7 @@ export function createAuth(
   ) => {
     try {
       if (emailVerificationEnabled() && !user.emailVerified) return;
-      const locale = localeFromHeaders(headers);
+      const locale = await accountMailLocale(db, user.email, headers);
       if (accountEmailFrom()) {
         sendAccountMail(buildWelcomeEmail({ to: user.email, name: user.name, locale }), mail);
       }
@@ -265,7 +266,7 @@ export function createAuth(
           app: consent.app ?? "An app",
           team,
           scopes: consent.scopes,
-          locale: localeFromHeaders(ctx.headers),
+          locale: await accountMailLocale(db, user.email, ctx.headers),
         }),
         mail,
       );
@@ -301,6 +302,9 @@ export function createAuth(
       },
     },
     user: {
+      additionalFields: {
+        locale: { type: "string", required: false, input: false },
+      },
       deleteUser: {
         enabled: true,
         beforeDelete: async (user) => {
@@ -394,13 +398,16 @@ export function createAuth(
       // learns the password changed and can start a reset of their own.
       onPasswordReset: async ({ user }: { user: { email: string } }, request?: Request) => {
         if (!accountEmailFrom()) return;
-        sendAccountMail(
-          buildPasswordChangedEmail({
-            to: user.email,
-            locale: localeFromHeaders(request?.headers),
-          }),
-          mail,
-        );
+        // Detached, language lookup included: Better Auth revokes the other
+        // sessions only after this hook returns, and nothing here may delay
+        // or fail that.
+        void accountMailLocale(db, user.email, request?.headers)
+          .then((locale) =>
+            sendAccountMail(buildPasswordChangedEmail({ to: user.email, locale }), mail),
+          )
+          .catch((error) => {
+            console.error("password_changed email skipped", error);
+          });
       },
       // A password sign-up gets no session until its address is verified;
       // an account from before this verifies at its next sign-in, where the
@@ -432,7 +439,7 @@ export function createAuth(
               data: { user: { email: string; name: string }; url: string },
               request?: Request,
             ) => {
-              sendVerificationEmail(data, request, mail);
+              sendVerificationEmail(db, data, request, mail);
             },
             sendOnSignUp: true,
             sendOnSignIn: true,
@@ -488,8 +495,13 @@ export function createAuth(
     databaseHooks: {
       user: {
         create: {
-          before: async () => {
+          // The account's language is the one its creating request reads in;
+          // the dashboard and every account mail read it back from here on.
+          // A creation with no request behind it stores none, and mail falls back.
+          before: async (user, ctx) => {
             await assertSignupAllowed(db, signupOpen());
+            const headers = ctx?.headers ?? ctx?.request?.headers;
+            return { data: headers ? { ...user, locale: localeFromHeaders(headers) } : user };
           },
           // Runs after the row exists (after the adapter's transaction for a
           // social first sign-in). Social sign-ins arrive verified and enroll
@@ -547,6 +559,16 @@ export function createAuth(
       // consent remains the gate. drizzle/0007 does the same for clients
       // registered before this hook existed.
       after: createAuthMiddleware(async (ctx) => {
+        // A new session carries the account's language to this browser, so
+        // the dashboard reads in the language its mail is written in.
+        const locale = ctx.context.newSession?.user.locale;
+        if (isAppLocale(locale) && ctx.getCookie(LOCALE_COOKIE) !== locale) {
+          ctx.setCookie(LOCALE_COOKIE, locale, {
+            path: "/",
+            maxAge: LOCALE_COOKIE_MAX_AGE,
+            sameSite: "lax",
+          });
+        }
         if (ctx.path === "/oauth2/consent") {
           await mailConsent(ctx);
           return;

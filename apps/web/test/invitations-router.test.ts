@@ -239,6 +239,22 @@ describe("settings.invitations list/revoke isolation", () => {
 });
 
 describe("settings.invitations email + resend", () => {
+  it("writes to an invitee with an account in their language, else in the inviter's", async () => {
+    stubSender();
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "owner1", "owner");
+    await db
+      .insert(schema.user)
+      .values({ id: "ana", name: "Ana", email: "ana@example.com", locale: "pt-BR" });
+    const { caller, sent } = mailCaller("owner1", teamId, "owner");
+    await caller.settings.invitations.create({ email: "ana@example.com" });
+    await caller.settings.invitations.create({ email: "new@example.com" });
+    expect(sent.map((m) => m.subject)).toEqual([
+      "owner1 convidou você para acme no MillionSend",
+      "owner1 invited you to acme on MillionSend",
+    ]);
+  });
+
   it("emails the invitee at create, naming the team and carrying the accept link", async () => {
     stubSender();
     const teamId = await createTeam(db, "acme");
