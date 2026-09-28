@@ -37,7 +37,7 @@
     "@aws-sdk/client-sts": "^3.1130.0"
   },
   "devDependencies": {
-    "@types/node": "^22.20.2",
+    "@types/node": "^22.20.4",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   }
