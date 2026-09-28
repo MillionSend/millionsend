@@ -87,7 +87,7 @@ jobs:
         id: meta
         with:
           images: ${{ env.APP_IMAGE }}
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: app
         with:
           context: .
@@ -101,7 +101,7 @@ jobs:
           cache-to: type=gha,scope=app-${{ matrix.slug }},mode=max
       # The backup sidecar (pg_dump + rclone) ships on the same tags so the
       # standalone compose file needs no build context.
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         id: backup
         with:
           context: scripts/backup
