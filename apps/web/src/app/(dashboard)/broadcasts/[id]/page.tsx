@@ -15,10 +15,10 @@ import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { StatBlock } from "@/components/stat-block";
-import { formatDayTime, formatUtcTimestamp } from "@/lib/format";
+import { formatDayTime, formatUtcTimestamp, sendingDays } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter } from "../../emails/list-parts";
-import { type BroadcastStatus, FinishCell, SendingStatus } from "../parts";
+import { type BroadcastStatus, FinishCell, PacingSteps, SendingStatus } from "../parts";
 
 function Microlabel({ children }: { children: React.ReactNode }) {
   return (
@@ -216,6 +216,10 @@ export default function BroadcastDetailPage() {
         </div>
       </div>
 
+      {progress && broadcast && broadcast.releases.length > 0 ? (
+        <PacingBand sent={broadcast.sent} releases={broadcast.releases} locale={locale} />
+      ) : null}
+
       <div
         className="ms-meta-grid"
         style={{
@@ -341,6 +345,29 @@ export default function BroadcastDetailPage() {
         </form>
       </Modal>
     </>
+  );
+}
+
+/** The pacing rail under the meta row, for a send that spans days. */
+function PacingBand({
+  sent,
+  releases,
+  locale,
+}: {
+  sent: { at: Date; count: number }[];
+  releases: { at: Date; endsAt: Date; count: number }[];
+  locale: string;
+}) {
+  const t = useTranslations("broadcasts");
+  if (sendingDays(sent, releases, new Date()).length < 2) return null;
+  return (
+    <div className="ms-pacing">
+      <div className="ms-microlabel" style={{ fontSize: 10.5 }}>
+        {t("detail.pacing")}
+      </div>
+      <PacingSteps sent={sent} releases={releases} locale={locale} />
+      <p>{t("guard.reason")}</p>
+    </div>
   );
 }
 

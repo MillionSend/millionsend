@@ -22,7 +22,7 @@ import { Truncated } from "@/components/truncated";
 import { formatFinishAbout, roundUpToQuarterHour } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
 import { ListFooter, StateCard } from "../emails/list-parts";
-import { type BroadcastStatus, PILL_VARIANT, StatusPill } from "./parts";
+import { type BroadcastStatus, PacingSteps, PILL_VARIANT, StatusPill } from "./parts";
 
 // Fixed layout keeps the percentage column shares; the min width makes the
 // wrapper scroll on narrow screens instead of squeezing nowrap cells together.
@@ -220,15 +220,22 @@ export default function BroadcastsPage() {
                           inline
                           text={
                             <>
-                              {row.finishesAt
-                                ? t("list.finishTip", {
-                                    time: formatFinishAbout(
-                                      roundUpToQuarterHour(row.finishesAt),
-                                      locale,
-                                    ),
-                                  })
-                                : null}
-                              {row.finishesAt ? <br /> : null}
+                              <div>
+                                {row.finishesAt
+                                  ? t("list.finishTip", {
+                                      time: formatFinishAbout(
+                                        roundUpToQuarterHour(row.finishesAt),
+                                        locale,
+                                      ),
+                                    })
+                                  : null}
+                              </div>
+                              <PacingSteps
+                                sent={row.sent}
+                                releases={row.releases}
+                                locale={locale}
+                                compact
+                              />
                               {t("list.progressTip", {
                                 sent: nf.format(row.sentCount),
                                 waiting: nf.format(Math.max(0, row.recipients - row.sentCount)),

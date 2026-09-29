@@ -229,6 +229,31 @@ export interface SendDay {
   count: number;
 }
 
+export interface SendingDay extends SendDay {
+  /** Rows of the day already out. */
+  sent: number;
+  state: "done" | "now" | "next";
+}
+
+/**
+ * A sending broadcast's days on the local calendar: what already went out
+ * plus the planner's releases still to come, each day marked done, today,
+ * or ahead.
+ */
+export function sendingDays(
+  sent: readonly { at: Date | string; count: number }[],
+  releases: readonly { at: Date | string; endsAt: Date | string; count: number }[],
+  now: Date,
+): SendingDay[] {
+  const past = sent.map((s) => ({ at: s.at, endsAt: s.at, count: s.count }));
+  const sentDays = groupReleasesByDay(past);
+  return groupReleasesByDay([...past, ...releases]).map((day) => {
+    const out = sentDays.find((d) => sameLocalDay(d.startsAt, day.startsAt))?.count ?? 0;
+    const state = sameLocalDay(day.startsAt, now) ? "now" : day.startsAt < now ? "done" : "next";
+    return { ...day, sent: out, state };
+  });
+}
+
 /** Whether two instants fall on the same UTC day: the day a daily plan cap resets on. */
 export function sameUtcDay(a: Date | string | number, b: Date | string | number): boolean {
   return new Date(a).toISOString().slice(0, 10) === new Date(b).toISOString().slice(0, 10);

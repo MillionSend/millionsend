@@ -126,7 +126,11 @@ export async function sendingBroadcasts(
       scheduledAt: b.scheduledAt,
       region,
       queued: countWhere("queued"),
-      parked: countWhere("queued_quota"),
+      // Contacts the walk has not reached yet wait like parked rows; the
+      // walk writes far faster than the drain releases, so they are always
+      // there by their slot. Written rows can outrun the audience when
+      // contacts join mid-walk, hence the floor.
+      parked: sql<number>`(select count(*) filter (where e.latest_status = 'queued_quota')::int + case when broadcasts.recipient_count is null then greatest(0, coalesce(broadcasts.audience_count, 0) - count(*)::int) else 0 end from emails e where e.broadcast_id = broadcasts.id)`,
       sent: sql<number>`(select count(*)::int from emails e where e.broadcast_id = broadcasts.id and e.sent_at is not null)`,
     })
     .from(b)

@@ -25,7 +25,8 @@ import {
   type SendingBroadcast,
   sendingBroadcasts,
 } from "@millionsend/core";
-import type { Db } from "@millionsend/db";
+import { type Db, schema } from "@millionsend/db";
+import { and, inArray, isNotNull, sql } from "drizzle-orm";
 import { plannerRegionAccount } from "./console/ses-regions";
 
 /** What the send dialog and the send mutation say about a send being initiated. */
@@ -155,35 +156,64 @@ export async function planBroadcastSend(
   };
 }
 
+/** A sending broadcast as the list and the detail show it. */
+export interface SendingProgressRow {
+  sentCount: number;
+  parkedCount: number;
+  finishesAt: Date | null;
+  /** The planner's releases still to come. */
+  releases: { at: Date; endsAt: Date; count: number }[];
+  /** Rows already out, in quarter-hour buckets. */
+  sent: { at: Date; count: number }[];
+}
+
 /**
  * The rows of a team's sending broadcasts as the list and the detail show
- * them: how many went out, how many still wait, and about when the last
+ * them: how many went out and when, how many still wait, and when the rest
  * goes. One planner run per region; nothing when no broadcast is sending.
  */
 export async function sendingProgress(
   db: Db,
   teamId: string,
   now: Date = new Date(),
-): Promise<Map<string, { sentCount: number; parkedCount: number; finishesAt: Date | null }>> {
-  const out = new Map<
-    string,
-    { sentCount: number; parkedCount: number; finishesAt: Date | null }
-  >();
+): Promise<Map<string, SendingProgressRow>> {
+  const out = new Map<string, SendingProgressRow>();
   const mine = await sendingBroadcasts(db, { teamId });
+  if (mine.length === 0) return out;
   const regions = new Set(mine.flatMap((b) => (b.region ? [b.region] : [])));
-  const plans = new Map(
-    await Promise.all(
+  const e = schema.emails;
+  const bucket = sql<Date>`date_bin('15 minutes', ${e.sentAt}, timestamptz 'epoch')`;
+  const [plans, sentRows] = await Promise.all([
+    Promise.all(
       [...regions].map(
         async (region) => [region, await planBroadcastSend(db, { teamId, region, now })] as const,
       ),
-    ),
-  );
+    ).then((entries) => new Map(entries)),
+    db
+      .select({ broadcastId: e.broadcastId, at: bucket, count: sql<number>`count(*)::int` })
+      .from(e)
+      .where(
+        and(
+          inArray(
+            e.broadcastId,
+            mine.map((b) => b.id),
+          ),
+          isNotNull(e.sentAt),
+        ),
+      )
+      .groupBy(e.broadcastId, bucket)
+      .orderBy(bucket),
+  ]);
   for (const b of mine) {
     const estimate = b.region ? plans.get(b.region)?.estimates.get(b.id) : undefined;
     out.set(b.id, {
       sentCount: b.sent,
       parkedCount: b.parked,
       finishesAt: estimate?.finishesAt ?? null,
+      releases: estimate?.releases ?? [],
+      sent: sentRows
+        .filter((r) => r.broadcastId === b.id)
+        .map((r) => ({ at: new Date(r.at), count: r.count })),
     });
   }
   return out;

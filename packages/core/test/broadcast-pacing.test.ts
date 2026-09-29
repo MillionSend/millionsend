@@ -102,6 +102,25 @@ it("lists the sending broadcasts of a region with their rows by state", async ()
   expect(await sendingBroadcasts(db, { region: "us-east-1" })).toEqual([]);
 });
 
+it("counts the contacts a walk has not reached yet as parked, until the walk ends", async () => {
+  const parked = async () => (await sendingBroadcasts(db, { region: "sa-east-1" }))[0]?.parked;
+  await db
+    .update(schema.broadcasts)
+    .set({ audienceCount: 20 })
+    .where(eq(schema.broadcasts.id, broadcastId));
+  // 9 rows written of 20: 3 parked plus the 11 still to come.
+  expect(await parked()).toBe(14);
+  await db
+    .update(schema.broadcasts)
+    .set({ recipientCount: 9 })
+    .where(eq(schema.broadcasts.id, broadcastId));
+  expect(await parked()).toBe(3);
+  await db
+    .update(schema.broadcasts)
+    .set({ audienceCount: null, recipientCount: null })
+    .where(eq(schema.broadcasts.id, broadcastId));
+});
+
 it("reads today's counter and the period's for the plan caps", async () => {
   expect(await quotaUsage(db, teamId, { kind: "day", plan: "free", limit: 100 }, NOW)).toEqual({
     day: 5,

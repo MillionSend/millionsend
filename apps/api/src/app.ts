@@ -3224,17 +3224,20 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             inArray(schema.broadcasts.status, ["scheduled", "sending"]),
           ),
         )
-        .returning({ id: schema.broadcasts.id });
+        .returning({
+          id: schema.broadcasts.id,
+          // Contacts a walk cut short never reached are stopped too.
+          unwritten: sql<number>`case when ${schema.broadcasts.recipientCount} is null then greatest(0, coalesce(${schema.broadcasts.audienceCount}, 0) - (select count(*)::int from ${schema.emails} where ${schema.emails.broadcastId} = ${schema.broadcasts.id})) else 0 end`,
+        });
       if (!row) {
         return c.json(
           errorBody(400, "invalid_parameter", "Only queued broadcasts can be canceled"),
           400,
         );
       }
-      const canceledRemaining = await cancelBroadcastRows(db, {
-        broadcastId: row.id,
-        teamId: auth.teamId,
-      });
+      const canceledRemaining =
+        (await cancelBroadcastRows(db, { broadcastId: row.id, teamId: auth.teamId })) +
+        row.unwritten;
       return c.json(
         { object: "broadcast" as const, id: row.id, canceled_remaining: canceledRemaining },
         200,

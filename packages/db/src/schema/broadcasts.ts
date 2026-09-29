@@ -51,6 +51,10 @@ export const broadcasts = pgTable(
     // broadcast stays "sending" until its parked rows have gone. Null for
     // rows that predate the column and while the walk runs.
     recipientCount: integer("recipient_count"),
+    // The audience the walk counted before writing its first row: an upper
+    // bound (suppressed contacts are skipped), standing in for the total
+    // while recipient_count is still null.
+    audienceCount: integer("audience_count"),
     // The last contact id of the fan-out's last committed page, so a walk
     // interrupted by a crash resumes from it instead of rescanning the team.
     // Cleared when the walk ends.

@@ -323,6 +323,10 @@ export async function sendBroadcast(
       ),
     );
   const audienceCount = audience?.n ?? 0;
+  await db
+    .update(schema.broadcasts)
+    .set({ audienceCount })
+    .where(eq(schema.broadcasts.id, broadcast.id));
   // Admission: the first `admitted` rows this walk writes get a job now; the
   // rest park for the drain. A resumed walk takes again against the count,
   // which already holds the rows it wrote before.
