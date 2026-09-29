@@ -389,12 +389,12 @@ export function UnsubscribeView() {
           <p className="ms-microlabel" style={{ margin: 0 }}>
             {t("preview")}
           </p>
-          <div className="ms-tabs">
+          <div style={{ display: "flex", gap: 2 }}>
             {(["confirm", "saved"] as const).map((state) => (
               <button
                 key={state}
                 type="button"
-                className={previewState === state ? "active" : ""}
+                className={previewState === state ? "ms-code-tab active" : "ms-code-tab"}
                 onClick={() => setPreviewState(state)}
               >
                 {state === "confirm" ? t("previewPreferences") : t("previewSuccess")}

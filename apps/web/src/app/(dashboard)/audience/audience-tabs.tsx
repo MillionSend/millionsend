@@ -26,7 +26,7 @@ export function AudienceTabs() {
   );
   const tabsRef = useActiveTabInView(activeHref);
   return (
-    <div ref={tabsRef} className="ms-tabs" style={{ marginBottom: 24 }}>
+    <div ref={tabsRef} className="ms-tabs bleed" style={{ marginBottom: 24 }}>
       {TABS.map(({ key, href }) => (
         <button
           key={key}

@@ -225,11 +225,15 @@ describe("emails.list sources", () => {
     const transactional = await caller(team).emails.list({ source: "transactional" });
     expect(transactional.items.map((r) => r.id)).toEqual([tx]);
     expect(transactional.total).toBe(1);
-    expect(transactional.sourceTotals).toEqual({ transactional: 1, broadcast: 2 });
+    expect(await caller(team).emails.sourceTotals({})).toEqual({ transactional: 1, broadcast: 2 });
 
     const broadcasts = await caller(team).emails.list({ source: "broadcast", search: "ada" });
     expect(broadcasts.items.map((r) => [r.id, r.broadcastId])).toEqual([[bulk, broadcastId]]);
-    expect(broadcasts.sourceTotals).toEqual({ transactional: 1, broadcast: 1 });
+    expect(broadcasts.total).toBe(1);
+    expect(await caller(team).emails.sourceTotals({ search: "ada" })).toEqual({
+      transactional: 1,
+      broadcast: 1,
+    });
 
     expect((await caller(team).emails.list({})).total).toBe(3);
   });

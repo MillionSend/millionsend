@@ -43,7 +43,7 @@ describe("revealInRow", () => {
 describe("AudienceTabs", () => {
   it("renders one active button (longest matching prefix) inside an ms-tabs row", () => {
     const html = renderToStaticMarkup(createElement(AudienceTabs));
-    expect(html).toContain('class="ms-tabs"');
+    expect(html).toContain('class="ms-tabs bleed"');
     expect(html.match(/class="active"/g)).toHaveLength(1);
     expect(html).toMatch(/class="active">segments</);
   });

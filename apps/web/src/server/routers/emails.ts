@@ -149,19 +149,44 @@ async function pendingSend(
   };
 }
 
+/** The Emails list's filters, shared by the list and its per-source counts. */
+const listFilterInput = z.object({
+  // One status or any subset of them.
+  status: z.union([emailStatus, z.array(emailStatus).min(1)]).optional(),
+  search: z.string().trim().max(200).optional(),
+  apiKeyId: z.uuid().optional(),
+  domainId: z.uuid().optional(),
+  broadcastId: z.uuid().optional(),
+  since: z.coerce.date().optional(),
+});
+
+function listFilters(teamId: string, input: z.infer<typeof listFilterInput>): (SQL | undefined)[] {
+  const t = schema.emails;
+  const filters: (SQL | undefined)[] = [eq(t.teamId, teamId)];
+  if (input.status) {
+    filters.push(
+      Array.isArray(input.status)
+        ? inArray(t.latestStatus, input.status)
+        : eq(t.latestStatus, input.status),
+    );
+  }
+  if (input.search) {
+    const pattern = `%${escapeLike(input.search)}%`;
+    filters.push(or(ilike(t.subject, pattern), sql`${t.to}::text ilike ${pattern}`));
+  }
+  if (input.apiKeyId) filters.push(eq(t.apiKeyId, input.apiKeyId));
+  if (input.domainId) filters.push(eq(t.domainId, input.domainId));
+  if (input.broadcastId) filters.push(eq(t.broadcastId, input.broadcastId));
+  if (input.since) filters.push(gte(t.createdAt, input.since));
+  return filters;
+}
+
 export const emailsRouter = router({
   list: teamProcedure
     .input(
-      z.object({
-        // One status or any subset of them.
-        status: z.union([emailStatus, z.array(emailStatus).min(1)]).optional(),
-        search: z.string().trim().max(200).optional(),
-        apiKeyId: z.uuid().optional(),
-        domainId: z.uuid().optional(),
-        broadcastId: z.uuid().optional(),
+      listFilterInput.extend({
         // Where the emails came from: API/SMTP sends, or broadcast copies.
         source: z.enum(["transactional", "broadcast"]).optional(),
-        since: z.coerce.date().optional(),
         cursor: cursorSchema.optional(),
         limit: z.number().int().min(1).max(50).default(25),
         // "asc" reads oldest-first (e.g. a team's very first email).
@@ -170,51 +195,13 @@ export const emailsRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const t = schema.emails;
-      const filters: (SQL | undefined)[] = [eq(t.teamId, ctx.teamId)];
-      if (input.status) {
-        filters.push(
-          Array.isArray(input.status)
-            ? inArray(t.latestStatus, input.status)
-            : eq(t.latestStatus, input.status),
-        );
-      }
-      if (input.search) {
-        const pattern = `%${escapeLike(input.search)}%`;
-        filters.push(or(ilike(t.subject, pattern), sql`${t.to}::text ilike ${pattern}`));
-      }
-      if (input.apiKeyId) filters.push(eq(t.apiKeyId, input.apiKeyId));
-      if (input.domainId) filters.push(eq(t.domainId, input.domainId));
-      if (input.broadcastId) filters.push(eq(t.broadcastId, input.broadcastId));
-      if (input.since) filters.push(gte(t.createdAt, input.since));
-      // One count on the first page sizes both sources under the other
-      // filters: the tabs, the hidden-broadcasts hint and the search
-      // fallback all read it.
-      let sourceTotals: { transactional: number; broadcast: number } | null = null;
-      if (!input.cursor) {
-        // Two counts, one per partial index, so each stays an index-only scan.
-        const count = async (side: SQL) => {
-          const [row] = await ctx.db
-            .select({ n: sql<number>`count(*)::int` })
-            .from(t)
-            .where(and(...filters, side));
-          return row?.n ?? 0;
-        };
-        const [transactional, broadcast] = await Promise.all([
-          count(isNull(t.broadcastId)),
-          count(isNotNull(t.broadcastId)),
-        ]);
-        sourceTotals = { transactional, broadcast };
-      }
-      const total = sourceTotals
-        ? input.source
-          ? sourceTotals[input.source]
-          : sourceTotals.transactional + sourceTotals.broadcast
-        : null;
+      const filters = listFilters(ctx.teamId, input);
       if (input.source) {
         filters.push(
           input.source === "broadcast" ? isNotNull(t.broadcastId) : isNull(t.broadcastId),
         );
       }
+      const total = await firstPageTotal(ctx.db, t, filters, input.cursor);
       const ascending = input.order === "asc";
       if (input.cursor) {
         filters.push(ascending ? afterCursor(t, input.cursor) : beforeCursor(t, input.cursor));
@@ -235,8 +222,31 @@ export const emailsRouter = router({
         .where(and(...filters))
         .orderBy(...(ascending ? [asc(t.createdAt), asc(t.id)] : [desc(t.createdAt), desc(t.id)]))
         .limit(input.limit + 1);
-      return { ...paginate(rows, input.limit), total, sourceTotals };
+      return { ...paginate(rows, input.limit), total };
     }),
+
+  /**
+   * Both sources' counts under the list's other filters, for the source
+   * tabs. Kept apart from the list so switching tabs reuses them instead of
+   * blanking them while the new page loads.
+   */
+  sourceTotals: teamProcedure.input(listFilterInput).query(async ({ ctx, input }) => {
+    const t = schema.emails;
+    const filters = listFilters(ctx.teamId, input);
+    // Two counts, one per partial index, so each stays an index-only scan.
+    const count = async (side: SQL) => {
+      const [row] = await ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(t)
+        .where(and(...filters, side));
+      return row?.n ?? 0;
+    };
+    const [transactional, broadcast] = await Promise.all([
+      count(isNull(t.broadcastId)),
+      count(isNotNull(t.broadcastId)),
+    ]);
+    return { transactional, broadcast };
+  }),
 
   /** Masthead proof strip + cap banner: today's sends, all-time deliveries, queued backlog. */
   stats: teamProcedure.query(async ({ ctx }) => {

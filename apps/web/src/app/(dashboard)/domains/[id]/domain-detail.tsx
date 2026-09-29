@@ -603,7 +603,7 @@ export function DomainDetail({ id }: { id: string }) {
           <Skeleton width={280} height="1lh" />
         </div>
         {/* Records | Configuration tab bar. */}
-        <div className="ms-tabs" style={{ marginTop: 26 }}>
+        <div className="ms-tabs bleed" style={{ marginTop: 26 }}>
           <Skeleton width={64} height={30} radius="var(--ms-r-input)" />
           <Skeleton width={96} height={30} radius="var(--ms-r-input)" />
         </div>
@@ -810,7 +810,7 @@ export function DomainDetail({ id }: { id: string }) {
 
       {/* Tracking and TLS settings are stored regardless of status and apply
           once the domain sends, so they can be set while DNS propagates. */}
-      <div className="ms-tabs" style={{ marginTop: 26 }}>
+      <div className="ms-tabs bleed" style={{ marginTop: 26 }}>
         <button
           type="button"
           className={tab === "records" ? "active" : ""}
