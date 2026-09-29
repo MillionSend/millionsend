@@ -150,7 +150,7 @@ export const emails = pgTable(
       .on(t.teamId, t.createdAt, t.id)
       .where(isNotNull(t.broadcastId)),
     // The cap banner counts a team's parked transactional rows only.
-    index("emails_team_tx_parked_idx")
+    index("emails_team_tx_held_idx")
       .on(t.teamId)
       .where(sql`${t.latestStatus} = 'queued_quota' and ${t.broadcastId} is null`),
     // The dashboard filters a team's list by status within a date window.

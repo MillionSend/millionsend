@@ -3687,8 +3687,8 @@
           "method": "btree",
           "with": {}
         },
-        "emails_team_tx_parked_idx": {
-          "name": "emails_team_tx_parked_idx",
+        "emails_team_tx_held_idx": {
+          "name": "emails_team_tx_held_idx",
           "columns": [
             {
               "expression": "team_id",
