@@ -141,6 +141,18 @@ export const emails = pgTable(
     index("emails_queued_created_idx").on(t.createdAt).where(sql`${t.latestStatus} = 'queued'`),
     // Metadata retention deletes by age across every team.
     index("emails_created_idx").on(t.createdAt),
+    // The Emails page's source tabs: a team's transactional log and its
+    // broadcast copies, each newest first without walking the other.
+    index("emails_team_tx_created_idx")
+      .on(t.teamId, t.createdAt, t.id)
+      .where(isNull(t.broadcastId)),
+    index("emails_team_bulk_created_idx")
+      .on(t.teamId, t.createdAt, t.id)
+      .where(isNotNull(t.broadcastId)),
+    // The cap banner counts a team's parked transactional rows only.
+    index("emails_team_tx_held_idx")
+      .on(t.teamId)
+      .where(sql`${t.latestStatus} = 'queued_quota' and ${t.broadcastId} is null`),
     // The dashboard filters a team's list by status within a date window.
     index("emails_team_status_created_idx").on(t.teamId, t.latestStatus, t.createdAt),
     // Fan-out idempotency spine: re-running a broadcast fan-out can never

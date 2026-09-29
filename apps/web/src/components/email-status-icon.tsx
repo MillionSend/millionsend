@@ -151,7 +151,16 @@ export function EventGlyph({ type, size = 15 }: { type: string; size?: number })
 }
 
 /** Timeline node tile: rounded square carrying the event glyph in its tone. */
-export function EventIconTile({ type, size = 34 }: { type: string; size?: number }) {
+export function EventIconTile({
+  type,
+  size = 34,
+  dashed = false,
+}: {
+  type: string;
+  size?: number;
+  /** An estimate rather than a recorded event. */
+  dashed?: boolean;
+}) {
   const color = emailStatusColor(type);
   return (
     <span
@@ -165,7 +174,7 @@ export function EventIconTile({ type, size = 34 }: { type: string; size?: number
         justifyContent: "center",
         borderRadius: 10,
         // Dashed for a prefetch: it happened, and it does not count.
-        border: `1px ${type === "prefetched" ? "dashed" : "solid"} color-mix(in srgb, ${color} 45%, var(--ms-line))`,
+        border: `1px ${dashed || type === "prefetched" ? "dashed" : "solid"} color-mix(in srgb, ${color} 45%, var(--ms-line))`,
         background: `linear-gradient(180deg, color-mix(in srgb, ${color} 16%, var(--ms-panel)), color-mix(in srgb, ${color} 5%, var(--ms-panel)))`,
         color,
       }}

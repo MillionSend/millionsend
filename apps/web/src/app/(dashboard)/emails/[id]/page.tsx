@@ -431,6 +431,174 @@ function EmailDetailSkeleton() {
   );
 }
 
+type Pending =
+  | { kind: "scheduled"; at: Date }
+  | { kind: "queued" }
+  | { kind: "plan"; resumesAt: Date }
+  | { kind: "waiting" }
+  | { kind: "paced"; from: Date | null; to: Date | null };
+
+/**
+ * A row the provider has not seen yet: the accept as its one real node, then
+ * what it waits for. Dashed nodes are the planner's read at load time, never
+ * stored events.
+ */
+function PendingEvents({
+  pending,
+  createdAt,
+  fromBroadcast,
+  locale,
+}: {
+  pending: Pending;
+  createdAt: Date;
+  fromBroadcast: boolean;
+  locale: string;
+}) {
+  const t = useTranslations("emails");
+  const stamp = (d: Date) => formatDayTime(d, locale);
+  const nodes: {
+    type: string;
+    label: string;
+    when?: string | undefined;
+    body?: React.ReactNode;
+    estimate?: boolean;
+  }[] = [
+    {
+      type: "queued",
+      label: t("detail.pending.accepted"),
+      when: stamp(createdAt),
+      body: t(fromBroadcast ? "detail.pending.fromBroadcast" : "detail.pending.fromApi"),
+    },
+  ];
+  if (pending.kind === "scheduled") {
+    nodes.push({ type: "queued", label: t("detail.pending.scheduled"), when: stamp(pending.at) });
+  } else if (pending.kind === "queued") {
+    nodes.push({
+      type: "queued",
+      label: t("detail.pending.queued"),
+      body: t("detail.pending.queuedBody"),
+      estimate: true,
+    });
+  } else if (pending.kind === "plan") {
+    nodes.push({
+      type: "queued_quota",
+      label: t("detail.pending.plan"),
+      body: (
+        <>
+          {t("detail.pending.planBody", { date: stamp(pending.resumesAt) })}{" "}
+          <Link href="/settings/billing" className="ms-link">
+            {t("detail.pending.raiseLimit")}
+          </Link>
+        </>
+      ),
+      estimate: true,
+    });
+  } else if (pending.kind === "waiting") {
+    nodes.push({
+      type: "queued_quota",
+      label: t("detail.pending.waiting"),
+      body: t("detail.pending.waitingBody"),
+      estimate: true,
+    });
+  } else {
+    nodes.push({
+      type: "queued_quota",
+      label: t("detail.pending.waitingCapacity"),
+      body: t("detail.pending.pacedBody"),
+      estimate: true,
+    });
+    if (pending.to) {
+      nodes.push({
+        type: "sent",
+        label: t("detail.pending.expected"),
+        body: pending.from
+          ? t("detail.pending.window", { from: stamp(pending.from), to: stamp(pending.to) })
+          : t("detail.pending.until", { to: stamp(pending.to) }),
+        estimate: true,
+      });
+    }
+  }
+  return (
+    <>
+      <div
+        style={{
+          marginTop: 12,
+          border: "1px solid var(--ms-line)",
+          borderRadius: 14,
+          padding: "30px 26px",
+          backgroundImage: "radial-gradient(var(--ms-line) 1px, transparent 1px)",
+          backgroundSize: "18px 18px",
+          backgroundPosition: "center",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 6,
+          overflowX: "auto",
+        }}
+      >
+        {nodes.map((node, i) => (
+          <div key={node.label} style={{ display: "contents" }}>
+            {i > 0 ? (
+              <span
+                aria-hidden="true"
+                style={{
+                  flex: "1 0 40px",
+                  marginTop: 17,
+                  borderTop: `1px ${node.estimate ? "dashed" : "solid"} var(--ms-line-strong)`,
+                }}
+              />
+            ) : null}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                textAlign: "center",
+                flex: "none",
+                maxWidth: 240,
+              }}
+            >
+              <EventIconTile type={node.type} dashed={node.estimate ?? false} />
+              <span className="ms-badge ms-badge-neutral" style={{ marginTop: 10 }}>
+                {node.label}
+              </span>
+              {node.estimate ? (
+                <span
+                  className="ms-mono"
+                  style={{
+                    marginTop: 6,
+                    fontSize: 10.5,
+                    color: "var(--ms-muted)",
+                    border: "1px dashed var(--ms-line-strong)",
+                    borderRadius: 4,
+                    padding: "0 5px",
+                  }}
+                >
+                  {t("detail.pending.estimate")}
+                </span>
+              ) : null}
+              {node.when ? (
+                <span style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 7 }}>
+                  {node.when}
+                </span>
+              ) : null}
+              {node.body ? (
+                <span
+                  style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 5, lineHeight: 1.45 }}
+                >
+                  {node.body}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p style={{ margin: "10px 0 0", color: "var(--ms-muted)", fontSize: 12.5 }}>
+        {t("detail.pending.notSentYet")}
+      </p>
+    </>
+  );
+}
+
 export default function EmailDetailPage() {
   const { id } = useParams<{ id: string }>();
   const t = useTranslations("emails");
@@ -678,6 +846,13 @@ export default function EmailDetailPage() {
           {email.from}
         </Meta>
         <Meta label={t("detail.subject")}>{email.subject}</Meta>
+        {email.broadcast ? (
+          <Meta label={t("detail.broadcast")}>
+            <Link href={`/broadcasts/${email.broadcast.id}`} className="ms-link">
+              {email.broadcast.name}
+            </Link>
+          </Meta>
+        ) : null}
         {email.replyTo?.length ? (
           <Meta label={t("detail.replyTo")} mono>
             {email.replyTo.join(", ")}
@@ -725,7 +900,14 @@ export default function EmailDetailPage() {
 
       <div style={{ marginTop: 26 }}>
         <div className="ms-microlabel">{t("detail.events")}</div>
-        {events.length === 0 ? (
+        {events.length === 0 && email.pending ? (
+          <PendingEvents
+            pending={email.pending}
+            createdAt={email.createdAt}
+            fromBroadcast={email.broadcast !== null}
+            locale={locale}
+          />
+        ) : events.length === 0 ? (
           <p style={{ margin: "12px 0 0", color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" }}>
             {t("detail.noEvents")}
           </p>

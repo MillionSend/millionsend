@@ -1,7 +1,19 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gte, ilike, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { CONTACT_STATUSES, type ContactStatus } from "@/lib/contact-status";
 import { type CsvColumn, toCsv } from "@/lib/csv-export";
@@ -117,7 +129,14 @@ interface EmailExportRow {
 export function emailRowsForExport(
   db: Db,
   teamId: string,
-  filters: { status?: string; search?: string; apiKeyId?: string; domainId?: string; since?: Date },
+  filters: {
+    status?: string;
+    search?: string;
+    apiKeyId?: string;
+    domainId?: string;
+    source?: string;
+    since?: Date;
+  },
 ): Promise<EmailExportRow[]> {
   const t = schema.emails;
   const conds: SQL[] = [eq(t.teamId, teamId)];
@@ -131,6 +150,8 @@ export function emailRowsForExport(
   }
   if (filters.apiKeyId) conds.push(eq(t.apiKeyId, filters.apiKeyId));
   if (filters.domainId) conds.push(eq(t.domainId, filters.domainId));
+  if (filters.source === "transactional") conds.push(isNull(t.broadcastId));
+  if (filters.source === "broadcast") conds.push(isNotNull(t.broadcastId));
   if (filters.since) conds.push(gte(t.createdAt, filters.since));
   return db
     .select({
@@ -249,6 +270,7 @@ export async function buildExport(
       const search = params.get("search") ?? undefined;
       const apiKeyId = params.get("apiKeyId") ?? undefined;
       const domainId = params.get("domainId") ?? undefined;
+      const source = params.get("source") ?? undefined;
       const sinceRaw = params.get("since");
       const since = sinceRaw ? new Date(sinceRaw) : undefined;
       const rows = await emailRowsForExport(db, teamId, {
@@ -256,6 +278,7 @@ export async function buildExport(
         ...(search ? { search } : {}),
         ...(apiKeyId ? { apiKeyId } : {}),
         ...(domainId ? { domainId } : {}),
+        ...(source ? { source } : {}),
         ...(since && !Number.isNaN(since.getTime()) ? { since } : {}),
       });
       return { filename: "emails.csv", csv: toCsv(rows, emailColumns, { bom: true }) };

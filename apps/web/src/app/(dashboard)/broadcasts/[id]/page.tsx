@@ -392,7 +392,7 @@ function BroadcastEmails({ broadcastId }: { broadcastId: string }) {
       <div className="ms-microlabel" style={{ marginBottom: 12 }}>
         {t("detail.emails")}
       </div>
-      <EmailsTable rows={items} />
+      <EmailsTable rows={items} broadcastChip={false} />
       <ListFooter
         left={emails("list.pageOf", {
           pages: query.data.pages.length,

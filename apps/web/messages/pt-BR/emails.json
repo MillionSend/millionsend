@@ -17,7 +17,6 @@
     "to": "Para",
     "status": "Status",
     "subject": "Assunto",
-    "sent": "Enviado",
     "loadMore": "Carregar mais",
     "empty": "Nenhum e-mail ainda.",
     "emptyHint": "Envie seu primeiro e-mail pela API — <code>POST /emails</code>.",
@@ -35,7 +34,24 @@
       "reachedMonth": "Cota mensal de {limit} e-mails atingida.",
       "queuedMonth": "{count} e-mails na fila — serão enviados quando o período renovar em {date}, ou assim que o excedente for ativado."
     },
-    "allDomains": "Todos os domínios"
+    "allDomains": "Todos os domínios",
+    "when": "Quando",
+    "whenWaiting": "Aguardando",
+    "whenQueued": "Na fila",
+    "whenScheduled": "Agendado · {date}",
+    "createdAt": "Criado em {date}",
+    "broadcastChip": "Transmissão",
+    "queuedBroadcast": "Na fila da transmissão",
+    "source": {
+      "label": "Origem",
+      "transactional": "Transacionais",
+      "broadcast": "Transmissões",
+      "all": "Todos"
+    },
+    "hiddenBroadcasts": "{count} e-mails de transmissões não aparecem nesta lista.",
+    "showBroadcasts": "Ver transmissões →",
+    "noTransactional": "Nenhum e-mail transacional encontrado.",
+    "inBroadcasts": "{count} resultados em transmissões."
   },
   "detail": {
     "breadcrumb": "Detalhes do e-mail",
@@ -84,7 +100,28 @@
     "noText": "Sem corpo em texto simples.",
     "previewLight": "Claro",
     "previewDark": "Escuro",
-    "hiddenBySupportView": "O conteúdo do e-mail fica oculto no modo de suporte"
+    "hiddenBySupportView": "O conteúdo do e-mail fica oculto no modo de suporte",
+    "broadcast": "Transmissão",
+    "pending": {
+      "accepted": "Aceito",
+      "fromApi": "Aceito para envio",
+      "fromBroadcast": "Criado pela transmissão",
+      "scheduled": "Agendado",
+      "queued": "Na fila",
+      "queuedBody": "Sai em instantes.",
+      "plan": "Retido pelo limite do plano",
+      "planBody": "Sai quando o limite renovar, {date}.",
+      "raiseLimit": "Aumentar limite",
+      "waitingCapacity": "Aguardando capacidade",
+      "pacedBody": "A transmissão é enviada em ondas pela capacidade diária. Seu e-mail transacional não fica retido atrás dela.",
+      "expected": "Envio previsto",
+      "window": "entre {from} e {to}",
+      "until": "por volta de {to}",
+      "estimate": "estimativa",
+      "notSentYet": "Ainda não enviado. Os eventos de entrega aparecem aqui assim que o provedor responder.",
+      "waiting": "Aguardando envio",
+      "waitingBody": "Sai assim que houver capacidade de envio."
+    }
   },
   "insights": {
     "outOfTen": "/ 10",

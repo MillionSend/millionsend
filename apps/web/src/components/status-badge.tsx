@@ -57,7 +57,17 @@ export function StatusDot({ status, color }: { status?: BadgeStatus; color?: str
 }
 
 /** Labels come from common.status.* — semantic colors always carry text. */
-export function StatusBadge({ status }: { status: BadgeStatus }) {
+export function StatusBadge({
+  status,
+  label,
+}: {
+  status: BadgeStatus;
+  label?: string | undefined;
+}) {
   const t = useTranslations("common");
-  return <span className={`ms-badge ms-badge-${VARIANTS[status]}`}>{t(`status.${status}`)}</span>;
+  return (
+    <span className={`ms-badge ms-badge-${VARIANTS[status]}`}>
+      {label ?? t(`status.${status}`)}
+    </span>
+  );
 }

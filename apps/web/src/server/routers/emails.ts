@@ -9,10 +9,26 @@ import {
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, gte, ilike, inArray, lt, or, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
+import { planHoldUntil, sendingProgress } from "../broadcast-plan";
 import { getKeyring } from "../keyring";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
@@ -91,6 +107,48 @@ async function firstPageTotal(
   return row?.total ?? 0;
 }
 
+/**
+ * What a row not yet handed to the provider is waiting for, for the detail's
+ * estimated nodes. Never stored: it is the planner's view at read time.
+ */
+type PendingSend =
+  | { kind: "scheduled"; at: Date }
+  | { kind: "queued" }
+  | { kind: "plan"; resumesAt: Date }
+  | { kind: "waiting" }
+  | { kind: "paced"; from: Date | null; to: Date | null };
+
+async function pendingSend(
+  db: Db,
+  teamId: string,
+  email: {
+    latestStatus: string;
+    sentAt: Date | null;
+    scheduledAt: Date | null;
+    broadcastId: string | null;
+  },
+): Promise<PendingSend | null> {
+  if (email.sentAt) return null;
+  const now = new Date();
+  if (email.latestStatus === "queued") {
+    return email.scheduledAt && email.scheduledAt > now
+      ? { kind: "scheduled", at: email.scheduledAt }
+      : { kind: "queued" };
+  }
+  if (email.latestStatus !== "queued_quota") return null;
+  // A hold by the team's own cap outranks capacity: its reset is the date.
+  const hold = await planHoldUntil(db, teamId, now);
+  if (hold) return { kind: "plan", resumesAt: hold };
+  // Parked with room under the plan: SES capacity (or a suspension) holds it.
+  if (!email.broadcastId) return { kind: "waiting" };
+  const progress = (await sendingProgress(db, teamId, now)).get(email.broadcastId);
+  return {
+    kind: "paced",
+    from: progress?.releases[0]?.at ?? null,
+    to: progress?.finishesAt ?? null,
+  };
+}
+
 export const emailsRouter = router({
   list: teamProcedure
     .input(
@@ -101,6 +159,8 @@ export const emailsRouter = router({
         apiKeyId: z.uuid().optional(),
         domainId: z.uuid().optional(),
         broadcastId: z.uuid().optional(),
+        // Where the emails came from: API/SMTP sends, or broadcast copies.
+        source: z.enum(["transactional", "broadcast"]).optional(),
         since: z.coerce.date().optional(),
         cursor: cursorSchema.optional(),
         limit: z.number().int().min(1).max(50).default(25),
@@ -126,7 +186,35 @@ export const emailsRouter = router({
       if (input.domainId) filters.push(eq(t.domainId, input.domainId));
       if (input.broadcastId) filters.push(eq(t.broadcastId, input.broadcastId));
       if (input.since) filters.push(gte(t.createdAt, input.since));
-      const total = await firstPageTotal(ctx.db, t, filters, input.cursor);
+      // One count on the first page sizes both sources under the other
+      // filters: the tabs, the hidden-broadcasts hint and the search
+      // fallback all read it.
+      let sourceTotals: { transactional: number; broadcast: number } | null = null;
+      if (!input.cursor) {
+        // Two counts, one per partial index, so each stays an index-only scan.
+        const count = async (side: SQL) => {
+          const [row] = await ctx.db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(t)
+            .where(and(...filters, side));
+          return row?.n ?? 0;
+        };
+        const [transactional, broadcast] = await Promise.all([
+          count(isNull(t.broadcastId)),
+          count(isNotNull(t.broadcastId)),
+        ]);
+        sourceTotals = { transactional, broadcast };
+      }
+      const total = sourceTotals
+        ? input.source
+          ? sourceTotals[input.source]
+          : sourceTotals.transactional + sourceTotals.broadcast
+        : null;
+      if (input.source) {
+        filters.push(
+          input.source === "broadcast" ? isNotNull(t.broadcastId) : isNull(t.broadcastId),
+        );
+      }
       const ascending = input.order === "asc";
       if (input.cursor) {
         filters.push(ascending ? afterCursor(t, input.cursor) : beforeCursor(t, input.cursor));
@@ -140,12 +228,14 @@ export const emailsRouter = router({
           createdAt: t.createdAt,
           cursorCreatedAt: createdAtCursorField(t),
           scheduledAt: t.scheduledAt,
+          sentAt: t.sentAt,
+          broadcastId: t.broadcastId,
         })
         .from(t)
         .where(and(...filters))
         .orderBy(...(ascending ? [asc(t.createdAt), asc(t.id)] : [desc(t.createdAt), desc(t.id)]))
         .limit(input.limit + 1);
-      return { ...paginate(rows, input.limit), total };
+      return { ...paginate(rows, input.limit), total, sourceTotals };
     }),
 
   /** Masthead proof strip + cap banner: today's sends, all-time deliveries, queued backlog. */
@@ -164,9 +254,22 @@ export const emailsRouter = router({
     const [queued] = await ctx.db
       .select({ count: sql<number>`count(*)::int` })
       .from(t)
-      .where(and(eq(t.teamId, ctx.teamId), eq(t.latestStatus, "queued_quota")));
+      // Transactional only: a paced broadcast's rows wait for capacity, and
+      // the broadcast's own page says when they go.
+      .where(
+        and(eq(t.teamId, ctx.teamId), eq(t.latestStatus, "queued_quota"), isNull(t.broadcastId)),
+      );
+
+    // Whether the team ever sent a broadcast copy: the source tabs show from
+    // it, whatever the list's filters match.
+    const [bulk] = await ctx.db
+      .select({ id: t.id })
+      .from(t)
+      .where(and(eq(t.teamId, ctx.teamId), isNotNull(t.broadcastId)))
+      .limit(1);
 
     return {
+      hasBroadcasts: bulk !== undefined,
       sentToday: usage?.sentToday ?? 0,
       deliveredAllTime: usage?.deliveredAllTime ?? 0,
       queuedQuota: queued?.count ?? 0,
@@ -235,8 +338,22 @@ export const emailsRouter = router({
       apiKeyName = key?.name ?? null;
     }
 
+    let broadcast: { id: string; name: string } | null = null;
+    if (email.broadcastId) {
+      const b = schema.broadcasts;
+      const [row] = await ctx.db
+        .select({ id: b.id, name: sql<string>`coalesce(${b.name}, ${b.subject})` })
+        .from(b)
+        .where(and(eq(b.id, email.broadcastId), eq(b.teamId, ctx.teamId)))
+        .limit(1);
+      broadcast = row ?? null;
+    }
+    const pending = await pendingSend(ctx.db, ctx.teamId, email);
+
     // Whitelisted shape: the ciphertext/key columns must never reach the client.
     return {
+      broadcast,
+      pending,
       apiKeyName,
       id: email.id,
       from: email.from,

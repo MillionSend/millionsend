@@ -201,6 +201,81 @@ describe("emails.list", () => {
   });
 });
 
+describe("emails.list sources", () => {
+  async function broadcastFor(teamId: string): Promise<string> {
+    const [b] = await db
+      .insert(schema.broadcasts)
+      .values({ teamId, from: "sender@acme.test", subject: "news", status: "sending" })
+      .returning({ id: schema.broadcasts.id });
+    if (!b) throw new Error("broadcast insert failed");
+    return b.id;
+  }
+
+  it("splits transactional sends from broadcast copies and counts both on the first page", async () => {
+    const team = await createTeam(db, "team-a");
+    const broadcastId = await broadcastFor(team);
+    const tx = await insertEmail({ ...baseEmail(team), latestStatus: "delivered" });
+    const bulk = await insertEmail({
+      ...baseEmail(team),
+      broadcastId,
+      latestStatus: "queued_quota",
+    });
+    await insertEmail({ ...baseEmail(team), broadcastId, to: ["bo@example.com"] });
+
+    const transactional = await caller(team).emails.list({ source: "transactional" });
+    expect(transactional.items.map((r) => r.id)).toEqual([tx]);
+    expect(transactional.total).toBe(1);
+    expect(transactional.sourceTotals).toEqual({ transactional: 1, broadcast: 2 });
+
+    const broadcasts = await caller(team).emails.list({ source: "broadcast", search: "ada" });
+    expect(broadcasts.items.map((r) => [r.id, r.broadcastId])).toEqual([[bulk, broadcastId]]);
+    expect(broadcasts.sourceTotals).toEqual({ transactional: 1, broadcast: 1 });
+
+    expect((await caller(team).emails.list({})).total).toBe(3);
+  });
+
+  it("leaves a broadcast's parked rows out of the cap banner's backlog", async () => {
+    const team = await createTeam(db, "team-a");
+    const broadcastId = await broadcastFor(team);
+    await insertEmail({ ...baseEmail(team), latestStatus: "queued_quota" });
+    await insertEmail({ ...baseEmail(team), broadcastId, latestStatus: "queued_quota" });
+    const stats = await caller(team).emails.stats();
+    expect(stats.queuedQuota).toBe(1);
+    expect(stats.hasBroadcasts).toBe(true);
+  });
+
+  it("says what an unsent row waits for, and names its broadcast", async () => {
+    const team = await createTeam(db, "team-a");
+    const broadcastId = await broadcastFor(team);
+    const at = new Date(Date.now() + 3_600_000);
+    const scheduled = await insertEmail({ ...baseEmail(team), scheduledAt: at });
+    const parked = await insertEmail({
+      ...baseEmail(team),
+      broadcastId,
+      latestStatus: "queued_quota",
+    });
+    const sent = await insertEmail({
+      ...baseEmail(team),
+      latestStatus: "delivered",
+      sentAt: new Date(),
+    });
+
+    expect((await caller(team).emails.get({ id: scheduled })).pending).toEqual({
+      kind: "scheduled",
+      at,
+    });
+    const bulk = await caller(team).emails.get({ id: parked });
+    expect(bulk.broadcast).toEqual({ id: broadcastId, name: "news" });
+    expect(bulk.pending?.kind).toBe("paced");
+    // Parked with the plan not binding: capacity holds it, never "raise your limit".
+    const txParked = await insertEmail({ ...baseEmail(team), latestStatus: "queued_quota" });
+    expect((await caller(team).emails.get({ id: txParked })).pending).toEqual({ kind: "waiting" });
+    const done = await caller(team).emails.get({ id: sent });
+    expect(done.pending).toBeNull();
+    expect(done.broadcast).toBeNull();
+  });
+});
+
 describe("emails.get", () => {
   it("decrypts the body and returns events in order", async () => {
     const teamA = await createTeam(db, "team-a");
@@ -347,13 +422,23 @@ describe("emails.stats", () => {
     await insertEmail({ ...baseEmail(teamA), latestStatus: "delivered" });
 
     const stats = await caller(teamA).emails.stats();
-    expect(stats).toEqual({ sentToday: 87, deliveredAllTime: 200, queuedQuota: 1 });
+    expect(stats).toEqual({
+      hasBroadcasts: false,
+      sentToday: 87,
+      deliveredAllTime: 200,
+      queuedQuota: 1,
+    });
   });
 
   it("returns zeros for an empty team", async () => {
     const teamA = await createTeam(db, "team-a");
     const stats = await caller(teamA).emails.stats();
-    expect(stats).toEqual({ sentToday: 0, deliveredAllTime: 0, queuedQuota: 0 });
+    expect(stats).toEqual({
+      hasBroadcasts: false,
+      sentToday: 0,
+      deliveredAllTime: 0,
+      queuedQuota: 0,
+    });
   });
 });
 

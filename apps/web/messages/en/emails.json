@@ -17,7 +17,6 @@
     "to": "To",
     "status": "Status",
     "subject": "Subject",
-    "sent": "Sent",
     "loadMore": "Load more",
     "empty": "No emails yet.",
     "emptyHint": "Send your first email through the API — <code>POST /emails</code>.",
@@ -35,7 +34,24 @@
       "reachedMonth": "Monthly quota of {limit} emails reached.",
       "queuedMonth": "{count} emails queued — they'll send when the period renews on {date}, or as soon as overage is on."
     },
-    "allDomains": "All domains"
+    "allDomains": "All domains",
+    "when": "When",
+    "whenWaiting": "Waiting",
+    "whenQueued": "Queued",
+    "whenScheduled": "Scheduled · {date}",
+    "createdAt": "Created {date}",
+    "broadcastChip": "Broadcast",
+    "queuedBroadcast": "Queued in broadcast",
+    "source": {
+      "label": "Source",
+      "transactional": "Transactional",
+      "broadcast": "Broadcasts",
+      "all": "All"
+    },
+    "hiddenBroadcasts": "{count} broadcast emails are not shown in this list.",
+    "showBroadcasts": "Show broadcasts →",
+    "noTransactional": "No transactional emails found.",
+    "inBroadcasts": "{count} results in broadcasts."
   },
   "detail": {
     "breadcrumb": "Email details",
@@ -84,7 +100,28 @@
     "noText": "No plain-text body.",
     "previewLight": "Light",
     "previewDark": "Dark",
-    "hiddenBySupportView": "Email content is hidden in support view"
+    "hiddenBySupportView": "Email content is hidden in support view",
+    "broadcast": "Broadcast",
+    "pending": {
+      "accepted": "Accepted",
+      "fromApi": "Accepted for sending",
+      "fromBroadcast": "Created by the broadcast",
+      "scheduled": "Scheduled",
+      "queued": "Queued",
+      "queuedBody": "Goes out in moments.",
+      "plan": "Held by the plan limit",
+      "planBody": "Goes out when the limit renews, {date}.",
+      "raiseLimit": "Raise limit",
+      "waitingCapacity": "Waiting for capacity",
+      "pacedBody": "The broadcast goes out in waves within the daily capacity. Your transactional email is not held behind it.",
+      "expected": "Expected send",
+      "window": "between {from} and {to}",
+      "until": "by about {to}",
+      "estimate": "estimate",
+      "notSentYet": "Not sent yet. Delivery events show up here as soon as the provider answers.",
+      "waiting": "Waiting to send",
+      "waitingBody": "Goes out as soon as sending capacity frees up."
+    }
   },
   "insights": {
     "outOfTen": "/ 10",

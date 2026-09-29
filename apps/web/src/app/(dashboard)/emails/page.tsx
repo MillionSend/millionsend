@@ -40,6 +40,9 @@ const STATUSES = [
 
 const RANGE_KEYS: RangeKey[] = ["h24", "d7", "d15", "d30", "all"];
 
+// The log opens on what a team checks every day; broadcast copies are a tab away.
+const SOURCES = ["transactional", "broadcast", "all"] as const;
+
 /** ms until the daily quota resets (midnight UTC). */
 function msToUtcMidnight(now = new Date()): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime();
@@ -59,6 +62,8 @@ export default function EmailsPage() {
   const [rangeParam, setRange] = useUrlState("range", "d15");
   const [apiKeyId, setApiKeyId] = useUrlState("key", "all");
   const [domainId, setDomainId] = useUrlState("domain", "all");
+  const [sourceParam, setSource] = useUrlState("source", "transactional");
+  const source = oneOf(SOURCES, sourceParam, "transactional");
   const [limit, setLimit] = useState(40);
   // Any subset of statuses, "all" (the default) meaning no status filter.
   const statuses = useMemo(() => manyOf(STATUSES, statusParam), [statusParam]);
@@ -78,6 +83,7 @@ export default function EmailsPage() {
         ...(deferredSearch ? { search: deferredSearch } : {}),
         ...(apiKeyId !== "all" ? { apiKeyId } : {}),
         ...(domainId !== "all" ? { domainId } : {}),
+        ...(source !== "all" ? { source } : {}),
         ...(since ? { since } : {}),
       },
       { getNextPageParam: (page) => page.nextCursor },
@@ -93,6 +99,10 @@ export default function EmailsPage() {
 
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
+  const sourceTotals = query.data?.pages[0]?.sourceTotals ?? null;
+  // A team that never sent a broadcast gets no tabs at all.
+  const showSources = source !== "transactional" || stats.data?.hasBroadcasts === true;
+  const hiddenBroadcasts = source === "transactional" ? (sourceTotals?.broadcast ?? 0) : 0;
 
   // The cap that can stop sends: the billing period's included volume on a
   // monthly plan (nothing stops it with overage on), today's cap otherwise.
@@ -117,7 +127,8 @@ export default function EmailsPage() {
     stats.data != null &&
     stats.data.sentToday === 0 &&
     stats.data.deliveredAllTime === 0 &&
-    stats.data.queuedQuota === 0;
+    stats.data.queuedQuota === 0 &&
+    !stats.data.hasBroadcasts;
 
   function clearFilters() {
     setSearch("");
@@ -132,6 +143,7 @@ export default function EmailsPage() {
   if (statuses.length > 0) exportParams.set("status", statuses.join(","));
   if (apiKeyId !== "all") exportParams.set("apiKeyId", apiKeyId);
   if (domainId !== "all") exportParams.set("domainId", domainId);
+  if (source !== "all") exportParams.set("source", source);
   if (since) exportParams.set("since", since.toISOString());
   const exportQuery = exportParams.toString();
 
@@ -212,6 +224,36 @@ export default function EmailsPage() {
           >
             {t("list.capBanner.upgrade")}
           </Link>
+        </div>
+      ) : null}
+
+      {showSources ? (
+        <div
+          className="ms-tabs"
+          role="tablist"
+          aria-label={t("list.source.label")}
+          style={{ marginBottom: 14 }}
+        >
+          {SOURCES.map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={source === key}
+              className={source === key ? "active" : undefined}
+              onClick={() => setSource(key)}
+            >
+              {t(`list.source.${key}`)}
+              {sourceTotals && key !== "all" ? (
+                <span
+                  className="ms-digits"
+                  style={{ marginLeft: 7, fontWeight: 500, color: "var(--ms-faint)" }}
+                >
+                  {nf.format(sourceTotals[key])}
+                </span>
+              ) : null}
+            </button>
+          ))}
         </div>
       ) : null}
 
@@ -297,9 +339,44 @@ export default function EmailsPage() {
         ) : null}
       </div>
 
+      {hiddenBroadcasts > 0 && items.length > 0 ? (
+        <div
+          className="ms-wrap-row"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            fontSize: 13,
+            color: "var(--ms-muted)",
+            background: "var(--ms-panel)",
+            border: "1px solid var(--ms-line)",
+            borderRadius: 10,
+            padding: "10px 14px",
+            marginBottom: 14,
+          }}
+        >
+          <span>{t("list.hiddenBroadcasts", { count: nf.format(hiddenBroadcasts) })}</span>
+          <button
+            type="button"
+            className="ms-link"
+            onClick={() => setSource("broadcast")}
+            style={{
+              background: "none",
+              border: 0,
+              padding: 0,
+              font: "inherit",
+              color: "var(--ms-bone)",
+              cursor: "pointer",
+            }}
+          >
+            {t("list.showBroadcasts")}
+          </button>
+        </div>
+      ) : null}
+
       {query.isPending ? (
         <ListSkeleton
-          headers={[t("list.to"), t("list.status"), t("list.subject"), t("list.sent")]}
+          headers={[t("list.to"), t("list.status"), t("list.subject"), t("list.when")]}
         />
       ) : query.isError ? (
         <StateCard
@@ -309,7 +386,14 @@ export default function EmailsPage() {
           onAction={() => query.refetch()}
         />
       ) : items.length === 0 ? (
-        hasFilters && !neverSent ? (
+        hiddenBroadcasts > 0 ? (
+          <StateCard
+            headline={t("list.noTransactional")}
+            detail={t("list.inBroadcasts", { count: nf.format(hiddenBroadcasts) })}
+            actionLabel={t("list.showBroadcasts")}
+            onAction={() => setSource("broadcast")}
+          />
+        ) : hasFilters && !neverSent ? (
           <StateCard
             headline={t("list.noMatch")}
             {...(filterSummary ? { detail: filterSummary } : {})}

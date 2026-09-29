@@ -309,6 +309,13 @@
       "when": 1790694056936,
       "tag": "0043_broadcast_audience_count",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790695221205,
+      "tag": "0044_emails_source_indexes",
+      "breakpoints": true
     }
   ]
 }
