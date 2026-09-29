@@ -1,0 +1,4 @@
+-- IF NOT EXISTS: an operator may build these CONCURRENTLY under the same names before deploying.
+CREATE INDEX IF NOT EXISTS "emails_team_tx_created_idx" ON "emails" USING btree ("team_id","created_at","id") WHERE "emails"."broadcast_id" is null;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "emails_team_bulk_created_idx" ON "emails" USING btree ("team_id","created_at","id") WHERE "emails"."broadcast_id" is not null;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "emails_team_tx_parked_idx" ON "emails" USING btree ("team_id") WHERE "emails"."latest_status" = 'queued_quota' and "emails"."broadcast_id" is null;
