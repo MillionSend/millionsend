@@ -239,7 +239,9 @@ describe("emails.list sources", () => {
     const broadcastId = await broadcastFor(team);
     await insertEmail({ ...baseEmail(team), latestStatus: "queued_quota" });
     await insertEmail({ ...baseEmail(team), broadcastId, latestStatus: "queued_quota" });
-    expect((await caller(team).emails.stats()).queuedQuota).toBe(1);
+    const stats = await caller(team).emails.stats();
+    expect(stats.queuedQuota).toBe(1);
+    expect(stats.hasBroadcasts).toBe(true);
   });
 
   it("says what an unsent row waits for, and names its broadcast", async () => {
@@ -265,6 +267,9 @@ describe("emails.list sources", () => {
     const bulk = await caller(team).emails.get({ id: parked });
     expect(bulk.broadcast).toEqual({ id: broadcastId, name: "news" });
     expect(bulk.pending?.kind).toBe("paced");
+    // Parked with the plan not binding: capacity holds it, never "raise your limit".
+    const txParked = await insertEmail({ ...baseEmail(team), latestStatus: "queued_quota" });
+    expect((await caller(team).emails.get({ id: txParked })).pending).toEqual({ kind: "waiting" });
     const done = await caller(team).emails.get({ id: sent });
     expect(done.pending).toBeNull();
     expect(done.broadcast).toBeNull();
@@ -417,13 +422,23 @@ describe("emails.stats", () => {
     await insertEmail({ ...baseEmail(teamA), latestStatus: "delivered" });
 
     const stats = await caller(teamA).emails.stats();
-    expect(stats).toEqual({ sentToday: 87, deliveredAllTime: 200, queuedQuota: 1 });
+    expect(stats).toEqual({
+      hasBroadcasts: false,
+      sentToday: 87,
+      deliveredAllTime: 200,
+      queuedQuota: 1,
+    });
   });
 
   it("returns zeros for an empty team", async () => {
     const teamA = await createTeam(db, "team-a");
     const stats = await caller(teamA).emails.stats();
-    expect(stats).toEqual({ sentToday: 0, deliveredAllTime: 0, queuedQuota: 0 });
+    expect(stats).toEqual({
+      hasBroadcasts: false,
+      sentToday: 0,
+      deliveredAllTime: 0,
+      queuedQuota: 0,
+    });
   });
 });
 

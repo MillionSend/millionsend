@@ -111,7 +111,6 @@
       "queuedBody": "Goes out in moments.",
       "plan": "Held by the plan limit",
       "planBody": "Goes out when the limit renews, {date}.",
-      "planBodyNoDate": "Goes out when the plan limit has room.",
       "raiseLimit": "Raise limit",
       "waitingCapacity": "Waiting for capacity",
       "pacedBody": "The broadcast goes out in waves within the daily capacity. Your transactional email is not held behind it.",
@@ -119,7 +118,9 @@
       "window": "between {from} and {to}",
       "until": "by about {to}",
       "estimate": "estimate",
-      "notSentYet": "Not sent yet. Delivery events show up here as soon as the provider answers."
+      "notSentYet": "Not sent yet. Delivery events show up here as soon as the provider answers.",
+      "waiting": "Waiting to send",
+      "waitingBody": "Goes out as soon as sending capacity frees up."
     }
   },
   "insights": {

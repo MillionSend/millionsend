@@ -111,7 +111,6 @@
       "queuedBody": "Sai em instantes.",
       "plan": "Retido pelo limite do plano",
       "planBody": "Sai quando o limite renovar, {date}.",
-      "planBodyNoDate": "Sai quando o limite do plano tiver espaço.",
       "raiseLimit": "Aumentar limite",
       "waitingCapacity": "Aguardando capacidade",
       "pacedBody": "A transmissão é enviada em ondas pela capacidade diária. Seu e-mail transacional não fica retido atrás dela.",
@@ -119,7 +118,9 @@
       "window": "entre {from} e {to}",
       "until": "por volta de {to}",
       "estimate": "estimativa",
-      "notSentYet": "Ainda não enviado. Os eventos de entrega aparecem aqui assim que o provedor responder."
+      "notSentYet": "Ainda não enviado. Os eventos de entrega aparecem aqui assim que o provedor responder.",
+      "waiting": "Aguardando envio",
+      "waitingBody": "Sai assim que houver capacidade de envio."
     }
   },
   "insights": {

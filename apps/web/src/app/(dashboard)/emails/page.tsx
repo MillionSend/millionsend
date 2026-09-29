@@ -100,8 +100,8 @@ export default function EmailsPage() {
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
   const sourceTotals = query.data?.pages[0]?.sourceTotals ?? null;
-  // A team that never sent a broadcast in the window gets no tabs at all.
-  const showSources = source !== "transactional" || (sourceTotals?.broadcast ?? 0) > 0;
+  // A team that never sent a broadcast gets no tabs at all.
+  const showSources = source !== "transactional" || stats.data?.hasBroadcasts === true;
   const hiddenBroadcasts = source === "transactional" ? (sourceTotals?.broadcast ?? 0) : 0;
 
   // The cap that can stop sends: the billing period's included volume on a
@@ -127,7 +127,8 @@ export default function EmailsPage() {
     stats.data != null &&
     stats.data.sentToday === 0 &&
     stats.data.deliveredAllTime === 0 &&
-    stats.data.queuedQuota === 0;
+    stats.data.queuedQuota === 0 &&
+    !stats.data.hasBroadcasts;
 
   function clearFilters() {
     setSearch("");

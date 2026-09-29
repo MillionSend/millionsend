@@ -114,7 +114,8 @@ async function firstPageTotal(
 type PendingSend =
   | { kind: "scheduled"; at: Date }
   | { kind: "queued" }
-  | { kind: "plan"; resumesAt: Date | null }
+  | { kind: "plan"; resumesAt: Date }
+  | { kind: "waiting" }
   | { kind: "paced"; from: Date | null; to: Date | null };
 
 async function pendingSend(
@@ -137,7 +138,9 @@ async function pendingSend(
   if (email.latestStatus !== "queued_quota") return null;
   // A hold by the team's own cap outranks capacity: its reset is the date.
   const hold = await planHoldUntil(db, teamId, now);
-  if (hold || !email.broadcastId) return { kind: "plan", resumesAt: hold };
+  if (hold) return { kind: "plan", resumesAt: hold };
+  // Parked with room under the plan: SES capacity (or a suspension) holds it.
+  if (!email.broadcastId) return { kind: "waiting" };
   const progress = (await sendingProgress(db, teamId, now)).get(email.broadcastId);
   return {
     kind: "paced",
@@ -188,14 +191,19 @@ export const emailsRouter = router({
       // fallback all read it.
       let sourceTotals: { transactional: number; broadcast: number } | null = null;
       if (!input.cursor) {
-        const [row] = await ctx.db
-          .select({
-            transactional: sql<number>`count(*) filter (where ${t.broadcastId} is null)::int`,
-            broadcast: sql<number>`count(*) filter (where ${t.broadcastId} is not null)::int`,
-          })
-          .from(t)
-          .where(and(...filters));
-        sourceTotals = { transactional: row?.transactional ?? 0, broadcast: row?.broadcast ?? 0 };
+        // Two counts, one per partial index, so each stays an index-only scan.
+        const count = async (side: SQL) => {
+          const [row] = await ctx.db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(t)
+            .where(and(...filters, side));
+          return row?.n ?? 0;
+        };
+        const [transactional, broadcast] = await Promise.all([
+          count(isNull(t.broadcastId)),
+          count(isNotNull(t.broadcastId)),
+        ]);
+        sourceTotals = { transactional, broadcast };
       }
       const total = sourceTotals
         ? input.source
@@ -252,7 +260,16 @@ export const emailsRouter = router({
         and(eq(t.teamId, ctx.teamId), eq(t.latestStatus, "queued_quota"), isNull(t.broadcastId)),
       );
 
+    // Whether the team ever sent a broadcast copy: the source tabs show from
+    // it, whatever the list's filters match.
+    const [bulk] = await ctx.db
+      .select({ id: t.id })
+      .from(t)
+      .where(and(eq(t.teamId, ctx.teamId), isNotNull(t.broadcastId)))
+      .limit(1);
+
     return {
+      hasBroadcasts: bulk !== undefined,
       sentToday: usage?.sentToday ?? 0,
       deliveredAllTime: usage?.deliveredAllTime ?? 0,
       queuedQuota: queued?.count ?? 0,

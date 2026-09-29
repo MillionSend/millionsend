@@ -434,7 +434,8 @@ function EmailDetailSkeleton() {
 type Pending =
   | { kind: "scheduled"; at: Date }
   | { kind: "queued" }
-  | { kind: "plan"; resumesAt: Date | null }
+  | { kind: "plan"; resumesAt: Date }
+  | { kind: "waiting" }
   | { kind: "paced"; from: Date | null; to: Date | null };
 
 /**
@@ -484,14 +485,19 @@ function PendingEvents({
       label: t("detail.pending.plan"),
       body: (
         <>
-          {pending.resumesAt
-            ? t("detail.pending.planBody", { date: stamp(pending.resumesAt) })
-            : t("detail.pending.planBodyNoDate")}{" "}
+          {t("detail.pending.planBody", { date: stamp(pending.resumesAt) })}{" "}
           <Link href="/settings/billing" className="ms-link">
             {t("detail.pending.raiseLimit")}
           </Link>
         </>
       ),
+      estimate: true,
+    });
+  } else if (pending.kind === "waiting") {
+    nodes.push({
+      type: "queued_quota",
+      label: t("detail.pending.waiting"),
+      body: t("detail.pending.waitingBody"),
       estimate: true,
     });
   } else {
