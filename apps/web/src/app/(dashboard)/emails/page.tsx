@@ -1,6 +1,6 @@
 "use client";
 
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
@@ -75,19 +75,23 @@ export default function EmailsPage() {
   const deferredSearch = useDeferredValue(search.trim());
   const since = useMemo(() => rangeSince(range), [range]);
 
+  const filterInput = {
+    ...(statuses.length > 0 ? { status: statuses } : {}),
+    ...(deferredSearch ? { search: deferredSearch } : {}),
+    ...(apiKeyId !== "all" ? { apiKeyId } : {}),
+    ...(domainId !== "all" ? { domainId } : {}),
+    ...(since ? { since } : {}),
+  };
   const query = useInfiniteQuery(
     trpc.emails.list.infiniteQueryOptions(
-      {
-        limit,
-        ...(statuses.length > 0 ? { status: statuses } : {}),
-        ...(deferredSearch ? { search: deferredSearch } : {}),
-        ...(apiKeyId !== "all" ? { apiKeyId } : {}),
-        ...(domainId !== "all" ? { domainId } : {}),
-        ...(source !== "all" ? { source } : {}),
-        ...(since ? { since } : {}),
-      },
+      { limit, ...filterInput, ...(source !== "all" ? { source } : {}) },
       { getNextPageParam: (page) => page.nextCursor },
     ),
+  );
+  // The tab counts hold their last value while a filter change refetches
+  // them, so the strip never loses its numbers mid-load.
+  const counts = useQuery(
+    trpc.emails.sourceTotals.queryOptions(filterInput, { placeholderData: keepPreviousData }),
   );
   const stats = useQuery(trpc.emails.stats.queryOptions());
   const usage = useQuery(trpc.settings.usage.recent.queryOptions({}));
@@ -99,7 +103,7 @@ export default function EmailsPage() {
 
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
-  const sourceTotals = query.data?.pages[0]?.sourceTotals ?? null;
+  const sourceTotals = counts.data ?? null;
   // A team that never sent a broadcast gets no tabs at all.
   const showSources = source !== "transactional" || stats.data?.hasBroadcasts === true;
   const hiddenBroadcasts = source === "transactional" ? (sourceTotals?.broadcast ?? 0) : 0;
@@ -229,7 +233,7 @@ export default function EmailsPage() {
 
       {showSources ? (
         <div
-          className="ms-tabs"
+          className="ms-tabs bleed"
           role="tablist"
           aria-label={t("list.source.label")}
           style={{ marginBottom: 14 }}

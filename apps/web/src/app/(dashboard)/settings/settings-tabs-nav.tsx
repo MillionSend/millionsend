@@ -46,7 +46,7 @@ export function SettingsTabsNav({
     audit: role === "owner" || role === "admin",
   };
   return (
-    <div ref={tabsRef} className="ms-tabs" style={{ marginBottom: 24 }}>
+    <div ref={tabsRef} className="ms-tabs bleed" style={{ marginBottom: 24 }}>
       {TABS.filter((tab) => visible[tab.key] ?? true).map(({ key, href }) => (
         <button
           key={key}

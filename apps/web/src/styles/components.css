@@ -796,24 +796,43 @@ table.ms-table {
   padding: 2px;
   margin: -2px;
 }
+/* Every tab carries the panel ground and a hairline so it reads as a
+   control before it is clicked; the active one lifts a shade. */
 .ms-tabs button {
   flex: none;
   white-space: nowrap;
   font: 500 var(--ms-fs-ui) var(--ms-font-sans);
   color: var(--ms-muted);
-  background: none;
-  border: 0;
-  padding: 7px 12px;
+  background: var(--ms-panel);
+  border: 1px solid var(--ms-line);
+  padding: 6px 12px;
   border-radius: var(--ms-r-input);
   cursor: pointer;
-  transition: color var(--ms-dur-fast) var(--ms-ease);
+  transition:
+    color var(--ms-dur-fast) var(--ms-ease),
+    border-color var(--ms-dur-fast) var(--ms-ease);
 }
 .ms-tabs button:hover {
   color: var(--ms-bone);
+  border-color: var(--ms-line-strong);
 }
 .ms-tabs button.active {
   background: var(--ms-panel-raised);
+  border-color: var(--ms-line-strong);
   color: var(--ms-bone);
+}
+/* A page-level strip runs edge to edge on phones and scrolls under the
+   gutter; the inner padding keeps its first tab on the title's line. */
+@media (max-width: 899px) {
+  .ms-tabs.bleed {
+    margin-inline: -16px;
+    padding-inline: 16px;
+    scroll-padding-inline: 16px;
+    scrollbar-width: none;
+  }
+  .ms-tabs.bleed::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Toast — near-black ground with a faint status-tinted glow (the system's one gradient) */
@@ -3051,6 +3070,16 @@ summary:focus-visible,
   color: var(--ms-muted);
   font-size: 12.5px;
 }
+/* On phones the day sits above its line, so the text takes the full width. */
+@media (max-width: 899px) {
+  .ms-steps li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .ms-steps .when {
+    padding-top: 0;
+  }
+}
 /* A live send's rail: a day already out keeps a filled dot and muted copy;
    today carries a meter of its own progress. */
 .ms-steps li.done::after {
@@ -3112,7 +3141,7 @@ summary:focus-visible,
   font-size: 13px;
   line-height: 1.55;
 }
-@media (max-width: 900px) {
+@media (max-width: 899px) {
   .ms-pacing {
     grid-template-columns: minmax(0, 1fr);
   }
