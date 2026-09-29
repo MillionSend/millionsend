@@ -15,6 +15,7 @@ import {
   groupReleasesByDay,
   roundUpToQuarterHour,
   sameLocalDay,
+  sendingDays,
 } from "@/lib/format";
 import { escapeHtml } from "@/lib/html";
 import { MERGE_TOKEN_RE } from "@/lib/merge-fields";
@@ -263,9 +264,88 @@ export function SendPlanSummary({
 export interface SendingProgress {
   sentCount: number | null;
   parkedCount: number | null;
-  /** Every row the fan-out wrote. */
+  /** The whole audience: the walk's own count until it has written every row. */
   recipients: number;
   finishesAt: Date | null;
+}
+
+/**
+ * A sending broadcast's days on the send dialog's step rail: days already
+ * out, today with its progress, the days still ahead. `compact` is the
+ * list tooltip's cut: counts only. Nothing for a send that fits in one day.
+ */
+export function PacingSteps({
+  sent,
+  releases,
+  locale,
+  compact = false,
+  now = new Date(),
+}: {
+  sent: readonly { at: Date; count: number }[];
+  releases: readonly { at: Date; endsAt: Date; count: number }[];
+  locale: string;
+  compact?: boolean;
+  now?: Date;
+}) {
+  const t = useTranslations("broadcasts");
+  const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
+  const days = sendingDays(sent, releases, now);
+  if (days.length < 2) return null;
+  const time = (d: Date) => formatStepTime(d, locale);
+  return (
+    <ol className={compact ? "ms-steps compact" : "ms-steps"} aria-label={t("detail.pacing")}>
+      {days.map((day, i) => {
+        const n = nf.format(day.count);
+        const last = i === days.length - 1;
+        const finish = time(roundUpToQuarterHour(day.endsAt));
+        let what: string;
+        let sub: string | undefined;
+        if (day.state === "done") {
+          what = t("detail.pacingDone", { count: n });
+          sub = t("detail.pacingRange", { start: time(day.startsAt), end: time(day.endsAt) });
+        } else if (day.state === "now") {
+          what = compact
+            ? t("detail.pacingTodayShort", { sent: nf.format(day.sent), count: n })
+            : t("detail.pacingToday", { sent: nf.format(day.sent), count: n });
+          sub = t(last ? "detail.pacingTodayLast" : "detail.pacingTodayRange", {
+            start: time(day.startsAt),
+            end: finish,
+          });
+        } else if (last) {
+          what = compact
+            ? t("detail.pacingLastShort", { count: n })
+            : t("guard.stepLast", { count: n, time: finish });
+        } else {
+          what = compact
+            ? t("detail.pacingMoreShort", { count: n })
+            : t("guard.stepMore", { count: n });
+          sub = t("detail.pacingFrom", { time: time(day.startsAt) });
+        }
+        return (
+          <li key={day.startsAt.getTime()} className={day.state === "next" ? undefined : day.state}>
+            <span className="when">
+              {day.state === "now"
+                ? t("detail.pacingTodayLabel")
+                : formatStepDay(day.startsAt, locale)}
+            </span>
+            <span className="what">
+              {what}
+              {!compact && day.state === "now" ? (
+                <span className="bar" aria-hidden="true">
+                  <b
+                    style={{
+                      width: `${Math.min(100, (day.sent / Math.max(1, day.count)) * 100)}%`,
+                    }}
+                  />
+                </span>
+              ) : null}
+              {!compact && sub ? <small>{sub}</small> : null}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
 /** "70,000 sent · 99,700 waiting": every row not yet out counts as waiting. */

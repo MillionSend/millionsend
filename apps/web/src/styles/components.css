@@ -3051,3 +3051,69 @@ summary:focus-visible,
   color: var(--ms-muted);
   font-size: 12.5px;
 }
+/* A live send's rail: a day already out keeps a filled dot and muted copy;
+   today carries a meter of its own progress. */
+.ms-steps li.done::after {
+  background: var(--ms-muted);
+  border-color: var(--ms-muted);
+}
+.ms-steps li.done .what {
+  color: var(--ms-muted);
+}
+.ms-steps .bar {
+  display: block;
+  height: 3px;
+  max-width: 320px;
+  margin: 7px 0 2px;
+  border-radius: 2px;
+  background: var(--ms-line-strong);
+  overflow: hidden;
+}
+.ms-steps .bar b {
+  display: block;
+  height: 100%;
+  background: var(--ms-steel);
+}
+/* The list tooltip's cut: a narrower day column and tighter rows. */
+.ms-steps.compact {
+  margin: 8px 0 4px;
+}
+.ms-steps.compact li {
+  grid-template-columns: 96px 1fr;
+  gap: 10px;
+  padding: 0 0 7px 18px;
+  font-size: 12px;
+}
+.ms-steps.compact .when {
+  font-size: 11px;
+  padding-top: 1px;
+}
+.ms-steps.compact li::after {
+  top: 5px;
+}
+.ms-steps.compact li::before {
+  top: 9px;
+}
+/* The detail page's pacing band: the rail beside the reason line. */
+.ms-pacing {
+  display: grid;
+  grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
+  gap: 12px 48px;
+  padding: 22px 0 18px;
+  border-top: 1px solid var(--ms-line);
+}
+.ms-pacing > .ms-microlabel {
+  grid-column: 1 / -1;
+}
+.ms-pacing > p {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--ms-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+@media (max-width: 900px) {
+  .ms-pacing {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

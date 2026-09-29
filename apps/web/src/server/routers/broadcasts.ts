@@ -209,7 +209,10 @@ async function getOwnBroadcast(ctx: { db: Db; teamId: string }, id: string): Pro
  */
 function recipientsSql(b: typeof schema.broadcasts) {
   const e = schema.emails;
-  return sql<number>`coalesce(${b.recipientCount}, (select count(*)::int from ${e} where ${e.broadcastId} = ${b.id}))`;
+  // While the walk runs, the audience it counted up front stands for the total.
+  // A walk canceled midway never sets recipient_count; its rows are the total.
+  const written = sql`(select count(*)::int from ${e} where ${e.broadcastId} = ${b.id})`;
+  return sql<number>`coalesce(${b.recipientCount}, case when ${b.status} = 'sending' then greatest(${b.audienceCount}, ${written}) else ${written} end)`;
 }
 
 function assertDraft(row: BroadcastRow): void {
@@ -313,6 +316,8 @@ export const broadcastsRouter = router({
             sentCount: p?.sentCount ?? null,
             parkedCount: p?.parkedCount ?? null,
             finishesAt: p?.finishesAt ?? null,
+            releases: p?.releases ?? [],
+            sent: p?.sent ?? [],
           };
         }),
       };
@@ -375,6 +380,8 @@ export const broadcastsRouter = router({
       sentCount: progress?.sentCount ?? null,
       parkedCount: progress?.parkedCount ?? null,
       finishesAt: progress?.finishesAt ?? null,
+      releases: progress?.releases ?? [],
+      sent: progress?.sent ?? [],
       startedAt: row.status === "sending" ? row.scheduledAt : null,
       planHold: planHold ? { resumesAt: planHold } : null,
       replyTo: firstReplyTo(row.replyTo),
@@ -383,7 +390,11 @@ export const broadcastsRouter = router({
       // Live counts while any email row still exists; the counts recorded
       // before the rows aged out stand in once they are gone.
       stats: {
-        total: row.recipientCount ?? live?.total ?? 0,
+        total:
+          row.recipientCount ??
+          (row.status === "sending"
+            ? Math.max(row.audienceCount ?? 0, live?.total ?? 0)
+            : (live?.total ?? 0)),
         delivered: live?.delivered ?? row.deliveredCount ?? 0,
         // Engagement keeps arriving after the send, so no snapshot could
         // stand in once the rows age out: null past the metadata window,

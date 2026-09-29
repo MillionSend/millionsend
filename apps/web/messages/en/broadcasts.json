@@ -143,7 +143,18 @@
     "stopTitle": "Stop the rest",
     "stopBody": "Stop the remaining {waiting} sends? The {sent} already sent are not affected.",
     "keepSending": "Keep sending",
-    "stopConfirm": "Stop the rest"
+    "stopConfirm": "Stop the rest",
+    "pacing": "Sending pace",
+    "pacingDone": "{count} sent",
+    "pacingRange": "{start} to {end}",
+    "pacingToday": "{count} go out · {sent} already sent",
+    "pacingTodayShort": "{sent} of {count} sent",
+    "pacingTodayRange": "{start} until about {end}",
+    "pacingTodayLast": "{start} · finishes about {end}",
+    "pacingFrom": "from {time}",
+    "pacingMoreShort": "{count} more",
+    "pacingLastShort": "last {count}",
+    "pacingTodayLabel": "Today"
   },
   "apiSheet": {
     "title": "Broadcasts API",
