@@ -5,7 +5,7 @@ import {
   authenticateApiKey,
   formatMailbox,
   isTeamSuspended,
-  OVERAGE_HARD_CAP,
+  monthlyQuotaMessage,
   parseMailbox,
   verifySenderDomain,
 } from "@millionsend/core";
@@ -151,12 +151,7 @@ async function handleMessage(
       throw smtpError(452, "Daily quota exceeded and the parked backlog is full");
     }
     if (result.reason === "monthly_quota_exceeded") {
-      throw smtpError(
-        452,
-        result.overage
-          ? `Monthly sending quota exceeded: sends stop at ${OVERAGE_HARD_CAP} times the included volume even with overage on; the period renews on ${result.periodEnd.toISOString()}`
-          : `Monthly sending quota exceeded; turn on overage in Billing or wait for the period to renew on ${result.periodEnd.toISOString()}`,
-      );
+      throw smtpError(452, monthlyQuotaMessage(result));
     }
     if (result.reason === "attachments_too_large") throw smtpError(552, "Attachments too large");
     throw smtpError(550, "All recipients are suppressed");

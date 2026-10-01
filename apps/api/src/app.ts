@@ -40,7 +40,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   makeUnsubscribeToken,
   markSegmentsStale,
-  OVERAGE_HARD_CAP,
+  monthlyQuotaMessage,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
   PLAN_CONTACT_LIMIT,
@@ -311,14 +311,6 @@ function emailScopeConditions(auth: ApiKeyAuth): SQL[] {
   }
   if (auth.domainId !== null) conditions.push(eq(schema.emails.domainId, auth.domainId));
   return conditions;
-}
-
-/** The monthly refusal names the cap it hit: the plan's volume, or the overage hard cap past it. */
-function monthlyQuotaMessage(result: { periodEnd: Date; overage: boolean }): string {
-  const renews = result.periodEnd.toISOString();
-  return result.overage
-    ? `Monthly sending quota exceeded: sends stop at ${OVERAGE_HARD_CAP} times the included volume even with overage on; the period renews on ${renews}`
-    : `Monthly sending quota exceeded; turn on overage in Billing or wait for the period to renew on ${renews}`;
 }
 
 /** Wire status + body for an accept the pipeline refused. */

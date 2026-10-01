@@ -53,8 +53,8 @@ included volume depends on the **overage** switch in Billing, on by default
 (the customer turns it off there):
 
 - **Overage off**: the API refuses with `429 monthly_quota_exceeded`
-  ("Monthly sending quota exceeded; turn on overage in Billing or wait for the
-  period to renew on `<date>`"); nothing parks through the API. Broadcasts
+  ("Monthly sending quota exceeded with overage off; the period renews on
+  `<date>`"); nothing parks through the API. Broadcasts
   still park their overflow as `queued_quota`, and the drain re-checks it
   against the period each run: it goes out when the period renews, when
   overage is turned on, or when the plan moves up.
