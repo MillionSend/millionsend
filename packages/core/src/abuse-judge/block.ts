@@ -1,5 +1,6 @@
-import { maskEmailLocalParts, redactRevealedText } from "../content-reveal-render.js";
+import { redactRevealedText } from "../content-reveal-render.js";
 import { extractAnchors, extractImages, visibleText } from "../email-insights.js";
+import { maskEmailLocalParts } from "../mask.js";
 import { registrableDomain, vouchedRegistrableDomain } from "../org-domain.js";
 
 /**
