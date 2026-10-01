@@ -3,6 +3,7 @@ import { findLiveSupportView } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { eq } from "drizzle-orm";
+import { httpOrigin } from "@/lib/http-url";
 import { uploadsEnabled } from "./storage";
 
 /**
@@ -20,6 +21,20 @@ export interface SupportViewSession {
   teamName: string;
   logoUrl: string | null;
   expiresAt: Date;
+}
+
+/**
+ * An event's data as a support view sees it. A click's link is a URL out of
+ * the sent body, and its path or query can carry a reset or sign-in token, so
+ * only its origin is kept.
+ */
+export function supportViewEventData<T>(data: T): T {
+  if (typeof data !== "object" || data === null || !("click" in data)) return data;
+  const { click } = data;
+  if (typeof click !== "object" || click === null || !("link" in click)) return data;
+  const { link, ...rest } = click;
+  const origin = typeof link === "string" ? httpOrigin(link) : null;
+  return { ...data, click: origin ? { ...rest, link: origin } : rest } as T;
 }
 
 /**

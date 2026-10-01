@@ -4,6 +4,7 @@ import {
   encryptEmailBody,
   SUPPORT_VIEW_MINUTES,
   SUPPORT_VIEW_REASONS,
+  SUPPORT_VIEW_SIGN_IN_MINUTES,
   type SystemMailMessage,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -23,7 +24,10 @@ process.env.MASTER_ENCRYPTION_KEY = TEST_KEK;
 
 const h = vi.hoisted(() => ({
   db: undefined as unknown as Db,
-  session: null as { user: { id: string; email: string; name: string } } | null,
+  session: null as {
+    user: { id: string; email: string; name: string };
+    session?: { id: string; createdAt: Date };
+  } | null,
   cookies: new Map<string, string>(),
   cookieSets: [] as { name: string; value: string; options: Record<string, unknown> }[],
   cookieDeletes: [] as string[],
@@ -197,10 +201,12 @@ describe("console.teams.startSupportView", () => {
     await expect(
       operator().console.teams.startSupportView({ id: ownTeamId, reason: "other" }),
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "own_team" });
-    for (const reason of ["support_ticket", "billing_dispute"] as const) {
-      await expect(
-        operator().console.teams.startSupportView({ id: teamId, reason }),
-      ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "reference_required" });
+    for (const reason of SUPPORT_VIEW_REASONS) {
+      for (const reference of [undefined, "  "]) {
+        await expect(
+          operator().console.teams.startSupportView({ id: teamId, reason, reference }),
+        ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "reference_required" });
+      }
     }
     await expect(
       operator().console.teams.startSupportView({ id: randomUuid(), reason: "other" }),
@@ -208,7 +214,7 @@ describe("console.teams.startSupportView", () => {
     expect(await db.select().from(schema.supportViewGrants)).toHaveLength(before);
   });
 
-  it("opens a 30-minute grant, sets the cookie, audits the team and emails its owners", async () => {
+  it("opens a 30-minute grant, sets the cookie, audits the team and mails nobody", async () => {
     const setCookie = vi.fn();
     const before = Date.now();
     const result = await callerFor(OPERATOR, ownTeamId, "owner", {
@@ -227,7 +233,6 @@ describe("console.teams.startSupportView", () => {
     const minutes = (grant.expiresAt.getTime() - grant.createdAt.getTime()) / 60_000;
     expect(minutes).toBe(SUPPORT_VIEW_MINUTES);
     expect(grant.createdAt.getTime()).toBeGreaterThanOrEqual(before - 1000);
-    expect(grant.notifiedAt).toBeInstanceOf(Date);
     expect(setCookie).toHaveBeenCalledWith({ id: grant.id, expiresAt: grant.expiresAt });
 
     const started = (await auditRows("support.view_started")).at(-1);
@@ -238,16 +243,51 @@ describe("console.teams.startSupportView", () => {
       data: { reason: "support_ticket", reference: "#4812", minutes: 30 },
     });
 
-    // Owners only, in their language, naming who, why, the reference and the deadline.
-    expect(h.sent.map((m) => [m.kind, m.to])).toEqual([
-      ["support.view_started", "bob@example.com"],
-    ]);
-    const mail = h.sent[0] as SystemMailMessage;
-    expect(mail.subject).toBe("Support view of acme started");
-    // The session's name and address, as the context carries them.
-    expect(mail.text).toContain("op (op@example.com)");
-    expect(mail.text).toContain("support ticket #4812");
-    expect(mail.text).toContain(`${APP}/settings`);
+    // A sender is configured and the team has an owner, so an empty outbox
+    // means the start itself mails nobody; the team audit row is the record.
+    expect(h.sent).toEqual([]);
+  });
+
+  it("opens no view when its audit row cannot be written", async () => {
+    await db.execute(
+      "create function refuse_support_start() returns trigger language plpgsql as $$ begin raise exception 'audit down'; end $$",
+    );
+    await db.execute(
+      "create trigger refuse_support_start before insert on audit_log for each row when (new.action = 'support.view_started') execute function refuse_support_start()",
+    );
+    try {
+      await expect(start()).rejects.toThrow();
+      const live = await db
+        .select()
+        .from(schema.supportViewGrants)
+        .where(isNull(schema.supportViewGrants.endedAt));
+      expect(live).toEqual([]);
+    } finally {
+      await db.execute("drop trigger refuse_support_start on audit_log");
+      await db.execute("drop function refuse_support_start");
+    }
+  });
+
+  it("asks for a recent sign-in before opening a view", async () => {
+    const signedInAt = new Date(Date.now() - (SUPPORT_VIEW_SIGN_IN_MINUTES + 1) * 60_000);
+    const stale = callerFor(OPERATOR, ownTeamId, "owner", {
+      session: { user: user(OPERATOR), session: { id: "s-old", createdAt: signedInAt } },
+    });
+    await expect(
+      stale.console.teams.startSupportView({
+        id: teamId,
+        reason: "support_ticket",
+        reference: "#1",
+      }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "sign_in_again" });
+    const unknown = callerFor(OPERATOR, ownTeamId, "owner", { session: { user: user(OPERATOR) } });
+    await expect(
+      unknown.console.teams.startSupportView({
+        id: teamId,
+        reason: "support_ticket",
+        reference: "#1",
+      }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "sign_in_again" });
   });
 
   it("keeps one live grant per operator: starting again ends the previous one", async () => {
@@ -266,32 +306,10 @@ describe("console.teams.startSupportView", () => {
     expect((await resolveSupportView(db, OPERATOR, second.id))?.grantId).toBe(second.id);
   });
 
-  it("leaves notified_at null when the instance has no sender configured", async () => {
-    vi.stubEnv("AUTH_EMAIL_FROM", "");
-    vi.stubEnv("NOTIFICATIONS_EMAIL_FROM", "");
-    const result = await operator().console.teams.startSupportView({
-      id: teamId,
-      reason: "other",
-    });
-    expect((await grantRow(result.grantId)).notifiedAt).toBeNull();
-    expect(h.sent).toEqual([]);
-  });
-
-  it("leaves notified_at null when the team has no owner to write to", async () => {
-    const orphan = await createTeam(db, `orphan-${Date.now()}`);
-    const result = await operator().console.teams.startSupportView({
-      id: orphan,
-      reason: "other",
-    });
-    const grant = await grantRow(result.grantId);
-    expect(grant.notifiedAt).toBeNull();
-    expect(h.sent).toEqual([]);
-  });
-
   it("never leaves two live grants when starts run at once", async () => {
     const results = await Promise.allSettled([
-      operator().console.teams.startSupportView({ id: teamId, reason: "other" }),
-      operator().console.teams.startSupportView({ id: teamId, reason: "other" }),
+      operator().console.teams.startSupportView({ id: teamId, reason: "other", reference: "#1" }),
+      operator().console.teams.startSupportView({ id: teamId, reason: "other", reference: "#2" }),
     ]);
     // Whoever loses the one-live-view index is told a view is live, never a
     // raw database error; the winner's grant is the only one still open.
@@ -490,6 +508,61 @@ describe("what a view can and cannot see", () => {
       hiddenBySupportView: true,
     });
     expect(viewed).not.toHaveProperty("bodyCiphertext");
+  });
+
+  it("cuts a clicked link to its origin in events and webhook payloads, and drops echoed bodies", async () => {
+    const [email] = await db
+      .insert(schema.emails)
+      .values({
+        teamId,
+        from: "sender@acme.test",
+        to: ["ada@example.com"],
+        subject: "Reset your password",
+        latestStatus: "delivered",
+      })
+      .returning({ id: schema.emails.id });
+    if (!email) throw new Error("email insert failed");
+    const click = {
+      link: "https://shop.example.com/reset?token=s3cret",
+      ipAddress: "203.0.113.9",
+      userAgent: "Mail",
+    };
+    await db
+      .insert(schema.emailEvents)
+      .values({ emailId: email.id, type: "clicked", occurredAt: new Date(), data: { click } });
+    const hook = await owner().webhooks.create({ url: "https://hook.example.com/in" });
+    const payload = { type: "email.clicked", data: { email_id: email.id, click } };
+    const [delivery] = await db
+      .insert(schema.webhookDeliveries)
+      .values({
+        endpointId: hook.id,
+        emailId: email.id,
+        messageId: "msg_click",
+        eventType: "email.clicked",
+        payload,
+        // Receivers often echo what they were sent.
+        lastResponseBody: JSON.stringify(payload),
+      })
+      .returning({ id: schema.webhookDeliveries.id });
+    if (!delivery) throw new Error("delivery insert failed");
+
+    const grant = await start();
+    const v = viewer(grant);
+    const cut = { ...click, link: "https://shop.example.com" };
+    expect((await v.emails.get({ id: email.id })).events.map((e) => e.data)).toEqual([
+      { click: cut },
+    ]);
+    const viewedDelivery = await v.webhooks.deliveries.get({ id: delivery.id });
+    expect(viewedDelivery.payload).toEqual({ ...payload, data: { ...payload.data, click: cut } });
+    expect(viewedDelivery.lastResponseBody).toBeNull();
+    // The owner still sees where every click went.
+    expect((await owner().emails.get({ id: email.id })).events.map((e) => e.data)).toEqual([
+      { click },
+    ]);
+    const ownDelivery = await owner().webhooks.deliveries.get({ id: delivery.id });
+    expect(ownDelivery.payload).toEqual(payload);
+    expect(ownDelivery.lastResponseBody).toBe(JSON.stringify(payload));
+    await owner().webhooks.delete({ id: hook.id });
   });
 
   it("hides a broadcast's body once it has reached someone, and not before", async () => {
@@ -739,10 +812,11 @@ describe("through the tRPC route (cookie to context)", () => {
   };
 
   it("starts through the console, views through the cookie, and drops a dead cookie", async () => {
-    h.session = { user: user(OPERATOR) };
+    h.session = { user: user(OPERATOR), session: { id: "s-op", createdAt: new Date() } };
     const started = await mutate("console.teams.startSupportView", {
       id: teamId,
       reason: "other",
+      reference: "#4812",
     });
     expect(started.status).toBe(200);
     const grantId = started.data.grantId as string;

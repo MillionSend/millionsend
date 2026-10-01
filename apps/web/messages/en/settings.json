@@ -540,7 +540,7 @@
   "supportAccess": {
     "title": "Support access",
     "intro": "At your request, an instance operator may open this dashboard read-only for up to 30 minutes. The content of sent emails, exports and secrets stay hidden, and the session is recorded in the audit log.",
-    "none": "No support session is live.",
+    "none": "No support session is live on {team}.",
     "operator": "Operator",
     "started": "Started",
     "expires": "Ends",

@@ -531,7 +531,7 @@
     },
     "viewDialog": {
       "title": "Ver {team} como proprietário",
-      "lead": "Abre o painel da equipe em modo somente leitura sob uma faixa, por 30 minutos. Cada procedimento lido vai para a auditoria da instância e a sessão aparece na auditoria da própria equipe na hora.",
+      "lead": "Abre o painel da equipe em modo somente leitura sob uma faixa, por 30 minutos. Cada procedimento lido é contado na sessão, e a sessão aparece na auditoria da própria equipe na hora.",
       "reasons": {
         "support_ticket": "Chamado de suporte",
         "billing_dispute": "Disputa de cobrança",
@@ -545,8 +545,9 @@
       "errors": {
         "support_view_off": "O modo de suporte está desligado nesta instância (SUPPORT_VIEW=on liga).",
         "support_view_live": "Já existe um modo de suporte ativo. Abra o painel e encerre-o pela faixa antes de iniciar outro.",
+        "sign_in_again": "Iniciar um modo de suporte exige um login recente. Saia e entre de novo, depois inicie outra vez.",
         "own_team": "Você é membro desta equipe; abra-a pelo seletor de equipes.",
-        "reference_required": "Uma referência de chamado é obrigatória para este motivo."
+        "reference_required": "Uma referência de chamado é obrigatória."
       }
     },
     "ownerTip": "Proprietário: {email}"

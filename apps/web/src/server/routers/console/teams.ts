@@ -4,17 +4,14 @@ import {
   accountMailPhrase,
   fetchAccountScore,
   fetchDeliverabilityHealth,
-  formatMailDateTime,
   liveSupportViewForTeam,
-  type MailLocale,
   PLAN_RUNGS,
   type Plan,
   raisesQuota,
   SUPPORT_VIEW_REASONS,
+  SUPPORT_VIEW_SIGN_IN_MINUTES,
   SUSPENSION_REASONS,
-  type SupportViewReason,
   startSupportView,
-  supportViewNeedsReference,
   teamQuota,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
@@ -122,21 +119,6 @@ export function operatorRungs(): { plan: string; planQuota: number | null; key: 
   return planValues.includes("system")
     ? [...rungs, { plan: "system", planQuota: null, key: "system" }]
     : rungs;
-}
-
-/** The clause the owner's notice gives for a support view: "at your request, support ticket #4812". */
-function supportViewReasonText(
-  locale: MailLocale,
-  reason: SupportViewReason,
-  reference: string | null,
-): string {
-  const kind = "support.view_started";
-  const needed = supportViewNeedsReference(reason);
-  const ref =
-    reference && !needed
-      ? accountMailPhrase({ locale, kind, key: "ref", values: { reference } })
-      : (reference ?? "");
-  return accountMailPhrase({ locale, kind, key: reason, values: { reference: ref } });
 }
 
 /** What a pause or suspension mail says in the reason slot: the phrase, then the operator's note. */
@@ -248,8 +230,9 @@ export const consoleTeamsRouter = router({
   /**
    * Opens the team's dashboard as its owner sees it, read-only, for 30
    * minutes: a grant on the operator's own session (never a session for the
-   * owner), named by a cookie the context re-checks on every request. The
-   * owners are emailed at once and both audit trails carry the start.
+   * owner), named by a cookie the context re-checks on every request. No mail
+   * goes out: the team's audit trail carries the start at once, written with
+   * the grant, and the owner can end the view from Settings.
    */
   startSupportView: operatorProcedure
     .input(
@@ -268,6 +251,13 @@ export const consoleTeamsRouter = router({
       if (ctx.supportView) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_live" });
       }
+      const signedInAt = ctx.session.session?.createdAt;
+      if (
+        !signedInAt ||
+        Date.now() - signedInAt.getTime() > SUPPORT_VIEW_SIGN_IN_MINUTES * 60_000
+      ) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "sign_in_again" });
+      }
       const team = await loadTeam(ctx.db, input.id);
       const [own] = await ctx.db
         .select({ id: schema.teamMembers.id })
@@ -281,7 +271,8 @@ export const consoleTeamsRouter = router({
         .limit(1);
       if (own) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "own_team" });
       const reference = input.reference || null;
-      if (supportViewNeedsReference(input.reason) && !reference) {
+      // Every view answers a request the customer made, so it names that request.
+      if (!reference) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "reference_required" });
       }
       let grant: Awaited<ReturnType<typeof startSupportView>>;
@@ -300,25 +291,6 @@ export const consoleTeamsRouter = router({
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_live" });
       }
       ctx.setSupportViewCookie?.({ id: grant.id, expiresAt: grant.expiresAt });
-      const notified = await mailTeamOwners(
-        ctx.db,
-        team,
-        "support.view_started",
-        "/settings",
-        (locale) => ({
-          operator: `${ctx.operator.name} (${ctx.operator.email})`,
-          reason: supportViewReasonText(locale, input.reason, reference),
-          until: formatMailDateTime(locale, grant.expiresAt),
-        }),
-      );
-      // Stamped only when a notice actually went out: a team with no owner to
-      // write to, or an instance with no sender, must not read as notified.
-      if (notified > 0) {
-        await ctx.db
-          .update(schema.supportViewGrants)
-          .set({ notifiedAt: new Date() })
-          .where(eq(schema.supportViewGrants.id, grant.id));
-      }
       return { grantId: grant.id, expiresAt: grant.expiresAt };
     }),
 

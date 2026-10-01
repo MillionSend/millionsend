@@ -531,7 +531,7 @@
     },
     "viewDialog": {
       "title": "View {team} as its owner",
-      "lead": "Opens the team dashboard read-only under a banner, for 30 minutes. Every procedure read lands in the instance audit and the session appears in the team's own audit at once.",
+      "lead": "Opens the team dashboard read-only under a banner, for 30 minutes. Every procedure read is counted on the session, and the session appears in the team's own audit at once.",
       "reasons": {
         "support_ticket": "Support ticket",
         "billing_dispute": "Billing dispute",
@@ -545,8 +545,9 @@
       "errors": {
         "support_view_off": "Support view is off on this instance (SUPPORT_VIEW=on turns it on).",
         "support_view_live": "A support view is already live. Open the dashboard and end it from its banner before starting another.",
+        "sign_in_again": "Starting a support view needs a recent sign-in. Sign out and back in, then start it again.",
         "own_team": "You are a member of this team; open it from the team switcher instead.",
-        "reference_required": "A ticket reference is required for this reason."
+        "reference_required": "A ticket reference is required."
       }
     },
     "ownerTip": "Owner: {email}"

@@ -1,17 +1,21 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull, type SQL, sql } from "drizzle-orm";
-import { recordAudit } from "./audit.js";
-import {
-  SUPPORT_VIEW_REASONS,
-  type SupportViewReason,
-  supportViewNeedsReference,
-} from "./support-view-reasons.js";
+import { auditRow, recordAudit } from "./audit.js";
+import { SUPPORT_VIEW_REASONS, type SupportViewReason } from "./support-view-reasons.js";
 
-export { SUPPORT_VIEW_REASONS, type SupportViewReason, supportViewNeedsReference };
+export { SUPPORT_VIEW_REASONS, type SupportViewReason };
 
 /** How long one read-only look at a team's dashboard lasts, server-enforced on every request. */
 export const SUPPORT_VIEW_MINUTES = 30;
+
+/**
+ * How recent the operator's sign-in must be to start a view, so a stolen
+ * long-lived session cannot open one.
+ * ponytail: a recent sign-in stands in for step-up auth; require a second
+ * factor once the instance has one.
+ */
+export const SUPPORT_VIEW_SIGN_IN_MINUTES = 15;
 
 export type SupportViewEndedBy = (typeof schema.supportViewEndedByEnum.enumValues)[number];
 export type SupportViewGrant = typeof schema.supportViewGrants.$inferSelect;
@@ -94,19 +98,30 @@ export async function startSupportView(
   const previous = await liveSupportViewOfOperator(db, input.operatorUserId, now);
   if (previous) await endSupportView(db, previous, { by: "operator" }, now);
   const expiresAt = new Date(now.getTime() + SUPPORT_VIEW_MINUTES * 60_000);
-  const [grant] = await db
-    .insert(g)
-    .values({ ...input, createdAt: now, expiresAt })
-    .returning();
-  if (!grant) throw new Error("support view insert returned no row");
-  await recordAudit(db, {
-    teamId: grant.teamId,
-    actor: { userId: grant.operatorUserId },
-    action: "support.view_started",
-    target: { type: "support_view", id: grant.id },
-    metadata: { reason: grant.reason, reference: grant.reference, minutes: SUPPORT_VIEW_MINUTES },
+  // The start row is the owner's only record of the session, so it commits
+  // with the grant or the view does not open; recordAudit would swallow a
+  // failed write.
+  return db.transaction(async (tx) => {
+    const [grant] = await tx
+      .insert(g)
+      .values({ ...input, createdAt: now, expiresAt })
+      .returning();
+    if (!grant) throw new Error("support view insert returned no row");
+    await tx.insert(schema.auditLog).values(
+      auditRow({
+        teamId: grant.teamId,
+        actor: { userId: grant.operatorUserId },
+        action: "support.view_started",
+        target: { type: "support_view", id: grant.id },
+        metadata: {
+          reason: grant.reason,
+          reference: grant.reference,
+          minutes: SUPPORT_VIEW_MINUTES,
+        },
+      }),
+    );
+    return grant;
   });
-  return grant;
 }
 
 /**

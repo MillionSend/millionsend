@@ -203,6 +203,13 @@ ABUSE_JUDGE_MODEL=jev-1.13.0
 # it on.
 CONTENT_REVEAL=off
 
+# Read-only support view (see "Support view (optional)" in SELF_HOSTING.md):
+# with this on, the console can open a team's dashboard read-only for 30
+# minutes against a request reference, logged in the team's audit at once.
+# Exactly off or on; any other value fails validation and the process exits.
+# Say so in your privacy notice before turning it on.
+SUPPORT_VIEW=off
+
 # The first user can always register; after that, signup stays closed unless
 # this is true. Keep false when the dashboard is reachable from the internet.
 ALLOW_SIGNUP=false

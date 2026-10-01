@@ -954,9 +954,10 @@ when the message text itself is needed. The session rides on the operator's
 own login; no session is ever minted for the owner.
 
 **What the operator sees.** The dashboard under a banner ("Support view of
-&lt;team&gt; · read-only · ends in mm:ss"): emails and their events,
-contacts, domains, broadcasts, templates, API key names, webhook endpoints,
-settings and usage.
+&lt;team&gt; · read-only · ends in mm:ss"): emails and their events (a
+clicked link shows only its origin, since its path and query can carry a
+token), contacts, domains, broadcasts, templates, API key names, webhook
+endpoints, settings and usage.
 
 **What stays hidden.** The content of sent mail: email bodies (the detail
 says "Email content is hidden in support view"); the body and preheader of a
@@ -972,7 +973,9 @@ whatever the screen shows.
 **How long.** 30 minutes, enforced on every request. One live view per
 operator, starting another ends the previous, and a view cannot start
 another. The operator ends it from the banner, the owner from Settings →
-Support access, and expiry ends it on the next request.
+Support access, and expiry ends it on the next request. Starting one needs a
+sign-in from the last 15 minutes, so a stolen long-lived session cannot open
+a view.
 
 **What is logged.** `support.view_started` and `support.view_ended`, in the
 instance audit and, at once, in the team's own Settings → Audit log: who,
@@ -980,10 +983,9 @@ the reason, the reference, how it ended, the minutes, and how many distinct
 procedures were read. The record keeps a count per procedure name and never
 anything a procedure returned.
 
-**What the owner receives.** An email when the session starts, naming who
-opened it, why, the reference, until when, and where to end it; and the
-Support access card under Settings while it is live, with an "End session"
-button.
+**What the owner sees.** No email. The session is in the team's Settings →
+Audit log at once, and the Support access card under Settings shows it while
+it is live, with an "End session" button.
 
 ```sh
 SUPPORT_VIEW=on

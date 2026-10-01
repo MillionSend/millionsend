@@ -784,6 +784,10 @@ function SupportAccessSection() {
   const queryClient = useQueryClient();
   const role = useTeamRole();
   const canManage = role === "owner" || role === "admin";
+  // The card reads the active team only, so it names it: an owner of several
+  // teams switches to see the others.
+  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
+  const team = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.teamName ?? "";
   const current = useQuery(
     trpc.team.supportView.current.queryOptions(undefined, {
       enabled: canManage,
@@ -841,7 +845,7 @@ function SupportAccessSection() {
         </dl>
       ) : (
         <p style={{ margin: 0, color: "var(--ms-bone)", fontSize: "var(--ms-fs-ui)" }}>
-          {t("none")}
+          {t("none", { team })}
         </p>
       )}
     </SectionCard>

@@ -501,11 +501,11 @@ export {
   recordSupportViewRead,
   SUPPORT_VIEW_MINUTES,
   SUPPORT_VIEW_REASONS,
+  SUPPORT_VIEW_SIGN_IN_MINUTES,
   type SupportViewEndedBy,
   type SupportViewGrant,
   type SupportViewReason,
   startSupportView,
-  supportViewNeedsReference,
 } from "./support-view.js";
 export {
   clearUnsubscribeSuppression,

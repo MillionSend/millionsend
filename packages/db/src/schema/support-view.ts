@@ -55,6 +55,7 @@ export const supportViewGrants = pgTable(
     endedAt: timestamp("ended_at", { withTimezone: true }),
     endedBy: supportViewEndedByEnum("ended_by"),
     procedures: jsonb("procedures").$type<Record<string, number>>().notNull().default({}),
+    // ponytail: nothing writes this; drop it in the next migration that touches this table.
     notifiedAt: timestamp("notified_at", { withTimezone: true }),
   },
   (t) => [
