@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { EllipsisGlyph, NavGlyph, type NavIconName } from "@/components/icons/nav-icons";
 import { useDismiss } from "@/components/popover-menu";
 import { TeamSwitcher } from "@/components/team-switcher";
-import { authClient } from "@/lib/auth-client";
+import { signOutToLogin } from "@/lib/auth-client";
 import { isAppLocale, LOCALES } from "@/lib/locale-cookie";
 import { isActive } from "@/lib/nav";
 import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
@@ -160,7 +160,6 @@ export function Sidebar({
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
-  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   useDismiss(accountRef, menuOpen, () => setMenuOpen(false));
@@ -173,12 +172,6 @@ export function Sidebar({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [menuOpen]);
-
-  async function signOut() {
-    await authClient.signOut();
-    router.push("/login");
-    router.refresh();
-  }
 
   return (
     <aside
@@ -267,7 +260,7 @@ export function Sidebar({
             <AppearanceRow />
             <LanguageRow />
             <hr className="ms-menu-sep" />
-            <button type="button" role="menuitem" className="ms-menu-item" onClick={signOut}>
+            <button type="button" role="menuitem" className="ms-menu-item" onClick={signOutToLogin}>
               {tCommon("signOut")}
             </button>
           </div>

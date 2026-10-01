@@ -8,11 +8,19 @@ import { useEffect, useRef } from "react";
    component about to router.push calls confirmUnsavedNavigation() first.
    Editor pages render one at a time, so a single slot suffices. */
 let activeGuard: { isDirty: () => boolean; message: () => string } | null = null;
+/* leaveDocument's caller already asked: its unload must not ask again. */
+let leaveConfirmed = false;
 
 /** True when navigation may proceed: no dirty guard, or the user confirmed. */
 export function confirmUnsavedNavigation(): boolean {
   if (!activeGuard?.isDirty()) return true;
   return window.confirm(activeGuard.message());
+}
+
+/** Loads href as a new document without the beforeunload prompt; call only after confirmUnsavedNavigation() returned true. */
+export function leaveDocument(href: string): void {
+  leaveConfirmed = true;
+  window.location.assign(href);
 }
 
 /**
@@ -26,7 +34,8 @@ export function confirmUnsavedNavigation(): boolean {
  *   duplicate of the current entry, so the first Back pops the sentinel
  *   (same URL, no visible change) and we get to ask; cancel re-pushes the
  *   sentinel, confirm issues the real back();
- * - programmatic pushes — confirmUnsavedNavigation() above.
+ * - programmatic pushes — confirmUnsavedNavigation() above, followed by
+ *   leaveDocument() when the move is a document load.
  *
  * All paths deliberately use the browser's native confirm: beforeunload can
  * never be restyled, so a custom dialog on the other paths would make the
@@ -55,6 +64,7 @@ export function useUnsavedChangesWarning(dirty: boolean, message: string) {
   useEffect(() => {
     if (!dirty) return;
     function onBeforeUnload(event: BeforeUnloadEvent) {
+      if (leaveConfirmed) return;
       event.preventDefault();
       // Chrome requires returnValue to be set for the prompt to show.
       event.returnValue = "";
