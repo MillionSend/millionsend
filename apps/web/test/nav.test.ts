@@ -21,6 +21,13 @@ describe("safeNextPath (open-redirect guard)", () => {
       "/\t//evil.com",
       "/\n//evil.com",
       "/\r\n\\evil.com",
+      // Resolving dot segments leaves a protocol-relative "//evil.com".
+      "/.//evil.com",
+      "/..//evil.com",
+      "/%2e//evil.com",
+      "/%2E%2E//evil.com",
+      "/a/..//evil.com",
+      "/./\\evil.com",
       "/emails\u0000",
       "",
       null,
