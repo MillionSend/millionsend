@@ -386,6 +386,7 @@ export {
   isPlanRungKey,
   type LadderPlan,
   monthlyCapacity,
+  monthlyQuotaMessage,
   OVERAGE_HARD_CAP,
   PAID_RUNGS,
   PLAN_CONTACT_LIMIT,

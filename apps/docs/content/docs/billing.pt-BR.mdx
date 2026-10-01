@@ -56,8 +56,8 @@ no volume incluído depende da chave **excedente** em Cobrança, ligada por
 padrão (o cliente a desliga lá):
 
 - **Excedente desligado**: a API recusa com `429 monthly_quota_exceeded`
-  ("Monthly sending quota exceeded; turn on overage in Billing or wait for the
-  period to renew on `<data>`"); nada estaciona pela API. Broadcasts ainda
+  ("Monthly sending quota exceeded with overage off; the period renews on
+  `<data>`"); nada estaciona pela API. Broadcasts ainda
   estacionam o que sobra como `queued_quota`, e o drain o reconfere contra o
   período a cada rodada: sai quando o período renova, quando o excedente é
   ligado ou quando o plano sobe.

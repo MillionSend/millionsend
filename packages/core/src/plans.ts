@@ -330,3 +330,11 @@ export const PLAN_CONTACT_LIMIT: Record<Plan, number | null> = {
  * up at most a few times the plan, never an open-ended bill.
  */
 export const OVERAGE_HARD_CAP = 5;
+
+/** The monthly refusal names the cap it hit: the plan's volume, or the overage hard cap past it. */
+export function monthlyQuotaMessage(result: { periodEnd: Date; overage: boolean }): string {
+  const renews = result.periodEnd.toISOString();
+  return result.overage
+    ? `Monthly sending quota exceeded: sends stop at ${OVERAGE_HARD_CAP} times the included volume even with overage on; the period renews on ${renews}`
+    : `Monthly sending quota exceeded with overage off; the period renews on ${renews}`;
+}

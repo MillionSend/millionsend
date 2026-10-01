@@ -266,7 +266,7 @@ const scheduledAtSchema = z.string().superRefine((v, ctx) => {
 });
 
 export const TEMPLATE_UNSUPPORTED_MESSAGE =
-  "template is not supported yet — send html/text; template-based sending is coming";
+  "template is not supported; an email takes html and/or text";
 
 export const sendEmailRequestSchema = z
   .object({
@@ -321,7 +321,7 @@ export const sendEmailRequestSchema = z
     template: z
       .unknown()
       .optional()
-      .describe("Not supported yet: any value is a 422. Send html/text instead"),
+      .describe("Not supported: any value is a 422; an email takes html and/or text"),
   })
   .refine((v) => v.template === undefined, {
     message: TEMPLATE_UNSUPPORTED_MESSAGE,
@@ -1239,7 +1239,7 @@ export const createDomainRequestSchema = (regions: readonly [string, ...string[]
         .enum(regions)
         .optional()
         .describe(
-          "SES region of the identity, one of the regions this deployment serves (the values listed here; the first is the default). Any other region is rejected with 422. A domain has one region: to move it, delete and re-add it.",
+          "SES region of the identity, one of the regions this deployment serves (the values listed here; the first is the default). Any other region is rejected with 422. A domain has one region, fixed when it is added.",
         ),
       custom_return_path: z
         .string()
@@ -1382,7 +1382,7 @@ export const createWebhookRequestSchema = z
       .string()
       .optional()
       .describe(
-        "Signing secret to use instead of minting one: whsec_ followed by base64 of 24-64 bytes, the format Resend/Svix issue. Carry over an existing secret so the receiver keeps verifying unchanged; omit to generate a new one.",
+        "Signing secret to use instead of minting one: whsec_ followed by base64 of 24-64 bytes, the format Resend/Svix issue. An existing secret carried over keeps the receiver verifying unchanged; when omitted, a new one is generated.",
       ),
   })
   .openapi("CreateWebhookRequest");

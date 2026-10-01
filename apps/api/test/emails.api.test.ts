@@ -927,7 +927,7 @@ describe("template sends are refused, not silently stripped", () => {
   const notSupported = {
     statusCode: 422,
     name: "validation_error",
-    message: expect.stringMatching(/template is not supported yet — send html\/text/),
+    message: expect.stringMatching(/template is not supported; an email takes html and\/or text/),
   };
 
   it("422s POST /emails even when html/text is present", async () => {
@@ -951,7 +951,7 @@ describe("template sends are refused, not silently stripped", () => {
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({
       ...notSupported,
-      message: expect.stringMatching(/^emails\.1: template: template is not supported yet/),
+      message: expect.stringMatching(/^emails\.1: template: template is not supported;/),
     });
     expect(enqueuedSends.length).toBe(before);
   });
