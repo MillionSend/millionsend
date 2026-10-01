@@ -289,6 +289,7 @@ async function callApi(
   path: string,
   body?: unknown,
   headers: Record<string, string> = {},
+  shape?: (json: Record<string, unknown>) => void,
 ): Promise<CallToolResult> {
   const req = new Request(`http://mcp.internal${path}`, {
     method,
@@ -300,8 +301,19 @@ async function callApi(
   const json: unknown = await res
     .json()
     .catch(() => errorBody(res.status, "error", res.statusText));
+  if (res.ok && shape && json && typeof json === "object") shape(json as Record<string, unknown>);
   return toolResult(json, res.ok);
 }
+
+// Policy facts for every client: chat directories (OpenAI's) refuse servers
+// whose tool results carry credentials, so secrets stay in the dashboard.
+const SERVER_INSTRUCTIONS =
+  "MillionSend's terms permit email only to recipients who consented to receive it from the sending team or have an existing relationship that lawfully permits it; purchased, rented and scraped lists are prohibited. API keys and webhook signing secrets are never returned by these tools: they are shown only in the MillionSend dashboard. Billing, plan changes and payments are not available through these tools.";
+
+/** Drops a webhook's signing secret from a tool result; it is only shown in the dashboard. */
+const omitSigningSecret = (json: Record<string, unknown>) => {
+  delete json.signing_secret;
+};
 
 const idOrEmail = z.string().min(1).describe("Contact id or email address");
 const enc = encodeURIComponent;
@@ -321,19 +333,22 @@ function buildServer(
   authInfo: AuthInfo,
   appBaseUrl: string,
 ): McpServer {
-  const server = new McpServer({
-    name: "millionsend",
-    title: "MillionSend",
-    version: "1.0.0",
-    websiteUrl: "https://millionsend.com",
-    icons: [
-      {
-        src: `${appBaseUrl}/logo/millionsend-avatar-512.png`,
-        mimeType: "image/png",
-        sizes: ["512x512"],
-      },
-    ],
-  });
+  const server = new McpServer(
+    {
+      name: "millionsend",
+      title: "MillionSend",
+      version: "1.0.0",
+      websiteUrl: "https://millionsend.com",
+      icons: [
+        {
+          src: `${appBaseUrl}/logo/millionsend-avatar-512.png`,
+          mimeType: "image/png",
+          sizes: ["512x512"],
+        },
+      ],
+    },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
   const { auth, userId, role, teams } = authInfo.extra as unknown as McpAuthExtra;
   const scopes = new Set(authInfo.scopes);
   const canAdmin = teams ? teams.some((t) => isAdmin(t.role)) : isAdmin(role);
@@ -346,7 +361,8 @@ function buildServer(
     path: string,
     body?: unknown,
     headers?: Record<string, string>,
-  ) => callApi(app, callTeam?.getStore() ?? auth, method, path, body, headers);
+    shape?: (json: Record<string, unknown>) => void,
+  ) => callApi(app, callTeam?.getStore() ?? auth, method, path, body, headers, shape);
   const teamIdArg = z
     .uuid()
     .optional()
@@ -363,6 +379,8 @@ function buildServer(
       readOnly?: boolean;
       destructive?: boolean;
       idempotent?: boolean;
+      /** Reaches outside the team's MillionSend account: external recipients, URLs or DNS/SES. */
+      openWorld?: boolean;
       /** Owner/admin only even though read-only (e.g. a read that returns a secret). */
       admin?: boolean;
     },
@@ -385,14 +403,14 @@ function buildServer(
           ? cfg.inputSchema.extend({ team_id: teamIdArg })
           : cfg.inputSchema) as unknown as S,
         // Directory reviews read the title from annotations, the pre-2025-06 location.
-        annotations: cfg.readOnly
-          ? { title: cfg.title, readOnlyHint: true }
-          : {
-              title: cfg.title,
-              readOnlyHint: false,
-              destructiveHint: cfg.destructive === true,
-              idempotentHint: cfg.idempotent === true,
-            },
+        // Directories require every hint as an explicit boolean.
+        annotations: {
+          title: cfg.title,
+          readOnlyHint: cfg.readOnly === true,
+          destructiveHint: !cfg.readOnly && cfg.destructive === true,
+          idempotentHint: cfg.readOnly === true || cfg.idempotent === true,
+          openWorldHint: cfg.openWorld === true,
+        },
       },
       // The conditional ToolCallback type cannot resolve for an unbound
       // generic; the cast is sound because args were validated against
@@ -440,7 +458,13 @@ function buildServer(
         description:
           "List the teams this all-teams connection can act in. Every other tool takes a team's id as team_id; the first team listed is the default when team_id is omitted.",
         inputSchema: z.object({}),
-        annotations: { title: "List teams", readOnlyHint: true },
+        annotations: {
+          title: "List teams",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
       },
       () =>
         toolResult(
@@ -503,11 +527,16 @@ function buildServer(
     {
       title: "Get usage",
       description:
-        "Get the team's plan and quota picture: effective plan, its send limit (emails_per_day on Free and Starter, emails_per_month on Pro and Scale), domain limit and contact limit (`limits.contacts`, null when unlimited), emails accepted so far today (UTC) and when that counter resets, and on a monthly plan a `period` object with the billing period's emails_sent, included volume, whether overage is on and when the period ends. A self-hosted instance reports cloud=false with null plan, limits and period; the instance's own (system) team reports cloud=true with the same nulls.",
+        "Get the team's sending limits and usage: the send limit (emails_per_day or emails_per_month), domain limit and contact limit (`limits.contacts`, null when unlimited), emails accepted so far today (UTC) and when that counter resets, and on a monthly limit a `period` object with the period's emails_sent, included volume, whether sending past it is on and when the period ends. A self-hosted instance reports cloud=false with null plan, limits and period; the instance's own (system) team reports cloud=true with the same nulls.",
       inputSchema: z.object({}),
       readOnly: true,
     },
-    () => api("GET", "/usage"),
+    // Prices stay out of chat clients' results: directories refuse pricing in a plugin.
+    () =>
+      api("GET", "/usage", undefined, undefined, (json) => {
+        const period = json.period as Record<string, unknown> | null | undefined;
+        if (period) delete period.overage_usd_per_1k;
+      }),
   );
   tool(
     "list_contacts",
@@ -697,12 +726,11 @@ function buildServer(
     {
       title: "Get webhook",
       description:
-        "Get one webhook endpoint by id, including its Standard Webhooks signing secret (whsec_…).",
+        "Get one webhook endpoint by id: URL, subscribed events and status. The signing secret is shown only in the MillionSend dashboard.",
       inputSchema: z.object({ id: z.uuid().describe("Webhook id from list_webhooks") }),
       readOnly: true,
-      admin: true,
     },
-    ({ id }) => api("GET", `/webhooks/${enc(id)}`),
+    ({ id }) => api("GET", `/webhooks/${enc(id)}`, undefined, undefined, omitSigningSecret),
   );
   tool(
     "list_api_keys",
@@ -737,6 +765,7 @@ function buildServer(
         description: `Get one sending domain with its DNS records (DKIM, MAIL FROM, DMARC, and the Tracking CNAME once a tracking subdomain is set) and per-record status. ${RECORD_STATUS_NOTE}`,
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
         readOnly: true,
+        openWorld: true,
       },
       ({ id }) => api("GET", `/domains/${enc(id)}`),
     );
@@ -748,9 +777,10 @@ function buildServer(
     {
       title: "Send email",
       description:
-        "Send a transactional email (or schedule it with scheduled_at). Suppressed and topic-opted-out recipients are skipped automatically. Returns the email id.",
+        "Send a transactional email (or schedule it with scheduled_at). Suppressed and topic-opted-out recipients are skipped automatically. Returns the email id. Each call is a new send: repeating it delivers the email again.",
       inputSchema: sendEmailRequestSchema,
       destructive: true,
+      openWorld: true,
     },
     (body) => api("POST", "/emails", body),
   );
@@ -760,11 +790,12 @@ function buildServer(
     {
       title: "Send email batch",
       description:
-        "Send up to 100 emails in one call; each entry has the same shape as send_email. Returns one id per accepted email.",
+        "Send up to 100 emails in one call; each entry has the same shape as send_email. Returns one id per accepted email. Each call is a new send: repeating it delivers every email again.",
       inputSchema: z.object({
         emails: batchEmailRequestSchema.describe("The emails to send, same shape as send_email"),
       }),
       destructive: true,
+      openWorld: true,
     },
     ({ emails }) => api("POST", "/emails/batch", emails),
   );
@@ -779,6 +810,7 @@ function buildServer(
       }),
       destructive: true,
       idempotent: true,
+      openWorld: true,
     },
     ({ id, ...body }) => api("PATCH", `/emails/${enc(id)}`, body),
   );
@@ -1100,6 +1132,7 @@ function buildServer(
         "Create a broadcast (bulk email to a segment or the whole audience). Saved as a draft unless send is true; send_broadcast sends a saved draft. A large audience is paced over days; the response's finishes_at and warning say when it finishes.",
       inputSchema: createBroadcastRequestSchema,
       destructive: true,
+      openWorld: true,
     },
     (body) => api("POST", "/broadcasts", body),
   );
@@ -1128,6 +1161,7 @@ function buildServer(
         id: z.uuid().describe("Broadcast id from create_broadcast"),
       }),
       destructive: true,
+      openWorld: true,
     },
     ({ id, ...body }) => api("POST", `/broadcasts/${enc(id)}/send`, body),
   );
@@ -1201,10 +1235,11 @@ function buildServer(
     {
       title: "Create webhook",
       description:
-        "Create a webhook endpoint subscribed to email events. The response includes the Standard Webhooks signing secret (whsec_…) used to verify deliveries; get_webhook also returns it.",
-      inputSchema: createWebhookRequestSchema,
+        "Create a webhook endpoint subscribed to email events. Its Standard Webhooks signing secret is generated by MillionSend and shown only in the MillionSend dashboard.",
+      inputSchema: createWebhookRequestSchema.omit({ signing_secret: true }),
+      openWorld: true,
     },
-    (body) => api("POST", "/webhooks", body),
+    (body) => api("POST", "/webhooks", body, undefined, omitSigningSecret),
   );
   tool(
     "update_webhook",
@@ -1218,23 +1253,9 @@ function buildServer(
       }),
       destructive: true,
       idempotent: true,
+      openWorld: true,
     },
     ({ id, ...body }) => api("PATCH", `/webhooks/${enc(id)}`, body),
-  );
-  tool(
-    "rotate_webhook_secret",
-    "webhooks:write",
-    {
-      title: "Rotate webhook secret",
-      description:
-        "Rotate a webhook's signing secret. Returns the new whsec_ secret; the previous one keeps signing alongside it for overlap_hours (default 24, up to 72) so the receiver can switch without a gap. signing_secret optionally supplies your own.",
-      inputSchema: rotateWebhookSecretRequestSchema.extend({
-        id: z.uuid().describe("Webhook id from list_webhooks"),
-      }),
-      admin: true,
-      destructive: true,
-    },
-    ({ id, ...body }) => api("POST", `/webhooks/${enc(id)}/rotate`, body),
   );
   tool(
     "delete_webhook",
@@ -1247,17 +1268,6 @@ function buildServer(
       idempotent: true,
     },
     ({ id }) => api("DELETE", `/webhooks/${enc(id)}`),
-  );
-  tool(
-    "create_api_key",
-    "api-keys:write",
-    {
-      title: "Create API key",
-      description:
-        "Create an API key for REST and SDK access. The token is a secret returned only in this response and never again. permission is full_access (default) or sending_access; domain_id restricts a key to one verified domain.",
-      inputSchema: createApiKeyRequestSchema,
-    },
-    (body) => api("POST", "/api-keys", body),
   );
   tool(
     "revoke_api_key",
@@ -1281,6 +1291,7 @@ function buildServer(
         title: "Add domain",
         description: `Add a sending domain. region is optional: this deployment serves ${regions.join(", ")} (default ${regions[0]}) and refuses any other. A domain has one region, fixed when it is added. Returns the DNS records to create; the domain sends once they verify. Open and click tracking start off; open_tracking/click_tracking together with a tracking_subdomain set the domain up tracked in one call — its Tracking CNAME then comes back with the other records (same rules as update_domain).`,
         inputSchema: createDomainRequestSchema(regions),
+        openWorld: true,
       },
       (body) => api("POST", "/domains", body),
     );
@@ -1296,6 +1307,7 @@ function buildServer(
         }),
         destructive: true,
         idempotent: true,
+        openWorld: true,
       },
       ({ id, ...body }) => api("PATCH", `/domains/${enc(id)}`, body),
     );
@@ -1307,6 +1319,7 @@ function buildServer(
         description: `Re-check a domain's DNS records and SES verification, returning the domain with fresh per-record status. ${RECORD_STATUS_NOTE}`,
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
         idempotent: true,
+        openWorld: true,
       },
       ({ id }) => api("POST", `/domains/${enc(id)}/verify`),
     );
@@ -1320,6 +1333,7 @@ function buildServer(
         inputSchema: z.object({ id: z.uuid().describe("Domain id from list_domains") }),
         destructive: true,
         idempotent: true,
+        openWorld: true,
       },
       ({ id }) => api("DELETE", `/domains/${enc(id)}`),
     );
@@ -1366,6 +1380,8 @@ export function registerMcp(app: OpenAPIHono<Env>, deps: ApiDeps, appBaseUrl: st
   };
   app.get("/.well-known/oauth-protected-resource", (c) => c.json(metadata));
   app.get(`/.well-known/oauth-protected-resource${MCP_RESOURCE_PATH}`, (c) => c.json(metadata));
+  const challenge = deps.openaiAppsChallengeToken;
+  if (challenge) app.get("/.well-known/openai-apps-challenge", (c) => c.text(challenge));
   // Origin is not validated: auth is an explicit bearer (never cookies), so a
   // DNS-rebound page holds no credential — the same reasoning behind the REST
   // API's wildcard CORS.

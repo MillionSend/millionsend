@@ -88,6 +88,7 @@ const app = createApi({
   },
   isCloud: env.IS_CLOUD,
   onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
+  openaiAppsChallengeToken: env.OPENAI_APPS_CHALLENGE_TOKEN,
   requireVerifiedMembers: accountMailDeliverable(),
   rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   revision: env.MILLIONSEND_REVISION,

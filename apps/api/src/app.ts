@@ -188,6 +188,8 @@ export interface ApiDeps {
   isCloud: boolean;
   /** ONBOARDING_EMAIL_FROM: the shared first-email sender (core verifyOnboardingSender). */
   onboardingEmailFrom?: string | undefined;
+  /** OPENAI_APPS_CHALLENGE_TOKEN: served at /.well-known/openai-apps-challenge. */
+  openaiAppsChallengeToken?: string | undefined;
   /** Whether the shared sender reaches only members who verified their address (the instance verifies). */
   requireVerifiedMembers?: boolean | undefined;
   /**

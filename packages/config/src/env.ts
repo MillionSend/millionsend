@@ -306,6 +306,10 @@ export const env = createEnv({
     // "Send email" button and the snippet asks for the team's own domain.
     ONBOARDING_EMAIL_FROM: z.string().optional(),
 
+    // OpenAI's plugin portal verifies ownership of the MCP host by fetching
+    // this token from /.well-known/openai-apps-challenge. Unset → 404.
+    OPENAI_APPS_CHALLENGE_TOKEN: z.string().optional(),
+
     // Cloudflare Turnstile, both keys or neither: sign-in, sign-up, password
     // reset and the onboarding send verify a token when set. Unset, every
     // form works as before with no challenge.
