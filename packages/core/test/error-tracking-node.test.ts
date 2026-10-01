@@ -21,7 +21,7 @@ vi.mock("@sentry/node", () => {
 });
 
 const config = {
-  dsn: "https://public@bugsink.example.com/7",
+  dsn: "https://public@errors.example.com/7",
   environment: "production",
   release: "c8ce832",
   tracesSampleRate: 0,

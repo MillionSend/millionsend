@@ -139,9 +139,9 @@ describe("scrubBreadcrumb and scrubSpan", () => {
 });
 
 describe("errorTrackingOptions", () => {
-  const config = { dsn: "https://k@bugsink.example.com/1", environment: "production" };
+  const config = { dsn: "https://k@errors.example.com/1", environment: "production" };
 
-  it("sends errors only, scrubbed, with nothing Bugsink would drop", () => {
+  it("sends errors only, scrubbed, and no sessions, replay or profiling", () => {
     const options = errorTrackingOptions({ ...config, release: "c8ce832", tracesSampleRate: 0 });
     expect(options).toMatchObject({
       dsn: config.dsn,

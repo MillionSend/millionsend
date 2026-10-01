@@ -263,15 +263,14 @@ export const env = createEnv({
     // supportViewEnabled().
     SUPPORT_VIEW: z.enum(["off", "on"]).default("off"),
 
-    // Optional error tracking through a Sentry SDK, pointed at Bugsink or
-    // Sentry. Unset DSN: the SDK is never loaded. SENTRY_DSN serves web, api
-    // and worker; SENTRY_BROWSER_DSN turns on the dashboard's browser
-    // reporting, which reaches it through this app's own origin. Read through
-    // errorTrackingConfig().
+    // Optional error tracking through a Sentry SDK. Unset DSN: the SDK is
+    // never loaded. SENTRY_DSN serves web, api and worker; SENTRY_BROWSER_DSN
+    // turns on the dashboard's browser reporting, which reaches it through
+    // this app's own origin. Read through errorTrackingConfig().
     SENTRY_DSN: z.url().optional(),
     SENTRY_BROWSER_DSN: z.url().optional(),
     SENTRY_ENVIRONMENT: z.string().default(SENTRY_ENVIRONMENT_DEFAULT),
-    // Share of requests traced. 0 sends errors only, all Bugsink accepts.
+    // Share of requests traced; 0 sends errors only.
     SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
 
     // Public base URL of this deployment; SNS subscriptions and hosted

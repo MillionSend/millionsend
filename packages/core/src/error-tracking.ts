@@ -105,8 +105,8 @@ export function scrubSpan(span: StreamedSpanJSON): StreamedSpanJSON {
 
 /**
  * Errors only unless a trace rate is set: no sessions, client reports,
- * replay or profiling, which Bugsink drops, and no trace headers on outgoing
- * requests, which would reach customers' webhook endpoints. Every callback
+ * replay or profiling, and no trace headers on outgoing requests, which
+ * would reach customers' webhook endpoints. Every callback
  * the SDK offers runs the scrubber. `dataCollection` is spelled out because
  * the SDK's defaults collect cookies, headers, bodies and user data.
  */

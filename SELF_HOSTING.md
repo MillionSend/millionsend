@@ -917,32 +917,29 @@ SUPPORT_VIEW=on
 <summary><b>Error tracking (optional)</b></summary>
 
 Off by default. With a DSN set, the web, api and worker processes report
-their errors through the Sentry SDK to [Bugsink](https://www.bugsink.com/)
-(self-hosted, errors only) or to Sentry. Without one the SDK is never
-loaded, on the server or in the browser. A restart applies any change.
+their errors through the Sentry SDK to your Sentry project. Without one
+the SDK is never loaded, on the server or in the browser. A restart applies
+any change.
 
-**Bugsink.** Create a project for the instance in Bugsink (and, for the
-dashboard's browser errors, a second one, or reuse the first), copy its DSN,
-and set in the instance's `.env`:
+Create a project for the instance (and, for the dashboard's browser
+errors, a second one, or reuse the first), copy its DSN, and set in the
+instance's `.env`:
 
 ```sh
-SENTRY_DSN=https://<key>@bugsink.example.com/<project-id>
+SENTRY_DSN=https://<key>@<host>/<project-id>
 # Optional: the dashboard's browser errors, to the same or another project.
-SENTRY_BROWSER_DSN=https://<key>@bugsink.example.com/<project-id>
+SENTRY_BROWSER_DSN=https://<key>@<host>/<project-id>
 SENTRY_ENVIRONMENT=production
 ```
 
-then `docker compose up -d`. Keep `SENTRY_TRACES_SAMPLE_RATE=0`: Bugsink
-accepts errors only, and nothing else is sent (no sessions, traces,
-replays, profiles or client reports).
-
-**Sentry.** The same variables with a Sentry project's DSN.
-`SENTRY_TRACES_SAMPLE_RATE` (0 to 1) also sends that share of request
-traces (incoming and outgoing HTTP, browser page loads), scrubbed like the
-errors; trace headers are never added to outgoing requests, so customers'
-webhook endpoints never see them. Sentry is a third party: before pointing
-an instance at it, name it as a sub-processor in the instance's privacy
-notice. A Bugsink you host is not one.
+then `docker compose up -d`. By default only errors are sent (no sessions,
+traces, replays, profiles or client reports). `SENTRY_TRACES_SAMPLE_RATE`
+(0 to 1) also sends that share of request traces (incoming and outgoing
+HTTP, browser page loads), scrubbed like the errors; trace headers are
+never added to outgoing requests, so customers' webhook endpoints never see
+them. A tracker run by a third party is a sub-processor: name it in the
+instance's privacy notice before pointing an instance at it. One you host
+yourself is not.
 
 **What is reported.**
 
@@ -985,19 +982,17 @@ in an error message, such as a name in a template.
 
 **Source maps (optional).** Browser stack traces are minified. An image
 built with a `SENTRY_AUTH_TOKEN` secret uploads the dashboard's browser
-source maps, matched by debug id (Bugsink 2.0.14 or later), and deletes
-them from the image:
+source maps, matched by debug id, and deletes them from the image:
 
 ```sh
 docker build --secret id=SENTRY_AUTH_TOKEN,env=SENTRY_AUTH_TOKEN \
-  --build-arg SENTRY_URL=https://bugsink.example.com/ \
-  --build-arg SENTRY_ORG=bugsinkhasnoorgs \
+  --build-arg SENTRY_ORG=<org-slug> \
   --build-arg SENTRY_PROJECT=<project-slug> -t millionsend .
 ```
 
-Bugsink ignores `SENTRY_ORG`, but the upload needs one; for Sentry, give
-your organization's slug and leave `SENTRY_URL` out. Without the secret the
-build is unchanged, and the published image is built without it.
+For a self-hosted tracker, add `--build-arg SENTRY_URL=https://<host>/`.
+Without the secret the build is unchanged, and the published image is built
+without it.
 
 </details>
 
