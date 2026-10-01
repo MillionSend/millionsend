@@ -115,7 +115,7 @@ async function withSourceMapUpload(base: NextConfig): Promise<NextConfig> {
           sentryWebpackPlugin({
             authToken,
             telemetry: false,
-            // Bugsink has no release API; each event names its release itself.
+            // Each event already names its release, so the upload never calls the release API, which some trackers lack.
             release: { create: false, finalize: false, inject: false },
             sourcemaps: { filesToDeleteAfterUpload: [".next/static/**/*.map"] },
           }),

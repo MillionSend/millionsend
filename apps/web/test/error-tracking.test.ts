@@ -36,7 +36,7 @@ const { default: RootLayout } = await import("@/app/layout");
 const { ErrorTracking } = await import("@/components/error-tracking");
 const { reportClientError, startClientErrorTracking } = await import("@/lib/client-errors");
 
-const DSN = "https://public@bugsink.example.com/7";
+const DSN = "https://public@errors.example.com/7";
 
 beforeEach(() => {
   h.captureError.mockClear();
@@ -157,7 +157,7 @@ describe("the browser's tunnel", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
     const [url, init] = upstream.mock.calls[0] ?? [];
     expect(url).toBe(
-      "https://bugsink.example.com/api/7/envelope/?sentry_version=7&sentry_key=public",
+      "https://errors.example.com/api/7/envelope/?sentry_version=7&sentry_key=public",
     );
     expect(init?.headers).toEqual({ "content-type": "application/x-sentry-envelope" });
     expect(new TextDecoder().decode(init?.body as ArrayBuffer)).toBe(envelope);

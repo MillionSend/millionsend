@@ -211,12 +211,12 @@ CONTENT_REVEAL=off
 SUPPORT_VIEW=off
 
 # Error tracking (see "Error tracking (optional)" in SELF_HOSTING.md): report
-# errors to Bugsink (self-hosted) or Sentry through the Sentry SDK. Off while
-# SENTRY_DSN is unset: the SDK is not even loaded. SENTRY_DSN covers the web,
-# api and worker processes; SENTRY_BROWSER_DSN also reports the dashboard's
-# browser errors, through this app's own origin (same project or another).
-# Errors only by default, all Bugsink accepts; raise SENTRY_TRACES_SAMPLE_RATE
-# (0 to 1) only for Sentry. Events are scrubbed of bodies, queries, cookies
+# errors to a Sentry project through the Sentry SDK. Off while SENTRY_DSN is
+# unset: the SDK is not even loaded. SENTRY_DSN covers the web, api and
+# worker processes; SENTRY_BROWSER_DSN also reports the dashboard's browser
+# errors, through this app's own origin (same project or another). Errors
+# only by default; SENTRY_TRACES_SAMPLE_RATE (0 to 1) also sends that share
+# of request traces. Events are scrubbed of bodies, queries, cookies
 # and credentials, but they leave the instance: a tracker you do not host is
 # a sub-processor to name in your privacy notice.
 SENTRY_DSN=

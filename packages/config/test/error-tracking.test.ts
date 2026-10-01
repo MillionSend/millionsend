@@ -5,7 +5,7 @@ function fakeEnv(overrides: Record<string, string | number>): Env {
   return { MILLIONSEND_REVISION: "unknown", ...overrides } as unknown as Env;
 }
 
-const DSN = "https://public@bugsink.example.com/7";
+const DSN = "https://public@errors.example.com/7";
 
 describe("errorTrackingConfig", () => {
   it("is off on both sides without a DSN", () => {
@@ -83,7 +83,7 @@ describe("the SENTRY_* schema", () => {
 
   it("refuses a DSN that is not a URL and a rate outside 0..1", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    await expect(parse({ SENTRY_DSN: "bugsink.example.com/7" })).rejects.toThrow();
+    await expect(parse({ SENTRY_DSN: "errors.example.com/7" })).rejects.toThrow();
     await expect(parse({ SENTRY_TRACES_SAMPLE_RATE: "2" })).rejects.toThrow();
   });
 });

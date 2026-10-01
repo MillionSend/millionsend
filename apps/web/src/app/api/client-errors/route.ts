@@ -1,10 +1,10 @@
 import { errorTrackingConfig } from "@millionsend/config";
 import { getEnvelopeEndpointWithUrlEncodedAuth, makeDsn } from "@sentry/core";
 
-/** Bugsink's default cap on one event; a browser report is a fraction of it. */
+/** A common ingest cap on one event; a browser report is a fraction of it. */
 const MAX_ENVELOPE_BYTES = 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 10_000;
-/** What the browser SDK backs off on: Bugsink answers every envelope with a no-traces limit. */
+/** Passed back unchanged so the browser SDK backs off when the tracker rate-limits it. */
 const RATE_LIMIT_HEADERS = ["x-sentry-rate-limits", "retry-after"];
 
 /**
