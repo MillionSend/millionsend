@@ -1,8 +1,15 @@
 import { env } from "@millionsend/config";
+import { CLIENT_ERRORS_PATH } from "@millionsend/core/error-tracking";
 import { type NextRequest, NextResponse } from "next/server";
 
 /** Paths the hosted unsubscribe flow needs; nothing else answers on its host. */
-const UNSUBSCRIBE_HOST_PATHS = ["/unsubscribe/", "/logo/", "/_next/", "/favicon.ico"];
+const UNSUBSCRIBE_HOST_PATHS = [
+  "/unsubscribe/",
+  "/logo/",
+  "/_next/",
+  "/favicon.ico",
+  CLIENT_ERRORS_PATH,
+];
 
 /**
  * The hosted unsubscribe pages may live on their own host (UNSUBSCRIBE_BASE_URL)

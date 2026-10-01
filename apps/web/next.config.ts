@@ -1,10 +1,14 @@
 import type { NextConfig } from "next";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
 import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 const config: NextConfig = {
   poweredByHeader: false,
+  // Required at runtime, not bundled per route: instrumentation starts the
+  // one SDK instance that every route then reports through.
+  serverExternalPackages: ["@sentry/node"],
   experimental: {
     // Keep visited page segments in the client router cache so sidebar
     // back-and-forth doesn't refetch RSC payloads every click. Safe at 30s:
@@ -89,4 +93,38 @@ const config: NextConfig = {
   },
 };
 
-export default withNextIntl(config);
+/**
+ * Browser source maps go to the error tracker only from a build that carries
+ * SENTRY_AUTH_TOKEN (with SENTRY_URL, SENTRY_ORG and SENTRY_PROJECT). They
+ * are matched by debug id and deleted once uploaded, so the image never
+ * serves them. Build phase only: the plugin is a dev dependency, absent from
+ * the image `next start` runs in.
+ */
+async function withSourceMapUpload(base: NextConfig): Promise<NextConfig> {
+  const authToken = process.env.SENTRY_AUTH_TOKEN;
+  if (!authToken) return base;
+  const { sentryWebpackPlugin } = await import("@sentry/bundler-plugins/webpack");
+  return {
+    ...base,
+    productionBrowserSourceMaps: true,
+    webpack: (webpackConfig, context) => {
+      const result = base.webpack ? base.webpack(webpackConfig, context) : webpackConfig;
+      if (!context.isServer && !context.dev) {
+        result.devtool = "hidden-source-map";
+        result.plugins.push(
+          sentryWebpackPlugin({
+            authToken,
+            telemetry: false,
+            // Bugsink has no release API; each event names its release itself.
+            release: { create: false, finalize: false, inject: false },
+            sourcemaps: { filesToDeleteAfterUpload: [".next/static/**/*.map"] },
+          }),
+        );
+      }
+      return result;
+    },
+  };
+}
+
+export default async (phase: string) =>
+  withNextIntl(phase === PHASE_PRODUCTION_BUILD ? await withSourceMapUpload(config) : config);

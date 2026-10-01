@@ -1,11 +1,23 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useEffect } from "react";
 import { StatusPage } from "@/components/status-page";
+import { reportClientError } from "@/lib/client-errors";
 
 // Root error boundary: rendered inside the root layout, so the intl provider
 // and theme still apply. The error itself goes to the console, not the user.
-export default function ErrorPage({ reset }: { error: Error; reset: () => void }) {
+export default function ErrorPage({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  // A digest marks a server error, reported on the server with that digest.
+  useEffect(() => {
+    if (!error.digest) reportClientError(error);
+  }, [error]);
   const t = useTranslations("common.errorPage");
   return (
     <StatusPage
