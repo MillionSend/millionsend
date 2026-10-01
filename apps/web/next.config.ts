@@ -13,8 +13,10 @@ const config: NextConfig = {
     // Keep visited page segments in the client router cache so sidebar
     // back-and-forth doesn't refetch RSC payloads every click. Safe at 30s:
     // dashboard pages are "use client" shells whose data flows through
-    // react-query (its own freshness rules) — the cached payload holds no
-    // user data that could go stale.
+    // react-query (its own freshness rules). Cached layouts do carry the
+    // session's outcome (team, email, a redirect to /login), prefetched ones
+    // for the full `static` 180 s, which is why sign-in and sign-out are
+    // document loads that start this cache empty.
     staleTimes: { dynamic: 30, static: 180 },
   },
   async redirects() {

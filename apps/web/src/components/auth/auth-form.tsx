@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { captchaHeaders, useTurnstile } from "@/components/turnstile";
@@ -64,7 +64,6 @@ export function AuthForm({
   const tSocial = useTranslations("auth.social");
   const tLegal = useTranslations("auth.legal");
   const tCommon = useTranslations("common");
-  const router = useRouter();
   const params = useSearchParams();
   // An invited user carries ?next=/invite/... — signup sends them to accept
   // the invite rather than /onboarding (which would create a new team).
@@ -152,8 +151,12 @@ export function AuthForm({
       setPending(null);
       return;
     }
-    // The dashboard layout guard bounces team-less users to /onboarding.
-    router.push(next);
+    // A document load, not router.push: the client router may hold dashboard
+    // payloads cached while signed out, whose redirect to /login would replay,
+    // and the root layout must re-render in the account's language. Replace,
+    // so Back skips the spent form. The dashboard layout guard bounces
+    // team-less users to /onboarding.
+    window.location.replace(next);
   }
 
   async function resendVerification() {

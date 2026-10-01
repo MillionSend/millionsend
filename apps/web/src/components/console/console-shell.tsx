@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { EllipsisGlyph, MenuGlyph } from "@/components/icons/nav-icons";
 import { useDismiss } from "@/components/popover-menu";
 import { AppearanceRow, LanguageRow } from "@/components/sidebar";
-import { authClient } from "@/lib/auth-client";
+import { signOutToLogin } from "@/lib/auth-client";
 import { pickActive } from "@/lib/nav";
 
 /** The console's own nav: five screens, static lucide-style glyphs (no hover choreography). */
@@ -90,7 +90,6 @@ function ConsoleSidebar({
   const t = useTranslations("console.nav");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
-  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   useDismiss(accountRef, menuOpen, () => setMenuOpen(false));
@@ -107,12 +106,6 @@ function ConsoleSidebar({
     pathname,
     CONSOLE_NAV.map((item) => item.href),
   );
-
-  async function signOut() {
-    await authClient.signOut();
-    router.push("/login");
-    router.refresh();
-  }
 
   return (
     <aside
@@ -185,7 +178,7 @@ function ConsoleSidebar({
             <AppearanceRow />
             <LanguageRow />
             <hr className="ms-menu-sep" />
-            <button type="button" role="menuitem" className="ms-menu-item" onClick={signOut}>
+            <button type="button" role="menuitem" className="ms-menu-item" onClick={signOutToLogin}>
               {tCommon("signOut")}
             </button>
           </div>

@@ -5,7 +5,9 @@
  * URL parser strips ASCII tab/newline and treats "\" as "/", so "/\t//host"
  * or "/\host" would otherwise pass a "single leading slash" test and still
  * navigate off-site. Control characters are rejected outright; anything else
- * must resolve to the same origin, and the normalized path is returned.
+ * must resolve to the same origin, and the normalized path is returned —
+ * unless normalizing left it starting with "//": resolving dot segments turns
+ * "/.//host" into "//host", which a browser reads as another origin.
  * Encoded forms (%2f, %5c) stay literal in the path and never decode to a
  * second leading slash, so they are ordinary same-origin paths.
  */
@@ -19,7 +21,7 @@ export function safeNextPath(next: string | null | undefined, fallback: string):
   } catch {
     return fallback;
   }
-  if (url.origin !== base) return fallback;
+  if (url.origin !== base || url.pathname.startsWith("//")) return fallback;
   return url.pathname + url.search + url.hash;
 }
 
