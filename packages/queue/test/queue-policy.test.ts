@@ -213,6 +213,47 @@ it("hands the handler the job's abort signal", async () => {
   ]);
 });
 
+it("tells the error hook of a throwing job, dead letter or cron, and still fails it for pg-boss", async () => {
+  const failures: [string, unknown][] = [];
+  const queue = await Queue.start("postgres://unused", {
+    workers: true,
+    onJobError: (error, name) => failures.push([name, error]),
+  });
+  const boom = new Error("boom");
+  await queue.work("email.send", async () => {
+    throw boom;
+  });
+  await queue.workDeadLetter("abuse.judge", async () => {
+    throw boom;
+  });
+  const handlers = Object.fromEntries(
+    Object.keys(CRON_JOBS).map((name) => [
+      name,
+      async () => {
+        if (name === "quota.drain") throw boom;
+      },
+    ]),
+  ) as Parameters<Queue["scheduleCrons"]>[0];
+  await queue.scheduleCrons(handlers);
+  const run = (name: string) =>
+    workers
+      .find((w) => w.name === name)
+      ?.handler([{ data: {}, signal: new AbortController().signal }]);
+  await expect(run("email.send")).rejects.toBe(boom);
+  await expect(run("abuse.judge.dead")).rejects.toBe(boom);
+  await expect(run("quota.drain")).rejects.toBe(boom);
+  await run("sends.reconcile");
+  expect(failures).toEqual([
+    ["email.send", boom],
+    ["abuse.judge.dead", boom],
+    ["quota.drain", boom],
+  ]);
+  // Once stop() has begun, a handler that gives up is the deploy, not a fault.
+  await queue.stop();
+  await expect(run("email.send")).rejects.toBe(boom);
+  expect(failures).toHaveLength(3);
+});
+
 it("cron and dead-letter workers poll slowly; crons are scheduled through the producer", async () => {
   const queue = await startWorker();
   await queue.workDeadLetter("email.send", async () => {});
