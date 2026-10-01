@@ -14,6 +14,16 @@ export const CONTENT_REVEAL_REASONS = [
 ] as const;
 export type ContentRevealReason = (typeof CONTENT_REVEAL_REASONS)[number];
 
+/**
+ * Reasons that read one named message, never a window: a customer asks about
+ * a message, and the law names what it requires. Mirrors "a specific message"
+ * in the hosted privacy policy (millionsend-lp src/app/privacy/page.tsx, §5).
+ */
+export const CONTENT_REVEAL_ONE_MESSAGE_REASONS: readonly ContentRevealReason[] = [
+  "legal_request",
+  "owner_support_request",
+];
+
 /** One message, or every flagged message of the review page's window. */
 export const CONTENT_REVEAL_SCOPES = ["email", "flagged_window"] as const;
 export type ContentRevealScope = (typeof CONTENT_REVEAL_SCOPES)[number];

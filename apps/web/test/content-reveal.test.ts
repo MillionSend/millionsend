@@ -177,6 +177,22 @@ describe("console.safety.requestAccess", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
+  it("reads one named message for a customer's request or a legal one, never the window", async () => {
+    await flaggedEmail();
+    const before = (await db.select().from(schema.contentAccessGrants)).length;
+    for (const reason of ["owner_support_request", "legal_request"] as const) {
+      await expect(
+        operator().console.safety.requestAccess({
+          teamId,
+          reason,
+          justification: JUSTIFICATION,
+          scope: "flagged_window",
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    expect(await db.select().from(schema.contentAccessGrants)).toHaveLength(before);
+  });
+
   it("wants a justification of some substance", async () => {
     const emailId = await flaggedEmail();
     await expect(
