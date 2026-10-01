@@ -166,6 +166,7 @@ auto-hospedada não tem limites de plano.
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login, o cadastro, a redefinição de senha e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
 | `ONBOARDING_EMAIL_FROM` | Remetente compartilhado do botão "Enviar e-mail" e do snippet do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Qualquer time pode enviar por ele, só para membros que confirmaram o e-mail (onde a instância confirma e-mails), e sempre com este nome de exibição exato. Deixe vazio para ocultar o botão; o snippet então pede o domínio do próprio time. |
 | `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos donos do time (cota quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para o time, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. Verifique o domínio em um time para registrar esses e-mails lá. |
+| `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Rastreamento de erros opcional com Bugsink ou Sentry; desligado enquanto `SENTRY_DSN` não estiver definido. Veja [Rastreamento de erros](#rastreamento-de-erros-opcional). |
 
 ### Dimensionamento do worker
 
@@ -1012,6 +1013,79 @@ suporte em Configurações a mostra enquanto ela está ativa, com um botão
 
 ```sh
 SUPPORT_VIEW=on
+```
+
+## Rastreamento de erros (opcional)
+
+Desligado por padrão. Com um DSN definido, os processos web, api e worker
+enviam seus erros pelo SDK do Sentry ao [Bugsink](https://www.bugsink.com/)
+(auto-hospedado, só erros) ou ao Sentry. Sem um DSN o SDK nunca é
+carregado, nem no servidor nem no navegador. Qualquer mudança vale após
+reiniciar.
+
+| Variável | Propósito |
+| --- | --- |
+| `SENTRY_DSN` | DSN dos processos web, api e worker. Sem definir: rastreamento de erros desligado. |
+| `SENTRY_BROWSER_DSN` | Envia também os erros do painel no navegador, ao mesmo projeto ou a outro. A página o recebe em tempo de execução e envia pela própria origem deste app. |
+| `SENTRY_ENVIRONMENT` | Nome do ambiente em todo evento (padrão `production`). |
+| `SENTRY_TRACES_SAMPLE_RATE` | Fração das requisições rastreadas, de `0` a `1` (padrão `0`: só erros). Só para o Sentry; o Bugsink não aceita traces. |
+
+**Bugsink.** Crie no Bugsink um projeto para a instância (e, para os erros
+do painel no navegador, um segundo, ou reutilize o primeiro), copie o DSN,
+defina no `.env` e rode `docker compose up -d`:
+
+```sh
+SENTRY_DSN=https://<chave>@bugsink.example.com/<id-do-projeto>
+SENTRY_BROWSER_DSN=https://<chave>@bugsink.example.com/<id-do-projeto>
+SENTRY_ENVIRONMENT=production
+```
+
+Mantenha `SENTRY_TRACES_SAMPLE_RATE=0`: nada além de erros é enviado (sem
+sessões, traces, replays, profiles nem client reports), e é só isso que o
+Bugsink aceita.
+
+**Sentry.** As mesmas variáveis com o DSN de um projeto do Sentry. Uma taxa
+de traces acima de `0` envia também essa fração dos traces de requisição,
+limpos como os erros; headers de trace nunca são adicionados a requisições
+de saída, então os endpoints de webhook dos clientes nunca os veem. O Sentry
+é um terceiro: antes de apontar uma instância para ele, liste-o como
+subprocessador no aviso de privacidade da instância. Um Bugsink que você
+hospeda não é um.
+
+**O que é reportado.** Erros de servidor do painel pelo hook
+`onRequestError` do Next.js, incluindo falhas de renderização de server
+components (o navegador só as vê como o erro minificado #441 do React e um
+digest, que o evento também leva); procedimentos tRPC que falham com
+`INTERNAL_SERVER_ERROR`, nunca uma resposta escolhida pelo procedimento como
+`UNAUTHORIZED` ou `NOT_FOUND`; os erros não tratados da API (a resposta 500
+`internal_server_error`); todo job, dead letter ou cron do worker que lança
+erro; rejeições não tratadas e exceções não capturadas nos três processos;
+e, com `SENTRY_BROWSER_DSN`, erros não capturados nas páginas do painel. Os
+eventos levam as tags `process`, `team_id` quando há um, e o padrão de rota,
+o procedimento tRPC ou a fila; a release é a revisão git da imagem, a mesma
+que o `/health` da API informa.
+
+**O que nunca é enviado.** Nenhum corpo de requisição, query string, cookie
+ou header além do user agent; nenhum usuário nem endereço IP; nenhuma
+variável local; nenhum input de tRPC ou payload de job. Em toda mensagem e
+breadcrumb, endereços de e-mail mantêm só o domínio
+(`••••••@example.com`), chaves de API `ms_` são mascaradas, e os caminhos de
+URL perdem todo segmento que possa ser um token ou um endereço. Eventos de
+servidor nomeiam o padrão de rota (`/invite/[token]`), nunca o caminho da
+requisição. Os relatos do navegador chegam ao rastreador por
+`/api/client-errors`, na própria origem do painel, então o endereço IP de um
+visitante nunca chega.
+
+**Source maps (opcional).** Uma imagem construída com o segredo
+`SENTRY_AUTH_TOKEN` envia os source maps do painel no navegador
+(associados por debug id; Bugsink 2.0.14 ou mais recente) e os apaga da
+imagem. Sem o segredo o build não muda.
+
+```sh
+docker build --secret id=SENTRY_AUTH_TOKEN,env=SENTRY_AUTH_TOKEN \
+  --build-arg SENTRY_URL=https://bugsink.example.com/ \
+  --build-arg SENTRY_ORG=bugsinkhasnoorgs \
+  --build-arg SENTRY_PROJECT=<slug-do-projeto> -t millionsend .
 ```
 
 ## Operações

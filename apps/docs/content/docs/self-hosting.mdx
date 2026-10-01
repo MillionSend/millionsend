@@ -161,6 +161,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys, both or neither. When set, sign-in, sign-up, password reset and the onboarding "Send email" button verify a challenge token (invisible or managed widgets both work). Unset, every form runs without a captcha. |
 | `ONBOARDING_EMAIL_FROM` | Shared sender for the onboarding "Send email" button and snippet, as `Name <user@domain>` or a bare address on a domain verified in this SES account. Any team may send from it, but only to members who verified their address (where the instance verifies), and always with this exact display name. Leave unset to hide the button; the snippet then asks for the team's own domain. |
 | `NOTIFICATIONS_EMAIL_FROM` | Sender for the notices to team owners (quota, bounce/complaint rates, a domain verifying or losing its records, a new API key, a rotated webhook secret, a member joining, a broadcast that went out or is held, billing on the cloud) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. Verify its domain in a team to log these emails there. |
+| `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Optional error tracking with Bugsink or Sentry; off while `SENTRY_DSN` is unset. See [Error tracking](#error-tracking-optional). |
 
 ### Worker sizing
 
@@ -989,6 +990,76 @@ it is live, with an "End session" button.
 
 ```sh
 SUPPORT_VIEW=on
+```
+
+## Error tracking (optional)
+
+Off by default. With a DSN set, the web, api and worker processes report
+their errors through the Sentry SDK to [Bugsink](https://www.bugsink.com/)
+(self-hosted, errors only) or to Sentry. Without one the SDK is never
+loaded, on the server or in the browser. A restart applies any change.
+
+| Variable | Purpose |
+| --- | --- |
+| `SENTRY_DSN` | DSN for the web, api and worker processes. Unset: error tracking is off. |
+| `SENTRY_BROWSER_DSN` | Also reports the dashboard's browser errors, to the same project or another. The page gets it at runtime and posts through this app's own origin. |
+| `SENTRY_ENVIRONMENT` | Environment name on every event (default `production`). |
+| `SENTRY_TRACES_SAMPLE_RATE` | Share of requests traced, `0` to `1` (default `0`: errors only). Sentry only; Bugsink accepts no traces. |
+
+**Bugsink.** Create a project for the instance in Bugsink (and, for the
+dashboard's browser errors, a second one, or reuse the first), copy its DSN,
+set it in `.env` and run `docker compose up -d`:
+
+```sh
+SENTRY_DSN=https://<key>@bugsink.example.com/<project-id>
+SENTRY_BROWSER_DSN=https://<key>@bugsink.example.com/<project-id>
+SENTRY_ENVIRONMENT=production
+```
+
+Keep `SENTRY_TRACES_SAMPLE_RATE=0`: nothing but errors is sent (no
+sessions, traces, replays, profiles or client reports), which is all Bugsink
+accepts.
+
+**Sentry.** The same variables with a Sentry project's DSN. A trace rate
+above `0` also sends that share of request traces, scrubbed like the
+errors; trace headers are never added to outgoing requests, so customers'
+webhook endpoints never see them. Sentry is a third party: before pointing
+an instance at it, name it as a sub-processor in the instance's privacy
+notice. A Bugsink you host is not one.
+
+**What is reported.** Server errors in the dashboard through Next.js's
+`onRequestError` hook, server component render failures included (the
+browser only sees those as React's minified error #441 and a digest, which
+the event carries too); tRPC procedures failing with `INTERNAL_SERVER_ERROR`,
+never an answer a procedure chose such as `UNAUTHORIZED` or `NOT_FOUND`; the
+API's unhandled errors (its 500 `internal_server_error` answer); every
+worker job, dead-letter or cron handler that throws; unhandled rejections
+and uncaught exceptions in all three processes; and, with
+`SENTRY_BROWSER_DSN`, uncaught errors in the dashboard's pages. Events are
+tagged with `process`, `team_id` where there is one, and the route pattern,
+tRPC procedure or queue; the release is the image's git revision, as the
+API's `/health` reports it.
+
+**What is never sent.** No request body, query string, cookie, or header
+other than the user agent; no user and no IP address; no local variables;
+no tRPC input or job payload. In every message and breadcrumb, email
+addresses keep only their domain (`••••••@example.com`), `ms_` API keys are
+masked, and URL paths lose every segment that could be a token or an
+address. Server events name the route pattern (`/invite/[token]`), never
+the request's path. Browser reports reach the tracker through
+`/api/client-errors` on the dashboard's own origin, so a visitor's IP
+address never does.
+
+**Source maps (optional).** An image built with a `SENTRY_AUTH_TOKEN`
+secret uploads the dashboard's browser source maps (matched by debug id;
+Bugsink 2.0.14 or later) and deletes them from the image. Without the
+secret the build is unchanged.
+
+```sh
+docker build --secret id=SENTRY_AUTH_TOKEN,env=SENTRY_AUTH_TOKEN \
+  --build-arg SENTRY_URL=https://bugsink.example.com/ \
+  --build-arg SENTRY_ORG=bugsinkhasnoorgs \
+  --build-arg SENTRY_PROJECT=<project-slug> -t millionsend .
 ```
 
 ## Operations
