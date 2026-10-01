@@ -255,6 +255,7 @@ describe("tool listing", () => {
     for (const t of tools) {
       expect(t.title, t.name).toBeTruthy();
       expect(t.annotations?.title, t.name).toBe(t.title);
+      expect(typeof t.annotations?.readOnlyHint, t.name).toBe("boolean");
       if (t.annotations?.readOnlyHint) continue;
       expect(typeof t.annotations?.destructiveHint, t.name).toBe("boolean");
       expect(typeof t.annotations?.idempotentHint, t.name).toBe("boolean");

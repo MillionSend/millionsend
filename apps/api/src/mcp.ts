@@ -389,6 +389,7 @@ function buildServer(
           ? { title: cfg.title, readOnlyHint: true }
           : {
               title: cfg.title,
+              readOnlyHint: false,
               destructiveHint: cfg.destructive === true,
               idempotentHint: cfg.idempotent === true,
             },
