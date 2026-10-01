@@ -36,6 +36,7 @@ import {
   regionBulkCounts,
   sesEventsHealth,
 } from "@millionsend/core";
+import { captureError, initErrorTracking } from "@millionsend/core/error-tracking-node";
 import { getDb, schema } from "@millionsend/db";
 import {
   EMAIL_SEND_PRIORITY,
@@ -85,6 +86,8 @@ import { syncTenants } from "./handlers/tenants.js";
 import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
 import { createSystemMailer } from "./system-mail.js";
+
+await initErrorTracking("worker");
 
 if (!env.MASTER_ENCRYPTION_KEY) {
   // Required even when cloud wraps DEKs with KMS: tracking/unsubscribe token
@@ -182,7 +185,10 @@ setInterval(() => void sendControls.refreshAll(), 60_000).unref();
 const horizonDays = async () =>
   pacingHorizonDays((await getInstanceSettings(db)).emailRetentionDays ?? env.EMAIL_RETENTION_DAYS);
 
-const queue = await Queue.start(env.DATABASE_URL, { workers: true });
+const queue = await Queue.start(env.DATABASE_URL, {
+  workers: true,
+  onJobError: (error, job) => void captureError(error, { tags: { job } }),
+});
 
 // Everything the worker itself enqueues is bulk unless the caller says
 // otherwise: broadcast fan-out always, drained or reconciled rows by origin.

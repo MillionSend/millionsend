@@ -66,6 +66,7 @@ import {
   verifySenderDomain,
   type WebhookEnqueue,
 } from "@millionsend/core";
+import { captureError } from "@millionsend/core/error-tracking-node";
 import type { Db } from "@millionsend/db";
 import { keysetCursorWhere, schema } from "@millionsend/db";
 import type { SegmentFilter } from "@millionsend/db/schema";
@@ -96,6 +97,7 @@ import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
+import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
 import { INTERNAL_AUTH, registerMcp } from "./mcp.js";
 import { loggedBody, maskEmailPathSegments } from "./request-log.js";
@@ -3260,6 +3262,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   // parse the body as JSON.
   app.onError((err, c) => {
     console.error("unhandled api error", err);
+    void captureError(err, { teamId: c.get("auth")?.teamId, tags: { route: routePath(c, -1) } });
     return c.json(errorBody(500, "internal_server_error", "An unexpected error occurred"), 500);
   });
 

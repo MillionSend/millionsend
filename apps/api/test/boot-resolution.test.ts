@@ -27,20 +27,33 @@ const ENTRYPOINTS = [
   { pkg: "packages/db", entry: "packages/db/src/migrate.ts" },
 ];
 
+function boot(pkg: string, entry: string, extraEnv: Record<string, string> = {}): string {
+  const bin = join(root, pkg, "node_modules/.bin/tsx");
+  expect(existsSync(bin), `${pkg} must depend on tsx (bin missing)`).toBe(true);
+  const result = spawnSync(bin, [join(root, entry)], {
+    cwd: root,
+    env: { ...env, ...extraEnv },
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  return `${result.stdout}\n${result.stderr}`;
+}
+
 describe("tsx boot resolution (start.mjs spawn contract)", () => {
   for (const { pkg, entry } of ENTRYPOINTS) {
     it(`${entry} loads under the ${pkg} tsx bin without module-resolution errors`, () => {
-      const bin = join(root, pkg, "node_modules/.bin/tsx");
-      expect(existsSync(bin), `${pkg} must depend on tsx (bin missing)`).toBe(true);
+      expect(boot(pkg, entry)).not.toMatch(/ERR_MODULE_NOT_FOUND|Cannot find module/);
+    }, 90_000);
+  }
 
-      const result = spawnSync(bin, [join(root, entry)], {
-        cwd: root,
-        env,
-        encoding: "utf8",
-        timeout: 60_000,
-      });
-      const output = `${result.stdout}\n${result.stderr}`;
-      expect(output).not.toMatch(/ERR_MODULE_NOT_FOUND|Cannot find module/);
+  // The SDK is imported only once a DSN is set, from @millionsend/core's
+  // directory: resolve it the way production does. Nothing listens on the
+  // DSN's port, so the boot failure it reports goes nowhere.
+  for (const { pkg, entry } of ENTRYPOINTS.slice(0, 2)) {
+    it(`${entry} loads the error-tracking SDK when SENTRY_DSN is set`, () => {
+      expect(boot(pkg, entry, { SENTRY_DSN: "http://key@127.0.0.1:9/1" })).not.toMatch(
+        /ERR_MODULE_NOT_FOUND|Cannot find module/,
+      );
     }, 90_000);
   }
 });
