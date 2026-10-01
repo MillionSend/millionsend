@@ -221,6 +221,9 @@ export interface JobContext {
 
 type JobHandler<N extends JobName> = (payload: JobPayloads[N], ctx: JobContext) => Promise<void>;
 
+/** Told of every handler that throws, by queue name; pg-boss records the failure itself. */
+export type JobErrorHook = (error: unknown, queue: string) => void;
+
 /**
  * pg-boss migrates its schema on start under an advisory lock with a 30 s
  * lock_timeout. A process booting beside the one migrating loses that race
@@ -259,10 +262,12 @@ export class Queue {
   // their signal (it only aborts after failing them at the timeout), so a
   // long walk would never learn it should stop before the pools close.
   #shutdown = new AbortController();
+  #onJobError: JobErrorHook | undefined;
 
-  private constructor(producer: PgBoss, consumer?: PgBoss) {
+  private constructor(producer: PgBoss, consumer?: PgBoss, onJobError?: JobErrorHook) {
     this.#producer = producer;
     this.#consumer = consumer;
+    this.#onJobError = onJobError;
   }
 
   /**
@@ -274,7 +279,10 @@ export class Queue {
    * a send never waits behind a fetch. Every static queue is created before
    * the first work() so registration never waits behind a backlog.
    */
-  static async start(databaseUrl: string, opts: { workers?: boolean } = {}): Promise<Queue> {
+  static async start(
+    databaseUrl: string,
+    opts: { workers?: boolean; onJobError?: JobErrorHook } = {},
+  ): Promise<Queue> {
     const base = { connectionString: databaseUrl, schema: "pgboss" };
     if (!opts.workers) {
       return new Queue(await startBoss({ ...base, supervise: false, schedule: false, max: 2 }));
@@ -298,7 +306,7 @@ export class Queue {
       migrate: false,
       max: 4,
     });
-    const queue = new Queue(producer, consumer);
+    const queue = new Queue(producer, consumer, opts.onJobError);
     for (const name of JOB_QUEUES) await queue.#prepare(name);
     for (const name of Object.keys(CRON_JOBS)) await queue.#ensureQueue(name);
     return queue;
@@ -461,17 +469,29 @@ export class Queue {
         notifyPollingIntervalSeconds: opts.pollingIntervalSeconds ?? 2,
         ...(opts.groupConcurrency !== undefined ? { groupConcurrency: opts.groupConcurrency } : {}),
       },
-      (jobs: { data: JobPayloads[N]; signal: AbortSignal }[]) => this.#run(handler, jobs),
+      (jobs: { data: JobPayloads[N]; signal: AbortSignal }[]) => this.#run(name, handler, jobs),
     );
   }
 
   /** Runs a batch one job at a time; the signal aborts on the job's own signal or on stop(). */
   async #run<N extends JobName>(
+    queue: string,
     handler: JobHandler<N>,
     jobs: { data: JobPayloads[N]; signal: AbortSignal }[],
   ): Promise<void> {
     for (const job of jobs) {
-      await handler(job.data, { signal: AbortSignal.any([job.signal, this.#shutdown.signal]) });
+      const signal = AbortSignal.any([job.signal, this.#shutdown.signal]);
+      await this.#reported(queue, () => handler(job.data, { signal }));
+    }
+  }
+
+  async #reported(queue: string, run: () => Promise<void>): Promise<void> {
+    try {
+      await run();
+    } catch (err) {
+      // A handler stop() cut short is a deploy, not a fault; pg-boss retries it.
+      if (!this.#shutdown.signal.aborted) this.#onJobError?.(err, queue);
+      throw err;
     }
   }
 
@@ -485,7 +505,8 @@ export class Queue {
     await this.#workers.work<JobPayloads[N]>(
       deadLetter,
       { batchSize: 1, pollingIntervalSeconds: SLOW_POLL_SECONDS },
-      (jobs: { data: JobPayloads[N]; signal: AbortSignal }[]) => this.#run(handler, jobs),
+      (jobs: { data: JobPayloads[N]; signal: AbortSignal }[]) =>
+        this.#run(deadLetter, handler, jobs),
     );
   }
 
@@ -496,9 +517,7 @@ export class Queue {
       await this.#workers.work(
         name,
         { batchSize: 1, pollingIntervalSeconds: SLOW_POLL_SECONDS },
-        async () => {
-          await handlers[name]();
-        },
+        () => this.#reported(name, handlers[name]),
       );
     }
   }

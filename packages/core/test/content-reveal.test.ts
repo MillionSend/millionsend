@@ -5,11 +5,8 @@ import {
   contentRevealExpiry,
   type RevealedContent,
 } from "../src/content-reveal.js";
-import {
-  maskEmailLocalParts,
-  redactRevealedText,
-  renderRevealedBody,
-} from "../src/content-reveal-render.js";
+import { redactRevealedText, renderRevealedBody } from "../src/content-reveal-render.js";
+import { maskEmailLocalParts } from "../src/mask.js";
 
 const plain = (content: RevealedContent) => content.spans.map((s) => s.text).join("");
 const masked = (content: RevealedContent) =>

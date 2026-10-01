@@ -22,6 +22,9 @@
     "@millionsend/db": "workspace:*",
     "@millionsend/queue": "workspace:*",
     "@millionsend/ses": "workspace:*",
+    "@sentry/browser": "^11.1.0",
+    "@sentry/core": "^11.1.0",
+    "@sentry/node": "^11.1.0",
     "@tanstack/react-query": "^5.102.8",
     "@trpc/client": "^11.18.0",
     "@trpc/server": "^11.18.0",
@@ -41,6 +44,7 @@
   },
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
+    "@sentry/bundler-plugins": "^11.1.0",
     "@types/node": "^22.20.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

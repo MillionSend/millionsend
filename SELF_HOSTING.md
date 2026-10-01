@@ -914,6 +914,94 @@ SUPPORT_VIEW=on
 </details>
 
 <details>
+<summary><b>Error tracking (optional)</b></summary>
+
+Off by default. With a DSN set, the web, api and worker processes report
+their errors through the Sentry SDK to [Bugsink](https://www.bugsink.com/)
+(self-hosted, errors only) or to Sentry. Without one the SDK is never
+loaded, on the server or in the browser. A restart applies any change.
+
+**Bugsink.** Create a project for the instance in Bugsink (and, for the
+dashboard's browser errors, a second one, or reuse the first), copy its DSN,
+and set in the instance's `.env`:
+
+```sh
+SENTRY_DSN=https://<key>@bugsink.example.com/<project-id>
+# Optional: the dashboard's browser errors, to the same or another project.
+SENTRY_BROWSER_DSN=https://<key>@bugsink.example.com/<project-id>
+SENTRY_ENVIRONMENT=production
+```
+
+then `docker compose up -d`. Keep `SENTRY_TRACES_SAMPLE_RATE=0`: Bugsink
+accepts errors only, and nothing else is sent (no sessions, traces,
+replays, profiles or client reports).
+
+**Sentry.** The same variables with a Sentry project's DSN.
+`SENTRY_TRACES_SAMPLE_RATE` (0 to 1) also sends that share of request
+traces (incoming and outgoing HTTP, browser page loads), scrubbed like the
+errors; trace headers are never added to outgoing requests, so customers'
+webhook endpoints never see them. Sentry is a third party: before pointing
+an instance at it, name it as a sub-processor in the instance's privacy
+notice. A Bugsink you host is not one.
+
+**What is reported.**
+
+- web: server errors through Next.js's `onRequestError` hook, server
+  component render failures included (the browser only ever sees those as
+  React's minified error #441 and a digest; the event carries the same
+  digest), route handlers and the proxy; tRPC procedures failing with
+  `INTERNAL_SERVER_ERROR`, never an answer a procedure chose
+  (`UNAUTHORIZED`, `NOT_FOUND`, `FORBIDDEN`, `BAD_REQUEST`…); with
+  `SENTRY_BROWSER_DSN`, uncaught errors in the dashboard's pages and what
+  its error boundary catches.
+- api: every request that ends in "unhandled api error" (the 500
+  `internal_server_error` answer).
+- worker: every job, dead-letter or cron handler that throws, tagged with
+  its queue. Each retry is an event; the tracker groups them.
+- all three: unhandled rejections and uncaught exceptions. The api and the
+  worker still exit on one, as before; the web process keeps serving, as
+  Next.js does.
+
+Events are tagged with `process` (web, api, worker, browser), `team_id`
+where the request has one, and the route pattern, tRPC procedure or queue.
+The release is the image's git revision, the `revision` the API's `/health`
+reports.
+
+**What is never sent.** Every event, breadcrumb and span passes one scrubber
+(`packages/core/src/error-tracking.ts`): no request body, query string,
+cookie, or header other than the user agent (`Authorization`, `x-api-key`
+and `Cookie` included); no user and no IP address; no local variables; no
+tRPC input or job payload. In messages, exception values, extra data,
+contexts and breadcrumbs, email addresses keep only their domain
+(`••••••@example.com`), `ms_` API keys are masked, and URL paths lose every
+segment that could be a token or an address (an unsubscribe or invite link
+carries its capability there), keeping route words and ids. Server events
+name the route pattern (`/invite/[token]`), never the request's path. The
+browser posts its reports to `/api/client-errors` on the dashboard's own
+origin, which forwards them, so the Content-Security-Policy needs no
+exception and a visitor's IP address never reaches the tracker. What no
+scrubber can recognise is personal data written into free text that ends up
+in an error message, such as a name in a template.
+
+**Source maps (optional).** Browser stack traces are minified. An image
+built with a `SENTRY_AUTH_TOKEN` secret uploads the dashboard's browser
+source maps, matched by debug id (Bugsink 2.0.14 or later), and deletes
+them from the image:
+
+```sh
+docker build --secret id=SENTRY_AUTH_TOKEN,env=SENTRY_AUTH_TOKEN \
+  --build-arg SENTRY_URL=https://bugsink.example.com/ \
+  --build-arg SENTRY_ORG=bugsinkhasnoorgs \
+  --build-arg SENTRY_PROJECT=<project-slug> -t millionsend .
+```
+
+Bugsink ignores `SENTRY_ORG`, but the upload needs one; for Sentry, give
+your organization's slug and leave `SENTRY_URL` out. Without the secret the
+build is unchanged, and the published image is built without it.
+
+</details>
+
+<details>
 <summary><b>Operations</b></summary>
 
 - Send rate and email retention are managed in the dashboard: Settings → Instance

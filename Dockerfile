@@ -11,7 +11,15 @@ RUN pnpm fetch
 FROM deps AS build
 COPY . .
 RUN pnpm install --frozen-lockfile --offline
-RUN pnpm --filter @millionsend/web build
+# Optional upload of the dashboard's browser source maps to the error
+# tracker (SELF_HOSTING.md, "Error tracking"). Without the secret the build
+# is unchanged. The secret never enters the cache key; these args do, so a
+# build that sets them is not served a layer built without the upload.
+ARG SENTRY_URL
+ARG SENTRY_ORG
+ARG SENTRY_PROJECT
+RUN --mount=type=secret,id=SENTRY_AUTH_TOKEN,env=SENTRY_AUTH_TOKEN \
+  pnpm --filter @millionsend/web build
 RUN pnpm --filter @millionsend/docs build
 # The webpack cache is build-only (hundreds of MB), and the runtime never
 # needs dev tooling (drizzle-kit, vitest, biome, typescript): a fresh

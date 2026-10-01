@@ -5,15 +5,13 @@ import {
   type RevealSpan,
 } from "./content-reveal.js";
 import { isIpLiteral, visibleText } from "./email-insights.js";
+import { API_KEY_PATTERN, MASK } from "./mask.js";
 import { registrableDomain } from "./org-domain.js";
 
 /**
  * The one redaction pass an operator's view of a customer's message goes
  * through. Pure: nothing here decrypts, reads or writes.
  */
-
-/** What a masked run is replaced with. The original never leaves the server. */
-const MASK = "••••••";
 
 /** Enough of a link to judge where it points, never enough to follow a one-time one. */
 const URL_PATH_STUB_MAX = 24;
@@ -39,10 +37,7 @@ const SECRETS: RegExp[] = [
   /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g,
   /(?<![0-9a-fA-F])[0-9a-fA-F]{32,}(?![0-9a-fA-F])/g,
   /(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{40,}={0,2}/g,
-  // This platform's own API key: base64url, so neither the hex nor the base64
-  // shape above catches it, and it is the credential most likely to be quoted
-  // back into a message the operator ends up reading.
-  /\bms_[A-Za-z0-9_-]{20,}/g,
+  API_KEY_PATTERN,
 ];
 
 /** Words a one-time code follows, in both of the dashboard's languages. */
@@ -50,15 +45,6 @@ const CODE_WORD = /\b(?:c[óo]digos?|codes?|otp|pins?|tokens?|senhas?|passwords?
 /** How far past such a word a bare number is read as that code. */
 const CODE_WINDOW = 40;
 const CODE_DIGITS = /(?<!\d)\d{4,8}(?!\d)/g;
-/**
- * The local part of an address: RFC 5322 atext and dots, Unicode letters and
- * marks for internationalised ones. "/" is left out: legal, never seen in a
- * real address, and it is what glues a link's path to an @ (youtube.com/@x).
- * A run starts only where its alphabet does, so a long run with no @ is
- * scanned once rather than from each of its characters.
- */
-const EMAIL_LOCAL_PART =
-  /(?<![\p{L}\p{M}\p{N}.!#$%&'*+=?^_`{|}~-])[\p{L}\p{M}\p{N}.!#$%&'*+=?^_`{|}~-]+@(?=[\p{L}\p{N}])/gu;
 
 interface Hit {
   start: number;
@@ -150,11 +136,6 @@ export function redactRevealedText(text: string): RevealedContent {
   }
   if (cursor < text.length) spans.push({ text: text.slice(cursor) });
   return { spans, redactions };
-}
-
-/** `someone@example.com` → `••••••@example.com`: the domain is the signal, the local part names a person. */
-export function maskEmailLocalParts(text: string, mask = MASK): string {
-  return text.replace(EMAIL_LOCAL_PART, `${mask}@`);
 }
 
 /** Cut the spans to a character budget, keeping whole spans where they fit. */

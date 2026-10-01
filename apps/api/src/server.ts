@@ -13,6 +13,7 @@ import {
   hashRecipient,
   pacingHorizonDays,
 } from "@millionsend/core";
+import { initErrorTracking } from "@millionsend/core/error-tracking-node";
 import { getDb } from "@millionsend/db";
 import { EMAIL_SEND_PRIORITY, Queue } from "@millionsend/queue";
 import {
@@ -25,6 +26,8 @@ import {
   type SesIdentityClient,
 } from "@millionsend/ses";
 import { createApi } from "./app.js";
+
+await initErrorTracking("api");
 
 // Throws on missing encryption configuration, so boot fails before any
 // listener starts.
