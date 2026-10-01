@@ -48,6 +48,9 @@ export type AbuseJudgeProvider = (typeof ABUSE_JUDGE_PROVIDERS)[number];
 export const ABUSE_JUDGE_BASE_URL_DEFAULT = "https://api.typesafe.ai";
 export const ABUSE_JUDGE_MODEL_DEFAULT = "jev-1.13.0";
 export const ABUSE_JUDGE_TIMEOUT_MS_DEFAULT = 20_000;
+const SENTRY_ENVIRONMENT_DEFAULT = "production";
+/** MILLIONSEND_REVISION outside an image built with a GIT_SHA. */
+const REVISION_UNKNOWN = "unknown";
 
 const emailAddress = z.email();
 
@@ -91,7 +94,7 @@ export const env = createEnv({
     PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     // Git SHA baked into the image (Dockerfile ARG GIT_SHA); reported by the
     // API's /health so a running deployment can be matched to a commit.
-    MILLIONSEND_REVISION: z.string().default("unknown"),
+    MILLIONSEND_REVISION: z.string().default(REVISION_UNKNOWN),
     API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(600),
     DATABASE_URL: z.url(),
 
@@ -259,6 +262,17 @@ export const env = createEnv({
     // (the owner is not mailed). Off by default; read through
     // supportViewEnabled().
     SUPPORT_VIEW: z.enum(["off", "on"]).default("off"),
+
+    // Optional error tracking through a Sentry SDK, pointed at Bugsink or
+    // Sentry. Unset DSN: the SDK is never loaded. SENTRY_DSN serves web, api
+    // and worker; SENTRY_BROWSER_DSN turns on the dashboard's browser
+    // reporting, which reaches it through this app's own origin. Read through
+    // errorTrackingConfig().
+    SENTRY_DSN: z.url().optional(),
+    SENTRY_BROWSER_DSN: z.url().optional(),
+    SENTRY_ENVIRONMENT: z.string().default(SENTRY_ENVIRONMENT_DEFAULT),
+    // Share of requests traced. 0 sends errors only, all Bugsink accepts.
+    SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
 
     // Public base URL of this deployment; SNS subscriptions and hosted
     // unsubscribe pages are derived from it.
@@ -475,6 +489,35 @@ export function abuseJudgeConfig(e: Env = env): AbuseJudgeConfig | null {
 /** Whether the operator may open a team's dashboard read-only; raw-string safe under SKIP_ENV_VALIDATION. */
 export function supportViewEnabled(e: Env = env): boolean {
   return (e.SUPPORT_VIEW as unknown) === "on";
+}
+
+export interface ErrorTrackingConfig {
+  dsn: string;
+  environment: string;
+  /** The image's git revision, the one the API's /health reports. */
+  release: string | undefined;
+  tracesSampleRate: number;
+}
+
+/**
+ * Error tracking for the server processes or for the dashboard's browser
+ * code; null when that side's DSN is unset, which leaves the SDK unloaded.
+ * Raw-string safe under SKIP_ENV_VALIDATION, as abuseJudgeConfig is.
+ */
+export function errorTrackingConfig(
+  side: "server" | "browser",
+  e: Env = env,
+): ErrorTrackingConfig | null {
+  const dsn = side === "server" ? e.SENTRY_DSN : e.SENTRY_BROWSER_DSN;
+  if (!dsn) return null;
+  const rate = Number(e.SENTRY_TRACES_SAMPLE_RATE);
+  const revision = e.MILLIONSEND_REVISION;
+  return {
+    dsn,
+    environment: e.SENTRY_ENVIRONMENT || SENTRY_ENVIRONMENT_DEFAULT,
+    release: revision && revision !== REVISION_UNKNOWN ? revision : undefined,
+    tracesSampleRate: Number.isFinite(rate) && rate > 0 ? rate : 0,
+  };
 }
 
 /**
