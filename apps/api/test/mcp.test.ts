@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { type ServerType, serve } from "@hono/node-server";
-import { DAY_MS, EnvKeyring, MCP_SCOPES, mcpResourceUrl } from "@millionsend/core";
+import { DAY_MS, EnvKeyring, generateApiKey, MCP_SCOPES, mcpResourceUrl } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -170,6 +170,21 @@ describe("auth middleware", () => {
     }
   });
 
+  it("serves the OpenAI domain-verification token only when one is configured", async () => {
+    expect((await app.request("/.well-known/openai-apps-challenge")).status).toBe(404);
+    const withToken = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: false,
+      appBaseUrl,
+      openaiAppsChallengeToken: "challenge-abc",
+      enqueueEmailSend: async () => {},
+    });
+    const res = await withToken.request("/.well-known/openai-apps-challenge");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("challenge-abc");
+  });
+
   it("401s a token minted for another resource (aud mismatch)", async () => {
     const token = await mintToken({ aud: "https://elsewhere.example/mcp" });
     const res = await app.request("/mcp", {
@@ -246,7 +261,7 @@ describe("tool listing", () => {
     await client.close();
   });
 
-  it("every tool carries a title in both places and an explicit write-safety hint", async () => {
+  it("every tool carries a title in both places and all four hints as booleans", async () => {
     const client = await connect(await mintToken());
     const tools = (await client.listTools()).tools;
     expect(client.getServerVersion()?.icons?.[0]?.src).toBe(
@@ -255,11 +270,16 @@ describe("tool listing", () => {
     for (const t of tools) {
       expect(t.title, t.name).toBeTruthy();
       expect(t.annotations?.title, t.name).toBe(t.title);
-      expect(typeof t.annotations?.readOnlyHint, t.name).toBe("boolean");
-      if (t.annotations?.readOnlyHint) continue;
-      expect(typeof t.annotations?.destructiveHint, t.name).toBe("boolean");
-      expect(typeof t.annotations?.idempotentHint, t.name).toBe("boolean");
+      for (const key of [
+        "readOnlyHint",
+        "destructiveHint",
+        "idempotentHint",
+        "openWorldHint",
+      ] as const) {
+        expect(typeof t.annotations?.[key], `${t.name}.${key}`).toBe("boolean");
+      }
     }
+    expect(client.getInstructions()).toContain("purchased, rented and scraped lists");
     const hint = (name: string) => tools.find((t) => t.name === name)?.annotations;
     for (const name of ["send_email", "create_broadcast", "update_contact", "cancel_email"]) {
       expect(hint(name)?.destructiveHint, name).toBe(true);
@@ -267,6 +287,10 @@ describe("tool listing", () => {
     expect(hint("create_contact")?.destructiveHint).toBe(false);
     expect(hint("delete_contact")?.idempotentHint).toBe(true);
     expect(hint("send_email")?.idempotentHint).toBe(false);
+    expect(hint("send_email")?.openWorldHint).toBe(true);
+    expect(hint("create_webhook")?.openWorldHint).toBe(true);
+    expect(hint("create_contact")?.openWorldHint).toBe(false);
+    expect(hint("list_emails")).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     await client.close();
   });
 
@@ -369,9 +393,7 @@ describe("tool listing", () => {
       "delete_template",
       "create_webhook",
       "update_webhook",
-      "rotate_webhook_secret",
       "delete_webhook",
-      "create_api_key",
       "revoke_api_key",
       "create_domain",
       "update_domain",
@@ -434,12 +456,9 @@ describe("tool listing", () => {
     expect(names).toContain("list_api_keys");
     expect(names).toContain("send_email");
     for (const hidden of [
-      "get_webhook",
       "create_webhook",
       "update_webhook",
-      "rotate_webhook_secret",
       "delete_webhook",
-      "create_api_key",
       "revoke_api_key",
       "create_domain",
       "update_domain",
@@ -759,16 +778,20 @@ describe('all-teams tokens (team_id claim "*")', () => {
   });
 });
 
-it("create_webhook surfaces the signing secret verbatim and lists back without it", async () => {
+it("webhook tools never carry the signing secret, in or out", async () => {
   const client = await connect(await mintToken({ scope: "webhooks:write" }));
-  expect((await client.listTools()).tools.map((t) => t.name)).toEqual([
+  const tools = (await client.listTools()).tools;
+  expect(tools.map((t) => t.name)).toEqual([
     "list_webhooks",
     "get_webhook",
     "create_webhook",
     "update_webhook",
-    "rotate_webhook_secret",
     "delete_webhook",
   ]);
+  const createSchema = tools.find((t) => t.name === "create_webhook")?.inputSchema as {
+    properties?: Record<string, unknown>;
+  };
+  expect(createSchema.properties).not.toHaveProperty("signing_secret");
   const created = await client.callTool({
     name: "create_webhook",
     arguments: {
@@ -777,14 +800,14 @@ it("create_webhook surfaces the signing secret verbatim and lists back without i
     },
   });
   expect(created.isError).toBeFalsy();
-  const { id, signing_secret } = resultJson(created) as { id: string; signing_secret: string };
-  expect(signing_secret).toMatch(/^whsec_/);
+  const createdJson = resultJson(created);
+  const { id } = createdJson as { id: string };
+  expect(JSON.stringify(createdJson)).not.toContain("whsec_");
   const listed = resultJson(await client.callTool({ name: "list_webhooks", arguments: {} }));
-  const listedText = JSON.stringify(listed);
-  expect(listedText).toContain(id);
-  expect(listedText).not.toContain(signing_secret);
+  expect(JSON.stringify(listed)).toContain(id);
   const got = resultJson(await client.callTool({ name: "get_webhook", arguments: { id } }));
-  expect((got as { signing_secret?: string }).signing_secret).toBe(signing_secret);
+  expect(got).toMatchObject({ id });
+  expect(JSON.stringify(got)).not.toContain("whsec_");
   await client.close();
 });
 
@@ -934,44 +957,41 @@ describe("REST parity tools", () => {
         ends_at: end.toISOString(),
       },
     });
+    const period = (
+      resultJson(await client.callTool({ name: "get_usage", arguments: {} })) as {
+        period: Record<string, unknown>;
+      }
+    ).period;
+    expect(period).not.toHaveProperty("overage_usd_per_1k");
     await client.close();
   });
 
-  it("api keys: create returns the token once, list never does, revoke cuts it off; members only list", async () => {
+  it("api keys: tools list and revoke but never mint a credential; members only list", async () => {
+    const key = generateApiKey();
+    const [row] = await db
+      .insert(schema.apiKeys)
+      .values({
+        teamId,
+        name: "dashboard key",
+        tokenPrefix: key.tokenPrefix,
+        keyHash: key.keyHash,
+        last4: key.last4,
+      })
+      .returning({ id: schema.apiKeys.id });
+    const id = row?.id ?? "";
     const client = await connect(await mintToken({ scope: "api-keys:write" }));
     expect((await client.listTools()).tools.map((t) => t.name)).toEqual([
       "list_api_keys",
-      "create_api_key",
       "revoke_api_key",
     ]);
-    const created = await client.callTool({
-      name: "create_api_key",
-      arguments: { name: "minted over mcp" },
-    });
-    expect(created.isError).toBeFalsy();
-    const { id, token } = resultJson(created) as { id: string; token: string };
-    expect(token).toMatch(/^ms_/);
-    // The audit row names the person behind the token, as a dashboard action would.
-    const audits = await db
-      .select({ actorId: schema.auditLog.actorId })
-      .from(schema.auditLog)
-      .where(
-        and(eq(schema.auditLog.teamId, teamId), eq(schema.auditLog.action, "api_key.created")),
-      );
-    expect(audits).toEqual([{ actorId: `user:${userId}` }]);
     const listed = JSON.stringify(
       resultJson(await client.callTool({ name: "list_api_keys", arguments: {} })),
     );
     expect(listed).toContain(id);
-    expect(listed).not.toContain(token);
-    // The minted key is a real REST credential for the same team.
-    const asKey = (path: string) =>
-      app.request(path, { headers: { authorization: `Bearer ${token}` } });
-    expect((await asKey("/usage")).status).toBe(200);
+    expect(listed).not.toContain(key.token);
     expect(
       resultJson(await client.callTool({ name: "revoke_api_key", arguments: { id } })),
     ).toMatchObject({ id, deleted: true });
-    expect((await asKey("/usage")).status).toBe(401);
     await client.close();
 
     await db.insert(schema.user).values({ id: "member-2", name: "Member", email: "m2@acme.dev" });

@@ -119,13 +119,14 @@ client's config.
 - A member removed from the team loses MCP access immediately, even before
   their token expires.
 - Your team role applies: tools that manage domains, webhooks and API keys
-  (and `get_webhook`, which returns the signing secret) are only offered to
-  owners and admins, matching the dashboard. A **member** with those
+  are only offered to owners and admins, matching the dashboard. A **member** with those
   permissions granted still gets the read-only domain, webhook and API key
   listings.
   On an **All teams** grant the tools appear when you are an admin in any
   team, and calls into a team where you are a member are refused.
 - MCP calls share the API's per-minute rate limit.
+- No tool returns a credential: API keys are created, and webhook signing
+  secrets read or rotated, only in the dashboard or through the REST API.
 - The MCP server is available on every plan, including Free.
 
 Questions or problems connecting a client: [support@millionsend.com](mailto:support@millionsend.com).
@@ -157,7 +158,7 @@ and admins.
 | `list_templates` | `templates:read` | List email templates. |
 | `get_template` | `templates:read` | Get one template by id or alias, with its subject, html and text. |
 | `list_webhooks` | `webhooks:write` | List webhook endpoints (list rows never carry signing secrets). |
-| `get_webhook` | `webhooks:write` | **admin** Get one webhook, including its signing secret. |
+| `get_webhook` | `webhooks:write` | Get one webhook: URL, events and status. |
 | `list_api_keys` | `api-keys:write` | List active API keys (never their tokens). |
 | `list_domains` | `domains:read` | List sending domains with verification status. |
 | `get_domain` | `domains:read` | Get one domain with its DNS records. |
@@ -194,11 +195,9 @@ and admins.
 | `create_template` | `templates:write` | Create an email template (live immediately). |
 | `update_template` | `templates:write` | Change a template's name, subject, html, text or alias. |
 | `delete_template` | `templates:write` | Delete a template; broadcasts keep their own copy. |
-| `create_webhook` | `webhooks:write` | **admin** Create a webhook endpoint; the response includes the signing secret. |
+| `create_webhook` | `webhooks:write` | **admin** Create a webhook endpoint. |
 | `update_webhook` | `webhooks:write` | **admin** Update a webhook's URL, events or status. |
-| `rotate_webhook_secret` | `webhooks:write` | **admin** Rotate a webhook's signing secret with an overlap window. |
 | `delete_webhook` | `webhooks:write` | **admin** Delete a webhook endpoint. |
-| `create_api_key` | `api-keys:write` | **admin** Create an API key; the token is returned only in this response. |
 | `revoke_api_key` | `api-keys:write` | **admin** Revoke an API key. |
 | `create_domain` | `domains:write` | **admin** Add a sending domain and get its DNS records; optional tracking settings apply at creation. |
 | `update_domain` | `domains:write` | **admin** Change a domain's tracking settings; `tracking_subdomain` is what yields the Tracking CNAME (required on Cloud). |

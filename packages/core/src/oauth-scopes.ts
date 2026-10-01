@@ -14,12 +14,11 @@ export const MCP_SCOPES = [
   "domains:write",
   "templates:read",
   "templates:write",
-  // One scope for the whole webhook surface: even reads return signing
-  // secrets (the SDK wire retrieves them by design), so a read/write split
-  // would imply a safety boundary that does not exist.
+  // One scope each for the webhook and API key surfaces. MCP tools never
+  // return a credential (signing secrets and new keys stay in the dashboard
+  // and REST API); the names predate that and are kept so existing grants
+  // stay valid.
   "webhooks:write",
-  // One scope for API keys as well: listing never returns a token, but the
-  // surface exists to mint credentials, so it is granted as a whole.
   "api-keys:write",
 ] as const;
 
