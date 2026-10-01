@@ -4,6 +4,7 @@ import {
   CONTENT_REVEAL_FIELDS,
   CONTENT_REVEAL_JUSTIFICATION_MAX,
   CONTENT_REVEAL_JUSTIFICATION_MIN,
+  CONTENT_REVEAL_ONE_MESSAGE_REASONS,
   CONTENT_REVEAL_REASONS,
   CONTENT_REVEAL_SCOPES,
   contentRevealExpiry,
@@ -428,7 +429,12 @@ export const consoleSafetyRouter = router({
         .refine((input) => input.scope !== "email" || input.emailId !== undefined, {
           message: "emailId is required for scope email",
           path: ["emailId"],
-        }),
+        })
+        .refine(
+          (input) =>
+            input.scope === "email" || !CONTENT_REVEAL_ONE_MESSAGE_REASONS.includes(input.reason),
+          { message: "this reason reads one named message", path: ["scope"] },
+        ),
     )
     .mutation(async ({ ctx, input }) => {
       assertContentRevealOn();

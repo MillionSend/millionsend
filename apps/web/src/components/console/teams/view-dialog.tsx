@@ -3,7 +3,6 @@
 import {
   SUPPORT_VIEW_REASONS,
   type SupportViewReason,
-  supportViewNeedsReference,
 } from "@millionsend/core/support-view-reasons";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
@@ -14,10 +13,16 @@ import { BtnSpinner } from "@/components/spinner";
 
 export interface ViewInput {
   reason: SupportViewReason;
-  reference?: string;
+  reference: string;
 }
 
-const KNOWN_ERRORS = ["support_view_off", "support_view_live", "own_team", "reference_required"];
+const KNOWN_ERRORS = [
+  "support_view_off",
+  "support_view_live",
+  "sign_in_again",
+  "own_team",
+  "reference_required",
+];
 
 /** Names a reason and a request, then opens the team's dashboard read-only for 30 minutes. */
 export function ViewDialog({
@@ -39,13 +44,12 @@ export function ViewDialog({
   const id = useId();
   const [reason, setReason] = useState<SupportViewReason>("support_ticket");
   const [reference, setReference] = useState("");
-  const needsReference = supportViewNeedsReference(reason);
   const trimmed = reference.trim();
-  const valid = !needsReference || trimmed.length > 0;
+  const valid = trimmed.length > 0;
 
   function submit() {
     if (pending || !valid) return;
-    onSubmit({ reason, ...(trimmed ? { reference: trimmed } : {}) });
+    onSubmit({ reason, reference: trimmed });
   }
 
   return (
@@ -82,7 +86,7 @@ export function ViewDialog({
             className="ms-input"
             style={{ width: "100%" }}
             maxLength={200}
-            required={needsReference}
+            required
             disabled={pending}
             placeholder={t("referencePlaceholder")}
             value={reference}

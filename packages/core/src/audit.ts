@@ -42,6 +42,17 @@ export function parseAuditActor(actorId: string | null): ParsedAuditActor {
   return { kind: "system" };
 }
 
+/** The audit_log row for an event, for the rare action that must not happen without its row. */
+export function auditRow(event: AuditEvent): typeof schema.auditLog.$inferInsert {
+  return {
+    teamId: event.teamId,
+    actorId: encodeActor(event.actor),
+    action: event.action,
+    target: event.target ? `${event.target.type}:${event.target.id}` : null,
+    data: event.metadata ?? null,
+  };
+}
+
 /**
  * Append one audit row. Call AFTER the mutation commits (never inside its
  * transaction): the write is best-effort — a failure is logged and swallowed
@@ -49,13 +60,7 @@ export function parseAuditActor(actorId: string | null): ParsedAuditActor {
  */
 export async function recordAudit(db: Db, event: AuditEvent): Promise<void> {
   try {
-    await db.insert(schema.auditLog).values({
-      teamId: event.teamId,
-      actorId: encodeActor(event.actor),
-      action: event.action,
-      target: event.target ? `${event.target.type}:${event.target.id}` : null,
-      data: event.metadata ?? null,
-    });
+    await db.insert(schema.auditLog).values(auditRow(event));
   } catch (err) {
     console.error("audit write failed", err);
   }

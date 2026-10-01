@@ -3,6 +3,7 @@
 import {
   CONTENT_REVEAL_JUSTIFICATION_MAX,
   CONTENT_REVEAL_JUSTIFICATION_MIN,
+  CONTENT_REVEAL_ONE_MESSAGE_REASONS,
   CONTENT_REVEAL_REASONS,
   type ContentRevealReason,
   type RevealSpan,
@@ -189,10 +190,18 @@ function RevealDialog({
     windowOnly ? "flagged_window" : "email",
   );
   const short = justification.trim().length < CONTENT_REVEAL_JUSTIFICATION_MIN;
+  const oneMessage = CONTENT_REVEAL_ONE_MESSAGE_REASONS.includes(reason);
+  const reasons = windowOnly
+    ? CONTENT_REVEAL_REASONS.filter((key) => !CONTENT_REVEAL_ONE_MESSAGE_REASONS.includes(key))
+    : CONTENT_REVEAL_REASONS;
 
   function submit() {
     if (pending || short) return;
-    onSubmit({ reason, justification: justification.trim(), scope });
+    onSubmit({
+      reason,
+      justification: justification.trim(),
+      scope: oneMessage ? "email" : scope,
+    });
   }
 
   const windowLabel =
@@ -227,7 +236,7 @@ function RevealDialog({
             ariaLabel={t("reason")}
             width="100%"
             disabled={pending}
-            options={CONTENT_REVEAL_REASONS.map((key) => ({
+            options={reasons.map((key) => ({
               value: key,
               label: t(`reasons.${key}`),
             }))}
@@ -273,7 +282,7 @@ function RevealDialog({
                   id={`${id}-scope`}
                   type="radio"
                   name={`${id}-scope-group`}
-                  checked={scope === "email"}
+                  checked={oneMessage || scope === "email"}
                   disabled={pending}
                   onChange={() => setScope("email")}
                 />
@@ -282,7 +291,7 @@ function RevealDialog({
                   <div className="sub">{t("scopeEmailSub")}</div>
                 </span>
               </label>
-              {request.flaggedCount > 1 ? (
+              {request.flaggedCount > 1 && !oneMessage ? (
                 <label className="ms-radio-card">
                   <input
                     type="radio"

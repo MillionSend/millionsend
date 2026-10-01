@@ -975,8 +975,9 @@ do proprietário.
 
 **O que o operador vê.** O painel sob uma faixa ("Modo de suporte de
 &lt;equipe&gt; · somente leitura · termina em mm:ss"): e-mails e seus
-eventos, contatos, domínios, transmissões, templates, nomes de chaves de
-API, endpoints de webhook, configurações e uso.
+eventos (um link clicado mostra só a origem, porque o caminho e a query
+podem conter um token), contatos, domínios, transmissões, templates, nomes
+de chaves de API, endpoints de webhook, configurações e uso.
 
 **O que fica oculto.** O conteúdo do que já foi enviado: corpos de e-mail
 (o detalhe diz "O conteúdo do e-mail fica oculto no modo de suporte"); o
@@ -994,17 +995,19 @@ do que a tela mostra.
 **Por quanto tempo.** 30 minutos, verificados a cada requisição. Um modo
 ativo por operador; iniciar outro encerra o anterior, e um modo não inicia
 outro. O operador encerra pela faixa, o proprietário em Configurações →
-Acesso de suporte, e a expiração encerra na requisição seguinte.
+Acesso de suporte, e a expiração encerra na requisição seguinte. Iniciar um
+modo exige um login feito nos últimos 15 minutos, para que uma sessão antiga
+roubada não consiga abrir um.
 
 **O que é registrado.** `support.view_started` e `support.view_ended`, na
-auditoria da instância e, na hora, no Log de auditoria da própria equipe em
-Configurações: quem, o motivo, a referência, como terminou, os minutos e
-quantos procedimentos distintos foram lidos. O registro guarda uma contagem
-por nome de procedimento e nunca o que um procedimento devolveu.
+auditoria da instância e, na hora, no Registro de auditoria da própria
+equipe em Configurações: quem, o motivo, a referência, como terminou, os
+minutos e quantos procedimentos distintos foram lidos. O registro guarda uma
+contagem por nome de procedimento e nunca o que um procedimento devolveu.
 
-**O que o proprietário recebe.** Um e-mail quando a sessão começa, dizendo
-quem abriu, por quê, a referência, até quando e onde encerrar; e o cartão
-Acesso de suporte em Configurações enquanto ela está ativa, com um botão
+**O que o proprietário vê.** Nenhum e-mail. A sessão aparece na hora em
+Configurações → Registro de auditoria da equipe, e o cartão Acesso de
+suporte em Configurações a mostra enquanto ela está ativa, com um botão
 "Encerrar sessão".
 
 ```sh

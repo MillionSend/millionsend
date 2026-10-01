@@ -293,9 +293,11 @@ export function createAuth(
       },
     }),
     session: {
-      // No step-up: a signed-in session may do everything its role allows,
-      // however old it is (Better Auth would otherwise re-prompt for
-      // password changes and account deletion).
+      // No Better Auth step-up: a signed-in session may do everything its
+      // role allows, however old it is (Better Auth would otherwise re-prompt
+      // for password changes and account deletion). Starting a support view
+      // is the one exception and checks the sign-in age itself
+      // (SUPPORT_VIEW_SIGN_IN_MINUTES).
       freshAge: 0,
       additionalFields: {
         activeTeamId: { type: "string", required: false, input: false },

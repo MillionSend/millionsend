@@ -30,6 +30,7 @@ import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { planHoldUntil, sendingProgress } from "../broadcast-plan";
 import { getKeyring } from "../keyring";
+import { supportViewEventData } from "../support-view";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
 const emailStatus = z.enum(schema.emailStatusEnum.enumValues);
@@ -381,7 +382,9 @@ export const emailsRouter = router({
       html: body.html,
       text: body.text,
       hiddenBySupportView,
-      events,
+      events: hiddenBySupportView
+        ? events.map((e) => ({ ...e, data: supportViewEventData(e.data) }))
+        : events,
       insights,
     };
   }),

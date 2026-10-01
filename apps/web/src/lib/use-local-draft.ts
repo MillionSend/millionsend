@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isReadOnly } from "@/lib/read-only";
 
 export interface RecoveredDraft<T> {
   savedAt: number;
@@ -59,6 +60,9 @@ export function useLocalDraft<T>({
   useEffect(() => {
     const id = setTimeout(() => {
       if (recoveredPendingRef.current) return; // don't clobber an unanswered offer
+      // Saves are refused under a support view, so a mirrored draft would never
+      // be cleared and the customer's content would stay in the operator's browser.
+      if (isReadOnly()) return;
       try {
         const snapshot = JSON.stringify(stateRef.current);
         if (snapshot === baselineRef.current) {

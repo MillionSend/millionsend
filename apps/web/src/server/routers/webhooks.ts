@@ -22,6 +22,7 @@ import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit";
 import { getKeyring } from "../keyring";
+import { supportViewEventData } from "../support-view";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
 const httpsUrl = z
@@ -488,7 +489,13 @@ export const webhooksRouter = router({
         .innerJoin(t, eq(d.endpointId, t.id))
         .where(and(eq(d.id, input.id), eq(t.teamId, ctx.teamId)));
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-      return row;
+      if (!ctx.supportView) return row;
+      // Receivers often echo the payload back, full click link included.
+      return {
+        ...row,
+        payload: { ...row.payload, data: supportViewEventData(row.payload.data) },
+        lastResponseBody: null,
+      };
     }),
   }),
 });

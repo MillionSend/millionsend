@@ -264,20 +264,6 @@ export const ptBR = {
       owner_support_request: "um pedido de suporte desta equipe",
     },
   },
-  "support.view_started": {
-    subject: "Modo de suporte iniciado em {team}",
-    body: [
-      "{operator}, operador da instância, abriu o painel de {team} em um modo de suporte somente leitura {reason}. Ele termina às {until}, ou antes se você encerrá-lo.",
-      "O conteúdo dos e-mails enviados, exportações e segredos não ficam visíveis nesse modo. Cada procedimento lido pelo operador é contado, e a sessão já aparece no log de auditoria da sua equipe em Configurações → Log de auditoria. Abra Acesso de suporte em Configurações para encerrá-la.",
-    ],
-    button: "Abrir acesso de suporte",
-    extra: {
-      support_ticket: "a seu pedido, chamado {reference}",
-      billing_dispute: "por uma disputa de cobrança, referência {reference}",
-      other: "por outro motivo{reference}",
-      ref: " (referência {reference})",
-    },
-  },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 export const ptBRPhrases = {

@@ -875,8 +875,9 @@ message text itself is needed. The session rides on the operator's own
 login; no session is ever minted for the owner.
 
 - **What the operator sees:** the dashboard under a banner ("Support view
-  of <team> · read-only · ends in mm:ss"): emails and their events,
-  contacts, domains, broadcasts, templates, API key names, webhook
+  of <team> · read-only · ends in mm:ss"): emails and their events (a
+  clicked link shows only its origin, since its path and query can carry a
+  token), contacts, domains, broadcasts, templates, API key names, webhook
   endpoints, settings and usage.
 - **What stays hidden:** the content of sent mail. Email bodies (the
   detail says "Email content is hidden in support view"); the body and
@@ -894,15 +895,17 @@ login; no session is ever minted for the owner.
 - **How long:** 30 minutes, enforced on every request; one live view per
   operator, starting another ends the previous, and a view cannot start
   another. The operator ends it from the banner, the owner from Settings →
-  Support access, and expiry ends it on the next request.
+  Support access, and expiry ends it on the next request. Starting one
+  needs a sign-in from the last 15 minutes, so a stolen long-lived session
+  cannot open a view.
 - **What is logged:** `support.view_started` and `support.view_ended` in
   the instance audit and, at once, in the team's own Settings → Audit log
   (who, the reason, the reference, how it ended, the minutes, how many
   distinct procedures were read). The grant row keeps a count per
   procedure name and never anything a procedure returned.
-- **What the owner receives:** an email when the session starts (who, why,
-  the reference, until when, and where to end it), and the Support access
-  card while it is live.
+- **What the owner sees:** no email; the session is in the team's audit
+  log at once, and the Support access card under Settings shows it while it
+  is live, with an "End session" button.
 
 ```sh
 SUPPORT_VIEW=on

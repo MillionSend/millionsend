@@ -264,20 +264,6 @@ export const en = {
       owner_support_request: "a support request from this team",
     },
   },
-  "support.view_started": {
-    subject: "Support view of {team} started",
-    body: [
-      "{operator}, an instance operator, opened the {team} dashboard in a read-only support view {reason}. It ends at {until}, or sooner if you end it.",
-      "The content of sent emails, exports and secrets are not visible in that view. Every procedure the operator reads is counted, and the session is already in your team's audit log under Settings → Audit log. Open Support access under Settings to end it.",
-    ],
-    button: "Open support access",
-    extra: {
-      support_ticket: "at your request, support ticket {reference}",
-      billing_dispute: "for a billing dispute, reference {reference}",
-      other: "for another reason{reference}",
-      ref: " (reference {reference})",
-    },
-  },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 /** Sentences several kinds share, filled by the builders. */

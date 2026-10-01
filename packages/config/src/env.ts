@@ -255,8 +255,9 @@ export const env = createEnv({
 
     // Read-only support view: the instance operator may open a team's
     // dashboard as its owner sees it, for 30 minutes, with a reason and a
-    // ticket reference, under a banner, notified to the owner and recorded
-    // in both audit logs. Off by default; read through supportViewEnabled().
+    // ticket reference, under a banner, recorded at once in both audit logs
+    // (the owner is not mailed). Off by default; read through
+    // supportViewEnabled().
     SUPPORT_VIEW: z.enum(["off", "on"]).default("off"),
 
     // Public base URL of this deployment; SNS subscriptions and hosted

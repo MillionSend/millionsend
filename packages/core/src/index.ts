@@ -204,6 +204,7 @@ export {
   CONTENT_REVEAL_JUSTIFICATION_MAX,
   CONTENT_REVEAL_JUSTIFICATION_MIN,
   CONTENT_REVEAL_NOTICE_DAYS,
+  CONTENT_REVEAL_ONE_MESSAGE_REASONS,
   CONTENT_REVEAL_REASONS,
   CONTENT_REVEAL_SCOPES,
   CONTENT_REVEAL_TEXT_MAX_CHARS,
@@ -501,11 +502,11 @@ export {
   recordSupportViewRead,
   SUPPORT_VIEW_MINUTES,
   SUPPORT_VIEW_REASONS,
+  SUPPORT_VIEW_SIGN_IN_MINUTES,
   type SupportViewEndedBy,
   type SupportViewGrant,
   type SupportViewReason,
   startSupportView,
-  supportViewNeedsReference,
 } from "./support-view.js";
 export {
   clearUnsubscribeSuppression,
