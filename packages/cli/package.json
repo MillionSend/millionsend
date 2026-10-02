@@ -37,7 +37,7 @@
     "@millionsend/db": "workspace:*",
     "@millionsend/test-utils": "workspace:*",
     "@types/node": "^22.20.2",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "^0.45.3",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"

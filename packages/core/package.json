@@ -70,8 +70,8 @@
     "@millionsend/db": "workspace:*",
     "@sentry/core": "^11.1.0",
     "@sentry/node": "^11.1.0",
-    "drizzle-orm": "^0.45.2",
-    "zod": "^4.6.3"
+    "drizzle-orm": "^0.45.3",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.14",
