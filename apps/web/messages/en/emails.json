@@ -144,7 +144,7 @@
     "check": {
       "dmarc_record": {
         "title": "DMARC record",
-        "description": "Your sending domain publishes a DMARC policy. Google, Yahoo and Microsoft require one for bulk senders — p=none already satisfies them; p=quarantine or p=reject additionally unlocks BIMI.",
+        "description": "Your sending domain publishes a DMARC policy. Google, Yahoo and Microsoft require one for bulk senders, and p=none already satisfies them.",
         "advice": "Add a _dmarc TXT record to your domain. Start at p=none, watch the reports, then tighten."
       },
       "auth_alignment": {
@@ -236,11 +236,6 @@
         "title": "Images on your domain",
         "description": "Images load from your sending domain. Third-party image hosts tie the message's rendering to servers you don't control.",
         "advice": "Host images on your own domain."
-      },
-      "bimi_ready": {
-        "title": "BIMI readiness",
-        "description": "BIMI shows your logo in supporting inboxes. It requires DMARC at p=quarantine or p=reject — p=none is not enough.",
-        "advice": "Tighten DMARC to quarantine or reject, then publish a BIMI record with a verified logo."
       },
       "reply_to_present": {
         "title": "Reply-To with no-reply From",

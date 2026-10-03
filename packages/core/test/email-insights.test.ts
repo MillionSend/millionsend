@@ -89,7 +89,6 @@ describe("catalog contract", () => {
       "subject_lint:minor:25:all",
       "image_alt_text:info:0:all",
       "images_offsite:info:0:all",
-      "bimi_ready:info:0:all",
       "reply_to_present:info:0:all",
     ]);
   });
@@ -668,29 +667,6 @@ describe("images_offsite", () => {
   });
 });
 
-describe("bimi_ready", () => {
-  it("passes enforcing policies, fails p=none and no-record, unknown without a snapshot", () => {
-    expect(
-      check(
-        input({ domainSnapshot: { dmarcPolicy: "quarantine", dmarcCheckedAt: fresh() } }),
-        "bimi_ready",
-      ).status,
-    ).toBe("pass");
-    expect(check(input(), "bimi_ready").status).toBe("pass");
-    const none = check(
-      input({ domainSnapshot: { dmarcPolicy: "none", dmarcCheckedAt: fresh() } }),
-      "bimi_ready",
-    );
-    expect(none.status).toBe("fail");
-    expect(none.detail).toEqual({ needs: "p=quarantine or p=reject" });
-    expect(
-      check(input({ domainSnapshot: { dmarcPolicy: null, dmarcCheckedAt: fresh() } }), "bimi_ready")
-        .status,
-    ).toBe("fail");
-    expect(check(input({ domainSnapshot: null }), "bimi_ready").status).toBe("unknown");
-  });
-});
-
 describe("reply_to_present", () => {
   it("is not_applicable unless no_reply_from failed", () => {
     expect(check(mkt(), "reply_to_present").status).toBe("not_applicable");
@@ -732,7 +708,6 @@ describe("scoring", () => {
       ["no_shorteners", 125],
       ["no_reply_from", 50],
       ["tracking_unbranded", 40],
-      ["bimi_ready", 0],
     ]);
     expect(res.scoreTenths).toBe(44);
     expect(scoreBand(res.scoreTenths)).toBe("at_risk");

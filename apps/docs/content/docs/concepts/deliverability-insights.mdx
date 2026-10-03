@@ -49,7 +49,6 @@ Each check reports one of five statuses: `pass`, `fail`, `passed_by_design`,
 | `subject_lint` | minor | 0.25 | All | The subject is not mostly uppercase and has no `!!!`/`???` runs. |
 | `image_alt_text` | info | 0 | All | Every image has alt text. |
 | `images_offsite` | info | 0 | All | Images are hosted on your own domain. |
-| `bimi_ready` | info | 0 | All | DMARC policy is strong enough for BIMI (`p=quarantine` or `p=reject`). |
 | `reply_to_present` | info | 0 | All | A Reply-To exists when the From address is `no-reply@`. |
 
 Some checks can't fail on MillionSend and report `passed_by_design`:
@@ -86,7 +85,9 @@ score = max(0, 10 − critical fails − major fails − min(1.5, minor fails))
 Every score carries a `score_version`, stamping which check table and weights
 scored that email. Weights may evolve; after a version bump, newer emails are
 scored by the newer table, and scores with different versions are not
-directly comparable. Existing scores are never rewritten.
+directly comparable. Existing scores are never rewritten. A zero-weight
+check can be added or retired without a version bump, since it never moves a
+score; a retired check also disappears from the reports of older emails.
 
 ## Marketing vs transactional
 

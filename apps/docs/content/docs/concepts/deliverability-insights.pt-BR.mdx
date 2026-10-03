@@ -52,7 +52,6 @@ pontos.
 | `subject_lint` | minor | 0.25 | Todos | O assunto não é majoritariamente maiúsculo e não tem sequências de `!!!`/`???`. |
 | `image_alt_text` | info | 0 | Todos | Toda imagem tem texto alternativo. |
 | `images_offsite` | info | 0 | Todos | Imagens hospedadas no seu próprio domínio. |
-| `bimi_ready` | info | 0 | Todos | Política DMARC forte o suficiente para BIMI (`p=quarantine` ou `p=reject`). |
 | `reply_to_present` | info | 0 | Todos | Um Reply-To existe quando o From é `no-reply@`. |
 
 Algumas verificações não podem falhar no MillionSend e reportam
@@ -91,7 +90,9 @@ Toda nota carrega um `score_version`, marcando qual tabela de verificações e
 pesos pontuou aquele email. Os pesos podem evoluir; depois de um bump de
 versão, emails mais novos são pontuados pela tabela mais nova, e notas com
 versões diferentes não são diretamente comparáveis. Notas existentes nunca
-são reescritas.
+são reescritas. Uma verificação de peso zero pode entrar ou sair sem bump de
+versão, porque nunca muda a nota; uma verificação retirada também some dos
+relatórios de emails antigos.
 
 ## Marketing vs transacional
 

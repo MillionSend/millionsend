@@ -4,6 +4,27 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { fetchEmailInsights } from "../src/email-insights-lookup.js";
 
+// bimi_ready is no longer in the catalog, but older stored rows still carry it.
+const retired = {
+  id: "bimi_ready",
+  severity: "info",
+  status: "fail",
+  penaltyHundredths: 0,
+} as const;
+const current = {
+  id: "plain_text",
+  severity: "major",
+  status: "pass",
+  penaltyHundredths: 0,
+} as const;
+// A catalog check with the retired one's shape (info, zero weight) must survive the filter.
+const infoFail = {
+  id: "images_offsite",
+  severity: "info",
+  status: "fail",
+  penaltyHundredths: 0,
+} as const;
+
 let db: Db;
 let close: () => Promise<void>;
 let teamId: string;
@@ -36,8 +57,22 @@ beforeAll(async () => {
   broadcastEmailId = fanout.id;
 
   await db.insert(schema.emailInsights).values([
-    { teamId, emailId, marketing: false, checks: [], scoreTenths: 100, scoreVersion: 1 },
-    { teamId, broadcastId, marketing: true, checks: [], scoreTenths: 80, scoreVersion: 1 },
+    {
+      teamId,
+      emailId,
+      marketing: false,
+      checks: [retired, current, infoFail],
+      scoreTenths: 100,
+      scoreVersion: 1,
+    },
+    {
+      teamId,
+      broadcastId,
+      marketing: true,
+      checks: [current, retired, infoFail],
+      scoreTenths: 80,
+      scoreVersion: 1,
+    },
   ]);
 });
 
@@ -51,6 +86,13 @@ it("resolves an API send by its emailId-keyed row", async () => {
 it("falls back to the shared broadcastId-keyed row for fan-out emails", async () => {
   const row = await fetchEmailInsights(db, teamId, { emailId: broadcastEmailId, broadcastId });
   expect(row?.scoreTenths).toBe(80);
+});
+
+it("drops results of checks no longer in the catalog, on both lookup paths", async () => {
+  const api = await fetchEmailInsights(db, teamId, { emailId, broadcastId: null });
+  const fanout = await fetchEmailInsights(db, teamId, { emailId: broadcastEmailId, broadcastId });
+  expect(api?.checks.map((c) => c.id)).toEqual(["plain_text", "images_offsite"]);
+  expect(fanout?.checks.map((c) => c.id)).toEqual(["plain_text", "images_offsite"]);
 });
 
 it("is team-scoped: another team's id resolves nothing", async () => {

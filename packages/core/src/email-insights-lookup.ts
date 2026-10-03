@@ -3,9 +3,16 @@ import type { Db } from "@millionsend/db";
 // postgres driver (node:net), which breaks client bundles importing this module.
 import * as schema from "@millionsend/db/schema";
 import { and, eq } from "drizzle-orm";
-import { type EmailCheckResult, type ScoreBand, scoreBand } from "./email-insights.js";
+import { CHECK_IDS, type EmailCheckResult, type ScoreBand, scoreBand } from "./email-insights.js";
 
 export type EmailInsightsRow = typeof schema.emailInsights.$inferSelect;
+
+const CATALOG = new Set<string>(CHECK_IDS);
+
+/** Rows outlive the catalog, and a retired check has no copy left to render. */
+function catalogChecks(row: EmailInsightsRow): EmailInsightsRow {
+  return { ...row, checks: row.checks.filter((c) => CATALOG.has(c.id)) };
+}
 
 /**
  * THE single insights lookup for an email: API sends store one row keyed by
@@ -25,7 +32,7 @@ export async function fetchEmailInsights(
     .from(i)
     .where(and(eq(i.teamId, teamId), eq(i.emailId, ref.emailId)))
     .limit(1);
-  if (byEmail) return byEmail;
+  if (byEmail) return catalogChecks(byEmail);
   if (ref.broadcastId === null) return null;
   return fetchBroadcastInsights(db, teamId, ref.broadcastId);
 }
@@ -42,7 +49,7 @@ export async function fetchBroadcastInsights(
     .from(i)
     .where(and(eq(i.teamId, teamId), eq(i.broadcastId, broadcastId)))
     .limit(1);
-  return byBroadcast ?? null;
+  return byBroadcast ? catalogChecks(byBroadcast) : null;
 }
 
 /** The row as the dashboard reads it: score, band, and the check results. */
