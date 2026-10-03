@@ -7,6 +7,7 @@ import { and, eq, gte, type SQL, sql } from "drizzle-orm";
 import { type DeliverabilityStatus, fetchDeliverabilityHealth } from "./deliverability.js";
 import { firstRow, resultRows } from "./driver-result.js";
 import {
+  CHECK_IDS,
   type CheckId,
   type CheckSeverity,
   SCORE_VERSION,
@@ -247,7 +248,8 @@ export interface ContentFactor {
 /**
  * Failing checks over the score window, heaviest first, with the same
  * email↔insights join and window as the content sub-score so both read the
- * same population. Info checks (zero weight) still list, at zero cost.
+ * same population. Info checks (zero weight) still list, at zero cost;
+ * results of checks retired from the catalog do not.
  */
 export async function fetchContentFactors(
   db: Db,
@@ -270,7 +272,7 @@ export async function fetchContentFactors(
              coalesce(sum((c->>'penaltyHundredths')::int * s.recipients), 0)::bigint as weighted
       from (${scoredSendsSql(teamId, window)}) s
       cross join lateral jsonb_array_elements(s.checks) as c
-      where c->>'status' = 'fail'
+      where c->>'status' = 'fail' and c->>'id' in ${CHECK_IDS}
       group by 1, 2
       order by weighted desc, recipients desc, id asc
     `),

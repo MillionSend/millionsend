@@ -144,7 +144,7 @@
     "check": {
       "dmarc_record": {
         "title": "Registro DMARC",
-        "description": "Seu domínio de envio publica uma política DMARC. Google, Yahoo e Microsoft exigem uma para remetentes em massa — p=none já os satisfaz; p=quarantine ou p=reject também desbloqueia o BIMI.",
+        "description": "Seu domínio de envio publica uma política DMARC. Google, Yahoo e Microsoft exigem uma para remetentes em massa, e p=none já os satisfaz.",
         "advice": "Adicione um registro TXT _dmarc ao seu domínio. Comece com p=none, acompanhe os relatórios e depois restrinja."
       },
       "auth_alignment": {
@@ -236,11 +236,6 @@
         "title": "Imagens no seu domínio",
         "description": "As imagens carregam do seu domínio de envio. Hosts de terceiros amarram a renderização da mensagem a servidores que você não controla.",
         "advice": "Hospede as imagens no seu próprio domínio."
-      },
-      "bimi_ready": {
-        "title": "Pronto para BIMI",
-        "description": "O BIMI exibe seu logotipo nas caixas de entrada compatíveis. Exige DMARC em p=quarantine ou p=reject — p=none não basta.",
-        "advice": "Restrinja o DMARC para quarantine ou reject e depois publique um registro BIMI com logotipo verificado."
       },
       "reply_to_present": {
         "title": "Reply-To com remetente no-reply",

@@ -19,8 +19,8 @@ const fail = (id: string, penaltyHundredths: number) => ({
   penaltyHundredths,
 });
 const pass = {
-  id: "alt_text",
-  severity: "minor" as const,
+  id: "image_alt_text",
+  severity: "info" as const,
   status: "pass" as const,
   penaltyHundredths: 0,
 };
@@ -68,7 +68,7 @@ beforeAll(async () => {
       teamId,
       emailId: scored,
       marketing: false,
-      checks: [fail("no_plain_text", 50), pass],
+      checks: [fail("plain_text", 50), pass],
       scoreTenths: 90,
       scoreVersion: 1,
     },
@@ -76,7 +76,7 @@ beforeAll(async () => {
       teamId,
       emailId: stale,
       marketing: false,
-      checks: [fail("no_plain_text", 50)],
+      checks: [fail("plain_text", 50)],
       scoreTenths: 10,
       scoreVersion: 1,
     },
@@ -84,7 +84,7 @@ beforeAll(async () => {
       teamId: otherTeamId,
       emailId: foreign,
       marketing: false,
-      checks: [fail("no_plain_text", 50)],
+      checks: [fail("plain_text", 50)],
       scoreTenths: 10,
       scoreVersion: 1,
     },
@@ -92,7 +92,25 @@ beforeAll(async () => {
       teamId,
       broadcastId: broadcast.id,
       marketing: true,
-      checks: [fail("no_plain_text", 30), fail("missing_unsubscribe", 20), pass],
+      checks: [
+        fail("plain_text", 30),
+        fail("list_unsubscribe", 20),
+        pass,
+        // A check retired from the catalog: stored rows keep it, factors skip it.
+        {
+          id: "bimi_ready",
+          severity: "info" as const,
+          status: "fail" as const,
+          penaltyHundredths: 0,
+        },
+        // Same shape, still in the catalog: it lists, at zero cost.
+        {
+          id: "images_offsite",
+          severity: "info" as const,
+          status: "fail" as const,
+          penaltyHundredths: 0,
+        },
+      ],
       scoreTenths: 60,
       scoreVersion: 1,
     },
@@ -112,18 +130,25 @@ it("aggregates failing checks over the same population, heaviest first", async (
   const factors = await fetchContentFactors(db, teamId, { now });
   expect(factors).toEqual([
     {
-      id: "no_plain_text",
+      id: "plain_text",
       severity: "major",
       emails: 4,
       recipients: 5,
       weightedPenaltyHundredths: 50 * 2 + 30 * 3,
     },
     {
-      id: "missing_unsubscribe",
+      id: "list_unsubscribe",
       severity: "major",
       emails: 3,
       recipients: 3,
       weightedPenaltyHundredths: 20 * 3,
+    },
+    {
+      id: "images_offsite",
+      severity: "info",
+      emails: 3,
+      recipients: 3,
+      weightedPenaltyHundredths: 0,
     },
   ]);
 });

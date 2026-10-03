@@ -17,7 +17,11 @@ export const SCORE_VERSION = 1;
 export type CheckStatus = "pass" | "fail" | "passed_by_design" | "not_applicable" | "unknown";
 export type CheckSeverity = "critical" | "major" | "minor" | "info";
 
-/** Single source of truth for the check catalog, ordered by severity then weight. */
+/**
+ * Single source of truth for the check catalog, ordered by severity then weight.
+ * A zero-weight check can leave without a SCORE_VERSION bump, since no score
+ * moves. Stored rows keep its results, so readers surface only CHECK_IDS.
+ */
 export const CHECKS = [
   { id: "dmarc_record", severity: "critical", weightHundredths: 350, applies: "all" },
   { id: "auth_alignment", severity: "critical", weightHundredths: 350, applies: "all" },
@@ -38,7 +42,6 @@ export const CHECKS = [
   { id: "subject_lint", severity: "minor", weightHundredths: 25, applies: "all" },
   { id: "image_alt_text", severity: "info", weightHundredths: 0, applies: "all" },
   { id: "images_offsite", severity: "info", weightHundredths: 0, applies: "all" },
-  { id: "bimi_ready", severity: "info", weightHundredths: 0, applies: "all" },
   { id: "reply_to_present", severity: "info", weightHundredths: 0, applies: "all" },
 ] as const satisfies readonly {
   id: string;
@@ -48,6 +51,8 @@ export const CHECKS = [
 }[];
 
 export type CheckId = (typeof CHECKS)[number]["id"];
+
+export const CHECK_IDS: readonly CheckId[] = CHECKS.map((c) => c.id);
 
 export interface EmailCheckResult {
   id: CheckId;
@@ -424,16 +429,6 @@ export function evaluateEmailInsights(input: EmailInsightsInput): {
         }
         if (offsite.size === 0) return { status: "pass" };
         return { status: "fail", detail: { imageDomains: [...offsite].slice(0, 5) } };
-      }
-      case "bimi_ready": {
-        if (!dmarcKnown || snap === null) return { status: "unknown" };
-        if (snap.dmarcPolicy === "quarantine" || snap.dmarcPolicy === "reject") {
-          return { status: "pass" };
-        }
-        if (snap.dmarcPolicy === "none") {
-          return { status: "fail", detail: { needs: "p=quarantine or p=reject" } };
-        }
-        return { status: "fail" };
       }
       case "reply_to_present": {
         // Only meaningful as the mitigation for a failing no_reply_from.
