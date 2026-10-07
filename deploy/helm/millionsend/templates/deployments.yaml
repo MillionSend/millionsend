@@ -1,0 +1,161 @@
+{{- /*
+One Deployment per process. The image's supervisor (scripts/start.mjs)
+picks the process from PROCESS and runs pending migrations before starting
+it (docs excepted); concurrent boots serialize on a Postgres advisory lock.
+*/ -}}
+{{- $components := list
+  (dict "name" "web" "port" 3000 "probe" "tcp")
+  (dict "name" "api" "port" 3001 "probe" "http" "env" (dict "PORT" "3001"))
+  (dict "name" "worker" "env" (dict "WORKER_REPLICAS" (toString .Values.worker.replicas)))
+  (dict "name" "smtp" "port" (int .Values.smtp.port) "probe" "tcp" "env" (dict "SMTP_PORT" (toString .Values.smtp.port)))
+  (dict "name" "docs" "port" 3002 "probe" "tcp")
+}}
+{{- range $c := $components }}
+{{- $v := index $.Values $c.name }}
+{{- if $v.enabled }}
+{{- if and (eq $c.name "smtp") (not $v.tlsSecretName) }}
+{{- fail "smtp.tlsSecretName is required with smtp.enabled: the relay refuses to start without a STARTTLS keypair" }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "millionsend.fullname" $ }}-{{ $c.name }}
+  labels:
+    {{- include "millionsend.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $c.name }}
+spec:
+  replicas: {{ $v.replicas }}
+  {{- if eq $c.name "worker" }}
+  # Recreate: the old and new worker sets must not overlap, or N+M
+  # processes each claim 1/N of the SES rate during the rollout.
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "millionsend.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $c.name }}
+  template:
+    metadata:
+      annotations:
+        {{- include "millionsend.checksums" $ | nindent 8 }}
+        {{- with $.Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "millionsend.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $c.name }}
+        {{- with $.Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "millionsend.serviceAccountName" $ }}
+      automountServiceAccountToken: {{ $.Values.serviceAccount.automountServiceAccountToken }}
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ $.Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: {{ $c.name }}
+          image: {{ include "millionsend.image" $ }}
+          {{- with $.Values.image.pullPolicy }}
+          imagePullPolicy: {{ . }}
+          {{- end }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          envFrom:
+            {{- include "millionsend.envFrom" $ | nindent 12 }}
+          env:
+            - name: PROCESS
+              value: {{ $c.name }}
+            {{- range $k, $val := $c.env }}
+            - name: {{ $k }}
+              value: {{ $val | quote }}
+            {{- end }}
+            {{- if eq $c.name "smtp" }}
+            - name: SMTP_TLS_CERT_PATH
+              value: /certs/tls.crt
+            - name: SMTP_TLS_KEY_PATH
+              value: /certs/tls.key
+            {{- end }}
+            {{- if and (ne $c.name "docs") $.Values.aws.webIdentity.enabled }}
+            {{- include "millionsend.awsWebIdentityEnv" $ | trim | nindent 12 }}
+            {{- end }}
+            {{- with $.Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with $v.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if $c.port }}
+          ports:
+            - name: {{ $c.name }}
+              containerPort: {{ $c.port }}
+              protocol: TCP
+          {{- $probe := dict }}
+          {{- if eq $c.probe "http" }}
+          {{- $probe = dict "httpGet" (dict "path" "/health" "port" $c.name) }}
+          {{- else }}
+          {{- $probe = dict "tcpSocket" (dict "port" $c.name) }}
+          {{- end }}
+          # Boot runs pending migrations first; the startup budget (10 min)
+          # keeps a long migration from being killed halfway.
+          startupProbe:
+            {{- toYaml $probe | nindent 12 }}
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            {{- toYaml $probe | nindent 12 }}
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            {{- toYaml $probe | nindent 12 }}
+            periodSeconds: 20
+            failureThreshold: 3
+          {{- end }}
+          {{- with $v.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- include "millionsend.scratchVolumeMounts" $ | nindent 12 }}
+            {{- if eq $c.name "smtp" }}
+            - name: smtp-tls
+              mountPath: /certs
+              readOnly: true
+            {{- end }}
+            {{- if and (ne $c.name "docs") $.Values.aws.webIdentity.enabled }}
+            {{- include "millionsend.awsWebIdentityVolumeMount" $ | trim | nindent 12 }}
+            {{- end }}
+      volumes:
+        {{- include "millionsend.scratchVolumes" $ | nindent 8 }}
+        {{- if eq $c.name "smtp" }}
+        - name: smtp-tls
+          secret:
+            secretName: {{ $v.tlsSecretName }}
+        {{- end }}
+        {{- if and (ne $c.name "docs") $.Values.aws.webIdentity.enabled }}
+        {{- include "millionsend.awsWebIdentityVolume" $ | trim | nindent 8 }}
+        {{- end }}
+      {{- with $.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}

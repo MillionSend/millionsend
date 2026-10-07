@@ -142,6 +142,27 @@ Without Docker (Node 24+, pnpm 11, local Postgres): `pnpm install`, point
 </details>
 
 <details>
+<summary><b>Kubernetes (Helm)</b></summary>
+
+The chart in [`deploy/helm/millionsend`](deploy/helm/millionsend/README.md) runs the
+same image with one Deployment per process (web, api, worker, plus the optional
+smtp relay and docs). Postgres stays outside the chart. Secrets come from an
+existing Secret (kubectl, SealedSecrets, SOPS), an External Secrets Operator
+`ExternalSecret`, or, for tests only, the values file:
+
+```sh
+helm upgrade --install millionsend deploy/helm/millionsend \
+  -n millionsend --create-namespace -f my-values.yaml
+```
+
+The chart README has a k3s example (Traefik, CloudNativePG, an IAM role over OIDC web identity
+instead of access keys) and an EKS example
+(ALB, RDS, External Secrets with AWS Secrets Manager, IRSA). Every variable in
+this guide goes in either `config` or the Secret.
+
+</details>
+
+<details>
 <summary><b>AWS setup</b></summary>
 
 The AWS step of `npx @millionsend/setup` creates everything MillionSend needs in
