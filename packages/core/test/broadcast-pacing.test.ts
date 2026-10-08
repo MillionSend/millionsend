@@ -59,7 +59,7 @@ beforeAll(async () => {
     row({ broadcastId, latestStatus: "delivered", sentAt: ago(25) }),
     row({ broadcastId, latestStatus: "sent", sentAt: ago(400) }),
     row({ broadcastId, latestStatus: "sent", sentAt: ago(25 * 60) }),
-    // Transactional sends count towards neither.
+    // Transactional rows: the sent one counts towards every send, never towards bulk.
     row({ latestStatus: "sent", sentAt: ago(5) }),
     row({ latestStatus: "queued_quota" }),
     // The wave in flight, and the parked remainder.
@@ -73,9 +73,9 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
-it("counts bulk sends and queued bulk rows per region", async () => {
+it("counts every send, the bulk ones and the queued bulk rows per region", async () => {
   const counts = await regionBulkCounts(db, NOW);
-  expect(counts.get("sa-east-1")).toEqual({ sent24h: 3, queued: 2 });
+  expect(counts.get("sa-east-1")).toEqual({ sent24h: 3, allSent24h: 4, queued: 2 });
 });
 
 it("buckets the region's bulk sends by drain slot", async () => {
@@ -194,4 +194,18 @@ it("plans a region's sends from its live state and names the rung that fits", as
     rungThatFits({ kind: "day", plan: "free", limit: 100 }, { day: 0, period: 0 }, NOW, runner),
   ).toMatchObject({ rung: { key: "pro_200k" }, overage: false });
   expect(rungThatFits({ kind: "none" }, used, NOW, runner)).toBeNull();
+});
+
+it("reads the transactional volume off our own rows while SES's number lags, on an unlimited quota too", async () => {
+  const plan = await planRegionSend(db, {
+    region: "sa-east-1",
+    account: { max24h: -1, sentLast24h: 2, maxSendRate: 14 },
+    reservePercent: 30,
+    rateCeiling: 14,
+    horizonDays: 24,
+    now: NOW,
+  });
+  expect(plan.share).toBe(Number.POSITIVE_INFINITY);
+  // SES has seen two of our four sends; three of the four are bulk.
+  expect(plan.txPerDay).toBe(1);
 });

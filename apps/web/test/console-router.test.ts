@@ -695,7 +695,17 @@ describe("console.regions pacing numbers", () => {
     expect(region?.lastFinishesAt?.getTime()).toBeGreaterThan(Date.now());
     // Off the cloud nothing is sold against the quota.
     expect(list.committedPerDay).toBeNull();
-    await db.delete(schema.emails).where(eq(schema.emails.broadcastId, broadcast.id));
+    // Twelve transactional sends SES has not counted yet: our own rows are the floor.
+    await db
+      .insert(schema.emails)
+      .values(
+        Array.from({ length: 12 }, () =>
+          row({ broadcastId: null, latestStatus: "sent", sentAt: new Date(Date.now() - 60_000) }),
+        ),
+      );
+    const lagging = await operator().console.regions.list();
+    expect(lagging.served.find((r) => r.region === REGION)?.txSent24h).toBe(12);
+    await db.delete(schema.emails).where(eq(schema.emails.domainId, domain.id));
     await db.delete(schema.broadcasts).where(eq(schema.broadcasts.id, broadcast.id));
     await db.delete(schema.domains).where(eq(schema.domains.id, domain.id));
   });
