@@ -20,6 +20,7 @@ import {
   planBulkWaves,
   planCaps,
   SES_QUOTA_SLOT_MS,
+  transactionalSent24h,
 } from "./ses-capacity.js";
 import { fetchTeamQuota } from "./team-plan.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
@@ -33,11 +34,13 @@ import { DAY_MS, utcDay } from "./utc-day.js";
 export interface RegionBulkCounts {
   /** Broadcast rows SES accepted in the last 24 hours. */
   sent24h: number;
+  /** Every row SES accepted in the last 24 hours, transactional included. */
+  allSent24h: number;
   /** Broadcast rows queued with a job (the wave in flight). */
   queued: number;
 }
 
-/** Bulk sends and queued bulk rows per region; a region with neither is absent. */
+/** Sends and queued bulk rows per region; a region with neither is absent. */
 export async function regionBulkCounts(
   db: Db,
   now: Date = new Date(),
@@ -46,12 +49,18 @@ export async function regionBulkCounts(
   const d = schema.domains;
   const out = new Map<string, RegionBulkCounts>();
   const sent = await db
-    .select({ region: d.region, n: sql<number>`count(*)::int` })
+    .select({
+      region: d.region,
+      all: sql<number>`count(*)::int`,
+      bulk: sql<number>`count(*) filter (where ${e.broadcastId} is not null)::int`,
+    })
     .from(e)
     .innerJoin(d, eq(d.id, e.domainId))
-    .where(and(gte(e.sentAt, new Date(now.getTime() - DAY_MS)), isNotNull(e.broadcastId)))
+    .where(gte(e.sentAt, new Date(now.getTime() - DAY_MS)))
     .groupBy(d.region);
-  for (const row of sent) out.set(row.region, { sent24h: row.n, queued: 0 });
+  for (const row of sent) {
+    out.set(row.region, { sent24h: row.bulk, allSent24h: row.all, queued: 0 });
+  }
   const queued = await db
     .select({ region: d.region, n: sql<number>`count(*)::int` })
     .from(e)
@@ -59,7 +68,7 @@ export async function regionBulkCounts(
     .where(and(eq(e.latestStatus, "queued"), isNotNull(e.broadcastId)))
     .groupBy(d.region);
   for (const row of queued) {
-    out.set(row.region, { sent24h: out.get(row.region)?.sent24h ?? 0, queued: row.n });
+    out.set(row.region, { sent24h: 0, allSent24h: 0, ...out.get(row.region), queued: row.n });
   }
   return out;
 }
@@ -300,8 +309,11 @@ export async function planRegionSend(db: Db, input: RegionSendPlanInput): Promis
     sendingBroadcasts(db, { region: input.region }),
   ]);
   const share = bulkShare(input.account.max24h, input.reservePercent);
-  const bulkSent24h = counts.get(input.region)?.sent24h ?? 0;
-  const txPerDay = Math.max(0, input.account.sentLast24h - bulkSent24h);
+  const txPerDay = transactionalSent24h({
+    sesSentLast24h: input.account.sentLast24h,
+    allSent24h: counts.get(input.region)?.allSent24h ?? 0,
+    bulkSent24h: counts.get(input.region)?.sent24h ?? 0,
+  });
   const broadcasts: PlannedBroadcast[] = sending.map((b) => {
     const caps = input.capsFor?.(b.teamId);
     return {

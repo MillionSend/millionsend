@@ -26,6 +26,7 @@ import {
   SES_TRANSACTIONAL_RESERVE_MIN,
   sendingBroadcasts,
   sesEventsHealth,
+  transactionalSent24h,
   usableReserve,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
@@ -212,9 +213,12 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
             share,
             usableReserve: quota === null ? null : usableReserve(quota, reserve.value),
             bulkSent24h,
-            // SES's own number minus ours: whatever else sends counts as transactional.
             txSent24h: account.ok
-              ? Math.max(0, account.overview.quota.sentLast24h - bulkSent24h)
+              ? transactionalSent24h({
+                  sesSentLast24h: account.overview.quota.sentLast24h,
+                  allSent24h: bulk.get(region)?.allSent24h ?? 0,
+                  bulkSent24h,
+                })
               : null,
             room: share === null ? null : Math.max(0, share - bulkSent24h - bulkQueued),
             bulkParked: inRegion.reduce((n, b) => n + b.parked, 0),

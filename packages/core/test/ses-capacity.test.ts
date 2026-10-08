@@ -8,6 +8,7 @@ import {
   planBulkWaves,
   planCaps,
   roundUpToSlot,
+  transactionalSent24h,
   usableReserve,
 } from "../src/ses-capacity.js";
 
@@ -34,6 +35,26 @@ describe("share arithmetic", () => {
     expect(clampReserve(95)).toBe(90);
     expect(pacingHorizonDays(30)).toBe(24);
     expect(pacingHorizonDays(10)).toBe(8);
+  });
+});
+
+describe("transactionalSent24h", () => {
+  // Read live during a burst: SentLast24Hours said 60,645 while our rows already held 69,644 broadcast sends.
+  it("counts our own rows while SES's number lags a burst", () => {
+    expect(
+      transactionalSent24h({ sesSentLast24h: 60_645, allSent24h: 70_844, bulkSent24h: 69_644 }),
+    ).toBe(1_200);
+  });
+
+  it("keeps SES's number when other senders on the account push it above ours", () => {
+    expect(
+      transactionalSent24h({ sesSentLast24h: 73_747, allSent24h: 70_844, bulkSent24h: 69_644 }),
+    ).toBe(4_103);
+  });
+
+  it("with no rows of ours, whatever SES counted is transactional", () => {
+    expect(transactionalSent24h({ sesSentLast24h: 250, allSent24h: 0, bulkSent24h: 0 })).toBe(250);
+    expect(transactionalSent24h({ sesSentLast24h: 0, allSent24h: 0, bulkSent24h: 0 })).toBe(0);
   });
 });
 

@@ -32,7 +32,6 @@ export interface RegionSendControls extends SendQuotaControls {
   /** The bucket rate this process applies, messages per second. */
   rate(region?: string): number;
   bulkSent24h(region?: string): number;
-  txSent24h(region?: string): number;
   /** Rows a fan-out may admit into the share right now. */
   room(region?: string): number;
   bulkExhausted(region?: string): boolean;
@@ -78,7 +77,7 @@ export function createRegionSendControls(opts: {
   /** The transactional reserve, percent; absent = the default. */
   reserve?: (() => Promise<number>) | undefined;
   /** Bulk sends and queued bulk rows per region; absent = no pacing counts (tests). */
-  counts?: (() => Promise<Map<string, RegionBulkCounts>>) | undefined;
+  counts?: (() => Promise<Map<string, Pick<RegionBulkCounts, "sent24h" | "queued">>>) | undefined;
   /** Regions whose broadcasts the breaker or an operator holds. */
   paused?: (() => Promise<Set<string>>) | undefined;
   /** Rate every bucket starts at until the first probe. */
@@ -236,10 +235,6 @@ export function createRegionSendControls(opts: {
     capacity: (region) => pick(region).state.quota,
     rate: (region) => pick(region).state.rate,
     bulkSent24h: (region) => bulkSent(pick(region)),
-    txSent24h: (region) => {
-      const c = pick(region);
-      return Math.max(0, (c.state.quota?.sentLast24h ?? 0) - bulkSent(c));
-    },
     room,
     bulkExhausted: (region) => {
       const c = pick(region);

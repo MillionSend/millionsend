@@ -477,6 +477,7 @@ export {
   SES_QUOTA_SLOT_MS,
   SES_TRANSACTIONAL_RESERVE_MAX,
   SES_TRANSACTIONAL_RESERVE_MIN,
+  transactionalSent24h,
   usableReserve,
 } from "./ses-capacity.js";
 export { associateDomainTenant, markDomainTenantAssociated } from "./ses-tenant.js";

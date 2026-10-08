@@ -24,6 +24,7 @@ import {
   rungThatFits,
   type SendingBroadcast,
   sendingBroadcasts,
+  transactionalSent24h,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { and, inArray, isNotNull, sql } from "drizzle-orm";
@@ -95,7 +96,11 @@ export async function planBroadcastSend(
   const input: PlanInput = {
     share: bulkShare(sesQuota.max24h, reservePercent),
     rate: Math.min(sesQuota.maxSendRate || rateCeiling, rateCeiling),
-    txPerDay: Math.max(0, sesQuota.sentLast24h - (counts.get(opts.region)?.sent24h ?? 0)),
+    txPerDay: transactionalSent24h({
+      sesSentLast24h: sesQuota.sentLast24h,
+      allSent24h: counts.get(opts.region)?.allSent24h ?? 0,
+      bulkSent24h: counts.get(opts.region)?.sent24h ?? 0,
+    }),
     sentBySlot,
     start: now,
     horizonDays,

@@ -47,6 +47,19 @@ export function usableReserve(max24h: number, reservePercent: number): number {
   return Math.floor(SES_QUOTA_MARGIN * max24h) - bulkShare(max24h, reservePercent);
 }
 
+/**
+ * Transactional sends in a region's last 24 hours, other senders on the account included.
+ * SES's SentLast24Hours lags our rows by minutes during a burst, so our own rows are its floor.
+ */
+export function transactionalSent24h(sent: {
+  sesSentLast24h: number;
+  /** Every row SES accepted in the region, bulk included. */
+  allSent24h: number;
+  bulkSent24h: number;
+}): number {
+  return Math.max(0, Math.max(sent.sesSentLast24h, sent.allSent24h) - sent.bulkSent24h);
+}
+
 /** The instant rounded up to the next slot: what every surface prints as "about". */
 export function roundUpToSlot(at: Date | number, slotMs: number = SES_QUOTA_SLOT_MS): Date {
   const ms = typeof at === "number" ? at : at.getTime();
