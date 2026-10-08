@@ -38,6 +38,27 @@ jobs:
           pnpm db:generate
           git diff --exit-code -- packages/db/drizzle
 
+  # `next build` (web, and docs, whose MDX compiles nowhere else) and the
+  # Dockerfiles would otherwise first run after merge, in `build`. amd64 only,
+  # nothing pushed. Reads main's layer cache but never writes one: PR-scoped
+  # entries would crowd main's out of the repository's cache quota.
+  image:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=app-amd64
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: scripts/backup
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=backup-amd64
+
   # Whole-history secret scan with the pinned gitleaks image (the GitHub
   # action needs a license key for organization repos; the CLI does not).
   secrets:
