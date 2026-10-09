@@ -142,13 +142,15 @@ linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
    item, e um degrau mensal tem dois.
 
 Uma equipe suspensa (por qualquer motivo) ou com uma sinalização `monitor`,
-`guardrail` ou `complaints` aberta em Confiança e segurança não pode comprar
-nem subir de plano: `billing.checkout`, uma subida em `billing.changePlan` e
-ligar o excedente respondem `FORBIDDEN` (`upgrades_held`), e a página de
-cobrança diz por quê. Descer, manter o degrau atual, desligar o excedente e
-**Gerenciar cobrança** (onde fica o cancelamento) continuam abertos. A
-configuração que o `--portal` cria não oferece troca de plano; a configuração
-padrão da conta pode oferecer, então defina `STRIPE_PORTAL_CONFIG`.
+`guardrail`, `complaints` ou `manual` aberta em Confiança e segurança não
+pode comprar nem subir de plano: `billing.checkout`, uma subida em
+`billing.changePlan` e ligar o excedente respondem `FORBIDDEN`
+(`upgrades_held`), e a página de cobrança diz que não é possível subir de
+plano, sem dizer por quê. Descer, manter o degrau atual, desligar o
+excedente e **Gerenciar cobrança** (onde fica o cancelamento) continuam
+abertos. A configuração que o `--portal` cria não oferece troca de plano; a
+configuração padrão da conta pode oferecer, então defina
+`STRIPE_PORTAL_CONFIG`.
 
 As colunas de plano são escritas a partir de uma assinatura buscada no
 Stripe — pelo handler do webhook e pelos dois procedimentos do painel acima —

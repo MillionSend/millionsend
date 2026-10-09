@@ -283,13 +283,15 @@ export async function syncTeamFlags(
 /** The guardrail window the automatic rates are measured over. */
 export const FLAG_WINDOW_DAYS = GUARDRAIL_WINDOW_DAYS;
 
-// The safety cron's abuse signals. A low score alone is not one, and an
-// operator who wants a team held suspends it.
-const UPGRADE_HOLD_REASONS: TeamFlagReason[] = ["monitor", "guardrail", "complaints"];
+// The safety cron's abuse signals, and an operator's manual flag: a deliberate
+// call, and while it is open the cron opens none of its own (one open flag per
+// team). A low score alone is not an abuse signal.
+const UPGRADE_HOLD_REASONS: TeamFlagReason[] = ["monitor", "guardrail", "complaints", "manual"];
 
 /**
  * Whether the team is barred from buying or moving up: suspended for any
- * reason, or holding an open abuse flag. Cancelling and moving down stay open.
+ * reason, or holding an open abuse or manual flag. Cancelling and moving down
+ * stay open.
  */
 export async function upgradesHeld(db: Db, teamId: string): Promise<boolean> {
   if ((await fetchTeamStanding(db, teamId))?.suspended) return true;

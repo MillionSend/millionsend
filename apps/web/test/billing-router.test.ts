@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { BillingStripe } from "@millionsend/billing";
 import {
   DAY_MS,
@@ -676,21 +677,29 @@ describe("billing router", () => {
 });
 
 describe("a suspended or flagged team", () => {
-  /** Suspends the team as the operator console does, or opens the safety cron's flag of that kind. */
-  async function hold(teamId: string, by: "suspension" | "monitor" | "guardrail" | "complaints") {
+  /**
+   * Suspends the team as the operator console does, or opens a flag of that
+   * kind: the safety cron's, or an operator's manual one.
+   */
+  async function hold(
+    teamId: string,
+    by: "suspension" | "monitor" | "guardrail" | "complaints" | "manual",
+  ) {
     if (by === "suspension") {
       await db
         .update(schema.teams)
         .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
         .where(eq(schema.teams.id, teamId));
     } else {
-      await db.insert(schema.teamFlags).values({ teamId, reason: by });
+      await db
+        .insert(schema.teamFlags)
+        .values({ teamId, reason: by, openedBy: by === "manual" ? "op1" : null });
     }
   }
   const held = { code: "FORBIDDEN", message: "upgrades_held" };
 
   it("cannot start a checkout; status says so", async () => {
-    for (const by of ["suspension", "monitor", "guardrail", "complaints"] as const) {
+    for (const by of ["suspension", "monitor", "guardrail", "complaints", "manual"] as const) {
       const teamId = await createTeam(db, `held-${by}`);
       await hold(teamId, by);
       const owner = callerFor(teamId, "owner");
@@ -702,11 +711,22 @@ describe("a suspended or flagged team", () => {
     expect(await auditRows()).toEqual([]);
   });
 
-  it("a low score, an operator's own flag or a cleared flag holds nothing", async () => {
+  it("is told upgrades are unavailable, never why", () => {
+    for (const locale of ["en", "pt-BR"]) {
+      const { billing } = JSON.parse(
+        readFileSync(new URL(`../messages/${locale}/settings.json`, import.meta.url), "utf8"),
+      );
+      for (const key of ["upgradesHeld", "upgradesHeldLive"]) {
+        expect(billing[key], `${locale} ${key}`).not.toMatch(/suspen|review|revis|flag|sinaliz/i);
+      }
+    }
+  });
+
+  it("a low score, a report flag or a cleared flag holds nothing", async () => {
     const flags = [
       { reason: "score" },
-      { reason: "manual", openedBy: "op1" },
       { reason: "report", openedBy: "op1" },
+      { reason: "manual", openedBy: "op1", status: "cleared", clearedAt: new Date() },
       { reason: "monitor", status: "cleared", clearedAt: new Date() },
     ] as const;
     for (const [i, flag] of flags.entries()) {
