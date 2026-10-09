@@ -445,6 +445,8 @@
       "pausedNotified": "Broadcasts paused for {team} · owner notified",
       "suspended": "{team} suspended · {reason}",
       "reinstated": "{team} reinstated",
+      "suspendedTenantFailed": "{team} suspended · SES did not disable its tenant in {regions}; retrying in the background",
+      "reinstatedTenantFailed": "{team} reinstated · SES did not re-enable its tenant in {regions}; retrying in the background",
       "limits": "Limits saved for {team}",
       "plan": "{team} · {from} → {to}",
       "error": "The action failed: {message}"

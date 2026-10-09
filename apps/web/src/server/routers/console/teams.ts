@@ -1,5 +1,5 @@
 import { isLiveKey } from "@millionsend/billing";
-import { env, isCloudDeployment, supportViewEnabled } from "@millionsend/config";
+import { env, isCloudDeployment, sesTenantsEnabled, supportViewEnabled } from "@millionsend/config";
 import {
   accountMailPhrase,
   fetchAccountScore,
@@ -8,21 +8,32 @@ import {
   PLAN_RUNGS,
   type Plan,
   raisesQuota,
+  recordTenantStatus,
   SUPPORT_VIEW_REASONS,
   SUPPORT_VIEW_SIGN_IN_MINUTES,
   SUSPENSION_REASONS,
   startSupportView,
+  syncTenantSendingStatus,
+  type TenantStatusOutcome,
   teamQuota,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
+import { createSesv2Client, type SesTenantClient, setTenantSendingStatus } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ilike, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { escapeLike } from "@/lib/sql";
+import { getQueue } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
-import { auditOperator, kickQuotaDrain, loadTeam, mailTeamOwners } from "./shared";
+import {
+  auditOperator,
+  kickQuotaDrain,
+  loadTeam,
+  mailTeamOwners,
+  type OperatorCtx,
+} from "./shared";
 
 const SORT_KEYS = [
   "name",
@@ -132,6 +143,50 @@ function reasonText(
   return note
     ? `${phrase} ${accountMailPhrase({ locale, kind, key: "note", values: { note } })}`
     : phrase;
+}
+
+/** SES access for a suspension's tenant status; tests swap it with setConsoleTeamsDeps. */
+export interface ConsoleTeamsDeps {
+  tenantClient(region: string): SesTenantClient;
+  /** Hands a failed update to the worker's tenant.status job, which retries it with backoff. */
+  retryTenantStatus(teamId: string): Promise<void>;
+}
+
+const defaultDeps: ConsoleTeamsDeps = {
+  tenantClient: (region) =>
+    createSesv2Client({
+      region,
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+    }),
+  retryTenantStatus: async (teamId) => {
+    await (await getQueue()).send("tenant.status", { teamId }, { dedupeKey: teamId });
+  },
+};
+
+let deps = defaultDeps;
+
+/** Tests: swap the SES client and the retry hand-off instead of stubbing the AWS SDK. */
+export function setConsoleTeamsDeps(next: ConsoleTeamsDeps | null): void {
+  deps = next ?? defaultDeps;
+}
+
+/**
+ * Brings the team's SES tenant in line with the standing just written. An
+ * AWS failure never fails the action: it is audited, handed to the worker's
+ * retry and returned for the console to show. Null without tenants.
+ */
+async function syncTenant(ctx: OperatorCtx, teamId: string): Promise<TenantStatusOutcome | null> {
+  if (!sesTenantsEnabled()) return null;
+  const outcome = await syncTenantSendingStatus(ctx.db, {
+    teamId,
+    setStatus: (region, status) =>
+      setTenantSendingStatus(deps.tenantClient(region), { tenantName: teamId, status }),
+  });
+  if (!outcome) return null;
+  if (outcome.failed.length > 0) await deps.retryTenantStatus(teamId);
+  await recordTenantStatus(ctx.db, { teamId, actor: { userId: ctx.operator.id }, outcome });
+  return outcome;
 }
 
 export const consoleTeamsRouter = router({
@@ -479,7 +534,10 @@ export const consoleTeamsRouter = router({
       await kickQuotaDrain();
     }),
 
-  /** Every send refused until reinstated; owners hear about it unless it is phishing. */
+  /**
+   * Every send refused until reinstated, the team's SES tenant disabled too;
+   * owners hear about it unless it is phishing.
+   */
   suspend: operatorProcedure
     .input(
       z.object({
@@ -527,6 +585,7 @@ export const consoleTeamsRouter = router({
           openedBy: ctx.operator.id,
         })
         .onConflictDoNothing();
+      return { tenant: await syncTenant(ctx, team.id) };
     }),
 
   reinstate: operatorProcedure
@@ -546,6 +605,9 @@ export const consoleTeamsRouter = router({
       if (team.suspendedAt && team.suspensionReason !== "phishing") {
         await mailTeamOwners(ctx.db, team, "team.reinstated", "/emails", () => ({}));
       }
+      // Before the drain: SES refuses a disabled tenant's sends.
+      const tenant = await syncTenant(ctx, team.id);
       await kickQuotaDrain();
+      return { tenant };
     }),
 });

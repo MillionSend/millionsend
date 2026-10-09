@@ -147,11 +147,12 @@ Without Docker (Node 24+, pnpm 11, local Postgres): `pnpm install`, point
 The AWS step of `npx @millionsend/setup` creates everything MillionSend needs in
 AWS — IAM policy + user + access key, the SNS event topic, the SQS events queue
 the worker long-polls, and the SES configuration set. The policy also carries the
-`ses:*Tenant*` actions behind `SES_TENANTS` (one SES tenant per team); a
-deployment set up before those existed re-runs the wizard, or updates the
-`millionsend-ses` policy, before enabling the flag. An https `APP_BASE_URL`
-additionally gets events pushed to your host; the queue works without any public
-URL.
+`ses:*Tenant*` actions and `ses:UpdateReputationEntityCustomerManagedStatus`
+behind `SES_TENANTS` (one SES tenant per team, disabled while the team is
+suspended); a deployment set up before those existed re-runs the wizard, or
+updates the `millionsend-ses` policy, before enabling the flag. An https
+`APP_BASE_URL` additionally gets events pushed to your host; the queue works
+without any public URL.
 
 Run it anywhere Node 18+ and your AWS admin credentials live — laptop or server; the
 MillionSend server never needs admin credentials. It verifies your AWS identity,
@@ -683,7 +684,11 @@ content insights (never email bodies), and an instance-wide audit log.
   broadcast pause parks broadcasts while transactional mail flows; a daily
   ceiling caps the team's UTC day under its plan. Owners are emailed about
   each of these (never for a phishing suspension), and every action is
-  recorded in the audit log with its reason.
+  recorded in the audit log with its reason. With `SES_TENANTS` on, a
+  suspension also disables the team's SES tenant in every region it has a
+  domain in, and reinstating enables it again; an AWS failure never holds
+  the suspension back: the console warns, the audit log records it, and the
+  worker retries.
 
 </details>
 

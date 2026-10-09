@@ -431,6 +431,8 @@
       "team_broadcasts_resumed": "Retomou transmissões",
       "team_suspended": "Suspendeu a equipe",
       "team_reinstated": "Reativou a equipe",
+      "team_ses_tenant_updated": "Atualizou o status do tenant do SES",
+      "team_ses_tenant_update_failed": "Falha ao atualizar o status do tenant do SES",
       "console_flag_opened": "Sinalizou a equipe",
       "console_flag_cleared": "Limpou a sinalização",
       "console_flag_reopened": "Reabriu a sinalização",

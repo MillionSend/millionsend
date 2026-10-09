@@ -480,7 +480,15 @@ export {
   transactionalSent24h,
   usableReserve,
 } from "./ses-capacity.js";
-export { associateDomainTenant, markDomainTenantAssociated } from "./ses-tenant.js";
+export {
+  associateDomainTenant,
+  markDomainTenantAssociated,
+  recordTenantAudit,
+  recordTenantStatus,
+  syncTenantSendingStatus,
+  type TenantSendingStatus,
+  type TenantStatusOutcome,
+} from "./ses-tenant.js";
 export {
   isBlockedIp,
   type PostFailureCode,

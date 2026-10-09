@@ -22,6 +22,9 @@ export interface JobPayloads {
   // The content monitor's judge call for one pending sample; the sample row
   // names the email, the job carries nothing else.
   "abuse.judge": { sampleId: string };
+  // Retry of a team's SES tenant status the console could not set; the
+  // handler applies whatever the team's standing is when it runs.
+  "tenant.status": { teamId: string };
 }
 
 /** ParsedSesEvent with occurredAt as ISO string (JSON-safe). */
@@ -92,6 +95,7 @@ export const DEAD_LETTER_QUEUES = {
   "webhook.drain": "webhook.drain.dead",
   "recipient.erase": "recipient.erase.dead",
   "abuse.judge": "abuse.judge.dead",
+  "tenant.status": "tenant.status.dead",
 } as const;
 
 export type DeadLetteredJobName = keyof typeof DEAD_LETTER_QUEUES;
@@ -103,6 +107,7 @@ const JOB_QUEUES = [
   "webhook.drain",
   "recipient.erase",
   "abuse.judge",
+  "tenant.status",
 ] as const;
 // Compile-time check that every JobPayloads key is listed above.
 const _everyJobQueueListed: Record<Exclude<JobName, (typeof JOB_QUEUES)[number]>, never> = {};

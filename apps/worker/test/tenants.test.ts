@@ -1,10 +1,10 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import type { SesIdentityClient } from "@millionsend/ses";
+import type { SesIdentityClient, SesTenantClient } from "@millionsend/ses";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq, isNotNull } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { syncTenants } from "../src/handlers/tenants.js";
+import { abandonTenantStatus, retryTenantStatus, syncTenants } from "../src/handlers/tenants.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -144,4 +144,141 @@ it("does nothing when tenants are disabled", async () => {
     failed: 0,
   });
   expect(calls).toEqual([]);
+});
+
+/** Per-region fake for the status calls; a region in `failing` refuses every call. */
+function statusSes(failing: string[] = []) {
+  const updates: { region: string; status: unknown }[] = [];
+  const clientForRegion = (region: string): SesTenantClient => ({
+    async send(command) {
+      if (failing.includes(region)) {
+        throw Object.assign(new Error("not authorized"), { name: "AccessDeniedException" });
+      }
+      if (command.constructor.name === "GetTenantCommand") {
+        return { Tenant: { TenantArn: `arn:aws:ses:${region}:123456789012:tenant/t/tn-1` } };
+      }
+      const input = (command as unknown as { input: { SendingStatus: string } }).input;
+      updates.push({ region, status: input.SendingStatus });
+      return {};
+    },
+  });
+  return { clientForRegion, updates };
+}
+
+const tenantRows = () =>
+  db
+    .select({
+      action: schema.auditLog.action,
+      actorId: schema.auditLog.actorId,
+      teamId: schema.auditLog.teamId,
+      target: schema.auditLog.target,
+      data: schema.auditLog.data,
+    })
+    .from(schema.auditLog);
+
+it("the tenant.status retry applies the team's standing at run time in every domain region", async () => {
+  const teamId = await createTeam(db, "acme");
+  await insertDomain(teamId, "a.acme.dev");
+  await insertDomain(teamId, "b.acme.dev", "us-east-1");
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+    .where(eq(schema.teams.id, teamId));
+  const ses = statusSes();
+
+  await retryTenantStatus(db, { clientForRegion: ses.clientForRegion, enabled: true }, teamId);
+  expect(ses.updates).toEqual([
+    { region: "sa-east-1", status: "DISABLED" },
+    { region: "us-east-1", status: "DISABLED" },
+  ]);
+  expect(await tenantRows()).toEqual([
+    {
+      action: "team.ses_tenant_updated",
+      actorId: "system",
+      teamId: null,
+      target: `team:${teamId}`,
+      data: { team: "acme", status: "DISABLED", regions: "sa-east-1, us-east-1" },
+    },
+  ]);
+
+  // Reinstated before the retry ran: the retry enables instead.
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: null, suspensionReason: null })
+    .where(eq(schema.teams.id, teamId));
+  ses.updates.length = 0;
+  await retryTenantStatus(db, { clientForRegion: ses.clientForRegion, enabled: true }, teamId);
+  expect(ses.updates.map((u) => u.status)).toEqual(["ENABLED", "ENABLED"]);
+});
+
+it("a reinstate landing mid-retry makes the job run again instead of keeping DISABLED", async () => {
+  const teamId = await createTeam(db, "acme");
+  await insertDomain(teamId, "a.acme.dev");
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+    .where(eq(schema.teams.id, teamId));
+  const ses = statusSes();
+  const reinstatedMidCall = (region: string): SesTenantClient => ({
+    async send(command) {
+      if (command.constructor.name !== "GetTenantCommand") {
+        await db
+          .update(schema.teams)
+          .set({ suspendedAt: null, suspensionReason: null })
+          .where(eq(schema.teams.id, teamId));
+      }
+      return ses.clientForRegion(region).send(command);
+    },
+  });
+
+  await expect(
+    retryTenantStatus(db, { clientForRegion: reinstatedMidCall, enabled: true }, teamId),
+  ).rejects.toThrow(/standing changed/);
+  expect(await tenantRows()).toEqual([]);
+
+  await retryTenantStatus(db, { clientForRegion: ses.clientForRegion, enabled: true }, teamId);
+  expect(ses.updates.map((u) => u.status)).toEqual(["DISABLED", "ENABLED"]);
+  expect(await tenantRows()).toMatchObject([
+    { action: "team.ses_tenant_updated", data: { status: "ENABLED" } },
+  ]);
+});
+
+it("the retry throws while a region still fails, and giving up is audited", async () => {
+  const teamId = await createTeam(db, "acme");
+  await insertDomain(teamId, "a.acme.dev");
+  await insertDomain(teamId, "b.acme.dev", "us-east-1");
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+    .where(eq(schema.teams.id, teamId));
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const ses = statusSes(["us-east-1"]);
+
+  await expect(
+    retryTenantStatus(db, { clientForRegion: ses.clientForRegion, enabled: true }, teamId),
+  ).rejects.toThrow(/DISABLED still failing .* in us-east-1/);
+  expect(ses.updates).toEqual([{ region: "sa-east-1", status: "DISABLED" }]);
+  expect(await tenantRows()).toEqual([]);
+
+  await abandonTenantStatus(db, teamId);
+  expect(await tenantRows()).toEqual([
+    {
+      action: "team.ses_tenant_update_failed",
+      actorId: "system",
+      teamId: null,
+      target: `team:${teamId}`,
+      data: { team: "acme", retrying: false },
+    },
+  ]);
+  expect(error).toHaveBeenCalledTimes(1);
+});
+
+it("the retry does nothing when tenants are disabled", async () => {
+  const teamId = await createTeam(db, "acme");
+  await insertDomain(teamId, "a.acme.dev");
+  const ses = statusSes();
+  await retryTenantStatus(db, { clientForRegion: ses.clientForRegion, enabled: false }, teamId);
+  expect(ses.updates).toEqual([]);
+  expect(await tenantRows()).toEqual([]);
 });
