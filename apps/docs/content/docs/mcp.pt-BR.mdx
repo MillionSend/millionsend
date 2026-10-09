@@ -120,12 +120,15 @@ segredo fica na configuração do cliente.
   sessão de trabalho não termina quando o access token expira.
 - Um membro removido do time perde o acesso MCP imediatamente, mesmo antes de
   o token expirar.
-- Seu papel no time vale aqui também: as ferramentas que gerenciam domínios,
-  webhooks e chaves de API só são oferecidas a owners e admins, como no dashboard. Um
-  **membro** com essas permissões concedidas ainda recebe as listagens somente
-  leitura de domínios, webhooks e chaves de API. Em uma concessão **Todos os times** as ferramentas aparecem se
-  você for admin em algum time, e chamadas em um time onde você é membro são
-  recusadas.
+- Seu papel no time vale aqui também, como no dashboard: só owners e admins
+  gerenciam domínios, webhooks e chaves de API, removem supressões, excluem
+  contatos em massa ou apagam um contato (`delete_contact` com `erase`). As
+  ferramentas marcadas com **admin** abaixo não são oferecidas a membros, e o
+  papel é verificado de novo a cada chamada. Um **membro** com essas
+  permissões concedidas ainda recebe as listagens somente leitura de
+  domínios, webhooks e chaves de API. Em uma concessão **Todos os times** as
+  ferramentas aparecem se você for admin em algum time, e chamadas em um time
+  onde você é membro são recusadas.
 - Chamadas MCP compartilham o limite por minuto da API.
 - Nenhuma ferramenta retorna uma credencial: chaves de API são criadas, e
   segredos de assinatura de webhook lidos ou rotacionados, só no dashboard ou
@@ -173,8 +176,8 @@ cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
 | `create_contact_batch` | `audience:write` | Cria até 1.000 contatos em uma chamada; `on_conflict` skip/upsert, `validation` strict/permissive. |
 | `update_contact` | `audience:write` | Atualiza nome, propriedades ou o cancelamento de um contato. |
 | `update_contact_topics` | `audience:write` | Define as inscrições por tópico de um contato. |
-| `delete_contact` | `audience:write` | Exclui um contato. |
-| `delete_contacts` | `audience:write` | Exclui até 1.000 contatos por ids ou e-mails. |
+| `delete_contact` | `audience:write` | Exclui um contato; `erase` (só **admin**) também o apaga do histórico de e-mails. |
+| `delete_contacts` | `audience:write` | **admin** Exclui até 1.000 contatos por ids ou e-mails. |
 | `create_contact_preferences_link` | `audience:write` | Gera a URL da central de preferências de um contato. |
 | `add_contact_to_segment` | `audience:write` | Adiciona um contato a um segmento manual. |
 | `remove_contact_from_segment` | `audience:write` | Remove um contato de um segmento manual. |
@@ -188,8 +191,8 @@ cobre as duas ferramentas de `broadcasts:read`. Ferramentas marcadas com
 | `update_contact_property` | `audience:write` | Atualiza a definição de uma propriedade. |
 | `delete_contact_property` | `audience:write` | Exclui a definição de uma propriedade. |
 | `add_suppressions` | `audience:write` | Bloqueia até 1.000 endereços, registrando um `origin` (bounce, complaint, manual ou unsubscribe) nas linhas novas. |
-| `remove_suppressions` | `audience:write` | Desbloqueia até 1.000 endereços por e-mails ou ids. |
-| `delete_suppression` | `audience:write` | Remove uma supressão por id ou e-mail. |
+| `remove_suppressions` | `audience:write` | **admin** Desbloqueia até 1.000 endereços por e-mails ou ids. |
+| `delete_suppression` | `audience:write` | **admin** Remove uma supressão por id ou e-mail. |
 | `create_broadcast` | `broadcasts:write` | Cria um rascunho de broadcast (ou envia na hora). |
 | `update_broadcast` | `broadcasts:write` | Atualiza um rascunho de broadcast. |
 | `send_broadcast` | `broadcasts:write` | Envia ou agenda um rascunho de broadcast. |

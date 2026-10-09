@@ -1,6 +1,16 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type ServerType, serve } from "@hono/node-server";
-import { DAY_MS, EnvKeyring, generateApiKey, MCP_SCOPES, mcpResourceUrl } from "@millionsend/core";
+import {
+  DAY_MS,
+  EnvKeyring,
+  generateApiKey,
+  hashRecipient,
+  MCP_SCOPES,
+  mcpResourceUrl,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -10,6 +20,7 @@ import { Hono } from "hono";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
+import { INTERNAL_AUTH } from "../src/mcp.js";
 
 /**
  * MCP resource server against createApi in process: bearer JWTs are minted
@@ -455,7 +466,11 @@ describe("tool listing", () => {
     expect(names).toContain("list_domains");
     expect(names).toContain("list_api_keys");
     expect(names).toContain("send_email");
+    expect(names).toContain("delete_contact");
     for (const hidden of [
+      "delete_contacts",
+      "remove_suppressions",
+      "delete_suppression",
       "create_webhook",
       "update_webhook",
       "delete_webhook",
@@ -1001,5 +1016,172 @@ describe("REST parity tools", () => {
     );
     expect((await member.listTools()).tools.map((t) => t.name)).toEqual(["list_api_keys"]);
     await member.close();
+  });
+});
+
+describe("dashboard admin parity", () => {
+  const user = "parity-user";
+  const kept = "kept@example.com";
+  const bounced = "bounced@example.com";
+  // A refusal lands before any row is looked up, so ids need not exist.
+  const id = randomUUID();
+  let memberTeam: string;
+
+  // Every adminProcedure in the dashboard's routers, as file.procedure, with
+  // the MCP calls that perform the same action ([] when no tool does).
+  const ADMIN_ACTIONS: Record<
+    string,
+    Array<{ name: string; arguments: Record<string, unknown> }>
+  > = {
+    "api-keys.create": [],
+    "api-keys.rename": [],
+    "api-keys.revoke": [{ name: "revoke_api_key", arguments: { id } }],
+    "audience.bulkDelete": [{ name: "delete_contacts", arguments: { emails: [kept] } }],
+    "audience.eraseRecipient": [
+      { name: "delete_contact", arguments: { id: kept, erase: true } },
+      { name: "delete_contacts", arguments: { emails: [kept], erase: true } },
+    ],
+    "billing.changePlan": [],
+    "billing.checkout": [],
+    "billing.portal": [],
+    "billing.setOverage": [],
+    "domains.create": [{ name: "create_domain", arguments: { name: "parity.example.com" } }],
+    "domains.delete": [{ name: "delete_domain", arguments: { id } }],
+    "domains.updateConfiguration": [
+      { name: "update_domain", arguments: { id, open_tracking: false } },
+    ],
+    "domains.verify": [{ name: "verify_domain", arguments: { id } }],
+    "emails.remove": [
+      { name: "remove_suppressions", arguments: { emails: [bounced] } },
+      { name: "delete_suppression", arguments: { id: bounced } },
+    ],
+    "team-bootstrap.current": [],
+    "team-bootstrap.end": [],
+    "webhooks.create": [
+      {
+        name: "create_webhook",
+        arguments: { endpoint: "https://acme.dev/hooks", events: ["email.bounced"] },
+      },
+    ],
+    "webhooks.delete": [{ name: "delete_webhook", arguments: { id } }],
+    "webhooks.rotateSecret": [],
+    "webhooks.testDelivery": [],
+    "webhooks.update": [{ name: "update_webhook", arguments: { id, status: "disabled" } }],
+  };
+
+  beforeAll(async () => {
+    // Admin elsewhere, so an all-teams grant registers the admin tools.
+    const adminTeam = await createTeam(db, "parity-admin");
+    memberTeam = await createTeam(db, "parity-member");
+    await db.insert(schema.user).values({ id: user, name: "Parity", email: "parity@acme.dev" });
+    await db.insert(schema.teamMembers).values([
+      { teamId: adminTeam, userId: user, role: "admin" },
+      { teamId: memberTeam, userId: user, role: "member" },
+    ]);
+    await db.insert(schema.contacts).values([
+      { teamId: memberTeam, email: kept },
+      { teamId: memberTeam, email: "plain@example.com" },
+    ]);
+    await db.insert(schema.suppressions).values({
+      teamId: memberTeam,
+      email: bounced,
+      emailHash: hashRecipient(bounced),
+      reason: "hard_bounce",
+    });
+  });
+
+  it("refuses a member every dashboard admin action an MCP tool performs", async () => {
+    const dir = fileURLToPath(new URL("../../web/src/server/routers", import.meta.url));
+    const procedures = readdirSync(dir, { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".ts"))
+      .flatMap((file) =>
+        [...readFileSync(join(dir, file), "utf8").matchAll(/(\w+): adminProcedure\b/g)].map(
+          ([, name]) => `${file.slice(0, -3)}.${name}`,
+        ),
+      );
+    expect(procedures.sort()).toEqual(Object.keys(ADMIN_ACTIONS).sort());
+
+    for (const team of [memberTeam, "*"]) {
+      const client = await connect(
+        await mintToken({ sub: user, team_id: team, team_role: "member" }),
+      );
+      const offered = new Set((await client.listTools()).tools.map((t) => t.name));
+      for (const { name, arguments: args } of Object.values(ADMIN_ACTIONS).flat()) {
+        const call = client.callTool({
+          name,
+          arguments: team === "*" ? { ...args, team_id: memberTeam } : args,
+        });
+        if (offered.has(name)) {
+          expect(resultJson(await call), `${team} ${name}`).toMatchObject({
+            statusCode: 403,
+            name: "forbidden",
+          });
+        } else {
+          await expect(call, `${team} ${name}`).rejects.toThrow(`Tool ${name} not found`);
+        }
+      }
+      await client.close();
+    }
+    const contacts = await db
+      .select({ email: schema.contacts.email })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.teamId, memberTeam));
+    expect(contacts.map((c) => c.email)).toContain(kept);
+    const suppressions = await db
+      .select({ email: schema.suppressions.email })
+      .from(schema.suppressions)
+      .where(eq(schema.suppressions.teamId, memberTeam));
+    expect(suppressions).toEqual([{ email: bounced }]);
+  });
+
+  it("the REST routes refuse an MCP call carrying a member role, whichever tool sent it", async () => {
+    const memberStatus = async (method: string, path: string, body?: unknown) => {
+      const req = new Request(`http://mcp.internal${path}`, {
+        method,
+        ...(body === undefined
+          ? {}
+          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      });
+      INTERNAL_AUTH.set(req, {
+        teamId: memberTeam,
+        plan: "free",
+        billing: {
+          plan: "free",
+          planQuota: null,
+          currentPeriodStart: null,
+          currentPeriodEnd: null,
+          overageEnabled: false,
+        },
+        apiKeyId: null,
+        userId: user,
+        oauthClientId: "client-abc",
+        permission: "full_access",
+        domainId: null,
+        role: "member",
+      });
+      return (await app.fetch(req)).status;
+    };
+    const adminRoutes: Array<[method: string, path: string, body?: unknown]> = [
+      ["POST", "/domains", { name: "parity.example.com" }],
+      ["PATCH", `/domains/${id}`, { open_tracking: false }],
+      ["POST", `/domains/${id}/verify`],
+      ["DELETE", `/domains/${id}`],
+      ["POST", "/webhooks", { endpoint: "https://acme.dev/hooks", events: ["email.bounced"] }],
+      ["PATCH", `/webhooks/${id}`, { status: "disabled" }],
+      ["POST", `/webhooks/${id}/rotate`],
+      ["DELETE", `/webhooks/${id}`],
+      ["POST", "/api-keys", { name: "parity" }],
+      ["DELETE", `/api-keys/${id}`],
+      ["POST", "/suppressions/batch/remove", { emails: [bounced] }],
+      ["DELETE", `/suppressions/${encodeURIComponent(bounced)}`],
+      ["POST", "/contacts/batch/remove", { emails: [kept] }],
+      ["DELETE", `/contacts/${encodeURIComponent(kept)}?erase=true`],
+      ["DELETE", `/audiences/${id}/contacts/${encodeURIComponent(kept)}?erase=true`],
+    ];
+    for (const [method, path, body] of adminRoutes) {
+      expect(await memberStatus(method, path, body), `${method} ${path}`).toBe(403);
+    }
+    // A plain delete stays member-level, as in the dashboard.
+    expect(await memberStatus("DELETE", "/contacts/plain%40example.com")).toBe(200);
   });
 });

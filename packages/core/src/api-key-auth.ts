@@ -23,7 +23,21 @@ export interface ApiKeyAuth {
    */
   permission: (typeof schema.apiKeys.permission.enumValues)[number];
   domainId: string | null;
+  /**
+   * SECURITY: the OAuth token holder's live team role, set on MCP calls only.
+   * Owner/admin-only routes refuse any other role. An API key carries none:
+   * only owners and admins can create a full-access key.
+   */
+  role?: TeamRole;
 }
+
+export type TeamRole = (typeof schema.teamMemberRoleEnum.enumValues)[number];
+
+/**
+ * The dashboard's adminProcedure line: owners and admins manage, members
+ * read. An allow-list, so a role added later is refused until admitted here.
+ */
+export const isAdminRole = (role: TeamRole): boolean => role === "owner" || role === "admin";
 
 const LAST_USED_STAMP_INTERVAL_MS = 60_000;
 

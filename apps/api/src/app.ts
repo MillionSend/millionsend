@@ -35,6 +35,7 @@ import {
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
+  isAdminRole,
   isTeamSuspended,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
@@ -3394,6 +3395,32 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
     return next();
   });
+
+  // SECURITY: the dashboard's adminProcedure line. Only an MCP call carries a
+  // role (ApiKeyAuth.role), so a member's agent is refused here whichever
+  // tool reached the route.
+  const requireAdmin = createMiddleware<Env>(async (c, next) => {
+    const role = c.get("auth")?.role;
+    if (role && !isAdminRole(role)) {
+      return c.json(
+        errorBody(403, "forbidden", "This action requires the owner or admin role"),
+        403,
+      );
+    }
+    return next();
+  });
+  // Every write to sending domains, webhooks and API keys; in the audience,
+  // lifting suppressions, bulk deletes and erasure (a plain delete is not).
+  app.on(
+    ["POST", "PATCH", "DELETE"],
+    ["/domains", "/domains/*", "/webhooks", "/webhooks/*", "/api-keys", "/api-keys/*"],
+    requireAdmin,
+  );
+  app.on("POST", ["/suppressions/batch/remove", "/contacts/batch/remove"], requireAdmin);
+  app.on("DELETE", "/suppressions/:id", requireAdmin);
+  app.on("DELETE", ["/contacts/:id", "/audiences/:audienceId/contacts/:id"], (c, next) =>
+    c.req.query("erase") === "true" ? requireAdmin(c, next) : next(),
+  );
 
   const countTeamRequest = fixedWindowCounter();
   const enforceRateLimit = createMiddleware<Env>(async (c, next) => {
