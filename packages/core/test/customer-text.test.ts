@@ -26,6 +26,9 @@ describe("inertText", () => {
     }
     // The lures carry live links before the helper runs.
     expect(LURE_NAMES.filter((lure) => autoLinks(lure).length > 0).length).toBeGreaterThan(8);
+    // Digits in a link's id are part of that link, not a number to call.
+    const link = "https://app.example/domains/1b9d6bcd-9484-8952-9b5d-ab8dfbbd4bed";
+    expect(autoLinks(`Open: ${link}`)).toEqual([link]);
   });
 
   it("keeps a name that looks like a domain readable, as one line", () => {

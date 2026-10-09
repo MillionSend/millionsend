@@ -138,9 +138,20 @@ export function autoLinks(text: string): string[] {
     .replace(/\p{Default_Ignorable_Code_Point}/gu, "");
   const found = new Set<string>();
   for (const t of [text, folded]) {
-    for (const match of linkifyIt.match(t) ?? []) found.add(match.url);
-    for (const link of find(t)) found.add(link.href);
-    for (const [number] of t.matchAll(PHONE_NUMBER)) {
+    // Digits inside a link (an id in a URL) are that link's, not a number to call.
+    let outsideLinks = t;
+    const blank = (start: number, end: number) => {
+      outsideLinks = `${outsideLinks.slice(0, start)}${"x".repeat(end - start)}${outsideLinks.slice(end)}`;
+    };
+    for (const match of linkifyIt.match(t) ?? []) {
+      found.add(match.url);
+      blank(match.index, match.lastIndex);
+    }
+    for (const link of find(t)) {
+      found.add(link.href);
+      blank(link.start, link.end);
+    }
+    for (const [number] of outsideLinks.matchAll(PHONE_NUMBER)) {
       found.add(`tel:${number.replace(/\P{Nd}/gu, "")}`);
     }
   }
