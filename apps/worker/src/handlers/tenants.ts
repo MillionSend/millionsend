@@ -1,5 +1,6 @@
 import {
   associateDomainTenant,
+  isTeamSuspended,
   recordAudit,
   recordTenantStatus,
   syncTenantSendingStatus,
@@ -94,6 +95,13 @@ export async function retryTenantStatus(
   if (outcome.failed.length > 0) {
     throw new Error(
       `tenant.status: ${outcome.status} still failing for team ${teamId} in ${outcome.failed.map((f) => f.region).join(", ")}`,
+    );
+  }
+  // A suspend or reinstate that lands while these calls are in flight can be
+  // overwritten by this run's older status; running again applies the newer one.
+  if ((await isTeamSuspended(db, teamId)) !== (outcome.status === "DISABLED")) {
+    throw new Error(
+      `tenant.status: team ${teamId}'s standing changed mid-update; applying it again`,
     );
   }
   await recordTenantStatus(db, { teamId, actor: "system", outcome });

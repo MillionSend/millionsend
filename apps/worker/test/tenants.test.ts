@@ -207,6 +207,38 @@ it("the tenant.status retry applies the team's standing at run time in every dom
   expect(ses.updates.map((u) => u.status)).toEqual(["ENABLED", "ENABLED"]);
 });
 
+it("a reinstate landing mid-retry makes the job run again instead of keeping DISABLED", async () => {
+  const teamId = await createTeam(db, "acme");
+  await insertDomain(teamId, "a.acme.dev");
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+    .where(eq(schema.teams.id, teamId));
+  const ses = statusSes();
+  const reinstatedMidCall = (region: string): SesTenantClient => ({
+    async send(command) {
+      if (command.constructor.name !== "GetTenantCommand") {
+        await db
+          .update(schema.teams)
+          .set({ suspendedAt: null, suspensionReason: null })
+          .where(eq(schema.teams.id, teamId));
+      }
+      return ses.clientForRegion(region).send(command);
+    },
+  });
+
+  await expect(
+    retryTenantStatus(db, { clientForRegion: reinstatedMidCall, enabled: true }, teamId),
+  ).rejects.toThrow(/standing changed/);
+  expect(await tenantRows()).toEqual([]);
+
+  await retryTenantStatus(db, { clientForRegion: ses.clientForRegion, enabled: true }, teamId);
+  expect(ses.updates.map((u) => u.status)).toEqual(["DISABLED", "ENABLED"]);
+  expect(await tenantRows()).toMatchObject([
+    { action: "team.ses_tenant_updated", data: { status: "ENABLED" } },
+  ]);
+});
+
 it("the retry throws while a region still fails, and giving up is audited", async () => {
   const teamId = await createTeam(db, "acme");
   await insertDomain(teamId, "a.acme.dev");
