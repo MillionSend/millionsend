@@ -137,14 +137,6 @@
       "bannerAction": "Abrir configurações do SES",
       "lastEvent": "Último evento recebido",
       "never": "nunca"
-    },
-    "breaker": {
-      "paused": "As transmissões estão pausadas em {region}: a taxa de {metric} da plataforma está em {rate}%, perto da linha de revisão do SES para a conta inteira. E-mails transacionais continuam; as transmissões voltam sozinhas quando a taxa se recuperar.",
-      "metric": {
-        "bounce": "bounce permanente",
-        "complaint": "reclamação"
-      },
-      "held": "As transmissões estão pausadas em {region} pelo operador da instância. E-mails transacionais continuam; as transmissões retomam quando o operador liberar a retenção."
     }
   },
   "team": {
@@ -488,8 +480,8 @@
         "note": "Parte de um broadcast ficou retida acima da cota."
       },
       "broadcast_held": {
-        "label": "Broadcast em espera",
-        "note": "O envio da região está pausado em toda a plataforma."
+        "label": "Broadcast atrasado",
+        "note": "Um broadcast aguarda para sair e retoma sozinho."
       },
       "quota": {
         "label": "Cota de envio",

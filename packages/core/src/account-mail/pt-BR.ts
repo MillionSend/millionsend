@@ -101,11 +101,11 @@ export const ptBR = {
     subject: '"{name}" está saindo ao longo de {days} dias',
     body: [
       "{first} de {count} e-mails saíram na primeira leva; o restante segue conforme a capacidade libera, o último por volta de {finishesAt}.",
-      "Envios acima da capacidade diária da plataforma são distribuídos pelos dias seguintes; o e-mail transacional de {team} não fica retido atrás deles.",
+      "Envios acima da capacidade diária de envio são distribuídos pelos dias seguintes; o e-mail transacional de {team} não fica retido atrás deles.",
     ],
     button: "Abrir broadcast",
     muted: [
-      "Você recebe isto uma vez por broadcast que leva mais de um dia. O horário de término é uma estimativa e muda conforme outras equipes enviam.",
+      "Você recebe isto uma vez por broadcast que leva mais de um dia. O horário de término é uma estimativa e pode mudar.",
     ],
   },
   "broadcast.held_quota": {
@@ -123,10 +123,10 @@ export const ptBR = {
     },
   },
   "broadcast.held": {
-    subject: '"{name}" está em espera',
+    subject: '"{name}" está atrasado',
     body: [
-      'Os envios de {region} estão pausados em toda a plataforma enquanto as taxas de bounce e reclamação se estabilizam, então "{name}" aguarda em vez de sair; e-mails transacionais continuam saindo.',
-      "Ele retoma sozinho — checamos a cada 15 minutos — e você recebe o relatório de envio de sempre ao terminar.",
+      '"{name}" aguarda para sair. O envio está pausado por enquanto e retoma automaticamente, então você não precisa fazer nada; e-mails transacionais continuam saindo.',
+      "Você recebe o relatório de envio de sempre ao terminar.",
     ],
     button: "Abrir broadcast",
   },

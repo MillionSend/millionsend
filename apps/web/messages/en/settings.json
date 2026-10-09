@@ -137,14 +137,6 @@
       "bannerAction": "Open SES settings",
       "lastEvent": "Last event received",
       "never": "never"
-    },
-    "breaker": {
-      "paused": "Broadcasts are paused in {region}: the platform's {metric} rate is {rate}%, near SES's review line for the whole account. Transactional email continues; broadcasts resume on their own once the rate recovers.",
-      "metric": {
-        "bounce": "hard-bounce",
-        "complaint": "complaint"
-      },
-      "held": "Broadcasts are paused in {region} by the instance operator. Transactional email continues; broadcasts resume when the operator releases the hold."
     }
   },
   "team": {
@@ -488,8 +480,8 @@
         "note": "Part of a broadcast is parked over the quota."
       },
       "broadcast_held": {
-        "label": "Broadcast on hold",
-        "note": "Sending from its region is paused across the platform."
+        "label": "Broadcast delayed",
+        "note": "A broadcast is waiting to send and resumes on its own."
       },
       "quota": {
         "label": "Sending quota",

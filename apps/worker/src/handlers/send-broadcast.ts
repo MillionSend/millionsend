@@ -215,11 +215,7 @@ export async function sendBroadcast(
         broadcast,
         "broadcast.held",
         `/broadcasts/${broadcast.id}`,
-        (_, team) => ({
-          name: broadcast.name ?? broadcast.subject,
-          region: domain.region,
-          team,
-        }),
+        (_, team) => ({ name: broadcast.name ?? broadcast.subject, team }),
       );
     }
     await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));

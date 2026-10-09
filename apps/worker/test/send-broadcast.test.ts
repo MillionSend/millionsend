@@ -1313,8 +1313,9 @@ it("defers the fan-out while the sender domain's region is held by the platform 
   // Said once, however many waits the hold lasts.
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("deferred");
   expect(rescheduled).toHaveLength(2);
-  expect(mail.sends.map((s) => s.subject)).toEqual(['"launch" is on hold']);
-  expect(mail.sends[0]?.text).toContain("Sending from us-east-1 is paused");
+  expect(mail.sends.map((s) => s.subject)).toEqual(['"launch" is delayed']);
+  expect(mail.sends[0]?.text).toContain("Delivery is paused for now and resumes automatically");
+  expect(mail.sends[0]?.text).not.toMatch(/platform|us-east-1|rates?\b|bounce|complaint/i);
   expect(mail.sends[0]?.text).toContain(`${BASE_URL}/broadcasts/${broadcastId}`);
   expect(enqueued).toEqual([]);
   const [row] = await db
