@@ -23,6 +23,10 @@ const GROUPS = [
     key: "thresholds",
     fields: ["flagRisk", "alertRisk", "pauseRisk", "autoPause", "flagScore"],
   },
+  {
+    key: "warmup",
+    fields: ["warmupEnabled", "warmupCapFirstDay", "warmupCapFirstWeek", "warmupCapFirstMonth"],
+  },
 ] as const;
 
 type Draft = string | boolean | null;

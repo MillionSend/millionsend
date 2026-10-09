@@ -1257,3 +1257,57 @@ it("drain gives a throttled team one cadence of rows per run, spaced on the rows
     jobs.map((j) => j.startAfter?.getTime()),
   );
 });
+
+it("drain releases a young domain's parked mail only as its warm-up allows, whatever parked it", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "news.fresh-drain.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date("2026-10-09T09:00:00Z"),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
+  // The registration day's 100 already went out.
+  await db
+    .insert(schema.domainWarmupUsage)
+    .values({ registrableDomain: "fresh-drain.com", day: "2026-10-09", accepted: 100 });
+  const warmupParked: string[] = [];
+  for (let i = 0; i < 150; i++) {
+    warmupParked.push(
+      await insertParked(new Date(Date.UTC(2026, 9, 9, 10, 0, i)), "held", {
+        domainId: domain.id,
+        parkReason: "warmup",
+      }),
+    );
+  }
+  // Parked by the plan, not the warm-up: its release still passes the warm-up.
+  const planParked = await insertParked(new Date("2026-10-09T11:00:00Z"), "plan", {
+    domainId: domain.id,
+  });
+  const enqueued: string[] = [];
+  const drain = (now: string) =>
+    drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date(now),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    });
+
+  expect(await drain("2026-10-09T15:00:00Z")).toEqual({ drained: 0, stillParked: 151 });
+  // A new UTC day, still under 24 hours old: another 100, oldest first.
+  expect(await drain("2026-10-10T00:15:00Z")).toEqual({ drained: 100, stillParked: 51 });
+  expect(enqueued).toEqual(warmupParked.slice(0, 100));
+  // Past 24 hours the same day's cap is 300: the rest goes.
+  expect(await drain("2026-10-10T09:15:00Z")).toEqual({ drained: 51, stillParked: 0 });
+  expect(enqueued.slice(100)).toEqual([...warmupParked.slice(100), planParked]);
+  const reasons = await db
+    .select({ reason: schema.emails.parkReason })
+    .from(schema.emails)
+    .where(eq(schema.emails.teamId, teamId));
+  expect(reasons.every((r) => r.reason === null)).toBe(true);
+});

@@ -55,6 +55,31 @@ the other region — its DNS records change, since SES identities are per
 region. On MillionSend Cloud a domain name another team holds is taken in
 every region.
 
+## New domain warm-up
+
+On MillionSend Cloud a domain registered recently sends gradually while it
+builds a reputation with mailbox providers. The age is the registered domain's
+(`acme.com` for `mail.acme.com`), read from public registry data when the
+domain is added, and the cap counts per UTC day:
+
+| Domain age | Emails per day |
+| --- | --- |
+| Under 24 hours | 100 |
+| 1 to 7 days | 300 |
+| 7 to 30 days | 2,000 |
+| 30 days or older | your plan's limit only |
+
+A domain that sends cleanly (few bounces, no spam complaints) moves up a step
+sooner. The cap applies on top of your plan and a plan upgrade does not lift
+it. While it applies, the domain page shows "Warming up: N/day today · full
+volume from …".
+
+Mail over the day's cap is never refused or lost: it is accepted, shows as
+**Waiting**, and goes out as the cap allows, oldest first. Only when a lot
+of mail is already waiting does a send answer `429 daily_quota_exceeded`
+(SMTP `452`) with a message naming the warm-up; retry after the UTC day rolls
+over.
+
 ## Per-domain configuration
 
 Once verified, a domain's **Configuration** tab controls:

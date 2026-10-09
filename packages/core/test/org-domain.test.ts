@@ -22,6 +22,19 @@ describe("registrableDomain", () => {
     expect(registrableDomain("send.acme.co.th")).toBe("acme.co.th");
   });
 
+  it("follows the Public Suffix List past the old curated families", () => {
+    expect(registrableDomain("cartas.vinco.app.br")).toBe("vinco.app.br");
+    expect(registrableDomain("mail.kriter.ia.br")).toBe("kriter.ia.br");
+    expect(registrableDomain("pay.shop.com.ua")).toBe("shop.com.ua");
+    // ICANN section only: a private suffix is not a name a registry sold.
+    expect(registrableDomain("x.github.io")).toBe("github.io");
+  });
+
+  it("returns a name with no registrable part as is", () => {
+    expect(registrableDomain("com.br")).toBe("com.br");
+    expect(registrableDomain("10.0.0.1")).toBe("10.0.0.1");
+  });
+
   it("tolerates uppercase and a trailing dot", () => {
     expect(registrableDomain("Send.Example.COM")).toBe("example.com");
     expect(registrableDomain("example.com.")).toBe("example.com");
@@ -50,10 +63,15 @@ describe("vouchedRegistrableDomain", () => {
     expect(vouchedRegistrableDomain("tx.acme.com")).toBe("acme.com");
   });
 
-  it("does not vouch where the last two labels may be a public suffix", () => {
-    expect(vouchedRegistrableDomain("x.sp.gov.br")).toBeNull();
-    expect(vouchedRegistrableDomain("loja.app.br")).toBeNull();
-    expect(vouchedRegistrableDomain("pay.shop.com.ua")).toBeNull();
+  it("vouches the exact name the suffix list gives, never a public suffix", () => {
+    expect(vouchedRegistrableDomain("x.sp.gov.br")).toBe("x.sp.gov.br");
+    expect(vouchedRegistrableDomain("loja.app.br")).toBe("loja.app.br");
+    expect(vouchedRegistrableDomain("pay.shop.com.ua")).toBe("shop.com.ua");
     expect(vouchedRegistrableDomain("com.br")).toBeNull();
+  });
+
+  it("does not vouch where strangers share the ICANN name", () => {
+    expect(vouchedRegistrableDomain("mail.foo.eu.org")).toBeNull();
+    expect(vouchedRegistrableDomain("x.github.io")).toBeNull();
   });
 });

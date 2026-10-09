@@ -81,7 +81,10 @@ deliberadas e explícitas:
   `429 monthly_quota_exceeded` em um plano mensal (Pro, Scale) no volume
   incluído com o excedente desligado; ative o excedente em Cobrança ou espere
   o período renovar (a mensagem informa a data). Um lote é aceito ou recusado
-  por inteiro.
+  por inteiro. Em qualquer plano, um domínio ainda no
+  [aquecimento de domínio novo](/pt-BR/concepts/domains#aquecimento-de-domínio-novo)
+  responde o mesmo `429 daily_quota_exceeded`, com uma mensagem que cita o
+  aquecimento, quando já há muito e-mail dele aguardando.
 - `POST /contacts`, `POST /contacts/batch` e o alias de audience retornam
   `403 plan_limit_reached` quando um contato novo levaria o time além do
   limite de contatos do plano (1.000 no Free; planos pagos são ilimitados).

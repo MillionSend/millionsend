@@ -120,7 +120,9 @@
       "estimate": "estimativa",
       "notSentYet": "Ainda não enviado. Os eventos de entrega aparecem aqui assim que o provedor responder.",
       "waiting": "Aguardando envio",
-      "waitingBody": "Sai assim que houver capacidade de envio."
+      "waitingBody": "Sai assim que houver capacidade de envio.",
+      "warmup": "Domínio em aquecimento",
+      "warmupBody": "Domínios novos aumentam o volume aos poucos para proteger a entregabilidade. Sai conforme o volume diário do domínio permitir."
     }
   },
   "insights": {

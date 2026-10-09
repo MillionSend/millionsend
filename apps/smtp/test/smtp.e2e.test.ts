@@ -7,6 +7,7 @@ import {
   generateApiKey,
   hashRecipient,
   OVERAGE_HARD_CAP,
+  utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -428,5 +429,64 @@ describe("smtp relay", () => {
     await setAccepted(cap - 1);
     const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail(mail);
     expect(info.response).toContain("Queued as");
+  });
+});
+
+describe("new-domain warm-up", () => {
+  it("parks a young domain's mail past its cap, then answers 452 naming the warm-up once the backlog is full", async () => {
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+    const warm = await createTeam(db, "smtp-warm");
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({
+        teamId: warm,
+        name: "fresh-smtp.com",
+        region: "us-east-1",
+        status: "verified",
+        verifiedAt: new Date(),
+        registeredAt: new Date(Date.now() - 3600_000),
+      })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    await db
+      .insert(schema.domainWarmupUsage)
+      .values({ registrableDomain: "fresh-smtp.com", day: utcDay(), accepted: 100 });
+    const key = generateApiKey();
+    await db.insert(schema.apiKeys).values({
+      teamId: warm,
+      name: "smtp",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    const send = () =>
+      transport({ user: SMTP_USERNAME, pass: key.token }).sendMail({
+        from: "a@fresh-smtp.com",
+        to: "r@example.com",
+        subject: "s",
+        text: "t",
+      });
+
+    const info = await send();
+    expect(await emailRow(info.response ?? "")).toMatchObject({
+      latestStatus: "queued_quota",
+      parkReason: "warmup",
+    });
+    // Free's backlog: three days of its 100 a day.
+    await db.insert(schema.emails).values(
+      Array.from({ length: 299 }, () => ({
+        teamId: warm,
+        domainId: domain.id,
+        from: "a@fresh-smtp.com",
+        to: ["r@example.com"],
+        subject: "s",
+        latestStatus: "queued_quota" as const,
+        parkReason: "warmup" as const,
+      })),
+    );
+    await expect(send()).rejects.toMatchObject({
+      responseCode: 452,
+      response: expect.stringContaining("New domain warm-up"),
+    });
   });
 });

@@ -1,4 +1,13 @@
-import { date, index, integer, pgTable, primaryKey, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  date,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
 
 /**
@@ -95,4 +104,20 @@ export const usagePeriods = pgTable(
     pendingOverage: integer("pending_overage"),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.periodStart] })],
+);
+
+/**
+ * Recipients accepted per registrable domain and UTC day while the domain
+ * warms up, across every team sending from it: the warm-up cap is the
+ * domain's, so a team's older domains never share it and a second team
+ * cannot double it. Reserved with the same guarded upsert as usage_counters.
+ */
+export const domainWarmupUsage = pgTable(
+  "domain_warmup_usage",
+  {
+    registrableDomain: text("registrable_domain").notNull(),
+    day: date("day").notNull(),
+    accepted: integer("accepted").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.registrableDomain, t.day] })],
 );

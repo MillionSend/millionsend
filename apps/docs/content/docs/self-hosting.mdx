@@ -895,6 +895,56 @@ hourly sample count, and the operator is emailed, at most once every six
 hours, when more than 20% of an hour's samples (at least 20 of them) went
 unjudged, or as soon as TypeSafe rejects the API key.
 
+## New-domain warm-up (optional)
+
+Off by default on a self-hosted instance and on by default with `IS_CLOUD`.
+With it on, a sending domain gets a daily cap by the age of its registrable
+domain (the ICANN part of the Public Suffix List: `acme.com.br` for
+`mail.acme.com.br`), counted per UTC day across every team sending from it:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `WARMUP_ENABLED` | `false` (`true` with `IS_CLOUD`) | Whether the warm-up applies |
+| `WARMUP_CAP_FIRST_DAY` | 100 | Emails a day while the domain is under 24 hours old |
+| `WARMUP_CAP_FIRST_WEEK` | 300 | From day 1 to day 7, and for a domain of unknown age while its team is new or on probation |
+| `WARMUP_CAP_FIRST_MONTH` | 2000 | From day 7 to day 30; from day 30 only the plan applies |
+
+Each value is edited in the console under Trust & safety → Monitoring
+settings, or set as its environment variable until it is; the console wins.
+The effective cap is the lower of the plan's and the warm-up's, and buying a
+plan never lifts it. Mail over it parks as `queued_quota` (with
+`park_reason = 'warmup'`) and the 15-minute `quota.drain` releases it as the
+day's cap allows; the API answers `429 daily_quota_exceeded` with a warm-up
+message (SMTP `452`) only when the team's parked backlog is full (three days of
+its plan's volume). A domain moves up one step early once its sends since the
+last step are clean: at least 50, hard bounces under 2%, complaints under 0.1%
+and no phishing-type verdict from the content monitor (checked by the
+15-minute `safety.flags` job). An operator can trust a team, or one domain, on
+its Trust & safety review page, which lifts the warm-up and is audited.
+
+**The age lookup** runs in the worker's `domain.age` job, never on the send
+path: when a domain is added, when it verifies, and from the 15-minute
+`domains.reverify` sweep for any domain never looked up (rows from before the
+upgrade included). It tries, in order:
+
+1. RDAP from the server [IANA's bootstrap](https://data.iana.org/rdap/dns.json)
+   names for the TLD (refreshed daily), or a fixed server for `.io` and `.me`
+   (`rdap.identitydigital.services`), `.co` (`rdap.registry.co`) and `.us`
+   (`rdap.nic.us`), which the bootstrap does not list.
+2. WHOIS on TCP port 43 at the server `whois.iana.org` refers the TLD to.
+3. The first certificate issued for the name in Certificate Transparency
+   ([crt.sh](https://crt.sh), at most one request every 12 seconds).
+
+Otherwise the age is unknown: `.de`, `.eu` and `.ch`, for instance, publish
+no creation date. Requests carry the User-Agent
+`MillionSend-domain-age/1.0 (+https://millionsend.com)`, a `429` is honoured
+until its `Retry-After`, and a failed lookup retries with backoff before the
+domain is recorded as unknown. The worker therefore needs outbound HTTPS to
+`data.iana.org`, the registries' RDAP servers and `crt.sh`, and outbound TCP
+43, while the warm-up is on; with it off no lookup is made. The date, its
+source (`rdap`, `whois`, `ct` or `unknown`) and the time of the check are
+stored on the domain row.
+
 ## Content access (break-glass)
 
 Off by default. With it on, an authorised operator can read the subject and

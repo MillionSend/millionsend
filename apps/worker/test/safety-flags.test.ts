@@ -33,7 +33,12 @@ const flagsOf = (teamId: string) =>
   db.select().from(schema.teamFlags).where(eq(schema.teamFlags.teamId, teamId));
 
 it("flags the noisy team only, stands both, and records the unsubscribed count", async () => {
-  expect(await runSafetyFlags(db, { now: NOW })).toEqual({ teams: 2, opened: 1, cleared: 0 });
+  expect(await runSafetyFlags(db, { now: NOW })).toEqual({
+    teams: 2,
+    opened: 1,
+    cleared: 0,
+    graduated: 0,
+  });
 
   expect(await flagsOf(noisy)).toMatchObject([
     { status: "open", openedBy: null, openedAt: NOW, reason: "guardrail" },
@@ -72,7 +77,12 @@ it("clears the flag once the counters are fixed", async () => {
     .update(schema.usageCounters)
     .set({ complained: 0 })
     .where(and(eq(schema.usageCounters.teamId, noisy), eq(schema.usageCounters.day, DAY)));
-  expect(await runSafetyFlags(db, { now: later })).toEqual({ teams: 2, opened: 0, cleared: 1 });
+  expect(await runSafetyFlags(db, { now: later })).toEqual({
+    teams: 2,
+    opened: 0,
+    cleared: 1,
+    graduated: 0,
+  });
   expect(await flagsOf(noisy)).toMatchObject([
     { status: "cleared", clearedBy: null, clearedAt: later, openedAt: NOW },
   ]);
@@ -136,4 +146,37 @@ it("opens nothing from a stored risk while the judge is off", async () => {
     await runSafetyFlags(db, { now: t, monitorFlagRisk: Number.POSITIVE_INFINITY }),
   ).toMatchObject({ opened: 0 });
   expect(await flagsOf(stale)).toEqual([]);
+});
+
+it("moves a warming domain up a step once its sends are clean", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const warming = await createTeam(db, "warming");
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: warming,
+      name: "news.warming-up.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date(NOW.getTime() - 5 * 3600_000),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
+  await db.insert(schema.emails).values(
+    Array.from({ length: 50 }, () => ({
+      teamId: warming,
+      domainId: domain.id,
+      from: "news@news.warming-up.com",
+      to: ["r@example.com"],
+      subject: "s",
+      latestStatus: "delivered" as const,
+      sentAt: new Date(NOW.getTime() - 2 * 3600_000),
+    })),
+  );
+  expect(await runSafetyFlags(db, { now: NOW })).toMatchObject({ graduated: 1 });
+  const [row] = await db
+    .select({ tier: schema.domains.warmupTier })
+    .from(schema.domains)
+    .where(eq(schema.domains.id, domain.id));
+  expect(row?.tier).toBe(1);
 });

@@ -755,6 +755,39 @@
           "unsolicited_bulk": "Parece envio em massa para quem nunca consentiu (promoção no estilo spam de um desconhecido), e não marketing com consentimento ou prospecção B2B. O modelo não vê o consentimento, então newsletters costumam ficar perto dessa linha.",
           "prompt_injection": "O texto tenta instruir um revisor ou modelo a mudar o veredito ou ignorar a política."
         }
+      },
+      "warmup": {
+        "title": "Aquecimento de domínios",
+        "subtitle": "Domínios de envio jovens enviam sob um limite diário pela idade do registro; o que passa dele espera. A confiança libera o limite da equipe ou de um domínio.",
+        "off": "O aquecimento está desligado nesta instância. A confiança definida aqui vale quando ele for ligado.",
+        "teamTrusted": "A equipe é confiável desde {date}: nenhum domínio dela passa por aquecimento.",
+        "trustTeam": "Confiar na equipe",
+        "untrustTeam": "Remover confiança da equipe",
+        "trustDomain": "Confiar",
+        "untrustDomain": "Remover confiança",
+        "cols": {
+          "domain": "Domínio",
+          "registered": "Registrado",
+          "today": "Hoje",
+          "trust": "Confiança"
+        },
+        "registered": "{date} · {source}",
+        "sources": {
+          "rdap": "RDAP",
+          "whois": "WHOIS",
+          "ct": "primeiro certificado",
+          "unknown": "desconhecida"
+        },
+        "unknownAge": "Desconhecido",
+        "notChecked": "Ainda não consultado",
+        "today": "{used} de {cap} · volume total {date}",
+        "todayNoDate": "{used} de {cap}",
+        "full": "Volume total",
+        "trusted": "Confiável",
+        "toast": {
+          "trusted": "Aquecimento liberado para {name}",
+          "untrusted": "Aquecimento restabelecido para {name}"
+        }
       }
     },
     "metric": {
@@ -799,14 +832,16 @@
         "tiers": "Níveis",
         "broadcasts": "Broadcasts",
         "escalation": "Escalonamento e limites",
-        "thresholds": "Linhas e política"
+        "thresholds": "Linhas e política",
+        "warmup": "Aquecimento de domínio novo"
       },
       "groupsSub": {
         "launch": "Os primeiros envios e horas de uma equipe são julgados por inteiro; depois vale a taxa de rampa até a contagem de envios ou o dia, o que vier primeiro.",
         "tiers": "Probatória vai do fim da rampa ao dia 30; Estabelecida a partir do dia 30; Confiável exige 120 dias, 50.000 envios e nenhuma sinalização em 90 dias.",
         "broadcasts": "Um broadcast é julgado pelo seu próprio HTML mais esta quantidade de cópias renderizadas; os destinatários nunca são amostrados por mensagem além disso.",
         "escalation": "Uma checagem crítica ou importante de conteúdo falhando multiplica a taxa; duas forçam. Os limites param a amostragem em silêncio, nunca o envio.",
-        "thresholds": "O risco vai de 0 a 1. A sinalização lista a equipe aqui e quadruplica sua taxa; o alerta envia um e-mail uma vez por dia por equipe; a pausa retém os broadcasts de uma equipe nova quando uma mensagem amostrada também pontuou 90 ou mais."
+        "thresholds": "O risco vai de 0 a 1. A sinalização lista a equipe aqui e quadruplica sua taxa; o alerta envia um e-mail uma vez por dia por equipe; a pausa retém os broadcasts de uma equipe nova quando uma mensagem amostrada também pontuou 90 ou mais.",
+        "warmup": "Um limite diário em cada domínio de envio pela idade do registro, contado por dia UTC; o que passa dele espera e sai conforme o limite permite. Nenhum plano o libera. Um domínio cuja idade nenhum registro publica recebe o limite de 1 a 7 dias enquanto a equipe é nova ou probatória. 50 envios limpos sobem o domínio um degrau antes."
       },
       "fields": {
         "firstSends": "Primeiros envios julgados por inteiro",
@@ -826,7 +861,11 @@
         "alertRisk": "Avisar o operador por e-mail no risco",
         "pauseRisk": "Pausar os broadcasts de uma equipe nova no risco",
         "autoPause": "Política de pausa",
-        "flagScore": "Uma amostra conta como sinalizada a partir da pontuação"
+        "flagScore": "Uma amostra conta como sinalizada a partir da pontuação",
+        "warmupEnabled": "Aquecer domínios novos",
+        "warmupCapFirstDay": "Limite · menos de 24 horas",
+        "warmupCapFirstWeek": "Limite · de 1 a 7 dias",
+        "warmupCapFirstMonth": "Limite · de 7 a 30 dias"
       },
       "hints": {
         "firstSends": "as primeiras N mensagens aceitas de uma equipe",
@@ -846,7 +885,11 @@
         "alertRisk": "avisa o operador por e-mail, uma vez por equipe por dia",
         "pauseRisk": "só no nível nova, com um veredicto de 90 ou mais no último dia",
         "autoPause": "se a pausa acima é aplicada; uma pessoa decide todo o resto",
-        "flagScore": "o veredicto de abuso do próprio juiz começa em 65"
+        "flagScore": "o veredicto de abuso do próprio juiz começa em 65",
+        "warmupEnabled": "ligado por padrão na nuvem; a partir de 30 dias o domínio envia no volume do plano",
+        "warmupCapFirstDay": "e-mails por dia de um domínio registrado há menos de 24 horas",
+        "warmupCapFirstWeek": "e-mails por dia do dia 1 ao 7, e para idade desconhecida numa equipe nova",
+        "warmupCapFirstMonth": "e-mails por dia do dia 7 ao 30"
       },
       "kinds": {
         "count": "número inteiro",

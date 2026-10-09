@@ -108,7 +108,7 @@ export const monitorSamples = pgTable(
   ],
 );
 
-/** The judge's own switch is env; these sampling and threshold overrides sit beside it. */
+/** The judge's own switch is env; these sampling and threshold overrides sit beside it, with the warm-up's. */
 export const monitorSettingColumns = {
   monitorFirstSends: integer("monitor_first_sends"),
   monitorFirstHours: integer("monitor_first_hours"),
@@ -128,4 +128,9 @@ export const monitorSettingColumns = {
   monitorPauseRisk: doublePrecision("monitor_pause_risk"),
   monitorAutoPause: boolean("monitor_auto_pause"),
   monitorFlagScore: smallint("monitor_flag_score"),
+  // The new-domain warm-up shares the trust & safety settings page.
+  warmupEnabled: boolean("warmup_enabled"),
+  warmupCapFirstDay: integer("warmup_cap_first_day"),
+  warmupCapFirstWeek: integer("warmup_cap_first_week"),
+  warmupCapFirstMonth: integer("warmup_cap_first_month"),
 } as const;

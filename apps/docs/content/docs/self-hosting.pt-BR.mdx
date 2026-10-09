@@ -909,6 +909,61 @@ por e-mail, no máximo a cada seis horas, quando mais de 20% das amostras de
 uma hora (pelo menos 20 delas) ficaram sem julgamento, ou assim que a
 TypeSafe recusa a chave de API.
 
+## Aquecimento de domínio novo (opcional)
+
+Desligado por padrão numa instância auto-hospedada e ligado por padrão com
+`IS_CLOUD`. Ligado, cada domínio de envio recebe um limite diário pela idade
+do seu domínio registrável (a parte ICANN da Public Suffix List: `acme.com.br`
+para `mail.acme.com.br`), contado por dia UTC entre todas as equipes que
+enviam por ele:
+
+| Configuração | Padrão | Significado |
+| --- | --- | --- |
+| `WARMUP_ENABLED` | `false` (`true` com `IS_CLOUD`) | Se o aquecimento vale |
+| `WARMUP_CAP_FIRST_DAY` | 100 | E-mails por dia enquanto o domínio tem menos de 24 horas |
+| `WARMUP_CAP_FIRST_WEEK` | 300 | Do dia 1 ao dia 7, e para um domínio de idade desconhecida enquanto a equipe é nova ou probatória |
+| `WARMUP_CAP_FIRST_MONTH` | 2000 | Do dia 7 ao dia 30; a partir do dia 30 vale só o plano |
+
+Cada valor é editado no console em Confiança e segurança → Configurações de
+monitoramento, ou definido na sua variável de ambiente até ser editado lá; o
+console prevalece. O limite efetivo é o menor entre o do plano e o do
+aquecimento, e comprar um plano nunca o libera. O que passa dele fica
+estacionado como `queued_quota` (com `park_reason = 'warmup'`) e o
+`quota.drain` de 15 minutos libera conforme o limite do dia permite; a API
+responde `429 daily_quota_exceeded` com uma mensagem de aquecimento (SMTP
+`452`) só quando o acúmulo estacionado da equipe está cheio (três dias do
+volume do plano). Um domínio sobe um degrau antes quando os envios desde o
+último degrau estão limpos: pelo menos 50, bounces permanentes abaixo de 2%,
+reclamações abaixo de 0,1% e nenhum veredicto do tipo phishing do
+monitoramento de conteúdo (verificado pelo job `safety.flags` de 15 minutos).
+Um operador pode confiar numa equipe, ou num domínio, na página de revisão de
+Confiança e segurança, o que libera o aquecimento e fica no registro de
+auditoria.
+
+**A consulta de idade** roda no job `domain.age` do worker, nunca no caminho
+de envio: quando um domínio é adicionado, quando é verificado, e pela varredura
+`domains.reverify` de 15 minutos para qualquer domínio nunca consultado
+(inclusive os de antes da atualização). Ela tenta, nesta ordem:
+
+1. RDAP no servidor que o [bootstrap da IANA](https://data.iana.org/rdap/dns.json)
+   indica para o TLD (atualizado diariamente), ou um servidor fixo para `.io`
+   e `.me` (`rdap.identitydigital.services`), `.co` (`rdap.registry.co`) e
+   `.us` (`rdap.nic.us`), que o bootstrap não lista.
+2. WHOIS na porta TCP 43 do servidor para o qual `whois.iana.org` encaminha o
+   TLD.
+3. O primeiro certificado emitido para o nome no Certificate Transparency
+   ([crt.sh](https://crt.sh), no máximo uma requisição a cada 12 segundos).
+
+Senão a idade fica desconhecida: `.de`, `.eu` e `.ch`, por exemplo, não
+publicam data de criação. As requisições levam o User-Agent
+`MillionSend-domain-age/1.0 (+https://millionsend.com)`, um `429` é respeitado
+até o seu `Retry-After`, e uma consulta que falha tenta de novo com espera
+crescente antes de o domínio ficar como desconhecido. O worker precisa, então,
+de HTTPS de saída para `data.iana.org`, os servidores RDAP dos registros e
+`crt.sh`, e de TCP 43 de saída, enquanto o aquecimento está ligado; desligado,
+nenhuma consulta é feita. A data, a sua origem (`rdap`, `whois`, `ct` ou
+`unknown`) e o horário da consulta ficam na linha do domínio.
+
 ## Acesso ao conteúdo (quebra de vidro)
 
 Desligado por padrão. Com ele ligado, um operador autorizado pode ler o

@@ -45,6 +45,8 @@ export const AUDIT_ACTIONS = [
   "monitor.override_cleared",
   "monitor.broadcasts_paused",
   "monitor.broadcasts_resumed",
+  "warmup.trust_granted",
+  "warmup.trust_revoked",
   "support.view_started",
   "support.view_ended",
   "billing.checkout_started",

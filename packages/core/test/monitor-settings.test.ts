@@ -47,7 +47,19 @@ describe("resolveMonitorSettings", () => {
   it("orders the thresholds and knows every key", () => {
     expect(monitorThresholdsOrdered(MONITOR_SETTING_DEFAULTS)).toBe(true);
     expect(monitorThresholdsOrdered({ flagRisk: 0.7, alertRisk: 0.7, pauseRisk: 0.9 })).toBe(false);
-    expect(MONITOR_SETTING_KEYS).toHaveLength(18);
+    expect(MONITOR_SETTING_KEYS).toHaveLength(22);
+  });
+
+  it("turns the warm-up on by default for the cloud only", () => {
+    expect(resolveMonitorSettings(null, {}).settings.warmupEnabled).toBe(false);
+    const cloud = resolveMonitorSettings(null, { IS_CLOUD: "true" });
+    expect(cloud.settings.warmupEnabled).toBe(true);
+    expect(cloud.sources.warmupEnabled).toBe("default");
+    expect(
+      resolveMonitorSettings(null, { IS_CLOUD: "true", WARMUP_ENABLED: "false" }).settings
+        .warmupEnabled,
+    ).toBe(false);
+    expect(resolveMonitorSettings({ warmupEnabled: true }, {}).settings.warmupEnabled).toBe(true);
   });
 });
 

@@ -112,6 +112,8 @@ export const teams = pgTable(
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
     suspensionReason: suspensionReasonEnum("suspension_reason"),
     suspensionNote: text("suspension_note"),
+    // Operator override: none of the team's domains warm up.
+    warmupTrustedAt: timestamp("warmup_trusted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

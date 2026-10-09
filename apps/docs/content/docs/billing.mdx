@@ -72,6 +72,11 @@ volume, once per period; the reached mail says whether sends now bill overage
 or are refused. There is no `quota.paused` on monthly plans. A scheduled send
 counts against the period it is accepted in.
 
+On every plan, a sending domain under 30 days old also has its own daily cap
+(see [Domains](/concepts/domains#new-domain-warm-up)). A plan change never
+lifts it, and mail it holds parks as `queued_quota` without counting against
+the plan until the drain releases it.
+
 ## The Stripe model
 
 - One **product** per paid plan (Starter, Pro, Scale), found again by

@@ -4,8 +4,9 @@ import { schema } from "@millionsend/db";
 import { and, count, eq } from "drizzle-orm";
 import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
-import { type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
-import { reserveQuota } from "./quota.js";
+import { admitWarmup } from "./domain-warmup.js";
+import { monthlyCapacity, type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
+import { releaseQuota, reserveQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
 import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppressions.js";
 import { findTopicOptOuts } from "./topics.js";
@@ -172,6 +173,52 @@ export function estimateAttachmentBytes(
 export const QUOTA_BACKLOG_DAYS = 3;
 
 /**
+ * Parked mail a team may hold behind a domain's warm-up: QUOTA_BACKLOG_DAYS
+ * of what its plan would send in a day (a monthly volume spread over 30),
+ * or of the warm-up cap where that is more. The plan's own volume, not the
+ * cap, so a new domain's burst is held rather than refused.
+ */
+function warmupBacklogLimit(quota: TeamQuota, cap: number): number {
+  const planDay = quota.kind === "none" ? 0 : monthlyCapacity(quota) / 30;
+  return Math.ceil(QUOTA_BACKLOG_DAYS * Math.max(cap, planDay));
+}
+
+async function countParked(db: Db, teamId: string): Promise<number> {
+  const [parked] = await db
+    .select({ n: count() })
+    .from(schema.emails)
+    .where(and(eq(schema.emails.teamId, teamId), eq(schema.emails.latestStatus, "queued_quota")));
+  return parked?.n ?? 0;
+}
+
+/**
+ * The new-domain warm-up on one send its plan already admitted, inside the
+ * accept transaction: "send" when the sending domain's cap for the delivery
+ * day has room (now reserved); "park" when it has none, the plan's units
+ * handed back so the row parks as queued_quota with reason "warmup" and the
+ * drain charges both again on release; "backlog_full" when the team already
+ * holds all the parked mail it may. Every accept surface enforces the
+ * warm-up through this one call.
+ */
+export async function enforceDomainWarmup(
+  tx: Db,
+  send: {
+    teamId: string;
+    domainId: string | null;
+    count: number;
+    quota: TeamQuota;
+    day: string;
+    at: Date;
+  },
+): Promise<"send" | "park" | "backlog_full"> {
+  const warmup = await admitWarmup(tx, send);
+  if (warmup.admitted) return "send";
+  await releaseQuota(tx, send);
+  const limit = warmupBacklogLimit(send.quota, warmup.cap.cap);
+  return (await countParked(tx, send.teamId)) >= limit ? "backlog_full" : "park";
+}
+
+/**
  * Distinct mailboxes an email reaches: what the daily quota charges, since
  * every recipient is one SES message and one unit of shared reputation.
  */
@@ -199,6 +246,8 @@ export type AcceptEmailResult =
   | { ok: false; reason: "all_suppressed" }
   | { ok: false; reason: "attachments_too_large"; maxBytes: number }
   | { ok: false; reason: "quota_backlog_full" }
+  /** The sending domain's warm-up cap is spent and the team's parked backlog is full. */
+  | { ok: false; reason: "warmup_backlog_full" }
   /**
    * A monthly plan at its cap: the included volume with overage off, or the
    * hard cap past it with overage on. Refused outright, nothing parks for a month.
@@ -319,17 +368,26 @@ export async function acceptEmail(
           ? (quota.dailyCeiling ?? null)
           : null;
     if (!reservation.reserved && dayLimit !== null) {
-      const [parked] = await txDb
-        .select({ n: count() })
-        .from(schema.emails)
-        .where(
-          and(
-            eq(schema.emails.teamId, auth.teamId),
-            eq(schema.emails.latestStatus, "queued_quota"),
-          ),
-        );
-      if ((parked?.n ?? 0) >= dayLimit * QUOTA_BACKLOG_DAYS) return "quota_backlog_full" as const;
+      if ((await countParked(txDb, auth.teamId)) >= dayLimit * QUOTA_BACKLOG_DAYS) {
+        return "quota_backlog_full" as const;
+      }
     }
+    // The plan said yes; the sending domain's warm-up has the last word. A
+    // deferred batch runs the same gate after its own reservation.
+    let parkReason: "warmup" | null = null;
+    if (reservation.reserved && opts.quota !== "deferred" && auth.billing !== "uncapped") {
+      const warmup = await enforceDomainWarmup(txDb, {
+        teamId: auth.teamId,
+        domainId: payload.domainId,
+        count: recipientCount,
+        quota,
+        day,
+        at: deliveryAt,
+      });
+      if (warmup === "backlog_full") return "warmup_backlog_full" as const;
+      if (warmup === "park") parkReason = "warmup";
+    }
+    const parked = !reservation.reserved || parkReason !== null;
     const [row] = await txDb
       .insert(schema.emails)
       .values({
@@ -347,7 +405,8 @@ export async function acceptEmail(
         headers: payload.headers ?? null,
         attachments: sealedAttachments,
         topicId: payload.topicId ?? null,
-        latestStatus: reservation.reserved ? "queued" : "queued_quota",
+        latestStatus: parked ? "queued_quota" : "queued",
+        parkReason,
         scheduledAt: payload.scheduledAt ?? null,
         bodyCiphertext: encrypted.ciphertext,
         bodyIv: encrypted.iv,
@@ -357,12 +416,14 @@ export async function acceptEmail(
       .returning({ id: schema.emails.id });
     if (!row) throw new Error("email insert returned no row");
     await opts.completeInTx?.(txDb, row.id);
-    return { id: row.id, parked: !reservation.reserved };
+    return { id: row.id, parked };
   };
   const accepted = opts.tx
     ? await runAccept(opts.tx)
     : await deps.db.transaction((tx) => runAccept(tx as unknown as Db));
-  if (accepted === "quota_backlog_full") return { ok: false, reason: "quota_backlog_full" };
+  if (accepted === "quota_backlog_full" || accepted === "warmup_backlog_full") {
+    return { ok: false, reason: accepted };
+  }
   if (accepted === "monthly_quota_exceeded") {
     return {
       ok: false,

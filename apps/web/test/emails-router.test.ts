@@ -248,6 +248,20 @@ describe("emails.list sources", () => {
     expect(stats.hasBroadcasts).toBe(true);
   });
 
+  it("shows a row the domain's warm-up holds as warming up, apart from the plan's backlog", async () => {
+    const team = await createTeam(db, "team-a");
+    // The plan is spent today: a warm-up row still never reads as held by it.
+    await db.insert(schema.usageCounters).values({ teamId: team, day: utcDay(), accepted: 500 });
+    const warming = await insertEmail({
+      ...baseEmail(team),
+      latestStatus: "queued_quota",
+      parkReason: "warmup",
+    });
+    await insertEmail({ ...baseEmail(team), latestStatus: "queued_quota" });
+    expect((await caller(team).emails.get({ id: warming })).pending).toEqual({ kind: "warmup" });
+    expect((await caller(team).emails.stats()).queuedQuota).toBe(1);
+  });
+
   it("says what an unsent row waits for, and names its broadcast", async () => {
     const team = await createTeam(db, "team-a");
     const broadcastId = await broadcastFor(team);

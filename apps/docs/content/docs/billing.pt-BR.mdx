@@ -75,6 +75,11 @@ incluído, uma vez por período; o e-mail de limite atingido diz se os envios
 agora cobram excedente ou são recusados. Não há `quota.paused` em planos
 mensais. Um envio agendado conta no período em que foi aceito.
 
+Em todo plano, um domínio de envio com menos de 30 dias também tem o seu
+próprio limite diário (veja [Domínios](/pt-BR/concepts/domains#aquecimento-de-domínio-novo)).
+Uma mudança de plano nunca o libera, e o que ele retém fica estacionado como
+`queued_quota` sem contar no plano até o dreno liberá-lo.
+
 ## O modelo no Stripe
 
 - Um **produto** por plano pago (Starter, Pro, Scale), localizado por

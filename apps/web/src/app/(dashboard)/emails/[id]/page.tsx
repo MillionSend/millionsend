@@ -436,6 +436,7 @@ type Pending =
   | { kind: "queued" }
   | { kind: "plan"; resumesAt: Date }
   | { kind: "waiting" }
+  | { kind: "warmup" }
   | { kind: "paced"; from: Date | null; to: Date | null };
 
 /**
@@ -498,6 +499,13 @@ function PendingEvents({
       type: "queued_quota",
       label: t("detail.pending.waiting"),
       body: t("detail.pending.waitingBody"),
+      estimate: true,
+    });
+  } else if (pending.kind === "warmup") {
+    nodes.push({
+      type: "queued_quota",
+      label: t("detail.pending.warmup"),
+      body: t("detail.pending.warmupBody"),
       estimate: true,
     });
   } else {

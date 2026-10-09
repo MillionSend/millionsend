@@ -17,6 +17,7 @@ import {
   isOperatorTeam,
   isReservedSenderDomain,
   PLAN_DOMAIN_LIMIT,
+  warmupCap,
 } from "@millionsend/core";
 import { registrableDomain } from "@millionsend/core/org-domain";
 import { type Db, schema } from "@millionsend/db";
@@ -44,6 +45,7 @@ import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
+import { enqueueDomainAge } from "../queue";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
 // Lowercase registrable hostname with at least two labels; SES identities are
@@ -60,6 +62,8 @@ export interface DomainsSesDeps {
   resolveNs(name: string): Promise<string[]>;
   /** Live per-record DNS lookups; omitted falls back to node:dns/promises. */
   dns?: DnsResolver;
+  /** The domain.age job, on create and verification; omitted, the worker's sweep asks later. */
+  enqueueDomainAge?: (domainId: string) => Promise<void>;
 }
 
 const regionClients = new Map<string, SesIdentityClient>();
@@ -85,6 +89,8 @@ const defaultSesDeps: DomainsSesDeps = {
   },
   resolveNs: (name) => dnsResolveNs(name),
   dns: nodeDnsResolver,
+  // Read at call time: a test's queue mock may not define it.
+  enqueueDomainAge: (domainId) => enqueueDomainAge(domainId),
 };
 
 /**
@@ -203,8 +209,16 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
         .select({ n: count() })
         .from(schema.emails)
         .where(and(eq(schema.emails.teamId, ctx.teamId), eq(schema.emails.domainId, domain.id)));
+      const warmup = await warmupCap(ctx.db, {
+        teamId: ctx.teamId,
+        domainId: domain.id,
+        at: new Date(),
+      });
       return {
         sentCount: sent?.n ?? 0,
+        // The day's cap while the domain warms up and when the calendar
+        // lifts it; never why, nor what a tier is.
+        warmup: warmup ? { perDay: warmup.cap, fullAt: warmup.fullAt } : null,
         id: domain.id,
         name: domain.name,
         region: domain.region,
@@ -367,6 +381,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           target: { type: "domain", id: created.id },
           metadata: { name: input.name, region: input.region },
         });
+        await deps.enqueueDomainAge?.(created.id);
         return { id: created.id };
       }),
 
@@ -438,6 +453,7 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
           target: { type: "domain", id: domain.id },
           metadata: { name: domain.name },
         });
+        await deps.enqueueDomainAge?.(domain.id);
       }
       return {
         status,
