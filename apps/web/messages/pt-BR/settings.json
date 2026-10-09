@@ -310,6 +310,8 @@
     "keepPlan": "Manter {plan}",
     "switchAtPeriodEnd": "Trocar no fim do período",
     "changeHint": "Subir de plano vale na hora, com a diferença rateada na próxima fatura. Descer vale quando o período renovar.",
+    "upgradesHeld": "Não é possível subir de plano nesta equipe no momento. Fale com o suporte se precisar de ajuda.",
+    "upgradesHeldLive": "Não é possível subir de plano nesta equipe no momento. Você ainda pode cancelar ou mudar para um plano menor. Fale com o suporte se precisar de ajuda.",
     "features": {
       "domains": "{n, plural, one {# domínio de envio} other {# domínios de envio}}",
       "domainsUnlimited": "Domínios de envio ilimitados",
@@ -423,6 +425,9 @@
       "team_broadcasts_resumed": "Retomou transmissões",
       "team_suspended": "Suspendeu a equipe",
       "team_reinstated": "Reativou a equipe",
+      "team_held_for_review": "Envio pausado aguardando revisão",
+      "team_ses_tenant_updated": "Atualizou o status do tenant do SES",
+      "team_ses_tenant_update_failed": "Falha ao atualizar o status do tenant do SES",
       "console_flag_opened": "Sinalizou a equipe",
       "console_flag_cleared": "Limpou a sinalização",
       "console_flag_reopened": "Reabriu a sinalização",

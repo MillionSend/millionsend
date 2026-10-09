@@ -35,7 +35,7 @@ export const CONTENT_REVEAL_JUSTIFICATION_MIN = 20;
 export const CONTENT_REVEAL_JUSTIFICATION_MAX = 2_000;
 /** Longer bodies are cut: the operator is triaging a lure, not reading a newsletter. */
 export const CONTENT_REVEAL_TEXT_MAX_CHARS = 20_000;
-/** Days after which the access appears in the team's own audit and its owners are told. */
+/** Days after which the access appears in the team's own audit; nobody is emailed. */
 export const CONTENT_REVEAL_NOTICE_DAYS = 7;
 
 /** What the audit rows say was read, on both sides. */

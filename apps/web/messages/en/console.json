@@ -445,6 +445,8 @@
       "pausedNotified": "Broadcasts paused for {team} · owner notified",
       "suspended": "{team} suspended · {reason}",
       "reinstated": "{team} reinstated",
+      "suspendedTenantFailed": "{team} suspended · SES did not disable its tenant in {regions}; retrying in the background",
+      "reinstatedTenantFailed": "{team} reinstated · SES did not re-enable its tenant in {regions}; retrying in the background",
       "limits": "Limits saved for {team}",
       "plan": "{team} · {from} → {to}",
       "error": "The action failed: {message}"
@@ -526,7 +528,7 @@
     },
     "reinstateDialog": {
       "title": "Reinstate {team}",
-      "lead": "Sends go out again at once; held broadcasts resume within 15 minutes. The owner is emailed unless the suspension was for phishing.",
+      "lead": "Sends go out again at once; held broadcasts resume within 15 minutes. The owner is emailed unless the suspension was for phishing or a review hold.",
       "confirm": "Reinstate team"
     },
     "viewDialog": {
@@ -619,6 +621,8 @@
       "reopen": "Reopen",
       "suspend": "Suspend team",
       "reinstate": "Reinstate team",
+      "release": "Release hold",
+      "convert": "Suspend for phishing",
       "reveal": "Request content access",
       "clearTip": "Marks the flag reviewed and closes it, with an audit entry. Risk, sampling and any pause stay as they are. While the same trigger holds, the automatic check will not reopen it; if the trigger lapses and comes back, a new flag opens. Left alone, an automatic flag closes itself once its trigger is gone. A flag opened in the last 90 days keeps the team out of the Trusted tier either way.",
       "reopenTip": "Opens it again as a manual flag, which the automatic check never closes.",
@@ -635,6 +639,7 @@
       "proofNoFlag": "{plan} · {region} · {domains, plural, one {# domain} other {# domains}} · owner {owner}",
       "badges": {
         "suspended": "Suspended",
+        "heldForReview": "Held for review",
         "guardrailPaused": "Guardrail paused",
         "guardrailWarning": "Guardrail warning",
         "guardrailOk": "Guardrail ok",
@@ -804,7 +809,7 @@
         "tiers": "Probation runs from the ramp's end to day 30; Established from day 30; Trusted needs 120 days, 50,000 sends and no flag in 90 days.",
         "broadcasts": "A broadcast is judged as its own HTML plus this many rendered copies; recipients are never sampled per message on top.",
         "escalation": "A failing critical or major content check multiplies the rate; two force it. Caps stop sampling silently, never sending.",
-        "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more."
+        "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more; the review hold suspends a new team when one message is judged phishing at the hold score, or the set number of them at the lower score in its first week, until you release it."
       },
       "fields": {
         "firstSends": "First sends judged in full",
@@ -824,7 +829,11 @@
         "alertRisk": "Email the operator at risk",
         "pauseRisk": "Pause a new team's broadcasts at risk",
         "autoPause": "Pause policy",
-        "flagScore": "A sample counts as flagged from score"
+        "flagScore": "A sample counts as flagged from score",
+        "holdScore": "Hold a new team for review from score",
+        "holdRepeatCount": "Hold a new team after this many phishing verdicts in its first week",
+        "holdRepeatScore": "A phishing verdict counts toward that from score",
+        "autoHold": "Review hold"
       },
       "hints": {
         "firstSends": "a team's first N accepted messages",
@@ -843,8 +852,12 @@
         "flagRisk": "opens the monitor flag and quadruples the team's rate",
         "alertRisk": "emails the operator, once per team per day",
         "pauseRisk": "new tier only, with a verdict of 90 or more in the last day",
-        "autoPause": "whether the pause above is applied; a human decides everything else",
-        "flagScore": "the judge's own abuse verdict starts at 65"
+        "autoPause": "whether the pause above is applied",
+        "flagScore": "the judge's own abuse verdict starts at 65",
+        "holdScore": "new tier only, on a phishing, brand impersonation or payment redirect verdict",
+        "holdRepeatCount": "the week runs from the team's first send; 0 turns this off",
+        "holdRepeatScore": "the same phishing verdicts as above, at a lower score",
+        "autoHold": "whether those verdicts suspend the team until you release it; the owner sees a neutral pause"
       },
       "kinds": {
         "count": "whole number",
@@ -965,6 +978,7 @@
       "phishing": "abuse",
       "non_payment": "non-payment"
     },
-    "broadcastsPendingReview": "Broadcasts are paused for this team pending review since {since}. Transactional email is unaffected."
+    "broadcastsPendingReview": "Broadcasts are paused for this team pending review since {since}. Transactional email is unaffected.",
+    "sendingPendingReview": "Sending is paused for this team pending review since {since}. New sends are refused and queued email waits until the review is complete; data stays."
   }
 }

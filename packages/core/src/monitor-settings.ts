@@ -82,6 +82,20 @@ export const MONITOR_SETTINGS = {
   pauseRisk: { column: "monitorPauseRisk", env: "MONITOR_PAUSE_RISK", kind: "rate", default: 0.85 },
   autoPause: { column: "monitorAutoPause", env: "MONITOR_AUTO_PAUSE", kind: "bool", default: true },
   flagScore: { column: "monitorFlagScore", env: "MONITOR_FLAG_SCORE", kind: "score", default: 70 },
+  autoHold: { column: "monitorAutoHold", env: "MONITOR_AUTO_HOLD", kind: "bool", default: true },
+  holdScore: { column: "monitorHoldScore", env: "MONITOR_HOLD_SCORE", kind: "score", default: 90 },
+  holdRepeatCount: {
+    column: "monitorHoldRepeatCount",
+    env: "MONITOR_HOLD_REPEAT_COUNT",
+    kind: "count",
+    default: 5,
+  },
+  holdRepeatScore: {
+    column: "monitorHoldRepeatScore",
+    env: "MONITOR_HOLD_REPEAT_SCORE",
+    kind: "score",
+    default: 80,
+  },
 } as const satisfies Record<
   string,
   {

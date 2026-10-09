@@ -9,7 +9,7 @@ export { AUDIT_ACTIONS, type AuditAction };
 export type AuditActor = { userId: string } | { apiKeyId: string } | "oauth" | "stripe" | "system";
 
 export interface AuditEvent {
-  /** Null only for actions with no team (none today); rows outlive their team. */
+  /** Null for an instance row, which no team's own audit ever lists; rows outlive their team. */
   teamId: string | null;
   actor: AuditActor;
   action: AuditAction;

@@ -99,6 +99,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         plan: data.team.plan,
         planQuota: data.team.planQuota,
         suspendedAt: data.team.suspendedAt,
+        suspensionReason: data.team.suspensionReason,
         broadcastsPausedByOperatorAt: data.team.broadcastsPausedByOperatorAt,
       });
     },
@@ -141,6 +142,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
     plan: team.plan,
     planQuota: team.planQuota,
     suspendedAt: team.suspendedAt,
+    suspensionReason: team.suspensionReason,
     broadcastsPausedByOperatorAt: team.broadcastsPausedByOperatorAt,
   };
   const owner = team.owners[0]?.email ?? common("none");
@@ -171,13 +173,16 @@ export function ReviewView({ teamId }: { teamId: string }) {
     );
   };
 
-  const standingBadge = team.suspendedAt
-    ? ["danger", t("badges.suspended")]
-    : standing.guardrail === "paused"
-      ? ["danger", t("badges.guardrailPaused")]
-      : standing.guardrail === "warning"
-        ? ["warn", t("badges.guardrailWarning")]
-        : ["neutral", t("badges.guardrailOk")];
+  const heldForReview = team.suspensionReason === "review";
+  const standingBadge = heldForReview
+    ? ["warn", t("badges.heldForReview")]
+    : team.suspendedAt
+      ? ["danger", t("badges.suspended")]
+      : standing.guardrail === "paused"
+        ? ["danger", t("badges.guardrailPaused")]
+        : standing.guardrail === "warning"
+          ? ["warn", t("badges.guardrailWarning")]
+          : ["neutral", t("badges.guardrailOk")];
 
   return (
     <>
@@ -253,13 +258,27 @@ export function ReviewView({ teamId }: { teamId: string }) {
               boxed
               ariaLabel={common("actions")}
               items={[
-                team.suspendedAt
-                  ? { label: safety("menu.reinstate"), onSelect: () => actions.reinstate(target) }
-                  : {
-                      label: safety("menu.suspend"),
-                      danger: true,
-                      onSelect: () => actions.suspend(target),
-                    },
+                ...(heldForReview
+                  ? [
+                      { label: safety("menu.release"), onSelect: () => actions.reinstate(target) },
+                      {
+                        label: safety("menu.convert"),
+                        danger: true,
+                        onSelect: () => actions.suspend(target),
+                      },
+                    ]
+                  : [
+                      team.suspendedAt
+                        ? {
+                            label: safety("menu.reinstate"),
+                            onSelect: () => actions.reinstate(target),
+                          }
+                        : {
+                            label: safety("menu.suspend"),
+                            danger: true,
+                            onSelect: () => actions.suspend(target),
+                          },
+                    ]),
                 ...(flagOpen
                   ? []
                   : [{ label: t("openFlag"), onSelect: () => setFlagDialog(true) }]),

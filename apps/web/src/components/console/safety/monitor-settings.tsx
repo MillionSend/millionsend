@@ -21,7 +21,17 @@ const GROUPS = [
   { key: "escalation", fields: ["anomalyMultiplier", "teamDailyCap", "instanceDailyCap"] },
   {
     key: "thresholds",
-    fields: ["flagRisk", "alertRisk", "pauseRisk", "autoPause", "flagScore"],
+    fields: [
+      "flagRisk",
+      "alertRisk",
+      "pauseRisk",
+      "autoPause",
+      "flagScore",
+      "holdScore",
+      "holdRepeatCount",
+      "holdRepeatScore",
+      "autoHold",
+    ],
   },
 ] as const;
 

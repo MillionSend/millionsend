@@ -310,6 +310,8 @@
     "keepPlan": "Keep {plan}",
     "switchAtPeriodEnd": "Switch at period end",
     "changeHint": "Moving up applies now, with the difference prorated on your next invoice. Moving down applies when the period renews.",
+    "upgradesHeld": "Upgrades are unavailable for this team right now. Contact support if you need help.",
+    "upgradesHeldLive": "Upgrades are unavailable for this team right now. You can still cancel or move to a smaller plan. Contact support if you need help.",
     "features": {
       "domains": "{n, plural, one {# sending domain} other {# sending domains}}",
       "domainsUnlimited": "Unlimited sending domains",
@@ -423,6 +425,9 @@
       "team_broadcasts_resumed": "Resumed broadcasts",
       "team_suspended": "Suspended team",
       "team_reinstated": "Reinstated team",
+      "team_held_for_review": "Sending paused pending review",
+      "team_ses_tenant_updated": "Updated SES tenant status",
+      "team_ses_tenant_update_failed": "SES tenant status update failed",
       "console_flag_opened": "Flagged team",
       "console_flag_cleared": "Cleared flag",
       "console_flag_reopened": "Reopened flag",

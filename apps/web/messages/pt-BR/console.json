@@ -445,6 +445,8 @@
       "pausedNotified": "Transmissões pausadas para {team} · proprietário avisado",
       "suspended": "{team} suspensa · {reason}",
       "reinstated": "{team} reativada",
+      "suspendedTenantFailed": "{team} suspensa · o SES não desativou o tenant em {regions}; nova tentativa em segundo plano",
+      "reinstatedTenantFailed": "{team} reativada · o SES não reativou o tenant em {regions}; nova tentativa em segundo plano",
       "limits": "Limites salvos para {team}",
       "plan": "{team} · {from} → {to}",
       "error": "A ação falhou: {message}"
@@ -526,7 +528,7 @@
     },
     "reinstateDialog": {
       "title": "Reativar {team}",
-      "lead": "Os envios voltam a sair na hora; transmissões retidas retomam em até 15 minutos. O proprietário é avisado por e-mail, exceto se a suspensão foi por phishing.",
+      "lead": "Os envios voltam a sair na hora; transmissões retidas retomam em até 15 minutos. O proprietário é avisado por e-mail, exceto se a suspensão foi por phishing ou uma retenção para revisão.",
       "confirm": "Reativar equipe"
     },
     "viewDialog": {
@@ -619,6 +621,8 @@
       "reopen": "Reabrir",
       "suspend": "Suspender equipe",
       "reinstate": "Reativar equipe",
+      "release": "Liberar retenção",
+      "convert": "Suspender por phishing",
       "reveal": "Pedir acesso ao conteúdo",
       "clearTip": "Marca a sinalização como revisada e a fecha, com registro na auditoria. Risco, amostragem e qualquer pausa continuam como estão. Enquanto o mesmo gatilho se mantiver, a checagem automática não a reabre; se o gatilho sumir e voltar, uma nova sinalização é aberta. Sem isso, uma sinalização automática se fecha sozinha quando o gatilho some. Uma sinalização aberta nos últimos 90 dias mantém a equipe fora do nível Confiável de qualquer forma.",
       "reopenTip": "Abre de novo como sinalização manual, que a checagem automática nunca fecha.",
@@ -635,6 +639,7 @@
       "proofNoFlag": "{plan} · {region} · {domains, plural, one {# domínio} other {# domínios}} · proprietário {owner}",
       "badges": {
         "suspended": "Suspensa",
+        "heldForReview": "Retida para revisão",
         "guardrailPaused": "Guardrail pausado",
         "guardrailWarning": "Guardrail em alerta",
         "guardrailOk": "Guardrail ok",
@@ -804,7 +809,7 @@
         "tiers": "Probatória vai do fim da rampa ao dia 30; Estabelecida a partir do dia 30; Confiável exige 120 dias, 50.000 envios e nenhuma sinalização em 90 dias.",
         "broadcasts": "Um broadcast é julgado pelo seu próprio HTML mais esta quantidade de cópias renderizadas; os destinatários nunca são amostrados por mensagem além disso.",
         "escalation": "Uma checagem crítica ou importante de conteúdo falhando multiplica a taxa; duas forçam. Os limites param a amostragem em silêncio, nunca o envio.",
-        "thresholds": "O risco vai de 0 a 1. A sinalização lista a equipe aqui e quadruplica sua taxa; o alerta envia um e-mail uma vez por dia por equipe; a pausa retém os broadcasts de uma equipe nova quando uma mensagem amostrada também pontuou 90 ou mais."
+        "thresholds": "O risco vai de 0 a 1. A sinalização lista a equipe aqui e quadruplica sua taxa; o alerta envia um e-mail uma vez por dia por equipe; a pausa retém os broadcasts de uma equipe nova quando uma mensagem amostrada também pontuou 90 ou mais; a retenção para revisão suspende uma equipe nova quando uma mensagem é julgada phishing na pontuação de retenção, ou o número definido delas na pontuação menor durante a primeira semana, até você liberá-la."
       },
       "fields": {
         "firstSends": "Primeiros envios julgados por inteiro",
@@ -824,7 +829,11 @@
         "alertRisk": "Avisar o operador por e-mail no risco",
         "pauseRisk": "Pausar os broadcasts de uma equipe nova no risco",
         "autoPause": "Política de pausa",
-        "flagScore": "Uma amostra conta como sinalizada a partir da pontuação"
+        "flagScore": "Uma amostra conta como sinalizada a partir da pontuação",
+        "holdScore": "Reter uma equipe nova para revisão a partir da pontuação",
+        "holdRepeatCount": "Reter uma equipe nova após este número de veredictos de phishing na primeira semana",
+        "holdRepeatScore": "Um veredicto de phishing conta para isso a partir da pontuação",
+        "autoHold": "Retenção para revisão"
       },
       "hints": {
         "firstSends": "as primeiras N mensagens aceitas de uma equipe",
@@ -843,8 +852,12 @@
         "flagRisk": "abre a sinalização do monitor e quadruplica a taxa da equipe",
         "alertRisk": "avisa o operador por e-mail, uma vez por equipe por dia",
         "pauseRisk": "só no nível nova, com um veredicto de 90 ou mais no último dia",
-        "autoPause": "se a pausa acima é aplicada; uma pessoa decide todo o resto",
-        "flagScore": "o veredicto de abuso do próprio juiz começa em 65"
+        "autoPause": "se a pausa acima é aplicada",
+        "flagScore": "o veredicto de abuso do próprio juiz começa em 65",
+        "holdScore": "só no nível nova, num veredicto de phishing, falsificação de marca ou desvio de pagamento",
+        "holdRepeatCount": "a semana conta a partir do primeiro envio da equipe; 0 desliga",
+        "holdRepeatScore": "os mesmos veredictos de phishing acima, numa pontuação menor",
+        "autoHold": "se esses veredictos suspendem a equipe até você liberá-la; o proprietário vê uma pausa neutra"
       },
       "kinds": {
         "count": "número inteiro",
@@ -965,6 +978,7 @@
       "phishing": "abuso",
       "non_payment": "inadimplência"
     },
-    "broadcastsPendingReview": "As transmissões desta equipe estão pausadas aguardando revisão desde {since}. E-mails transacionais não são afetados."
+    "broadcastsPendingReview": "As transmissões desta equipe estão pausadas aguardando revisão desde {since}. E-mails transacionais não são afetados.",
+    "sendingPendingReview": "O envio desta equipe está pausado aguardando revisão desde {since}. Novos envios são recusados e os e-mails na fila aguardam até o fim da revisão; os dados ficam."
   }
 }

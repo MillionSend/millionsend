@@ -35,7 +35,6 @@ import {
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
-  isTeamSuspended,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
   makeUnsubscribeToken,
@@ -61,6 +60,7 @@ import {
   segmentContactsWhere,
   segmentFilterSchema,
   sendingBroadcasts,
+  suspendedSendRefusal,
   teamQuota,
   verifyOnboardingSender,
   verifySenderDomain,
@@ -366,12 +366,10 @@ async function sendingPausedError(
 ): Promise<ReturnType<typeof errorBody> | null> {
   // An operator suspension outranks the rates: keys still authenticate so
   // the caller learns why, but nothing leaves.
-  if (await isTeamSuspended(deps.db, auth.teamId)) {
-    return errorBody(
-      403,
-      "team_suspended",
-      "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
-    );
+  const suspended = (await fetchTeamStanding(deps.db, auth.teamId))?.suspended;
+  if (suspended) {
+    const refusal = suspendedSendRefusal(suspended.reason);
+    return errorBody(403, refusal.code, refusal.message);
   }
   const health = await fetchDeliverabilityHealth(deps.db, auth.teamId);
   const paused = health.reasons.find((r) => r.tier === "paused");

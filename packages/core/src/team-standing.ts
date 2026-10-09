@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 export type SuspensionReason = (typeof schema.suspensionReasonEnum.enumValues)[number];
 export const SUSPENSION_REASONS = schema.suspensionReasonEnum.enumValues;
@@ -57,4 +57,55 @@ export async function isTeamSuspended(db: Db, teamId: string): Promise<boolean> 
     .from(schema.teams)
     .where(eq(schema.teams.id, teamId));
   return row?.suspendedAt != null;
+}
+
+/**
+ * Suspends a team; every send surface reads the row per send. A standing
+ * suspension keeps its original suspended_at and takes the new reason,
+ * unless `ifNotSuspended` leaves it as it is. True when the row changed; the
+ * audit, mail, flag and SES tenant are the caller's.
+ */
+export async function suspendTeam(
+  db: Db,
+  input: {
+    teamId: string;
+    reason: SuspensionReason;
+    note?: string | null | undefined;
+    now?: Date | undefined;
+    ifNotSuspended?: boolean | undefined;
+  },
+): Promise<boolean> {
+  const t = schema.teams;
+  const changed = await db
+    .update(t)
+    .set({
+      suspendedAt: sql`coalesce(${t.suspendedAt}, ${input.now ?? new Date()})`,
+      suspensionReason: input.reason,
+      suspensionNote: input.note ?? null,
+    })
+    .where(and(eq(t.id, input.teamId), input.ifNotSuspended ? isNull(t.suspendedAt) : undefined))
+    .returning({ id: t.id });
+  return changed.length > 0;
+}
+
+/**
+ * What a refused API or SMTP send says while the team is suspended. A review
+ * hold reads as a neutral pause: the team may be innocent, and a phisher
+ * learns nothing about what was judged.
+ */
+export function suspendedSendRefusal(reason: SuspensionReason): {
+  code: "team_suspended" | "sending_paused";
+  message: string;
+} {
+  return reason === "review"
+    ? {
+        code: "sending_paused",
+        message:
+          "Sending is paused pending review. Sends are refused until the review is complete.",
+      }
+    : {
+        code: "team_suspended",
+        message:
+          "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
+      };
 }
