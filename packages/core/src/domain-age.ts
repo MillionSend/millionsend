@@ -3,7 +3,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
 import { getDomain } from "tldts";
-import { normalizeHostname } from "./org-domain.js";
+import { normalizeHostname, ownerDomain } from "./org-domain.js";
 import { DAY_MS } from "./utc-day.js";
 
 /**
@@ -313,18 +313,17 @@ export function createDomainAgeResolver(deps: DomainAgeDeps = {}): DomainAgeReso
 
   return {
     async lookup(hostname) {
-      const name = normalizeHostname(hostname);
-      const domain = getDomain(name, { allowPrivateDomains: true }) ?? getDomain(name);
-      if (!domain) return { domain: null, registeredAt: null, source: "unknown" };
+      const sold = getDomain(normalizeHostname(hostname));
+      if (!sold) return { domain: null, registeredAt: null, source: "unknown" };
+      const domain = ownerDomain(hostname);
       const tld = domain.slice(domain.lastIndexOf(".") + 1);
       const steps = [
         ["rdap", () => rdap(domain, tld)],
         ["whois", () => registryWhois(domain, tld)],
         ["ct", () => certificateTransparency(domain)],
       ] as const;
-      const sold = domain === getDomain(name);
       let retry = false;
-      for (const [source, step] of sold ? steps : steps.slice(2)) {
+      for (const [source, step] of domain === sold ? steps : steps.slice(2)) {
         const found = await step();
         if (found === "retry") retry = true;
         else if (found && plausible(found)) return { domain, registeredAt: found, source };
