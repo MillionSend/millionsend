@@ -236,6 +236,7 @@ async function notifyOperator(
         path,
         { team: name, risk, score: String(score) },
         deps.appBaseUrl,
+        teamId,
       );
     }
     if (outcome.alert) {
@@ -253,6 +254,7 @@ async function notifyOperator(
           flagged: String(overview.flagged7d),
         },
         deps.appBaseUrl,
+        teamId,
       );
     }
   } catch (err) {

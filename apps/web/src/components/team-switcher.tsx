@@ -10,6 +10,7 @@ import { useDismiss } from "@/components/popover-menu";
 import { BtnSpinner } from "@/components/spinner";
 import { TeamLogo } from "@/components/team-logo";
 import { useTRPC } from "@/lib/trpc";
+import { guardMessage } from "@/lib/trpc-error";
 
 function PlanBadge({ plan }: { plan: string }) {
   const t = useTranslations("common");
@@ -251,7 +252,9 @@ export function TeamSwitcher({
           </div>
           {createTeam.isError ? (
             <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
-              {createTeam.error.data?.code === "FORBIDDEN" ? t("limit") : t("error")}
+              {createTeam.error.data?.code === "FORBIDDEN"
+                ? t("limit")
+                : guardMessage(createTeam.error, t("error"))}
             </p>
           ) : null}
           <ModalFooter>

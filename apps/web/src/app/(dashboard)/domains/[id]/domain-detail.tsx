@@ -25,6 +25,7 @@ import { OPEN_TRACKING_DOCS_URL } from "@/lib/docs-links";
 import { formatRelative, formatUtcMinute } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { guardMessage } from "@/lib/trpc-error";
 import { isLoopbackUrl } from "@/lib/url";
 import { zoneRelativeName } from "@/lib/zone";
 import { type DomainStatus, DomainStatusBadge, displayDomainStatus } from "../domain-status";
@@ -971,7 +972,7 @@ export function DomainDetail({ id }: { id: string }) {
           <p
             style={{ margin: "8px 0 0", color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}
           >
-            {t("detail.deleteError")}
+            {guardMessage(deleteDomain.error, t("detail.deleteError"))}
           </p>
         ) : null}
         <ModalFooter>

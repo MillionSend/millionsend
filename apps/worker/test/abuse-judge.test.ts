@@ -26,10 +26,19 @@ let teamId: string;
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
 const NOW = new Date("2026-09-15T12:00:00Z");
 const settings: MonitorSettings = MONITOR_SETTING_DEFAULTS;
-const sends: { to: string; kind: string; subject: string; text: string }[] = [];
+const sends: {
+  to: string;
+  kind: string;
+  subject: string;
+  text: string;
+  aboutTeamId?: string | undefined;
+}[] = [];
 const mailer = {
-  send: async (to: string, m: { subject: string; text: string; kind: string }) => {
-    sends.push({ to, kind: m.kind, subject: m.subject, text: m.text });
+  send: async (
+    to: string,
+    m: { subject: string; text: string; kind: string; aboutTeamId?: string | undefined },
+  ) => {
+    sends.push({ to, kind: m.kind, subject: m.subject, text: m.text, aboutTeamId: m.aboutTeamId });
   },
 };
 
@@ -280,6 +289,8 @@ it("emails the operator on the alert and on the pause, in that team's review lin
   expect(sends.find((s) => s.kind === "monitor.broadcasts_paused")?.subject).toContain(
     "fresh-team",
   );
+  // Named, so the send path drops them once the team is suspended.
+  expect(sends.map((s) => s.aboutTeamId)).toEqual(sends.map(() => fresh));
   const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, fresh));
   expect(team?.broadcastsPausedByOperatorAt).toEqual(NOW);
   const [audit] = await db

@@ -504,3 +504,41 @@ describe("settings.invitations.preview", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
+
+describe("settings.invitations while the team is suspended", () => {
+  it("refuses new invitations, resends and accepts; the pending invite stays as it was", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "owner1", "owner");
+    await createUser("newbie");
+    const owner = callerFor("owner1", teamId, "owner");
+    const pending = await owner.settings.invitations.create({ email: "newbie@example.com" });
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "reputation" })
+      .where(eq(schema.teams.id, teamId));
+    const locked = {
+      code: "PRECONDITION_FAILED",
+      message: "This team is suspended, so no one new can join it. Contact support.",
+    };
+
+    await expect(
+      owner.settings.invitations.create({ email: "other@example.com" }),
+    ).rejects.toMatchObject(locked);
+    await expect(owner.settings.invitations.resend({ id: pending.id })).rejects.toMatchObject(
+      locked,
+    );
+    await expect(
+      callerFor("newbie", null, null).settings.invitations.accept({
+        token: tokenFromUrl(pending.acceptUrl),
+      }),
+    ).rejects.toMatchObject(locked);
+
+    const members = await db
+      .select({ userId: schema.teamMembers.userId })
+      .from(schema.teamMembers)
+      .where(eq(schema.teamMembers.teamId, teamId));
+    expect(members).toEqual([{ userId: "owner1" }]);
+    const invites = await db.select().from(schema.teamInvitations);
+    expect(invites).toMatchObject([{ id: pending.id, acceptedAt: null, sendCount: 0 }]);
+  });
+});

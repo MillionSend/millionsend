@@ -46,6 +46,7 @@ import { activeLocale } from "../locale";
 import { poweredByLocked } from "../powered-by";
 import { smtpRelayOffered } from "../smtp";
 import { deletePublicObject, keyFromPublicUrl, uploadsEnabled } from "../storage";
+import { assertTeamNotSuspended } from "../suspension-lock";
 import {
   awsCredentialsConfigured,
   buildInvitationEmail,
@@ -314,6 +315,7 @@ export function createSettingsRouter(
        */
       delete: teamProcedure.mutation(async ({ ctx }) => {
         if (ctx.role !== "owner") throw new TRPCError({ code: "FORBIDDEN" });
+        await assertTeamNotSuspended(ctx.db, ctx.teamId, "deleteTeam");
         if (env.IS_CLOUD) await deps.cancelSubscription(ctx.db, ctx.teamId);
         const { domains, logoUrl, name } = await ctx.db.transaction(async (tx) => {
           const [team] = await tx
@@ -471,6 +473,7 @@ export function createSettingsRouter(
         )
         .mutation(async ({ ctx, input }) => {
           assertCanManageMembers(ctx.role);
+          await assertTeamNotSuspended(ctx.db, ctx.teamId, "invite");
           if (inviteEmailsLimited(ctx.teamId)) throw INVITE_HOURLY_LIMIT_ERROR;
           try {
             const [row] = await ctx.db
@@ -547,6 +550,7 @@ export function createSettingsRouter(
        */
       resend: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
         assertCanManageMembers(ctx.role);
+        await assertTeamNotSuspended(ctx.db, ctx.teamId, "invite");
         if (!inviteEmailsEnabled()) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
@@ -735,6 +739,7 @@ export function createSettingsRouter(
               });
             if (!claimed)
               throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid invitation." });
+            await assertTeamNotSuspended(tx as unknown as Db, claimed.teamId, "invite");
 
             await tx
               .insert(schema.teamMembers)

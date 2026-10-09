@@ -1129,6 +1129,35 @@ describe("DELETE /domains/{id}", () => {
     expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(0);
   });
 
+  it("403s team_suspended for a suspended team before SES is touched; the key still authenticates", async () => {
+    const { client, calls } = fakeSes();
+    const app = makeApp({ client });
+    const { id } = await createDomain(app, "held.example.com");
+    const suspend = (on: boolean) =>
+      db
+        .update(schema.teams)
+        .set(
+          on
+            ? { suspendedAt: new Date(), suspensionReason: "phishing" }
+            : { suspendedAt: null, suspensionReason: null },
+        )
+        .where(eq(schema.teams.id, teamId));
+    await suspend(true);
+    const before = calls.length;
+    try {
+      const res = await call(app, fullKey, "DELETE", `/domains/${id}`);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ statusCode: 403, name: "team_suspended" });
+      expect(calls.length).toBe(before);
+      expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(
+        1,
+      );
+    } finally {
+      await suspend(false);
+    }
+    expect((await call(app, fullKey, "DELETE", `/domains/${id}`)).status).toBe(200);
+  });
+
   it("404s a foreign team's domain without touching SES", async () => {
     const { client, calls } = fakeSes();
     const app = makeApp({ client });

@@ -329,6 +329,8 @@ describe("owner mail", () => {
     await send("evt_1", "customer.subscription.deleted");
     await send("evt_1", "customer.subscription.deleted");
     expect(kinds()).toEqual(["billing.downgraded"]);
+    // Named, so the send path can hold it back while the team is suspended.
+    expect(h.sent[0]?.aboutTeamId).toBe(teamId);
     expect(
       await h.db
         .select({ kind: schema.teamNotifications.kind, key: schema.teamNotifications.periodKey })

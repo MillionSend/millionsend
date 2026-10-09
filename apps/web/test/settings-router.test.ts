@@ -293,6 +293,35 @@ describe("settings.team.delete", () => {
     expect(await db.select().from(schema.broadcasts)).toEqual([]);
     expect((await db.select().from(schema.oauthConsent)).map((c) => c.id)).toEqual(["there"]);
   });
+
+  it("refuses the owner of a suspended team before anything is cancelled or removed", async () => {
+    stubCloud();
+    const teamId = await createTeam(db, "held");
+    await addMember(teamId, "alice", "owner");
+    await db.insert(schema.domains).values({ teamId, name: "held.test", region: "us-east-1" });
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+      .where(eq(schema.teams.id, teamId));
+    const calls: string[] = [];
+    const deps: TeamDeletionDeps = {
+      cancelSubscription: async () => void calls.push("stripe"),
+      deleteSesIdentity: async () => void calls.push("ses"),
+      deleteSesTenant: async () => void calls.push("tenant"),
+      deleteLogo: async () => void calls.push("logo"),
+    };
+
+    await expect(
+      deletionCaller("alice", teamId, "owner", deps).settings.team.delete(),
+    ).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: "This team is suspended and can't be deleted. Contact support.",
+    });
+    expect(calls).toEqual([]);
+    expect(await db.select().from(schema.teams)).toHaveLength(1);
+    expect(await db.select().from(schema.teamMembers)).toHaveLength(1);
+    expect(await db.select().from(schema.domains)).toHaveLength(1);
+  });
 });
 
 describe("settings.locale", () => {

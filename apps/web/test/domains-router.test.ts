@@ -798,6 +798,25 @@ describe("domains.get", () => {
 });
 
 describe("domains.delete", () => {
+  it("refuses an admin of a suspended team before SES is touched", async () => {
+    const teamId = await createTeam(db);
+    const { deps, calls } = fakeSes();
+    const caller = callerFor(teamId, deps, "admin");
+    const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "manual" })
+      .where(eq(schema.teams.id, teamId));
+    const before = calls.length;
+
+    await expect(caller.domains.delete({ id })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: "This team is suspended, so its domains can't be deleted. Contact support.",
+    });
+    expect(calls).toHaveLength(before);
+    expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(1);
+  });
+
   it("deletes the SES identity and the row", async () => {
     const teamId = await createTeam(db);
     const { deps, calls } = fakeSes();

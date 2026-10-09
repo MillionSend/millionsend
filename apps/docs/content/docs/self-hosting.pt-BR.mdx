@@ -785,6 +785,13 @@ um teto diário limita o dia da equipe abaixo do plano. Os proprietários são
 avisados por e-mail a cada ação (exceto suspensão por phishing), e cada ação
 entra no log de auditoria com o motivo.
 
+Enquanto uma equipe está suspensa, os avisos de cota, entregabilidade,
+rebaixamento de plano e transmissões retidas param, assim como os alertas do
+monitor de conteúdo sobre ela; ninguém nela pode excluí-la, remover os
+domínios dela (a API também responde `403 team_suspended`) nem convidar
+ninguém, e um membro de uma equipe suspensa por phishing não pode criar novas
+equipes.
+
 ## Monitoramento de conteúdo (opcional)
 
 Desligado por padrão. Com um juiz configurado, uma amostra do e-mail aceito é

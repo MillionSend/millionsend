@@ -7,6 +7,7 @@ import {
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
+  fetchTeamStanding,
   isIdentitySharedByOtherDomains,
   isLoopbackUrl,
   isOperatorTeam,
@@ -731,11 +732,23 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: removeDomainResponseSchema } },
           description: "Domain deleted",
         },
+        403: jsonErr("Team suspended"),
         404: jsonErr("Not found"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
+      // Same lock as the dashboard delete: a suspended team keeps its domains.
+      if ((await fetchTeamStanding(db, auth.teamId))?.suspended) {
+        return c.json(
+          errorBody(
+            403,
+            "team_suspended",
+            "This team is suspended by the instance operator. Its domains cannot be deleted until it is reinstated; contact support.",
+          ),
+          403,
+        );
+      }
       const domain = await findDomain(auth.teamId, c.req.valid("param").id);
       if (!domain) return c.json(errorBody(404, "not_found", "Domain not found"), 404);
       // The SES identity is shared by every row with the same (name, region):

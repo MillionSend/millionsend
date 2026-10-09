@@ -8,12 +8,14 @@ import { EnvKeyring } from "../src/crypto/keyring.js";
 import { hashRecipient } from "../src/suppressions.js";
 import {
   findSenderDomainOwner,
+  MUTED_WHILE_SUSPENDED,
   type SenderDomainOwner,
   SYSTEM_MAIL_TAG,
   type SystemMailMessage,
   SystemMailRefused,
   sendSystemMail,
 } from "../src/system-mail.js";
+import { SUSPENSION_REASONS, type SuspensionReason } from "../src/team-standing.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -200,5 +202,59 @@ describe("sendSystemMail", () => {
     // region its identity is verified in.
     expect(d.rawOwners).toEqual([{ teamId: ownerTeam, domainId, region: "us-east-1" }]);
     expect(d.enqueued).toHaveLength(0);
+  });
+});
+
+describe("suspended teams", () => {
+  it("lists the automated notices a suspended team does not get", () => {
+    expect([...MUTED_WHILE_SUSPENDED].sort()).toEqual([
+      "billing.downgraded",
+      "broadcast.held",
+      "broadcast.held_quota",
+      "deliverability.paused",
+      "deliverability.warning",
+      "monitor.alert",
+      "monitor.broadcasts_paused",
+      "quota.paused",
+      "quota.reached",
+      "quota.warning",
+    ]);
+  });
+
+  it("mutes those notices for any suspension reason, and only those", async () => {
+    const team = await createTeam(db, "suspended");
+    const suspend = (reason: SuspensionReason | null) =>
+      db
+        .update(schema.teams)
+        .set({ suspendedAt: reason ? new Date() : null, suspensionReason: reason })
+        .where(eq(schema.teams.id, team));
+    const d = deps();
+    for (const reason of SUSPENSION_REASONS) {
+      await suspend(reason);
+      for (const kind of MUTED_WHILE_SUSPENDED) {
+        expect(await sendSystemMail(d.deps, message({ kind, aboutTeamId: team })), kind).toBe(
+          "muted",
+        );
+      }
+    }
+    expect(d.enqueued).toEqual([]);
+    expect(d.raw).toEqual([]);
+
+    // The console's own notices and account mail keep going out.
+    for (const kind of ["team.suspended", "team.reinstated", "password_reset"] as const) {
+      expect(await sendSystemMail(d.deps, message({ kind, aboutTeamId: team })), kind).toBe(
+        "pipeline",
+      );
+    }
+    // A notice that names no team, or another team, is not the suspended team's.
+    expect(await sendSystemMail(d.deps, message({ kind: "quota.paused" }))).toBe("pipeline");
+    expect(
+      await sendSystemMail(d.deps, message({ kind: "quota.paused", aboutTeamId: otherTeam })),
+    ).toBe("pipeline");
+
+    await suspend(null);
+    expect(await sendSystemMail(d.deps, message({ kind: "quota.paused", aboutTeamId: team }))).toBe(
+      "pipeline",
+    );
   });
 });

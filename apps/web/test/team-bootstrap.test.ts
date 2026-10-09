@@ -8,6 +8,14 @@ import { getActiveMembership } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import type { Context } from "@/server/trpc";
 
+// The request language server-side refusals are written in (NEXT_LOCALE).
+const locale = vi.hoisted(() => ({ cookie: undefined as string | undefined }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: () => (locale.cookie ? { value: locale.cookie } : undefined),
+  }),
+}));
+
 let db: Db;
 let close: () => Promise<void>;
 
@@ -17,6 +25,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  locale.cookie = undefined;
   await close();
 });
 
@@ -139,6 +148,38 @@ describe("team.createTeam", () => {
     await expect(caller.team.createTeam({ name: "Acme" })).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     });
+  });
+
+  it("refuses anyone in a team suspended for phishing, owner or member; other suspensions do not count", async () => {
+    await insertUser("owner", "owner@example.com");
+    await insertUser("member", "member@example.com");
+    await insertUser("outsider", "outsider@example.com");
+    const { teamId } = await callerFor("owner").team.createTeam({ name: "Phish" });
+    await db.insert(schema.teamMembers).values({ teamId, userId: "member", role: "member" });
+    const suspend = (reason: "reputation" | "phishing") =>
+      db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, teamId));
+
+    await suspend("reputation");
+    await callerFor("member").team.createTeam({ name: "Allowed" });
+
+    await suspend("phishing");
+    for (const user of ["owner", "member"]) {
+      await expect(callerFor(user).team.createTeam({ name: "Again" })).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        message:
+          "You can't create a team while a team you belong to is suspended. Contact support.",
+      });
+    }
+    locale.cookie = "pt-BR";
+    await expect(callerFor("owner").team.createTeam({ name: "Again" })).rejects.toMatchObject({
+      message:
+        "Você não pode criar uma equipe enquanto uma equipe da qual você faz parte estiver suspensa. Fale com o suporte.",
+    });
+    await callerFor("outsider").team.createTeam({ name: "Clean" });
+    expect(await db.select().from(schema.teams).where(eq(schema.teams.name, "Again"))).toEqual([]);
   });
 });
 
