@@ -222,7 +222,7 @@ export const en = {
   "monitor.alert": {
     subject: "Content monitor: {team} needs a look",
     body: [
-      "The content monitor's risk for {team} reached {risk} ({tier} tier, {samples} samples judged in the last 7 days, {flagged} over the flag line). The model reads a sample of accepted mail; nothing was paused or held on its account.",
+      "The content monitor's risk for {team} reached {risk} ({tier} tier, {samples} samples judged in the last 7 days, {flagged} over the flag line). The model reads a sample of accepted mail; this alert by itself pauses and holds nothing.",
       "Open the review page to see the sampled verdicts, the content checks and the team's history, and decide. This notice repeats at most once a day per team while the risk stays over the line.",
     ],
     button: "Open review",
@@ -235,6 +235,19 @@ export const en = {
     ],
     button: "Open review",
   },
+  "monitor.team_held": {
+    subject: "Content monitor held {team} for review",
+    body: [
+      "{team} is in the new tier and a sampled message scored {score} ({verdict}). {rule} Under the hold policy every send of the team is now refused or parked: the API and SMTP refuse, queued mail and broadcasts wait, and its SES tenant is disabled where tenants are on. The sampled message itself had already gone out when it was judged.",
+      "The owner sees sending as paused pending review and is not emailed. Open the review page to release the team, which sends the held mail, or to suspend it for phishing.",
+    ],
+    button: "Open review",
+    extra: {
+      score: "This one verdict held the team: the hold score is {line}.",
+      repeat:
+        "This verdict held the team as its phishing-type verdict number {n} at or above {line} in its first week of sending.",
+    },
+  },
   "monitor.degraded": {
     subject: "Content monitor: {rate} of samples went unjudged in the last hour",
     body: [
@@ -245,24 +258,6 @@ export const en = {
     muted: [
       "Sent to the instance operator at most once every six hours while the share stays over 20% or the provider keeps rejecting the API key.",
     ],
-  },
-  "content.access_notice": {
-    subject: "An operator read content in {team}",
-    body: [
-      "On {when}, an authorised operator of this instance read the subject and rendered text of {emails} in {team}, for a recorded security reason: {reason}.",
-      "Recipient addresses, attachments, message headers and the raw HTML were withheld, and the access closed after 30 minutes. It is recorded in this team's audit log with the same date, and in the instance's own log since it happened.",
-      "This notice is required of us within seven days of such an access and is sent whether or not anything came of it. Reply to this email if you want to know more.",
-    ],
-    button: "Open audit log",
-    extra: {
-      one: "one message",
-      many: "{n} messages",
-      phishing_or_malware: "suspected phishing or malware",
-      complaint_spike: "a spike in spam complaints",
-      provider_report: "an abuse report from a mailbox provider",
-      legal_request: "a legal request",
-      owner_support_request: "a support request from this team",
-    },
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 

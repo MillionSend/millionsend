@@ -34,6 +34,7 @@ export {
   deriveSamplingKey,
   drawBroadcastCopy,
   foldRisk,
+  type HoldRule,
   loadMonitorState,
   MONITOR_ALERT_INTERVAL_MS,
   MONITOR_ANOMALY_CHECKS,
@@ -585,6 +586,8 @@ export {
   STANDING_COLUMNS,
   SUSPENSION_REASONS,
   type SuspensionReason,
+  suspendedSendRefusal,
+  suspendTeam,
   type TeamStanding,
   teamStandingOf,
 } from "./team-standing.js";

@@ -2,12 +2,21 @@ import { recordAudit } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setRegionAccountDeps } from "@/server/console/ses-regions";
 import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import { setConsoleTeamsDeps } from "@/server/routers/console/teams";
+
+const h = vi.hoisted(() => ({ sent: [] as { to: string; subject: string }[] }));
+vi.mock("@/server/system-mail", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/system-mail")>();
+  return {
+    ...actual,
+    sendAccountMail: (m: { to: string; subject: string }) => void h.sent.push(m),
+  };
+});
 
 // The console kicks the quota drain after a raise; no pg-boss in tests.
 vi.mock("@/server/queue", () => ({
@@ -401,7 +410,7 @@ describe("console.monitor", () => {
   it("reads every setting with its source, and the judge as off by default", async () => {
     const got = await operator().console.monitor.settings.get();
     expect(got.judge).toEqual({ on: false });
-    expect(got.settings).toHaveLength(18);
+    expect(got.settings).toHaveLength(22);
     expect(got.settings.find((s) => s.key === "firstSends")).toEqual({
       key: "firstSends",
       value: 1000,
@@ -873,5 +882,158 @@ describe("suspend / reinstate and the team's SES tenant", () => {
     expect(ses.calls).toEqual([]);
     expect(ses.retried).toEqual([]);
     expect(await rows()).toBe(before);
+  });
+});
+
+// Last: the audit log is append-only, and the audit tests above count suspensions.
+describe("review holds", () => {
+  it("a review hold converts to phishing or is released without a word to the owner", async () => {
+    vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@millionsend.test>");
+    const heldTeam = await createTeam(db, "held");
+    await db.insert(schema.teamMembers).values({ teamId: heldTeam, userId: MEMBER, role: "owner" });
+    const heldAt = new Date("2026-10-09T12:03:00Z");
+    const hold = () =>
+      db
+        .update(schema.teams)
+        .set({ suspendedAt: heldAt, suspensionReason: "review" })
+        .where(eq(schema.teams.id, heldTeam));
+    h.sent = [];
+
+    await hold();
+    await operator().console.teams.suspend({ id: heldTeam, reason: "phishing" });
+    expect(await team(heldTeam)).toMatchObject({
+      suspendedAt: heldAt,
+      suspensionReason: "phishing",
+    });
+    expect((await auditRows("team.suspended"))[0]).toMatchObject({
+      teamId: heldTeam,
+      data: { reason: "phishing", notified: false },
+    });
+
+    await hold();
+    await operator().console.teams.reinstate({ id: heldTeam });
+    expect(await team(heldTeam)).toMatchObject({ suspendedAt: null, suspensionReason: null });
+    expect(h.sent).toEqual([]);
+
+    // The same release of an ordinary suspension does tell the owner.
+    await operator().console.teams.suspend({ id: heldTeam, reason: "manual", notify: false });
+    await operator().console.teams.reinstate({ id: heldTeam });
+    expect(h.sent.map((m) => m.to)).toEqual(["bob@example.com"]);
+  });
+
+  it("releasing a hold clears the monitor flag it kept open, as the operator, out of the team's log", async () => {
+    const heldTeam = await createTeam(db, "released");
+    await db.insert(schema.teamMembers).values({ teamId: heldTeam, userId: MEMBER, role: "owner" });
+    const openFlags = (id: string) =>
+      db
+        .select()
+        .from(schema.teamFlags)
+        .where(and(eq(schema.teamFlags.teamId, id), eq(schema.teamFlags.status, "open")));
+    // What the hold leaves behind: a review suspension and the monitor's own flag.
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "review" })
+      .where(eq(schema.teams.id, heldTeam));
+    const [flag] = await db
+      .insert(schema.teamFlags)
+      .values({ teamId: heldTeam, reason: "monitor", detail: { risk: 0.62, samples: 3 } })
+      .returning();
+    if (!flag) throw new Error("flag missing");
+
+    await operator().console.teams.reinstate({ id: heldTeam });
+    const [cleared] = await db
+      .select()
+      .from(schema.teamFlags)
+      .where(eq(schema.teamFlags.id, flag.id));
+    expect(cleared).toMatchObject({ status: "cleared", clearedBy: OPERATOR });
+    expect(await openFlags(heldTeam)).toEqual([]);
+    expect((await auditRows("console.flag_cleared"))[0]).toMatchObject({
+      teamId: null,
+      actorId: `user:${OPERATOR}`,
+      target: `team:${heldTeam}`,
+      data: { team: "released", flagId: flag.id, reason: "monitor" },
+    });
+    const owner = await callerFor(MEMBER, heldTeam, "owner").audit.list({ limit: 50 });
+    expect(owner.items.map((r) => r.action)).not.toContain("console.flag_cleared");
+    const review = await operator().console.safety.review({ teamId: heldTeam });
+    expect(review.audit.map((r) => r.action)).toContain("console.flag_cleared");
+
+    // Any other reinstatement leaves an open monitor flag to the safety cron.
+    const other = await createTeam(db, "suspended");
+    await db
+      .insert(schema.teamFlags)
+      .values({ teamId: other, reason: "monitor", detail: { risk: 0.62, samples: 3 } });
+    await operator().console.teams.suspend({ id: other, reason: "manual", notify: false });
+    await operator().console.teams.reinstate({ id: other });
+    expect(await openFlags(other)).toMatchObject([{ reason: "monitor", openedBy: null }]);
+  });
+
+  it("releasing a hold lifts the monitor's broadcast pause from before it, as Resume does", async () => {
+    const pausedAt = new Date("2026-10-09T11:40:00Z");
+    const pauseBroadcasts = async (id: string, byMonitor: boolean) => {
+      await db
+        .update(schema.teams)
+        .set({ broadcastsPausedByOperatorAt: pausedAt })
+        .where(eq(schema.teams.id, id));
+      if (byMonitor) {
+        await db.insert(schema.teamMonitor).values({ teamId: id, broadcastsPausedAt: pausedAt });
+      }
+    };
+    const hold = (id: string) =>
+      db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: "review" })
+        .where(eq(schema.teams.id, id));
+    const monitorRow = async (id: string) =>
+      (await db.select().from(schema.teamMonitor).where(eq(schema.teamMonitor.teamId, id)))[0];
+
+    // A verdict past the pause line paused broadcasts; a later one held the team.
+    const heldTeam = await createTeam(db, "paused-then-held");
+    await db.insert(schema.teamMembers).values({ teamId: heldTeam, userId: MEMBER, role: "owner" });
+    await pauseBroadcasts(heldTeam, true);
+    await hold(heldTeam);
+    const owner = () => callerFor(MEMBER, heldTeam, "owner");
+    expect(await owner().team.standing()).toMatchObject({ pendingReview: true });
+
+    await operator().console.teams.reinstate({ id: heldTeam });
+    expect(await owner().team.standing()).toMatchObject({
+      suspended: null,
+      broadcastsPausedByOperatorAt: null,
+      pendingReview: false,
+    });
+    const monitor = await monitorRow(heldTeam);
+    expect(monitor?.broadcastsPausedAt).toBeNull();
+    expect(monitor?.broadcastsResumedAt).not.toBeNull();
+    expect((await auditRows("monitor.broadcasts_resumed"))[0]).toMatchObject({
+      teamId: heldTeam,
+      actorId: `user:${OPERATOR}`,
+    });
+
+    // An operator's own pause is not the monitor's to lift.
+    const operatorPaused = await createTeam(db, "operator-paused-then-held");
+    await pauseBroadcasts(operatorPaused, false);
+    await hold(operatorPaused);
+    await operator().console.teams.reinstate({ id: operatorPaused });
+    expect((await team(operatorPaused)).broadcastsPausedByOperatorAt).toEqual(pausedAt);
+
+    // Any other reinstatement leaves the monitor's pause to Resume.
+    const suspended = await createTeam(db, "paused-then-suspended");
+    await pauseBroadcasts(suspended, true);
+    await operator().console.teams.suspend({ id: suspended, reason: "manual", notify: false });
+    await operator().console.teams.reinstate({ id: suspended });
+    expect((await team(suspended)).broadcastsPausedByOperatorAt).toEqual(pausedAt);
+    expect((await monitorRow(suspended))?.broadcastsPausedAt).toEqual(pausedAt);
+  });
+
+  it("refuses a review hold from the console's suspend: only the monitor holds", async () => {
+    const id = await createTeam(db, "never-held");
+    await expect(
+      // @ts-expect-error — the input enum leaves the review reason out
+      operator().console.teams.suspend({ id, reason: "review", notify: false }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(await team(id)).toMatchObject({ suspendedAt: null, suspensionReason: null });
+    expect(await auditRows("team.suspended")).not.toContainEqual(
+      expect.objectContaining({ teamId: id }),
+    );
   });
 });

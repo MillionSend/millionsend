@@ -48,7 +48,8 @@ export const contentAccessGrants = pgTable(
     lastViewedAt: timestamp("last_viewed_at", { withTimezone: true }),
     // When the seven-day disclosure ran — including when it was withheld
     // because the team had been suspended for phishing by then, which is why
-    // this is stamped even with team_visible_at left null.
+    // this is stamped even with team_visible_at left null. A team held for
+    // review stays unstamped until the hold ends. Nothing is mailed.
     noticeSentAt: timestamp("notice_sent_at", { withTimezone: true }),
     // When the team's own audit gained its row for this access.
     teamVisibleAt: timestamp("team_visible_at", { withTimezone: true }),

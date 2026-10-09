@@ -21,6 +21,8 @@ export interface TeamActionTarget {
   plan: string;
   planQuota: number | null;
   suspendedAt: Date | null;
+  /** A review hold opens Suspend on phishing, the conversion it usually ends in. */
+  suspensionReason?: string | null;
   broadcastsPausedByOperatorAt: Date | null;
 }
 
@@ -186,6 +188,7 @@ export function useTeamActions(onChanged: () => void): TeamActions {
       {dialog?.kind === "suspend" ? (
         <SuspendDialog
           name={team.name}
+          initialReason={team.suspensionReason === "review" ? "phishing" : undefined}
           pending={suspend.isPending}
           onClose={close}
           onSubmit={(input) =>
