@@ -5,7 +5,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
 import { recordAudit } from "./audit.js";
 import { MONITOR_SETTING_DEFAULTS, type MonitorSettings } from "./monitor-settings.js";
-import { suspendTeam } from "./team-standing.js";
+import { fetchTeamStanding, suspendTeam } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -531,68 +531,6 @@ export async function applyJudgedSample(
         set: { ...next, riskUpdatedAt: now, updatedAt: now },
       });
     const tier = monitorTier(await loadMonitorState(t, { ...row, risk: next.risk }, now), s, now);
-    let alert = false;
-    if (next.risk >= s.alertRisk) {
-      const stamped = await t
-        .update(tm)
-        .set({ alertedAt: now })
-        .where(
-          and(
-            eq(tm.teamId, input.teamId),
-            or(
-              isNull(tm.alertedAt),
-              lte(tm.alertedAt, new Date(now.getTime() - MONITOR_ALERT_INTERVAL_MS)),
-            ),
-          ),
-        )
-        .returning({ teamId: tm.teamId });
-      alert = stamped.length > 0;
-    }
-    let paused = false;
-    if (
-      s.autoPause &&
-      tier === "new" &&
-      next.risk >= s.pauseRisk &&
-      row.broadcastsPausedAt === null
-    ) {
-      // Only verdicts since the operator last resumed count: a reviewed
-      // episode's evidence must not pause the team again on its own.
-      const since = new Date(
-        Math.max(
-          now.getTime() - MONITOR_PAUSE_VERDICT_WINDOW_MS,
-          row.broadcastsResumedAt?.getTime() ?? 0,
-        ),
-      );
-      const [hot] = await t
-        .select({ n: sql<number>`count(*)::int` })
-        .from(ms)
-        .where(
-          and(
-            eq(ms.teamId, input.teamId),
-            eq(ms.status, "judged"),
-            gte(ms.score, MONITOR_PAUSE_VERDICT_SCORE),
-            gte(ms.judgedAt, since),
-          ),
-        );
-      if ((hot?.n ?? 0) > 0 || input.score >= MONITOR_PAUSE_VERDICT_SCORE) {
-        // A team the operator already holds is theirs; the policy only
-        // stamps a team nothing else holds, so its Resume lifts its own hold.
-        const held = await t
-          .update(schema.teams)
-          .set({ broadcastsPausedByOperatorAt: now })
-          .where(
-            and(
-              eq(schema.teams.id, input.teamId),
-              isNull(schema.teams.broadcastsPausedByOperatorAt),
-            ),
-          )
-          .returning({ id: schema.teams.id });
-        if (held.length > 0) {
-          await t.update(tm).set({ broadcastsPausedAt: now }).where(eq(tm.teamId, input.teamId));
-          paused = true;
-        }
-      }
-    }
     let held = false;
     if (
       s.autoHold &&
@@ -623,6 +561,74 @@ export async function applyJudgedSample(
             openedAt: now,
           })
           .onConflictDoNothing();
+      }
+    }
+    // The backlog sampled before a hold is judged after it. The hold mail is
+    // the operator's notice: an alert would say nothing is held, and a pause
+    // would outlive the release and keep the held broadcasts parked.
+    const underReview =
+      held || (await fetchTeamStanding(t, input.teamId))?.suspended?.reason === "review";
+    let alert = false;
+    if (!underReview && next.risk >= s.alertRisk) {
+      const stamped = await t
+        .update(tm)
+        .set({ alertedAt: now })
+        .where(
+          and(
+            eq(tm.teamId, input.teamId),
+            or(
+              isNull(tm.alertedAt),
+              lte(tm.alertedAt, new Date(now.getTime() - MONITOR_ALERT_INTERVAL_MS)),
+            ),
+          ),
+        )
+        .returning({ teamId: tm.teamId });
+      alert = stamped.length > 0;
+    }
+    let paused = false;
+    if (
+      !underReview &&
+      s.autoPause &&
+      tier === "new" &&
+      next.risk >= s.pauseRisk &&
+      row.broadcastsPausedAt === null
+    ) {
+      // Only verdicts since the operator last resumed count: a reviewed
+      // episode's evidence must not pause the team again on its own.
+      const since = new Date(
+        Math.max(
+          now.getTime() - MONITOR_PAUSE_VERDICT_WINDOW_MS,
+          row.broadcastsResumedAt?.getTime() ?? 0,
+        ),
+      );
+      const [hot] = await t
+        .select({ n: sql<number>`count(*)::int` })
+        .from(ms)
+        .where(
+          and(
+            eq(ms.teamId, input.teamId),
+            eq(ms.status, "judged"),
+            gte(ms.score, MONITOR_PAUSE_VERDICT_SCORE),
+            gte(ms.judgedAt, since),
+          ),
+        );
+      if ((hot?.n ?? 0) > 0 || input.score >= MONITOR_PAUSE_VERDICT_SCORE) {
+        // A team the operator already holds is theirs; the policy only
+        // stamps a team nothing else holds, so its Resume lifts its own hold.
+        const stamped = await t
+          .update(schema.teams)
+          .set({ broadcastsPausedByOperatorAt: now })
+          .where(
+            and(
+              eq(schema.teams.id, input.teamId),
+              isNull(schema.teams.broadcastsPausedByOperatorAt),
+            ),
+          )
+          .returning({ id: schema.teams.id });
+        if (stamped.length > 0) {
+          await t.update(tm).set({ broadcastsPausedAt: now }).where(eq(tm.teamId, input.teamId));
+          paused = true;
+        }
       }
     }
     return { risk: next.risk, tier, alert, paused, held };

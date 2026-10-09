@@ -827,6 +827,9 @@ neutro de "envio pausado aguardando revisão". A equipe fica em Confiança e
 segurança com a sinalização aberta até o operador decidir na página de
 revisão: **Liberar retenção** a reativa e o e-mail estacionado sai;
 **Suspender por phishing** transforma a retenção numa suspensão por phishing.
+Enquanto a equipe está retida, os veredictos seguintes ainda movem o risco,
+mas não geram alerta nem pausa, então liberar a equipe não deixa pausa para
+trás.
 Uma equipe é retida uma vez só: depois de liberada, seus veredictos seguintes
 só geram alerta, então o e-mail liberado, julgado de novo na saída, não a
 retém outra vez. Uma equipe já suspensa mantém a suspensão, e equipes nos níveis Probatória,

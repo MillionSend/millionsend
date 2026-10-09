@@ -749,6 +749,41 @@ describe("the review hold", () => {
     ).toBe(true);
   });
 
+  it("neither alerts nor pauses while the team is held, so a release leaves no pause behind", async () => {
+    const teamId = await newTeam("held-backlog");
+    expect(
+      await applyJudgedSample(db, S, { teamId, score: 96, verdict: PHISHING, now: NOW }),
+    ).toMatchObject({ held: true, alert: false, paused: false });
+    // The samples taken before the hold are judged after it and carry the
+    // risk past the alert and pause lines.
+    for (let i = 1; i <= 20; i++) {
+      expect(
+        await applyJudgedSample(db, S, {
+          teamId,
+          score: 99,
+          verdict: PHISHING,
+          now: new Date(NOW.getTime() + i * 60_000),
+        }),
+      ).toMatchObject({ held: false, alert: false, paused: false });
+    }
+    expect(await team(teamId)).toMatchObject({
+      suspensionReason: "review",
+      broadcastsPausedByOperatorAt: null,
+    });
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: null, suspensionReason: null })
+      .where(eq(schema.teams.id, teamId));
+    const released = await applyJudgedSample(db, S, {
+      teamId,
+      score: 99,
+      verdict: PHISHING,
+      now: new Date(NOW.getTime() + HOUR),
+    });
+    expect(released).toMatchObject({ held: false, alert: true });
+    expect(released.risk).toBeGreaterThan(S.pauseRisk);
+  });
+
   it("leaves an operator's suspension as it is", async () => {
     const teamId = await newTeam("operator-suspended");
     await db

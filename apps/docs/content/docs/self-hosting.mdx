@@ -818,7 +818,9 @@ disabled. The operator is emailed at once; the owner is not, and sees a
 neutral "Sending is paused pending review" notice. The team stays on Trust &
 safety with its flag open until the operator decides on its review page:
 **Release hold** reinstates it and the parked mail goes out; **Suspend for
-phishing** turns the hold into a phishing suspension. A team is held once:
+phishing** turns the hold into a phishing suspension. While the team is held,
+its later verdicts still move its risk but send no alert and apply no
+pause, so a release leaves no pause behind. A team is held once:
 after a release its later verdicts only alert, so the released mail, judged
 again on its way out, cannot hold it a second time. A team already
 suspended keeps its suspension, and Probation, Established, Trusted and
