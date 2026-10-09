@@ -197,7 +197,7 @@ it("answers 429 naming the warm-up, never the plan, once the parked backlog is f
     const body = (await res.json()) as { name: string; message: string };
     expect(body.name).toBe("daily_quota_exceeded");
     expect(body.message).toBe(
-      `${prefix}New domain warm-up: this sending domain ramps up gradually and enough of its emails are already waiting; retry after the UTC day rolls over`,
+      `${prefix}New domain warm-up: this sending domain ramps up gradually and enough emails are already waiting; retry after the UTC day rolls over`,
     );
     expect(body.message).not.toMatch(/upgrade|plan/i);
   }

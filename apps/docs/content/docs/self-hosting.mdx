@@ -919,8 +919,9 @@ stays within its own cap. Mail over either parks as `queued_quota` (with
 `park_reason = 'warmup'`) and the 15-minute `quota.drain` releases it, oldest
 first, as both allow; the API answers `429 daily_quota_exceeded` with a warm-up
 message (SMTP `452`) only when the team's parked backlog is full (three days of
-its plan's volume). A domain moves up one step early once its sends since the
-last step are clean: at least 50, the first a day old, hard bounces under 2%,
+its plan's volume, or of the domain's cap where that is more). A domain moves
+up one step early once its sends since the last step are clean: at least 50,
+the first a day old, hard bounces under 2%,
 complaints under 0.1% and no phishing-type verdict from the content monitor
 (checked by the 15-minute `safety.flags` job). An operator can trust a team, or
 one domain, on its Trust & safety review page, which lifts the warm-up and is

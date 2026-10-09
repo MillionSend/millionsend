@@ -937,8 +937,9 @@ estacionado como `queued_quota` (com `park_reason = 'warmup'`) e o
 os dois permitem; a API
 responde `429 daily_quota_exceeded` com uma mensagem de aquecimento (SMTP
 `452`) só quando o acúmulo estacionado da equipe está cheio (três dias do
-volume do plano). Um domínio sobe um degrau antes quando os envios desde o
-último degrau estão limpos: pelo menos 50, o primeiro enviado há um dia ou
+volume do plano, ou do limite do domínio quando ele é maior). Um domínio sobe
+um degrau antes quando os envios desde o último degrau estão limpos: pelo
+menos 50, o primeiro enviado há um dia ou
 mais, bounces permanentes abaixo de 2%, reclamações abaixo de 0,1% e nenhum
 veredicto do tipo phishing do monitoramento de conteúdo (verificado pelo job
 `safety.flags` de 15 minutos).

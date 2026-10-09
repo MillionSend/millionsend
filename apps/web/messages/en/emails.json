@@ -122,7 +122,7 @@
       "waiting": "Waiting to send",
       "waitingBody": "Goes out as soon as sending capacity frees up.",
       "warmup": "Warming up the domain",
-      "warmupBody": "New domains ramp up gradually to protect deliverability. Goes out as the domain's daily volume allows."
+      "warmupBody": "New domains ramp up gradually to protect deliverability. Goes out as the daily volume allows."
     }
   },
   "insights": {

@@ -342,7 +342,7 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
         body: errorBody(
           429,
           "daily_quota_exceeded",
-          "New domain warm-up: this sending domain ramps up gradually and enough of its emails are already waiting; retry after the UTC day rolls over",
+          "New domain warm-up: this sending domain ramps up gradually and enough emails are already waiting; retry after the UTC day rolls over",
         ),
       };
     case "monthly_quota_exceeded":
