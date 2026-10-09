@@ -383,6 +383,46 @@ describe("OAuth authorization server", () => {
     });
   });
 
+  it("strips invisible characters from the client name, caps it, and refuses oversized metadata", async () => {
+    const clientId = await registerClient(undefined, {
+      client_name: `‮Claude​ ${"x".repeat(100)}`,
+    });
+    const [row] = await db
+      .select({ name: schema.oauthClient.name })
+      .from(schema.oauthClient)
+      .where(eq(schema.oauthClient.clientId, clientId));
+    expect(row?.name).toBe(`Claude ${"x".repeat(57)}`);
+
+    const res = await call("/oauth2/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        client_name: "Claude Code",
+        redirect_uris: [REDIRECT_URI],
+        token_endpoint_auth_method: "none",
+        software_statement: "x".repeat(20_000),
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_client_metadata" });
+  });
+
+  it("does not serve the provider's session endpoints for creating or editing clients", async () => {
+    const { cookie } = await signUp("ada@example.com");
+    for (const path of ["/oauth2/create-client", "/oauth2/update-client"]) {
+      const res = await call(path, {
+        method: "POST",
+        cookie,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          redirect_uris: ["https://app.example/cb"],
+          client_uri: "https://elsewhere.example",
+        }),
+      });
+      expect(res.status, path).toBe(404);
+    }
+  });
+
   it("lets a non-holder revoke an all-teams grant only when administering every team of the holder", async () => {
     const first = await createTeam(db, "first");
     const second = await createTeam(db, "second");

@@ -53,6 +53,16 @@ export { resolveBaseUrl };
 const CLIENT_LINK_FIELDS = ["client_uri", "logo_uri", "tos_uri", "policy_uri"] as const;
 
 /**
+ * Open registration stores a client row per request, so the metadata is
+ * bounded, and client_name headlines the consent screen, so it is kept to a
+ * line and stripped of the invisible and bidi characters that make a name
+ * read as something it is not.
+ */
+const MAX_REGISTRATION_JSON = 16 * 1024;
+const MAX_CLIENT_NAME = 64;
+const INVISIBLE_OR_CONTROL = /[\p{Cc}\p{Cf}]/gu;
+
+/**
  * Refuses account deletion while the user is the only owner of any team:
  * the team would be left with nobody able to administer or delete it.
  */
@@ -475,6 +485,11 @@ export function createAuth(
         "/oauth2/register": { window: 15 * 60, max: 10 },
       },
     },
+    // The provider's session endpoints for creating and editing clients: any
+    // signed-in user could store consent-screen links that skip the
+    // /oauth2/register checks in hooks.before. Clients here come only from
+    // RFC 7591 registration.
+    disabledPaths: ["/oauth2/create-client", "/oauth2/update-client"],
     advanced: {
       // Cloud sits behind Cloudflare only (the firewall admits nothing else),
       // which sets the single-value cf-connecting-ip. Self-host walks the
@@ -532,6 +547,18 @@ export function createAuth(
         if (ctx.path !== "/oauth2/register") return;
         const body = ctx.body as Record<string, unknown> | undefined;
         if (!body) return;
+        if (JSON.stringify(body).length > MAX_REGISTRATION_JSON) {
+          throw new APIError("BAD_REQUEST", {
+            error: "invalid_client_metadata",
+            error_description: "Client metadata is too large.",
+          });
+        }
+        if (typeof body.client_name === "string") {
+          body.client_name = Array.from(body.client_name.replace(INVISIBLE_OR_CONTROL, ""))
+            .slice(0, MAX_CLIENT_NAME)
+            .join("")
+            .trim();
+        }
         const redirects = Array.isArray(body.redirect_uris)
           ? body.redirect_uris.filter((uri): uri is string => typeof uri === "string")
           : [];

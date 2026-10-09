@@ -98,6 +98,10 @@ export function ConsentForm({
     }
   }
 
+  const redirects = app?.redirectOrigins.length ? (
+    <span>{t("redirectsTo", { origins: app.redirectOrigins.join(", ") })}</span>
+  ) : null;
+
   return (
     <AuthScreen title={t("title", { app: appName })}>
       <p className={styles.subline}>
@@ -110,6 +114,36 @@ export function ConsentForm({
         )}{" "}
         {t("subline", { email: userEmail })}
       </p>
+      {app?.unverified ? (
+        <div
+          role="note"
+          style={{
+            display: "grid",
+            gap: 4,
+            border: "1px solid var(--ms-warn-border)",
+            background: "var(--ms-warn-bg)",
+            borderRadius: "var(--ms-r-input)",
+            padding: "9px 14px",
+            fontSize: "var(--ms-fs-label)",
+            lineHeight: 1.5,
+            color: "var(--ms-warn)",
+            overflowWrap: "anywhere",
+          }}
+        >
+          <strong>
+            {t("unverified")}
+            {app.registeredAt
+              ? ` · ${t("registered", {
+                  date: new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
+                    new Date(app.registeredAt),
+                  ),
+                })}`
+              : null}
+          </strong>
+          <span>{t("unverifiedNote")}</span>
+          {redirects}
+        </div>
+      ) : null}
       {app ? (
         <div
           style={{
@@ -120,21 +154,7 @@ export function ConsentForm({
             overflowWrap: "anywhere",
           }}
         >
-          {app.unverified ? (
-            <span>
-              {t("unverified")}
-              {app.registeredAt
-                ? ` · ${t("registered", {
-                    date: new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
-                      new Date(app.registeredAt),
-                    ),
-                  })}`
-                : null}
-            </span>
-          ) : null}
-          {app.redirectOrigins.length > 0 ? (
-            <span>{t("redirectsTo", { origins: app.redirectOrigins.join(", ") })}</span>
-          ) : null}
+          {app.unverified ? null : redirects}
           <span>
             {t("clientId")} <span className="ms-mono">{app.clientId}</span>
           </span>
