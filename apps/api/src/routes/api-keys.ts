@@ -38,12 +38,41 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
           content: { "application/json": { schema: createApiKeyResponseSchema } },
           description: "API key created; the token is returned only here",
         },
+        403: jsonErr(
+          "Restricted API key: a sending_access key, or a domain_id outside the calling key's domain",
+        ),
         422: jsonErr("Validation error"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
       const body = c.req.valid("json");
+      // SECURITY: a minted key is never broader than the key minting it. Under
+      // a domain-scoped minter, an omitted or null domain_id inherits the
+      // minter's domain and any other is refused; only a full_access minter
+      // may pick another permission. Lowercased because a client may send an
+      // uppercase uuid while Postgres returns them lowercase.
+      const domainId = body.domain_id?.toLowerCase() ?? auth.domainId;
+      if (auth.domainId !== null && domainId !== auth.domainId) {
+        return c.json(
+          errorBody(
+            403,
+            "restricted_api_key",
+            "This API key can only create keys scoped to its own domain",
+          ),
+          403,
+        );
+      }
+      if (auth.permission !== "full_access" && body.permission !== auth.permission) {
+        return c.json(
+          errorBody(
+            403,
+            "restricted_api_key",
+            `This API key can only create ${auth.permission} keys`,
+          ),
+          403,
+        );
+      }
       const [active] = await db
         .select({ n: count() })
         .from(k)
@@ -89,7 +118,7 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
           keyHash: generated.keyHash,
           last4: generated.last4,
           permission: body.permission,
-          domainId: body.domain_id ?? null,
+          domainId,
           createdByApiKeyId: auth.apiKeyId,
         })
         .returning({ id: k.id });
@@ -102,7 +131,7 @@ export function registerApiKeyRoutes(app: OpenAPIHono<Env>, db: Db): void {
         metadata: {
           name: body.name,
           permission: body.permission,
-          domainId: body.domain_id ?? null,
+          domainId,
         },
       });
       // The full secret exists only in this response — the row stores

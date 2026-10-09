@@ -1473,8 +1473,15 @@ export const createApiKeyRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
     permission: z.enum(["full_access", "sending_access"]).default("full_access"),
-    // Omitted = any verified domain; a uuid scopes the key to one domain.
-    domain_id: z.uuid().nullish(),
+    domain_id: z
+      .uuid()
+      .nullish()
+      .describe(
+        "Restricts the key to sending from this one verified domain. Omitted or null, the key " +
+          "inherits the calling key's scope: all domains, or the calling key's domain if it is " +
+          "domain-scoped. A domain-scoped calling key cannot name any other domain " +
+          "(403 restricted_api_key).",
+      ),
   })
   .openapi("CreateApiKeyRequest");
 

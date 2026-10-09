@@ -132,3 +132,6 @@ em que você não pode confiar totalmente de todo modo.
 
 Uma chave de API pode ficar restrita a um único domínio; essa chave só envia
 a partir daquele domínio (outros domínios retornam `403 restricted_api_key`).
+As chaves que ela cria pela API ficam restritas ao mesmo domínio: um
+`domain_id` omitido herda esse domínio, e qualquer outro domínio retorna
+`403 restricted_api_key`.

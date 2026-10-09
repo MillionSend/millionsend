@@ -42,6 +42,11 @@ total, já que as leituras devolvem os corpos armazenados e todo o arquivo do
 time. Uma chave também pode ficar restrita a um único domínio, limitando de
 quais endereços `from` ela pode enviar.
 
+Uma chave criada com `POST /api-keys` nunca é mais ampla que a chave que a
+criou. Uma chave restrita a um domínio cria chaves restritas ao mesmo domínio:
+um `domain_id` omitido ou nulo herda esse domínio, e qualquer outro domínio
+retorna `403 restricted_api_key`.
+
 ## Compatibilidade com Resend
 
 Os formatos de requisição e resposta correspondem aos da API do Resend, então
