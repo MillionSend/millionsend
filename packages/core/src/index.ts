@@ -34,6 +34,7 @@ export {
   deriveSamplingKey,
   drawBroadcastCopy,
   foldRisk,
+  type HoldRule,
   loadMonitorState,
   MONITOR_ALERT_INTERVAL_MS,
   MONITOR_ANOMALY_CHECKS,

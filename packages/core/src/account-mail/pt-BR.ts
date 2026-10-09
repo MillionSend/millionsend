@@ -222,7 +222,7 @@ export const ptBR = {
   "monitor.alert": {
     subject: "Monitor de conteúdo: {team} precisa de uma olhada",
     body: [
-      "O risco do monitor de conteúdo para {team} chegou a {risk} (nível {tier}, {samples} amostras julgadas nos últimos 7 dias, {flagged} acima da linha de sinalização). O modelo lê uma amostra do e-mail aceito; nada foi pausado nem retido por conta dele.",
+      "O risco do monitor de conteúdo para {team} chegou a {risk} (nível {tier}, {samples} amostras julgadas nos últimos 7 dias, {flagged} acima da linha de sinalização). O modelo lê uma amostra do e-mail aceito; este alerta, por si só, não pausa nem retém nada.",
       "Abra a página de revisão para ver os veredictos amostrados, as verificações de conteúdo e o histórico da equipe, e decida. Este aviso se repete no máximo uma vez por dia por equipe enquanto o risco ficar acima da linha.",
     ],
     button: "Abrir revisão",
@@ -238,10 +238,15 @@ export const ptBR = {
   "monitor.team_held": {
     subject: "O monitor de conteúdo reteve {team} para revisão",
     body: [
-      "{team} está no nível novo e uma mensagem amostrada pontuou {score} ({verdict}). Pela política de retenção, todo envio da equipe agora é recusado ou estacionado: a API e o SMTP recusam, o e-mail na fila e os broadcasts aguardam, e seu tenant do SES fica desativado onde os tenants estão ligados. A própria mensagem amostrada já tinha saído quando foi julgada.",
+      "{team} está no nível novo e uma mensagem amostrada pontuou {score} ({verdict}). {rule} Pela política de retenção, todo envio da equipe agora é recusado ou estacionado: a API e o SMTP recusam, o e-mail na fila e os broadcasts aguardam, e seu tenant do SES fica desativado onde os tenants estão ligados. A própria mensagem amostrada já tinha saído quando foi julgada.",
       "O dono vê o envio como pausado aguardando revisão e não recebe e-mail. Abra a página de revisão para liberar a equipe, o que envia o e-mail retido, ou para suspendê-la por phishing.",
     ],
     button: "Abrir revisão",
+    extra: {
+      score: "Este único veredicto reteve a equipe: a pontuação de retenção é {line}.",
+      repeat:
+        "Este veredicto reteve a equipe como o seu veredicto do tipo phishing número {n} com pontuação {line} ou mais na primeira semana de envios.",
+    },
   },
   "monitor.degraded": {
     subject: "Monitor de conteúdo: {rate} das amostras ficaram sem julgamento na última hora",

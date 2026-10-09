@@ -22,10 +22,11 @@ export interface RevealNoticeDeps {
  * grant, the team's own audit gains a `content.accessed` row dated at the
  * access and its owners are told, in their own language.
  *
- * Withheld for a team suspended for phishing after the grant — telling the
- * account under investigation what was read, and when, is the one case where
- * disclosure works against the reason the content was read at all. The grant
- * is stamped either way so a withheld notice is not retried every night.
+ * Withheld for a team suspended for phishing or held for review — telling
+ * the account under investigation what was read, and when, is the one case
+ * where disclosure works against the reason the content was read at all, and
+ * a held team must not learn from it that it is under review. The grant is
+ * stamped either way so a withheld notice is not retried every night.
  */
 export async function runRevealNotices(
   db: Db,
@@ -54,11 +55,13 @@ export async function runRevealNotices(
   let disclosed = 0;
   let withheld = 0;
   for (const grant of grants) {
-    // Suspended for phishing at the disclosure, whenever the suspension
+    // Suspended for phishing or held at the disclosure, whenever that
     // happened: a re-suspension keeps the original suspended_at, so an
     // escalation to phishing would otherwise read as older than the grant,
     // and a team already suspended for it is no less under investigation.
-    const underInvestigation = grant.suspensionReason === "phishing" && grant.suspendedAt !== null;
+    const underInvestigation =
+      (grant.suspensionReason === "phishing" || grant.suspensionReason === "review") &&
+      grant.suspendedAt !== null;
     try {
       if (!underInvestigation) {
         // Written straight rather than through recordAudit, whose failures are

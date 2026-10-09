@@ -54,7 +54,11 @@ export const MONITOR_HOLD_REASONS = [
   "harvests_secrets",
   "off_domain_lure",
 ] as const;
-/** The repeat hold counts the verdicts of a team's first week, from its creation. */
+/**
+ * The repeat hold counts the verdicts of a team's first week of sending,
+ * from its first send: a phisher who signs up and waits a week before
+ * sending is still covered. A team that has not sent has nothing to count.
+ */
 export const MONITOR_HOLD_REPEAT_DAYS = 7;
 /** Samples are metadata on the probes' clock. */
 export const MONITOR_SAMPLE_RETENTION_DAYS = 90;
@@ -482,9 +486,12 @@ export interface VerdictOutcome {
   alert: boolean;
   /** Broadcasts were paused now by the policy. */
   paused: boolean;
-  /** The team was suspended for review now by the hold policy. */
-  held: boolean;
+  /** The team was suspended for review now by the hold policy, under this rule. */
+  held: HoldRule | null;
 }
+
+/** One verdict from `holdScore`, or the `verdicts`th from `holdRepeatScore` in the first week of sending. */
+export type HoldRule = { rule: "score" } | { rule: "repeat"; verdicts: number };
 
 /** A verdict as the judge returns it or as its sample stores it. */
 interface HoldVerdictFields {
@@ -507,25 +514,22 @@ export function isHoldVerdict(v: HoldVerdictFields, holdScore: number): boolean 
 
 /**
  * The repeat hold: this verdict is at least the `holdRepeatCount`th
- * phishing-type one from `holdRepeatScore` judged in the team's first week.
- * The stored verdicts include this one: the judge writes it in the
- * transaction that folds it.
+ * phishing-type one from `holdRepeatScore` judged in the team's first week
+ * of sending. The stored verdicts include this one: the judge writes it in
+ * the transaction that folds it.
  */
-async function repeatHoldReached(
+async function repeatHold(
   db: Db,
   s: MonitorSettings,
-  teamId: string,
+  row: Pick<TeamMonitorRow, "teamId" | "firstSendAt">,
   verdict: HoldVerdictFields,
   now: Date,
-): Promise<boolean> {
-  if (s.holdRepeatCount === 0 || !isHoldVerdict(verdict, s.holdRepeatScore)) return false;
-  const [team] = await db
-    .select({ createdAt: schema.teams.createdAt })
-    .from(schema.teams)
-    .where(eq(schema.teams.id, teamId));
-  if (!team) return false;
-  const until = new Date(team.createdAt.getTime() + MONITOR_HOLD_REPEAT_DAYS * DAY_MS);
-  if (now >= until) return false;
+): Promise<HoldRule | null> {
+  if (s.holdRepeatCount === 0 || !row.firstSendAt || !isHoldVerdict(verdict, s.holdRepeatScore)) {
+    return null;
+  }
+  const until = new Date(row.firstSendAt.getTime() + MONITOR_HOLD_REPEAT_DAYS * DAY_MS);
+  if (now >= until) return null;
   const judged = await db
     .select({
       score: ms.score,
@@ -536,13 +540,14 @@ async function repeatHoldReached(
     .from(ms)
     .where(
       and(
-        eq(ms.teamId, teamId),
+        eq(ms.teamId, row.teamId),
         eq(ms.status, "judged"),
         gte(ms.score, s.holdRepeatScore),
         lt(ms.judgedAt, until),
       ),
     );
-  return judged.filter((v) => isHoldVerdict(v, s.holdRepeatScore)).length >= s.holdRepeatCount;
+  const verdicts = judged.filter((v) => isHoldVerdict(v, s.holdRepeatScore)).length;
+  return verdicts >= s.holdRepeatCount ? { rule: "repeat", verdicts } : null;
 }
 
 /**
@@ -581,24 +586,24 @@ export async function applyJudgedSample(
         set: { ...next, riskUpdatedAt: now, updatedAt: now },
       });
     const tier = monitorTier(await loadMonitorState(t, { ...row, risk: next.risk }, now), s, now);
-    let held = false;
+    let held: HoldRule | null = null;
     const verdict = input.verdict && { ...input.verdict, score: input.score };
-    if (
-      s.autoHold &&
-      tier === "new" &&
-      row.heldAt === null &&
-      verdict &&
-      (isHoldVerdict(verdict, s.holdScore) ||
-        (await repeatHoldReached(t, s, input.teamId, verdict, now)))
-    ) {
+    const rule =
+      s.autoHold && tier === "new" && row.heldAt === null && verdict
+        ? isHoldVerdict(verdict, s.holdScore)
+          ? ({ rule: "score" } as const)
+          : await repeatHold(t, s, row, verdict, now)
+        : null;
+    if (rule) {
       // A standing suspension is the operator's call and stays as it is.
-      held = await suspendTeam(t, {
+      const suspended = await suspendTeam(t, {
         teamId: input.teamId,
         reason: "review",
         now,
         ifNotSuspended: true,
       });
-      if (held) {
+      if (suspended) {
+        held = rule;
         await t.update(tm).set({ heldAt: now }).where(eq(tm.teamId, input.teamId));
         const samples = await monitorSamplesByTeam(t, [input.teamId], now);
         await t
@@ -615,13 +620,8 @@ export async function applyJudgedSample(
           .onConflictDoNothing();
       }
     }
-    // The backlog sampled before a hold is judged after it. The hold mail is
-    // the operator's notice: an alert would say nothing is held, and a pause
-    // would outlive the release and keep the held broadcasts parked.
-    const underReview =
-      held || (await fetchTeamStanding(t, input.teamId))?.suspended?.reason === "review";
     let alert = false;
-    if (!underReview && next.risk >= s.alertRisk) {
+    if (next.risk >= s.alertRisk) {
       const stamped = await t
         .update(tm)
         .set({ alertedAt: now })
@@ -638,17 +638,18 @@ export async function applyJudgedSample(
       alert = stamped.length > 0;
     }
     let paused = false;
-    // A team the monitor held is never paused by the policy after its
-    // release: the backlog judged during the hold keeps the risk past the
-    // line, so the released mail's first verdict would park the broadcasts
-    // the release let go.
+    // A team held for review is never paused by the policy, during the hold
+    // or after its release: the backlog sampled before the hold is judged
+    // after it and keeps the risk past the line, so a pause would outlive the
+    // release and park the broadcasts the release let go.
     if (
-      !underReview &&
-      row.heldAt === null &&
       s.autoPause &&
       tier === "new" &&
       next.risk >= s.pauseRisk &&
-      row.broadcastsPausedAt === null
+      row.broadcastsPausedAt === null &&
+      held === null &&
+      row.heldAt === null &&
+      (await fetchTeamStanding(t, input.teamId))?.suspended?.reason !== "review"
     ) {
       // Only verdicts since the operator last resumed count: a reviewed
       // episode's evidence must not pause the team again on its own.

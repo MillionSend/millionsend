@@ -70,7 +70,7 @@ function recorder() {
   };
 }
 
-const suspend = (reason: "phishing" | "non_payment") =>
+const suspend = (reason: "phishing" | "review" | "non_payment") =>
   db
     .update(schema.teams)
     .set({ suspendedAt: new Date(), suspensionReason: reason })
@@ -129,6 +129,17 @@ describe("safety.reveal_notices", () => {
     const id = await grant(8);
     expect(await runRevealNotices(db)).toEqual({ disclosed: 0, withheld: 1 });
     expect(await teamRowsFor(id)).toEqual([]);
+  });
+
+  it("withholds row and notice from a team held for review, which must not learn of the review", async () => {
+    const id = await grant(8);
+    await suspend("review");
+    const { sent, mailer } = recorder();
+    expect(await runRevealNotices(db, { mailer })).toEqual({ disclosed: 0, withheld: 1 });
+    expect(sent).toEqual([]);
+    expect(await teamRowsFor(id)).toEqual([]);
+    const [stamped] = await db.select().from(schema.contentAccessGrants);
+    expect(stamped?.teamVisibleAt).toBeNull();
   });
 
   it("still discloses to a team suspended for anything else", async () => {

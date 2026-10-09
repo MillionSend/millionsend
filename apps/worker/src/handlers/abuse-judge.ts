@@ -1,5 +1,6 @@
 import {
   type AbuseJudge,
+  accountMailPhrase,
   applyJudgedSample,
   buildJudgeBlock,
   decryptEmailBody,
@@ -247,17 +248,29 @@ async function notifyOperator(
   const risk = outcome.risk.toFixed(2);
   const score = String(verdict.score);
   try {
-    // The hold supersedes the pause and the alert, whose mails say nothing is held.
-    if (outcome.held) {
+    const held = outcome.held;
+    if (held) {
       await mailOperator(
         db,
         deps.mailer,
         "monitor.team_held",
         path,
-        { team: name, score, verdict: [...verdict.categories, ...verdict.reasons].join(", ") },
+        (locale) => ({
+          team: name,
+          score,
+          verdict: [...verdict.categories, ...verdict.reasons].join(", "),
+          rule: accountMailPhrase({
+            locale,
+            kind: "monitor.team_held",
+            key: held.rule,
+            values:
+              held.rule === "score"
+                ? { line: String(settings.holdScore) }
+                : { line: String(settings.holdRepeatScore), n: String(held.verdicts) },
+          }),
+        }),
         deps.appBaseUrl,
       );
-      return;
     }
     if (outcome.paused) {
       await mailOperator(

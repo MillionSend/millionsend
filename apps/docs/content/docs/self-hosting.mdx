@@ -815,14 +815,14 @@ secret-harvesting or off-domain-lure finding, the team is suspended at once
 with the reason `review`: the API answers `403 sending_paused`, SMTP `550`,
 queued mail and broadcasts park, and with `SES_TENANTS` on its SES tenant is
 disabled. A run of lower verdicts holds the team too: by default the fifth
-such verdict from 80 within seven days of the team's creation. The operator
-is emailed at once; the owner is not, and sees a
-neutral "Sending is paused pending review" notice. The team stays on Trust &
+such verdict from 80 within seven days of the team's first send. The operator
+is emailed at once, with the rule that held the team; the owner is not, and
+sees a neutral "Sending is paused pending review" notice. The team stays on Trust &
 safety with its flag open until the operator decides on its review page:
 **Release hold** reinstates it and the parked mail goes out; **Suspend for
 phishing** turns the hold into a phishing suspension. While the team is held,
-its later verdicts still move its risk but send no alert and apply no
-pause, so a release leaves no pause behind. A team is held once, by either
+its later verdicts still move its risk and alert the operator as for any
+other team, but apply no pause, so a release leaves no pause behind. A team is held once, by either
 rule: after a release its later verdicts only alert, so the released mail,
 judged again on its way out, neither holds it a second time nor pauses its
 broadcasts. A team already
@@ -913,7 +913,7 @@ is; the console wins.
 | `MONITOR_AUTO_PAUSE` | true | Whether the pause policy applies |
 | `MONITOR_FLAG_SCORE` | 70 | A sample counts as flagged in the console from this score |
 | `MONITOR_HOLD_SCORE` | 90 | New teams only: a phishing-type verdict from this score holds the team for review |
-| `MONITOR_HOLD_REPEAT_COUNT` | 5 | New teams only: this many phishing-type verdicts from the score below, within seven days of the team's creation, also hold it for review; 0 turns this off |
+| `MONITOR_HOLD_REPEAT_COUNT` | 5 | New teams only: this many phishing-type verdicts from the score below, within seven days of the team's first send, also hold it for review; 0 turns this off |
 | `MONITOR_HOLD_REPEAT_SCORE` | 80 | The score from which a phishing-type verdict counts toward the count above |
 | `MONITOR_AUTO_HOLD` | true | Whether the review hold applies |
 
@@ -961,7 +961,7 @@ number of messages — never the justification's text and never any content.
 `content.accessed` row to the team's own audit log — dated at the access,
 not at the disclosure — and emails the team's owners in their own language:
 when it happened, the reason, how many messages, and what was withheld. The
-one exception is a team suspended for phishing since the grant, where the
+one exception is a team suspended for phishing or held for review, where the
 row and the notice are withheld; the grant records that the disclosure step
 ran either way, so it is not retried nightly.
 

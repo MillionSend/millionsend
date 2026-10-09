@@ -222,7 +222,7 @@ export const en = {
   "monitor.alert": {
     subject: "Content monitor: {team} needs a look",
     body: [
-      "The content monitor's risk for {team} reached {risk} ({tier} tier, {samples} samples judged in the last 7 days, {flagged} over the flag line). The model reads a sample of accepted mail; nothing was paused or held on its account.",
+      "The content monitor's risk for {team} reached {risk} ({tier} tier, {samples} samples judged in the last 7 days, {flagged} over the flag line). The model reads a sample of accepted mail; this alert by itself pauses and holds nothing.",
       "Open the review page to see the sampled verdicts, the content checks and the team's history, and decide. This notice repeats at most once a day per team while the risk stays over the line.",
     ],
     button: "Open review",
@@ -238,10 +238,15 @@ export const en = {
   "monitor.team_held": {
     subject: "Content monitor held {team} for review",
     body: [
-      "{team} is in the new tier and a sampled message scored {score} ({verdict}). Under the hold policy every send of the team is now refused or parked: the API and SMTP refuse, queued mail and broadcasts wait, and its SES tenant is disabled where tenants are on. The sampled message itself had already gone out when it was judged.",
+      "{team} is in the new tier and a sampled message scored {score} ({verdict}). {rule} Under the hold policy every send of the team is now refused or parked: the API and SMTP refuse, queued mail and broadcasts wait, and its SES tenant is disabled where tenants are on. The sampled message itself had already gone out when it was judged.",
       "The owner sees sending as paused pending review and is not emailed. Open the review page to release the team, which sends the held mail, or to suspend it for phishing.",
     ],
     button: "Open review",
+    extra: {
+      score: "This one verdict held the team: the hold score is {line}.",
+      repeat:
+        "This verdict held the team as its phishing-type verdict number {n} at or above {line} in its first week of sending.",
+    },
   },
   "monitor.degraded": {
     subject: "Content monitor: {rate} of samples went unjudged in the last hour",

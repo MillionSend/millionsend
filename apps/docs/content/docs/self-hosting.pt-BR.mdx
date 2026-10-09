@@ -823,15 +823,16 @@ equipe é suspensa na hora com o motivo `review`: a API responde
 `403 sending_paused`, o SMTP `550`, o e-mail na fila e os broadcasts ficam
 estacionados e, com `SES_TENANTS` ligado, o tenant do SES dela é desativado.
 Uma sequência de veredictos mais baixos também retém a equipe: por padrão, o
-quinto desses veredictos a partir de 80 em até sete dias da criação da equipe.
-O operador é avisado por e-mail na hora; o proprietário não, e vê um aviso
-neutro de "envio pausado aguardando revisão". A equipe fica em Confiança e
+quinto desses veredictos a partir de 80 em até sete dias do primeiro envio da
+equipe. O operador é avisado por e-mail na hora, com a regra que reteve a
+equipe; o proprietário não, e vê um aviso neutro de "envio pausado aguardando
+revisão". A equipe fica em Confiança e
 segurança com a sinalização aberta até o operador decidir na página de
 revisão: **Liberar retenção** a reativa e o e-mail estacionado sai;
 **Suspender por phishing** transforma a retenção numa suspensão por phishing.
-Enquanto a equipe está retida, os veredictos seguintes ainda movem o risco,
-mas não geram alerta nem pausa, então liberar a equipe não deixa pausa para
-trás.
+Enquanto a equipe está retida, os veredictos seguintes ainda movem o risco e
+avisam o operador como para qualquer outra equipe, mas não geram pausa, então
+liberar a equipe não deixa pausa para trás.
 Uma equipe é retida uma vez só, por qualquer das regras: depois de liberada,
 seus veredictos seguintes só geram alerta, então o e-mail liberado, julgado de
 novo na saída, não a retém outra vez nem pausa seus broadcasts. Uma equipe já suspensa mantém a suspensão, e equipes nos níveis Probatória,
@@ -927,7 +928,7 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 | `MONITOR_AUTO_PAUSE` | true | Se a política de pausa se aplica |
 | `MONITOR_FLAG_SCORE` | 70 | Uma amostra conta como sinalizada no console a partir desta pontuação |
 | `MONITOR_HOLD_SCORE` | 90 | Só equipes novas: um veredicto do tipo phishing a partir desta pontuação retém a equipe para revisão |
-| `MONITOR_HOLD_REPEAT_COUNT` | 5 | Só equipes novas: este número de veredictos do tipo phishing a partir da pontuação abaixo, em até sete dias da criação da equipe, também a retém para revisão; 0 desliga |
+| `MONITOR_HOLD_REPEAT_COUNT` | 5 | Só equipes novas: este número de veredictos do tipo phishing a partir da pontuação abaixo, em até sete dias do primeiro envio da equipe, também a retém para revisão; 0 desliga |
 | `MONITOR_HOLD_REPEAT_SCORE` | 80 | A pontuação a partir da qual um veredicto do tipo phishing conta para o número acima |
 | `MONITOR_AUTO_HOLD` | true | Se a retenção para revisão se aplica |
 
@@ -981,7 +982,7 @@ acrescenta uma linha `content.accessed` ao log de auditoria da própria
 equipe — datada no acesso, não na divulgação — e envia um e-mail aos donos
 da equipe no idioma de cada um: quando aconteceu, o motivo, quantas
 mensagens e o que não foi acessado. A única exceção é uma equipe suspensa
-por phishing depois da autorização, em que a linha e o aviso são retidos; a
+por phishing ou retida para revisão, em que a linha e o aviso são retidos; a
 autorização registra que a etapa de divulgação rodou de qualquer forma, para
 não ser repetida toda noite.
 

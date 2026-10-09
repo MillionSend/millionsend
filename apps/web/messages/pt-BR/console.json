@@ -855,7 +855,7 @@
         "autoPause": "se a pausa acima é aplicada",
         "flagScore": "o veredicto de abuso do próprio juiz começa em 65",
         "holdScore": "só no nível nova, num veredicto de phishing, falsificação de marca ou desvio de pagamento",
-        "holdRepeatCount": "a semana conta a partir da criação da equipe; 0 desliga",
+        "holdRepeatCount": "a semana conta a partir do primeiro envio da equipe; 0 desliga",
         "holdRepeatScore": "os mesmos veredictos de phishing acima, numa pontuação menor",
         "autoHold": "se esses veredictos suspendem a equipe até você liberá-la; o proprietário vê uma pausa neutra"
       },

@@ -658,14 +658,17 @@ describe("the review hold", () => {
   };
   async function newTeam(
     slug: string,
-    over: { plan?: "system"; sentTotal?: number; firstSendAt?: Date } = {},
+    over: { plan?: "system"; sentTotal?: number; firstSendAt?: Date; createdAt?: Date } = {},
   ) {
     const teamId = await createTeam(db, slug);
     const firstSendAt =
       over.firstSendAt ?? new Date(NOW.getTime() - (over.sentTotal ? 60 * DAY_MS : 3 * 60_000));
     await db
       .update(schema.teams)
-      .set({ createdAt: new Date(firstSendAt.getTime() - HOUR), plan: over.plan ?? "free" })
+      .set({
+        createdAt: over.createdAt ?? new Date(firstSendAt.getTime() - HOUR),
+        plan: over.plan ?? "free",
+      })
       .where(eq(schema.teams.id, teamId));
     await db
       .insert(schema.teamMonitor)
@@ -687,7 +690,7 @@ describe("the review hold", () => {
       verdict: PHISHING,
       now: NOW,
     });
-    expect(out).toMatchObject({ tier: "new", held: true, paused: false });
+    expect(out).toMatchObject({ tier: "new", held: { rule: "score" }, paused: false });
     expect(await team(teamId)).toMatchObject({
       suspendedAt: NOW,
       suspensionReason: "review",
@@ -705,7 +708,7 @@ describe("the review hold", () => {
       verdict: PHISHING,
       now: new Date(NOW.getTime() + HOUR),
     });
-    expect(again.held).toBe(false);
+    expect(again.held).toBeNull();
     expect((await team(teamId))?.suspendedAt).toEqual(NOW);
     expect(await audits(teamId)).toHaveLength(1);
     // Released: the drained mail is judged again, and the same verdicts only alert.
@@ -719,7 +722,7 @@ describe("the review hold", () => {
       verdict: PHISHING,
       now: new Date(NOW.getTime() + 2 * HOUR),
     });
-    expect(released.held).toBe(false);
+    expect(released.held).toBeNull();
     expect((await team(teamId))?.suspendedAt).toBeNull();
   });
 
@@ -730,7 +733,7 @@ describe("the review hold", () => {
       verdict: typeof PHISHING,
       s: MonitorSettings = S,
       id = teamId,
-    ) => (await applyJudgedSample(db, s, { teamId: id, score, verdict, now: NOW })).held;
+    ) => (await applyJudgedSample(db, s, { teamId: id, score, verdict, now: NOW })).held !== null;
     expect(await held(89, PHISHING)).toBe(false);
     expect(
       await held(99, { verdict: "abuse", categories: ["scam"], reasons: ["unsolicited_bulk"] }),
@@ -742,7 +745,7 @@ describe("the review hold", () => {
     expect(await held(99, PHISHING, S, await newTeam("system", { plan: "system" }))).toBe(false);
     expect(
       await applyJudgedSample(db, S, { teamId, score: 99, now: NOW }).then((o) => o.held),
-    ).toBe(false);
+    ).toBeNull();
     expect((await team(teamId))?.suspendedAt).toBeNull();
     // The line is a setting; a lure reason alone is enough.
     expect(
@@ -754,23 +757,26 @@ describe("the review hold", () => {
     ).toBe(true);
   });
 
-  it("neither alerts nor pauses while the team is held, and after a release only alerts", async () => {
+  it("alerts as for any team but never pauses while the team is held, nor after a release", async () => {
     const teamId = await newTeam("held-backlog");
     expect(
       await applyJudgedSample(db, S, { teamId, score: 96, verdict: PHISHING, now: NOW }),
-    ).toMatchObject({ held: true, alert: false, paused: false });
+    ).toMatchObject({ held: { rule: "score" }, alert: false, paused: false });
     // The samples taken before the hold are judged after it and carry the
     // risk past the alert and pause lines.
+    const backlog = [];
     for (let i = 1; i <= 20; i++) {
-      expect(
+      backlog.push(
         await applyJudgedSample(db, S, {
           teamId,
           score: 99,
           verdict: PHISHING,
           now: new Date(NOW.getTime() + i * 60_000),
         }),
-      ).toMatchObject({ held: false, alert: false, paused: false });
+      );
     }
+    expect(backlog.filter((o) => o.alert)).toHaveLength(1);
+    expect(backlog.filter((o) => o.paused || o.held)).toEqual([]);
     expect(await team(teamId)).toMatchObject({
       suspensionReason: "review",
       broadcastsPausedByOperatorAt: null,
@@ -779,15 +785,15 @@ describe("the review hold", () => {
       .update(schema.teams)
       .set({ suspendedAt: null, suspensionReason: null })
       .where(eq(schema.teams.id, teamId));
-    // The drained mail is judged again with the risk still past the pause
-    // line: it alerts, and leaves the released broadcasts flowing.
+    // The drained mail is judged again the next day with the risk still past
+    // the pause line: it alerts, and leaves the released broadcasts flowing.
     const released = await applyJudgedSample(db, S, {
       teamId,
       score: 99,
       verdict: PHISHING,
-      now: new Date(NOW.getTime() + HOUR),
+      now: new Date(NOW.getTime() + DAY_MS + HOUR),
     });
-    expect(released).toMatchObject({ held: false, alert: true, paused: false });
+    expect(released).toMatchObject({ held: null, alert: true, paused: false });
     expect(released.risk).toBeGreaterThan(S.pauseRisk);
     expect((await team(teamId))?.broadcastsPausedByOperatorAt).toBeNull();
   });
@@ -804,7 +810,7 @@ describe("the review hold", () => {
       verdict: PHISHING,
       now: new Date(NOW.getTime() + HOUR),
     });
-    expect(out.held).toBe(false);
+    expect(out.held).toBeNull();
     expect(await team(teamId)).toMatchObject({
       suspendedAt: NOW,
       suspensionReason: "non_payment",
@@ -836,9 +842,9 @@ describe("the review hold", () => {
 
   it("holds a new team on its fifth phishing verdict from 80, not its fourth", async () => {
     const teamId = await newTeam("repeat");
-    expect(await judge(teamId, 85, PHISHING, minute(1))).toBe(false);
+    expect(await judge(teamId, 85, PHISHING, minute(1))).toBeNull();
     // Under the score, other abuse and a clean call with a lure finding do not count.
-    expect(await judge(teamId, 79, PHISHING, minute(2))).toBe(false);
+    expect(await judge(teamId, 79, PHISHING, minute(2))).toBeNull();
     expect(
       await judge(
         teamId,
@@ -846,7 +852,7 @@ describe("the review hold", () => {
         { verdict: "abuse", categories: ["scam"], reasons: ["unsolicited_bulk"] },
         minute(3),
       ),
-    ).toBe(false);
+    ).toBeNull();
     expect(
       await judge(
         teamId,
@@ -854,8 +860,8 @@ describe("the review hold", () => {
         { verdict: "clean", categories: [], reasons: ["off_domain_lure"] },
         minute(4),
       ),
-    ).toBe(false);
-    expect(await judge(teamId, 88, PHISHING, minute(5))).toBe(false);
+    ).toBeNull();
+    expect(await judge(teamId, 88, PHISHING, minute(5))).toBeNull();
     expect(
       await judge(
         teamId,
@@ -863,9 +869,9 @@ describe("the review hold", () => {
         { verdict: "abuse", categories: ["other_abuse"], reasons: ["harvests_secrets"] },
         minute(6),
       ),
-    ).toBe(false);
-    expect(await judge(teamId, 84, PHISHING, minute(7))).toBe(false);
-    expect(await judge(teamId, 82, PHISHING, minute(8))).toBe(true);
+    ).toBeNull();
+    expect(await judge(teamId, 84, PHISHING, minute(7))).toBeNull();
+    expect(await judge(teamId, 82, PHISHING, minute(8))).toEqual({ rule: "repeat", verdicts: 5 });
     expect(await team(teamId)).toMatchObject({
       suspendedAt: minute(8),
       suspensionReason: "review",
@@ -874,23 +880,39 @@ describe("the review hold", () => {
     expect(await audits(teamId)).toMatchObject([{ action: "team.held_for_review" }]);
   });
 
-  it("counts only the verdicts of the team's first seven days from its creation", async () => {
+  it("counts only the verdicts of the team's first seven days of sending, from its first send", async () => {
+    // Signed up ten days before its first send: the week starts at the send.
     const week = async (slug: string, fifthAfter: number) => {
-      const teamId = await newTeam(slug);
-      const created = (await team(teamId))?.createdAt.getTime() ?? 0;
+      const teamId = await newTeam(slug, {
+        firstSendAt: NOW,
+        createdAt: new Date(NOW.getTime() - 10 * DAY_MS),
+      });
       for (let i = 1; i <= 4; i++) {
-        await judge(teamId, 85, PHISHING, new Date(created + DAY_MS + i * 60_000));
+        await judge(teamId, 85, PHISHING, new Date(NOW.getTime() + DAY_MS + i * 60_000));
       }
-      return judge(teamId, 85, PHISHING, new Date(created + fifthAfter));
+      return judge(teamId, 85, PHISHING, new Date(NOW.getTime() + fifthAfter));
     };
-    expect(await week("repeat-in-week", 7 * DAY_MS - 60_000)).toBe(true);
-    expect(await week("repeat-past-week", 7 * DAY_MS + 60_000)).toBe(false);
+    expect(await week("repeat-in-week", 7 * DAY_MS - 60_000)).toEqual({
+      rule: "repeat",
+      verdicts: 5,
+    });
+    expect(await week("repeat-past-week", 7 * DAY_MS)).toBeNull();
+    // A team that has not sent yet has no week to count.
+    const unsent = await createTeam(db, "repeat-unsent");
+    await db
+      .update(schema.teams)
+      .set({ createdAt: new Date(NOW.getTime() - HOUR) })
+      .where(eq(schema.teams.id, unsent));
+    for (let i = 1; i <= 5; i++) expect(await judge(unsent, 85, PHISHING, minute(i))).toBeNull();
+    expect((await team(unsent))?.suspendedAt).toBeNull();
   });
 
   it("shares the hold's scope and switch, never holds a released team again, and reads both settings", async () => {
     const five = async (teamId: string, s: MonitorSettings = S) => {
       let held = false;
-      for (let i = 1; i <= 5; i++) held = (await judge(teamId, 85, PHISHING, minute(i), s)) || held;
+      for (let i = 1; i <= 5; i++) {
+        held = (await judge(teamId, 85, PHISHING, minute(i), s)) !== null || held;
+      }
       return held;
     };
     const probation = await newTeam("repeat-probation", {
@@ -903,7 +925,7 @@ describe("the review hold", () => {
     expect(await five(await newTeam("repeat-zero"), { ...S, holdRepeatCount: 0 })).toBe(false);
     // A release ends it: no verdict, before or after it, counts toward a second hold.
     const released = await newTeam("repeat-released");
-    expect(await judge(released, 96, PHISHING, NOW)).toBe(true);
+    expect(await judge(released, 96, PHISHING, NOW)).toEqual({ rule: "score" });
     await db
       .update(schema.teams)
       .set({ suspendedAt: null, suspensionReason: null })
@@ -911,7 +933,7 @@ describe("the review hold", () => {
     expect(await five(released)).toBe(false);
     const two = await newTeam("repeat-two");
     const s = { ...S, holdRepeatCount: 2, holdRepeatScore: 70 };
-    expect(await judge(two, 75, PHISHING, minute(1), s)).toBe(false);
-    expect(await judge(two, 75, PHISHING, minute(2), s)).toBe(true);
+    expect(await judge(two, 75, PHISHING, minute(1), s)).toBeNull();
+    expect(await judge(two, 75, PHISHING, minute(2), s)).toEqual({ rule: "repeat", verdicts: 2 });
   });
 });

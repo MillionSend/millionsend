@@ -855,7 +855,7 @@
         "autoPause": "whether the pause above is applied",
         "flagScore": "the judge's own abuse verdict starts at 65",
         "holdScore": "new tier only, on a phishing, brand impersonation or payment redirect verdict",
-        "holdRepeatCount": "the week runs from the team's creation; 0 turns this off",
+        "holdRepeatCount": "the week runs from the team's first send; 0 turns this off",
         "holdRepeatScore": "the same phishing verdicts as above, at a lower score",
         "autoHold": "whether those verdicts suspend the team until you release it; the owner sees a neutral pause"
       },
