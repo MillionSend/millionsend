@@ -90,24 +90,28 @@ export const auditRouter = router({
               .where(inArray(schema.user.id, userIds))
           : [];
       const byId = new Map(users.map((u) => [u.id, u]));
-      // The instance operator on a team it does not belong to is the platform
-      // to that team, never a person it could name or write to.
+      // The instance operator is the platform to a team, never a person it
+      // could name or write to. Only what it did there as a member, from its
+      // join on, carries its name: an invitation accepted later must not name
+      // it on the console actions and support views that came before.
       const operator = await findInstanceOperator(ctx.db);
       const m = schema.teamMembers;
       const [operatorMembership] = operator
         ? await ctx.db
-            .select({ userId: m.userId })
+            .select({ joinedAt: m.createdAt })
             .from(m)
             .where(and(eq(m.teamId, ctx.teamId), eq(m.userId, operator.id)))
         : [];
-      const outsideOperatorId = operatorMembership ? null : operator?.id;
 
       return {
         nextCursor: page.nextCursor,
         items: page.items.map(({ actorId: _actorId, ...row }, i) => {
           const actor = actors[i] ?? { kind: "system" as const };
           const user = actor.kind === "user" ? byId.get(actor.id) : undefined;
-          const byOperator = actor.kind === "user" && actor.id === outsideOperatorId;
+          const byOperator =
+            actor.kind === "user" &&
+            actor.id === operator?.id &&
+            !(operatorMembership && row.createdAt >= operatorMembership.joinedAt);
           return {
             ...row,
             data: teamVisibleData(row.action, row.data),

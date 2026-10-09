@@ -22,6 +22,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await close();
 });
 
@@ -156,6 +157,59 @@ describe("audit.list", () => {
         email: "op@example.com",
       });
     }
+  });
+
+  it("keeps the operator MillionSend for what it did on a team before it joined", async () => {
+    vi.stubEnv("SUPPORT_VIEW", "on");
+    await db
+      .insert(schema.user)
+      .values({ id: "op", name: "Operator", email: "op@example.com", createdAt: new Date(0) });
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    const operator = createCaller({
+      db,
+      session: {
+        user: { id: "op", email: "op@example.com", name: "Operator" },
+        session: { id: "s-op", createdAt: new Date() },
+      },
+      teamId: null,
+      role: null,
+    });
+    await operator.console.teams.suspend({ id: teamId, reason: "manual", notify: false });
+    await operator.console.teams.reinstate({ id: teamId });
+    await operator.console.teams.startSupportView({
+      id: teamId,
+      reason: "support_ticket",
+      reference: "#4812",
+    });
+    await operator.support.end();
+    // The team later invites the operator in, and it acts there as a member.
+    const joinedAt = new Date(Date.now() + 60_000);
+    await db
+      .insert(schema.teamMembers)
+      .values({ teamId, userId: "op", role: "admin", createdAt: joinedAt });
+    await db.insert(schema.auditLog).values({
+      teamId,
+      actorId: "user:op",
+      action: "api_key.created",
+      target: `api_key:${crypto.randomUUID()}`,
+      data: { name: "CI" },
+      createdAt: new Date(joinedAt.getTime() + 1000),
+    });
+
+    const [asMember, ...before] = (await callerFor("alice", teamId, "owner").audit.list({})).items;
+    expect(asMember).toMatchObject({
+      action: "api_key.created",
+      actor: { kind: "user", id: "op", name: "Operator", email: "op@example.com" },
+    });
+    expect(before.map((row) => row.action).sort()).toEqual([
+      "support.view_ended",
+      "support.view_started",
+      "team.reinstated",
+      "team.suspended",
+    ]);
+    for (const row of before) expect(row.actor).toEqual({ kind: "operator" });
+    expect(JSON.stringify(before)).not.toMatch(/Operator|op@example\.com|"op"/);
   });
 
   it("never shows the team the content monitor's actions or a pause it was not told about, and keeps its access disclosure", async () => {
