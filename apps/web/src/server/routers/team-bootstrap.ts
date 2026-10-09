@@ -145,7 +145,7 @@ export const teamBootstrapRouter = router({
     .input(z.object({ name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
       if (await belongsToSilentlySuspendedTeam(ctx.db, ctx.session.user.id)) {
-        throw await suspensionLockError("createTeam");
+        throw await suspensionLockError("unavailable");
       }
       if (env.IS_CLOUD) {
         const userId = ctx.session.user.id;

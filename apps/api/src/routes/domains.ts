@@ -14,6 +14,7 @@ import {
   isReservedSenderDomain,
   PLAN_DOMAIN_LIMIT,
   recordAudit,
+  SILENT_SUSPENSIONS,
 } from "@millionsend/core";
 import {
   combineRecordStatus,
@@ -732,20 +733,27 @@ export function registerDomainRoutes(
           content: { "application/json": { schema: removeDomainResponseSchema } },
           description: "Domain deleted",
         },
-        403: jsonErr("Team suspended"),
+        403: jsonErr("Team suspended, or not available for this team"),
         404: jsonErr("Not found"),
       },
     }),
     async (c) => {
       const auth = c.get("auth");
       // Same lock as the dashboard delete: a suspended team keeps its domains.
-      if ((await fetchTeamStanding(db, auth.teamId))?.suspended) {
+      const suspended = (await fetchTeamStanding(db, auth.teamId))?.suspended;
+      if (suspended) {
         return c.json(
-          errorBody(
-            403,
-            "team_suspended",
-            "This team is suspended by the instance operator. Its domains cannot be deleted until it is reinstated; contact support.",
-          ),
+          SILENT_SUSPENSIONS.includes(suspended.reason)
+            ? errorBody(
+                403,
+                "forbidden",
+                "This isn't available for this team right now. Contact support if you need help.",
+              )
+            : errorBody(
+                403,
+                "team_suspended",
+                "This team is suspended by the instance operator. Its domains cannot be deleted until it is reinstated; contact support.",
+              ),
           403,
         );
       }

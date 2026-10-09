@@ -22,12 +22,17 @@ export async function suspensionLockError(lock: SuspensionLock): Promise<TRPCErr
   });
 }
 
+/** A silent suspension reads as the neutral `unavailable`, never as a suspension. */
 export async function assertTeamNotSuspended(
   db: Db,
   teamId: string,
   lock: SuspensionLock,
 ): Promise<void> {
-  if ((await fetchTeamStanding(db, teamId))?.suspended) throw await suspensionLockError(lock);
+  const suspended = (await fetchTeamStanding(db, teamId))?.suspended;
+  if (!suspended) return;
+  throw await suspensionLockError(
+    SILENT_SUSPENSIONS.includes(suspended.reason) ? "unavailable" : lock,
+  );
 }
 
 /** Whether the user owns or belongs, in any role, to a team under a silent suspension. */

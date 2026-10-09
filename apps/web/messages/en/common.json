@@ -114,6 +114,6 @@
     "deleteTeam": "This team is suspended and can't be deleted. Contact support.",
     "deleteDomain": "This team is suspended, so its domains can't be deleted. Contact support.",
     "invite": "This team is suspended, so no one new can join it. Contact support.",
-    "createTeam": "You can't create a team while a team you belong to is suspended. Contact support."
+    "unavailable": "This isn't available for this team right now. Contact support if you need help."
   }
 }

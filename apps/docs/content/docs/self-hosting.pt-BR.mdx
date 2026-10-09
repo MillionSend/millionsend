@@ -794,8 +794,11 @@ de conteúdo sobre a equipe, continua saindo. Ninguém numa equipe suspensa pode
 excluí-la, remover os domínios dela (a API também responde
 `403 team_suspended`) nem convidar ninguém, e um membro de uma equipe suspensa
 por phishing ou retida para revisão não pode criar novas equipes. Com esses
-dois motivos, o log de auditoria da própria equipe mostra a suspensão sem a
-nota do operador.
+dois motivos, cada uma dessas recusas é uma única linha neutra que nunca diz
+suspensa ("Isso não está disponível para esta equipe no momento. Fale com o
+suporte se precisar de ajuda."; a exclusão de domínio pela API responde
+`403 forbidden`), e o log de auditoria da própria equipe mostra a suspensão
+sem a nota do operador.
 
 ## Monitoramento de conteúdo (opcional)
 

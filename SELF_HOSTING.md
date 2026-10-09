@@ -686,8 +686,10 @@ content insights (never email bodies), and an instance-wide audit log.
   the content monitor's alerts, still goes out; nobody on it can
   delete it, remove its domains (the API answers `403 team_suspended` there
   too) or invite anyone, and a member of a team suspended for phishing or
-  held for review cannot create new teams (under either reason the team's
-  own audit log shows the suspension without the operator's note); a
+  held for review cannot create new teams (under either reason each of these
+  refusals is one neutral line that never says suspended, the API's domain
+  delete answers `403 forbidden`, and the team's own audit log shows the
+  suspension without the operator's note); a
   broadcast pause parks broadcasts while transactional mail flows; a daily
   ceiling caps the team's UTC day under its plan. Owners are emailed about
   each of these (never for a phishing suspension), and every action is
