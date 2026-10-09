@@ -9,7 +9,7 @@ import {
   type MonitorSettings,
   resolveMonitorSettings,
 } from "./monitor-settings.js";
-import { registrableDomain } from "./org-domain.js";
+import { ownerDomain } from "./org-domain.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -114,7 +114,7 @@ function rowTier(row: TierColumns, at: Date): number | "unknown" | null {
 }
 
 export interface WarmupCap {
-  /** The registrable domain whose daily counter the cap runs against. */
+  /** The registrable domain (ownerDomain) whose daily counter the cap runs against. */
   key: string;
   cap: number;
   tier: number;
@@ -194,7 +194,7 @@ export async function warmupCap(
     poolDomains += 1;
   }
   return {
-    key: registrableDomain(row.name),
+    key: ownerDomain(row.name),
     cap: capOf(s, tier),
     tier,
     fullAt: row.registeredAt ? tierStart(row.registeredAt, WARMUP_FULL_TIER) : null,
@@ -297,7 +297,7 @@ export async function graduateWarmupDomains(db: Db, now: Date = new Date()): Pro
     .where(mayWarmUp(now));
   const groups = new Map<string, typeof rows>();
   for (const row of rows) {
-    const key = registrableDomain(row.name);
+    const key = ownerDomain(row.name);
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
   const moved: string[] = [];

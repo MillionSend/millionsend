@@ -815,7 +815,9 @@ them) went unjudged, or as soon as TypeSafe rejects the API key.
 
 Off by default here and on by default with `IS_CLOUD`. With it on, a sending
 domain gets a daily cap by the age of its registrable domain (ICANN section of
-the Public Suffix List), counted per UTC day across every team sending from it:
+the Public Suffix List; under a private-section suffix, such as `shop.eu.org`
+from a free subdomain service, the name itself, dated by its certificates
+only), counted per UTC day across every team sending from it:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |

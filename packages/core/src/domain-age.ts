@@ -10,7 +10,8 @@ import { DAY_MS } from "./utc-day.js";
  * When a sending domain was registered, looked up off the send path (the
  * domain.age job) on the registrable name: RDAP through the IANA bootstrap,
  * then the registry's own WHOIS, then the first certificate in Certificate
- * Transparency, else unknown.
+ * Transparency, else unknown. A name a free subdomain service hands out
+ * (ownerDomain) is no registry's: only its certificates can date it.
  */
 
 /** Names MillionSend to every registry and log it asks. */
@@ -312,7 +313,8 @@ export function createDomainAgeResolver(deps: DomainAgeDeps = {}): DomainAgeReso
 
   return {
     async lookup(hostname) {
-      const domain = getDomain(normalizeHostname(hostname));
+      const name = normalizeHostname(hostname);
+      const domain = getDomain(name, { allowPrivateDomains: true }) ?? getDomain(name);
       if (!domain) return { domain: null, registeredAt: null, source: "unknown" };
       const tld = domain.slice(domain.lastIndexOf(".") + 1);
       const steps = [
@@ -320,8 +322,9 @@ export function createDomainAgeResolver(deps: DomainAgeDeps = {}): DomainAgeReso
         ["whois", () => registryWhois(domain, tld)],
         ["ct", () => certificateTransparency(domain)],
       ] as const;
+      const sold = domain === getDomain(name);
       let retry = false;
-      for (const [source, step] of steps) {
+      for (const [source, step] of sold ? steps : steps.slice(2)) {
         const found = await step();
         if (found === "retry") retry = true;
         else if (found && plausible(found)) return { domain, registeredAt: found, source };

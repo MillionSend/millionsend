@@ -939,6 +939,11 @@ upgrade included). It tries, in order:
 3. The first certificate issued for the name in Certificate Transparency
    ([crt.sh](https://crt.sh), at most one request every 12 seconds).
 
+A name under a suffix of the list's private part, such as `shop.eu.org` from
+a free subdomain service, is its own domain for the warm-up: it is dated by
+step 3 alone, since no registry sold it, and counts apart from the service's
+other names.
+
 Otherwise the age is unknown: `.de`, `.eu` and `.ch`, for instance, publish
 no creation date. Requests carry the User-Agent
 `MillionSend-domain-age/1.0 (+https://millionsend.com)`, a `429` is honoured

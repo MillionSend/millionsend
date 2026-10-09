@@ -486,6 +486,22 @@ describe("the accept path", () => {
       }
       expect(await sentRecipients(teamId)).toBe(100);
     });
+
+    it("counts a name a free subdomain service hands out by itself, never with strangers on that service", async () => {
+      // de5.net is in the private section of the Public Suffix List: each
+      // name under it has its own owner.
+      const first = await newTeam({ plan: "pro", planQuota: 100_000 });
+      const second = await newTeam({ plan: "pro", planQuota: 100_000 });
+      const a = await newDomain(first, "mail.shop-a.de5.net", REGISTERED);
+      const b = await newDomain(second, "mail.shop-b.de5.net", REGISTERED);
+      expect(await warmupCap(db, { teamId: first, domainId: a, at: NOW })).toMatchObject({
+        key: "shop-a.de5.net",
+      });
+      await send(first, PRO, a, { to: recipients(50, "s1") });
+      await send(first, PRO, a, { to: recipients(50, "s2") });
+      expect(await send(first, PRO, a)).toMatchObject({ ok: true, parked: true });
+      expect(await send(second, PRO, b)).toMatchObject({ ok: true, parked: false });
+    });
   });
 
   it("replays the incident: 1,074 sends on the registration day, 100 go and 974 wait", async () => {
@@ -649,6 +665,18 @@ describe("early graduation", () => {
     expect(moved).not.toContain("brand-lure.com");
     expect(moved).not.toContain("first-day-lure.com");
     expect(moved).toContain("bulk-sender.com");
+  });
+
+  it("moves a name a free subdomain service hands out on its own sends, never a stranger's", async () => {
+    const owner = await newTeam();
+    const ownDomain = await newDomain(owner, "news.clean-shop.de5.net", REGISTERED);
+    await sent(owner, ownDomain, 50, DAY_OLD);
+    const stranger = await newTeam();
+    const strangerDomain = await newDomain(stranger, "login.fresh-lure.de5.net", REGISTERED);
+
+    const moved = await graduateWarmupDomains(db, NOW);
+    expect(moved).toContain("clean-shop.de5.net");
+    expect(await tierOf(strangerDomain)).toBeNull();
   });
 
   it("leaves trusted domains alone and does nothing with the switch off", async () => {

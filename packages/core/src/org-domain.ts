@@ -8,13 +8,25 @@ export function normalizeHostname(hostname: string): string {
 /**
  * The registrable domain under the ICANN section of the Public Suffix List:
  * the name a registry sold (acme.com.br for news.acme.com.br, vinco.app.br
- * for cartas.vinco.app.br). Feeds DMARC lookups, link-domain checks and the
- * domain-age lookup, so it must never stop at a public suffix. A name with no
- * registrable part (an IP, a bare suffix, a single label) comes back as is.
+ * for cartas.vinco.app.br). Feeds DMARC lookups and link-domain checks, so
+ * it must never stop at a public suffix. A name with no registrable part (an
+ * IP, a bare suffix, a single label) comes back as is.
  */
 export function registrableDomain(hostname: string): string {
   const name = normalizeHostname(hostname);
   return getDomain(name) ?? name;
+}
+
+/**
+ * The registrable domain one owner holds, with the private section of the
+ * list too: shop.eu.org, where registrableDomain says eu.org. What the
+ * warm-up dates and counts by: the ICANN name above a free subdomain
+ * service is the service's, years older than the names it hands out, and
+ * shared by strangers. A name with no registrable part comes back as is.
+ */
+export function ownerDomain(hostname: string): string {
+  const name = normalizeHostname(hostname);
+  return getDomain(name, { allowPrivateDomains: true }) ?? name;
 }
 
 /**

@@ -960,6 +960,11 @@ de envio: quando um domínio é adicionado, quando é verificado, e pela varredu
 3. O primeiro certificado emitido para o nome no Certificate Transparency
    ([crt.sh](https://crt.sh), no máximo uma requisição a cada 12 segundos).
 
+Um nome sob um sufixo da parte privada da lista, como `shop.eu.org` de um
+serviço gratuito de subdomínios, é um domínio próprio para o aquecimento: só
+o passo 3 o data, já que nenhum registro o vendeu, e ele conta separado dos
+outros nomes do serviço.
+
 Senão a idade fica desconhecida: `.de`, `.eu` e `.ch`, por exemplo, não
 publicam data de criação. As requisições levam o User-Agent
 `MillionSend-domain-age/1.0 (+https://millionsend.com)`, um `429` é respeitado

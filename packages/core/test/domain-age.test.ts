@@ -213,6 +213,28 @@ describe("Certificate Transparency", () => {
   });
 });
 
+describe("a name a free subdomain service hands out", () => {
+  it("is dated by its own certificates, never by the service's registration", async () => {
+    // de5.net is in the private section of the Public Suffix List: a
+    // registry sold de5.net years ago, the service handed out phish.de5.net.
+    const { r, web, port43 } = resolver({
+      "https://rdap.verisign.com/net/v1/domain/de5.net": {
+        body: JSON.stringify({
+          events: [{ eventAction: "registration", eventDate: "2024-07-01T00:00:00Z" }],
+        }),
+      },
+      "https://crt.sh/?q=phish.de5.net&output=json": { body: "[]" },
+    });
+    expect(await r.lookup("mail.phish.de5.net")).toEqual({
+      domain: "phish.de5.net",
+      registeredAt: null,
+      source: "unknown",
+    });
+    expect(web.calls.map((c) => c.url)).toEqual(["https://crt.sh/?q=phish.de5.net&output=json"]);
+    expect(port43.asked).toEqual([]);
+  });
+});
+
 describe("failures", () => {
   it("throws a retryable error when every source failed", async () => {
     const { r } = resolver(
