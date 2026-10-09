@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { decryptEmailBody, EnvKeyring } from "@millionsend/core";
+import { decryptEmailBody, EnvKeyring, hashRecipient } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -147,6 +147,18 @@ describe("onboarding.sendFirstEmail", () => {
       .update(schema.user)
       .set({ emailVerified: true })
       .where(eq(schema.user.id, "team-b-ada"));
+    // Refused inside the claim's transaction: the claim rolls back with it.
+    await db.insert(schema.suppressions).values({
+      teamId,
+      email: "ada@team-b.example",
+      emailHash: hashRecipient("ada@team-b.example"),
+      reason: "hard_bounce",
+    });
+    await expect(c.onboarding.sendFirstEmail({ locale: "en" })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: "all_suppressed",
+    });
+    await db.delete(schema.suppressions).where(eq(schema.suppressions.teamId, teamId));
     expect(await c.onboarding.sendFirstEmail({ locale: "en" })).toMatchObject({
       sent: true,
       to: "ada@team-b.example",
