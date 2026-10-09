@@ -35,6 +35,14 @@ export async function assertTeamNotSuspended(
   );
 }
 
+/** Whether the team row is under a silent suspension. */
+export function isSilentlySuspended(team: {
+  suspendedAt: Date | null;
+  suspensionReason: string | null;
+}): boolean {
+  return team.suspendedAt !== null && SILENT_SUSPENSIONS.includes(team.suspensionReason ?? "");
+}
+
 /** Whether the user owns or belongs, in any role, to a team under a silent suspension. */
 export async function belongsToSilentlySuspendedTeam(db: Db, userId: string): Promise<boolean> {
   // Matched here rather than in SQL: a reason the schema lacks yet would be

@@ -5,6 +5,7 @@ import {
   SUPPORT_VIEW_MINUTES,
   SUPPORT_VIEW_REASONS,
   SUPPORT_VIEW_SIGN_IN_MINUTES,
+  SUSPENSION_REASONS,
   type SystemMailMessage,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -213,6 +214,43 @@ describe("console.teams.startSupportView", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(await db.select().from(schema.supportViewGrants)).toHaveLength(before);
   });
+
+  it.each(SUSPENSION_REASONS)(
+    "refuses a team suspended for %s only when the team must not learn of it",
+    async (reason) => {
+      const slug = `suspended-${reason}`;
+      const id = await createTeam(db, slug);
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, id));
+      const silent = ["phishing", "review"].includes(reason);
+      // The console disables the item with the reason before anyone clicks.
+      const [row] = (await operator().console.teams.list({ search: slug })).items;
+      expect(row).toMatchObject({ id, silentlySuspended: silent });
+      expect(await operator().console.teams.detail({ id })).toMatchObject({
+        silentlySuspended: silent,
+      });
+      const started = operator().console.teams.startSupportView({
+        id,
+        reason: "support_ticket",
+        reference: "#4812",
+      });
+      if (silent) {
+        await expect(started).rejects.toMatchObject({
+          code: "PRECONDITION_FAILED",
+          message: "silent_suspension",
+        });
+      } else {
+        await started;
+      }
+      const grants = await db
+        .select()
+        .from(schema.supportViewGrants)
+        .where(eq(schema.supportViewGrants.teamId, id));
+      expect(grants).toHaveLength(silent ? 0 : 1);
+    },
+  );
 
   it("opens a 30-minute grant, sets the cookie, audits the team and mails nobody", async () => {
     const setCookie = vi.fn();

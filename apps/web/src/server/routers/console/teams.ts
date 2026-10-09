@@ -21,6 +21,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { escapeLike } from "@/lib/sql";
+import { isSilentlySuspended } from "../../suspension-lock";
 import { operatorProcedure, router } from "../../trpc";
 import { auditOperator, kickQuotaDrain, loadTeam, mailTeamOwners } from "./shared";
 
@@ -179,7 +180,9 @@ export const consoleTeamsRouter = router({
           .leftJoin(st, eq(st.teamId, t.id))
           .where(where),
       ]);
-      const items = rows.slice(0, input.limit);
+      const items = rows
+        .slice(0, input.limit)
+        .map((row) => ({ ...row, silentlySuspended: isSilentlySuspended(row) }));
       return {
         items,
         total: count?.total ?? 0,
@@ -211,6 +214,7 @@ export const consoleTeamsRouter = router({
     ]);
     return {
       ...row,
+      silentlySuspended: isSilentlySuspended(row),
       stripeSubscriptionUrl: row.stripeSubscriptionId
         ? `https://dashboard.stripe.com/${isLiveKey(env.STRIPE_SECRET_KEY ?? "") ? "" : "test/"}subscriptions/${row.stripeSubscriptionId}`
         : null,
@@ -259,6 +263,11 @@ export const consoleTeamsRouter = router({
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "sign_in_again" });
       }
       const team = await loadTeam(ctx.db, input.id);
+      // A live view puts the operator's name and email on the owner's
+      // Settings, and a silently suspended team must not learn who reviews it.
+      if (isSilentlySuspended(team)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "silent_suspension" });
+      }
       const [own] = await ctx.db
         .select({ id: schema.teamMembers.id })
         .from(schema.teamMembers)

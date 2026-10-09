@@ -886,8 +886,10 @@ dispute, other) and the ticket reference, and opens the team's dashboard as
 its owner sees it, read-only, for 30 minutes. Every reason is a request the
 customer made; an operator checking an abuse report works from the console's
 own Trust & safety pages instead, and from the content reveal when the
-message text itself is needed. The session rides on the operator's own
-login; no session is ever minted for the owner.
+message text itself is needed. No view starts on a team suspended for
+phishing or held for review: its owner's Support access card would show who
+opened it. The session rides on the operator's own login; no session is
+ever minted for the owner.
 
 - **What the operator sees:** the dashboard under a banner ("Support view
   of <team> · read-only · ends in mm:ss"): emails and their events (a

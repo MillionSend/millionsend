@@ -245,25 +245,30 @@ export function useTeamActions(onChanged: () => void): TeamActions {
 
 /**
  * The Teams list's "…" items for one team, from the shared actions: Open
- * team, View as owner (when `supportView` is given: disabled with the env
- * named while the feature is off), Adjust limits, Change plan, separator,
- * Pause/Resume broadcasts, Suspend/Reinstate team. `labels` come from
- * console.teams.menu.
+ * team, View as owner (when `options` are given: disabled with the reason
+ * while the feature is off or the team is silently suspended), Adjust
+ * limits, Change plan, separator, Pause/Resume broadcasts, Suspend/Reinstate
+ * team. `labels` come from console.teams.menu.
  */
 export function teamMenuItems(
   team: TeamActionTarget,
   actions: TeamActions,
   labels: (key: string) => string,
-  options?: { supportView: boolean },
+  options?: { supportView: boolean; silentlySuspended: boolean },
 ): (PopoverMenuItem | null)[] {
+  const viewOff = !options?.supportView
+    ? "viewOff"
+    : options.silentlySuspended
+      ? "viewSilent"
+      : null;
   return [
     { label: labels("open"), onSelect: () => actions.openTeam(team) },
     options
       ? {
           label: labels("view"),
           onSelect: () => actions.viewAsOwner(team),
-          disabled: !options.supportView,
-          ...(options.supportView ? {} : { title: labels("viewOff") }),
+          disabled: viewOff !== null,
+          ...(viewOff ? { title: labels(viewOff) } : {}),
         }
       : null,
     { label: labels("limits"), onSelect: () => actions.adjustLimits(team) },
