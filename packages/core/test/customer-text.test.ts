@@ -56,6 +56,41 @@ describe("inertText", () => {
     expect(inertText("Acme 2026 Q4, order 123456")).toBe("Acme 2026 Q4, order 123456");
   });
 
+  it("prints a run that is exactly one date or one span of years as typed", () => {
+    for (const typed of [
+      "Newsletter 09/10/2026",
+      "Turma 2025-2026",
+      "2026-10-09",
+      "9.10.2026",
+      "Turma 2025\u20132026",
+    ]) {
+      expect(readable(inertText(typed)), typed).toBe(typed);
+      expect(autoLinks(typed), typed).toEqual([]);
+      expect(autoLinks(inertText(typed)), typed).toEqual([]);
+    }
+  });
+
+  it("masks every other run, and the oracle still dials each one as typed", () => {
+    for (const [typed, printed] of [
+      ["1-888-555-0199", "1-888-•••-••••"],
+      ["+55 11 3025-2026", "+55 11 ••••-••••"],
+      ["13/13/2026", "13/13/••••"],
+      ["2025-2040", "2025-••••"],
+      ["Call 09/10/2026 555", "Call 09/10/•••• •••"],
+      ["Edição 42 \u2013 09/10/2026", "Edição 42 \u2013 09/••/••••"],
+      ["０９/１０/２０２６", "０９/１０/••••"],
+      ["Turma 2024-2025 2025-2026", "Turma 2024-•••• ••••-••••"],
+    ] as const) {
+      expect(inertText(typed), typed).toBe(printed);
+      expect(
+        autoLinks(typed).some((link) => link.startsWith("tel:")),
+        typed,
+      ).toBe(true);
+    }
+    // A cut through a date leaves no seven of its digits.
+    expect(inertText(`${"x".repeat(53)} 2026-10-09 and more`)).toBe(`${"x".repeat(53)} 2026-••-•…`);
+  });
+
   it("cuts on a whole character and marks the cut", () => {
     const long = `${"🙂".repeat(CUSTOMER_TEXT_MAX)}x`;
     expect(inertText(long)).toBe(`${"🙂".repeat(CUSTOMER_TEXT_MAX - 1)}…`);
@@ -189,6 +224,22 @@ describe("system mail catalogs and customer text", () => {
         }
       }
     }
+  });
+
+  it("prints a broadcast subject with a date and a team named for its years as typed", () => {
+    const url = "https://app.example/broadcasts/b";
+    const mail = buildAccountMail({
+      kind: "broadcast.sent",
+      locale: "en",
+      url,
+      values: { subject: "Newsletter 09/10/2026", team: "Turma 2025-2026", count: "2", failed: "" },
+    });
+    for (const part of [mail.text, unescapeHtml(mail.html)]) {
+      expect(readable(part)).toContain(
+        '"Newsletter 09/10/2026" was handed to 2 contacts of Turma 2025-2026;',
+      );
+    }
+    expect(mailLinks(mail).sort()).toEqual([url, "https://millionsend.com"].sort());
   });
 
   it("reads a domain-like team name as written", () => {

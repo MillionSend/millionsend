@@ -709,7 +709,9 @@ direction-changing characters are dropped (the joiners and selectors inside
 an emoji or a Persian or Indic word stay), it stops at 64 characters, and a
 hair space follows each `.`, `@`, `:` and `\`, so `acme.dev` still reads as
 acme.dev without becoming one. A run of seven or more digits keeps its first
-four, so no mail app offers to call it. Team and display names with a link
+four, so no mail app offers to call it, unless the run is exactly one date
+(`09/10/2026`, `2026-10-09`) or one span of up to ten years (`2025-2026`),
+which prints as typed. Team and display names with a link
 scheme, an `@`, a line break or any other invisible character, or longer than
 64 characters, are refused when set. A team may hold one pending invitation per
 address, a resend waits two minutes, and the team, and each member across all

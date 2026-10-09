@@ -112,14 +112,15 @@ export const REFUSED_NAMES = [
 
 /**
  * Real team and display names every input accepts and system mail prints as
- * typed: accents, a domain-like name, CJK with full-width punctuation,
- * Arabic, Persian with its zero-width non-joiner, and emoji built with a
- * presentation selector, a skin tone and zero-width joiners.
+ * typed: accents, a domain-like name, a span of years, CJK with full-width
+ * punctuation, Arabic, Persian with its zero-width non-joiner, and emoji built
+ * with a presentation selector, a skin tone and zero-width joiners.
  */
 export const REAL_NAMES = [
   "João & Conceição Ltda.",
   "O'Brien Labs",
   "acme.dev",
+  "Turma 2025-2026",
   "株式会社テスト",
   "市场部\uff1a华东区",
   "شركة النور",
@@ -143,6 +144,28 @@ const linkifyIt = new LinkifyIt({ fuzzyIP: true });
  * prolonged sound mark (U+30FC).
  */
 const PHONE_NUMBER = /\p{Nd}(?:[^\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{Nd}]{0,3}\p{Nd}){6,}/gu;
+
+const DAY = String.raw`(?:0?[1-9]|[12]\d|3[01])`;
+const MONTH = "(?:0?[1-9]|1[0-2])";
+const YEAR = String.raw`(?:19|20)\d\d`;
+const DATE = new RegExp(
+  `^(?:${DAY}([/.-])${MONTH}\\1${YEAR}|${MONTH}([/.-])${DAY}\\2${YEAR}|${YEAR}([/.-])${MONTH}\\3${DAY})$`,
+);
+const YEARS = new RegExp(`^(${YEAR})[-\u2013/](${YEAR})$`);
+
+/**
+ * Whether a number is exactly one date or one span of up to ten years, which
+ * system mail prints as typed: ASCII digits, one separator throughout, day
+ * and month either way round before the year, or year, month and day. The
+ * hair space system mail sets after a dot (a plain space once folded) is no
+ * part of it.
+ */
+function isDateOrYears(number: string): boolean {
+  const run = number.replace(/(?<=\.)\s/g, "");
+  const [, from, to] = YEARS.exec(run) ?? [];
+  const span = Number(to) - Number(from);
+  return DATE.test(run) || (span >= 1 && span <= 10);
+}
 
 /**
  * Every link two independent auto-linkers find in text (linkify-it, which
@@ -171,7 +194,7 @@ export function autoLinks(text: string): string[] {
       blank(link.start, link.end);
     }
     for (const [number] of outsideLinks.matchAll(PHONE_NUMBER)) {
-      found.add(`tel:${number.replace(/\P{Nd}/gu, "")}`);
+      if (!isDateOrYears(number)) found.add(`tel:${number.replace(/\P{Nd}/gu, "")}`);
     }
   }
   return [...found];

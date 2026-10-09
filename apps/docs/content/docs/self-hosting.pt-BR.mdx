@@ -728,7 +728,9 @@ persa ou em escrita indiana ficam), o texto para em 64 caracteres e um espaço
 finíssimo (hair space) segue cada `.`, `@`, `:` e `\`, então `acme.dev`
 continua legível como acme.dev sem virar link. Uma sequência de sete ou mais
 dígitos mantém só os quatro primeiros, para nenhum app de e-mail oferecer a
-ligação. Nomes de time e de pessoa com um esquema de link, um `@`, uma quebra
+ligação, a menos que seja exatamente uma data (`09/10/2026`, `2026-10-09`) ou
+um intervalo de até dez anos (`2025-2026`), que sai como foi digitado. Nomes
+de time e de pessoa com um esquema de link, um `@`, uma quebra
 de linha ou qualquer outro caractere invisível, ou com mais de 64 caracteres,
 são recusados ao serem definidos. Um time tem no máximo um convite pendente
 por endereço, um reenvio espera dois minutos, e o time, e cada membro somando
