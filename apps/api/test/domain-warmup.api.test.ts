@@ -151,6 +151,29 @@ it("a single send over the warm-up is accepted and waits", async () => {
   expect(row).toEqual({ status: "queued_quota", reason: "warmup" });
 });
 
+it("a send scheduled in the past counts against today's warm-up, single or batch", async () => {
+  const { token } = await youngSender("backdated-warmup", { plan: "pro", planQuota: 100_000 }, 100);
+  const past = (days: number) => new Date(NOW.getTime() - days * 86_400_000).toISOString();
+  const single = await post(token, "/emails", {
+    ...email("backdated-warmup", "r@example.com"),
+    scheduled_at: past(2),
+  });
+  expect(single.status).toBe(200);
+  const batch = await post(
+    token,
+    "/emails/batch",
+    [3, 4].map((days) => ({
+      ...email("backdated-warmup", `r${days}@example.com`),
+      scheduled_at: past(days),
+    })),
+  );
+  expect(batch.status).toBe(200);
+  const { id } = (await single.json()) as { id: string };
+  const { data } = (await batch.json()) as { data: { id: string }[] };
+  const held = { status: "queued_quota", reason: "warmup" };
+  expect(await rowsOf([id, ...data.map((d) => d.id)])).toMatchObject([held, held, held]);
+});
+
 it("answers 429 naming the warm-up, never the plan, once the parked backlog is full", async () => {
   const { teamId, domainId, token } = await youngSender("full-warmup", { plan: "free" }, 100);
   // Free's backlog: three days of its 100 a day.

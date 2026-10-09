@@ -3845,6 +3845,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           startAfter?: Date;
           index: number;
           day: string;
+          at: Date;
           recipientCount: number;
           domainId: string | null;
         }[] = [];
@@ -3856,6 +3857,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             parked: false,
             index,
             day: result.day,
+            at: result.at,
             recipientCount: result.recipientCount,
             domainId: payload.domainId,
             ...(payload.scheduledAt ? { startAfter: payload.scheduledAt } : {}),
@@ -3877,7 +3879,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           if (!first) continue;
           // Items in one group share a delivery day; the first one's instant
           // places the hourly mirror like a single send's would.
-          const at = first.startAfter ?? new Date();
+          const { at } = first;
           const reservation = await reserveQuota(txDb, {
             teamId: auth.teamId,
             count: items.reduce((n, o) => n + o.recipientCount, 0),
@@ -3959,7 +3961,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             count: o.recipientCount,
             quota,
             day: o.day,
-            at: o.startAfter ?? new Date(),
+            at: o.at,
           });
           if (warmup === "send") continue;
           if (warmup === "backlog_full") {

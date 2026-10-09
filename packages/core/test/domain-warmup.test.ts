@@ -471,6 +471,21 @@ describe("the accept path", () => {
       });
       expect(await send(teamId, PRO, unknown)).toMatchObject({ ok: true, parked: true });
     });
+
+    it("charges a send scheduled in the past to today, so no earlier day's limit reopens", async () => {
+      const teamId = await newTeam({ plan: "pro", planQuota: 100_000 });
+      const a = await newDomain(teamId, "backdate-a.com", REGISTERED);
+      const b = await newDomain(teamId, "backdate-b.com", REGISTERED);
+      await send(teamId, PRO, a, { to: recipients(50, "a1") });
+      await send(teamId, PRO, a, { to: recipients(50, "a2") });
+      for (const days of [1, 2, 3]) {
+        const scheduledAt = new Date(NOW.getTime() - days * DAY_MS);
+        expect(
+          await send(teamId, PRO, b, { to: recipients(50, `b${days}`), scheduledAt }),
+        ).toMatchObject({ ok: true, parked: true });
+      }
+      expect(await sentRecipients(teamId)).toBe(100);
+    });
   });
 
   it("replays the incident: 1,074 sends on the registration day, 100 go and 974 wait", async () => {

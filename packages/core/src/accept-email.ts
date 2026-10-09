@@ -238,9 +238,14 @@ export type AcceptEmailResult =
       ok: true;
       id: string;
       parked: boolean;
-      /** Distinct mailboxes charged to the quota, and the UTC day they count against. */
+      /**
+       * Distinct mailboxes charged to the quota, the UTC day they count
+       * against, and the instant they count at: the delivery time, now for
+       * an immediate or backdated send.
+       */
       recipientCount: number;
       day: string;
+      at: Date;
       /** The cap the reservation ran against, for callers that reserve in bulk. */
       quota: TeamQuota;
     }
@@ -341,9 +346,12 @@ export async function acceptEmail(
   // commit atomically (the quota contract). Over a DAILY cap mail is parked
   // as queued_quota — still accepted, drained after the midnight rollover;
   // a scheduled send is charged to its delivery day, so a team cannot stack
-  // many days of the cap onto one future instant. A monthly plan counts
-  // every accept against the current billing period, whenever it delivers.
-  const deliveryAt = payload.scheduledAt ?? new Date();
+  // many days of the cap onto one future instant. A past scheduled_at sends
+  // now and counts now: charged to its own date, every earlier day would be
+  // a fresh day's cap. A monthly plan counts every accept against the
+  // current billing period, whenever it delivers.
+  const now = new Date();
+  const deliveryAt = payload.scheduledAt && payload.scheduledAt > now ? payload.scheduledAt : now;
   const day = utcDay(deliveryAt);
   const runAccept = async (txDb: Db) => {
     const reservation =
@@ -449,5 +457,13 @@ export async function acceptEmail(
       console.error("email.send enqueue failed; reconcile sweep will recover", err);
     }
   }
-  return { ok: true, id: accepted.id, parked: accepted.parked, recipientCount, day, quota };
+  return {
+    ok: true,
+    id: accepted.id,
+    parked: accepted.parked,
+    recipientCount,
+    day,
+    at: deliveryAt,
+    quota,
+  };
 }
