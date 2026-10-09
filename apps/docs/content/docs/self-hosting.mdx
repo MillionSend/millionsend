@@ -159,7 +159,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Same, for GitHub. Callback URL: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Sender for the emails to a person about their own account (password reset, email verification, the welcome, a password-changed receipt, an app granted access), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery and sign-up verification only exist when this is set and SES credentials are configured — leave unset to skip both. Verify its domain in a team under **Domains** and those emails are logged there, with new accounts as its contacts (see [Account mail](#account-mail-contacts-and-product-updates)). |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys, both or neither. When set, sign-in, sign-up, password reset and the onboarding "Send email" button verify a challenge token (invisible or managed widgets both work). Unset, every form runs without a captcha. |
-| `ONBOARDING_EMAIL_FROM` | Shared sender for the onboarding "Send email" button and snippet, as `Name <user@domain>` or a bare address on a domain verified in this SES account. Any team may send from it, but only to members who verified their address (where the instance verifies), and always with this exact display name. Leave unset to hide the button; the snippet then asks for the team's own domain. |
+| `ONBOARDING_EMAIL_FROM` | Sender of the onboarding "Send email" button, as `Name <user@domain>` or a bare address on a domain verified in this SES account. It carries one fixed test email per team, to the team's owner (a verified address, where the instance verifies), and nothing else: a send from it through the API, SMTP, MCP, a broadcast or a dashboard test is refused (`422 reserved_sender` on the API), even for a team that verified its domain. Leave unset to hide the button. |
 | `NOTIFICATIONS_EMAIL_FROM` | Sender for the notices to team owners (quota, bounce/complaint rates, a domain verifying or losing its records, a new API key, a rotated webhook secret, a member joining, a broadcast that went out or is held, billing on the cloud) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. Verify its domain in a team to log these emails there. |
 | `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Optional error tracking through the Sentry SDK; off while `SENTRY_DSN` is unset. See [Error tracking](#error-tracking-optional). |
 
@@ -744,7 +744,7 @@ Email verification is on whenever `AUTH_EMAIL_FROM` is set and SES
 credentials are configured — the same condition as password recovery. A
 password sign-up gets no session until the emailed link is opened; accounts
 from before verify at their next sign-in. Where the instance verifies, the
-onboarding sender only reaches members who did.
+onboarding email only goes to an owner who did.
 
 On an instance upgrading to this release, domains already verified and
 day-old audit rows are marked as told, but a domain that is demoted at the

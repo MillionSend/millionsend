@@ -113,6 +113,12 @@ deliberadas e explícitas:
   endereço precisa ser uma única caixa postal — um nome de exibição contendo
   `@` é rejeitado, e endereços aceitos voltam na forma canônica
   `Nome <usuario@host>`.
+- O remetente de onboarding da instância (`ONBOARDING_EMAIL_FROM`;
+  `hello@mail.millionsend.com` na nuvem) leva só o e-mail de onboarding do
+  próprio MillionSend: como `from` em `POST /emails`, `POST /emails/batch` ou
+  no envio de um broadcast ele é recusado com `422 reserved_sender`, com
+  qualquer caixa de letras e qualquer nome de exibição. Envie de um domínio que
+  você [verificou](/pt-BR/concepts/domains).
 - Qualquer coisa não suportada é rejeitada com `422` em vez de descartada em
   silêncio (ex.: `tls` na atualização de domínio).
 

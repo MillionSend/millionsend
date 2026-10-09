@@ -68,6 +68,7 @@ const serverDeps = () => ({
   keyring,
   isCloud: true,
   allowInsecureAuth: true,
+  onboardingEmailFrom: "MillionSend <hello@ms.example>",
   enqueueEmailSend: async (emailId: string, opts?: { startAfter?: Date }) => {
     enqueued.push({ emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) });
   },
@@ -263,6 +264,34 @@ describe("smtp relay", () => {
         text: "t",
       }),
     ).rejects.toMatchObject({ responseCode: 554 });
+  });
+
+  it("refuses the instance's onboarding sender with 550, even from the team holding its domain", async () => {
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "ms.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const auth = { user: SMTP_USERNAME, pass: token };
+    for (const from of ["MillionSend <hello@ms.example>", "HELLO@ms.example"]) {
+      await expect(
+        transport(auth).sendMail({ from, to: "r@example.com", subject: "s", text: "t" }),
+      ).rejects.toMatchObject({
+        responseCode: 550,
+        response: expect.stringContaining(
+          "hello@ms.example is reserved for MillionSend's own onboarding email. Add and verify a domain to send your own emails: https://docs.millionsend.com/concepts/domains",
+        ),
+      });
+    }
+    const ok = await transport(auth).sendMail({
+      from: "news@ms.example",
+      to: "r@example.com",
+      subject: "s",
+      text: "t",
+    });
+    expect(ok.response).toContain("Queued as");
   });
 
   it("stores display names canonically quoted", async () => {

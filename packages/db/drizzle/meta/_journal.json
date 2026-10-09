@@ -316,6 +316,13 @@
       "when": 1790695221205,
       "tag": "0044_emails_source_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1791564187776,
+      "tag": "0045_onboarding_email_sent",
+      "breakpoints": true
     }
   ]
 }

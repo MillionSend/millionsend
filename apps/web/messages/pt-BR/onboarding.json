@@ -24,7 +24,7 @@
   "step2": {
     "title": "Envie um e-mail",
     "bodyLocked": "Para a sua própria caixa de entrada, de um domínio que você verificar — o snippet libera assim que você tiver uma chave.",
-    "bodyReady": "Sua chave e sua caixa de entrada já vêm preenchidas. Rode no seu terminal.",
+    "bodyReady": "Sua chave e sua caixa de entrada já vêm preenchidas. Rode no seu terminal com um remetente de um domínio que você verificou.",
     "subject": "Funciona.",
     "html": "<p>0000001 e contando.</p>",
     "fromPlaceholder": "voce@seudominio.com.br",
@@ -32,12 +32,13 @@
     "keyCommentReplace": "substitua pela sua chave de API",
     "keyCommentLocked": "sua chave, após a criação",
     "sendCta": "Enviar e-mail",
+    "sendHint": "Ainda sem domínio? Receba um e-mail de teste do MillionSend — um por time, enviado ao dono do time.",
     "sending": "Enviando…",
     "sentTo": "Enviado para {to}. Aparece abaixo assim que chegar.",
+    "alreadySent": "O e-mail de teste deste time já foi enviado. Verifique um domínio para enviar os seus.",
     "sendError": "Não foi possível enviar. Tente de novo.",
     "selfHostBase": "Self-host: aponte os SDKs para esta instância com MILLIONSEND_BASE_URL={url}.",
-    "captchaFailed": "A verificação falhou. Tente de novo.",
-    "sendLimited": "Alguns e-mails de onboarding já saíram deste time. Tente de novo em uma hora."
+    "captchaFailed": "A verificação falhou. Tente de novo."
   },
   "step3": {
     "title": "Veja chegar",

@@ -107,6 +107,12 @@ remaining deltas are deliberate and loud:
 - `to`, `cc` and `bcc` together cannot exceed 50 recipients, and each address
   must be a single mailbox — a display name containing `@` is rejected, and
   accepted addresses read back in canonical `Name <user@host>` form.
+- The instance's onboarding sender (`ONBOARDING_EMAIL_FROM`;
+  `hello@mail.millionsend.com` on the cloud) carries only MillionSend's own
+  onboarding email: as `from` on `POST /emails`, `POST /emails/batch` or a
+  broadcast send it is refused with `422 reserved_sender`, in any letter case
+  and with any display name. Send from a domain you
+  [verified](/concepts/domains) instead.
 - Anything unsupported is rejected with `422` rather than silently dropped
   (e.g. `tls` on domain update).
 

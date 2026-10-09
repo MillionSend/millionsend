@@ -164,7 +164,7 @@ auto-hospedada não tem limites de plano.
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha, confirmação de e-mail), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha e a confirmação no cadastro só existem com isto definido e credenciais SES configuradas — deixe vazio para pular as duas. Verifique o domínio em um time em **Domínios** e esses e-mails passam a ser registrados lá, com as novas contas como seus contatos (veja [E-mails de conta](#e-mails-de-conta-contatos-e-novidades)). |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login, o cadastro, a redefinição de senha e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
-| `ONBOARDING_EMAIL_FROM` | Remetente compartilhado do botão "Enviar e-mail" e do snippet do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Qualquer time pode enviar por ele, só para membros que confirmaram o e-mail (onde a instância confirma e-mails), e sempre com este nome de exibição exato. Deixe vazio para ocultar o botão; o snippet então pede o domínio do próprio time. |
+| `ONBOARDING_EMAIL_FROM` | Remetente do botão "Enviar e-mail" do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Leva um único e-mail de teste fixo por time, para o dono do time (um endereço confirmado, onde a instância confirma e-mails), e nada mais: um envio a partir dele pela API, SMTP, MCP, um broadcast ou um teste do painel é recusado (`422 reserved_sender` na API), mesmo para um time que verificou o domínio. Deixe vazio para ocultar o botão. |
 | `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos donos do time (cota quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para o time, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. Verifique o domínio em um time para registrar esses e-mails lá. |
 | `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Rastreamento de erros opcional pelo SDK do Sentry; desligado enquanto `SENTRY_DSN` não estiver definido. Veja [Rastreamento de erros](#rastreamento-de-erros-opcional). |
 
@@ -752,7 +752,7 @@ A confirmação de e-mail fica ligada sempre que `AUTH_EMAIL_FROM` está
 definido e há credenciais SES — a mesma condição da recuperação de senha. Um
 cadastro por senha não recebe sessão até o link enviado ser aberto; contas
 anteriores confirmam no próximo login. Onde a instância confirma e-mails, o
-remetente do onboarding só alcança membros que confirmaram.
+e-mail do onboarding só vai para um dono que confirmou.
 
 Nada em uma instância auto-hospedada contata millionsend.com por conta
 própria. O assistente de configuração oferece, uma vez e só de forma
