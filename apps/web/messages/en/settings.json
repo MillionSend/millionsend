@@ -318,6 +318,8 @@
     "keepPlan": "Keep {plan}",
     "switchAtPeriodEnd": "Switch at period end",
     "changeHint": "Moving up applies now, with the difference prorated on your next invoice. Moving down applies when the period renews.",
+    "upgradesHeld": "Upgrades are unavailable while this team is suspended or under review.",
+    "upgradesHeldLive": "Upgrades are unavailable while this team is suspended or under review. You can still cancel or move to a smaller plan.",
     "features": {
       "domains": "{n, plural, one {# sending domain} other {# sending domains}}",
       "domainsUnlimited": "Unlimited sending domains",

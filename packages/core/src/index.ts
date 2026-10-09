@@ -554,6 +554,7 @@ export {
   type TeamFlagReason,
   type TeamFlagStatus,
   type TeamStandingRow,
+  upgradesHeld,
 } from "./team-flags.js";
 export {
   INVITE_EMAILS_PER_HOUR,

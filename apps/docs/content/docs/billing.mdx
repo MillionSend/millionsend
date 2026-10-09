@@ -137,6 +137,15 @@ worker reports, so the customer's **overage** switch is a plain row flag,
    cannot update a subscription with more than one item, and a monthly rung
    has two.
 
+A team that is suspended (for any reason) or holds an open `monitor`,
+`guardrail` or `complaints` flag on Trust & safety cannot buy or move up:
+`billing.checkout`, a move up in `billing.changePlan` and switching overage
+on answer `FORBIDDEN` (`upgrades_held`), and the billing page says why.
+Moving down, keeping the current rung, switching overage off and **Manage
+billing** (where cancelling lives) stay open. The configuration `--portal`
+provisions offers no plan switch at all; the account's default configuration
+may, so set `STRIPE_PORTAL_CONFIG`.
+
 The plan columns are written from a subscription fetched from Stripe — by
 the webhook handler and by the two dashboard procedures above — never from a
 redirect, a client call, or an event payload taken at face value.

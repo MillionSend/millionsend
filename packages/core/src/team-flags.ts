@@ -11,6 +11,7 @@ import {
   GUARDRAIL_WINDOW_DAYS,
   MIN_GUARDRAIL_VOLUME,
 } from "./deliverability.js";
+import { isTeamSuspended } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 export type TeamFlagReason = (typeof schema.teamFlagReasonEnum.enumValues)[number];
@@ -281,3 +282,23 @@ export async function syncTeamFlags(
 
 /** The guardrail window the automatic rates are measured over. */
 export const FLAG_WINDOW_DAYS = GUARDRAIL_WINDOW_DAYS;
+
+// The safety cron's abuse signals. A low score alone is not one, and an
+// operator who wants a team held suspends it.
+const UPGRADE_HOLD_REASONS: TeamFlagReason[] = ["monitor", "guardrail", "complaints"];
+
+/**
+ * Whether the team is barred from buying or moving up: suspended for any
+ * reason, or holding an open abuse flag. Cancelling and moving down stay open.
+ */
+export async function upgradesHeld(db: Db, teamId: string): Promise<boolean> {
+  if (await isTeamSuspended(db, teamId)) return true;
+  const f = schema.teamFlags;
+  const [flag] = await db
+    .select({ id: f.id })
+    .from(f)
+    .where(
+      and(eq(f.teamId, teamId), eq(f.status, "open"), inArray(f.reason, UPGRADE_HOLD_REASONS)),
+    );
+  return flag !== undefined;
+}

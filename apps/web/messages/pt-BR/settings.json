@@ -318,6 +318,8 @@
     "keepPlan": "Manter {plan}",
     "switchAtPeriodEnd": "Trocar no fim do período",
     "changeHint": "Subir de plano vale na hora, com a diferença rateada na próxima fatura. Descer vale quando o período renovar.",
+    "upgradesHeld": "Não é possível subir de plano enquanto esta equipe estiver suspensa ou em revisão.",
+    "upgradesHeldLive": "Não é possível subir de plano enquanto esta equipe estiver suspensa ou em revisão. Você ainda pode cancelar ou mudar para um plano menor.",
     "features": {
       "domains": "{n, plural, one {# domínio de envio} other {# domínios de envio}}",
       "domainsUnlimited": "Domínios de envio ilimitados",

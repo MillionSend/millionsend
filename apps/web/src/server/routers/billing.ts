@@ -17,6 +17,7 @@ import {
   type TeamQuota,
   teamQuota,
   teamRung,
+  upgradesHeld,
   utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -24,6 +25,7 @@ import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { UPGRADES_HELD } from "@/lib/trpc-error";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { getStripe, mailPlanMove } from "../billing";
@@ -64,6 +66,13 @@ function assertBillable(team: { plan: Plan }): void {
       code: "FORBIDDEN",
       message: "The system team is never billed; its plan is set by the operator.",
     });
+  }
+}
+
+/** Buying and moving up wait out a suspension or an abuse flag; cancelling and moving down never do. */
+async function assertNotHeld(db: Db, teamId: string): Promise<void> {
+  if (await upgradesHeld(db, teamId)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: UPGRADES_HELD });
   }
 }
 
@@ -117,6 +126,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         usage: await readUsage(ctx.db, ctx.teamId, quota),
         hasCustomer: team.stripeCustomerId !== null,
         hasLiveSubscription: live,
+        upgradesHeld: await upgradesHeld(ctx.db, ctx.teamId),
       };
     }),
 
@@ -131,6 +141,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         if (hasLiveSubscription(team.planStatus)) {
           throw new TRPCError({ code: "PRECONDITION_FAILED" });
         }
+        await assertNotHeld(ctx.db, ctx.teamId);
         const url = await createCheckoutSession(
           { db: ctx.db, stripe: deps.stripe() },
           {
@@ -162,6 +173,9 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         assertBillable(team);
         if (!hasLiveSubscription(team.planStatus)) {
           throw new TRPCError({ code: "PRECONDITION_FAILED" });
+        }
+        if (rungByKey(input.rung).priceCents > teamRung(team.plan, team.planQuota).priceCents) {
+          await assertNotHeld(ctx.db, ctx.teamId);
         }
         const change = await changeRung(
           { db: ctx.db, stripe: deps.stripe() },
@@ -196,6 +210,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         ) {
           throw new TRPCError({ code: "PRECONDITION_FAILED" });
         }
+        if (input.enabled) await assertNotHeld(ctx.db, ctx.teamId);
         await setSubscriptionOverage(
           { db: ctx.db, stripe: deps.stripe() },
           { teamId: ctx.teamId, enabled: input.enabled },
