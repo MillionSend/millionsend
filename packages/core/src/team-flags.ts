@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { TeamFlagDetail } from "@millionsend/db/schema";
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { MONITOR_FLAG_RISK_DEFAULT, monitorSamplesByTeam, riskAt } from "./abuse-monitor.js";
 import { fetchAccountScore } from "./account-score.js";
 import {
@@ -11,6 +11,7 @@ import {
   GUARDRAIL_WINDOW_DAYS,
   MIN_GUARDRAIL_VOLUME,
 } from "./deliverability.js";
+import { fetchTeamStanding } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 export type TeamFlagReason = (typeof schema.teamFlagReasonEnum.enumValues)[number];
@@ -301,3 +302,30 @@ export async function syncTeamFlags(
 
 /** The guardrail window the automatic rates are measured over. */
 export const FLAG_WINDOW_DAYS = GUARDRAIL_WINDOW_DAYS;
+
+// The safety cron's abuse signals; a low score alone is not one.
+const CRON_HOLD_REASONS: TeamFlagReason[] = ["monitor", "guardrail", "complaints"];
+
+/**
+ * Whether the team is barred from buying or moving up: suspended for any
+ * reason, or holding an open flag that is one of the cron's abuse signals or
+ * an operator's call of any kind (opened or reopened by hand). While an
+ * operator's flag is open the cron opens none of its own, one open flag per
+ * team, so that flag is all that holds the team. Cancelling and moving down
+ * stay open.
+ */
+export async function upgradesHeld(db: Db, teamId: string): Promise<boolean> {
+  if ((await fetchTeamStanding(db, teamId))?.suspended) return true;
+  const f = schema.teamFlags;
+  const [flag] = await db
+    .select({ id: f.id })
+    .from(f)
+    .where(
+      and(
+        eq(f.teamId, teamId),
+        eq(f.status, "open"),
+        or(isNotNull(f.openedBy), inArray(f.reason, CRON_HOLD_REASONS)),
+      ),
+    );
+  return flag !== undefined;
+}

@@ -1,4 +1,4 @@
-import { recordAudit } from "@millionsend/core";
+import { recordAudit, upgradesHeld } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -403,6 +403,85 @@ describe("console.audit.list", () => {
     expect(filtered.total).toBe(1);
 
     await expect(member().console.audit.list({})).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+// After console.audit.list, which counts the suspensions before it.
+describe("the flag a suspension opens", () => {
+  const flagsOf = (id: string) =>
+    db
+      .select()
+      .from(schema.teamFlags)
+      .where(eq(schema.teamFlags.teamId, id))
+      .orderBy(schema.teamFlags.openedAt);
+
+  it("is cleared by the reinstatement, so a team that paid up can upgrade again", async () => {
+    const paid = await createTeam(db, "paid-up");
+    await operator().console.teams.suspend({ id: paid, reason: "non_payment", notify: false });
+    const [opened] = await flagsOf(paid);
+    if (!opened) throw new Error("flag missing");
+    expect(opened).toMatchObject({
+      reason: "manual",
+      status: "open",
+      openedBy: OPERATOR,
+      detail: { suspension: true },
+    });
+
+    await operator().console.teams.reinstate({ id: paid });
+    expect(await flagsOf(paid)).toMatchObject([
+      { id: opened.id, status: "cleared", clearedBy: OPERATOR },
+    ]);
+    expect((await auditRows("console.flag_cleared"))[0]).toMatchObject({
+      teamId: paid,
+      actorId: `user:${OPERATOR}`,
+      target: `team_flag:${opened.id}`,
+      data: { reason: "manual" },
+    });
+    expect(await upgradesHeld(db, paid)).toBe(false);
+  });
+
+  it("leaves any other open flag open, a reopened one included", async () => {
+    // An operator's flag from before the suspension: the suspension opens none.
+    const watched = await createTeam(db, "watched");
+    await operator().console.safety.openFlag({ teamId: watched, note: "keep an eye" });
+    await operator().console.teams.suspend({ id: watched, reason: "manual", notify: false });
+    await operator().console.teams.reinstate({ id: watched });
+    expect(await flagsOf(watched)).toMatchObject([{ status: "open", note: "keep an eye" }]);
+    expect(await upgradesHeld(db, watched)).toBe(true);
+
+    // Reopened, the suspension's flag is the operator's own: the next
+    // reinstatement leaves it open.
+    const reopened = await createTeam(db, "reopened");
+    await operator().console.teams.suspend({ id: reopened, reason: "manual", notify: false });
+    await operator().console.teams.reinstate({ id: reopened });
+    const [cleared] = await flagsOf(reopened);
+    if (!cleared) throw new Error("flag missing");
+    await operator().console.safety.reopenFlag({ flagId: cleared.id });
+    await operator().console.teams.suspend({ id: reopened, reason: "manual", notify: false });
+    await operator().console.teams.reinstate({ id: reopened });
+    const open = (await flagsOf(reopened)).filter((f) => f.status === "open");
+    expect(open).toMatchObject([{ reason: "manual", openedBy: OPERATOR }]);
+    expect(open[0]?.detail).toEqual({});
+    expect(await upgradesHeld(db, reopened)).toBe(true);
+  });
+
+  it("reopening records the operator, so a reopened score flag holds upgrades; the cron's does not", async () => {
+    const scored = await createTeam(db, "scored");
+    const [flag] = await db
+      .insert(schema.teamFlags)
+      .values({ teamId: scored, reason: "score", detail: { metric: "score", scoreTenths: 40 } })
+      .returning({ id: schema.teamFlags.id });
+    if (!flag) throw new Error("flag missing");
+    expect(await upgradesHeld(db, scored)).toBe(false);
+
+    await operator().console.safety.clearFlag({ flagId: flag.id });
+    await operator().console.safety.reopenFlag({ flagId: flag.id });
+    expect((await flagsOf(scored)).find((f) => f.status === "open")).toMatchObject({
+      reason: "score",
+      openedBy: OPERATOR,
+      detail: { metric: "score", scoreTenths: 40 },
+    });
+    expect(await upgradesHeld(db, scored)).toBe(true);
   });
 });
 
