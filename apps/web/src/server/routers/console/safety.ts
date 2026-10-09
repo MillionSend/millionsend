@@ -600,12 +600,15 @@ export const consoleSafetyRouter = router({
         .from(f)
         .where(and(eq(f.teamId, flag.teamId), eq(f.status, "open")));
       if (open) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "already_open" });
+      // Reopened, a suspension's flag is the operator's own call, which no
+      // reinstatement clears.
+      const { suspension: _, ...detail } = flag.detail ?? {};
       const [reopened] = await ctx.db
         .insert(f)
         .values({
           teamId: flag.teamId,
           reason: flag.reason,
-          detail: flag.detail,
+          detail: flag.detail && detail,
           note: flag.note,
           openedBy: ctx.operator.id,
         })

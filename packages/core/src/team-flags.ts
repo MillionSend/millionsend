@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { TeamFlagDetail } from "@millionsend/db/schema";
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { MONITOR_FLAG_RISK_DEFAULT, monitorSamplesByTeam, riskAt } from "./abuse-monitor.js";
 import { fetchAccountScore } from "./account-score.js";
 import {
@@ -283,14 +283,15 @@ export async function syncTeamFlags(
 /** The guardrail window the automatic rates are measured over. */
 export const FLAG_WINDOW_DAYS = GUARDRAIL_WINDOW_DAYS;
 
-// The safety cron's abuse signals, and an operator's manual flag: a deliberate
-// call, and while it is open the cron opens none of its own (one open flag per
-// team). A low score alone is not an abuse signal.
-const UPGRADE_HOLD_REASONS: TeamFlagReason[] = ["monitor", "guardrail", "complaints", "manual"];
+// The safety cron's abuse signals; a low score alone is not one.
+const CRON_HOLD_REASONS: TeamFlagReason[] = ["monitor", "guardrail", "complaints"];
 
 /**
  * Whether the team is barred from buying or moving up: suspended for any
- * reason, or holding an open abuse or manual flag. Cancelling and moving down
+ * reason, or holding an open flag that is one of the cron's abuse signals or
+ * an operator's call of any kind (opened or reopened by hand). While an
+ * operator's flag is open the cron opens none of its own, one open flag per
+ * team, so that flag is all that holds the team. Cancelling and moving down
  * stay open.
  */
 export async function upgradesHeld(db: Db, teamId: string): Promise<boolean> {
@@ -300,7 +301,11 @@ export async function upgradesHeld(db: Db, teamId: string): Promise<boolean> {
     .select({ id: f.id })
     .from(f)
     .where(
-      and(eq(f.teamId, teamId), eq(f.status, "open"), inArray(f.reason, UPGRADE_HOLD_REASONS)),
+      and(
+        eq(f.teamId, teamId),
+        eq(f.status, "open"),
+        or(isNotNull(f.openedBy), inArray(f.reason, CRON_HOLD_REASONS)),
+      ),
     );
   return flag !== undefined;
 }

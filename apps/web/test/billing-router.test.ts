@@ -679,11 +679,11 @@ describe("billing router", () => {
 describe("a suspended or flagged team", () => {
   /**
    * Suspends the team as the operator console does, or opens a flag of that
-   * kind: the safety cron's, or an operator's manual one.
+   * kind: one of the safety cron's abuse signals, or else an operator's call.
    */
   async function hold(
     teamId: string,
-    by: "suspension" | "monitor" | "guardrail" | "complaints" | "manual",
+    by: "suspension" | "monitor" | "guardrail" | "complaints" | "manual" | "score" | "report",
   ) {
     if (by === "suspension") {
       await db
@@ -691,15 +691,25 @@ describe("a suspended or flagged team", () => {
         .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
         .where(eq(schema.teams.id, teamId));
     } else {
+      const cron = by === "monitor" || by === "guardrail" || by === "complaints";
       await db
         .insert(schema.teamFlags)
-        .values({ teamId, reason: by, openedBy: by === "manual" ? "op1" : null });
+        .values({ teamId, reason: by, openedBy: cron ? null : "op1" });
     }
   }
   const held = { code: "FORBIDDEN", message: "upgrades_held" };
 
   it("cannot start a checkout; status says so", async () => {
-    for (const by of ["suspension", "monitor", "guardrail", "complaints", "manual"] as const) {
+    // An operator's flag holds whatever its kind: a reopened score flag, a report.
+    for (const by of [
+      "suspension",
+      "monitor",
+      "guardrail",
+      "complaints",
+      "manual",
+      "score",
+      "report",
+    ] as const) {
       const teamId = await createTeam(db, `held-${by}`);
       await hold(teamId, by);
       const owner = callerFor(teamId, "owner");
@@ -722,10 +732,10 @@ describe("a suspended or flagged team", () => {
     }
   });
 
-  it("a low score, a report flag or a cleared flag holds nothing", async () => {
+  it("the cron's own score or report flag, or a cleared flag, holds nothing", async () => {
     const flags = [
       { reason: "score" },
-      { reason: "report", openedBy: "op1" },
+      { reason: "report" },
       { reason: "manual", openedBy: "op1", status: "cleared", clearedAt: new Date() },
       { reason: "monitor", status: "cleared", clearedAt: new Date() },
     ] as const;

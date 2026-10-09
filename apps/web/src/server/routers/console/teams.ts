@@ -517,7 +517,8 @@ export const consoleTeamsRouter = router({
         }));
       }
       // The trust & safety list is the register of suspended teams, so a
-      // suspension without a flag opens a manual one.
+      // suspension without a flag opens a manual one, marked as its own so
+      // the reinstatement clears it.
       await ctx.db
         .insert(schema.teamFlags)
         .values({
@@ -525,6 +526,7 @@ export const consoleTeamsRouter = router({
           reason: "manual",
           note: input.note ?? null,
           openedBy: ctx.operator.id,
+          detail: { suspension: true },
         })
         .onConflictDoNothing();
     }),
@@ -537,6 +539,27 @@ export const consoleTeamsRouter = router({
         .update(t)
         .set({ suspendedAt: null, suspensionReason: null, suspensionNote: null })
         .where(eq(t.id, team.id));
+      // The flag the suspension opened goes with it; any other stays open.
+      const f = schema.teamFlags;
+      const [flag] = await ctx.db
+        .update(f)
+        .set({ status: "cleared", clearedAt: new Date(), clearedBy: ctx.operator.id })
+        .where(
+          and(
+            eq(f.teamId, team.id),
+            eq(f.status, "open"),
+            sql`${f.detail} @> '{"suspension": true}'::jsonb`,
+          ),
+        )
+        .returning({ id: f.id, reason: f.reason });
+      if (flag) {
+        await auditOperator(ctx, {
+          teamId: team.id,
+          action: "console.flag_cleared",
+          target: { type: "team_flag", id: flag.id },
+          metadata: { reason: flag.reason },
+        });
+      }
       await auditOperator(ctx, {
         teamId: team.id,
         action: "team.reinstated",

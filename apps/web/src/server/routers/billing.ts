@@ -69,7 +69,7 @@ function assertBillable(team: { plan: Plan }): void {
   }
 }
 
-/** Buying and moving up wait out a suspension or an abuse or manual flag; cancelling and moving down never do. */
+/** Buying and moving up wait out a suspension, an abuse flag or an operator's flag; cancelling and moving down never do. */
 async function assertNotHeld(db: Db, teamId: string): Promise<void> {
   if (await upgradesHeld(db, teamId)) {
     throw new TRPCError({ code: "FORBIDDEN", message: UPGRADES_HELD });
