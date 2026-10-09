@@ -813,12 +813,15 @@ it("a team crossing the pause line mid-walk drips the rest of the fan-out from t
       .where(eq(schema.usageCounters.teamId, tId));
   };
 
+  const walkStart = Date.now();
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
 
   expect(startAfters).toHaveLength(3);
   const [first, t1, t2] = startAfters.map((d) => d?.getTime());
   expect(first).toBeUndefined();
   if (t1 === undefined || t2 === undefined) throw new Error("no drip after the pause line");
+  // A slot already in the past is no drip: the job and the row are due at once.
+  expect(t1).toBeGreaterThanOrEqual(walkStart);
   expect(t2 - t1).toBe(broadcastSendSpacingMs("paused"));
   const rows = await emailsOf(broadcastId);
   expect(rows.map((r) => r.scheduledAt?.getTime()).sort()).toEqual([t1, t2, undefined]);
