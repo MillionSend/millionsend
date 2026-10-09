@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { setRegionAccountDeps } from "@/server/console/ses-regions";
 import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
+import { setConsoleTeamsDeps } from "@/server/routers/console/teams";
 
 // The console kicks the quota drain after a raise; no pg-boss in tests.
 vi.mock("@/server/queue", () => ({
@@ -708,5 +709,135 @@ describe("console.regions pacing numbers", () => {
     await db.delete(schema.emails).where(eq(schema.emails.domainId, domain.id));
     await db.delete(schema.broadcasts).where(eq(schema.broadcasts.id, broadcast.id));
     await db.delete(schema.domains).where(eq(schema.domains.id, domain.id));
+  });
+});
+
+describe("suspend / reinstate and the team's SES tenant", () => {
+  let tenantTeam: string;
+  const arn = (region: string) => `arn:aws:ses:${region}:123456789012:tenant/${tenantTeam}/tn-1`;
+
+  beforeAll(async () => {
+    tenantTeam = await createTeam(db, "tenant-team");
+    await db.insert(schema.domains).values([
+      { teamId: tenantTeam, name: "acme.dev", region: "us-east-1" },
+      { teamId: tenantTeam, name: "acme.com.br", region: "sa-east-1" },
+    ]);
+  });
+  afterEach(() => setConsoleTeamsDeps(null));
+
+  /** One fake SESv2 client per region; a region named in `fail` throws that error on every call. */
+  function fakeTenants(fail: Record<string, string> = {}) {
+    const calls: { region: string; name: string; input: Record<string, unknown> }[] = [];
+    const retried: string[] = [];
+    setConsoleTeamsDeps({
+      tenantClient: (region) => ({
+        async send(command) {
+          const name = command.constructor.name;
+          calls.push({
+            region,
+            name,
+            input: (command as unknown as { input: Record<string, unknown> }).input,
+          });
+          const error = fail[region];
+          if (error) throw Object.assign(new Error(error), { name: error });
+          return name === "GetTenantCommand" ? { Tenant: { TenantArn: arn(region) } } : {};
+        },
+      }),
+      retryTenantStatus: async (id) => void retried.push(id),
+    });
+    const updates = () =>
+      calls
+        .filter((c) => c.name === "UpdateReputationEntityCustomerManagedStatusCommand")
+        .map((c) => c.input);
+    return { calls, retried, updates };
+  }
+
+  const status = (region: string, SendingStatus: string) => ({
+    ReputationEntityType: "RESOURCE",
+    ReputationEntityReference: arn(region),
+    SendingStatus,
+  });
+
+  it("suspend disables the tenant in every region the team has a domain in; reinstate enables it", async () => {
+    vi.stubEnv("SES_TENANTS", "true");
+    const ses = fakeTenants();
+
+    const suspended = await operator().console.teams.suspend({
+      id: tenantTeam,
+      reason: "phishing",
+    });
+    expect(ses.updates()).toEqual([
+      status("sa-east-1", "DISABLED"),
+      status("us-east-1", "DISABLED"),
+    ]);
+    expect(ses.calls.filter((c) => c.name === "GetTenantCommand").map((c) => c.input)).toEqual([
+      { TenantName: tenantTeam },
+      { TenantName: tenantTeam },
+    ]);
+    expect(suspended.tenant).toEqual({
+      status: "DISABLED",
+      updated: ["sa-east-1", "us-east-1"],
+      failed: [],
+    });
+    expect((await auditRows("team.ses_tenant_updated"))[0]).toMatchObject({
+      teamId: tenantTeam,
+      actorId: `user:${OPERATOR}`,
+      data: { status: "DISABLED", regions: "sa-east-1, us-east-1" },
+    });
+
+    ses.calls.length = 0;
+    const reinstated = await operator().console.teams.reinstate({ id: tenantTeam });
+    expect(ses.updates()).toEqual([status("sa-east-1", "ENABLED"), status("us-east-1", "ENABLED")]);
+    expect(reinstated.tenant?.status).toBe("ENABLED");
+    expect(ses.retried).toEqual([]);
+  });
+
+  it("a failing AWS call still suspends the team, is audited and handed to the worker's retry", async () => {
+    vi.stubEnv("SES_TENANTS", "true");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ses = fakeTenants({ "us-east-1": "AccessDeniedException" });
+
+    const { tenant } = await operator().console.teams.suspend({
+      id: tenantTeam,
+      reason: "phishing",
+    });
+    expect((await team(tenantTeam)).suspendedAt).toBeInstanceOf(Date);
+    expect(ses.updates()).toEqual([status("sa-east-1", "DISABLED")]);
+    expect(tenant).toEqual({
+      status: "DISABLED",
+      updated: ["sa-east-1"],
+      failed: [{ region: "us-east-1", error: "AccessDeniedException" }],
+    });
+    expect(ses.retried).toEqual([tenantTeam]);
+    expect((await auditRows("team.ses_tenant_update_failed"))[0]).toMatchObject({
+      teamId: tenantTeam,
+      actorId: `user:${OPERATOR}`,
+      data: {
+        status: "DISABLED",
+        regions: "sa-east-1",
+        failed: "us-east-1 (AccessDeniedException)",
+        retrying: true,
+      },
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    await operator().console.teams.reinstate({ id: tenantTeam });
+    warn.mockRestore();
+  });
+
+  it("is a no-op without SES tenants", async () => {
+    vi.stubEnv("SES_TENANTS", "false");
+    const ses = fakeTenants();
+    const rows = async () =>
+      (await auditRows("team.ses_tenant_updated")).length +
+      (await auditRows("team.ses_tenant_update_failed")).length;
+    const before = await rows();
+
+    const suspended = await operator().console.teams.suspend({ id: tenantTeam, reason: "manual" });
+    const reinstated = await operator().console.teams.reinstate({ id: tenantTeam });
+    expect(suspended.tenant).toBeNull();
+    expect(reinstated.tenant).toBeNull();
+    expect(ses.calls).toEqual([]);
+    expect(ses.retried).toEqual([]);
+    expect(await rows()).toBe(before);
   });
 });

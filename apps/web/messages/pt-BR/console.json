@@ -445,6 +445,8 @@
       "pausedNotified": "Transmissões pausadas para {team} · proprietário avisado",
       "suspended": "{team} suspensa · {reason}",
       "reinstated": "{team} reativada",
+      "suspendedTenantFailed": "{team} suspensa · o SES não desativou o tenant em {regions}; nova tentativa em segundo plano",
+      "reinstatedTenantFailed": "{team} reativada · o SES não reativou o tenant em {regions}; nova tentativa em segundo plano",
       "limits": "Limites salvos para {team}",
       "plan": "{team} · {from} → {to}",
       "error": "A ação falhou: {message}"

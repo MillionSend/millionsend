@@ -108,5 +108,6 @@ export {
   ensureTenant,
   provisionDomainTenant,
   type SesTenantClient,
+  setTenantSendingStatus,
   type TenantCommand,
 } from "./tenants.js";

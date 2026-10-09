@@ -140,7 +140,7 @@ auto-hospedada não tem limites de plano.
 | `SNS_TOPIC_ARNS` | ARNs de tópicos SNS (separados por vírgula) autorizados a entregar eventos do SES. Sem definir, a ingestão de eventos fica desativada. |
 | `SQS_QUEUE_URL` | Fila SQS que o worker consome por long polling para eventos do SES. O setup sempre a cria; mantenha definida mesmo quando o SNS também faz push em `https://<seu-host>/ses/events` (o app deduplica os dois). |
 | `SES_CONFIGURATION_SET` | Configuration set do SES aplicado a envios sem configuration set por domínio. Sem definir, envia sem (e sem eventos de entrega). |
-| `SES_TENANTS` | Um tenant do SES por equipe, para o SES medir a reputação de bounces/reclamações por cliente e pausar um remetente sem pausar os demais. Padrão = `IS_CLOUD`; exige as ações IAM `ses:*Tenant*`. |
+| `SES_TENANTS` | Um tenant do SES por equipe, para o SES medir a reputação de bounces/reclamações por cliente e pausar um remetente sem pausar os demais; suspender uma equipe desativa o tenant dela. Padrão = `IS_CLOUD`; exige as ações IAM `ses:*Tenant*` e `ses:UpdateReputationEntityCustomerManagedStatus`. |
 
 ### Opcionais
 
@@ -346,12 +346,19 @@ do domínio e o `SES_CONFIGURATION_SET` compartilhado são associados ao tenant 
 criação do domínio, e todo envio a partir dele nomeia o tenant, então o SES
 mantém as métricas de bounce e reclamação — e a própria pausa de envio — por
 cliente, não por conta. Domínios anteriores à flag, ou cuja associação falhou,
-são tratados pelo job `tenants.sync` de hora em hora. A política IAM que o
-assistente e o template do CloudFormation instalam inclui as ações
-`ses:CreateTenant`, `ses:GetTenant`, `ses:DeleteTenant`,
-`ses:CreateTenantResourceAssociation` e `ses:DeleteTenantResourceAssociation`;
-uma implantação existente roda o assistente de novo (ou atualiza a política
-`millionsend-ses`) antes de ligar a flag.
+são tratados pelo job `tenants.sync` de hora em hora. Suspender uma equipe
+pelo console coloca o status de envio do tenant em `DISABLED` em cada região
+onde a equipe tem um domínio, e reativá-la volta para `ENABLED` (nunca
+`REINSTATED`, para que as constatações de reputação do próprio SES continuem
+valendo). Uma falha na chamada à AWS nunca segura a suspensão: o console
+avisa, o log de auditoria registra e o worker tenta de novo com espera
+crescente. A política IAM que o assistente e o template do CloudFormation
+instalam inclui as ações `ses:CreateTenant`, `ses:GetTenant`,
+`ses:DeleteTenant`, `ses:CreateTenantResourceAssociation`,
+`ses:DeleteTenantResourceAssociation` e
+`ses:UpdateReputationEntityCustomerManagedStatus`; uma implantação existente
+roda o assistente de novo (ou atualiza a política `millionsend-ses`) antes de
+ligar a flag.
 
 Para atualizar a política sem recriar nada, publique o JSON que a página de
 configurações do SES mostra como nova versão padrão:

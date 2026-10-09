@@ -82,7 +82,7 @@ import { runSafetyFlags } from "./handlers/safety-flags.js";
 import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
 import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createRegionSendControls } from "./handlers/ses-regions.js";
-import { syncTenants } from "./handlers/tenants.js";
+import { abandonTenantStatus, retryTenantStatus, syncTenants } from "./handlers/tenants.js";
 import { createSesSender } from "./ses-sender.js";
 import { startSqsPoller } from "./sqs-poller.js";
 import { createSystemMailer } from "./system-mail.js";
@@ -513,6 +513,8 @@ await queue.workDeadLetter("abuse.judge", async ({ sampleId }) => {
   console.error(`abuse.judge: dead-lettered sample ${sampleId}`);
 });
 
+await queue.workDeadLetter("tenant.status", ({ teamId }) => abandonTenantStatus(db, teamId));
+
 await queue.work(
   "email.send",
   async (payload) => {
@@ -648,6 +650,12 @@ await queue.work(
   // so a stalled receiver holds one of these lanes for at most a budget
   // before its successor queues behind everyone else's.
   { concurrency: 8, batchSize: 1, groupConcurrency: 1 },
+);
+
+await queue.work(
+  "tenant.status",
+  ({ teamId }) => retryTenantStatus(db, { clientForRegion, enabled: sesTenantsEnabled() }, teamId),
+  { pollingIntervalSeconds: 30 },
 );
 
 // Erasure scans a team's whole history; it runs here so the request that

@@ -431,6 +431,8 @@
       "team_broadcasts_resumed": "Resumed broadcasts",
       "team_suspended": "Suspended team",
       "team_reinstated": "Reinstated team",
+      "team_ses_tenant_updated": "Updated SES tenant status",
+      "team_ses_tenant_update_failed": "SES tenant status update failed",
       "console_flag_opened": "Flagged team",
       "console_flag_cleared": "Cleared flag",
       "console_flag_reopened": "Reopened flag",

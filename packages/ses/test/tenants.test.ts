@@ -5,6 +5,7 @@ import {
   disassociateIdentity,
   ensureTenant,
   type SesTenantClient,
+  setTenantSendingStatus,
 } from "../src/tenants.js";
 
 const ARN = "arn:aws:ses:us-east-1:123456789012:tenant/team-1";
@@ -122,5 +123,34 @@ describe("disassociateIdentity / deleteTenant", () => {
         tenantName: "team-1",
       }),
     ).rejects.toMatchObject({ name: "BadRequestException" });
+  });
+});
+
+describe("setTenantSendingStatus", () => {
+  it("addresses the tenant by the ARN GetTenant returns", async () => {
+    const tenantArn = `${ARN}/tn-a96eac8820300bbb2fa111b73603b`;
+    const { client, calls } = fakeClient({
+      GetTenantCommand: { Tenant: { TenantArn: tenantArn } },
+    });
+    await setTenantSendingStatus(client, { tenantName: "team-1", status: "DISABLED" });
+    expect(calls).toEqual([
+      { name: "GetTenantCommand", input: { TenantName: "team-1" } },
+      {
+        name: "UpdateReputationEntityCustomerManagedStatusCommand",
+        input: {
+          ReputationEntityType: "RESOURCE",
+          ReputationEntityReference: tenantArn,
+          SendingStatus: "DISABLED",
+        },
+      },
+    ]);
+  });
+
+  it("propagates a missing tenant instead of updating nothing", async () => {
+    const { client, calls } = fakeClient({ GetTenantCommand: named("NotFoundException") });
+    await expect(
+      setTenantSendingStatus(client, { tenantName: "team-1", status: "ENABLED" }),
+    ).rejects.toMatchObject({ name: "NotFoundException" });
+    expect(calls).toHaveLength(1);
   });
 });
