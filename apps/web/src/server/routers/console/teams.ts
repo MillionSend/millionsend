@@ -9,6 +9,7 @@ import {
   type Plan,
   raisesQuota,
   recordTenantStatus,
+  resumeMonitorPause,
   SUPPORT_VIEW_REASONS,
   SUPPORT_VIEW_SIGN_IN_MINUTES,
   SUSPENSION_REASONS,
@@ -627,6 +628,9 @@ export const consoleTeamsRouter = router({
             metadata: { team: team.name, flagId: holdFlag.id, reason: "monitor" },
           });
         }
+        // A broadcast pause the monitor applied before the hold goes with it,
+        // as the review page's Resume lifts it; an operator's own pause stays.
+        await resumeMonitorPause(ctx.db, { teamId: team.id, actor: { userId: ctx.operator.id } });
       }
       // Before the drain: SES refuses a disabled tenant's sends.
       const tenant = await syncTenant(ctx, team.id);

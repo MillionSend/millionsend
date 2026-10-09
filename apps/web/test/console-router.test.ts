@@ -967,4 +967,61 @@ describe("review holds", () => {
     await operator().console.teams.reinstate({ id: other });
     expect(await openFlags(other)).toMatchObject([{ reason: "monitor", openedBy: null }]);
   });
+
+  it("releasing a hold lifts the monitor's broadcast pause from before it, as Resume does", async () => {
+    const pausedAt = new Date("2026-10-09T11:40:00Z");
+    const pauseBroadcasts = async (id: string, byMonitor: boolean) => {
+      await db
+        .update(schema.teams)
+        .set({ broadcastsPausedByOperatorAt: pausedAt })
+        .where(eq(schema.teams.id, id));
+      if (byMonitor) {
+        await db.insert(schema.teamMonitor).values({ teamId: id, broadcastsPausedAt: pausedAt });
+      }
+    };
+    const hold = (id: string) =>
+      db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: "review" })
+        .where(eq(schema.teams.id, id));
+    const monitorRow = async (id: string) =>
+      (await db.select().from(schema.teamMonitor).where(eq(schema.teamMonitor.teamId, id)))[0];
+
+    // A verdict past the pause line paused broadcasts; a later one held the team.
+    const heldTeam = await createTeam(db, "paused-then-held");
+    await db.insert(schema.teamMembers).values({ teamId: heldTeam, userId: MEMBER, role: "owner" });
+    await pauseBroadcasts(heldTeam, true);
+    await hold(heldTeam);
+    const owner = () => callerFor(MEMBER, heldTeam, "owner");
+    expect(await owner().team.standing()).toMatchObject({ pendingReview: true });
+
+    await operator().console.teams.reinstate({ id: heldTeam });
+    expect(await owner().team.standing()).toMatchObject({
+      suspended: null,
+      broadcastsPausedByOperatorAt: null,
+      pendingReview: false,
+    });
+    const monitor = await monitorRow(heldTeam);
+    expect(monitor?.broadcastsPausedAt).toBeNull();
+    expect(monitor?.broadcastsResumedAt).not.toBeNull();
+    expect((await auditRows("monitor.broadcasts_resumed"))[0]).toMatchObject({
+      teamId: heldTeam,
+      actorId: `user:${OPERATOR}`,
+    });
+
+    // An operator's own pause is not the monitor's to lift.
+    const operatorPaused = await createTeam(db, "operator-paused-then-held");
+    await pauseBroadcasts(operatorPaused, false);
+    await hold(operatorPaused);
+    await operator().console.teams.reinstate({ id: operatorPaused });
+    expect((await team(operatorPaused)).broadcastsPausedByOperatorAt).toEqual(pausedAt);
+
+    // Any other reinstatement leaves the monitor's pause to Resume.
+    const suspended = await createTeam(db, "paused-then-suspended");
+    await pauseBroadcasts(suspended, true);
+    await operator().console.teams.suspend({ id: suspended, reason: "manual", notify: false });
+    await operator().console.teams.reinstate({ id: suspended });
+    expect((await team(suspended)).broadcastsPausedByOperatorAt).toEqual(pausedAt);
+    expect((await monitorRow(suspended))?.broadcastsPausedAt).toEqual(pausedAt);
+  });
 });
