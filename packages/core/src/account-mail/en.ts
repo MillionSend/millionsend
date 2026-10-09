@@ -259,24 +259,6 @@ export const en = {
       "Sent to the instance operator at most once every six hours while the share stays over 20% or the provider keeps rejecting the API key.",
     ],
   },
-  "content.access_notice": {
-    subject: "An operator read content in {team}",
-    body: [
-      "On {when}, an authorised operator of this instance read the subject and rendered text of {emails} in {team}, for a recorded security reason: {reason}.",
-      "Recipient addresses, attachments, message headers and the raw HTML were withheld, and the access closed after 30 minutes. It is recorded in this team's audit log with the same date, and in the instance's own log since it happened.",
-      "This notice is required of us within seven days of such an access and is sent whether or not anything came of it. Reply to this email if you want to know more.",
-    ],
-    button: "Open audit log",
-    extra: {
-      one: "one message",
-      many: "{n} messages",
-      phishing_or_malware: "suspected phishing or malware",
-      complaint_spike: "a spike in spam complaints",
-      provider_report: "an abuse report from a mailbox provider",
-      legal_request: "a legal request",
-      owner_support_request: "a support request from this team",
-    },
-  },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 /** Sentences several kinds share, filled by the builders. */

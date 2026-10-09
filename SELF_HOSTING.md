@@ -874,11 +874,12 @@ number of messages — never the justification's text and never any content.
 
 **What the team sees, and when.** Seven days later a daily job adds a
 `content.accessed` row to the team's own audit log — dated at the access,
-not at the disclosure — and emails the team's owners in their own language:
-when it happened, the reason, how many messages, and what was withheld. The
-one exception is a team suspended for phishing or held for review, where the
-row and the notice are withheld; the grant records that the disclosure step
-ran either way, so it is not retried nightly.
+not at the disclosure — with the reason, how many messages and which fields
+were read. Nobody is emailed about an access, then or later. A team
+suspended for phishing never gets the row; the grant records that the
+disclosure step ran, so it is not retried nightly. A team held for review
+gets it once the hold ends: after a release the next daily run writes it,
+and if the hold becomes a phishing suspension it is withheld for good.
 
 **Turning it on** in the instance's `.env`, read by the worker and the app
 (a restart applies it):

@@ -259,24 +259,6 @@ export const ptBR = {
       "Enviado ao operador da instância no máximo a cada seis horas enquanto a parcela ficar acima de 20% ou o provedor continuar recusando a chave de API.",
     ],
   },
-  "content.access_notice": {
-    subject: "Um operador leu conteúdo em {team}",
-    body: [
-      "Em {when}, um operador autorizado desta instância leu o assunto e o texto renderizado de {emails} em {team}, por um motivo de segurança registrado: {reason}.",
-      "Endereços de destinatários, anexos, cabeçalhos e o HTML bruto não foram acessados, e o acesso se fechou depois de 30 minutos. Está registrado no log de auditoria desta equipe com a mesma data, e no log da instância desde que aconteceu.",
-      "Este aviso é exigido de nós em até sete dias após um acesso desses e é enviado tenha ou não dado em algo. Responda a este e-mail se quiser saber mais.",
-    ],
-    button: "Abrir log de auditoria",
-    extra: {
-      one: "uma mensagem",
-      many: "{n} mensagens",
-      phishing_or_malware: "suspeita de phishing ou malware",
-      complaint_spike: "um pico de reclamações de spam",
-      provider_report: "uma denúncia de abuso de um provedor de caixa postal",
-      legal_request: "uma solicitação judicial",
-      owner_support_request: "um pedido de suporte desta equipe",
-    },
-  },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 
 export const ptBRPhrases = {

@@ -979,12 +979,14 @@ de mensagens — nunca o texto da justificativa e nunca qualquer conteúdo.
 
 **O que a equipe vê, e quando.** Sete dias depois, uma rotina diária
 acrescenta uma linha `content.accessed` ao log de auditoria da própria
-equipe — datada no acesso, não na divulgação — e envia um e-mail aos donos
-da equipe no idioma de cada um: quando aconteceu, o motivo, quantas
-mensagens e o que não foi acessado. A única exceção é uma equipe suspensa
-por phishing ou retida para revisão, em que a linha e o aviso são retidos; a
-autorização registra que a etapa de divulgação rodou de qualquer forma, para
-não ser repetida toda noite.
+equipe — datada no acesso, não na divulgação — com o motivo, quantas
+mensagens e quais campos foram lidos. Ninguém recebe e-mail sobre um acesso,
+nem na hora nem depois. Uma equipe suspensa por phishing nunca recebe a
+linha; a autorização registra que a etapa de divulgação rodou, para não ser
+repetida toda noite. Uma equipe retida para revisão a recebe quando a
+retenção termina: depois de uma liberação, a próxima rotina diária a
+escreve, e se a retenção virar uma suspensão por phishing a linha nunca é
+divulgada.
 
 **Como ligar**, no `.env` da instância, lido pelo worker e pelo app (um
 restart aplica):
