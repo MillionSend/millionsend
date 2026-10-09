@@ -15,7 +15,7 @@ import type { EmailSendRequest } from "@millionsend/queue";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { reconcileStalledBroadcasts } from "../src/handlers/cron.js";
+import { drainQuotaParked, reconcileStalledBroadcasts } from "../src/handlers/cron.js";
 import {
   applyMergeFields,
   type BroadcastDeps,
@@ -825,6 +825,53 @@ it("a team crossing the pause line mid-walk drips the rest of the fan-out from t
   expect(t2 - t1).toBe(broadcastSendSpacingMs("paused"));
   const rows = await emailsOf(broadcastId);
   expect(rows.map((r) => r.scheduledAt?.getTime()).sort()).toEqual([t1, t2, undefined]);
+});
+
+it("rows a fan-out queued before its team crossed the pause line wait for the drain and send once the rates recover", async () => {
+  // 10/2000 = 0.5% hard bounces: ok for the whole walk, so no row carries a drip.
+  const { broadcastId, teamId: tId } = await seedThrottleTeam("bc-crossed", {
+    sent: 2000,
+    bounced: 10,
+    hardBounced: 10,
+  });
+  expect(await sendBroadcast(db, makeDeps().deps, { broadcastId })).toBe("sent");
+  const ids = (await emailsOf(broadcastId)).map((r) => r.id);
+  expect(ids).toHaveLength(3);
+  const bounces = (n: number) =>
+    db
+      .update(schema.usageCounters)
+      .set({ bounced: n, hardBounced: n })
+      .where(eq(schema.usageCounters.teamId, tId));
+  // 210/2000 = 10.5% in the pause window.
+  await bounces(210);
+
+  const sends: Buffer[] = [];
+  const ses: SesSender = {
+    async sendRaw({ raw }) {
+      sends.push(raw);
+      return { messageId: `crossed-${sends.length}` };
+    },
+  };
+  const sendDeps = { keyring, ses, unsubscribe: { secretKey, baseUrl: BASE_URL } };
+  for (const emailId of ids) expect(await sendEmail(db, sendDeps, { emailId })).toBe("parked");
+  expect(sends).toHaveLength(0);
+
+  const released: string[] = [];
+  const drainDeps = {
+    isCloud: false,
+    enqueueSends: async (batch: readonly { emailId: string }[]) => {
+      released.push(...batch.map((j) => j.emailId));
+    },
+  };
+  await drainQuotaParked(db, drainDeps);
+  expect(released.filter((id) => ids.includes(id))).toEqual([]);
+  expect((await emailsOf(broadcastId)).every((r) => r.latestStatus === "queued_quota")).toBe(true);
+
+  await bounces(10);
+  await drainQuotaParked(db, drainDeps);
+  expect(released.filter((id) => ids.includes(id)).sort()).toEqual([...ids].sort());
+  for (const emailId of ids) expect(await sendEmail(db, sendDeps, { emailId })).toBe("sent");
+  expect(sends).toHaveLength(3);
 });
 
 it("an aborted signal fails the walk at the next page so the job retries; the resumed walk skips fanned-out contacts and keeps its drip tight", async () => {

@@ -424,8 +424,8 @@ export async function sendEmail(
     return "parked";
   }
   // Transactional mail accepted before the team crossed the deliverability
-  // pause line parks the same way. A broadcast row keeps the fan-out's
-  // throttled drip instead.
+  // pause line parks the same way; a broadcast row parks below, once a stop
+  // has been honored.
   if (!email.broadcastId && (await deliverabilityHold(db, email.teamId))) {
     await parkQueued(db, email, "sending paused");
     return "parked";
@@ -473,6 +473,13 @@ export async function sendEmail(
     // parked where no sweep looks again.
     if (email.broadcastId && (await broadcastCanceled(db, email.broadcastId))) {
       return refuse(db, email, "broadcast_canceled");
+    }
+    // Past the pause line a broadcast row waits for the drain, which releases
+    // it once the rates recover. Rows the fan-out queued while the team was
+    // healthy carry no drip and would otherwise go out at full speed.
+    if (await deliverabilityHold(db, email.teamId)) {
+      await parkQueued(db, email, "sending paused");
+      return "parked";
     }
     if (deps.sesQuota?.bulkExhausted?.(region) || deps.sesQuota?.paused?.(region)) {
       await parkQueued(

@@ -1458,7 +1458,7 @@ it("parks a suspended team's mail before SES, and a paused team's broadcast rows
   await hold({ broadcastsPausedByOperatorAt: null });
 });
 
-it("parks a paused team's queued transactional row before SES; its broadcast rows drip on and the system team is never held", async () => {
+it("parks a paused team's queued rows before SES, broadcast ones too, drip or not; the system team is never held", async () => {
   const { ses, sends } = fakeSes("pause-mid");
   const paused = await createTeam(db, "paused-team");
   const [domain] = await db
@@ -1487,15 +1487,26 @@ it("parks a paused team's queued transactional row before SES; its broadcast row
     .insert(schema.broadcasts)
     .values({ teamId: paused, from: "P <p@paused.dev>", subject: "s", html: "<p>x</p>" })
     .returning({ id: schema.broadcasts.id });
-  const bulk = await insertEmail({ ...own, broadcastId: bc?.id });
-  expect(await sendEmail(db, { keyring, ses }, { emailId: bulk })).toBe("sent");
+  for (const scheduledAt of [null, new Date(Date.now() - 1000)]) {
+    const bulk = await insertEmail({ ...own, broadcastId: bc?.id, scheduledAt });
+    expect(await sendEmail(db, { keyring, ses }, { emailId: bulk })).toBe("parked");
+    const [parked] = await db.select().from(schema.emails).where(eq(schema.emails.id, bulk));
+    expect(parked?.latestStatus).toBe("queued_quota");
+  }
+  // A stopped broadcast's row still ends canceled; parked, no sweep would reach it.
+  const [stopped] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId: paused, from: "P <p@paused.dev>", subject: "s", status: "canceled" })
+    .returning({ id: schema.broadcasts.id });
+  const late = await insertEmail({ ...own, broadcastId: stopped?.id });
+  expect(await sendEmail(db, { keyring, ses }, { emailId: late })).toBe("canceled");
+  expect(sends).toHaveLength(0);
 
   await db.update(schema.teams).set({ plan: "system" }).where(eq(schema.teams.id, paused));
   const system = fakeSes("pause-mid-system");
   expect(
     await sendEmail(db, { keyring, ses: system.ses }, { emailId: await insertEmail(own) }),
   ).toBe("sent");
-  expect(sends).toHaveLength(1);
   expect(system.sends).toHaveLength(1);
 });
 

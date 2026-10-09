@@ -274,7 +274,8 @@ export async function sendBroadcast(
   // avoid the burst. Health is read at every page edge, so a team that crosses
   // the line mid-walk drips the rest from that page on. The drip never loosens
   // within a walk, since the slots it handed out are still ahead, and a
-  // tighter one starts after the last of them instead of on top.
+  // tighter one starts after the last of them instead of on top. While the
+  // team stays paused, the send handler parks each row as it comes due.
   let spacingMs = 0;
   let nextSendMs = 0;
   let emitted = 0;
