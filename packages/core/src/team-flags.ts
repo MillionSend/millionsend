@@ -11,7 +11,7 @@ import {
   GUARDRAIL_WINDOW_DAYS,
   MIN_GUARDRAIL_VOLUME,
 } from "./deliverability.js";
-import { isTeamSuspended } from "./team-standing.js";
+import { fetchTeamStanding } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 export type TeamFlagReason = (typeof schema.teamFlagReasonEnum.enumValues)[number];
@@ -292,7 +292,7 @@ const UPGRADE_HOLD_REASONS: TeamFlagReason[] = ["monitor", "guardrail", "complai
  * reason, or holding an open abuse flag. Cancelling and moving down stay open.
  */
 export async function upgradesHeld(db: Db, teamId: string): Promise<boolean> {
-  if (await isTeamSuspended(db, teamId)) return true;
+  if ((await fetchTeamStanding(db, teamId))?.suspended) return true;
   const f = schema.teamFlags;
   const [flag] = await db
     .select({ id: f.id })
