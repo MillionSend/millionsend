@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb, REFUSED_NAMES } from "@millionsend/test-utils";
+import { createTeam, createTestDb, REAL_NAMES, REFUSED_NAMES } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Auth, createAuth } from "@/server/auth";
@@ -99,9 +99,9 @@ describe("display names", () => {
     expect(await db.select({ name: schema.user.name }).from(schema.user)).toEqual([
       { name: "acme.dev" },
     ]);
-    expect((await post(auth, "/update-user", { name: "Ada at Acme" }, { cookie })).status).toBe(
-      200,
-    );
+    for (const name of REAL_NAMES) {
+      expect((await post(auth, "/update-user", { name }, { cookie })).status, name).toBe(200);
+    }
   });
 });
 

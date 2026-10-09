@@ -110,6 +110,25 @@ export const REFUSED_NAMES = [
   "x".repeat(65),
 ] as const;
 
+/**
+ * Real team and display names every input accepts and system mail prints as
+ * typed: accents, a domain-like name, CJK with full-width punctuation,
+ * Arabic, Persian with its zero-width non-joiner, and emoji built with a
+ * presentation selector, a skin tone and zero-width joiners.
+ */
+export const REAL_NAMES = [
+  "João & Conceição Ltda.",
+  "O'Brien Labs",
+  "acme.dev",
+  "株式会社テスト",
+  "市场部\uff1a华东区",
+  "شركة النور",
+  "محمد\u200cرضا",
+  "Ana \u2764\ufe0f",
+  "\u{1f469}\u{1f3fd}\u200d\u{1f4bb} Dev Team",
+  "\u{1f3f3}\ufe0f\u200d\u{1f308} Pride",
+] as const;
+
 /** Mail text as a reader sees it: the hair spaces that keep customer text from linking left out. */
 export function readable(text: string | undefined): string {
   return (text ?? "").replaceAll("\u200a", "");

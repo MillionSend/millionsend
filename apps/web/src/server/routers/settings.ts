@@ -546,12 +546,14 @@ export function createSettingsRouter(
           try {
             const row = await ctx.db.transaction(async (tx) => {
               // The team's and then the inviter's row lock queue the invites
-              // each cap counts, so two at once cannot both pass one.
+              // each cap counts, so two at once cannot both pass one. No key
+              // update: the team's sends only check the row as a foreign key,
+              // and an invite must neither wait for them nor hold them up.
               await tx
                 .select({ id: schema.teams.id })
                 .from(schema.teams)
                 .where(eq(schema.teams.id, ctx.teamId))
-                .for("update");
+                .for("no key update");
               await tx
                 .select({ id: schema.user.id })
                 .from(schema.user)

@@ -705,12 +705,13 @@ own account and the security receipts are always sent.
 What a customer typed (a team, person, domain, key or broadcast name, a
 webhook URL, an address) never appears in a subject. In the body it prints as
 text no mail client turns into a link: line breaks and invisible or
-direction-changing characters are dropped, it stops at 64 characters, and a
+direction-changing characters are dropped (the joiners and selectors inside
+an emoji or a Persian or Indic word stay), it stops at 64 characters, and a
 hair space follows each `.`, `@`, `:` and `\`, so `acme.dev` still reads as
 acme.dev without becoming one. A run of seven or more digits keeps its first
 four, so no mail app offers to call it. Team and display names with a link
-scheme, an `@`, a line break or an invisible character, or longer than 64
-characters, are refused when set. A team may hold one pending invitation per
+scheme, an `@`, a line break or any other invisible character, or longer than
+64 characters, are refused when set. A team may hold one pending invitation per
 address, a resend waits two minutes, and the team, and each member across all
 their teams, creates at most `INVITES_PER_TEAM_PER_DAY` invitations a day
 (default 50, revoked ones and those of deleted teams included).

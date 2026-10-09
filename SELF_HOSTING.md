@@ -387,9 +387,10 @@ addresses) never appears in a subject, and the body prints it as text no mail cl
 into a link (a hair space follows each `.`, `@`, `:` and `\`) or a number to call (a run of
 seven or more digits keeps its first four), cut at 64 characters.
 Team and display names with a link scheme, an `@`, a line break or an invisible character
-are refused when set. A team, and one member across all their teams, creates at most
-`INVITES_PER_TEAM_PER_DAY` invitations a day (default 50, revoked ones and those of deleted
-teams included), one pending per address.
+are refused when set; the joiners and selectors inside an emoji or a Persian or Indic word
+are writing, not hidden text, and stay in names and in mail. A team, and one member across
+all their teams, creates at most `INVITES_PER_TEAM_PER_DAY` invitations a day (default 50,
+revoked ones and those of deleted teams included), one pending per address.
 
 That team is the instance's own, and an operator can mark it as such: on the `system` plan
 it is never capped or billed and its badge reads System. On a self-hosted instance plans

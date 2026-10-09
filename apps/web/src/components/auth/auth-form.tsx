@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { captchaHeaders, useTurnstile } from "@/components/turnstile";
 import { authClient } from "@/lib/auth-client";
+import { typedEmail } from "@/lib/email-input";
 import { safeNextPath } from "@/lib/nav";
 import { passwordStrength } from "@/lib/password-strength";
 import styles from "./auth.module.css";
@@ -309,7 +310,7 @@ export function AuthForm({
               placeholder={t("emailPlaceholder")}
               required
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => setEmail(typedEmail(e.target.value))}
             />
           </div>
           {passwordShown ? (

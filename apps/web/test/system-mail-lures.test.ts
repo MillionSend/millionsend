@@ -1,7 +1,9 @@
 import { accountMailPhrase, MAIL_LOCALES, type SystemMailMessage } from "@millionsend/core";
-import { LURE_NAMES, mailLinks, readable } from "@millionsend/test-utils";
+import { unescapeHtml } from "@millionsend/core/html";
+import { LURE_NAMES, mailLinks, REAL_NAMES, readable } from "@millionsend/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DOCS_URL } from "@/lib/docs-links";
+import { typedEmail } from "@/lib/email-input";
 import {
   buildAccountEmail,
   buildInvitationEmail,
@@ -96,5 +98,36 @@ describe("system mail around customer text shaped like a lure", () => {
       expect(readable(part)).toContain("(new@example.com)");
     }
     expect(foreignLinks(mail)).toEqual([]);
+    // The invitee's address, copied from the mail into the sign-up form, is the address again.
+    const printed = mail.text.match(/\(([^()]*@[^()]*)\)/)?.[1] ?? "";
+    expect(printed).not.toBe("new@example.com");
+    expect(typedEmail(printed)).toBe("new@example.com");
+  });
+
+  it("prints real names in any script as typed, in both parts and both languages", () => {
+    for (const name of REAL_NAMES) {
+      for (const locale of MAIL_LOCALES) {
+        const mails = [
+          buildInvitationEmail({
+            to: "new@example.com",
+            inviterName: name,
+            teamName: name,
+            role: "member",
+            url: LINK,
+            expiresInDays: 3,
+            locale,
+          }),
+          buildVerificationEmail({ to: "a@example.com", name, url: LINK, locale }),
+          buildResetEmail({ to: "a@example.com", name, url: LINK, locale }),
+        ];
+        for (const mail of mails) {
+          const where = `${locale} ${mail.kind} ${name}`;
+          expect(mail.subject, where).not.toContain(name);
+          expect(readable(mail.text), where).toContain(name);
+          expect(readable(unescapeHtml(mail.html)), where).toContain(name);
+          expect(foreignLinks(mail), where).toEqual([]);
+        }
+      }
+    }
   });
 });

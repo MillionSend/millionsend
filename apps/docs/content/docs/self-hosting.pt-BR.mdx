@@ -722,17 +722,18 @@ deixar rastro, como antes.
 O que um cliente digitou (nome de time, de pessoa, de domínio, de chave ou de
 broadcast, a URL de um webhook, um endereço) nunca aparece no assunto. No
 corpo, sai como texto que nenhum cliente de e-mail transforma em link: quebras
-de linha e caracteres invisíveis ou que mudam a direção do texto são
-removidos, o texto para em 64 caracteres e um espaço finíssimo (hair space)
-segue cada `.`, `@`, `:` e `\`, então `acme.dev` continua legível como
-acme.dev sem virar link. Uma sequência de sete ou mais dígitos mantém só os
-quatro primeiros, para nenhum app de e-mail oferecer a ligação. Nomes de time
-e de pessoa com um esquema de link, um `@`, uma quebra de linha ou um
-caractere invisível, ou com mais de 64 caracteres, são recusados ao serem
-definidos. Um time tem no máximo um convite pendente por endereço, um reenvio
-espera dois minutos, e o time, e cada membro somando todos os seus times, cria
-no máximo `INVITES_PER_TEAM_PER_DAY` convites por dia (padrão 50, contando os
-revogados e os de times excluídos).
+de linha e caracteres invisíveis ou que mudam a direção do texto são removidos
+(os caracteres de junção e de variação dentro de um emoji ou de uma palavra em
+persa ou em escrita indiana ficam), o texto para em 64 caracteres e um espaço
+finíssimo (hair space) segue cada `.`, `@`, `:` e `\`, então `acme.dev`
+continua legível como acme.dev sem virar link. Uma sequência de sete ou mais
+dígitos mantém só os quatro primeiros, para nenhum app de e-mail oferecer a
+ligação. Nomes de time e de pessoa com um esquema de link, um `@`, uma quebra
+de linha ou qualquer outro caractere invisível, ou com mais de 64 caracteres,
+são recusados ao serem definidos. Um time tem no máximo um convite pendente
+por endereço, um reenvio espera dois minutos, e o time, e cada membro somando
+todos os seus times, cria no máximo `INVITES_PER_TEAM_PER_DAY` convites por
+dia (padrão 50, contando os revogados e os de times excluídos).
 
 Esse time é o da própria instância, e o operador pode marcá-lo como tal: no
 plano `system` ele nunca tem limite nem cobrança, o selo diz System e a aba

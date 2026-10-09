@@ -1,4 +1,4 @@
-import { autoLinks, LURE_NAMES, mailLinks, readable } from "@millionsend/test-utils";
+import { autoLinks, LURE_NAMES, mailLinks, REAL_NAMES, readable } from "@millionsend/test-utils";
 import { describe, expect, it } from "vitest";
 import { en } from "../src/account-mail/en.js";
 import { ptBR } from "../src/account-mail/pt-BR.js";
@@ -10,6 +10,7 @@ import {
   MAIL_LOCALES,
 } from "../src/account-mail.js";
 import { CUSTOMER_SLOTS, CUSTOMER_TEXT_MAX, inertText, isPlainName } from "../src/customer-text.js";
+import { unescapeHtml } from "../src/html.js";
 
 const HIDDEN = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]/u;
 const slots = (template: string) => [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1] ?? "");
@@ -35,8 +36,17 @@ describe("inertText", () => {
     expect(readable(inertText("acme.dev"))).toBe("acme.dev");
     expect(autoLinks(inertText("acme.dev"))).toEqual([]);
     expect(inertText("Acme\n\nInc.")).toBe("Acme Inc.\u200a");
-    expect(readable(inertText("ａｃｍｅ．dev"))).toBe("ａｃｍｅ.dev");
+    expect(readable(inertText("ａｃｍｅ．dev"))).toBe("ａｃｍｅ．dev");
     expect(inertText("Café Ünïcode™")).toBe("Café Ünïcode™");
+  });
+
+  it("prints real names in any script as typed, emoji sequences and joiners included", () => {
+    for (const name of REAL_NAMES) {
+      expect(readable(inertText(name)), name).toBe(name);
+      expect(autoLinks(inertText(name)), name).toEqual([]);
+    }
+    // A joiner or a presentation selector anywhere else is no part of writing.
+    expect(inertText("pay\u200dpal 1\ufe0f \u200c\u4e2d")).toBe("paypal 1 \u4e2d");
   });
 
   it("prints no phone number a mail app would dial, and keeps shorter numbers", () => {
@@ -52,6 +62,12 @@ describe("inertText", () => {
     expect(inertText("x".repeat(CUSTOMER_TEXT_MAX))).toBe("x".repeat(CUSTOMER_TEXT_MAX));
     // One letter under hundreds of combining marks is a single character.
     expect(inertText(`Z${"\u0336".repeat(500)}algo`)).toBe(`Z${"\u0336".repeat(4)}algo`);
+    // So is a chain of emoji joiners or of Indic viramas, which the code point cap cuts.
+    for (const chain of [`${"\u{1f469}\u200d".repeat(300)}x`, `${"\u0915\u094d".repeat(300)}x`]) {
+      const inert = inertText(chain);
+      expect(Array.from(inert).length).toBeLessThanOrEqual(4 * CUSTOMER_TEXT_MAX);
+      expect(inert).toMatch(/[^\u200d]…$/u);
+    }
   });
 });
 
@@ -59,10 +75,10 @@ describe("isPlainName", () => {
   it("accepts ordinary names, a domain-like one included", () => {
     for (const name of [
       "Acme",
-      "acme.dev",
       "Acme Data: Sales",
       "Café Ünïcode™",
       "O'Brien & Sons",
+      ...REAL_NAMES,
     ]) {
       expect(isPlainName(name), name).toBe(true);
     }
@@ -82,6 +98,8 @@ describe("isPlainName", () => {
       "Acme\nVisit us",
       "Acme\tInc",
       "acme-sup\u200bport",
+      "pay\u200dpal",
+      "Acme\ufe0f",
       "\u202emoc.troppus\u202c",
       "Acme\u2066Inc",
       "x".repeat(CUSTOMER_TEXT_MAX + 1),
@@ -151,6 +169,23 @@ describe("system mail catalogs and customer text", () => {
               [],
             );
           }
+        }
+      }
+    }
+  });
+
+  it("prints a real name in every kind and language as typed, in both parts", () => {
+    for (const name of REAL_NAMES) {
+      const values = Object.fromEntries([...CUSTOMER_SLOTS].map((slot) => [slot, name]));
+      for (const locale of MAIL_LOCALES) {
+        for (const kind of ACCOUNT_MAIL_KINDS) {
+          const entry: AccountMailEntry = (locale === "en" ? en : ptBR)[kind];
+          const printed = [...entry.body, ...(entry.muted ?? [])].flatMap(slots);
+          if (!printed.some((slot) => CUSTOMER_SLOTS.has(slot))) continue;
+          const mail = buildAccountMail({ kind, locale, url: "https://app.example/x", values });
+          const where = `${locale} ${kind} ${name}`;
+          expect(readable(mail.text), where).toContain(name);
+          expect(readable(unescapeHtml(mail.html)), where).toContain(name);
         }
       }
     }

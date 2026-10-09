@@ -23,8 +23,21 @@ export const CUSTOMER_TEXT_MAX = 64;
 const BREAK = "\u200a";
 const SEPARATORS = new Set([".", ":", "@", "\\"]);
 
-/** Zero-width, bidi and the other format and default-ignorable characters. */
-const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
+/**
+ * Zero-width, bidi and the other format and default-ignorable characters,
+ * except the joiners and presentation selectors that writing uses.
+ */
+const INVISIBLE = /(?!\u200c|\u200d|\ufe0e|\ufe0f)[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
+/**
+ * Those stay only where writing puts them: a presentation selector right
+ * after an emoji (the U+FE0F of a red heart), a joiner inside an emoji
+ * sequence (the U+200D between a person and a laptop) or between letters
+ * of a script that shapes with it (Persian ZWNJ, Indic ZWJ). Anywhere else
+ * they go.
+ */
+const STRAY_SELECTOR = /(?<!\p{Extended_Pictographic})(?:\ufe0e|\ufe0f)/gu;
+const STRAY_JOINER =
+  /(?<![\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Lo}\p{M}])(?:\u200c|\u200d)|(?:\u200c|\u200d)(?![\p{Extended_Pictographic}\p{Lo}])/gu;
 /** Controls (newlines, tabs) and line or paragraph separators. */
 const LINE_BREAKING = /[\p{Cc}\p{Zl}\p{Zp}]/gu;
 /**
@@ -41,27 +54,42 @@ const MARK_FLOOD = /(\p{M}{4})\p{M}+/gu;
  * print as "•".
  */
 const DIGIT_RUN = /\p{N}(?:[^\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{N}]*\p{N})*/gu;
+/**
+ * A joined chain (emoji linked by zero-width joiners, Indic consonants linked
+ * by viramas) segments as one grapheme however long it runs, so the cut also
+ * stops at this many code points; 64 characters of real writing stay well
+ * under it.
+ */
+const CODE_POINT_MAX = CUSTOMER_TEXT_MAX * 4;
+
+function dropInvisible(value: string): string {
+  return value.replace(INVISIBLE, "").replace(STRAY_SELECTOR, "").replace(STRAY_JOINER, "");
+}
 
 /** One line of visible text: line breaks and controls become spaces, invisible characters go. */
 export function stripInvisible(value: string): string {
-  return value.replace(LINE_BREAKING, " ").replace(INVISIBLE, "").replace(/\s+/g, " ").trim();
+  return dropInvisible(value.replace(LINE_BREAKING, " ")).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * ".", ":", "@" or "\", or a character whose compatibility form is one ("．"
+ * "＠" "﹕"), or the ideographic full stop, which IDNA reads as a dot.
+ */
+function isSeparator(c: string): boolean {
+  return SEPARATORS.has(c.normalize("NFKC").replace("\u3002", "."));
 }
 
 /**
  * Customer text for a system email's body, the same string in the HTML and
  * the plain-text part (the card escapes it for HTML): one line, at most
  * CUSTOMER_TEXT_MAX characters, nothing a mail client turns into a link or
- * offers to call. A character whose compatibility form is a separator ("．"
- * "＠" "﹕") and the ideographic full stop, which IDNA reads as a dot, count
- * as that separator, so "ｅｖｉｌ．ｃｏｍ" and "evil。com" break like evil.com.
+ * offers to call. Look-alike separators break like the ASCII ones and keep
+ * their form, so "ｅｖｉｌ．ｃｏｍ" and "evil。com" link no more than evil.com
+ * does, and "市场部：华东区" reads as typed.
  */
 export function inertText(value: string): string {
   const text = stripInvisible(value)
     .replace(MARK_FLOOD, "$1")
-    .replace(/\P{ASCII}/gu, (c) => {
-      const folded = c.normalize("NFKC").replace("\u3002", ".");
-      return SEPARATORS.has(folded) ? folded : c;
-    })
     .replace(DIGIT_RUN, (run) => {
       if ((run.match(/\p{N}/gu)?.length ?? 0) < 7) return run;
       let kept = 0;
@@ -72,14 +100,22 @@ export function inertText(value: string): string {
     text.length > CUSTOMER_TEXT_MAX
       ? Array.from(new Intl.Segmenter().segment(text), (s) => s.segment)
       : [];
-  const capped =
+  const cut =
     parts.length > CUSTOMER_TEXT_MAX
       ? `${parts
           .slice(0, CUSTOMER_TEXT_MAX - 1)
           .join("")
           .trimEnd()}…`
       : text;
-  return capped.replace(/[.:@\\]/g, `$&${BREAK}`);
+  const points = Array.from(cut);
+  const capped =
+    points.length > CODE_POINT_MAX
+      ? `${points
+          .slice(0, CODE_POINT_MAX - 1)
+          .join("")
+          .replace(STRAY_JOINER, "")}…`
+      : cut;
+  return capped.replace(/[^\p{L}\p{N}\s]/gu, (c) => (isSeparator(c) ? `${c}${BREAK}` : c));
 }
 
 /**
@@ -119,7 +155,7 @@ export function fillMailTemplate(template: string, values: Record<string, string
  */
 const URL_SCHEME =
   /[a-z][a-z\d+.-]*:\/\/|\b(?:mailto|tel|sms|callto|javascript|data|file|ftp|https?):(?!\s)/i;
-const NOT_PLAIN = /[@\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/u;
+const NOT_PLAIN = /[@\p{Cc}\p{Zl}\p{Zp}]/u;
 
 /**
  * Whether a team or display name may be stored: one line of visible text, at
@@ -130,5 +166,10 @@ const NOT_PLAIN = /[@\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]/u
  */
 export function isPlainName(value: string): boolean {
   const folded = value.normalize("NFKC");
-  return value.length <= CUSTOMER_TEXT_MAX && !NOT_PLAIN.test(folded) && !URL_SCHEME.test(folded);
+  return (
+    value.length <= CUSTOMER_TEXT_MAX &&
+    !NOT_PLAIN.test(folded) &&
+    dropInvisible(folded) === folded &&
+    !URL_SCHEME.test(folded)
+  );
 }

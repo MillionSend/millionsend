@@ -567,7 +567,7 @@ describe("settings.invitations limits", () => {
       caller.settings.invitations.create({ email: "A@example.com" }),
     ).rejects.toMatchObject({
       code: "CONFLICT",
-      message: "This address already has a pending invitation. Resend it from the list instead.",
+      message: "This address already has a pending invitation. Resend or revoke it from the list.",
     });
     await expect(caller.settings.invitations.resend({ id: created.id })).rejects.toMatchObject({
       code: "TOO_MANY_REQUESTS",
@@ -579,7 +579,7 @@ describe("settings.invitations limits", () => {
       caller.settings.invitations.create({ email: "a@example.com" }),
     ).rejects.toMatchObject({
       code: "CONFLICT",
-      message: "Este endereço já tem um convite pendente. Reenvie o convite pela lista.",
+      message: "Este endereço já tem um convite pendente. Reenvie ou revogue o convite pela lista.",
     });
     await expect(caller.settings.invitations.resend({ id: created.id })).rejects.toMatchObject({
       code: "TOO_MANY_REQUESTS",

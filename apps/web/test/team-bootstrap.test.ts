@@ -1,7 +1,7 @@
 import { PLAN_TEAM_LIMIT } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTestDb, REFUSED_NAMES } from "@millionsend/test-utils";
+import { createTestDb, REAL_NAMES, REFUSED_NAMES } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getActiveMembership } from "@/server/membership";
@@ -52,7 +52,7 @@ describe("team.createTeam", () => {
     expect(members[0]?.role).toBe("owner");
   });
 
-  it("refuses a name that could read as a link or hide characters; a domain-like one is fine", async () => {
+  it("refuses a name that could read as a link or hide characters; real names in any script are fine", async () => {
     await insertUser("u1", "u1@example.com");
     for (const name of REFUSED_NAMES) {
       await expect(callerFor("u1").team.createTeam({ name }), name).rejects.toMatchObject({
@@ -60,9 +60,11 @@ describe("team.createTeam", () => {
       });
     }
     expect(await db.select().from(schema.teams)).toEqual([]);
-    const { teamId } = await callerFor("u1").team.createTeam({ name: "acme.dev" });
-    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
-    expect(team?.name).toBe("acme.dev");
+    for (const name of REAL_NAMES) {
+      const { teamId } = await callerFor("u1").team.createTeam({ name });
+      const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+      expect(team?.name, name).toBe(name);
+    }
   });
 
   it("suffixes the slug when the name collides", async () => {
