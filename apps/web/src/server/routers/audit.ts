@@ -7,14 +7,39 @@ import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../k
 import { router, teamProcedure } from "../trpc";
 
 /**
- * Trust & safety flags are the operator's record: the team's own trail never
- * lists them, whatever team_id their rows were written with.
+ * Trust & safety flags and the content monitor's actions are the operator's
+ * record: the team's own trail never lists them, whatever team_id their rows
+ * were written with. A monitor pause reads to the team as "pending review"
+ * on its banner, never as a verdict.
  */
 const OPERATOR_ONLY_ACTIONS = [
   "console.flag_opened",
   "console.flag_cleared",
   "console.flag_reopened",
+  "monitor.broadcasts_paused",
+  "monitor.broadcasts_resumed",
+  "monitor.override_set",
+  "monitor.override_cleared",
 ];
+
+/**
+ * An operator's why, kept from the team where it was never written for it:
+ * the note on a silent suspension says what was seen, and the team must not
+ * learn from it what got it caught; a broadcast pause's reason and note
+ * reach the owner only in the mail that carried them.
+ */
+function teamVisibleData(
+  action: string,
+  data: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (action === "team.suspended" && SILENT_SUSPENSIONS.includes(String(data?.reason))) {
+    return { ...data, note: null };
+  }
+  if (action === "team.broadcasts_paused" && data?.notified !== true) {
+    return { ...data, reason: null, note: null };
+  }
+  return data;
+}
 
 /**
  * Read-only, and never a member feed: the trail is a forensic record. A
@@ -85,13 +110,7 @@ export const auditRouter = router({
           const byOperator = actor.kind === "user" && actor.id === outsideOperatorId;
           return {
             ...row,
-            // The operator's note on a silent suspension says what was seen,
-            // and the team must not learn from it what got it caught.
-            data:
-              row.action === "team.suspended" &&
-              SILENT_SUSPENSIONS.includes(String(row.data?.reason))
-                ? { ...row.data, note: null }
-                : row.data,
+            data: teamVisibleData(row.action, row.data),
             actor: byOperator
               ? { kind: "operator" as const }
               : { ...actor, ...(user ? { name: user.name, email: user.email } : {}) },
