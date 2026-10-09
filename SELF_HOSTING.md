@@ -838,8 +838,9 @@ The worker's `domain.age` job looks the age up off the send path, when a
 domain is added or verifies and from the `domains.reverify` sweep: RDAP via
 IANA's bootstrap (plus fixed servers for `.io`, `.me`, `.co` and `.us`), then
 the registry's WHOIS on TCP 43, then the first certificate on crt.sh, else
-unknown. It needs outbound HTTPS and TCP 43 while the warm-up is on and makes
-no lookup while it is off. The full description is in the docs' self-hosting
+unknown; a certificate's date never replaces a registry's found before. It
+needs outbound HTTPS and TCP 43 while the warm-up is on and makes no lookup
+while it is off. The full description is in the docs' self-hosting
 page.
 
 </details>

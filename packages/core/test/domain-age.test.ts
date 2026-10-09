@@ -280,10 +280,11 @@ describe("parseRegistryDate", () => {
 describe("recordDomainAge", () => {
   let db: Db;
   let close: () => Promise<void>;
+  let teamId: string;
   let domainId: string;
   beforeAll(async () => {
     ({ db, close } = await createTestDb());
-    const teamId = await createTeam(db, "age-team");
+    teamId = await createTeam(db, "age-team");
     const [domain] = await db
       .insert(schema.domains)
       .values({
@@ -298,7 +299,7 @@ describe("recordDomainAge", () => {
   });
   afterAll(() => close());
 
-  const row = async () =>
+  const row = async (id = domainId) =>
     (
       await db
         .select({
@@ -307,7 +308,7 @@ describe("recordDomainAge", () => {
           ageCheckedAt: schema.domains.ageCheckedAt,
         })
         .from(schema.domains)
-        .where(eq(schema.domains.id, domainId))
+        .where(eq(schema.domains.id, id))
     )[0];
 
   it("stores the date, its source and the check; a later dateless answer keeps it", async () => {
@@ -338,5 +339,30 @@ describe("recordDomainAge", () => {
     });
     await markDomainAgeUnknown(db, domainId);
     expect((await row())?.ageSource).toBe("rdap");
+  });
+
+  it("keeps a registry's date when a later check reaches only a certificate", async () => {
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId, name: "tx.example.com", region: "us-east-1" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    const rdapUrl = "https://rdap.verisign.com/com/v1/domain/example.com";
+    const routes: Record<string, Route> = {
+      [rdapUrl]: { body: fixture("rdap-example.com.json") },
+      "https://crt.sh/?q=example.com&output=json": { body: fixture("crt.sh-millionsend.com.json") },
+    };
+    const { r } = resolver(routes, {});
+    await recordDomainAge(db, r, domain.id, new Date("2026-10-09T13:00:00Z"));
+    // The registry is down on the re-check and WHOIS unreachable: only crt.sh answers.
+    routes[rdapUrl] = { status: 503 };
+    const recheckedAt = new Date("2026-10-10T13:00:00Z");
+    const registry = { registeredAt: new Date("1995-08-14T04:00:00Z"), source: "rdap" };
+    expect(await recordDomainAge(db, r, domain.id, recheckedAt)).toMatchObject(registry);
+    expect(await row(domain.id)).toEqual({
+      registeredAt: registry.registeredAt,
+      ageSource: "rdap",
+      ageCheckedAt: recheckedAt,
+    });
   });
 });

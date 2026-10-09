@@ -334,8 +334,10 @@ export function createDomainAgeResolver(deps: DomainAgeDeps = {}): DomainAgeReso
 
 /**
  * The domain.age job's write: the date and where it came from, stamped with
- * the check. An answer without a date never erases one found before.
- * Returns null when the row is gone.
+ * the check. An answer without a date never erases one found before, and a
+ * certificate's never replaces a registry's: the certificate is only reached
+ * when the registry lookups fail, and it can postdate the registration by
+ * years. Returns what the row holds after the write, null when it is gone.
  */
 export async function recordDomainAge(
   db: Db,
@@ -344,18 +346,29 @@ export async function recordDomainAge(
   now: Date = new Date(),
 ): Promise<DomainAge | null> {
   const d = schema.domains;
-  const [domain] = await db.select({ name: d.name }).from(d).where(eq(d.id, domainId));
+  const [domain] = await db
+    .select({ name: d.name, registeredAt: d.registeredAt, ageSource: d.ageSource })
+    .from(d)
+    .where(eq(d.id, domainId));
   if (!domain) return null;
   const age = await resolver.lookup(domain.name);
+  const registry = domain.ageSource === "rdap" || domain.ageSource === "whois";
+  if (age.registeredAt && !(age.source === "ct" && registry)) {
+    await db
+      .update(d)
+      .set({ registeredAt: age.registeredAt, ageSource: age.source, ageCheckedAt: now })
+      .where(eq(d.id, domainId));
+    return age;
+  }
   await db
     .update(d)
-    .set(
-      age.registeredAt
-        ? { registeredAt: age.registeredAt, ageSource: age.source, ageCheckedAt: now }
-        : { ageSource: sql`coalesce(${d.ageSource}, 'unknown')`, ageCheckedAt: now },
-    )
+    .set({ ageSource: sql`coalesce(${d.ageSource}, 'unknown')`, ageCheckedAt: now })
     .where(eq(d.id, domainId));
-  return age;
+  return {
+    domain: age.domain,
+    registeredAt: domain.registeredAt,
+    source: domain.ageSource ?? "unknown",
+  };
 }
 
 /** A lookup that ran out of retries: checked, age unknown unless an earlier check found one. */

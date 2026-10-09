@@ -944,7 +944,8 @@ domain is recorded as unknown. The worker therefore needs outbound HTTPS to
 `data.iana.org`, the registries' RDAP servers and `crt.sh`, and outbound TCP
 43, while the warm-up is on; with it off no lookup is made. The date, its
 source (`rdap`, `whois`, `ct` or `unknown`) and the time of the check are
-stored on the domain row.
+stored on the domain row; a certificate's date never replaces a registry's
+found on an earlier check.
 
 ## Content access (break-glass)
 

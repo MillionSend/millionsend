@@ -963,7 +963,9 @@ crescente antes de o domínio ficar como desconhecido. O worker precisa, então,
 de HTTPS de saída para `data.iana.org`, os servidores RDAP dos registros e
 `crt.sh`, e de TCP 43 de saída, enquanto o aquecimento está ligado; desligado,
 nenhuma consulta é feita. A data, a sua origem (`rdap`, `whois`, `ct` ou
-`unknown`) e o horário da consulta ficam na linha do domínio.
+`unknown`) e o horário da consulta ficam na linha do domínio; a data de um
+certificado nunca substitui a de um registro encontrada numa consulta
+anterior.
 
 ## Acesso ao conteúdo (quebra de vidro)
 
