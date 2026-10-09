@@ -774,7 +774,8 @@ read per region; no paid AWS API is called, and the per-region cost is a
 local estimate.
 
 A suspended team keeps its data and its keys authenticate, but every send
-answers `403 team_suspended` (SMTP `550`); a broadcast pause holds
+answers `403 team_suspended` (`403 sending_paused` under a review hold; SMTP
+`550`); a broadcast pause holds
 broadcasts while transactional mail flows; a daily ceiling caps the team's
 day under its plan. Owners are emailed about each action (except a phishing
 suspension), and every action lands in the audit log with its reason.

@@ -678,7 +678,8 @@ content insights (never email bodies), and an instance-wide audit log.
   team's standing and the automatic trust & safety flags every 15 minutes.
   History is kept 90 days.
 - **Operator actions and the team:** a suspended team's API keys still
-  authenticate but every send answers `403 team_suspended` (SMTP `550`),
+  authenticate but every send answers `403 team_suspended` (`403 sending_paused`
+  under a review hold; SMTP `550`),
   broadcasts in flight park, webhooks keep delivering and data stays; its
   quota, deliverability, broadcast-hold and broadcast-pause notices stop, and
   so does its billing mail when the reason is phishing or a review hold

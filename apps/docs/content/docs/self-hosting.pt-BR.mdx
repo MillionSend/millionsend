@@ -779,7 +779,8 @@ de uma leitura gratuita de `GetAccount` do SESv2 por região; nenhuma API paga
 da AWS é chamada, e o custo por região é uma estimativa local.
 
 Uma equipe suspensa mantém os dados e as chaves continuam autenticando, mas
-todo envio responde `403 team_suspended` (SMTP `550`); uma pausa de
+todo envio responde `403 team_suspended` (`403 sending_paused` numa retenção
+para revisão; SMTP `550`); uma pausa de
 transmissões retém as transmissões enquanto o e-mail transacional continua;
 um teto diário limita o dia da equipe abaixo do plano. Os proprietários são
 avisados por e-mail a cada ação (exceto suspensão por phishing), e cada ação
