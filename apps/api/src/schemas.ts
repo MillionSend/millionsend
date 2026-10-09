@@ -1412,7 +1412,12 @@ export const createWebhookResponseSchema = z
 export const getWebhookResponseSchema = webhookListItemSchema
   .extend({
     object: z.literal("webhook"),
-    signing_secret: z.string(),
+    signing_secret: z
+      .string()
+      .optional()
+      .describe(
+        "Not returned to a team member's MCP call; the dashboard shows members only its last 4 characters",
+      ),
     previous_secret_expires_at: z
       .string()
       .nullable()

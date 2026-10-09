@@ -10,6 +10,7 @@ import {
   hashRecipient,
   MCP_SCOPES,
   mcpResourceUrl,
+  type TeamRole,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -1193,33 +1194,37 @@ describe("dashboard admin parity", () => {
     expect(suppressions).toEqual([{ email: bounced }]);
   });
 
-  it("the REST routes refuse an MCP call carrying a member role, whichever tool sent it", async () => {
-    const memberStatus = async (method: string, path: string, body?: unknown) => {
-      const req = new Request(`http://mcp.internal${path}`, {
-        method,
-        ...(body === undefined
-          ? {}
-          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-      });
-      INTERNAL_AUTH.set(req, {
-        teamId: memberTeam,
+  /** A REST call the way an MCP tool makes it, as `role` in the member team. */
+  const asRole = (role: TeamRole, method: string, path: string, body?: unknown) => {
+    const req = new Request(`http://mcp.internal${path}`, {
+      method,
+      ...(body === undefined
+        ? {}
+        : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+    });
+    INTERNAL_AUTH.set(req, {
+      teamId: memberTeam,
+      plan: "free",
+      billing: {
         plan: "free",
-        billing: {
-          plan: "free",
-          planQuota: null,
-          currentPeriodStart: null,
-          currentPeriodEnd: null,
-          overageEnabled: false,
-        },
-        apiKeyId: null,
-        userId: user,
-        oauthClientId: "client-abc",
-        permission: "full_access",
-        domainId: null,
-        role: "member",
-      });
-      return (await app.fetch(req)).status;
-    };
+        planQuota: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        overageEnabled: false,
+      },
+      apiKeyId: null,
+      userId: user,
+      oauthClientId: "client-abc",
+      permission: "full_access",
+      domainId: null,
+      role,
+    });
+    return app.fetch(req);
+  };
+
+  it("the REST routes refuse an MCP call carrying a member role, whichever tool sent it", async () => {
+    const memberStatus = async (method: string, path: string, body?: unknown) =>
+      (await asRole("member", method, path, body)).status;
     const adminRoutes: Array<[method: string, path: string, body?: unknown]> = [
       ["POST", "/domains", { name: "parity.example.com" }],
       ["PATCH", `/domains/${id}`, { open_tracking: false }],
@@ -1242,5 +1247,23 @@ describe("dashboard admin parity", () => {
     }
     // A plain delete stays member-level, as in the dashboard.
     expect(await memberStatus("DELETE", "/contacts/plain%40example.com")).toBe(200);
+  });
+
+  it("a member never receives a webhook's signing secret over REST", async () => {
+    const created = (await (
+      await asRole("admin", "POST", "/webhooks", {
+        endpoint: "https://acme.dev/hooks",
+        events: ["email.bounced"],
+      })
+    ).json()) as { id: string; signing_secret: string };
+    expect(created.signing_secret).toMatch(/^whsec_/);
+
+    const asMember = await asRole("member", "GET", `/webhooks/${created.id}`);
+    expect(asMember.status).toBe(200);
+    const memberView = await asMember.json();
+    expect(memberView).toMatchObject({ object: "webhook", id: created.id });
+    expect(memberView).not.toHaveProperty("signing_secret");
+    const asAdmin = await (await asRole("admin", "GET", `/webhooks/${created.id}`)).json();
+    expect(asAdmin).toMatchObject({ signing_secret: created.signing_secret });
   });
 });
