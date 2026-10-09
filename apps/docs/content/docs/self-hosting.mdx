@@ -824,7 +824,8 @@ phishing** turns the hold into a phishing suspension. While the team is held,
 its later verdicts still move its risk but send no alert and apply no
 pause, so a release leaves no pause behind. A team is held once, by either
 rule: after a release its later verdicts only alert, so the released mail,
-judged again on its way out, cannot hold it a second time. A team already
+judged again on its way out, neither holds it a second time nor pauses its
+broadcasts. A team already
 suspended keeps its suspension, and Probation, Established, Trusted and
 system teams are never held: they stay alert-only. The judge reads a message
 after SES has taken it, so the message that triggers the hold has already

@@ -754,7 +754,7 @@ describe("the review hold", () => {
     ).toBe(true);
   });
 
-  it("neither alerts nor pauses while the team is held, so a release leaves no pause behind", async () => {
+  it("neither alerts nor pauses while the team is held, and after a release only alerts", async () => {
     const teamId = await newTeam("held-backlog");
     expect(
       await applyJudgedSample(db, S, { teamId, score: 96, verdict: PHISHING, now: NOW }),
@@ -779,14 +779,17 @@ describe("the review hold", () => {
       .update(schema.teams)
       .set({ suspendedAt: null, suspensionReason: null })
       .where(eq(schema.teams.id, teamId));
+    // The drained mail is judged again with the risk still past the pause
+    // line: it alerts, and leaves the released broadcasts flowing.
     const released = await applyJudgedSample(db, S, {
       teamId,
       score: 99,
       verdict: PHISHING,
       now: new Date(NOW.getTime() + HOUR),
     });
-    expect(released).toMatchObject({ held: false, alert: true });
+    expect(released).toMatchObject({ held: false, alert: true, paused: false });
     expect(released.risk).toBeGreaterThan(S.pauseRisk);
+    expect((await team(teamId))?.broadcastsPausedByOperatorAt).toBeNull();
   });
 
   it("leaves an operator's suspension as it is", async () => {

@@ -638,8 +638,13 @@ export async function applyJudgedSample(
       alert = stamped.length > 0;
     }
     let paused = false;
+    // A team the monitor held is never paused by the policy after its
+    // release: the backlog judged during the hold keeps the risk past the
+    // line, so the released mail's first verdict would park the broadcasts
+    // the release let go.
     if (
       !underReview &&
+      row.heldAt === null &&
       s.autoPause &&
       tier === "new" &&
       next.risk >= s.pauseRisk &&
