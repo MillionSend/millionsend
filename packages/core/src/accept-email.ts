@@ -5,9 +5,10 @@ import { and, count, eq } from "drizzle-orm";
 import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
 import { type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
-import { reserveQuota } from "./quota.js";
+import { quotaChargeAt, reserveQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
 import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppressions.js";
+import { type SendRefusal, sendRefusal } from "./team-standing.js";
 import { findTopicOptOuts } from "./topics.js";
 import { utcDay } from "./utc-day.js";
 
@@ -126,7 +127,7 @@ export interface AcceptEmailAuth {
   /**
    * The team's billing columns; the cap is derived here (teamQuota), never
    * trusted from the payload. "uncapped" is for the instance's own account
-   * mail, which counts but must never park.
+   * mail, which counts but must never park nor be refused by sendRefusal.
    */
   billing: QuotaTeamRow | "uncapped";
   /** Null when the caller authenticated with something other than an API key (OAuth/MCP). */
@@ -203,13 +204,16 @@ export type AcceptEmailResult =
    * A monthly plan at its cap: the included volume with overage off, or the
    * hard cap past it with overage on. Refused outright, nothing parks for a month.
    */
-  | { ok: false; reason: "monthly_quota_exceeded"; periodEnd: Date; overage: boolean };
+  | { ok: false; reason: "monthly_quota_exceeded"; periodEnd: Date; overage: boolean }
+  /** The team may not send at all right now (sendRefusal); nothing was accepted. */
+  | ({ ok: false } & SendRefusal);
 
 /**
- * The single accept pipeline behind every send surface: suppression strip,
- * body encryption, atomic quota reservation + email insert, and the send
- * enqueue. Callers own transport concerns (wire validation, idempotency
- * keys, error shapes) and sender-domain verification via verifySenderDomain.
+ * The single accept pipeline behind every send surface: the team's send
+ * admission (sendRefusal), suppression strip, body encryption, atomic quota
+ * reservation + email insert, and the send enqueue. Callers own transport
+ * concerns (wire validation, idempotency keys, error shapes) and
+ * sender-domain verification via verifySenderDomain.
  */
 export async function acceptEmail(
   deps: AcceptEmailDeps,
@@ -237,6 +241,10 @@ export async function acceptEmail(
     quota?: "deferred" | undefined;
   } = {},
 ): Promise<AcceptEmailResult> {
+  if (auth.billing !== "uncapped") {
+    const refusal = await sendRefusal(opts.tx ?? deps.db, auth.teamId);
+    if (refusal) return { ok: false, ...refusal };
+  }
   if (estimateAttachmentBytes(payload.attachments ?? []) > MAX_ATTACHMENT_BYTES) {
     return { ok: false, reason: "attachments_too_large", maxBytes: MAX_ATTACHMENT_BYTES };
   }
@@ -291,9 +299,10 @@ export async function acceptEmail(
   // commit atomically (the quota contract). Over a DAILY cap mail is parked
   // as queued_quota — still accepted, drained after the midnight rollover;
   // a scheduled send is charged to its delivery day, so a team cannot stack
-  // many days of the cap onto one future instant. A monthly plan counts
-  // every accept against the current billing period, whenever it delivers.
-  const deliveryAt = payload.scheduledAt ?? new Date();
+  // many days of the cap onto one future instant (quotaChargeAt: a past one
+  // is today). A monthly plan counts every accept against the current
+  // billing period, whenever it delivers.
+  const deliveryAt = quotaChargeAt(payload.scheduledAt);
   const day = utcDay(deliveryAt);
   const runAccept = async (txDb: Db) => {
     const reservation =

@@ -5,6 +5,7 @@ import {
   bumpHourlyUsage,
   CREDENTIAL_MAIL_KINDS,
   decryptEmailBody,
+  deliverabilityHold,
   type EmailAttachment,
   type EmailBody,
   enqueueWebhookDeliveries,
@@ -420,6 +421,13 @@ export async function sendEmail(
   const standing = await fetchTeamStanding(db, email.teamId);
   if (standing?.suspended || (email.broadcastId && standing?.broadcastsPausedByOperatorAt)) {
     await parkQueued(db, email, standing.suspended ? "team suspended" : "broadcasts paused");
+    return "parked";
+  }
+  // Transactional mail accepted before the team crossed the deliverability
+  // pause line parks the same way. A broadcast row keeps the fan-out's
+  // throttled drip instead.
+  if (!email.broadcastId && (await deliverabilityHold(db, email.teamId))) {
+    await parkQueued(db, email, "sending paused");
     return "parked";
   }
 

@@ -46,7 +46,10 @@ e-mails acima desse teto ficam estacionados como `queued_quota` e o job
 responde `429 daily_quota_exceeded` só quando a fila estacionada está cheia.
 Os owners recebem `quota.warning` em 80% do limite, `quota.reached` no limite
 e `quota.paused` quando os envios começam a estacionar, uma vez por dia UTC;
-um upgrade de plano libera o que estava estacionado em poucos minutos.
+um upgrade de plano libera o que estava estacionado em poucos minutos. Um
+envio agendado conta no dia UTC em que sai: o próprio dia, ou hoje para um
+`scheduled_at` já passado (ele sai na hora); reagendá-lo para um dia
+posterior leva a cobrança junto.
 
 ### Volumes mensais (Pro, Scale)
 

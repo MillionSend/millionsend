@@ -3,10 +3,12 @@ import {
   countDistinctRecipients,
   DAY_MS,
   DRAIN_MAX_PER_RUN,
+  deliverabilityHold,
   failQueuedEmailsForDomain,
   fetchDeliverabilityHealth,
   getInstanceSettings,
   isIdentitySharedByOtherDomains,
+  nextUtcDayStart,
   type PlanSnapshot,
   purgedEmailBodyColumns,
   QUOTA_COLUMNS,
@@ -189,8 +191,10 @@ const DRAIN_PAGE = 500;
 /** What one drain run carries between its passes. */
 interface DrainRun {
   now: Date;
-  /** Teams found at their cap this run leave every later page query. */
-  exhaustedTeams: Set<string>;
+  /** Teams found at their cap, or held by the deliverability pause, leave every later page query. */
+  heldTeams: Set<string>;
+  /** Teams already asked whether the deliverability pause holds them. */
+  checkedTeams: Set<string>;
   failures: unknown[];
 }
 
@@ -220,7 +224,12 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
   await deps.sesQuota?.recount?.();
   const regions = deps.sesQuota?.regions ?? [];
   const held = regions.filter((region) => deps.sesQuota?.exhausted(region));
-  const run: DrainRun = { now: deps.now ?? new Date(), exhaustedTeams: new Set(), failures: [] };
+  const run: DrainRun = {
+    now: deps.now ?? new Date(),
+    heldTeams: new Set(),
+    checkedTeams: new Set(),
+    failures: [],
+  };
   let drained = 0;
   if (regions.length === 0 || held.length < regions.length) {
     const released = await releaseParkedRows(db, deps, run, {
@@ -355,9 +364,14 @@ async function releaseParkedRows(
           // team releases only its transactional rows.
           isNull(schema.teams.suspendedAt),
           or(isNull(schema.emails.broadcastId), isNull(schema.teams.broadcastsPausedByOperatorAt)),
-          run.exhaustedTeams.size > 0
-            ? notInArray(schema.emails.teamId, [...run.exhaustedTeams])
-            : undefined,
+          // A row due on a later UTC day is charged on that day, when it
+          // comes: reserved against today, days of the cap could all go out
+          // at one future instant.
+          or(
+            isNull(schema.emails.scheduledAt),
+            lt(schema.emails.scheduledAt, nextUtcDayStart(run.now)),
+          ),
+          run.heldTeams.size > 0 ? notInArray(schema.emails.teamId, [...run.heldTeams]) : undefined,
           opts.held.length > 0 ? notInArray(region, [...opts.held]) : undefined,
           cursorId
             ? keysetCursorWhere(schema.emails.createdAt, schema.emails.id, cursorId)
@@ -483,11 +497,22 @@ async function releaseParked(
   run: DrainRun,
   throttleAt: Date | null,
 ): Promise<MovedEmail | null> {
-  if (run.exhaustedTeams.has(email.teamId)) return null;
+  if (run.heldTeams.has(email.teamId)) return null;
   const quota = teamQuota(email, deps.isCloud);
   // Charged the way accept charged it: one unit per distinct mailbox.
   const units = countDistinctRecipients(email.to, email.cc, email.bcc);
   try {
+    // Past the deliverability pause line nothing of the team leaves the
+    // drain: its transactional rows would only park again at send time, and
+    // its broadcast backlog waits for the rates to recover.
+    if (!run.checkedTeams.has(email.teamId)) {
+      const held = await deliverabilityHold(db, email.teamId);
+      run.checkedTeams.add(email.teamId);
+      if (held) {
+        run.heldTeams.add(email.teamId);
+        return null;
+      }
+    }
     const outcome = await db
       .transaction(async (tx) => {
         const txDb = tx as unknown as Db;
@@ -511,7 +536,7 @@ async function releaseParked(
         throw err;
       });
     if (outcome === "exhausted") {
-      run.exhaustedTeams.add(email.teamId);
+      run.heldTeams.add(email.teamId);
       return null;
     }
     if (outcome === "raced") return null;

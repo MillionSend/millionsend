@@ -1,9 +1,12 @@
 import { randomBytes } from "node:crypto";
 import {
+  DAY_MS,
+  dailyCeiling,
   EnvKeyring,
   generateApiKey,
   hashRecipient,
   openAttachments,
+  teamRung,
   utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -1249,5 +1252,112 @@ describe("POST /emails/batch quota", () => {
       .from(schema.usageCounters)
       .where(eq(schema.usageCounters.teamId, teamId));
     expect(counter?.accepted).toBe(150);
+  });
+});
+
+describe("quota day of a scheduled send", () => {
+  const FREE_CEILING = dailyCeiling(teamRung("free", null).included);
+
+  /** A fresh free team with a verified domain; returns a request helper on its key. */
+  async function freeTeam(slug: string) {
+    const id = await createTeam(db, slug);
+    await db.insert(schema.domains).values({
+      teamId: id,
+      name: `${slug}.dev`,
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const key = generateApiKey();
+    await db.insert(schema.apiKeys).values({
+      teamId: id,
+      name: "t",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    const call = (method: string, path: string, payload: unknown) =>
+      app.request(path, {
+        method,
+        headers: { authorization: `Bearer ${key.token}`, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    const counters = async () =>
+      Object.fromEntries(
+        (
+          await db
+            .select({ day: schema.usageCounters.day, accepted: schema.usageCounters.accepted })
+            .from(schema.usageCounters)
+            .where(eq(schema.usageCounters.teamId, id))
+        ).map((r) => [r.day, r.accepted]),
+      );
+    const statusOf = async (emailId: string) =>
+      (
+        await db
+          .select({ s: schema.emails.latestStatus })
+          .from(schema.emails)
+          .where(eq(schema.emails.id, emailId))
+      )[0]?.s;
+    return { id, call, counters, statusOf, body: { ...validBody, from: `A <a@${slug}.dev>` } };
+  }
+
+  it("a free team cannot pass its daily ceiling with a backdated scheduled_at, single or batch", async () => {
+    const team = await freeTeam("backdated");
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team.id, day: utcDay(), accepted: FREE_CEILING });
+    const yesterday = new Date(Date.now() - DAY_MS).toISOString();
+    const lastWeek = new Date(Date.now() - 7 * DAY_MS).toISOString();
+
+    const single = await team.call("POST", "/emails", { ...team.body, scheduled_at: yesterday });
+    expect(single.status).toBe(200);
+    const { id } = (await single.json()) as { id: string };
+    expect(await team.statusOf(id)).toBe("queued_quota");
+
+    const batch = await team.call("POST", "/emails/batch", [
+      { ...team.body, to: ["b1@example.com"], scheduled_at: yesterday },
+      { ...team.body, to: ["b2@example.com"], scheduled_at: lastWeek },
+    ]);
+    expect(batch.status).toBe(200);
+    const { data } = (await batch.json()) as { data: { id: string }[] };
+    for (const item of data) expect(await team.statusOf(item.id)).toBe("queued_quota");
+
+    // Nothing landed on a past day's unspent counter: today alone holds the charge.
+    expect(await team.counters()).toEqual({ [utcDay()]: FREE_CEILING });
+  });
+
+  it("rescheduling to a later day moves the charge along, and parks the email when that day is full", async () => {
+    const team = await freeTeam("rescheduled");
+    const at = (days: number) => new Date(Date.now() + days * DAY_MS);
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team.id, day: utcDay(at(3)), accepted: FREE_CEILING });
+    const res = await team.call("POST", "/emails", {
+      ...team.body,
+      scheduled_at: at(1).toISOString(),
+    });
+    const { id } = (await res.json()) as { id: string };
+    expect(await team.counters()).toEqual({
+      [utcDay(at(1))]: 1,
+      [utcDay(at(3))]: FREE_CEILING,
+    });
+
+    expect((await team.call("PATCH", `/emails/${id}`, { scheduled_at: at(2) })).status).toBe(200);
+    expect(await team.statusOf(id)).toBe("queued");
+    expect(await team.counters()).toEqual({
+      [utcDay(at(1))]: 0,
+      [utcDay(at(2))]: 1,
+      [utcDay(at(3))]: FREE_CEILING,
+    });
+
+    // The full day refuses the reservation: the email waits for the drain
+    // instead of going out past that day's ceiling.
+    expect((await team.call("PATCH", `/emails/${id}`, { scheduled_at: at(3) })).status).toBe(200);
+    expect(await team.statusOf(id)).toBe("queued_quota");
+    expect(await team.counters()).toEqual({
+      [utcDay(at(1))]: 0,
+      [utcDay(at(2))]: 0,
+      [utcDay(at(3))]: FREE_CEILING,
+    });
   });
 });

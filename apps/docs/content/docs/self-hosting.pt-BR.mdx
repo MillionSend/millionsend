@@ -367,7 +367,10 @@ Um relay SMTP pronto para software que fala SMTP em vez de HTTP — apps
 legados, plugins de CMS, qualquer coisa com um formulário de "configurações
 SMTP". As mensagens passam pelo mesmo pipeline de aceitação do
 `POST /emails`: mesma verificação de domínio, checagens de supressão, log de
-requisições e eventos de entrega.
+requisições e eventos de entrega. Enquanto os envios da equipe estão pausados
+pela taxa de bounce ou de reclamação, o relay responde `451 4.7.1` após o
+DATA, e o cliente guarda a mensagem e tenta de novo; uma equipe suspensa
+recebe `550`.
 
 Dados de conexão:
 

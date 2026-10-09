@@ -55,12 +55,9 @@ export const onboardingRouter = router({
         }
       }
       const [team] = await ctx.db
-        .select({ name: schema.teams.name, suspendedAt: schema.teams.suspendedAt })
+        .select({ name: schema.teams.name })
         .from(schema.teams)
         .where(eq(schema.teams.id, ctx.teamId));
-      if (team?.suspendedAt) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "team suspended" });
-      }
       const message = buildOnboardingEmail({
         locale: input.locale,
         team: team?.name ?? "",

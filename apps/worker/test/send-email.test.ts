@@ -1458,6 +1458,47 @@ it("parks a suspended team's mail before SES, and a paused team's broadcast rows
   await hold({ broadcastsPausedByOperatorAt: null });
 });
 
+it("parks a paused team's queued transactional row before SES; its broadcast rows drip on and the system team is never held", async () => {
+  const { ses, sends } = fakeSes("pause-mid");
+  const paused = await createTeam(db, "paused-team");
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: paused,
+      name: "paused.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  const own = { teamId: paused, domainId: domain?.id, from: "P <p@paused.dev>" };
+  // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId: paused, day: utcDay(), sent: 200, hardBounced: 20 });
+
+  const transactional = await insertEmail(own);
+  expect(await sendEmail(db, { keyring, ses }, { emailId: transactional })).toBe("parked");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, transactional));
+  expect(row?.latestStatus).toBe("queued_quota");
+  expect(sends).toHaveLength(0);
+
+  const [bc] = await db
+    .insert(schema.broadcasts)
+    .values({ teamId: paused, from: "P <p@paused.dev>", subject: "s", html: "<p>x</p>" })
+    .returning({ id: schema.broadcasts.id });
+  const bulk = await insertEmail({ ...own, broadcastId: bc?.id });
+  expect(await sendEmail(db, { keyring, ses }, { emailId: bulk })).toBe("sent");
+
+  await db.update(schema.teams).set({ plan: "system" }).where(eq(schema.teams.id, paused));
+  const system = fakeSes("pause-mid-system");
+  expect(
+    await sendEmail(db, { keyring, ses: system.ses }, { emailId: await insertEmail(own) }),
+  ).toBe("sent");
+  expect(sends).toHaveLength(1);
+  expect(system.sends).toHaveLength(1);
+});
+
 it("a broadcast row parks on the bulk share or a held region; a transactional row only at the total, which the probe hears", async () => {
   const { ses, sends } = fakeSes("mid-share");
   const [bc] = await db

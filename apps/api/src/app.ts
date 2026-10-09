@@ -21,6 +21,7 @@ import {
   contactPropertiesChange,
   contactRoom,
   contactSnapshotColumns,
+  countDistinctRecipients,
   DAY_MS,
   decryptEmailBody,
   emitContactEvents,
@@ -35,33 +36,37 @@ import {
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
-  isTeamSuspended,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
   makeUnsubscribeToken,
   markSegmentsStale,
   monthlyQuotaMessage,
-  PAUSE_BOUNCE_RATE,
-  PAUSE_COMPLAINT_RATE,
   PLAN_CONTACT_LIMIT,
   parseScheduledAt,
   planCaps,
   planRegionSend,
   QUOTA_BACKLOG_DAYS,
+  quotaChargeAt,
   quotaRoom,
   quotaUsage,
   recordContactActivity,
   recountSegment,
   regionPause,
   releaseIdempotent,
+  releaseQuota,
   reserveQuota,
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
+  type SendRefusal,
   scoreBand,
   segmentContactsWhere,
   segmentFilterSchema,
   sendingBroadcasts,
+  sendRefusal,
+  sendRefusalMessage,
   teamQuota,
+  transitionQueueState,
+  utcDay,
   verifyOnboardingSender,
   verifySenderDomain,
   type WebhookEnqueue,
@@ -348,42 +353,19 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
         status: 422 as const,
         body: errorBody(422, "all_recipients_suppressed", "All recipients are suppressed"),
       };
+    case "team_suspended":
+    case "sending_paused":
+      return { status: 403 as const, body: refusalBody(result) };
   }
 }
 
 /**
- * Server-authoritative deliverability guardrail on every send surface: a raw
- * API client must not bypass what the dashboard enforces. If the team's
- * trailing-window bounce or complaint rate has crossed SES's own pause line,
- * new sends are refused so we stop before SES pauses the whole account.
- * `sending_paused` is a MillionSend-specific error outside Resend's SDK
- * union (see docs/resend-compatibility.md, known deltas). Returns the error
- * body, or null when sending may proceed.
+ * Wire body for a team sendRefusal holds; keys still authenticate so the
+ * caller learns why. `sending_paused` is a MillionSend-specific error outside
+ * Resend's SDK union (see docs/resend-compatibility.md, known deltas).
  */
-async function sendingPausedError(
-  deps: Pick<ApiDeps, "db">,
-  auth: ApiKeyAuth,
-): Promise<ReturnType<typeof errorBody> | null> {
-  // An operator suspension outranks the rates: keys still authenticate so
-  // the caller learns why, but nothing leaves.
-  if (await isTeamSuspended(deps.db, auth.teamId)) {
-    return errorBody(
-      403,
-      "team_suspended",
-      "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
-    );
-  }
-  const health = await fetchDeliverabilityHealth(deps.db, auth.teamId);
-  const paused = health.reasons.find((r) => r.tier === "paused");
-  if (!paused) return null;
-  const limit = paused.metric === "bounce" ? PAUSE_BOUNCE_RATE : PAUSE_COMPLAINT_RATE;
-  const metric = paused.metric === "bounce" ? "hard bounce" : "complaint";
-  const pct = (r: number) => `${(r * 100).toFixed(2)}%`;
-  return errorBody(
-    403,
-    "sending_paused",
-    `Sending is paused: your ${metric} rate of ${pct(paused.rate)} over the last ${paused.windowDays} days is at or above the ${pct(limit)} limit. Lower it before sending again.`,
-  );
+function refusalBody(refusal: SendRefusal) {
+  return errorBody(403, refusal.reason, sendRefusalMessage(refusal));
 }
 
 /** Refusal from acceptEmail inside a caller-owned batch transaction. */
@@ -2663,8 +2645,8 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         "APP_BASE_URL is not set. Unsubscribe links are built from it. Set it, restart, send again.",
       );
     }
-    const paused = await sendingPausedError(deps, auth);
-    if (paused) return { ok: false as const, status: 403 as const, body: paused };
+    const refusal = await sendRefusal(db, auth.teamId);
+    if (refusal) return { ok: false as const, status: 403 as const, body: refusalBody(refusal) };
     // Same boundary as /emails: only a verified team domain may appear as
     // the sender.
     const domain = await verifySenderDomain(db, auth.teamId, broadcast.from);
@@ -3616,11 +3598,6 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
 
     try {
-      const paused = await sendingPausedError(deps, auth);
-      if (paused) {
-        if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
-        return c.json(paused, 403);
-      }
       const result = await acceptEmail(
         deps,
         auth,
@@ -3815,11 +3792,6 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // committed. Idempotency completion is recorded in the same transaction;
     // enqueue happens only after commit (reconcile re-enqueues any lost job).
     try {
-      const paused = await sendingPausedError(deps, auth);
-      if (paused) {
-        if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
-        return c.json(paused, 403);
-      }
       const quota = teamQuota(auth.billing, deps.isCloud);
       const accepted = await deps.db.transaction(async (dbTx) => {
         const txDb = dbTx as unknown as Db;
@@ -3859,7 +3831,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           if (!first) continue;
           // Items in one group share a delivery day; the first one's instant
           // places the hourly mirror like a single send's would.
-          const at = first.startAfter ?? new Date();
+          const at = quotaChargeAt(first.startAfter);
           const reservation = await reserveQuota(txDb, {
             teamId: auth.teamId,
             count: items.reduce((n, o) => n + o.recipientCount, 0),
@@ -4077,7 +4049,14 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     const { id } = c.req.valid("param");
     const body = c.req.valid("json");
     const [email] = await deps.db
-      .select({ id: schema.emails.id, createdAt: schema.emails.createdAt })
+      .select({
+        id: schema.emails.id,
+        createdAt: schema.emails.createdAt,
+        scheduledAt: schema.emails.scheduledAt,
+        to: schema.emails.to,
+        cc: schema.emails.cc,
+        bcc: schema.emails.bcc,
+      })
       .from(schema.emails)
       .where(
         and(
@@ -4113,19 +4092,54 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     // Same state gate as cancel: only a scheduled email nothing has claimed
     // can move — a reschedule racing the send loses cleanly (the WHERE no
     // longer matches once the sender claims sentAt).
-    const [row] = await deps.db
-      .update(schema.emails)
-      .set({ scheduledAt })
-      .where(
-        and(
-          eq(schema.emails.id, id),
-          eq(schema.emails.teamId, auth.teamId),
-          inArray(schema.emails.latestStatus, ["queued", "queued_quota"]),
-          isNull(schema.emails.sentAt),
-          isNotNull(schema.emails.scheduledAt),
-        ),
-      )
-      .returning({ id: schema.emails.id, latestStatus: schema.emails.latestStatus });
+    const row = await deps.db.transaction(async (tx) => {
+      const txDb = tx as unknown as Db;
+      const [moved] = await txDb
+        .update(schema.emails)
+        .set({ scheduledAt })
+        .where(
+          and(
+            eq(schema.emails.id, id),
+            eq(schema.emails.teamId, auth.teamId),
+            inArray(schema.emails.latestStatus, ["queued", "queued_quota"]),
+            isNull(schema.emails.sentAt),
+            isNotNull(schema.emails.scheduledAt),
+          ),
+        )
+        .returning({ id: schema.emails.id, latestStatus: schema.emails.latestStatus });
+      // A queued row holds its reservation on its delivery day, so a move to
+      // a later UTC day takes the charge along: left behind, rows charged
+      // across many days could all go out on one. A move earlier still sends
+      // at the old time (see the nudge below), where the charge already is.
+      // The old day is certain only while the row is ahead of now; a row
+      // already due keeps that charge and pays the new day as well.
+      const now = new Date();
+      const before = quotaChargeAt(email.scheduledAt, now);
+      const after = quotaChargeAt(scheduledAt, now);
+      if (moved?.latestStatus !== "queued" || utcDay(after) <= utcDay(before)) return moved;
+      const quota = teamQuota(auth.billing, deps.isCloud);
+      const units = countDistinctRecipients(email.to, email.cc, email.bcc);
+      if (email.scheduledAt && email.scheduledAt > now) {
+        await releaseQuota(txDb, {
+          teamId: auth.teamId,
+          count: units,
+          quota,
+          day: utcDay(before),
+          at: before,
+        });
+      }
+      const reservation = await reserveQuota(txDb, {
+        teamId: auth.teamId,
+        count: units,
+        quota,
+        day: utcDay(after),
+        at: after,
+      });
+      if (reservation.reserved) return moved;
+      // The new day is full: parked like an over-cap accept, for the drain.
+      await transitionQueueState(txDb, moved.id, { from: "queued", to: "queued_quota" });
+      return { ...moved, latestStatus: "queued_quota" as const };
+    });
     if (!row) {
       return c.json(
         errorBody(

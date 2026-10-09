@@ -355,7 +355,10 @@ aws iam create-policy-version --policy-arn arn:aws:iam::<account-id>:policy/mill
 A drop-in SMTP relay for software that speaks SMTP instead of HTTP — legacy
 apps, CMS plugins, anything with an "SMTP settings" form. Messages go through
 the same accept pipeline as `POST /emails`: same domain verification,
-suppression checks, request logging, and delivery events.
+suppression checks, request logging, and delivery events. While the team's
+sending is paused for its bounce or complaint rate, the relay answers
+`451 4.7.1` after DATA, so the client keeps the message and retries; a
+suspended team gets `550`.
 
 Connection details:
 

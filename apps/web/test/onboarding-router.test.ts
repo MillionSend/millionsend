@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -69,6 +70,31 @@ describe("onboarding.sendFirstEmail", () => {
     await expect(
       caller(await createTeam(db, "team-b")).onboarding.sendFirstEmail({ locale: "en" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("refuses a suspended or paused team through the shared admission", async () => {
+    vi.stubEnv("ONBOARDING_EMAIL_FROM", "MillionSend <onboarding@ms.example>");
+    const teamId = await createTeam(db, "team-a");
+    // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId, day: utcDay(), sent: 200, hardBounced: 20 });
+    await expect(caller(teamId).onboarding.sendFirstEmail({ locale: "en" })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: "sending_paused",
+    });
+
+    await db.delete(schema.usageCounters).where(eq(schema.usageCounters.teamId, teamId));
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "manual" })
+      .where(eq(schema.teams.id, teamId));
+    await expect(caller(teamId).onboarding.sendFirstEmail({ locale: "en" })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    });
+    expect(await db.select().from(schema.emails).where(eq(schema.emails.teamId, teamId))).toEqual(
+      [],
+    );
   });
 
   it("is unavailable when no shared sender is configured", async () => {

@@ -22,6 +22,15 @@ export type QuotaResult =
     };
 
 /**
+ * The instant a send is charged to: its delivery time, never earlier than
+ * now. A past scheduled_at sends at once and counts today; charged to its
+ * own day it would land on an unspent counter, a fresh cap per past day.
+ */
+export function quotaChargeAt(scheduledAt: Date | null | undefined, now: Date = new Date()): Date {
+  return scheduledAt && scheduledAt.getTime() > now.getTime() ? scheduledAt : now;
+}
+
+/**
  * Atomically reserve `count` sends against a team's daily limit (UTC day).
  * Single upsert with the limit re-checked inside the UPDATE's WHERE, so
  * concurrent requests can never overshoot the cap — no cached aggregates.

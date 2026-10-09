@@ -258,4 +258,63 @@ describe("acceptEmail", () => {
       overage: true,
     });
   });
+
+  it("charges a past scheduled_at to today, so a full day parks it instead of an unspent past one", async () => {
+    const backdating = await createTeam(db, "backdating");
+    const ceiling = Math.floor(teamRung("free", null).included * (1 + QUOTA_TOLERANCE));
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: backdating, day: utcDay(), accepted: ceiling });
+    const past = new Date(Date.now() - 3 * DAY_MS);
+    const result = await acceptEmail(
+      deps(),
+      { teamId: backdating, billing: FREE, apiKeyId: null },
+      payload({ domainId: null, scheduledAt: past }),
+    );
+    expect(result).toMatchObject({ ok: true, parked: true, day: utcDay() });
+    const days = await db
+      .select({ day: schema.usageCounters.day, accepted: schema.usageCounters.accepted })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, backdating));
+    expect(days).toEqual([{ day: utcDay(), accepted: ceiling }]);
+  });
+
+  it("refuses a suspended or paused team before writing anything; account mail still lands", async () => {
+    const held = await createTeam(db, "held");
+    const heldAuth = { teamId: held, billing: FREE, apiKeyId: null };
+    const rows = () =>
+      db.select({ id: schema.emails.id }).from(schema.emails).where(eq(schema.emails.teamId, held));
+
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "manual" })
+      .where(eq(schema.teams.id, held));
+    expect(await acceptEmail(deps(), heldAuth, payload({ domainId: null }))).toEqual({
+      ok: false,
+      reason: "team_suspended",
+    });
+
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: null, suspensionReason: null })
+      .where(eq(schema.teams.id, held));
+    // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: held, day: utcDay(), sent: 200, hardBounced: 20 });
+    expect(await acceptEmail(deps(), heldAuth, payload({ domainId: null }))).toMatchObject({
+      ok: false,
+      reason: "sending_paused",
+      pause: { metric: "bounce", tier: "paused" },
+    });
+    expect(await rows()).toEqual([]);
+
+    const account = await acceptEmail(
+      deps(),
+      { ...heldAuth, billing: "uncapped" },
+      payload({ domainId: null }),
+    );
+    expect(account).toMatchObject({ ok: true, parked: false });
+    expect(await rows()).toHaveLength(1);
+  });
 });
