@@ -1,7 +1,7 @@
 import { env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { loadMonitorState, monitorTier, teamMonitorRow } from "./abuse-monitor.js";
 import { firstRow } from "./driver-result.js";
 import {
@@ -152,11 +152,19 @@ export async function warmupCap(
     earned: d.warmupTier,
     trustedAt: d.warmupTrustedAt,
   };
-  const [row] = await db
-    .select({ name: d.name, ...tierColumns, teamTrustedAt: t.warmupTrustedAt, plan: t.plan })
+  // The sending domain and, in the same read, the team's others still warming.
+  const rows = await db
+    .select({
+      id: d.id,
+      name: d.name,
+      ...tierColumns,
+      teamTrustedAt: t.warmupTrustedAt,
+      plan: t.plan,
+    })
     .from(d)
     .innerJoin(t, eq(t.id, d.teamId))
-    .where(and(eq(d.id, input.domainId), eq(d.teamId, input.teamId)));
+    .where(and(eq(d.teamId, input.teamId), or(eq(d.id, input.domainId), mayWarmUp(input.at))));
+  const row = rows.find((r) => r.id === input.domainId);
   // An old domain is answered from its row alone: no settings read on the common path.
   if (!row || row.plan === "system" || row.teamTrustedAt || rowTier(row, input.at) === null) {
     return null;
@@ -176,13 +184,10 @@ export async function warmupCap(
   };
   const tier = await tierOf(row);
   if (tier === null) return null;
-  const others = await db
-    .select(tierColumns)
-    .from(d)
-    .where(and(eq(d.teamId, input.teamId), ne(d.id, input.domainId), mayWarmUp(input.at)));
   let pool = capOf(s, tier);
   let poolDomains = 1;
-  for (const other of others) {
+  for (const other of rows) {
+    if (other === row) continue;
     const otherTier = await tierOf(other);
     if (otherTier === null) continue;
     pool = Math.max(pool, capOf(s, otherTier));

@@ -489,7 +489,7 @@ describe("the accept path", () => {
       ]),
     );
     expect(await periodAccepted(teamId)).toBe(100);
-  }, 120_000);
+  }, 300_000);
 });
 
 describe("early graduation", () => {

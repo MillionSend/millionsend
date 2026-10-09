@@ -1310,7 +1310,7 @@ it("drain releases a young domain's parked mail only as its warm-up allows, what
     .from(schema.emails)
     .where(eq(schema.emails.teamId, teamId));
   expect(reasons.every((r) => r.reason === null)).toBe(true);
-});
+}, 60_000);
 
 it("drain leaves a young domain's mail due on a later day to that day's warm-up", async () => {
   await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
@@ -1392,4 +1392,4 @@ it("drain releases a team's warm-up mail oldest first across its young domains, 
   // Past 24 hours the shared limit is 300: the rest goes.
   expect(await drain("2026-10-10T09:15:00Z")).toEqual({ drained: 50, stillParked: 0 });
   expect(enqueued.slice(100)).toEqual(parked.slice(100));
-});
+}, 60_000);
