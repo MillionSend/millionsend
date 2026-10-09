@@ -435,6 +435,7 @@ export {
   quotaRoom,
   readPeriodUsage,
   releaseDailyQuota,
+  releasePeriodCount,
   releasePeriodQuota,
   releaseQuota,
   reserveDailyQuota,

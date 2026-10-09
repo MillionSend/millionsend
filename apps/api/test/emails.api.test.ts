@@ -1326,7 +1326,7 @@ describe("quota day of a scheduled send", () => {
     expect(await team.counters()).toEqual({ [utcDay()]: FREE_CEILING });
   });
 
-  it("rescheduling to a later day moves the charge along, and parks the email when that day is full", async () => {
+  it("rescheduling to another day charges that day too, and parks the email when that day is full", async () => {
     const team = await freeTeam("rescheduled");
     const at = (days: number) => new Date(Date.now() + days * DAY_MS);
     await db
@@ -1345,7 +1345,7 @@ describe("quota day of a scheduled send", () => {
     expect((await team.call("PATCH", `/emails/${id}`, { scheduled_at: at(2) })).status).toBe(200);
     expect(await team.statusOf(id)).toBe("queued");
     expect(await team.counters()).toEqual({
-      [utcDay(at(1))]: 0,
+      [utcDay(at(1))]: 1,
       [utcDay(at(2))]: 1,
       [utcDay(at(3))]: FREE_CEILING,
     });
@@ -1355,9 +1355,76 @@ describe("quota day of a scheduled send", () => {
     expect((await team.call("PATCH", `/emails/${id}`, { scheduled_at: at(3) })).status).toBe(200);
     expect(await team.statusOf(id)).toBe("queued_quota");
     expect(await team.counters()).toEqual({
-      [utcDay(at(1))]: 0,
-      [utcDay(at(2))]: 0,
+      [utcDay(at(1))]: 1,
+      [utcDay(at(2))]: 1,
       [utcDay(at(3))]: FREE_CEILING,
+    });
+  });
+
+  // While the first job is queued, the queue drops the reschedule's job: a
+  // move back earlier still sends at the first time.
+  const lateToday = () => new Date(`${utcDay()}T23:59:59Z`);
+  const dayAhead = (n: number) => new Date(`${utcDay(Date.now() + n * DAY_MS)}T12:00:00Z`);
+  const reschedule = async (team: Awaited<ReturnType<typeof freeTeam>>, id: string, at: Date) =>
+    expect((await team.call("PATCH", `/emails/${id}`, { scheduled_at: at })).status).toBe(200);
+  const sendNow = async (team: Awaited<ReturnType<typeof freeTeam>>) => {
+    const res = await team.call("POST", "/emails", { ...team.body, to: ["now@example.com"] });
+    return team.statusOf(((await res.json()) as { id: string }).id);
+  };
+
+  it("moving an email due today to a later day and back cannot free a send today", async () => {
+    const team = await freeTeam("rebound");
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team.id, day: utcDay(), accepted: FREE_CEILING - 1 });
+    const res = await team.call("POST", "/emails", { ...team.body, scheduled_at: lateToday() });
+    const { id } = (await res.json()) as { id: string };
+    await reschedule(team, id, dayAhead(1));
+    await reschedule(team, id, lateToday());
+    // The email still goes out today, so today has no room left.
+    expect(await sendNow(team)).toBe("queued_quota");
+  });
+
+  it("a reschedule never refunds a day the email was not charged to", async () => {
+    const team = await freeTeam("refundless");
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team.id, day: utcDay(), accepted: FREE_CEILING });
+    const res = await team.call("POST", "/emails", { ...team.body, scheduled_at: dayAhead(3) });
+    const { id } = (await res.json()) as { id: string };
+    await reschedule(team, id, lateToday());
+    await reschedule(team, id, dayAhead(1));
+    expect((await team.counters())[utcDay()]).toBe(FREE_CEILING);
+    expect(await sendNow(team)).toBe("queued_quota");
+  });
+
+  it("a monthly plan's reschedule onto a day at its operator ceiling parks without counting the period twice", async () => {
+    const team = await freeTeam("ceiling");
+    await db
+      .update(schema.teams)
+      .set({ plan: "pro", dailySendCeiling: 1 })
+      .where(eq(schema.teams.id, team.id));
+    const period = async () =>
+      (
+        await db
+          .select({ accepted: schema.usagePeriods.accepted })
+          .from(schema.usagePeriods)
+          .where(eq(schema.usagePeriods.teamId, team.id))
+      ).reduce((n, r) => n + r.accepted, 0);
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: team.id, day: utcDay(dayAhead(2)), accepted: 1 });
+    const res = await team.call("POST", "/emails", { ...team.body, scheduled_at: dayAhead(1) });
+    const { id } = (await res.json()) as { id: string };
+    expect(await period()).toBe(1);
+
+    await reschedule(team, id, dayAhead(2));
+    expect(await team.statusOf(id)).toBe("queued_quota");
+    // The drain charges the period again when it releases the email.
+    expect(await period()).toBe(0);
+    expect(await team.counters()).toEqual({
+      [utcDay(dayAhead(1))]: 1,
+      [utcDay(dayAhead(2))]: 1,
     });
   });
 });

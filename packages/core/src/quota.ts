@@ -178,14 +178,23 @@ export async function reservePeriodQuota(
   if (!daily.reserved) {
     // The day refused, not the period: hand the period its count back so a
     // parked send is charged once, when the drain reserves it again.
-    await db.execute(sql`
-      update ${t}
-      set accepted = greatest(accepted - ${count}, 0)
-      where ${t.teamId} = ${teamId} and ${t.periodStart} = ${periodStart}
-    `);
+    await releasePeriodCount(db, { teamId, count, periodStart });
     return { reserved: false, accepted: daily.accepted, ceiling: daily.ceiling, cap: "day" };
   }
   return { reserved: true, accepted: Number(row.accepted), ceiling };
+}
+
+/** Hands a billing period back `count` sends and leaves every day's counter alone; floors at zero. */
+export async function releasePeriodCount(
+  db: Db,
+  params: { teamId: string; count: number; periodStart: Date },
+): Promise<void> {
+  const t = schema.usagePeriods;
+  await db.execute(sql`
+    update ${t}
+    set accepted = greatest(accepted - ${params.count}, 0)
+    where ${t.teamId} = ${params.teamId} and ${t.periodStart} = ${params.periodStart}
+  `);
 }
 
 /** Compensating release for a period reservation; floors at zero and mirrors the daily release. */
@@ -194,12 +203,7 @@ export async function releasePeriodQuota(
   params: { teamId: string; count: number; periodStart: Date; day?: string; at?: Date },
 ): Promise<void> {
   if (params.count <= 0) throw new Error("count must be positive");
-  const t = schema.usagePeriods;
-  await db.execute(sql`
-    update ${t}
-    set accepted = greatest(accepted - ${params.count}, 0)
-    where ${t.teamId} = ${params.teamId} and ${t.periodStart} = ${params.periodStart}
-  `);
+  await releasePeriodCount(db, params);
   await releaseDailyQuota(db, {
     teamId: params.teamId,
     count: params.count,

@@ -53,7 +53,8 @@ import {
   recountSegment,
   regionPause,
   releaseIdempotent,
-  releaseQuota,
+  releasePeriodCount,
+  reserveDailyQuota,
   reserveQuota,
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
@@ -4107,36 +4108,47 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           ),
         )
         .returning({ id: schema.emails.id, latestStatus: schema.emails.latestStatus });
-      // A queued row holds its reservation on its delivery day, so a move to
-      // a later UTC day takes the charge along: left behind, rows charged
-      // across many days could all go out on one. A move earlier still sends
-      // at the old time (see the nudge below), where the charge already is.
-      // The old day is certain only while the row is ahead of now; a row
-      // already due keeps that charge and pays the new day as well.
+      // A move onto another UTC day is charged to that day too: left
+      // uncharged, rows charged across many days could all go out on one.
+      // No day is ever refunded. The row does not record which day holds
+      // its charge, and while its first job waits the queue drops the new
+      // one, so a move back earlier still sends at the first time: a refund
+      // there would let one day's cap be spent twice.
+      if (moved?.latestStatus !== "queued") return moved;
       const now = new Date();
-      const before = quotaChargeAt(email.scheduledAt, now);
       const after = quotaChargeAt(scheduledAt, now);
-      if (moved?.latestStatus !== "queued" || utcDay(after) <= utcDay(before)) return moved;
+      const sameDay =
+        email.scheduledAt !== null &&
+        email.scheduledAt > now &&
+        utcDay(email.scheduledAt) === utcDay(after);
       const quota = teamQuota(auth.billing, deps.isCloud);
-      const units = countDistinctRecipients(email.to, email.cc, email.bcc);
-      if (email.scheduledAt && email.scheduledAt > now) {
-        await releaseQuota(txDb, {
-          teamId: auth.teamId,
-          count: units,
-          quota,
-          day: utcDay(before),
-          at: before,
-        });
+      // Only a day's cap is at stake: a monthly period counted the email at accept.
+      if (
+        sameDay ||
+        quota.kind === "none" ||
+        (quota.kind === "month" && quota.dailyCeiling == null)
+      ) {
+        return moved;
       }
-      const reservation = await reserveQuota(txDb, {
+      const units = countDistinctRecipients(email.to, email.cc, email.bcc);
+      const reservation = await reserveDailyQuota(txDb, {
         teamId: auth.teamId,
         count: units,
-        quota,
+        limit: quota.kind === "day" ? quota.limit : null,
+        hardLimit: quota.dailyCeiling ?? null,
         day: utcDay(after),
         at: after,
       });
       if (reservation.reserved) return moved;
-      // The new day is full: parked like an over-cap accept, for the drain.
+      // The day is full: parked like an over-cap accept. The drain charges
+      // it again on release, the billing period included.
+      if (quota.kind === "month") {
+        await releasePeriodCount(txDb, {
+          teamId: auth.teamId,
+          count: units,
+          periodStart: quota.periodStart,
+        });
+      }
       await transitionQueueState(txDb, moved.id, { from: "queued", to: "queued_quota" });
       return { ...moved, latestStatus: "queued_quota" as const };
     });
