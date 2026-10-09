@@ -680,8 +680,10 @@ content insights (never email bodies), and an instance-wide audit log.
 - **Operator actions and the team:** a suspended team's API keys still
   authenticate but every send answers `403 team_suspended` (SMTP `550`),
   broadcasts in flight park, webhooks keep delivering and data stays; its
-  quota, deliverability, plan-downgrade, broadcast-hold and broadcast-pause
-  notices stop, as do the content monitor's alerts about it; nobody on it can
+  quota, deliverability, broadcast-hold and broadcast-pause notices stop, and
+  so does its billing mail when the reason is phishing or a review hold
+  (Stripe still sends its own receipts), while mail to the operator, such as
+  the content monitor's alerts, still goes out; nobody on it can
   delete it, remove its domains (the API answers `403 team_suspended` there
   too) or invite anyone, and a member of a team suspended for phishing cannot
   create new teams; a

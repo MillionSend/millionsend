@@ -108,7 +108,7 @@ export async function mailOwners(
 /**
  * One catalog notice to the instance operator, in their own language when
  * their contact row says which; nothing goes out when no operator exists.
- * `aboutTeamId` names the team a notice is about, when it is about one.
+ * It names no team, so no suspension mutes it.
  * Returns whether it was sent; a failing send is the caller's to log.
  */
 export async function mailOperator(
@@ -118,7 +118,6 @@ export async function mailOperator(
   path: string,
   values: Record<string, string>,
   appBaseUrl: string | undefined,
-  aboutTeamId?: string,
 ): Promise<boolean> {
   const operator = await findInstanceOperator(db);
   if (!operator) return false;
@@ -126,7 +125,6 @@ export async function mailOperator(
   await mailer.send(operator.email, {
     ...buildAccountMail({ kind, locale, url: `${appBaseUrl ?? ""}${path}`, values }),
     kind,
-    aboutTeamId,
   });
   return true;
 }

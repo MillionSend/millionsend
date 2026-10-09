@@ -13,12 +13,13 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { desc, eq } from "drizzle-orm";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import {
   JUDGE_THROTTLE_RETRIES,
   type JudgeDeps,
   judgeSample,
 } from "../src/handlers/abuse-judge.js";
+import { createSystemMailer } from "../src/system-mail.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -26,19 +27,10 @@ let teamId: string;
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
 const NOW = new Date("2026-09-15T12:00:00Z");
 const settings: MonitorSettings = MONITOR_SETTING_DEFAULTS;
-const sends: {
-  to: string;
-  kind: string;
-  subject: string;
-  text: string;
-  aboutTeamId?: string | undefined;
-}[] = [];
+const sends: { to: string; kind: string; subject: string; text: string }[] = [];
 const mailer = {
-  send: async (
-    to: string,
-    m: { subject: string; text: string; kind: string; aboutTeamId?: string | undefined },
-  ) => {
-    sends.push({ to, kind: m.kind, subject: m.subject, text: m.text, aboutTeamId: m.aboutTeamId });
+  send: async (to: string, m: { subject: string; text: string; kind: string }) => {
+    sends.push({ to, kind: m.kind, subject: m.subject, text: m.text });
   },
 };
 
@@ -289,8 +281,6 @@ it("emails the operator on the alert and on the pause, in that team's review lin
   expect(sends.find((s) => s.kind === "monitor.broadcasts_paused")?.subject).toContain(
     "fresh-team",
   );
-  // Named, so the send path drops them once the team is suspended.
-  expect(sends.map((s) => s.aboutTeamId)).toEqual(sends.map(() => fresh));
   const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, fresh));
   expect(team?.broadcastsPausedByOperatorAt).toEqual(NOW);
   const [audit] = await db
@@ -299,4 +289,55 @@ it("emails the operator on the alert and on the pause, in that team's review lin
     .where(eq(schema.auditLog.teamId, fresh))
     .orderBy(desc(schema.auditLog.createdAt));
   expect(audit).toMatchObject({ action: "monitor.broadcasts_paused", actorId: "system" });
+});
+
+it("still emails the operator about a suspended team, through the system mailer", async () => {
+  vi.stubEnv("NOTIFICATIONS_EMAIL_FROM", "MillionSend <notify@mail.system.test>");
+  try {
+    const system = await createTeam(db, "system");
+    await db.insert(schema.domains).values({
+      teamId: system,
+      name: "mail.system.test",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: NOW,
+    });
+    const suspended = await createTeam(db, "suspended-team");
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: NOW, suspensionReason: "phishing" })
+      .where(eq(schema.teams.id, suspended));
+    await db.insert(schema.teamMonitor).values({
+      teamId: suspended,
+      sentTotal: 2,
+      firstSendAt: new Date(NOW.getTime() - 3600_000),
+    });
+    const judge = fakeJudge(async () => ({ score: 100 }));
+    const systemMailer = createSystemMailer({ db, keyring, enqueueSend: async () => {} });
+    for (let i = 0; i < 12; i += 1) {
+      const [row] = await db
+        .insert(schema.monitorSamples)
+        .values({
+          teamId: suspended,
+          emailId: await insertEmail("<p>pay here</p>", { team: suspended }),
+          kind: "first_sends",
+          createdAt: NOW,
+        })
+        .returning({ id: schema.monitorSamples.id });
+      await judgeSample(db, deps(judge, { mailer: systemMailer }), { sampleId: row?.id ?? "" });
+    }
+    const mailed = await db
+      .select({ to: schema.emails.to, tags: schema.emails.tags })
+      .from(schema.emails)
+      .where(eq(schema.emails.teamId, system));
+    expect(mailed).toHaveLength(2);
+    expect(mailed).toEqual(
+      expect.arrayContaining([
+        { to: ["op@example.com"], tags: { millionsend_system: "monitor.alert" } },
+        { to: ["op@example.com"], tags: { millionsend_system: "monitor.broadcasts_paused" } },
+      ]),
+    );
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

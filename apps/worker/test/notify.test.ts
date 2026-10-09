@@ -755,7 +755,7 @@ it("a scheduled cancellation is recalled three days out, once, on the cloud only
   expect(sends.map((s) => s.subject)).toEqual([
     `Reminder: notify-team's Pro 100K plan ends on ${formatMailDate("en", endsAt)}`,
   ]);
-  expect(sends[0]?.text).toContain("to keep sending up to 100,000 emails a month");
+  expect(sends[0]?.text).toContain("to stay on Pro 100K (up to 100,000 emails a month)");
 
   // Too far out to count down yet; a fresh date is its own reminder.
   await setPlan({ cancelAt: new Date(Date.now() + 10 * DAY) });

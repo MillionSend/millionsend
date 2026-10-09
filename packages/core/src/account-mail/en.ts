@@ -134,7 +134,7 @@ export const en = {
     subject: "Payment failed for {team}'s {plan} plan",
     body: [
       "We couldn't charge the card on file for {team}'s {plan} plan.",
-      "{retry} Nothing changes yet: {team} keeps sending {cap}. If the invoice stays unpaid, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
+      "{retry} For now {team} keeps its {plan} plan ({cap}). If the invoice stays unpaid, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
     ],
     button: "Pay the invoice",
     muted: ["Or update the card from Billing: {billingUrl}"],
@@ -146,7 +146,7 @@ export const en = {
   "billing.plan_activated": {
     subject: "{team} is on {plan}",
     body: [
-      "Your subscription is active: {team} now sends {cap}, and anything parked over the old cap is released within minutes.",
+      "Your subscription is active: {plan} allows {cap}, and mail parked over the old cap no longer waits on it.",
       "Receipts and invoices come from Stripe; the subscription is managed from Billing.",
     ],
     button: "Open billing",
@@ -154,7 +154,7 @@ export const en = {
   "billing.plan_changed": {
     subject: "{team} moved from {old} to {new}",
     body: [
-      "From now on {team} sends {cap}. On a lower cap, sends already accepted are unaffected; past the new cap, daily plans wait for the next UTC day and monthly plans either bill overage (when it is on) or refuse new API sends until the period renews.",
+      "{team} is now on {new}, which allows {cap}. On a lower cap, sends already accepted are unaffected; past the new cap, daily plans wait for the next UTC day and monthly plans either bill overage (when it is on) or refuse new API sends until the period renews.",
       "Proration shows on the next Stripe invoice.",
     ],
     button: "Open billing",
@@ -171,14 +171,14 @@ export const en = {
     subject: "Reminder: {team}'s {plan} plan ends on {date}",
     body: [
       "On {date} {team} returns to Free: {freeCap} emails a day, and anything over the cap waits for the next day.",
-      "Resume the plan from Billing to keep sending {cap}.",
+      "Resume the plan from Billing to stay on {plan} ({cap}).",
     ],
     button: "Open billing",
   },
   "billing.downgraded": {
     subject: "{team} is now on Free",
     body: [
-      "The {plan} plan ended on {date}. From today {team} sends up to {freeCap} emails a day; anything over waits for the next UTC day, and broadcasts over the cap go out in parts.",
+      "The {plan} plan ended on {date}. From today {team} is on Free: up to {freeCap} emails a day, anything over waits for the next UTC day, and broadcasts over the cap go out in parts.",
       "Verified domains, contacts and API keys are untouched. Pick a plan again from Billing whenever you need more.",
     ],
     button: "Open billing",

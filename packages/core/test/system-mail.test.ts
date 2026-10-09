@@ -4,6 +4,7 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ACCOUNT_MAIL_KINDS } from "../src/account-mail.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { hashRecipient } from "../src/suppressions.js";
 import {
@@ -208,13 +209,10 @@ describe("sendSystemMail", () => {
 describe("suspended teams", () => {
   it("lists the automated notices a suspended team does not get", () => {
     expect([...MUTED_WHILE_SUSPENDED].sort()).toEqual([
-      "billing.downgraded",
       "broadcast.held",
       "broadcast.held_quota",
       "deliverability.paused",
       "deliverability.warning",
-      "monitor.alert",
-      "monitor.broadcasts_paused",
       "quota.paused",
       "quota.reached",
       "quota.warning",
@@ -240,8 +238,14 @@ describe("suspended teams", () => {
     expect(d.enqueued).toEqual([]);
     expect(d.raw).toEqual([]);
 
-    // The console's own notices and account mail keep going out.
-    for (const kind of ["team.suspended", "team.reinstated", "password_reset"] as const) {
+    // The console's own notices, the operator's and account mail keep going out.
+    for (const kind of [
+      "team.suspended",
+      "team.reinstated",
+      "monitor.alert",
+      "monitor.broadcasts_paused",
+      "password_reset",
+    ] as const) {
       expect(await sendSystemMail(d.deps, message({ kind, aboutTeamId: team })), kind).toBe(
         "pipeline",
       );
@@ -256,5 +260,24 @@ describe("suspended teams", () => {
     expect(await sendSystemMail(d.deps, message({ kind: "quota.paused", aboutTeamId: team }))).toBe(
       "pipeline",
     );
+  });
+
+  it("mutes billing mail only while the team is suspended for phishing or held for review", async () => {
+    const team = await createTeam(db, "billing-suspended");
+    const silent: readonly string[] = ["phishing", "review"];
+    const billing = ACCOUNT_MAIL_KINDS.filter((kind) => kind.startsWith("billing."));
+    const d = deps();
+    for (const reason of SUSPENSION_REASONS) {
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, team));
+      for (const kind of billing) {
+        expect(
+          await sendSystemMail(d.deps, message({ kind, aboutTeamId: team })),
+          `${reason} ${kind}`,
+        ).toBe(silent.includes(reason) ? "muted" : "pipeline");
+      }
+    }
   });
 });

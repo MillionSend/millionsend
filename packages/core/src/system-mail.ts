@@ -63,10 +63,15 @@ export const MUTED_WHILE_SUSPENDED: ReadonlySet<SystemMailKind> = new Set<System
   "deliverability.warning",
   "deliverability.paused",
   "broadcast.held",
-  "billing.downgraded",
-  "monitor.alert",
-  "monitor.broadcasts_paused",
 ]);
+
+/**
+ * Suspensions a team must not learn of from automated mail, so its billing
+ * mail goes nowhere either; Stripe still sends its own receipts. Any other
+ * suspension keeps its billing mail. Plain strings, so naming the content
+ * monitor's `review` hold compiles whether or not the schema has that reason.
+ */
+const SILENT_SUSPENSIONS: ReadonlySet<string> = new Set(["phishing", "review"]);
 
 export interface SystemMailMessage {
   /** `Name <user@domain>` or a bare address; one of the instance's sender env vars. */
@@ -76,7 +81,11 @@ export interface SystemMailMessage {
   html: string;
   text: string;
   kind: SystemMailKind;
-  /** The team a notice is about, owners' or operator's; what MUTED_WHILE_SUSPENDED checks. */
+  /**
+   * The team an owner notice is about, which the suspension mutes check. Mail
+   * to the instance operator never names one: a verdict on a suspended team is
+   * what the operator needs to see.
+   */
   aboutTeamId?: string | undefined;
 }
 
@@ -154,10 +163,13 @@ export async function sendSystemMail(
   deps: SystemSendDeps,
   message: SystemMailMessage,
 ): Promise<"pipeline" | "raw" | "muted"> {
+  const suspended = message.aboutTeamId
+    ? (await fetchTeamStanding(deps.db, message.aboutTeamId))?.suspended
+    : null;
   if (
-    message.aboutTeamId &&
-    MUTED_WHILE_SUSPENDED.has(message.kind) &&
-    (await fetchTeamStanding(deps.db, message.aboutTeamId))?.suspended
+    suspended &&
+    (MUTED_WHILE_SUSPENDED.has(message.kind) ||
+      (message.kind.startsWith("billing.") && SILENT_SUSPENSIONS.has(suspended.reason)))
   ) {
     return "muted";
   }
