@@ -76,6 +76,27 @@ describe("audit.list", () => {
     expect(second.nextCursor).toBeNull();
   });
 
+  it("never shows the team the operator's note on a phishing suspension or a review hold", async () => {
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    // The row the console's Suspend writes, under each kind of reason.
+    for (const reason of ["phishing", "review", "manual"]) {
+      await db.insert(schema.auditLog).values({
+        teamId,
+        actorId: "user:op",
+        action: "team.suspended",
+        target: `team:${teamId}`,
+        data: { name: "acme", reason, note: `kit seen (${reason})`, notified: false },
+      });
+    }
+    const { items } = await callerFor("alice", teamId, "owner").audit.list({});
+    expect(Object.fromEntries(items.map((row) => [row.data?.reason, row.data]))).toEqual({
+      phishing: { name: "acme", reason: "phishing", note: null, notified: false },
+      review: { name: "acme", reason: "review", note: null, notified: false },
+      manual: { name: "acme", reason: "manual", note: "kit seen (manual)", notified: false },
+    });
+  });
+
   it("is forbidden for members", async () => {
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "bob", "member");

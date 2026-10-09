@@ -1,4 +1,4 @@
-import { parseAuditActor } from "@millionsend/core";
+import { parseAuditActor, SILENT_SUSPENSIONS } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -59,6 +59,13 @@ export const auditRouter = router({
           const user = actor.kind === "user" ? byId.get(actor.id) : undefined;
           return {
             ...row,
+            // The operator's note on a silent suspension says what was seen,
+            // and the team must not learn from it what got it caught.
+            data:
+              row.action === "team.suspended" &&
+              SILENT_SUSPENSIONS.includes(String(row.data?.reason))
+                ? { ...row.data, note: null }
+                : row.data,
             actor: {
               ...actor,
               ...(user ? { name: user.name, email: user.email } : {}),

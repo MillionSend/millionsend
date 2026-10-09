@@ -786,7 +786,9 @@ keeps coming under any other reason. Mail to the operator, such as the
 content monitor's alerts about the team, still goes out. Nobody on a
 suspended team can delete it, remove its domains (the API answers
 `403 team_suspended` there too) or invite anyone, and a member of a team
-suspended for phishing or held for review cannot create new teams.
+suspended for phishing or held for review cannot create new teams. Under
+those two reasons the team's own audit log shows the suspension without the
+operator's note.
 
 ## Content monitoring (optional)
 
