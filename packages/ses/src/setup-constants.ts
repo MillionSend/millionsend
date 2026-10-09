@@ -55,8 +55,9 @@ export const SES_IAM_POLICY = {
       Action: ["ses:SendEmail", "ses:SendRawEmail", "ses:GetAccount"],
       Resource: "*",
     },
-    // Per-team SES tenants (SES_TENANTS). Tenant ARNs have no documented
-    // resource-level scope, so the actions stay account-wide.
+    // Per-team SES tenants (SES_TENANTS); suspending a team disables its
+    // tenant's sending. Tenant ARNs have no documented resource-level scope,
+    // so the actions stay account-wide.
     {
       Effect: "Allow",
       Action: [
@@ -65,6 +66,7 @@ export const SES_IAM_POLICY = {
         "ses:DeleteTenant",
         "ses:CreateTenantResourceAssociation",
         "ses:DeleteTenantResourceAssociation",
+        "ses:UpdateReputationEntityCustomerManagedStatus",
       ],
       Resource: "*",
     },
@@ -179,7 +181,9 @@ SES_CONFIGURATION_SET=
 
 # One SES tenant per team, so SES tracks bounce/complaint reputation per
 # customer instead of per account and can pause one sender without pausing
-# the rest. Defaults to IS_CLOUD; the IAM policy needs the ses:*Tenant* actions.
+# the rest; suspending a team disables its tenant. Defaults to IS_CLOUD; the
+# IAM policy needs the ses:*Tenant* actions and
+# ses:UpdateReputationEntityCustomerManagedStatus.
 SES_TENANTS=
 
 # --- Optional ---

@@ -21,6 +21,8 @@ export interface TeamActionTarget {
   plan: string;
   planQuota: number | null;
   suspendedAt: Date | null;
+  /** A review hold opens Suspend on phishing, the conversion it usually ends in. */
+  suspensionReason?: string | null;
   broadcastsPausedByOperatorAt: Date | null;
 }
 
@@ -64,8 +66,8 @@ export function useTeamActions(onChanged: () => void): TeamActions {
     trpc.console.teams.detail.queryOptions({ id: dialog?.team.id ?? "" }, { enabled: needsDetail }),
   );
 
-  const done = (message: string, teamId: string) => {
-    toast(message);
+  const done = (message: string, teamId: string, tone?: "warn") => {
+    toast(message, tone);
     setDialog(null);
     void queryClient.invalidateQueries({
       queryKey: trpc.console.teams.detail.queryKey({ id: teamId }),
@@ -186,20 +188,26 @@ export function useTeamActions(onChanged: () => void): TeamActions {
       {dialog?.kind === "suspend" ? (
         <SuspendDialog
           name={team.name}
+          initialReason={team.suspensionReason === "review" ? "phishing" : undefined}
           pending={suspend.isPending}
           onClose={close}
           onSubmit={(input) =>
             suspend.mutate(
               { id: team.id, ...input },
               {
-                onSuccess: () =>
+                onSuccess: ({ tenant }) => {
+                  const regions = tenant?.failed.map((f) => f.region).join(", ");
                   done(
-                    t("toast.suspended", {
-                      team: team.name,
-                      reason: t(`suspendDialog.reasons.${input.reason}`),
-                    }),
+                    regions
+                      ? t("toast.suspendedTenantFailed", { team: team.name, regions })
+                      : t("toast.suspended", {
+                          team: team.name,
+                          reason: t(`suspendDialog.reasons.${input.reason}`),
+                        }),
                     team.id,
-                  ),
+                    regions ? "warn" : undefined,
+                  );
+                },
               },
             )
           }
@@ -213,7 +221,18 @@ export function useTeamActions(onChanged: () => void): TeamActions {
           onSubmit={() =>
             reinstate.mutate(
               { id: team.id },
-              { onSuccess: () => done(t("toast.reinstated", { team: team.name }), team.id) },
+              {
+                onSuccess: ({ tenant }) => {
+                  const regions = tenant?.failed.map((f) => f.region).join(", ");
+                  done(
+                    regions
+                      ? t("toast.reinstatedTenantFailed", { team: team.name, regions })
+                      : t("toast.reinstated", { team: team.name }),
+                    team.id,
+                    regions ? "warn" : undefined,
+                  );
+                },
+              },
             )
           }
         />

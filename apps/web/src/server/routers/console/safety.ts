@@ -24,7 +24,19 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, ilike, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
@@ -272,7 +284,13 @@ export const consoleSafetyRouter = router({
           createdAt: schema.auditLog.createdAt,
         })
         .from(schema.auditLog)
-        .where(eq(schema.auditLog.teamId, team.id))
+        .where(
+          or(
+            eq(schema.auditLog.teamId, team.id),
+            // The instance's rows about the team, which its own audit never lists.
+            and(isNull(schema.auditLog.teamId), eq(schema.auditLog.target, `team:${team.id}`)),
+          ),
+        )
         .orderBy(desc(schema.auditLog.createdAt))
         .limit(20),
       teamMonitorOverview(ctx.db, team.id, monitorSettings, now),

@@ -119,7 +119,13 @@ async function standingGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError
   const { t } = await sendGuardTranslator();
   return new TRPCError({
     code: "PRECONDITION_FAILED",
-    message: t(standing.suspended ? "sendGuard.suspended" : "sendGuard.operatorPaused"),
+    message: t(
+      standing.suspended?.reason === "review"
+        ? "sendGuard.pendingReview"
+        : standing.suspended
+          ? "sendGuard.suspended"
+          : "sendGuard.operatorPaused",
+    ),
   });
 }
 
