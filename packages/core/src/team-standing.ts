@@ -5,6 +5,14 @@ import { eq } from "drizzle-orm";
 export type SuspensionReason = (typeof schema.suspensionReasonEnum.enumValues)[number];
 export const SUSPENSION_REASONS = schema.suspensionReasonEnum.enumValues;
 
+/**
+ * Suspensions the team must not learn of: no automated mail about it goes
+ * out, billing included, and its people cannot start another team. Plain
+ * strings, so the content monitor's `review` hold applies as soon as the
+ * schema has that reason.
+ */
+export const SILENT_SUSPENSIONS: readonly string[] = ["phishing", "review"];
+
 /** The operator overrides on a team that every send surface honours. */
 export interface TeamStanding {
   suspended: { at: Date; reason: SuspensionReason; note: string | null } | null;

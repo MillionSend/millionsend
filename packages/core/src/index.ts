@@ -575,6 +575,7 @@ export {
 export {
   fetchTeamStanding,
   isTeamSuspended,
+  SILENT_SUSPENSIONS,
   STANDING_COLUMNS,
   SUSPENSION_REASONS,
   type SuspensionReason,

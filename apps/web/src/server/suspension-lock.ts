@@ -1,4 +1,4 @@
-import { fetchTeamStanding } from "@millionsend/core";
+import { fetchTeamStanding, SILENT_SUSPENSIONS } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
 import { and, eq, isNotNull } from "drizzle-orm";
@@ -30,19 +30,14 @@ export async function assertTeamNotSuspended(
   if ((await fetchTeamStanding(db, teamId))?.suspended) throw await suspensionLockError(lock);
 }
 
-/** Whether the user owns or belongs to a team suspended for phishing, in any role. */
-export async function belongsToPhishingSuspendedTeam(db: Db, userId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ teamId: schema.teamMembers.teamId })
+/** Whether the user owns or belongs, in any role, to a team under a silent suspension. */
+export async function belongsToSilentlySuspendedTeam(db: Db, userId: string): Promise<boolean> {
+  // Matched here rather than in SQL: a reason the schema lacks yet would be
+  // an invalid enum literal to Postgres.
+  const suspended = await db
+    .select({ reason: schema.teams.suspensionReason })
     .from(schema.teamMembers)
     .innerJoin(schema.teams, eq(schema.teams.id, schema.teamMembers.teamId))
-    .where(
-      and(
-        eq(schema.teamMembers.userId, userId),
-        isNotNull(schema.teams.suspendedAt),
-        eq(schema.teams.suspensionReason, "phishing"),
-      ),
-    )
-    .limit(1);
-  return row !== undefined;
+    .where(and(eq(schema.teamMembers.userId, userId), isNotNull(schema.teams.suspendedAt)));
+  return suspended.some((row) => SILENT_SUSPENSIONS.includes(row.reason ?? ""));
 }

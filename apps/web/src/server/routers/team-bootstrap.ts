@@ -16,7 +16,7 @@ import { isUniqueViolation } from "@/lib/db-errors";
 import { slugify } from "@/lib/slug";
 import { recordAudit } from "../audit";
 import { listMemberships } from "../membership";
-import { belongsToPhishingSuspendedTeam, suspensionLockError } from "../suspension-lock";
+import { belongsToSilentlySuspendedTeam, suspensionLockError } from "../suspension-lock";
 import {
   type AuthSession,
   adminProcedure,
@@ -144,7 +144,7 @@ export const teamBootstrapRouter = router({
   createTeam: protectedProcedure
     .input(z.object({ name: z.string().trim().min(1).max(80) }))
     .mutation(async ({ ctx, input }) => {
-      if (await belongsToPhishingSuspendedTeam(ctx.db, ctx.session.user.id)) {
+      if (await belongsToSilentlySuspendedTeam(ctx.db, ctx.session.user.id)) {
         throw await suspensionLockError("createTeam");
       }
       if (env.IS_CLOUD) {

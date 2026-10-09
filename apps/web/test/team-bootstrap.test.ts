@@ -1,4 +1,4 @@
-import { PLAN_TEAM_LIMIT } from "@millionsend/core";
+import { PLAN_TEAM_LIMIT, SUSPENSION_REASONS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTestDb } from "@millionsend/test-utils";
@@ -150,29 +150,39 @@ describe("team.createTeam", () => {
     });
   });
 
-  it("refuses anyone in a team suspended for phishing, owner or member; other suspensions do not count", async () => {
+  it("refuses anyone in a team suspended for phishing or held for review, owner or member; other suspensions do not count", async () => {
     await insertUser("owner", "owner@example.com");
     await insertUser("member", "member@example.com");
     await insertUser("outsider", "outsider@example.com");
     const { teamId } = await callerFor("owner").team.createTeam({ name: "Phish" });
     await db.insert(schema.teamMembers).values({ teamId, userId: "member", role: "member" });
-    const suspend = (reason: "reputation" | "phishing") =>
-      db
+
+    // Every reason the schema has, so `review` is covered once it exists.
+    const silent: readonly string[] = ["phishing", "review"];
+    for (const reason of SUSPENSION_REASONS) {
+      await db
         .update(schema.teams)
         .set({ suspendedAt: new Date(), suspensionReason: reason })
         .where(eq(schema.teams.id, teamId));
-
-    await suspend("reputation");
-    await callerFor("member").team.createTeam({ name: "Allowed" });
-
-    await suspend("phishing");
-    for (const user of ["owner", "member"]) {
-      await expect(callerFor(user).team.createTeam({ name: "Again" })).rejects.toMatchObject({
-        code: "PRECONDITION_FAILED",
-        message:
-          "You can't create a team while a team you belong to is suspended. Contact support.",
-      });
+      for (const user of ["owner", "member"]) {
+        if (!silent.includes(reason)) {
+          await callerFor(user).team.createTeam({ name: `Allowed ${reason}` });
+          continue;
+        }
+        await expect(
+          callerFor(user).team.createTeam({ name: "Again" }),
+          `${reason} ${user}`,
+        ).rejects.toMatchObject({
+          code: "PRECONDITION_FAILED",
+          message:
+            "You can't create a team while a team you belong to is suspended. Contact support.",
+        });
+      }
     }
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+      .where(eq(schema.teams.id, teamId));
     locale.cookie = "pt-BR";
     await expect(callerFor("owner").team.createTeam({ name: "Again" })).rejects.toMatchObject({
       message:

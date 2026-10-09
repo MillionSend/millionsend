@@ -4,7 +4,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { type AcceptEmailDeps, acceptEmail } from "./accept-email.js";
 import type { AccountMailKind } from "./account-mail.js";
 import { parseSingleSender } from "./sender-address.js";
-import { fetchTeamStanding } from "./team-standing.js";
+import { fetchTeamStanding, SILENT_SUSPENSIONS } from "./team-standing.js";
 
 /**
  * Tag every system email carries; the value names the kind. A label only:
@@ -64,14 +64,6 @@ export const MUTED_WHILE_SUSPENDED: ReadonlySet<SystemMailKind> = new Set<System
   "deliverability.paused",
   "broadcast.held",
 ]);
-
-/**
- * Suspensions a team must not learn of from automated mail, so its billing
- * mail goes nowhere either; Stripe still sends its own receipts. Any other
- * suspension keeps its billing mail. Plain strings, so naming the content
- * monitor's `review` hold compiles whether or not the schema has that reason.
- */
-const SILENT_SUSPENSIONS: ReadonlySet<string> = new Set(["phishing", "review"]);
 
 export interface SystemMailMessage {
   /** `Name <user@domain>` or a bare address; one of the instance's sender env vars. */
@@ -166,10 +158,12 @@ export async function sendSystemMail(
   const suspended = message.aboutTeamId
     ? (await fetchTeamStanding(deps.db, message.aboutTeamId))?.suspended
     : null;
+  // A silent suspension mutes billing mail too, while Stripe still sends its
+  // own receipts; any other suspension keeps its billing mail.
   if (
     suspended &&
     (MUTED_WHILE_SUSPENDED.has(message.kind) ||
-      (message.kind.startsWith("billing.") && SILENT_SUSPENSIONS.has(suspended.reason)))
+      (message.kind.startsWith("billing.") && SILENT_SUSPENSIONS.includes(suspended.reason)))
   ) {
     return "muted";
   }

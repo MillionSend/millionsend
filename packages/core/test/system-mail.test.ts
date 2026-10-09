@@ -16,7 +16,11 @@ import {
   SystemMailRefused,
   sendSystemMail,
 } from "../src/system-mail.js";
-import { SUSPENSION_REASONS, type SuspensionReason } from "../src/team-standing.js";
+import {
+  SILENT_SUSPENSIONS,
+  SUSPENSION_REASONS,
+  type SuspensionReason,
+} from "../src/team-standing.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -265,6 +269,7 @@ describe("suspended teams", () => {
   it("mutes billing mail only while the team is suspended for phishing or held for review", async () => {
     const team = await createTeam(db, "billing-suspended");
     const silent: readonly string[] = ["phishing", "review"];
+    expect(SILENT_SUSPENSIONS).toEqual(silent);
     const billing = ACCOUNT_MAIL_KINDS.filter((kind) => kind.startsWith("billing."));
     const d = deps();
     for (const reason of SUSPENSION_REASONS) {
