@@ -4,12 +4,16 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
 
 let db: Db;
 let close: () => Promise<void>;
 let app: ReturnType<typeof createApi>;
+
+// One instant for the whole test: the warm-up counts per UTC day, and a
+// rollover between seeding a counter and sending would read a fresh day.
+const NOW = new Date("2026-10-09T10:00:00Z");
 
 /** A team sending from a domain registered an hour ago, with today's warm-up already at `used`. */
 async function youngSender(
@@ -26,15 +30,15 @@ async function youngSender(
       name: `mail.${slug}.com`,
       region: "us-east-1",
       status: "verified",
-      verifiedAt: new Date(),
-      registeredAt: new Date(Date.now() - 3600_000),
+      verifiedAt: NOW,
+      registeredAt: new Date(NOW.getTime() - 3600_000),
       ageSource: "rdap",
     })
     .returning({ id: schema.domains.id });
   if (!domain) throw new Error("domain insert failed");
   await db
     .insert(schema.domainWarmupUsage)
-    .values({ registrableDomain: `${slug}.com`, day: utcDay(), accepted: used });
+    .values({ registrableDomain: `${slug}.com`, day: utcDay(NOW), accepted: used });
   const key = generateApiKey();
   await db.insert(schema.apiKeys).values({
     teamId,
@@ -60,6 +64,18 @@ const email = (slug: string, to: string) => ({
   text: "t",
 });
 
+const rowsOf = async (ids: string[]) => {
+  const rows = await db
+    .select({
+      id: schema.emails.id,
+      status: schema.emails.latestStatus,
+      reason: schema.emails.parkReason,
+    })
+    .from(schema.emails)
+    .where(inArray(schema.emails.id, ids));
+  return ids.map((id) => rows.find((r) => r.id === id));
+};
+
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
   await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
@@ -73,6 +89,12 @@ beforeAll(async () => {
   });
 });
 afterAll(() => close());
+beforeEach(() => {
+  vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 it("a batch from a young domain sends what fits its warm-up and parks the rest, on a paid plan too", async () => {
   const { token } = await youngSender("batch-warmup", { plan: "pro", planQuota: 100_000 }, 98);
@@ -83,20 +105,7 @@ it("a batch from a young domain sends what fits its warm-up and parks the rest, 
   );
   expect(res.status).toBe(200);
   const { data } = (await res.json()) as { data: { id: string }[] };
-  const rows = await db
-    .select({
-      id: schema.emails.id,
-      status: schema.emails.latestStatus,
-      reason: schema.emails.parkReason,
-    })
-    .from(schema.emails)
-    .where(
-      inArray(
-        schema.emails.id,
-        data.map((d) => d.id),
-      ),
-    );
-  expect(data.map((d) => rows.find((r) => r.id === d.id))).toMatchObject([
+  expect(await rowsOf(data.map((d) => d.id))).toMatchObject([
     { status: "queued", reason: null },
     { status: "queued", reason: null },
     { status: "queued_quota", reason: "warmup" },

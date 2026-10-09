@@ -14,7 +14,7 @@ import { schema } from "@millionsend/db";
 import type { EmailSendRequest } from "@millionsend/queue";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { reconcileStalledBroadcasts } from "../src/handlers/cron.js";
 import {
   applyMergeFields,
@@ -1325,38 +1325,52 @@ it("defers the fan-out while the sender domain's region is held by the platform 
   await db.delete(schema.regionBreakers);
 });
 
-it("cloud fan-out from a young domain sends up to its warm-up and parks the rest without a quota notice", async () => {
-  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
-  const { teamId: wTeamId } = await seedTeam("warmbc", [
-    { email: "w1@example.com" },
-    { email: "w2@example.com" },
-    { email: "w3@example.com" },
-  ]);
-  await db
-    .update(schema.domains)
-    .set({ registeredAt: new Date(Date.now() - 2 * 3600_000), ageSource: "rdap" })
-    .where(eq(schema.domains.teamId, wTeamId));
-  // 98 of the registration day's 100 are spent: room for 2 of 3.
-  await db
-    .insert(schema.domainWarmupUsage)
-    .values({ registrableDomain: "warmbc.dev", day: utcDay(), accepted: 98 });
-  const broadcastId = await insertBroadcast({ teamId: wTeamId, from: "Acme <hi@warmbc.dev>" });
-  const mail = captureMailer();
-  const { deps, enqueued } = makeDeps({ isCloud: true, ...mail });
+describe("new-domain warm-up", () => {
+  // One instant per test: the warm-up counts per UTC day, and a rollover
+  // between seeding a counter and the fan-out would read a fresh day.
+  const NOW = new Date("2026-10-09T10:00:00Z");
+  beforeAll(async () => {
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  });
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
-  const rows = await emailsOf(broadcastId);
-  const queued = rows.filter((r) => r.latestStatus === "queued");
-  expect(queued).toHaveLength(2);
-  expect(rows.filter((r) => r.latestStatus === "queued_quota")).toMatchObject([
-    { parkReason: "warmup" },
-  ]);
-  expect(enqueued.sort()).toEqual(queued.map((r) => r.id).sort());
-  // The plan's unit for the held row went back.
-  const [counter] = await db
-    .select()
-    .from(schema.usageCounters)
-    .where(eq(schema.usageCounters.teamId, wTeamId));
-  expect(counter?.accepted).toBe(2);
-  expect(mail.sends.filter((s) => /quota/i.test(s.subject))).toEqual([]);
+  it("cloud fan-out from a young domain sends up to its warm-up and parks the rest without a quota notice", async () => {
+    const { teamId: wTeamId } = await seedTeam("warmbc", [
+      { email: "w1@example.com" },
+      { email: "w2@example.com" },
+      { email: "w3@example.com" },
+    ]);
+    await db
+      .update(schema.domains)
+      .set({ registeredAt: new Date(NOW.getTime() - 2 * 3600_000), ageSource: "rdap" })
+      .where(eq(schema.domains.teamId, wTeamId));
+    // 98 of the registration day's 100 are spent: room for 2 of 3.
+    await db
+      .insert(schema.domainWarmupUsage)
+      .values({ registrableDomain: "warmbc.dev", day: utcDay(NOW), accepted: 98 });
+    const broadcastId = await insertBroadcast({ teamId: wTeamId, from: "Acme <hi@warmbc.dev>" });
+    const mail = captureMailer();
+    const { deps, enqueued } = makeDeps({ isCloud: true, ...mail });
+
+    expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+    const rows = await emailsOf(broadcastId);
+    const queued = rows.filter((r) => r.latestStatus === "queued");
+    expect(queued).toHaveLength(2);
+    expect(rows.filter((r) => r.latestStatus === "queued_quota")).toMatchObject([
+      { parkReason: "warmup" },
+    ]);
+    expect(enqueued.sort()).toEqual(queued.map((r) => r.id).sort());
+    // The plan's unit for the held row went back.
+    const [counter] = await db
+      .select()
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, wTeamId));
+    expect(counter?.accepted).toBe(2);
+    expect(mail.sends.filter((s) => /quota/i.test(s.subject))).toEqual([]);
+  });
 });

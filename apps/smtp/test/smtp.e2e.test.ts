@@ -14,7 +14,7 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import nodemailer from "nodemailer";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSmtpServer,
   MAX_CONNECTIONS_PER_IP,
@@ -433,24 +433,35 @@ describe("smtp relay", () => {
 });
 
 describe("new-domain warm-up", () => {
-  it("parks a young domain's mail past its cap, then answers 452 naming the warm-up once the backlog is full", async () => {
+  // One instant per test: the warm-up counts per UTC day, and a rollover
+  // between seeding a counter and sending would read a fresh day.
+  const NOW = new Date("2026-10-09T10:00:00Z");
+  beforeAll(async () => {
     await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
-    const warm = await createTeam(db, "smtp-warm");
-    const [domain] = await db
+  });
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A Free team sending from young domains, with an SMTP key. */
+  async function warmTeam(slug: string, names: string[]) {
+    const warm = await createTeam(db, slug);
+    const domains = await db
       .insert(schema.domains)
-      .values({
-        teamId: warm,
-        name: "fresh-smtp.com",
-        region: "us-east-1",
-        status: "verified",
-        verifiedAt: new Date(),
-        registeredAt: new Date(Date.now() - 3600_000),
-      })
+      .values(
+        names.map((name) => ({
+          teamId: warm,
+          name,
+          region: "us-east-1",
+          status: "verified" as const,
+          verifiedAt: NOW,
+          registeredAt: new Date(NOW.getTime() - 3600_000),
+        })),
+      )
       .returning({ id: schema.domains.id });
-    if (!domain) throw new Error("domain insert failed");
-    await db
-      .insert(schema.domainWarmupUsage)
-      .values({ registrableDomain: "fresh-smtp.com", day: utcDay(), accepted: 100 });
     const key = generateApiKey();
     await db.insert(schema.apiKeys).values({
       teamId: warm,
@@ -459,13 +470,24 @@ describe("new-domain warm-up", () => {
       keyHash: key.keyHash,
       last4: key.last4,
     });
-    const send = () =>
+    const send = (from: string, to: string | string[] = "r@example.com") =>
       transport({ user: SMTP_USERNAME, pass: key.token }).sendMail({
-        from: "a@fresh-smtp.com",
-        to: "r@example.com",
+        from,
+        to,
         subject: "s",
         text: "t",
       });
+    return { warm, domains, send };
+  }
+
+  it("parks a young domain's mail past its cap, then answers 452 naming the warm-up once the backlog is full", async () => {
+    const { warm, domains, send: sendFrom } = await warmTeam("smtp-warm", ["fresh-smtp.com"]);
+    const domain = domains[0];
+    if (!domain) throw new Error("domain insert failed");
+    await db
+      .insert(schema.domainWarmupUsage)
+      .values({ registrableDomain: "fresh-smtp.com", day: utcDay(NOW), accepted: 100 });
+    const send = () => sendFrom("a@fresh-smtp.com");
 
     const info = await send();
     expect(await emailRow(info.response ?? "")).toMatchObject({
