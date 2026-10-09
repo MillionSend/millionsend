@@ -313,7 +313,16 @@ const omitSigningSecret = (json: Record<string, unknown>) => {
 };
 
 const idOrEmail = z.string().min(1).describe("Contact id or email address");
-const enc = encodeURIComponent;
+/**
+ * SECURITY: one path segment of a tool's REST call. The URL parser resolves
+ * "." and ".." segments, %2e spellings included, so no encoding can carry
+ * them: contact_id ".." on remove_contact_from_segment would reach
+ * DELETE /segments/{id}. No id is either, so they are refused.
+ */
+const enc = (id: string): string => {
+  if (id === "." || id === "..") throw new Error(`"${id}" is not a valid id`);
+  return encodeURIComponent(id);
+};
 /** How to read records[] on a domain response; shared by get_domain and verify_domain. */
 const RECORD_STATUS_NOTE =
   "Only the DKIM and MAIL FROM (SPF) rows gate sending. The DMARC row is recommended, and reads verified when a parent-domain policy covers the subdomain (see inherited_from and policy). Each record's live field says what public DNS answers now; detail explains a pending or failed row.";

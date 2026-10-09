@@ -629,6 +629,65 @@ describe("tools", () => {
   });
 });
 
+describe('"." and ".." ids', () => {
+  it('remove_contact_from_segment refuses contact_id ".." and the segment survives', async () => {
+    const [segment] = await db
+      .insert(schema.segments)
+      .values({ teamId, name: "Dot target" })
+      .returning({ id: schema.segments.id });
+    const id = segment?.id ?? "";
+    const client = await connect(await mintToken());
+    const res = await client.callTool({
+      name: "remove_contact_from_segment",
+      arguments: { contact_id: "..", segment_id: id },
+    });
+    expect(res.isError).toBe(true);
+    const kept = await db.select().from(schema.segments).where(eq(schema.segments.id, id));
+    expect(kept).toHaveLength(1);
+    await client.close();
+  });
+
+  it("every tool that takes an id refuses them before any REST call", async () => {
+    // The other required arguments, so only the id can be what is refused.
+    const rest: Record<string, Record<string, unknown>> = {
+      send_email: {
+        from: "Acme <onboarding@acme.dev>",
+        to: ["x@example.com"],
+        subject: "s",
+        text: "t",
+      },
+      update_email: { scheduled_at: "in 1 hour" },
+      update_contact_topics: { topics: [] },
+      create_broadcast: { from: "Acme <news@acme.dev>", subject: "s", text: "t" },
+    };
+    const client = await connect(await mintToken());
+    const dispatched = vi.spyOn(INTERNAL_AUTH, "set");
+    try {
+      for (const { name, inputSchema } of (await client.listTools()).tools) {
+        const ids = Object.keys(inputSchema.properties ?? {}).filter(
+          (p) => p === "id" || p.endsWith("_id"),
+        );
+        if (ids.length === 0) continue;
+        const valid = { ...rest[name], ...Object.fromEntries(ids.map((p) => [p, randomUUID()])) };
+        dispatched.mockClear();
+        await client.callTool({ name, arguments: valid });
+        expect(dispatched, `${name} reaches the API with valid ids`).toHaveBeenCalled();
+        for (const id of ids) {
+          for (const dots of [".", ".."]) {
+            dispatched.mockClear();
+            const res = await client.callTool({ name, arguments: { ...valid, [id]: dots } });
+            expect(res.isError, `${name} ${id}="${dots}"`).toBe(true);
+            expect(dispatched, `${name} ${id}="${dots}"`).not.toHaveBeenCalled();
+          }
+        }
+      }
+    } finally {
+      dispatched.mockRestore();
+    }
+    await client.close();
+  });
+});
+
 describe("rate limiting", () => {
   // The limiter counts in fixed minute windows; a test whose calls straddle a
   // boundary sees a fresh window and no 429. Wait out the last seconds of one.
