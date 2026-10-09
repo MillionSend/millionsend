@@ -212,18 +212,23 @@ export async function syncTeamFlags(
   db: Db,
   standings: readonly TeamStandingRow[],
   now: Date = new Date(),
-  previous?: readonly (Omit<TeamStandingRow, "monitorSamples"> & { monitorSamples?: number })[],
+  previous?: readonly (Omit<TeamStandingRow, "monitorSamples"> & {
+    monitorSamples?: number;
+    computedAt?: Date;
+  })[],
   opts: FlagTriggerOptions = {},
 ): Promise<{ opened: number; cleared: number }> {
   const f = schema.teamFlags;
   const open = await db.select().from(f).where(eq(f.status, "open"));
+  const priorRows = previous ?? (await db.select().from(schema.teamStandings));
   const before = new Map(
-    (previous ?? (await db.select().from(schema.teamStandings))).map((row) => [
+    priorRows.map((row) => [
       row.teamId,
       // A stored row has no sample count; the trigger only reads the risk off it.
       { monitorSamples: 0, ...row } as TeamStandingRow,
     ]),
   );
+  const lastRunAt = priorRows.reduce((at, row) => Math.max(at, row.computedAt?.getTime() ?? 0), 0);
   const openByTeam = new Map(open.map((row) => [row.teamId, row]));
   const triggered = new Map(
     standings.flatMap((s) => {
@@ -245,13 +250,17 @@ export async function syncTeamFlags(
       continue;
     }
     const [latest] = await db
-      .select({ reason: f.reason, clearedBy: f.clearedBy })
+      .select({ reason: f.reason, clearedBy: f.clearedBy, openedAt: f.openedAt })
       .from(f)
       .where(eq(f.teamId, teamId))
       .orderBy(desc(f.openedAt))
       .limit(1);
     const prior = before.get(teamId);
-    const held = prior !== undefined && flagTrigger(prior, opts)?.reason === trigger.reason;
+    // A flag opened since the last run (the review hold's) was never weighed
+    // by one, so an operator's clear of it stands as if the trigger had held.
+    const held =
+      (prior !== undefined && flagTrigger(prior, opts)?.reason === trigger.reason) ||
+      (lastRunAt > 0 && latest !== undefined && latest.openedAt.getTime() > lastRunAt);
     if (held && latest?.clearedBy && latest.reason === trigger.reason) continue;
     await db.insert(f).values({
       teamId,

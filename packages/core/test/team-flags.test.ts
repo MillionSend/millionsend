@@ -199,10 +199,31 @@ describe("syncTeamFlags", () => {
     });
     const noisy = standing({ teamId, complaintRate7d: 0.002 });
     // The previous run was clean, so this is a fresh finding, not the one cleared.
-    expect(await syncTeamFlags(db, [noisy], new Date(), [standing({ teamId })])).toMatchObject({
-      opened: 1,
-    });
+    const clean = { ...standing({ teamId }), computedAt: new Date() };
+    expect(await syncTeamFlags(db, [noisy], new Date(), [clean])).toMatchObject({ opened: 1 });
     expect((await flagsOf(teamId)).filter((f) => f.status === "open")).toHaveLength(1);
+  });
+
+  it("does not reopen a flag no run saw, which an operator cleared, while its trigger holds", async () => {
+    const teamId = await createTeam(db, "released-early");
+    // The review hold opened it after the last run, and its release cleared it before this one.
+    await db.insert(schema.teamFlags).values({
+      teamId,
+      reason: "monitor",
+      status: "cleared",
+      clearedBy: "op",
+      openedAt: new Date("2026-10-09T12:02:00Z"),
+      clearedAt: new Date("2026-10-09T12:08:00Z"),
+    });
+    const hot = standing({ teamId, monitorRisk: 0.51, monitorSamples: 1 });
+    // A brand-new team had no standing yet when the last run computed the others'.
+    const lastRun = [
+      { ...standing({ teamId: "other" }), computedAt: new Date("2026-10-09T12:00:00Z") },
+    ];
+    expect(await syncTeamFlags(db, [hot], new Date("2026-10-09T12:15:00Z"), lastRun)).toMatchObject(
+      { opened: 0 },
+    );
+    expect((await flagsOf(teamId)).filter((f) => f.status === "open")).toEqual([]);
   });
 
   it("reads the previous standings from the table when none are handed in", async () => {

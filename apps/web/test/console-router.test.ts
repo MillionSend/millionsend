@@ -2,7 +2,7 @@ import { recordAudit } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setRegionAccountDeps } from "@/server/console/ses-regions";
 import type { TeamRole } from "@/server/membership";
@@ -919,5 +919,52 @@ describe("review holds", () => {
     await operator().console.teams.suspend({ id: heldTeam, reason: "manual", notify: false });
     await operator().console.teams.reinstate({ id: heldTeam });
     expect(h.sent.map((m) => m.to)).toEqual(["bob@example.com"]);
+  });
+
+  it("releasing a hold clears the monitor flag it kept open, as the operator, out of the team's log", async () => {
+    const heldTeam = await createTeam(db, "released");
+    await db.insert(schema.teamMembers).values({ teamId: heldTeam, userId: MEMBER, role: "owner" });
+    const openFlags = (id: string) =>
+      db
+        .select()
+        .from(schema.teamFlags)
+        .where(and(eq(schema.teamFlags.teamId, id), eq(schema.teamFlags.status, "open")));
+    // What the hold leaves behind: a review suspension and the monitor's own flag.
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "review" })
+      .where(eq(schema.teams.id, heldTeam));
+    const [flag] = await db
+      .insert(schema.teamFlags)
+      .values({ teamId: heldTeam, reason: "monitor", detail: { risk: 0.62, samples: 3 } })
+      .returning();
+    if (!flag) throw new Error("flag missing");
+
+    await operator().console.teams.reinstate({ id: heldTeam });
+    const [cleared] = await db
+      .select()
+      .from(schema.teamFlags)
+      .where(eq(schema.teamFlags.id, flag.id));
+    expect(cleared).toMatchObject({ status: "cleared", clearedBy: OPERATOR });
+    expect(await openFlags(heldTeam)).toEqual([]);
+    expect((await auditRows("console.flag_cleared"))[0]).toMatchObject({
+      teamId: null,
+      actorId: `user:${OPERATOR}`,
+      target: `team:${heldTeam}`,
+      data: { team: "released", flagId: flag.id, reason: "monitor" },
+    });
+    const owner = await callerFor(MEMBER, heldTeam, "owner").audit.list({ limit: 50 });
+    expect(owner.items.map((r) => r.action)).not.toContain("console.flag_cleared");
+    const review = await operator().console.safety.review({ teamId: heldTeam });
+    expect(review.audit.map((r) => r.action)).toContain("console.flag_cleared");
+
+    // Any other reinstatement leaves an open monitor flag to the safety cron.
+    const other = await createTeam(db, "suspended");
+    await db
+      .insert(schema.teamFlags)
+      .values({ teamId: other, reason: "monitor", detail: { risk: 0.62, samples: 3 } });
+    await operator().console.teams.suspend({ id: other, reason: "manual", notify: false });
+    await operator().console.teams.reinstate({ id: other });
+    expect(await openFlags(other)).toMatchObject([{ reason: "monitor", openedBy: null }]);
   });
 });

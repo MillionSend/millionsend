@@ -601,6 +601,33 @@ export const consoleTeamsRouter = router({
       if (team.suspendedAt && !SILENT_SUSPENSIONS.includes(team.suspensionReason ?? "")) {
         await mailTeamOwners(ctx.db, team, "team.reinstated", "/emails", () => ({}));
       }
+      if (team.suspensionReason === "review") {
+        // Releasing a hold clears the monitor flag it kept open, in the
+        // operator's name, which the safety cron does not reopen while the
+        // same trigger holds; left open, it would keep a released team flagged.
+        const tf = schema.teamFlags;
+        const [holdFlag] = await ctx.db
+          .update(tf)
+          .set({ status: "cleared", clearedAt: new Date(), clearedBy: ctx.operator.id })
+          .where(
+            and(
+              eq(tf.teamId, team.id),
+              eq(tf.status, "open"),
+              eq(tf.reason, "monitor"),
+              isNull(tf.openedBy),
+            ),
+          )
+          .returning({ id: tf.id });
+        if (holdFlag) {
+          // An instance row: the team's own audit never lists its flags.
+          await auditOperator(ctx, {
+            teamId: null,
+            action: "console.flag_cleared",
+            target: { type: "team", id: team.id },
+            metadata: { team: team.name, flagId: holdFlag.id, reason: "monitor" },
+          });
+        }
+      }
       // Before the drain: SES refuses a disabled tenant's sends.
       const tenant = await syncTenant(ctx, team.id);
       await kickQuotaDrain();
