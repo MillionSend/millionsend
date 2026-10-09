@@ -818,7 +818,18 @@ describe("domains.get", () => {
     expect((await caller.domains.get({ id })).warmup).toEqual({
       perDay: 300,
       fullAt: new Date(registeredAt.getTime() + 30 * 86_400_000),
+      shared: false,
     });
+    // A second young domain the team can send from: the day's volume is shared.
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "news.brand-newer.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date(Date.now() - 3_600_000),
+      ageSource: "rdap",
+    });
+    expect((await caller.domains.get({ id })).warmup).toMatchObject({ perDay: 300, shared: true });
   });
 });
 

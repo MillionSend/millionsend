@@ -1352,3 +1352,44 @@ it("drain leaves a young domain's mail due on a later day to that day's warm-up"
       .from(schema.domainWarmupUsage),
   ).toEqual([{ day: "2026-10-11", accepted: 1 }]);
 });
+
+it("drain releases a team's warm-up mail oldest first across its young domains, within their shared limit", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const domains = await db
+    .insert(schema.domains)
+    .values(
+      ["news.pool-one.com", "news.pool-two.com"].map((name) => ({
+        teamId,
+        name,
+        region: "us-east-1",
+        status: "verified" as const,
+        registeredAt: new Date("2026-10-09T09:00:00Z"),
+      })),
+    )
+    .returning({ id: schema.domains.id });
+  const parked: string[] = [];
+  for (let i = 0; i < 150; i++) {
+    parked.push(
+      await insertParked(new Date(Date.UTC(2026, 9, 9, 10, 0, i)), "held", {
+        domainId: domains[i % 2]?.id,
+        parkReason: "warmup",
+      }),
+    );
+  }
+  const enqueued: string[] = [];
+  const drain = (now: string) =>
+    drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date(now),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    });
+
+  // A new UTC day, both still under 24 hours old: one day's 100 between them.
+  expect(await drain("2026-10-10T00:15:00Z")).toEqual({ drained: 100, stillParked: 50 });
+  expect(enqueued).toEqual(parked.slice(0, 100));
+  // Past 24 hours the shared limit is 300: the rest goes.
+  expect(await drain("2026-10-10T09:15:00Z")).toEqual({ drained: 50, stillParked: 0 });
+  expect(enqueued.slice(100)).toEqual(parked.slice(100));
+});

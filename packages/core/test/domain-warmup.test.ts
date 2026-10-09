@@ -9,6 +9,7 @@ import { EnvKeyring } from "../src/crypto/keyring.js";
 import {
   ageTier,
   graduateWarmupDomains,
+  teamWarmupOverview,
   WARMUP_FULL_TIER,
   warmupCap,
 } from "../src/domain-warmup.js";
@@ -71,7 +72,15 @@ describe("the schedule", () => {
     const domainId = await newDomain(teamId, "mail.fresh-launch.com", registered);
     const cap = (ms: number) => warmupCap(db, { teamId, domainId, at: aged(ms) });
     const fullAt = aged(30 * DAY_MS);
-    expect(await cap(0)).toEqual({ key: "fresh-launch.com", cap: 100, tier: 0, fullAt });
+    expect(await cap(0)).toEqual({
+      key: "fresh-launch.com",
+      cap: 100,
+      tier: 0,
+      fullAt,
+      teamId,
+      pool: 100,
+      poolDomains: 1,
+    });
     expect(await cap(DAY_MS - 1)).toMatchObject({ cap: 100 });
     expect(await cap(DAY_MS)).toMatchObject({ cap: 300 });
     expect(await cap(7 * DAY_MS - 1)).toMatchObject({ cap: 300 });
@@ -102,6 +111,9 @@ describe("the schedule", () => {
       cap: 300,
       tier: 1,
       fullAt: null,
+      teamId: fresh,
+      pool: 300,
+      poolDomains: 1,
     });
 
     const settled = await newTeam();
@@ -321,6 +333,144 @@ describe("the accept path", () => {
         await send(trustedTeam, PRO, teamDomain, { to: recipients(50, `u${i}`) }),
       ).toMatchObject({ parked: false });
     }
+  });
+
+  const sentRecipients = async (teamId: string) => {
+    const [row] = await db
+      .select({ n: sql<number>`coalesce(sum(jsonb_array_length(${schema.emails.to})), 0)::int` })
+      .from(schema.emails)
+      .where(and(eq(schema.emails.teamId, teamId), eq(schema.emails.latestStatus, "queued")));
+    return row?.n ?? 0;
+  };
+
+  describe("the team's shared limit", () => {
+    it("lets two fresh domains send one day's 100 between them, not 200", async () => {
+      const teamId = await newTeam({ plan: "pro", planQuota: 100_000 });
+      const a = await newDomain(teamId, "pool-a.com", REGISTERED);
+      const b = await newDomain(teamId, "pool-b.com", REGISTERED);
+      for (const [i, domainId] of [a, b, a, b].entries()) {
+        await send(teamId, PRO, domainId, { to: recipients(50, `p${i}`) });
+      }
+      expect(await sentRecipients(teamId)).toBe(100);
+      expect(await rows(teamId)).toEqual(
+        expect.arrayContaining([
+          { status: "queued", reason: null, n: 2 },
+          { status: "queued_quota", reason: "warmup", n: 2 },
+        ]),
+      );
+      expect((await teamWarmupOverview(db, teamId, NOW)).pool).toEqual({ cap: 100, used: 100 });
+    });
+
+    it("lets ten fresh domains send 100 in total on their registration day", async () => {
+      const teamId = await newTeam({ plan: "pro", planQuota: 100_000 });
+      const domains: string[] = [];
+      for (let i = 0; i < 10; i++)
+        domains.push(await newDomain(teamId, `burst-${i}.com`, REGISTERED));
+      for (const [i, domainId] of domains.entries()) {
+        await send(teamId, PRO, domainId, { to: recipients(20, `burst${i}`) });
+      }
+      expect(await sentRecipients(teamId)).toBe(100);
+    });
+
+    it("shares a day-10 domain's 2,000 with a fresh one, which still stops at its own 100", async () => {
+      const teamId = await newTeam({ plan: "pro", planQuota: 100_000 });
+      const fresh = await newDomain(teamId, "pool-fresh.com", REGISTERED);
+      const older = await newDomain(
+        teamId,
+        "pool-older.com",
+        new Date(NOW.getTime() - 10 * DAY_MS),
+      );
+      expect(await warmupCap(db, { teamId, domainId: fresh, at: NOW })).toMatchObject({
+        cap: 100,
+        pool: 2000,
+        poolDomains: 2,
+      });
+      await send(teamId, PRO, fresh, { to: recipients(50, "f1") });
+      await send(teamId, PRO, fresh, { to: recipients(50, "f2") });
+      expect(await send(teamId, PRO, fresh)).toMatchObject({ ok: true, parked: true });
+      expect(await send(teamId, PRO, older, { to: recipients(1900, "o") })).toMatchObject({
+        parked: false,
+      });
+      expect(await send(teamId, PRO, older)).toMatchObject({ ok: true, parked: true });
+      expect(await sentRecipients(teamId)).toBe(2000);
+    });
+
+    it("never holds or counts an old domain", async () => {
+      const teamId = await newTeam({ plan: "pro", planQuota: 100_000 });
+      const old = await newDomain(teamId, "pool-old.com", new Date("2014-03-01T00:00:00Z"));
+      const a = await newDomain(teamId, "pool-young-a.com", REGISTERED);
+      const b = await newDomain(teamId, "pool-young-b.com", REGISTERED);
+      expect(await send(teamId, PRO, old, { to: recipients(500, "o1") })).toMatchObject({
+        parked: false,
+      });
+      expect(await send(teamId, PRO, a, { to: recipients(50, "a") })).toMatchObject({
+        parked: false,
+      });
+      expect(await send(teamId, PRO, b, { to: recipients(50, "b") })).toMatchObject({
+        parked: false,
+      });
+      expect(await send(teamId, PRO, b)).toMatchObject({ parked: true });
+      expect(await send(teamId, PRO, old, { to: recipients(500, "o2") })).toMatchObject({
+        parked: false,
+      });
+      expect(await warmupCap(db, { teamId, domainId: old, at: NOW })).toBeNull();
+    });
+
+    it("lets operator trust take a domain, or the team, out of it", async () => {
+      const teamId = await newTeam({ plan: "pro", planQuota: 100_000 });
+      const a = await newDomain(teamId, "trust-pool-a.com", REGISTERED);
+      const b = await newDomain(teamId, "trust-pool-b.com", REGISTERED);
+      const c = await newDomain(teamId, "trust-pool-c.com", REGISTERED);
+      await send(teamId, PRO, a, { to: recipients(50, "a1") });
+      await send(teamId, PRO, a, { to: recipients(50, "a2") });
+      expect(await send(teamId, PRO, b)).toMatchObject({ parked: true });
+      await db.update(schema.domains).set({ warmupTrustedAt: NOW }).where(eq(schema.domains.id, b));
+      expect(await send(teamId, PRO, b, { to: recipients(50, "b") })).toMatchObject({
+        parked: false,
+      });
+      expect(await warmupCap(db, { teamId, domainId: a, at: NOW })).toMatchObject({
+        pool: 100,
+        poolDomains: 2,
+      });
+      expect(await send(teamId, PRO, c)).toMatchObject({ parked: true });
+      await db
+        .update(schema.teams)
+        .set({ warmupTrustedAt: NOW })
+        .where(eq(schema.teams.id, teamId));
+      expect(await send(teamId, PRO, c)).toMatchObject({ parked: false });
+    });
+
+    it("is not lifted by buying a plan", async () => {
+      const teamId = await newTeam();
+      const a = await newDomain(teamId, "upgrade-pool-a.com", REGISTERED);
+      const b = await newDomain(teamId, "upgrade-pool-b.com", REGISTERED);
+      await send(teamId, FREE, a, { to: recipients(50, "a") });
+      await send(teamId, FREE, b, { to: recipients(50, "b") });
+      // Free's own ceiling still has room: the shared limit holds it.
+      expect(await send(teamId, FREE, a)).toMatchObject({ ok: true, parked: true });
+      await db
+        .update(schema.teams)
+        .set({ plan: "pro", planQuota: 100_000 })
+        .where(eq(schema.teams.id, teamId));
+      expect(await send(teamId, PRO, b)).toMatchObject({ ok: true, parked: true });
+    });
+
+    it("takes in an unknown-age domain of a new team at its 1-7 day cap", async () => {
+      const teamId = await newTeam({ plan: "pro", planQuota: 100_000 });
+      const fresh = await newDomain(teamId, "pool-known.com", REGISTERED);
+      const unknown = await newDomain(teamId, "pool-unknown.de", null, { ageSource: "unknown" });
+      expect(await warmupCap(db, { teamId, domainId: fresh, at: NOW })).toMatchObject({
+        cap: 100,
+        pool: 300,
+        poolDomains: 2,
+      });
+      await send(teamId, PRO, fresh, { to: recipients(50, "k1") });
+      await send(teamId, PRO, fresh, { to: recipients(50, "k2") });
+      expect(await send(teamId, PRO, unknown, { to: recipients(200, "u") })).toMatchObject({
+        parked: false,
+      });
+      expect(await send(teamId, PRO, unknown)).toMatchObject({ ok: true, parked: true });
+    });
   });
 
   it("replays the incident: 1,074 sends on the registration day, 100 go and 974 wait", async () => {

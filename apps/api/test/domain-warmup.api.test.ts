@@ -112,6 +112,33 @@ it("a batch from a young domain sends what fits its warm-up and parks the rest, 
   ]);
 });
 
+it("a batch from two young domains of one team shares one day's warm-up between them", async () => {
+  const { teamId, token } = await youngSender("pool-batch", { plan: "pro", planQuota: 100_000 }, 0);
+  await db.insert(schema.domains).values({
+    teamId,
+    name: "mail.pool-batch-two.com",
+    region: "us-east-1",
+    status: "verified",
+    verifiedAt: NOW,
+    registeredAt: new Date(NOW.getTime() - 3600_000),
+    ageSource: "rdap",
+  });
+  const fifty = (prefix: string) =>
+    Array.from({ length: 50 }, (_, i) => `${prefix}${i}@example.com`);
+  const res = await post(token, "/emails/batch", [
+    { ...email("pool-batch", ""), to: fifty("a") },
+    { ...email("pool-batch-two", ""), to: fifty("b") },
+    email("pool-batch-two", "c@example.com"),
+  ]);
+  expect(res.status).toBe(200);
+  const { data } = (await res.json()) as { data: { id: string }[] };
+  expect(await rowsOf(data.map((d) => d.id))).toMatchObject([
+    { status: "queued", reason: null },
+    { status: "queued", reason: null },
+    { status: "queued_quota", reason: "warmup" },
+  ]);
+});
+
 it("a single send over the warm-up is accepted and waits", async () => {
   const { token } = await youngSender("single-warmup", { plan: "pro", planQuota: 100_000 }, 100);
   const res = await post(token, "/emails", email("single-warmup", "r@example.com"));

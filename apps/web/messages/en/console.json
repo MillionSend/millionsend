@@ -758,7 +758,7 @@
       },
       "warmup": {
         "title": "Domain warm-up",
-        "subtitle": "Young sending domains send under a daily cap by registration age; mail over it waits. Trust lifts the cap for the team or for one domain.",
+        "subtitle": "Young sending domains send under a daily cap by registration age, and a team's warming domains share one daily limit, the highest of their caps; mail over either waits. Trust lifts the cap for the team or for one domain.",
         "off": "Warm-up is off on this instance. Trust set here applies once it is on.",
         "teamTrusted": "The team is trusted since {date}: none of its domains warm up.",
         "trustTeam": "Trust team",
@@ -782,6 +782,7 @@
         "notChecked": "Not looked up yet",
         "today": "{used} of {cap} · full volume {date}",
         "todayNoDate": "{used} of {cap}",
+        "pool": "Shared by the team's warming domains today: {used} of {cap}",
         "full": "Full volume",
         "trusted": "Trusted",
         "toast": {
@@ -841,7 +842,7 @@
         "broadcasts": "A broadcast is judged as its own HTML plus this many rendered copies; recipients are never sampled per message on top.",
         "escalation": "A failing critical or major content check multiplies the rate; two force it. Caps stop sampling silently, never sending.",
         "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more.",
-        "warmup": "A daily cap on each sending domain by its registration age, counted per UTC day; mail over it waits and goes out as the cap allows. No plan lifts it. A domain whose age no registry publishes gets the 1 to 7 day cap while its team is new or on probation. 50 clean sends move a domain up a step early."
+        "warmup": "A daily cap on each sending domain by its registration age, counted per UTC day, and one daily limit a team's warming domains share, the highest of their caps; mail over either waits and goes out as they allow. No plan lifts them. A domain whose age no registry publishes gets the 1 to 7 day cap while its team is new or on probation. 50 clean sends move a domain up a step early."
       },
       "fields": {
         "firstSends": "First sends judged in full",

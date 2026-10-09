@@ -6,8 +6,10 @@ import {
   EnvKeyring,
   formatMailDate,
   hashRecipient,
+  reserveWarmup,
   utcDay,
   verifyUnsubscribeToken,
+  warmupCap,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -1372,5 +1374,43 @@ describe("new-domain warm-up", () => {
       .where(eq(schema.usageCounters.teamId, wTeamId));
     expect(counter?.accepted).toBe(2);
     expect(mail.sends.filter((s) => /quota/i.test(s.subject))).toEqual([]);
+  });
+
+  it("cloud fan-out from a young domain parks what its team's other young domain already spent of their shared day", async () => {
+    const { teamId: pTeamId } = await seedTeam("poolbc", [
+      { email: "p1@example.com" },
+      { email: "p2@example.com" },
+      { email: "p3@example.com" },
+    ]);
+    const [other] = await db
+      .insert(schema.domains)
+      .values({
+        teamId: pTeamId,
+        name: "poolbc-two.dev",
+        region: "us-east-1",
+        status: "verified",
+        verifiedAt: NOW,
+      })
+      .returning({ id: schema.domains.id });
+    if (!other) throw new Error("domain insert failed");
+    await db
+      .update(schema.domains)
+      .set({ registeredAt: new Date(NOW.getTime() - 2 * 3600_000), ageSource: "rdap" })
+      .where(eq(schema.domains.teamId, pTeamId));
+    // 98 of the registration day's 100 already went out from the other domain.
+    const cap = await warmupCap(db, { teamId: pTeamId, domainId: other.id, at: NOW });
+    if (!cap) throw new Error("no warm-up cap");
+    await reserveWarmup(db, cap, 98, utcDay(NOW));
+    const broadcastId = await insertBroadcast({ teamId: pTeamId, from: "Acme <hi@poolbc.dev>" });
+    const { deps, enqueued } = makeDeps({ isCloud: true });
+
+    expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+    const rows = await emailsOf(broadcastId);
+    const queued = rows.filter((r) => r.latestStatus === "queued");
+    expect(queued).toHaveLength(2);
+    expect(rows.filter((r) => r.latestStatus === "queued_quota")).toMatchObject([
+      { parkReason: "warmup" },
+    ]);
+    expect(enqueued.sort()).toEqual(queued.map((r) => r.id).sort());
   });
 });

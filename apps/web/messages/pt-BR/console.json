@@ -758,7 +758,7 @@
       },
       "warmup": {
         "title": "Aquecimento de domínios",
-        "subtitle": "Domínios de envio jovens enviam sob um limite diário pela idade do registro; o que passa dele espera. A confiança libera o limite da equipe ou de um domínio.",
+        "subtitle": "Domínios de envio jovens enviam sob um limite diário pela idade do registro, e os domínios em aquecimento de uma equipe compartilham um único limite diário, o maior entre os deles; o que passa de qualquer um espera. A confiança libera o limite da equipe ou de um domínio.",
         "off": "O aquecimento está desligado nesta instância. A confiança definida aqui vale quando ele for ligado.",
         "teamTrusted": "A equipe é confiável desde {date}: nenhum domínio dela passa por aquecimento.",
         "trustTeam": "Confiar na equipe",
@@ -782,6 +782,7 @@
         "notChecked": "Ainda não consultado",
         "today": "{used} de {cap} · volume total {date}",
         "todayNoDate": "{used} de {cap}",
+        "pool": "Compartilhado pelos domínios em aquecimento da equipe hoje: {used} de {cap}",
         "full": "Volume total",
         "trusted": "Confiável",
         "toast": {
@@ -841,7 +842,7 @@
         "broadcasts": "Um broadcast é julgado pelo seu próprio HTML mais esta quantidade de cópias renderizadas; os destinatários nunca são amostrados por mensagem além disso.",
         "escalation": "Uma checagem crítica ou importante de conteúdo falhando multiplica a taxa; duas forçam. Os limites param a amostragem em silêncio, nunca o envio.",
         "thresholds": "O risco vai de 0 a 1. A sinalização lista a equipe aqui e quadruplica sua taxa; o alerta envia um e-mail uma vez por dia por equipe; a pausa retém os broadcasts de uma equipe nova quando uma mensagem amostrada também pontuou 90 ou mais.",
-        "warmup": "Um limite diário em cada domínio de envio pela idade do registro, contado por dia UTC; o que passa dele espera e sai conforme o limite permite. Nenhum plano o libera. Um domínio cuja idade nenhum registro publica recebe o limite de 1 a 7 dias enquanto a equipe é nova ou probatória. 50 envios limpos sobem o domínio um degrau antes."
+        "warmup": "Um limite diário em cada domínio de envio pela idade do registro, contado por dia UTC, e um único limite diário que os domínios em aquecimento de uma equipe compartilham, o maior entre os deles; o que passa de qualquer um espera e sai conforme eles permitem. Nenhum plano os libera. Um domínio cuja idade nenhum registro publica recebe o limite de 1 a 7 dias enquanto a equipe é nova ou probatória. 50 envios limpos sobem o domínio um degrau antes."
       },
       "fields": {
         "firstSends": "Primeiros envios julgados por inteiro",

@@ -511,4 +511,19 @@ describe("new-domain warm-up", () => {
       response: expect.stringContaining("New domain warm-up"),
     });
   });
+
+  it("holds a team's second young domain once their shared day is spent", async () => {
+    const { send } = await warmTeam("smtp-pool", ["pool-one-smtp.com", "pool-two-smtp.com"]);
+    const fifty = (prefix: string) =>
+      Array.from({ length: 50 }, (_, i) => `${prefix}${i}@example.com`);
+    for (const prefix of ["a", "b"]) {
+      const info = await send("a@pool-one-smtp.com", fifty(prefix));
+      expect(await emailRow(info.response ?? "")).toMatchObject({ latestStatus: "queued" });
+    }
+    const info = await send("a@pool-two-smtp.com");
+    expect(await emailRow(info.response ?? "")).toMatchObject({
+      latestStatus: "queued_quota",
+      parkReason: "warmup",
+    });
+  });
 });

@@ -193,12 +193,13 @@ async function countParked(db: Db, teamId: string): Promise<number> {
 
 /**
  * The new-domain warm-up on one send its plan already admitted, inside the
- * accept transaction: "send" when the sending domain's cap for the delivery
- * day has room (now reserved); "park" when it has none, the plan's units
- * handed back so the row parks as queued_quota with reason "warmup" and the
- * drain charges both again on release; "backlog_full" when the team already
- * holds all the parked mail it may. Every accept surface enforces the
- * warm-up through this one call.
+ * accept transaction: "send" when the sending domain's cap and the team's
+ * shared warm-up limit for the delivery day both have room (now reserved);
+ * "park" when either has none, the plan's units handed back so the row
+ * parks as queued_quota with reason "warmup" and the drain charges them all
+ * again on release; "backlog_full" when the team already holds all the
+ * parked mail it may. Every accept surface enforces the warm-up through
+ * this one call.
  */
 export async function enforceDomainWarmup(
   tx: Db,

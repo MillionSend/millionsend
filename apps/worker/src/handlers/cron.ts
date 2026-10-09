@@ -187,8 +187,15 @@ export interface DrainResult {
 /** Sentinel: the row left queued_quota concurrently; roll the reservation back. */
 class DrainRaced extends Error {}
 
-/** Sentinel: the sending domain's warm-up is spent for the day; roll the plan's reservation back. */
-class WarmupHeld extends Error {}
+/**
+ * Sentinel: the sending domain's warm-up, or the team's shared one, is spent
+ * for the day; roll the plan's reservation back.
+ */
+class WarmupHeld extends Error {
+  constructor(readonly full: "domain" | "pool") {
+    super(`warm-up ${full} full`);
+  }
+}
 
 /** Parked rows loaded per page; the backlog is unbounded (see acceptEmail). */
 const DRAIN_PAGE = 500;
@@ -200,8 +207,12 @@ interface DrainRun {
   exhaustedTeams: Set<string>;
   /** The warm-up cap per sending domain row, read once per run. */
   warmups: Map<string, WarmupCap | null>;
-  /** Registrable domains whose warm-up day is spent, and the domain rows that leave the page query with them. */
+  /**
+   * Registrable domains whose warm-up day is spent, teams whose shared one
+   * is, and the domain rows that leave the page query with them.
+   */
   warmupFull: Set<string>;
+  poolFull: Set<string>;
   heldDomains: Set<string>;
   failures: unknown[];
 }
@@ -237,6 +248,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
     exhaustedTeams: new Set(),
     warmups: new Map(),
     warmupFull: new Set(),
+    poolFull: new Set(),
     heldDomains: new Set(),
     failures: [],
   };
@@ -532,7 +544,7 @@ async function releaseParked(
       if (warmup && email.scheduledAt && utcDay(email.scheduledAt) > utcDay(run.now)) {
         return null;
       }
-      if (warmup && run.warmupFull.has(warmup.key)) {
+      if (warmup && (run.warmupFull.has(warmup.key) || run.poolFull.has(warmup.teamId))) {
         run.heldDomains.add(domainId);
         return null;
       }
@@ -542,8 +554,9 @@ async function releaseParked(
         const txDb = tx as unknown as Db;
         const reservation = await reserveQuota(txDb, { teamId: email.teamId, count: units, quota });
         if (!reservation.reserved) return "exhausted" as const;
-        if (warmup && !(await reserveWarmup(txDb, warmup, units, utcDay(run.now)))) {
-          throw new WarmupHeld();
+        if (warmup) {
+          const held = await reserveWarmup(txDb, warmup, units, utcDay(run.now));
+          if (!held.reserved) throw new WarmupHeld(held.full);
         }
         const moved = await transitionQueueState(txDb, email.id, {
           from: "queued_quota",
@@ -560,15 +573,16 @@ async function releaseParked(
       })
       .catch((err) => {
         if (err instanceof DrainRaced) return "raced" as const;
-        if (err instanceof WarmupHeld) return "held" as const;
+        if (err instanceof WarmupHeld) return err.full === "pool" ? "pool_full" : "domain_full";
         throw err;
       });
     if (outcome === "exhausted") {
       run.exhaustedTeams.add(email.teamId);
       return null;
     }
-    if (outcome === "held") {
-      if (warmup) run.warmupFull.add(warmup.key);
+    if (outcome === "domain_full" || outcome === "pool_full") {
+      if (warmup && outcome === "pool_full") run.poolFull.add(warmup.teamId);
+      else if (warmup) run.warmupFull.add(warmup.key);
       if (domainId) run.heldDomains.add(domainId);
       return null;
     }

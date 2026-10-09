@@ -381,8 +381,9 @@ export async function sendBroadcast(
       // A billing period can renew under a long walk (the daily counter follows
       // the clock by itself); each page reserves against the period current now.
       quota = (await fetchTeamQuota(db, broadcast.teamId, deps.isCloud)) ?? quota;
-      // The sending domain's warm-up, read per page like the quota: once its
-      // day is spent, the rest of the page parks at insert behind it.
+      // The sending domain's warm-up and the team's shared one, read per page
+      // like the quota: once either day is spent, the rest of the page parks
+      // at insert behind it.
       const warmup = await warmupCap(db, {
         teamId: broadcast.teamId,
         domainId: domain.id,
@@ -546,11 +547,11 @@ export async function sendBroadcast(
             quota,
           });
           if (reservation.reserved) {
-            if (!warmup || (await reserveWarmup(txDb, warmup, 1, utcDay()))) {
+            if (!warmup || (await reserveWarmup(txDb, warmup, 1, utcDay())).reserved) {
               return { id: row.id, parked: false };
             }
-            // Over the domain's warm-up: the plan's unit goes back, the row
-            // parks for the drain, which charges both again on release.
+            // Over the warm-up: the plan's unit goes back, the row parks for
+            // the drain, which charges them all again on release.
             await releaseQuota(txDb, { teamId: broadcast.teamId, count: 1, quota });
             await tx
               .update(schema.emails)

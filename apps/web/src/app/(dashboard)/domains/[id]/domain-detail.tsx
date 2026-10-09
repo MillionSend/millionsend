@@ -834,7 +834,9 @@ export function DomainDetail({ id }: { id: string }) {
                   perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
                 })}
           </span>
-          <span style={{ color: "var(--ms-muted)" }}>{t("detail.warmupBody")}</span>
+          <span style={{ color: "var(--ms-muted)" }}>
+            {t(data.warmup.shared ? "detail.warmupBodyShared" : "detail.warmupBody")}
+          </span>
         </div>
       ) : null}
 

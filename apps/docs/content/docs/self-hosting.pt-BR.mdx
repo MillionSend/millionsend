@@ -927,9 +927,14 @@ enviam por ele:
 Cada valor é editado no console em Confiança e segurança → Configurações de
 monitoramento, ou definido na sua variável de ambiente até ser editado lá; o
 console prevalece. O limite efetivo é o menor entre o do plano e o do
-aquecimento, e comprar um plano nunca o libera. O que passa dele fica
+aquecimento, e comprar um plano nunca o libera. Os domínios em aquecimento
+de uma equipe (verificados, sob um limite e sem confiança) também
+compartilham um único limite diário, o maior entre os deles, contado por
+equipe e dia UTC: um segundo domínio novo nunca acrescenta volume, e cada
+domínio continua dentro do seu limite. O que passa de qualquer um fica
 estacionado como `queued_quota` (com `park_reason = 'warmup'`) e o
-`quota.drain` de 15 minutos libera conforme o limite do dia permite; a API
+`quota.drain` de 15 minutos libera, do mais antigo para o mais novo, conforme
+os dois permitem; a API
 responde `429 daily_quota_exceeded` com uma mensagem de aquecimento (SMTP
 `452`) só quando o acúmulo estacionado da equipe está cheio (três dias do
 volume do plano). Um domínio sobe um degrau antes quando os envios desde o

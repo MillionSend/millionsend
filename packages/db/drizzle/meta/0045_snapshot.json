@@ -1,5 +1,5 @@
 {
-  "id": "27a54a84-370c-495a-bd0b-cdbc5b40f082",
+  "id": "7d16a521-dac9-43e0-80df-c68a37c261b6",
   "prevId": "df234c44-efe3-4bd3-8a03-fc99dee4ae16",
   "version": "7",
   "dialect": "postgresql",
@@ -6071,6 +6071,60 @@
           "name": "domain_warmup_usage_registrable_domain_day_pk",
           "columns": [
             "registrable_domain",
+            "day"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.team_warmup_usage": {
+      "name": "team_warmup_usage",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day": {
+          "name": "day",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accepted": {
+          "name": "accepted",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "team_warmup_usage_team_id_teams_id_fk": {
+          "name": "team_warmup_usage_team_id_teams_id_fk",
+          "tableFrom": "team_warmup_usage",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "team_warmup_usage_team_id_day_pk": {
+          "name": "team_warmup_usage_team_id_day_pk",
+          "columns": [
+            "team_id",
             "day"
           ]
         }

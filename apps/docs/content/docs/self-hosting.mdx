@@ -912,9 +912,12 @@ domain (the ICANN part of the Public Suffix List: `acme.com.br` for
 Each value is edited in the console under Trust & safety → Monitoring
 settings, or set as its environment variable until it is; the console wins.
 The effective cap is the lower of the plan's and the warm-up's, and buying a
-plan never lifts it. Mail over it parks as `queued_quota` (with
-`park_reason = 'warmup'`) and the 15-minute `quota.drain` releases it as the
-day's cap allows; the API answers `429 daily_quota_exceeded` with a warm-up
+plan never lifts it. A team's warming domains (verified, under a cap and not
+trusted) also share one daily limit, the highest of their caps, counted per
+team and UTC day: a second fresh domain never adds volume, and each domain
+stays within its own cap. Mail over either parks as `queued_quota` (with
+`park_reason = 'warmup'`) and the 15-minute `quota.drain` releases it, oldest
+first, as both allow; the API answers `429 daily_quota_exceeded` with a warm-up
 message (SMTP `452`) only when the team's parked backlog is full (three days of
 its plan's volume). A domain moves up one step early once its sends since the
 last step are clean: at least 50, the first a day old, hard bounces under 2%,

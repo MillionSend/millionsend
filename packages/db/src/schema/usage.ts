@@ -121,3 +121,20 @@ export const domainWarmupUsage = pgTable(
   },
   (t) => [primaryKey({ columns: [t.registrableDomain, t.day] })],
 );
+
+/**
+ * Recipients a team accepted per UTC day from its domains still warming up:
+ * the one daily limit they share, so a second fresh domain never adds
+ * volume. Reserved beside domain_warmup_usage, the same way.
+ */
+export const teamWarmupUsage = pgTable(
+  "team_warmup_usage",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    accepted: integer("accepted").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.day] })],
+);

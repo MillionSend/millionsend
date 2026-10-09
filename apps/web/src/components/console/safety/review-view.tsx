@@ -744,6 +744,7 @@ type WarmupOverview = {
     trustedAt: Date | string | null;
     today: { cap: number; used: number; fullAt: Date | string | null } | null;
   }[];
+  pool: { cap: number; used: number } | null;
 };
 
 /** The team's domains under the new-domain warm-up, and the operator's trust over it. */
@@ -808,6 +809,11 @@ function WarmupCard({
           {t(teamTrusted ? "untrustTeam" : "trustTeam")}
         </button>
       </div>
+      {warmup.pool ? (
+        <div style={{ padding: "8px 20px 0", fontSize: 13, color: "var(--ms-muted)" }}>
+          {t("pool", { used: nf.format(warmup.pool.used), cap: nf.format(warmup.pool.cap) })}
+        </div>
+      ) : null}
       <Table>
         <thead>
           <tr>

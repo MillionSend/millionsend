@@ -216,9 +216,12 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       });
       return {
         sentCount: sent?.n ?? 0,
-        // The day's cap while the domain warms up and when the calendar
-        // lifts it; never why, nor what a tier is.
-        warmup: warmup ? { perDay: warmup.cap, fullAt: warmup.fullAt } : null,
+        // The day's cap while the domain warms up, when the calendar lifts
+        // it, and whether the team's other new domains share the day's
+        // volume; never why, nor what a tier is.
+        warmup: warmup
+          ? { perDay: warmup.cap, fullAt: warmup.fullAt, shared: warmup.poolDomains > 1 }
+          : null,
         id: domain.id,
         name: domain.name,
         region: domain.region,

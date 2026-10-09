@@ -177,6 +177,7 @@
     "warmup": "Warming up: {perDay}/day today · full volume from {date}",
     "warmupToday": "Warming up: {perDay}/day today",
     "warmupBody": "Gradual ramp-up protects deliverability for new domains.",
+    "warmupBodyShared": "Gradual ramp-up protects deliverability for new domains. The daily volume is shared across your team's new domains.",
     "deleteDomain": "Delete domain",
     "deleteBody": "This permanently deletes the domain and its DNS configuration. Sending from it stops immediately.",
     "deleteConfirmLabel": "Type the domain to confirm",
