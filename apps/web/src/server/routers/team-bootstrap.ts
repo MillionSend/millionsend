@@ -77,12 +77,12 @@ export const teamBootstrapRouter = router({
     current: adminProcedure.query(async ({ ctx }) => {
       const enabled = supportViewEnabled();
       const live = enabled ? await liveSupportViewForTeam(ctx.db, ctx.teamId) : null;
+      // To the team the view is MillionSend's: the operator's name, email and id stay out.
       return {
         enabled,
         live: live
           ? {
               id: live.id,
-              operator: live.operator,
               reason: live.reason,
               reference: live.reference,
               startedAt: live.createdAt,

@@ -432,7 +432,7 @@
       "open": "Abrir equipe",
       "view": "Ver como proprietário",
       "viewOff": "Desligado nesta instância: SUPPORT_VIEW=on liga",
-      "viewSilent": "Indisponível enquanto a equipe está suspensa por phishing ou retida para revisão: o proprietário veria seu nome e e-mail",
+      "viewSilent": "Indisponível enquanto a equipe está suspensa por phishing ou retida para revisão",
       "limits": "Ajustar limites",
       "plan": "Alterar plano",
       "pause": "Pausar transmissões",
@@ -548,7 +548,7 @@
         "support_view_live": "Já existe um modo de suporte ativo. Abra o painel e encerre-o pela faixa antes de iniciar outro.",
         "sign_in_again": "Iniciar um modo de suporte exige um login recente. Saia e entre de novo, depois inicie outra vez.",
         "own_team": "Você é membro desta equipe; abra-a pelo seletor de equipes.",
-        "silent_suspension": "Esta equipe está suspensa por phishing ou retida para revisão. Um modo de suporte mostraria ao proprietário seu nome e e-mail, então nenhum pode começar.",
+        "silent_suspension": "Esta equipe está suspensa por phishing ou retida para revisão, então nenhum modo de suporte pode começar.",
         "reference_required": "Uma referência de chamado é obrigatória."
       }
     },

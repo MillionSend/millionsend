@@ -887,9 +887,8 @@ its owner sees it, read-only, for 30 minutes. Every reason is a request the
 customer made; an operator checking an abuse report works from the console's
 own Trust & safety pages instead, and from the content reveal when the
 message text itself is needed. No view starts on a team suspended for
-phishing or held for review: its owner's Support access card would show who
-opened it. The session rides on the operator's own login; no session is
-ever minted for the owner.
+phishing or held for review. The session rides on the operator's own login;
+no session is ever minted for the owner.
 
 - **What the operator sees:** the dashboard under a banner ("Support view
   of <team> · read-only · ends in mm:ss"): emails and their events (a
@@ -922,7 +921,8 @@ ever minted for the owner.
   procedure name and never anything a procedure returned.
 - **What the owner sees:** no email; the session is in the team's audit
   log at once, and the Support access card under Settings shows it while it
-  is live, with an "End session" button.
+  is live, with an "End session" button. Both name MillionSend, never the
+  operator: no name, email or user id reaches the team.
 
 ```sh
 SUPPORT_VIEW=on

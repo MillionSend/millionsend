@@ -263,8 +263,6 @@ export const consoleTeamsRouter = router({
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "sign_in_again" });
       }
       const team = await loadTeam(ctx.db, input.id);
-      // A live view puts the operator's name and email on the owner's
-      // Settings, and a silently suspended team must not learn who reviews it.
       if (isSilentlySuspended(team)) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "silent_suspension" });
       }

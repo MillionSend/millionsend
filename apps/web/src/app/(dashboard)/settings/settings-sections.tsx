@@ -780,6 +780,7 @@ function SupportEndsAt({ expiresAt }: { expiresAt: Date }) {
  */
 function SupportAccessSection() {
   const t = useTranslations("settings.supportAccess");
+  const actors = useTranslations("settings.audit.actors");
   const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -830,9 +831,7 @@ function SupportAccessSection() {
       {live ? (
         <dl className="ms-kv">
           <dt>{t("operator")}</dt>
-          <dd>
-            {live.operator.name} · <span className="ms-mono">{live.operator.email}</span>
-          </dd>
+          <dd>{actors("operator")}</dd>
           <dt>{t("started")}</dt>
           <dd>{formatDayTime(live.startedAt, locale)}</dd>
           <dt>{t("expires")}</dt>

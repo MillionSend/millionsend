@@ -777,16 +777,18 @@ describe("the owner's side", () => {
   it("sees the live view, ends it, and both trails carry the rows", async () => {
     const grant = await start({ reason: "billing_dispute", reference: "INV-77" });
     const current = await owner().team.supportView.current();
-    expect(current).toMatchObject({
+    // The card names MillionSend: nothing of the operator reaches the team.
+    expect(current).toStrictEqual({
       enabled: true,
       live: {
         id: grant.id,
-        operator: { name: "Operator", email: "op@example.com" },
         reason: "billing_dispute",
         reference: "INV-77",
+        startedAt: grant.createdAt,
         expiresAt: grant.expiresAt,
       },
     });
+    expect(JSON.stringify(current)).not.toMatch(/Operator|op@example\.com/);
     // The card is owner/admin only, and so is the read behind it.
     await expect(member().team.supportView.current()).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(member().team.supportView.end()).rejects.toMatchObject({ code: "FORBIDDEN" });
