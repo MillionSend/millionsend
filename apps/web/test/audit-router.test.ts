@@ -97,6 +97,58 @@ describe("audit.list", () => {
     });
   });
 
+  it("never lists trust & safety flags and shows the operator only as MillionSend; the console keeps both", async () => {
+    // The instance operator is the first registered user, and no member of the team.
+    await db
+      .insert(schema.user)
+      .values({ id: "op", name: "Operator", email: "op@example.com", createdAt: new Date(0) });
+    const teamId = await createTeam(db, "acme");
+    await addMember(teamId, "alice", "owner");
+    const operator = createCaller({
+      db,
+      session: {
+        user: { id: "op", email: "op@example.com", name: "Operator" },
+        session: { id: "s-op", createdAt: new Date() },
+      },
+      teamId: null,
+      role: null,
+    });
+
+    await operator.console.safety.openFlag({ teamId, note: "kit seen" });
+    const [flag] = await db.select().from(schema.teamFlags);
+    if (!flag) throw new Error("flag missing");
+    await operator.console.safety.clearFlag({ flagId: flag.id });
+    await operator.console.safety.reopenFlag({ flagId: flag.id });
+    await operator.console.teams.suspend({ id: teamId, reason: "manual", notify: false });
+    await callerFor("alice", teamId, "owner").apiKeys.create({ name: "CI" });
+
+    const { items } = await callerFor("alice", teamId, "owner").audit.list({});
+    expect(items.map((row) => [row.action, row.actor])).toEqual([
+      ["api_key.created", { kind: "user", id: "alice", name: "alice", email: "alice@example.com" }],
+      ["team.suspended", { kind: "operator" }],
+    ]);
+    expect(JSON.stringify(items)).not.toMatch(/Operator|op@example\.com|kit seen/);
+
+    const instance = await operator.console.audit.list({});
+    const flagRows = instance.items.filter((row) => row.action.startsWith("console.flag_"));
+    expect(flagRows.map((row) => row.action)).toEqual([
+      "console.flag_reopened",
+      "console.flag_cleared",
+      "console.flag_opened",
+    ]);
+    for (const row of [
+      ...flagRows,
+      ...instance.items.filter((r) => r.action === "team.suspended"),
+    ]) {
+      expect(row.actor).toEqual({
+        kind: "user",
+        id: "op",
+        name: "Operator",
+        email: "op@example.com",
+      });
+    }
+  });
+
   it("is forbidden for members", async () => {
     const teamId = await createTeam(db, "acme");
     await addMember(teamId, "bob", "member");

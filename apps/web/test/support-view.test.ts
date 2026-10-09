@@ -763,10 +763,7 @@ describe("the owner's side", () => {
     const rows = teamTrail.items.filter((r) => r.target === `support_view:${grant.id}`);
     expect(rows.map((r) => [r.action, r.actor])).toEqual([
       ["support.view_ended", { kind: "user", id: OWNER, name: "Bob", email: "bob@example.com" }],
-      [
-        "support.view_started",
-        { kind: "user", id: OPERATOR, name: "Operator", email: "op@example.com" },
-      ],
+      ["support.view_started", { kind: "operator" }],
     ]);
     expect(rows[0]?.data).toMatchObject({ by: "owner" });
 

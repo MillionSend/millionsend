@@ -792,6 +792,10 @@ suspended ("This isn't available for this team right now. Contact support if
 you need help."; the API's domain delete answers `403 forbidden`), and the
 team's own audit log shows the suspension without the operator's note.
 
+A team's own audit log never lists trust & safety flags (opened, cleared or
+reopened), which stay in the console, and shows every operator action as
+MillionSend, never the operator's name or email.
+
 ## Content monitoring (optional)
 
 Off by default. With a judge configured, a sample of accepted mail is

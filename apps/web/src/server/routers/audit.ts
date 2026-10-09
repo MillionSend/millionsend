@@ -1,10 +1,20 @@
-import { parseAuditActor, SILENT_SUSPENSIONS } from "@millionsend/core";
+import { findInstanceOperator, parseAuditActor, SILENT_SUSPENSIONS } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { router, teamProcedure } from "../trpc";
+
+/**
+ * Trust & safety flags are the operator's record: the team's own trail never
+ * lists them, whatever team_id their rows were written with.
+ */
+const OPERATOR_ONLY_ACTIONS = [
+  "console.flag_opened",
+  "console.flag_cleared",
+  "console.flag_reopened",
+];
 
 /**
  * Read-only, and never a member feed: the trail is a forensic record. A
@@ -34,7 +44,11 @@ export const auditRouter = router({
         })
         .from(t)
         .where(
-          and(eq(t.teamId, ctx.teamId), input.cursor ? beforeCursor(t, input.cursor) : undefined),
+          and(
+            eq(t.teamId, ctx.teamId),
+            notInArray(t.action, OPERATOR_ONLY_ACTIONS),
+            input.cursor ? beforeCursor(t, input.cursor) : undefined,
+          ),
         )
         .orderBy(desc(t.createdAt), desc(t.id))
         .limit(input.limit + 1);
@@ -51,12 +65,24 @@ export const auditRouter = router({
               .where(inArray(schema.user.id, userIds))
           : [];
       const byId = new Map(users.map((u) => [u.id, u]));
+      // The instance operator on a team it does not belong to is the platform
+      // to that team, never a person it could name or write to.
+      const operator = await findInstanceOperator(ctx.db);
+      const m = schema.teamMembers;
+      const [operatorMembership] = operator
+        ? await ctx.db
+            .select({ userId: m.userId })
+            .from(m)
+            .where(and(eq(m.teamId, ctx.teamId), eq(m.userId, operator.id)))
+        : [];
+      const outsideOperatorId = operatorMembership ? null : operator?.id;
 
       return {
         nextCursor: page.nextCursor,
         items: page.items.map(({ actorId: _actorId, ...row }, i) => {
           const actor = actors[i] ?? { kind: "system" as const };
           const user = actor.kind === "user" ? byId.get(actor.id) : undefined;
+          const byOperator = actor.kind === "user" && actor.id === outsideOperatorId;
           return {
             ...row,
             // The operator's note on a silent suspension says what was seen,
@@ -66,10 +92,9 @@ export const auditRouter = router({
               SILENT_SUSPENSIONS.includes(String(row.data?.reason))
                 ? { ...row.data, note: null }
                 : row.data,
-            actor: {
-              ...actor,
-              ...(user ? { name: user.name, email: user.email } : {}),
-            },
+            actor: byOperator
+              ? { kind: "operator" as const }
+              : { ...actor, ...(user ? { name: user.name, email: user.email } : {}) },
           };
         }),
       };
