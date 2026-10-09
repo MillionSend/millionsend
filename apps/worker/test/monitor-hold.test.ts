@@ -3,7 +3,9 @@ import {
   type AbuseJudge,
   EnvKeyring,
   encryptEmailBody,
+  type JudgeVerdict,
   MONITOR_SETTING_DEFAULTS,
+  type MonitorSettings,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -112,4 +114,63 @@ it("holds a new team on its first phishing verdict, and parks what it sends next
   expect(await sendEmail(db, { keyring, ses }, { emailId: next })).toBe("parked");
   const [parked] = await db.select().from(schema.emails).where(eq(schema.emails.id, next));
   expect(parked?.latestStatus).toBe("queued_quota");
+});
+
+// The first phishing campaign the monitor judged, verdict by verdict: one
+// test message, then the campaign, every message sampled in the first window.
+const LURE = ["impersonation", "off_domain_lure"];
+const BULK_LURE = [...LURE, "unsolicited_bulk"];
+const BRAND = ["brand_impersonation"];
+const INCIDENT: Pick<JudgeVerdict, "score" | "verdict" | "categories" | "reasons">[] = [
+  { score: 38, verdict: "clean", categories: [], reasons: [] },
+  { score: 15, verdict: "clean", categories: [], reasons: [] },
+  { score: 13, verdict: "clean", categories: [], reasons: [] },
+  { score: 41, verdict: "clean", categories: [], reasons: ["off_domain_lure"] },
+  { score: 42, verdict: "clean", categories: [], reasons: ["off_domain_lure"] },
+  { score: 96, verdict: "abuse", categories: BRAND, reasons: LURE },
+  { score: 95, verdict: "abuse", categories: BRAND, reasons: LURE },
+  { score: 83, verdict: "abuse", categories: BRAND, reasons: BULK_LURE },
+  { score: 84, verdict: "abuse", categories: BRAND, reasons: BULK_LURE },
+  { score: 69, verdict: "abuse", categories: BRAND, reasons: LURE },
+  { score: 80, verdict: "abuse", categories: BRAND, reasons: BULK_LURE },
+];
+
+it("replays the first phishing campaign: held on its 5th message, or its 10th by the repeat hold alone", async () => {
+  /** The campaign message whose verdict held the team; 0 is the test message. */
+  async function heldOn(slug: string, settings: MonitorSettings): Promise<number | null> {
+    const teamId = await createTeam(db, slug);
+    await db
+      .update(schema.teams)
+      .set({ createdAt: new Date(FIRST_SEND.getTime() - 3600_000) })
+      .where(eq(schema.teams.id, teamId));
+    await db.insert(schema.teamMonitor).values({ teamId, sentTotal: 1, firstSendAt: FIRST_SEND });
+    for (const [i, verdict] of INCIDENT.entries()) {
+      const at = new Date(FIRST_SEND.getTime() + i * 60_000);
+      const [sample] = await db
+        .insert(schema.monitorSamples)
+        .values({
+          teamId,
+          emailId: await email(teamId, "sent"),
+          kind: "first_sends",
+          createdAt: at,
+        })
+        .returning({ id: schema.monitorSamples.id });
+      const judge: AbuseJudge = {
+        provider: "typesafe",
+        model: "fake-model",
+        judge: async () => ({ ...verdict, impersonatedBrand: null, language: "other" }),
+      };
+      await judgeSample(
+        db,
+        { judge, keyring, settings: async () => settings, now: () => at },
+        { sampleId: sample?.id ?? "" },
+      );
+      const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+      if (team?.suspensionReason === "review") return i;
+    }
+    return null;
+  }
+  expect(await heldOn("incident", MONITOR_SETTING_DEFAULTS)).toBe(5);
+  // A hold score out of the campaign's reach leaves the repeat hold to act.
+  expect(await heldOn("incident-repeat", { ...MONITOR_SETTING_DEFAULTS, holdScore: 100 })).toBe(10);
 });

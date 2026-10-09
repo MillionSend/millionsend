@@ -809,7 +809,7 @@
         "tiers": "Probatória vai do fim da rampa ao dia 30; Estabelecida a partir do dia 30; Confiável exige 120 dias, 50.000 envios e nenhuma sinalização em 90 dias.",
         "broadcasts": "Um broadcast é julgado pelo seu próprio HTML mais esta quantidade de cópias renderizadas; os destinatários nunca são amostrados por mensagem além disso.",
         "escalation": "Uma checagem crítica ou importante de conteúdo falhando multiplica a taxa; duas forçam. Os limites param a amostragem em silêncio, nunca o envio.",
-        "thresholds": "O risco vai de 0 a 1. A sinalização lista a equipe aqui e quadruplica sua taxa; o alerta envia um e-mail uma vez por dia por equipe; a pausa retém os broadcasts de uma equipe nova quando uma mensagem amostrada também pontuou 90 ou mais; a retenção para revisão suspende na hora uma equipe nova quando uma mensagem é julgada phishing na pontuação de retenção, até você liberá-la."
+        "thresholds": "O risco vai de 0 a 1. A sinalização lista a equipe aqui e quadruplica sua taxa; o alerta envia um e-mail uma vez por dia por equipe; a pausa retém os broadcasts de uma equipe nova quando uma mensagem amostrada também pontuou 90 ou mais; a retenção para revisão suspende uma equipe nova quando uma mensagem é julgada phishing na pontuação de retenção, ou o número definido delas na pontuação menor durante a primeira semana, até você liberá-la."
       },
       "fields": {
         "firstSends": "Primeiros envios julgados por inteiro",
@@ -831,6 +831,8 @@
         "autoPause": "Política de pausa",
         "flagScore": "Uma amostra conta como sinalizada a partir da pontuação",
         "holdScore": "Reter uma equipe nova para revisão a partir da pontuação",
+        "holdRepeatCount": "Reter uma equipe nova após este número de veredictos de phishing na primeira semana",
+        "holdRepeatScore": "Um veredicto de phishing conta para isso a partir da pontuação",
         "autoHold": "Retenção para revisão"
       },
       "hints": {
@@ -853,7 +855,9 @@
         "autoPause": "se a pausa acima é aplicada",
         "flagScore": "o veredicto de abuso do próprio juiz começa em 65",
         "holdScore": "só no nível nova, num veredicto de phishing, falsificação de marca ou desvio de pagamento",
-        "autoHold": "se esse veredicto suspende a equipe até você liberá-la; o proprietário vê uma pausa neutra"
+        "holdRepeatCount": "a semana conta a partir da criação da equipe; 0 desliga",
+        "holdRepeatScore": "os mesmos veredictos de phishing acima, numa pontuação menor",
+        "autoHold": "se esses veredictos suspendem a equipe até você liberá-la; o proprietário vê uma pausa neutra"
       },
       "kinds": {
         "count": "número inteiro",

@@ -28,6 +28,8 @@ const GROUPS = [
       "autoPause",
       "flagScore",
       "holdScore",
+      "holdRepeatCount",
+      "holdRepeatScore",
       "autoHold",
     ],
   },

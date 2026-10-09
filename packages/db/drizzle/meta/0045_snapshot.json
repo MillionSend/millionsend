@@ -4111,6 +4111,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "monitor_hold_repeat_count": {
+          "name": "monitor_hold_repeat_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "monitor_hold_repeat_score": {
+          "name": "monitor_hold_repeat_score",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",

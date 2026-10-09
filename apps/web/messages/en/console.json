@@ -809,7 +809,7 @@
         "tiers": "Probation runs from the ramp's end to day 30; Established from day 30; Trusted needs 120 days, 50,000 sends and no flag in 90 days.",
         "broadcasts": "A broadcast is judged as its own HTML plus this many rendered copies; recipients are never sampled per message on top.",
         "escalation": "A failing critical or major content check multiplies the rate; two force it. Caps stop sampling silently, never sending.",
-        "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more; the review hold suspends a new team at once when one message is judged phishing at the hold score, until you release it."
+        "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more; the review hold suspends a new team when one message is judged phishing at the hold score, or the set number of them at the lower score in its first week, until you release it."
       },
       "fields": {
         "firstSends": "First sends judged in full",
@@ -831,6 +831,8 @@
         "autoPause": "Pause policy",
         "flagScore": "A sample counts as flagged from score",
         "holdScore": "Hold a new team for review from score",
+        "holdRepeatCount": "Hold a new team after this many phishing verdicts in its first week",
+        "holdRepeatScore": "A phishing verdict counts toward that from score",
         "autoHold": "Review hold"
       },
       "hints": {
@@ -853,7 +855,9 @@
         "autoPause": "whether the pause above is applied",
         "flagScore": "the judge's own abuse verdict starts at 65",
         "holdScore": "new tier only, on a phishing, brand impersonation or payment redirect verdict",
-        "autoHold": "whether that verdict suspends the team until you release it; the owner sees a neutral pause"
+        "holdRepeatCount": "the week runs from the team's creation; 0 turns this off",
+        "holdRepeatScore": "the same phishing verdicts as above, at a lower score",
+        "autoHold": "whether those verdicts suspend the team until you release it; the owner sees a neutral pause"
       },
       "kinds": {
         "count": "whole number",

@@ -133,4 +133,6 @@ export const monitorSettingColumns = {
   monitorFlagScore: smallint("monitor_flag_score"),
   monitorAutoHold: boolean("monitor_auto_hold"),
   monitorHoldScore: smallint("monitor_hold_score"),
+  monitorHoldRepeatCount: integer("monitor_hold_repeat_count"),
+  monitorHoldRepeatScore: smallint("monitor_hold_repeat_score"),
 } as const;
