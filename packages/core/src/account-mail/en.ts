@@ -235,6 +235,14 @@ export const en = {
     ],
     button: "Open review",
   },
+  "monitor.team_held": {
+    subject: "Content monitor held {team} for review",
+    body: [
+      "{team} is in the new tier and a sampled message scored {score} ({verdict}). Under the hold policy every send of the team is now refused or parked: the API and SMTP refuse, queued mail and broadcasts wait, and its SES tenant is disabled where tenants are on. The sampled message itself had already gone out when it was judged.",
+      "The owner sees sending as paused pending review and is not emailed. Open the review page to release the team, which sends the held mail, or to suspend it for phishing.",
+    ],
+    button: "Open review",
+  },
   "monitor.degraded": {
     subject: "Content monitor: {rate} of samples went unjudged in the last hour",
     body: [

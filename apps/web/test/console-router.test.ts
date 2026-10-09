@@ -9,6 +9,15 @@ import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import { setConsoleTeamsDeps } from "@/server/routers/console/teams";
 
+const h = vi.hoisted(() => ({ sent: [] as { to: string; subject: string }[] }));
+vi.mock("@/server/system-mail", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/system-mail")>();
+  return {
+    ...actual,
+    sendAccountMail: (m: { to: string; subject: string }) => void h.sent.push(m),
+  };
+});
+
 // The console kicks the quota drain after a raise; no pg-boss in tests.
 vi.mock("@/server/queue", () => ({
   getQueue: async () => ({ runCronNow: async () => {} }),
@@ -401,7 +410,7 @@ describe("console.monitor", () => {
   it("reads every setting with its source, and the judge as off by default", async () => {
     const got = await operator().console.monitor.settings.get();
     expect(got.judge).toEqual({ on: false });
-    expect(got.settings).toHaveLength(18);
+    expect(got.settings).toHaveLength(20);
     expect(got.settings.find((s) => s.key === "firstSends")).toEqual({
       key: "firstSends",
       value: 1000,
@@ -873,5 +882,42 @@ describe("suspend / reinstate and the team's SES tenant", () => {
     expect(ses.calls).toEqual([]);
     expect(ses.retried).toEqual([]);
     expect(await rows()).toBe(before);
+  });
+});
+
+// Last: the audit log is append-only, and the audit tests above count suspensions.
+describe("review holds", () => {
+  it("a review hold converts to phishing or is released without a word to the owner", async () => {
+    vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@millionsend.test>");
+    const heldTeam = await createTeam(db, "held");
+    await db.insert(schema.teamMembers).values({ teamId: heldTeam, userId: MEMBER, role: "owner" });
+    const heldAt = new Date("2026-10-09T12:03:00Z");
+    const hold = () =>
+      db
+        .update(schema.teams)
+        .set({ suspendedAt: heldAt, suspensionReason: "review" })
+        .where(eq(schema.teams.id, heldTeam));
+    h.sent = [];
+
+    await hold();
+    await operator().console.teams.suspend({ id: heldTeam, reason: "phishing" });
+    expect(await team(heldTeam)).toMatchObject({
+      suspendedAt: heldAt,
+      suspensionReason: "phishing",
+    });
+    expect((await auditRows("team.suspended"))[0]).toMatchObject({
+      teamId: heldTeam,
+      data: { reason: "phishing", notified: false },
+    });
+
+    await hold();
+    await operator().console.teams.reinstate({ id: heldTeam });
+    expect(await team(heldTeam)).toMatchObject({ suspendedAt: null, suspensionReason: null });
+    expect(h.sent).toEqual([]);
+
+    // The same release of an ordinary suspension does tell the owner.
+    await operator().console.teams.suspend({ id: heldTeam, reason: "manual", notify: false });
+    await operator().console.teams.reinstate({ id: heldTeam });
+    expect(h.sent.map((m) => m.to)).toEqual(["bob@example.com"]);
   });
 });

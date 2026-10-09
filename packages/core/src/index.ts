@@ -585,6 +585,8 @@ export {
   STANDING_COLUMNS,
   SUSPENSION_REASONS,
   type SuspensionReason,
+  suspendedSendRefusal,
+  suspendTeam,
   type TeamStanding,
   teamStandingOf,
 } from "./team-standing.js";

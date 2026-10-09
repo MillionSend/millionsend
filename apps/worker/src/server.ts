@@ -580,6 +580,9 @@ await queue.work(
         timeoutMs: judgeConfig?.timeoutMs,
         mailer,
         appBaseUrl: env.APP_BASE_URL,
+        syncTenant: async (teamId) => {
+          await queue.send("tenant.status", { teamId }, { dedupeKey: teamId });
+        },
       },
       { sampleId },
     );

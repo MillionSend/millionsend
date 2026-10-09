@@ -4,12 +4,14 @@ import {
   buildJudgeBlock,
   decryptEmailBody,
   type JudgeBlockInput,
+  type JudgeVerdict,
   judgeErrorClass,
   type Keyring,
   type MonitorSettings,
   openAttachments,
   teamMonitorOverview,
   teamMonitorRow,
+  type VerdictOutcome,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -25,6 +27,8 @@ export interface JudgeDeps {
   mailer?: SystemMailer | undefined;
   appBaseUrl?: string | undefined;
   now?: (() => Date) | undefined;
+  /** Hands a team the hold just suspended to the tenant.status job, which disables its SES tenant. */
+  syncTenant?: ((teamId: string) => Promise<void>) | undefined;
 }
 
 /** A throttled call is retried this many times through the queue's backoff before the sample gives up. */
@@ -113,11 +117,25 @@ export async function judgeSample(
       .returning({ id: ms.id });
     // A concurrent run already wrote this sample: its verdict stands, the risk moved once.
     if (!judged) return null;
-    return applyJudgedSample(t, settings, { teamId: sample.teamId, score: verdict.score, now });
+    return applyJudgedSample(t, settings, {
+      teamId: sample.teamId,
+      score: verdict.score,
+      verdict,
+      now,
+    });
   });
   if (!outcome) return "skipped";
-  if ((outcome.alert || outcome.paused) && deps.mailer) {
-    await notifyOperator(db, deps, sample.teamId, verdict.score, outcome, settings, now);
+  if ((outcome.alert || outcome.paused || outcome.held) && deps.mailer) {
+    await notifyOperator(db, deps, sample.teamId, verdict, outcome, settings, now);
+  }
+  if (outcome.held && deps.syncTenant) {
+    // The hold already refuses every send; the tenant is a second lock, so a
+    // failed hand-off is logged rather than failing a committed verdict.
+    try {
+      await deps.syncTenant(sample.teamId);
+    } catch (err) {
+      console.error(`abuse.judge: SES tenant hand-off for held team ${sample.teamId} failed`, err);
+    }
   }
   return "judged";
 }
@@ -214,8 +232,8 @@ async function notifyOperator(
   db: Db,
   deps: JudgeDeps,
   teamId: string,
-  score: number,
-  outcome: { risk: number; tier: string; alert: boolean; paused: boolean },
+  verdict: Pick<JudgeVerdict, "score" | "categories" | "reasons">,
+  outcome: VerdictOutcome,
   settings: MonitorSettings,
   now: Date,
 ): Promise<void> {
@@ -227,14 +245,27 @@ async function notifyOperator(
   const name = team?.name ?? teamId;
   const path = `/console/safety/${teamId}`;
   const risk = outcome.risk.toFixed(2);
+  const score = String(verdict.score);
   try {
+    // The hold supersedes the pause and the alert, whose mails say nothing is held.
+    if (outcome.held) {
+      await mailOperator(
+        db,
+        deps.mailer,
+        "monitor.team_held",
+        path,
+        { team: name, score, verdict: [...verdict.categories, ...verdict.reasons].join(", ") },
+        deps.appBaseUrl,
+      );
+      return;
+    }
     if (outcome.paused) {
       await mailOperator(
         db,
         deps.mailer,
         "monitor.broadcasts_paused",
         path,
-        { team: name, risk, score: String(score) },
+        { team: name, risk, score },
         deps.appBaseUrl,
       );
     }

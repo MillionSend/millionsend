@@ -13,6 +13,7 @@ import {
   SUPPORT_VIEW_SIGN_IN_MINUTES,
   SUSPENSION_REASONS,
   startSupportView,
+  suspendTeam,
   syncTenantSendingStatus,
   type TenantStatusOutcome,
   teamQuota,
@@ -46,6 +47,8 @@ const SORT_KEYS = [
   "created",
 ] as const;
 const PAUSE_REASONS = ["complaints", "report", "manual"] as const;
+/** Suspensions the owner never hears about, on the way in or out. */
+const SILENT_SUSPENSIONS: readonly string[] = ["phishing", "review"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const t = schema.teams;
@@ -536,7 +539,7 @@ export const consoleTeamsRouter = router({
 
   /**
    * Every send refused until reinstated, the team's SES tenant disabled too;
-   * owners hear about it unless it is phishing.
+   * owners hear about it unless it is phishing or a review hold.
    */
   suspend: operatorProcedure
     .input(
@@ -549,15 +552,8 @@ export const consoleTeamsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const team = await loadTeam(ctx.db, input.id);
-      await ctx.db
-        .update(t)
-        .set({
-          suspendedAt: team.suspendedAt ?? new Date(),
-          suspensionReason: input.reason,
-          suspensionNote: input.note ?? null,
-        })
-        .where(eq(t.id, team.id));
-      const notify = input.notify && input.reason !== "phishing";
+      await suspendTeam(ctx.db, { teamId: team.id, reason: input.reason, note: input.note });
+      const notify = input.notify && !SILENT_SUSPENSIONS.includes(input.reason);
       await auditOperator(ctx, {
         teamId: team.id,
         action: "team.suspended",
@@ -602,7 +598,7 @@ export const consoleTeamsRouter = router({
         target: { type: "team", id: team.id },
         metadata: { name: team.name, reason: team.suspensionReason },
       });
-      if (team.suspendedAt && team.suspensionReason !== "phishing") {
+      if (team.suspendedAt && !SILENT_SUSPENSIONS.includes(team.suspensionReason ?? "")) {
         await mailTeamOwners(ctx.db, team, "team.reinstated", "/emails", () => ({}));
       }
       // Before the drain: SES refuses a disabled tenant's sends.

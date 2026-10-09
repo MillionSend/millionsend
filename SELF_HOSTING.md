@@ -683,10 +683,10 @@ content insights (never email bodies), and an instance-wide audit log.
   broadcasts in flight park, webhooks keep delivering and data stays; a
   broadcast pause parks broadcasts while transactional mail flows; a daily
   ceiling caps the team's UTC day under its plan. Owners are emailed about
-  each of these (never for a phishing suspension), and every action is
-  recorded in the audit log with its reason. With `SES_TENANTS` on, a
-  suspension also disables the team's SES tenant in every region it has a
-  domain in, and reinstating enables it again; an AWS failure never holds
+  each of these (never for a phishing suspension or a review hold), and
+  every action is recorded in the audit log with its reason. With
+  `SES_TENANTS` on, a suspension also disables the team's SES tenant in
+  every region it has a domain in, and reinstating enables it again; an AWS failure never holds
   the suspension back: the console warns, the audit log records it, and the
   worker retries.
 
@@ -698,11 +698,11 @@ content insights (never email bodies), and an instance-wide audit log.
 Off by default. With a judge configured, a sample of accepted mail is
 scored 0–100 by TypeSafe Jev after SES has taken it and folded into a
 per-team risk the operator sees on Trust & safety.
-Nothing on the send path waits for it: a verdict never delays, holds or
-refuses a message, and a judge failure of any kind (feature off, missing
-credentials, throttling, timeout, upstream error, unparseable answer, body
-already purged by retention) records the sample as unjudged and changes
-nothing else. The deterministic content checks (`email_insights`, the
+Nothing on the send path waits for it: a verdict never delays the message
+it judges, which SES has already taken, and a judge failure of any kind
+(feature off, missing credentials, throttling, timeout, upstream error,
+unparseable answer, body already purged by retention) records the sample
+as unjudged and changes nothing else. The deterministic content checks (`email_insights`, the
 guardrail, the account score) run on every send whether or not the judge is
 on. Self-hosters can leave it off; the cloud runs it.
 
@@ -713,8 +713,26 @@ day per team past the alert line, and, for a team in the New tier only
 days), pauses broadcasts when the risk passes the pause line and a sampled
 message scored 90 or more within a day (transactional mail keeps flowing;
 the team sees "paused pending review"; the operator resumes from the review
-page). It never suspends a team and never holds transactional mail: a
-person decides. The pause policy is a setting and can be switched off.
+page). The pause policy is a setting and can be switched off.
+
+**The review hold.** When one sampled message of a New-tier team is judged
+abuse at the hold score (90 by default) as credential phishing, brand
+impersonation or payment redirection, or with an impersonation,
+secret-harvesting or off-domain-lure finding, the team is suspended at once
+with the reason `review`: the API answers `403 sending_paused`, SMTP `550`,
+queued mail and broadcasts park, and with `SES_TENANTS` on its SES tenant is
+disabled. The operator is emailed at once; the owner is not, and sees a
+neutral "Sending is paused pending review" notice. The team stays on Trust &
+safety with its flag open until the operator decides on its review page:
+**Release hold** reinstates it and the parked mail goes out; **Suspend for
+phishing** turns the hold into a phishing suspension. A team is held once:
+after a release its later verdicts only alert, so the released mail, judged
+again on its way out, cannot hold it a second time. A team already
+suspended keeps its suspension, and Probation, Established, Trusted and
+system teams are never held: they stay alert-only. The judge reads a message
+after SES has taken it, so the message that triggers the hold has already
+gone out; the hold stops what follows. `MONITOR_AUTO_HOLD=false` switches it
+off.
 
 **Turning it on** (in the instance's `.env`, read by the worker and the
 app; a restart applies it):
@@ -799,6 +817,8 @@ as its `MONITOR_*` environment variable until it is; the console wins.
 | `MONITOR_PAUSE_RISK` | 0.85 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |
 | `MONITOR_AUTO_PAUSE` | true | Whether the pause policy applies |
 | `MONITOR_FLAG_SCORE` | 70 | A sample counts as flagged in the console from this score |
+| `MONITOR_HOLD_SCORE` | 90 | New teams only: a phishing-type verdict from this score holds the team for review |
+| `MONITOR_AUTO_HOLD` | true | Whether the review hold applies |
 
 The risk is a decayed mean of the verdicts (half-life 7 days) with a prior
 that starts new teams higher; the review page shows it beside the tier,

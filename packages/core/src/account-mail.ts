@@ -37,6 +37,7 @@ export const ACCOUNT_MAIL_KINDS = [
   "team.reinstated",
   "monitor.alert",
   "monitor.broadcasts_paused",
+  "monitor.team_held",
   "monitor.degraded",
   "content.access_notice",
 ] as const;

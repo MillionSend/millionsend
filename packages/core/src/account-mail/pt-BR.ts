@@ -235,6 +235,14 @@ export const ptBR = {
     ],
     button: "Abrir revisão",
   },
+  "monitor.team_held": {
+    subject: "O monitor de conteúdo reteve {team} para revisão",
+    body: [
+      "{team} está no nível novo e uma mensagem amostrada pontuou {score} ({verdict}). Pela política de retenção, todo envio da equipe agora é recusado ou estacionado: a API e o SMTP recusam, o e-mail na fila e os broadcasts aguardam, e seu tenant do SES fica desativado onde os tenants estão ligados. A própria mensagem amostrada já tinha saído quando foi julgada.",
+      "O dono vê o envio como pausado aguardando revisão e não recebe e-mail. Abra a página de revisão para liberar a equipe, o que envia o e-mail retido, ou para suspendê-la por phishing.",
+    ],
+    button: "Abrir revisão",
+  },
   "monitor.degraded": {
     subject: "Monitor de conteúdo: {rate} das amostras ficaram sem julgamento na última hora",
     body: [

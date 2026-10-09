@@ -140,11 +140,13 @@ export function PauseDialog({
 /** Every send refused until reinstated. A phishing suspension never emails the owner. */
 export function SuspendDialog({
   name,
+  initialReason = "reputation",
   pending,
   onClose,
   onSubmit,
 }: {
   name: string;
+  initialReason?: SuspensionReason | undefined;
   pending: boolean;
   onClose: () => void;
   onSubmit: (input: HoldInput<SuspensionReason>) => void;
@@ -152,7 +154,7 @@ export function SuspendDialog({
   const t = useTranslations("console.teams.suspendDialog");
   const common = useTranslations("console.common");
   const id = useId();
-  const [reason, setReason] = useState<SuspensionReason>("reputation");
+  const [reason, setReason] = useState<SuspensionReason>(initialReason);
   const [note, setNote] = useState("");
   const [notify, setNotify] = useState(true);
   const phishing = reason === "phishing";

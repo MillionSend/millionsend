@@ -640,3 +640,133 @@ describe("verdicts and thresholds", () => {
     expect(await pruneMonitorSamples(db, NOW)).toBe(1);
   });
 });
+
+describe("the review hold", () => {
+  let db: Db;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, close } = await createTestDb());
+  });
+  afterAll(() => close());
+
+  const PHISHING = {
+    verdict: "abuse" as const,
+    categories: ["brand_impersonation"],
+    reasons: ["impersonation", "off_domain_lure"],
+  };
+  async function newTeam(slug: string, over: { plan?: "system"; sentTotal?: number } = {}) {
+    const teamId = await createTeam(db, slug);
+    if (over.plan) {
+      await db.update(schema.teams).set({ plan: over.plan }).where(eq(schema.teams.id, teamId));
+    }
+    await db.insert(schema.teamMonitor).values({
+      teamId,
+      sentTotal: over.sentTotal ?? 1,
+      firstSendAt: new Date(NOW.getTime() - (over.sentTotal ? 60 * DAY_MS : 3 * 60_000)),
+    });
+    return teamId;
+  }
+  const team = async (teamId: string) =>
+    (await db.select().from(schema.teams).where(eq(schema.teams.id, teamId)))[0];
+  const flags = (teamId: string) =>
+    db.select().from(schema.teamFlags).where(eq(schema.teamFlags.teamId, teamId));
+  const audits = (teamId: string) =>
+    db.select().from(schema.auditLog).where(eq(schema.auditLog.teamId, teamId));
+
+  it("suspends a new team for review on one confident phishing verdict, once, and leaves a released team to the operator", async () => {
+    const teamId = await newTeam("held");
+    const out = await applyJudgedSample(db, S, {
+      teamId,
+      score: 96,
+      verdict: PHISHING,
+      now: NOW,
+    });
+    expect(out).toMatchObject({ tier: "new", held: true, paused: false });
+    expect(await team(teamId)).toMatchObject({
+      suspendedAt: NOW,
+      suspensionReason: "review",
+      suspensionNote: null,
+    });
+    expect(await flags(teamId)).toMatchObject([
+      { reason: "monitor", status: "open", openedBy: null, openedAt: NOW },
+    ]);
+    expect(await audits(teamId)).toMatchObject([
+      { action: "team.held_for_review", actorId: "system", target: `team:${teamId}` },
+    ]);
+    const again = await applyJudgedSample(db, S, {
+      teamId,
+      score: 99,
+      verdict: PHISHING,
+      now: new Date(NOW.getTime() + HOUR),
+    });
+    expect(again.held).toBe(false);
+    expect((await team(teamId))?.suspendedAt).toEqual(NOW);
+    expect(await audits(teamId)).toHaveLength(1);
+    // Released: the drained mail is judged again, and the same verdicts only alert.
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: null, suspensionReason: null })
+      .where(eq(schema.teams.id, teamId));
+    const released = await applyJudgedSample(db, S, {
+      teamId,
+      score: 99,
+      verdict: PHISHING,
+      now: new Date(NOW.getTime() + 2 * HOUR),
+    });
+    expect(released.held).toBe(false);
+    expect((await team(teamId))?.suspendedAt).toBeNull();
+  });
+
+  it("stays alert-only under the score, on other abuse, past the new tier, for system teams and with the policy off", async () => {
+    const teamId = await newTeam("alert-only");
+    const held = async (
+      score: number,
+      verdict: typeof PHISHING,
+      s: MonitorSettings = S,
+      id = teamId,
+    ) => (await applyJudgedSample(db, s, { teamId: id, score, verdict, now: NOW })).held;
+    expect(await held(89, PHISHING)).toBe(false);
+    expect(
+      await held(99, { verdict: "abuse", categories: ["scam"], reasons: ["unsolicited_bulk"] }),
+    ).toBe(false);
+    expect(await held(99, PHISHING, { ...S, autoHold: false })).toBe(false);
+    expect(await held(99, PHISHING, S, await newTeam("settled", { sentTotal: 20_000 }))).toBe(
+      false,
+    );
+    expect(await held(99, PHISHING, S, await newTeam("system", { plan: "system" }))).toBe(false);
+    expect(
+      await applyJudgedSample(db, S, { teamId, score: 99, now: NOW }).then((o) => o.held),
+    ).toBe(false);
+    expect((await team(teamId))?.suspendedAt).toBeNull();
+    // The line is a setting; a lure reason alone is enough.
+    expect(
+      await held(
+        85,
+        { verdict: "abuse", categories: ["other_abuse"], reasons: ["harvests_secrets"] },
+        { ...S, holdScore: 80 },
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves an operator's suspension as it is", async () => {
+    const teamId = await newTeam("operator-suspended");
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: NOW, suspensionReason: "non_payment", suspensionNote: "invoice" })
+      .where(eq(schema.teams.id, teamId));
+    const out = await applyJudgedSample(db, S, {
+      teamId,
+      score: 99,
+      verdict: PHISHING,
+      now: new Date(NOW.getTime() + HOUR),
+    });
+    expect(out.held).toBe(false);
+    expect(await team(teamId)).toMatchObject({
+      suspendedAt: NOW,
+      suspensionReason: "non_payment",
+      suspensionNote: "invoice",
+    });
+    expect(await flags(teamId)).toEqual([]);
+  });
+});

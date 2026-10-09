@@ -141,6 +141,22 @@ describe("syncTeamFlags", () => {
     ]);
   });
 
+  it("keeps a held team's automatic flag open until the hold is lifted", async () => {
+    const teamId = await createTeam(db, "held-for-review");
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "review" })
+      .where(eq(schema.teams.id, teamId));
+    await db.insert(schema.teamFlags).values({ teamId, reason: "monitor", detail: { risk: 0.49 } });
+    expect(await syncTeamFlags(db, [standing({ teamId })])).toEqual({ opened: 0, cleared: 0 });
+    expect(await flagsOf(teamId)).toMatchObject([{ status: "open" }]);
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: null, suspensionReason: null })
+      .where(eq(schema.teams.id, teamId));
+    expect(await syncTeamFlags(db, [standing({ teamId })])).toEqual({ opened: 0, cleared: 1 });
+  });
+
   it("does not reopen what an operator cleared for the same reason while the trigger holds", async () => {
     const teamId = await createTeam(db, "cleared");
     await db.insert(schema.teamFlags).values({

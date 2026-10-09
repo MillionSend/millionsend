@@ -47,7 +47,7 @@ describe("resolveMonitorSettings", () => {
   it("orders the thresholds and knows every key", () => {
     expect(monitorThresholdsOrdered(MONITOR_SETTING_DEFAULTS)).toBe(true);
     expect(monitorThresholdsOrdered({ flagRisk: 0.7, alertRisk: 0.7, pauseRisk: 0.9 })).toBe(false);
-    expect(MONITOR_SETTING_KEYS).toHaveLength(18);
+    expect(MONITOR_SETTING_KEYS).toHaveLength(20);
   });
 });
 

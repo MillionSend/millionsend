@@ -789,18 +789,18 @@ Uma equipe suspensa mantém os dados e as chaves continuam autenticando, mas
 todo envio responde `403 team_suspended` (SMTP `550`); uma pausa de
 transmissões retém as transmissões enquanto o e-mail transacional continua;
 um teto diário limita o dia da equipe abaixo do plano. Os proprietários são
-avisados por e-mail a cada ação (exceto suspensão por phishing), e cada ação
-entra no log de auditoria com o motivo.
+avisados por e-mail a cada ação (exceto suspensão por phishing ou retenção
+para revisão), e cada ação entra no log de auditoria com o motivo.
 
 ## Monitoramento de conteúdo (opcional)
 
 Desligado por padrão. Com um juiz configurado, uma amostra do e-mail aceito é
 pontuada de 0 a 100 pelo TypeSafe Jev depois que o SES o recebeu e incorporada
 a um risco por equipe que o operador vê em Confiança e segurança. Nada no caminho de envio espera por
-isso: um veredicto nunca atrasa, retém ou recusa uma mensagem, e uma falha do
-juiz de qualquer tipo (recurso desligado, credenciais ausentes, limitação de
-taxa, timeout, erro do provedor, resposta que não parseia, corpo já removido
-pela retenção) registra a amostra como sem julgamento e não muda mais nada.
+isso: um veredicto nunca atrasa a mensagem que julga, que o SES já recebeu,
+e uma falha do juiz de qualquer tipo (recurso desligado, credenciais
+ausentes, limitação de taxa, timeout, erro do provedor, resposta que não
+parseia, corpo já removido pela retenção) registra a amostra como sem julgamento e não muda mais nada.
 As verificações determinísticas de conteúdo (os insights, o guardrail, o
 score da conta) rodam em todo envio com ou sem o juiz. Quem hospeda por
 conta própria pode deixá-lo desligado.
@@ -812,9 +812,29 @@ equipe no nível Nova (nos primeiros 1.000 envios ou 72 horas, ou abaixo de
 10.000 envios em 7 dias), pausa os broadcasts quando o risco passa da
 linha de pausa e uma mensagem amostrada pontuou 90 ou mais no último dia (o
 e-mail transacional continua saindo; a equipe vê "pausados aguardando
-revisão"; o operador retoma pela página de revisão). Nunca suspende uma
-equipe e nunca retém e-mail transacional: uma pessoa decide. A política de
-pausa é uma configuração e pode ser desligada.
+revisão"; o operador retoma pela página de revisão). A política de pausa é
+uma configuração e pode ser desligada.
+
+**A retenção para revisão.** Quando uma mensagem amostrada de uma equipe no
+nível Nova é julgada abuso na pontuação de retenção (90 por padrão) como
+phishing de credenciais, falsificação de marca ou desvio de pagamento, ou com
+uma constatação de falsificação, coleta de segredos ou isca fora do domínio, a
+equipe é suspensa na hora com o motivo `review`: a API responde
+`403 sending_paused`, o SMTP `550`, o e-mail na fila e os broadcasts ficam
+estacionados e, com `SES_TENANTS` ligado, o tenant do SES dela é desativado. O
+operador é avisado por e-mail na hora; o proprietário não, e vê um aviso
+neutro de "envio pausado aguardando revisão". A equipe fica em Confiança e
+segurança com a sinalização aberta até o operador decidir na página de
+revisão: **Liberar retenção** a reativa e o e-mail estacionado sai;
+**Suspender por phishing** transforma a retenção numa suspensão por phishing.
+Uma equipe é retida uma vez só: depois de liberada, seus veredictos seguintes
+só geram alerta, então o e-mail liberado, julgado de novo na saída, não a
+retém outra vez. Uma equipe já suspensa mantém a suspensão, e equipes nos níveis Probatória,
+Estabelecida e Confiável e as de sistema nunca são retidas: ficam só no
+alerta. O
+juiz lê uma mensagem depois que o SES a recebeu, então a mensagem que dispara
+a retenção já saiu; a retenção barra o que vem depois.
+`MONITOR_AUTO_HOLD=false` a desliga.
 
 **Para ligar**, no `.env` da instância, lido pelo worker e pelo app (um
 reinício aplica):
@@ -901,6 +921,8 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 | `MONITOR_PAUSE_RISK` | 0.85 | Só equipes novas: os broadcasts pausam, com um veredicto de 90 ou mais no último dia |
 | `MONITOR_AUTO_PAUSE` | true | Se a política de pausa se aplica |
 | `MONITOR_FLAG_SCORE` | 70 | Uma amostra conta como sinalizada no console a partir desta pontuação |
+| `MONITOR_HOLD_SCORE` | 90 | Só equipes novas: um veredicto do tipo phishing a partir desta pontuação retém a equipe para revisão |
+| `MONITOR_AUTO_HOLD` | true | Se a retenção para revisão se aplica |
 
 O risco é uma média decaída dos veredictos (meia-vida de 7 dias) com um
 prior que começa mais alto para equipes novas. O cartão Monitoramento da

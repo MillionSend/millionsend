@@ -203,9 +203,10 @@ export function flagTrigger(s: TeamStandingRow, opts: FlagTriggerOptions = {}): 
  * the same reason and the trigger has held since (their call stands; a
  * trigger that lapsed and came back is a new finding, judged against the
  * previous run's standings, so `previous` must be the rows saved before this
- * run's); an open automatic flag whose trigger is gone is cleared; an
- * operator's manual flag is never touched. `opened_at` of an open flag is
- * left alone so the list's "since" holds still.
+ * run's); an open automatic flag whose trigger is gone is cleared, unless
+ * the team is held for review, which waits on an operator; an operator's
+ * manual flag is never touched. `opened_at` of an open flag is left alone so
+ * the list's "since" holds still.
  */
 export async function syncTeamFlags(
   db: Db,
@@ -260,7 +261,17 @@ export async function syncTeamFlags(
     });
     opened += 1;
   }
-  const stale = open.filter((row) => row.openedBy === null && !triggered.has(row.teamId));
+  const held = new Set(
+    (
+      await db
+        .select({ id: schema.teams.id })
+        .from(schema.teams)
+        .where(eq(schema.teams.suspensionReason, "review"))
+    ).map((row) => row.id),
+  );
+  const stale = open.filter(
+    (row) => row.openedBy === null && !triggered.has(row.teamId) && !held.has(row.teamId),
+  );
   if (stale.length > 0) {
     await db
       .update(f)
