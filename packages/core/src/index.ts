@@ -574,6 +574,7 @@ export {
 } from "./team-plan.js";
 export {
   fetchTeamStanding,
+  isSilentlySuspended,
   isTeamSuspended,
   SILENT_SUSPENSIONS,
   STANDING_COLUMNS,

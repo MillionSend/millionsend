@@ -4,6 +4,7 @@ import {
   accountMailPhrase,
   fetchAccountScore,
   fetchDeliverabilityHealth,
+  isSilentlySuspended,
   liveSupportViewForTeam,
   PLAN_RUNGS,
   type Plan,
@@ -21,7 +22,6 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { escapeLike } from "@/lib/sql";
-import { isSilentlySuspended } from "../../suspension-lock";
 import { operatorProcedure, router } from "../../trpc";
 import { auditOperator, kickQuotaDrain, loadTeam, mailTeamOwners } from "./shared";
 

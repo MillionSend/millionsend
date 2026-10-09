@@ -13,6 +13,14 @@ export const SUSPENSION_REASONS = schema.suspensionReasonEnum.enumValues;
  */
 export const SILENT_SUSPENSIONS: readonly string[] = ["phishing", "review"];
 
+/** Whether the team row is under a silent suspension. */
+export function isSilentlySuspended(team: {
+  suspendedAt: Date | null;
+  suspensionReason: string | null;
+}): boolean {
+  return team.suspendedAt !== null && SILENT_SUSPENSIONS.includes(team.suspensionReason ?? "");
+}
+
 /** The operator overrides on a team that every send surface honours. */
 export interface TeamStanding {
   suspended: { at: Date; reason: SuspensionReason; note: string | null } | null;
