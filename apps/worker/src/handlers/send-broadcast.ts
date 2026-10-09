@@ -271,10 +271,12 @@ export async function sendBroadcast(
   // A broadcast that reaches fan-out already "paused" (scheduled while healthy,
   // degraded since) is throttled here, not hard-halted — the initiation guards
   // (tRPC + API) are what block NEW paused sends; the fan-out's only job is to
-  // avoid the burst. Evaluated once so the whole campaign shares one drip base.
-  const health = await fetchDeliverabilityHealth(db, broadcast.teamId);
-  const spacingMs = broadcastSendSpacingMs(health.status);
-  const startMs = Date.now();
+  // avoid the burst. Health is read at every page edge, so a team that crosses
+  // the line mid-walk drips the rest from that page on. The drip never loosens
+  // within a walk, since the slots it handed out are still ahead, and a
+  // tighter one starts after the last of them instead of on top.
+  let spacingMs = 0;
+  let nextSendMs = 0;
   let emitted = 0;
 
   // Optional segment: AND the shared resolver (filter matches plus manual
@@ -418,6 +420,13 @@ export async function sendBroadcast(
         await deps.reschedule?.(broadcast.id, new Date(Date.now() + REGION_HOLD_RETRY_MS));
         return "deferred";
       }
+      const pageSpacingMs = broadcastSendSpacingMs(
+        (await fetchDeliverabilityHealth(db, broadcast.teamId)).status,
+      );
+      if (pageSpacingMs > spacingMs) {
+        spacingMs = pageSpacingMs;
+        nextSendMs = Math.max(nextSendMs, Date.now());
+      }
 
       // Suppression mirrors the API accept path: a bounced or complained
       // address must never receive bulk mail again, or SES reputation pays.
@@ -485,7 +494,7 @@ export async function sendBroadcast(
         // Only rows this run actually enqueues advance the drip — re-run
         // conflicts (accepted === null) don't, so a resumed fan-out keeps
         // spacing tight instead of leaving gaps for already-queued contacts.
-        const startAfter = spacingMs > 0 ? new Date(startMs + emitted * spacingMs) : undefined;
+        const startAfter = spacingMs > 0 ? new Date(nextSendMs) : undefined;
         // Past the share's room the row parks at once: no reservation and no
         // job, the drain reserves on release (the existing parking contract).
         const paced = emitted >= admitted;
@@ -544,6 +553,7 @@ export async function sendBroadcast(
         // already queued (or the sends.reconcile sweep recovers it).
         if (accepted && !accepted.parked) {
           emitted += 1;
+          nextSendMs += spacingMs;
           batch.push({ emailId: accepted.id, startAfter });
         }
         if (

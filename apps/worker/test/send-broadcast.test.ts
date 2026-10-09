@@ -735,7 +735,7 @@ it("cloud fan-out re-reads the billing period per page, so a renewal mid-walk co
 async function seedThrottleTeam(
   label: string,
   counter: Partial<typeof schema.usageCounters.$inferInsert>,
-): Promise<{ broadcastId: string }> {
+): Promise<{ broadcastId: string; teamId: string }> {
   const { teamId: tId } = await seedTeam(label, [
     { email: "t1@example.com" },
     { email: "t2@example.com" },
@@ -746,7 +746,7 @@ async function seedThrottleTeam(
     teamId: tId,
     from: `Acme <hi@${label}.dev>`,
   });
-  return { broadcastId };
+  return { broadcastId, teamId: tId };
 }
 
 it("throttles the fan-out drip when the team is over the risk line, one enqueue per page", async () => {
@@ -792,6 +792,36 @@ it("fans out at full rate (no startAfter) when the team is ok", async () => {
   expect(startAfters).toHaveLength(3);
   expect(startAfters.every((d) => d === undefined)).toBe(true);
   expect((await emailsOf(broadcastId)).every((r) => r.scheduledAt === null)).toBe(true);
+});
+
+it("a team crossing the pause line mid-walk drips the rest of the fan-out from the next page", async () => {
+  // 10/2000 = 0.5% hard bounces: ok when the walk starts.
+  const { broadcastId, teamId: tId } = await seedThrottleTeam("bc-midwalk", {
+    sent: 2000,
+    bounced: 10,
+    hardBounced: 10,
+  });
+  const { deps, startAfters } = makeDeps();
+  // The first page's bounces land before the next page: 210/2000 = 10.5%
+  // in the pause window.
+  const enqueue = deps.enqueueEmailSends;
+  deps.enqueueEmailSends = async (batch) => {
+    await enqueue(batch);
+    await db
+      .update(schema.usageCounters)
+      .set({ bounced: 210, hardBounced: 210 })
+      .where(eq(schema.usageCounters.teamId, tId));
+  };
+
+  expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+
+  expect(startAfters).toHaveLength(3);
+  const [first, t1, t2] = startAfters.map((d) => d?.getTime());
+  expect(first).toBeUndefined();
+  if (t1 === undefined || t2 === undefined) throw new Error("no drip after the pause line");
+  expect(t2 - t1).toBe(broadcastSendSpacingMs("paused"));
+  const rows = await emailsOf(broadcastId);
+  expect(rows.map((r) => r.scheduledAt?.getTime()).sort()).toEqual([t1, t2, undefined]);
 });
 
 it("an aborted signal fails the walk at the next page so the job retries; the resumed walk skips fanned-out contacts and keeps its drip tight", async () => {
