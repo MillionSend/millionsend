@@ -540,13 +540,14 @@ export const consoleTeamsRouter = router({
 
   /**
    * Every send refused until reinstated, the team's SES tenant disabled too;
-   * owners hear about it unless it is phishing or a review hold.
+   * owners hear about it unless it is phishing.
    */
   suspend: operatorProcedure
     .input(
       z.object({
         id: z.uuid(),
-        reason: z.enum(SUSPENSION_REASONS),
+        // A review hold comes only from the content monitor, which also stamps held_at.
+        reason: z.enum(SUSPENSION_REASONS).exclude(["review"]),
         note: z.string().trim().max(1000).optional(),
         notify: z.boolean().default(true),
       }),

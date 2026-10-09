@@ -1024,4 +1024,16 @@ describe("review holds", () => {
     expect((await team(suspended)).broadcastsPausedByOperatorAt).toEqual(pausedAt);
     expect((await monitorRow(suspended))?.broadcastsPausedAt).toEqual(pausedAt);
   });
+
+  it("refuses a review hold from the console's suspend: only the monitor holds", async () => {
+    const id = await createTeam(db, "never-held");
+    await expect(
+      // @ts-expect-error — the input enum leaves the review reason out
+      operator().console.teams.suspend({ id, reason: "review", notify: false }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(await team(id)).toMatchObject({ suspendedAt: null, suspensionReason: null });
+    expect(await auditRows("team.suspended")).not.toContainEqual(
+      expect.objectContaining({ teamId: id }),
+    );
+  });
 });
