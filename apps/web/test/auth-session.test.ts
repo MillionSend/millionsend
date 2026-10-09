@@ -1,6 +1,6 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, REFUSED_NAMES } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Auth, createAuth } from "@/server/auth";
@@ -24,7 +24,7 @@ afterEach(async () => {
 
 async function signUp(auth: Auth, email: string, headers: Record<string, string> = {}) {
   const { headers: resHeaders, response } = await auth.api.signUpEmail({
-    body: { name: email, email, password: "correct horse battery" },
+    body: { name: email.split("@")[0] ?? email, email, password: "correct horse battery" },
     headers: new Headers(headers),
     returnHeaders: true,
   });
@@ -42,6 +42,68 @@ async function sessionIp(userId: string): Promise<string | null> {
     .where(eq(schema.session.userId, userId));
   return row?.ipAddress ?? null;
 }
+
+describe("display names", () => {
+  const post = (auth: Auth, path: string, body: unknown, headers: Record<string, string> = {}) =>
+    auth.handler(
+      new Request(`${BASE}/api/auth${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE, ...headers },
+        body: JSON.stringify(body),
+      }),
+    );
+  const password = "correct horse battery";
+
+  it("sign-up and the profile endpoint refuse a name that could read as a link or hide characters", async () => {
+    const auth = createAuth(db);
+    for (const [i, name] of REFUSED_NAMES.entries()) {
+      const res = await post(auth, "/sign-up/email", {
+        name,
+        email: `n${i}@example.com`,
+        password,
+      });
+      expect(res.status, name).toBe(400);
+      expect(await res.json(), name).toMatchObject({
+        code: "INVALID_NAME",
+        message:
+          "Names can't contain links, email addresses, line breaks or hidden characters, and can be up to 64 characters long.",
+      });
+    }
+    const portuguese = await post(
+      auth,
+      "/sign-up/email",
+      { name: REFUSED_NAMES[0], email: "pt@example.com", password },
+      { "accept-language": "pt-BR" },
+    );
+    expect(await portuguese.json()).toMatchObject({
+      message:
+        "Nomes não podem ter links, endereços de e-mail, quebras de linha nem caracteres invisíveis, e podem ter até 64 caracteres.",
+    });
+    expect(await db.select().from(schema.user)).toEqual([]);
+
+    // A name that only looks like a domain is a company's name.
+    const created = await post(auth, "/sign-up/email", {
+      name: "acme.dev",
+      email: "ada@example.com",
+      password,
+    });
+    expect(created.status).toBe(200);
+    const cookie = created.headers
+      .getSetCookie()
+      .map((c) => c.split(";")[0])
+      .join("; ");
+    for (const name of REFUSED_NAMES) {
+      const res = await post(auth, "/update-user", { name }, { cookie });
+      expect(res.status, name).toBe(400);
+    }
+    expect(await db.select({ name: schema.user.name }).from(schema.user)).toEqual([
+      { name: "acme.dev" },
+    ]);
+    expect((await post(auth, "/update-user", { name: "Ada at Acme" }, { cookie })).status).toBe(
+      200,
+    );
+  });
+});
 
 describe("client IP resolution", () => {
   it("self-host: walks a forwarded chain past the loopback proxy instead of discarding it", async () => {

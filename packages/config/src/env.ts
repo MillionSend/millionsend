@@ -37,6 +37,7 @@ export const SES_TRANSACTIONAL_RESERVE_MAX = 90;
 export const AWS_REGION_DEFAULT = "us-east-1";
 export const EMAIL_RETENTION_DAYS_DEFAULT = 30;
 export const OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT = 10;
+export const INVITES_PER_TEAM_PER_DAY_DEFAULT = 50;
 
 /** Break-glass content access in the console; "off" is the default everywhere. */
 export const CONTENT_REVEAL_MODES = ["off", "on"] as const;
@@ -320,6 +321,13 @@ export const env = createEnv({
     // team owners) and team invitation emails, same forms as AUTH_EMAIL_FROM,
     // which it falls back to.
     NOTIFICATIONS_EMAIL_FROM: z.string().optional(),
+    // Invitations one team may create in a rolling day, revoked ones
+    // included. Read through invitesPerTeamPerDay().
+    INVITES_PER_TEAM_PER_DAY: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .default(INVITES_PER_TEAM_PER_DAY_DEFAULT),
 
     // Dashboard session signing secret (`openssl rand -base64 32`).
     // Required only by the web process, which asserts it at boot.
@@ -429,6 +437,12 @@ export function sesTenantsEnabled(e: Env = env): boolean {
 /** The sender for account notifications; undefined when no system sender is configured. */
 export function notificationsEmailFrom(e: Env = env): string | undefined {
   return e.NOTIFICATIONS_EMAIL_FROM ?? e.AUTH_EMAIL_FROM;
+}
+
+/** The daily invitation cap per team; under SKIP_ENV_VALIDATION the proxy carries the raw string. */
+export function invitesPerTeamPerDay(e: Env = env): number {
+  const value = Number(e.INVITES_PER_TEAM_PER_DAY);
+  return Number.isInteger(value) && value >= 1 ? value : INVITES_PER_TEAM_PER_DAY_DEFAULT;
 }
 
 /**

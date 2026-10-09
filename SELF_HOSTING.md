@@ -382,6 +382,13 @@ emails lose their body once SES accepts them, since the link inside is a live cr
 the other notices keep theirs for the usual retention window. Until a team holds the
 domain they go straight through SES and leave no trace.
 
+What a customer typed (team, person, domain, key and broadcast names, webhook URLs,
+addresses) never appears in a subject, and the body prints it as text no mail client turns
+into a link (a hair space follows each `.`, `@`, `:` and `\`), cut at 64 characters.
+Team and display names with a link scheme, an `@`, a line break or an invisible character
+are refused when set. A team creates at most `INVITES_PER_TEAM_PER_DAY` invitations a day
+(default 50, revoked ones included), one pending per address.
+
 That team is the instance's own, and an operator can mark it as such: on the `system` plan
 it is never capped or billed and its badge reads System. On a self-hosted instance plans
 carry no limits, so the mark only labels the team.

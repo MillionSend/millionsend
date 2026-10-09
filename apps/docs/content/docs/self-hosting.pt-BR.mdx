@@ -166,6 +166,7 @@ auto-hospedada não tem limites de plano.
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login, o cadastro, a redefinição de senha e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
 | `ONBOARDING_EMAIL_FROM` | Remetente compartilhado do botão "Enviar e-mail" e do snippet do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Qualquer time pode enviar por ele, só para membros que confirmaram o e-mail (onde a instância confirma e-mails), e sempre com este nome de exibição exato. Deixe vazio para ocultar o botão; o snippet então pede o domínio do próprio time. |
 | `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos donos do time (cota quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para o time, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. Verifique o domínio em um time para registrar esses e-mails lá. |
+| `INVITES_PER_TEAM_PER_DAY` | Convites que um time pode criar em um dia corrido, contando os revogados (padrão `50`). Acima disso, novos convites são recusados até o dia virar. |
 | `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Rastreamento de erros opcional pelo SDK do Sentry; desligado enquanto `SENTRY_DSN` não estiver definido. Veja [Rastreamento de erros](#rastreamento-de-erros-opcional). |
 
 ### Dimensionamento do worker
@@ -717,6 +718,19 @@ descartado assim que o SES aceita a mensagem, já que um link de redefinição �
 uma credencial válida, e os links nunca são reescritos para rastreio de
 cliques. Enquanto nenhum time tiver o domínio, eles saem direto pelo SES sem
 deixar rastro, como antes.
+
+O que um cliente digitou (nome de time, de pessoa, de domínio, de chave ou de
+broadcast, a URL de um webhook, um endereço) nunca aparece no assunto. No
+corpo, sai como texto que nenhum cliente de e-mail transforma em link: quebras
+de linha e caracteres invisíveis ou que mudam a direção do texto são
+removidos, o texto para em 64 caracteres e um espaço finíssimo (hair space)
+segue cada `.`, `@`, `:` e `\`, então `acme.dev` continua legível como
+acme.dev sem virar link. Nomes de time e de pessoa com um esquema de link, um
+`@`, uma quebra de linha ou um caractere invisível, ou com mais de 64
+caracteres, são recusados ao serem definidos. Um time tem no máximo um convite
+pendente por endereço, um reenvio espera dois minutos, e ele cria no máximo
+`INVITES_PER_TEAM_PER_DAY` convites por dia (padrão 50, contando os
+revogados).
 
 Esse time é o da própria instância, e o operador pode marcá-lo como tal: no
 plano `system` ele nunca tem limite nem cobrança, o selo diz System e a aba

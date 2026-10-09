@@ -16,6 +16,7 @@ import { isUniqueViolation } from "@/lib/db-errors";
 import { slugify } from "@/lib/slug";
 import { recordAudit } from "../audit";
 import { listMemberships } from "../membership";
+import { teamNameSchema } from "../team-name";
 import {
   type AuthSession,
   adminProcedure,
@@ -141,7 +142,7 @@ export const teamBootstrapRouter = router({
     }),
 
   createTeam: protectedProcedure
-    .input(z.object({ name: z.string().trim().min(1).max(80) }))
+    .input(z.object({ name: teamNameSchema }))
     .mutation(async ({ ctx, input }) => {
       if (env.IS_CLOUD) {
         const userId = ctx.session.user.id;

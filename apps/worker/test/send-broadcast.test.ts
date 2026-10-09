@@ -211,7 +211,7 @@ it("a broadcast with no segment or topic fans out to ALL subscribed team contact
   expect(await finalizeBroadcast(db, deps, broadcastId)).toBe(true);
   // The owners' report: what went out, to how many, with the link.
   expect(mail.sends.map((s) => [s.to, s.kind, s.subject])).toEqual([
-    ["acme-owner@example.com", "broadcast.sent", '"launch" went out to 2 recipients'],
+    ["acme-owner@example.com", "broadcast.sent", "Your broadcast went out to 2 recipients"],
   ]);
   expect(mail.sends[0]?.text).toContain('"launch" was handed to 2 contacts of acme;');
   expect(mail.sends[0]?.text).not.toContain("could not be sent");
@@ -426,7 +426,7 @@ it("a paced broadcast tells the owners once at walk end, then reports when the l
   const { deps } = makeDeps({ sesQuota: controls, ...mail });
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
   expect(mail.sends.map((s) => [s.kind, s.subject])).toEqual([
-    ["broadcast.sending", '"launch" is going out over 3 days'],
+    ["broadcast.sending", "Your broadcast is going out over 3 days"],
   ]);
   expect(mail.sends[0]?.text).toContain("1 of 3 emails went out in the first wave");
   expect(mail.sends[0]?.text).toMatch(/the last about .* UTC\./);
@@ -455,7 +455,7 @@ it("a paced broadcast tells the owners once at walk end, then reports when the l
   await settleRows(broadcastId);
   expect(await finalizeBroadcast(db, deps, broadcastId)).toBe(true);
   expect(mail.sends.map((s) => s.kind)).toEqual(["broadcast.sending", "broadcast.sent"]);
-  expect(mail.sends[1]?.subject).toBe('"launch" went out to 3 recipients');
+  expect(mail.sends[1]?.subject).toBe("Your broadcast went out to 3 recipients");
   expect(mail.sends[1]?.text).toContain("1 could not be sent.");
   const [row] = await db
     .select({ status: schema.broadcasts.status, sentAt: schema.broadcasts.sentAt })
@@ -623,7 +623,7 @@ it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", 
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
   // Anything parked turns the report into the quota notice.
   expect(mail.sends.map((s) => [s.to, s.subject])).toEqual([
-    ["quota-owner@example.com", '"launch": 1 of 3 recipients are waiting for the quota'],
+    ["quota-owner@example.com", "1 of 3 broadcast recipients are waiting for the quota"],
   ]);
   expect(mail.sends[0]?.text).toContain(
     "2 emails went out; 1 are parked because quota reached its quota of 100.",
@@ -673,7 +673,7 @@ it("cloud fan-out on a monthly plan parks at the included volume and names the r
 
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
   expect(mail.sends.map((s) => s.subject)).toEqual([
-    '"launch": 2 of 3 recipients are waiting for the quota',
+    "2 of 3 broadcast recipients are waiting for the quota",
   ]);
   expect(mail.sends[0]?.text).toContain(
     "1 emails went out; 2 are parked because monthly reached its quota of 100,000.",
@@ -1313,7 +1313,7 @@ it("defers the fan-out while the sender domain's region is held by the platform 
   // Said once, however many waits the hold lasts.
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("deferred");
   expect(rescheduled).toHaveLength(2);
-  expect(mail.sends.map((s) => s.subject)).toEqual(['"launch" is on hold']);
+  expect(mail.sends.map((s) => s.subject)).toEqual(["Your broadcast is waiting to send"]);
   expect(mail.sends[0]?.text).toContain("Sending from us-east-1 is paused");
   expect(mail.sends[0]?.text).toContain(`${BASE_URL}/broadcasts/${broadcastId}`);
   expect(enqueued).toEqual([]);

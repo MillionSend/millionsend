@@ -2,6 +2,7 @@ import { cancelTeamSubscription } from "@millionsend/billing";
 import {
   accountEmailFrom,
   env,
+  invitesPerTeamPerDay,
   isCloudDeployment,
   notificationsEmailFrom,
 } from "@millionsend/config";
@@ -9,6 +10,7 @@ import {
   accountLocale,
   createFixedWindowLimiter,
   DAY_MS,
+  fillTemplate,
   INVITE_EMAILS_PER_HOUR,
   INVITE_MAX_SENDS,
   INVITE_RESEND_COOLDOWN_MS,
@@ -39,6 +41,8 @@ import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { isHexColor } from "@/lib/hex-color";
 import { isHttpUrl } from "@/lib/http-url";
+import enSettings from "../../../messages/en/settings.json";
+import ptBRSettings from "../../../messages/pt-BR/settings.json";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { getStripe } from "../billing";
@@ -52,6 +56,7 @@ import {
   defaultSystemMailDeps,
   type SystemMailDeps,
 } from "../system-mail";
+import { teamNameSchema } from "../team-name";
 import { protectedProcedure, publicProcedure, router, teamProcedure } from "../trpc";
 
 /** Managing members is an owner/admin concern; plain members are read-only. */
@@ -182,10 +187,48 @@ function inviteEmailsEnabled(): boolean {
 // Invite spam guard shared by create and resend, keyed by team.
 const inviteEmailsLimited = createFixedWindowLimiter(INVITE_EMAILS_PER_HOUR, 3_600_000);
 
-const INVITE_HOURLY_LIMIT_ERROR = new TRPCError({
-  code: "TOO_MANY_REQUESTS",
-  message: "Too many invitations this hour. Try again later.",
-});
+const INVITE_REFUSALS = {
+  en: enSettings.invitations.refused,
+  "pt-BR": ptBRSettings.invitations.refused,
+} as const;
+
+/** An invitation refused in the dashboard's language; the dialogs show the message as is. */
+async function inviteRefusal(
+  code: TRPCError["code"],
+  reason: keyof typeof enSettings.invitations.refused,
+  values: Record<string, string> = {},
+): Promise<TRPCError> {
+  return new TRPCError({
+    code,
+    message: fillTemplate(INVITE_REFUSALS[await activeLocale()][reason], values),
+  });
+}
+
+/**
+ * Invitations the team started in the last day, whatever became of them.
+ * Revoking deletes the row, so the day's revocations count as well: invite
+ * and revoke would otherwise hand the invitation back.
+ */
+async function invitesInLastDay(db: Db | Tx, teamId: string): Promise<number> {
+  const since = new Date(Date.now() - DAY_MS);
+  const [created] = await db
+    .select({ n: count() })
+    .from(schema.teamInvitations)
+    .where(
+      and(eq(schema.teamInvitations.teamId, teamId), gt(schema.teamInvitations.createdAt, since)),
+    );
+  const [revoked] = await db
+    .select({ n: count() })
+    .from(schema.auditLog)
+    .where(
+      and(
+        eq(schema.auditLog.teamId, teamId),
+        eq(schema.auditLog.action, "invitation.revoked"),
+        gt(schema.auditLog.createdAt, since),
+      ),
+    );
+  return (created?.n ?? 0) + (revoked?.n ?? 0);
+}
 
 /**
  * Hostname a self-hoster points their app's SMTP client at: an explicit
@@ -295,7 +338,7 @@ export function createSettingsRouter(
       }),
 
       rename: teamProcedure
-        .input(z.object({ name: z.string().trim().min(1).max(80) }))
+        .input(z.object({ name: teamNameSchema }))
         .mutation(async ({ ctx, input }) => {
           if (ctx.role === "member") throw new TRPCError({ code: "FORBIDDEN" });
           await ctx.db
@@ -471,18 +514,34 @@ export function createSettingsRouter(
         )
         .mutation(async ({ ctx, input }) => {
           assertCanManageMembers(ctx.role);
-          if (inviteEmailsLimited(ctx.teamId)) throw INVITE_HOURLY_LIMIT_ERROR;
+          if (inviteEmailsLimited(ctx.teamId)) {
+            throw await inviteRefusal("TOO_MANY_REQUESTS", "hourly");
+          }
           try {
-            const [row] = await ctx.db
-              .insert(schema.teamInvitations)
-              .values({
-                teamId: ctx.teamId,
-                email: input.email,
-                role: input.role,
-                invitedByUserId: ctx.session.user.id,
-                expiresAt: new Date(Date.now() + INVITE_TTL_MS),
-              })
-              .returning({ id: schema.teamInvitations.id });
+            const row = await ctx.db.transaction(async (tx) => {
+              // The team row's lock queues this team's invites, so two at
+              // once cannot both pass the daily cap.
+              await tx
+                .select({ id: schema.teams.id })
+                .from(schema.teams)
+                .where(eq(schema.teams.id, ctx.teamId))
+                .for("update");
+              const cap = invitesPerTeamPerDay();
+              if ((await invitesInLastDay(tx, ctx.teamId)) >= cap) {
+                throw await inviteRefusal("TOO_MANY_REQUESTS", "daily", { limit: String(cap) });
+              }
+              const [inserted] = await tx
+                .insert(schema.teamInvitations)
+                .values({
+                  teamId: ctx.teamId,
+                  email: input.email,
+                  role: input.role,
+                  invitedByUserId: ctx.session.user.id,
+                  expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+                })
+                .returning({ id: schema.teamInvitations.id });
+              return inserted;
+            });
             if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
             const senderConfigured = inviteEmailsEnabled();
             const emailed =
@@ -511,9 +570,7 @@ export function createSettingsRouter(
               noSender: !senderConfigured && !isCloudDeployment(),
             };
           } catch (error) {
-            if (isUniqueViolation(error)) {
-              throw new TRPCError({ code: "CONFLICT", message: "Already invited." });
-            }
+            if (isUniqueViolation(error)) throw await inviteRefusal("CONFLICT", "duplicate");
             throw error;
           }
         }),
@@ -547,12 +604,7 @@ export function createSettingsRouter(
        */
       resend: teamProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
         assertCanManageMembers(ctx.role);
-        if (!inviteEmailsEnabled()) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "No email sender is configured; share the invitation link instead.",
-          });
-        }
+        if (!inviteEmailsEnabled()) throw await inviteRefusal("PRECONDITION_FAILED", "noSender");
         const [invite] = await ctx.db
           .select({
             id: schema.teamInvitations.id,
@@ -571,21 +623,19 @@ export function createSettingsRouter(
           );
         if (!invite) throw new TRPCError({ code: "NOT_FOUND" });
         if (invite.sendCount >= INVITE_MAX_SENDS) {
-          throw new TRPCError({
-            code: "TOO_MANY_REQUESTS",
-            message: `This invitation was already sent ${INVITE_MAX_SENDS} times. Revoke it and invite again.`,
+          throw await inviteRefusal("TOO_MANY_REQUESTS", "maxSends", {
+            max: String(INVITE_MAX_SENDS),
           });
         }
         if (
           invite.lastSentAt &&
           Date.now() - invite.lastSentAt.getTime() < INVITE_RESEND_COOLDOWN_MS
         ) {
-          throw new TRPCError({
-            code: "TOO_MANY_REQUESTS",
-            message: "This invitation was just sent. Wait a couple of minutes before resending.",
-          });
+          throw await inviteRefusal("TOO_MANY_REQUESTS", "cooldown");
         }
-        if (inviteEmailsLimited(ctx.teamId)) throw INVITE_HOURLY_LIMIT_ERROR;
+        if (inviteEmailsLimited(ctx.teamId)) {
+          throw await inviteRefusal("TOO_MANY_REQUESTS", "hourly");
+        }
         const now = new Date();
         // The cooldown and the cap live in the same conditional update as the
         // counter bump, so two concurrent resends cannot both pass the pre-read.
@@ -611,12 +661,7 @@ export function createSettingsRouter(
             ),
           )
           .returning({ expiresAt: schema.teamInvitations.expiresAt });
-        if (!renewed) {
-          throw new TRPCError({
-            code: "TOO_MANY_REQUESTS",
-            message: "This invitation was just sent. Wait a couple of minutes before resending.",
-          });
-        }
+        if (!renewed) throw await inviteRefusal("TOO_MANY_REQUESTS", "cooldown");
         const emailed = await emailInvite(ctx, {
           id: invite.id,
           email: invite.email,
@@ -629,10 +674,7 @@ export function createSettingsRouter(
             .update(schema.teamInvitations)
             .set({ lastSentAt: invite.lastSentAt, sendCount: invite.sendCount })
             .where(eq(schema.teamInvitations.id, invite.id));
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "The invitation email could not be sent. Try again in a moment.",
-          });
+          throw await inviteRefusal("INTERNAL_SERVER_ERROR", "sendFailed");
         }
         await recordAudit(ctx, {
           action: "invitation.resent",

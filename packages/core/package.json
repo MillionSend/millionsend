@@ -44,6 +44,10 @@
       "types": "./src/html.ts",
       "default": "./src/html.ts"
     },
+    "./customer-text": {
+      "types": "./src/customer-text.ts",
+      "default": "./src/customer-text.ts"
+    },
     "./open-classifier": {
       "types": "./src/open-classifier.ts",
       "default": "./src/open-classifier.ts"

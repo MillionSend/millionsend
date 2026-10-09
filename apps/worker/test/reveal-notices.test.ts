@@ -97,7 +97,9 @@ describe("safety.reveal_notices", () => {
     });
     // Dated at the access, not at the disclosure.
     expect(Date.now() - (row?.createdAt.getTime() ?? 0)).toBeGreaterThan(7 * 86_400_000);
-    expect(sent).toEqual([{ to: "bob@example.com", subject: "An operator read content in acme" }]);
+    expect(sent).toEqual([
+      { to: "bob@example.com", subject: "An operator read content in your team" },
+    ]);
 
     const [stamped] = await db.select().from(schema.contentAccessGrants);
     expect(stamped?.noticeSentAt).toBeInstanceOf(Date);

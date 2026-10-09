@@ -636,7 +636,16 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
+      linkify-it:
+        specifier: ^5.0.2
+        version: 5.0.2
+      linkifyjs:
+        specifier: ^4.3.3
+        version: 4.3.3
     devDependencies:
+      '@types/linkify-it':
+        specifier: ^5.0.0
+        version: 5.0.0
       '@types/node':
         specifier: ^22.20.2
         version: 22.20.2
