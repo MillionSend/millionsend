@@ -396,7 +396,9 @@ export const consoleTeamsRouter = router({
           target: { type: "team", id: team.id },
           metadata: { name: team.name, reason: "manual" },
         });
-        if (input.broadcastsPaused) {
+        // A suspended team is not told: the notice says transactional mail
+        // keeps flowing, which the suspension stops, and phishing stays silent.
+        if (input.broadcastsPaused && !team.suspendedAt) {
           await mailTeamOwners(ctx.db, team, "team.broadcasts_paused", "/broadcasts", (locale) => ({
             reason: reasonText(locale, "team.broadcasts_paused", "manual", undefined),
           }));
@@ -436,6 +438,8 @@ export const consoleTeamsRouter = router({
         .update(t)
         .set({ broadcastsPausedByOperatorAt: new Date() })
         .where(eq(t.id, team.id));
+      // Same rule as adjustLimits: a suspended team is not told.
+      const notify = input.notify && !team.suspendedAt;
       await auditOperator(ctx, {
         teamId: team.id,
         action: "team.broadcasts_paused",
@@ -444,10 +448,10 @@ export const consoleTeamsRouter = router({
           name: team.name,
           reason: input.reason,
           note: input.note ?? null,
-          notified: input.notify,
+          notified: notify,
         },
       });
-      if (input.notify) {
+      if (notify) {
         await mailTeamOwners(ctx.db, team, "team.broadcasts_paused", "/broadcasts", (locale) => ({
           reason: reasonText(locale, "team.broadcasts_paused", input.reason, input.note),
         }));

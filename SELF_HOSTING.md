@@ -680,11 +680,11 @@ content insights (never email bodies), and an instance-wide audit log.
 - **Operator actions and the team:** a suspended team's API keys still
   authenticate but every send answers `403 team_suspended` (SMTP `550`),
   broadcasts in flight park, webhooks keep delivering and data stays; its
-  quota, deliverability, plan-downgrade and broadcast-hold notices stop, as
-  do the content monitor's alerts about it; nobody on it can delete it,
-  remove its domains (the API answers `403 team_suspended` there too) or
-  invite anyone, and a member of a team suspended for phishing cannot create
-  new teams; a
+  quota, deliverability, plan-downgrade, broadcast-hold and broadcast-pause
+  notices stop, as do the content monitor's alerts about it; nobody on it can
+  delete it, remove its domains (the API answers `403 team_suspended` there
+  too) or invite anyone, and a member of a team suspended for phishing cannot
+  create new teams; a
   broadcast pause parks broadcasts while transactional mail flows; a daily
   ceiling caps the team's UTC day under its plan. Owners are emailed about
   each of these (never for a phishing suspension), and every action is

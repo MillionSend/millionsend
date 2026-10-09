@@ -175,7 +175,9 @@ export function useTeamActions(onChanged: () => void): TeamActions {
               {
                 onSuccess: () =>
                   done(
-                    t(input.notify ? "toast.pausedNotified" : "toast.paused", { team: team.name }),
+                    t(input.notify && !team.suspendedAt ? "toast.pausedNotified" : "toast.paused", {
+                      team: team.name,
+                    }),
                     team.id,
                   ),
               },

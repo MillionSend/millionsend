@@ -779,11 +779,11 @@ broadcasts while transactional mail flows; a daily ceiling caps the team's
 day under its plan. Owners are emailed about each action (except a phishing
 suspension), and every action lands in the audit log with its reason.
 
-While a team is suspended, its quota, deliverability, plan-downgrade and
-broadcast-hold notices stop, as do the content monitor's alerts about it;
-nobody on it can delete it, remove its domains (the API answers
-`403 team_suspended` there too) or invite anyone, and a member of a team
-suspended for phishing cannot create new teams.
+While a team is suspended, its quota, deliverability, plan-downgrade,
+broadcast-hold and broadcast-pause notices stop, as do the content monitor's
+alerts about it; nobody on it can delete it, remove its domains (the API
+answers `403 team_suspended` there too) or invite anyone, and a member of a
+team suspended for phishing cannot create new teams.
 
 ## Content monitoring (optional)
 
