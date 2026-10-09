@@ -27,6 +27,20 @@ const SEPARATORS = new Set([".", ":", "@", "\\"]);
 const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
 /** Controls (newlines, tabs) and line or paragraph separators. */
 const LINE_BREAKING = /[\p{Cc}\p{Zl}\p{Zp}]/gu;
+/**
+ * Combining marks past the fourth in a row: real writing stays under that,
+ * and a flood of them is one character the length cap would never cut.
+ */
+const MARK_FLOOD = /(\p{M}{4})\p{M}+/gu;
+/**
+ * Digits joined only by spaces and punctuation, the way phone numbers are
+ * written and the way iOS Mail's data detectors and the Gmail and Outlook
+ * apps find numbers to call; a modifier letter joins them too, as
+ * libphonenumber reads the katakana prolonged sound mark (U+30FC). A run of
+ * seven or more (a local number's length) keeps its first four, and the rest
+ * print as "•".
+ */
+const DIGIT_RUN = /\p{N}(?:[^\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{N}]*\p{N})*/gu;
 
 /** One line of visible text: line breaks and controls become spaces, invisible characters go. */
 export function stripInvisible(value: string): string {
@@ -36,16 +50,23 @@ export function stripInvisible(value: string): string {
 /**
  * Customer text for a system email's body, the same string in the HTML and
  * the plain-text part (the card escapes it for HTML): one line, at most
- * CUSTOMER_TEXT_MAX characters, nothing a mail client turns into a link.
- * A character whose compatibility form is a separator ("．" "＠" "﹕") and the
- * ideographic full stop, which IDNA reads as a dot, count as that separator,
- * so "ｅｖｉｌ．ｃｏｍ" and "evil。com" break like evil.com.
+ * CUSTOMER_TEXT_MAX characters, nothing a mail client turns into a link or
+ * offers to call. A character whose compatibility form is a separator ("．"
+ * "＠" "﹕") and the ideographic full stop, which IDNA reads as a dot, count
+ * as that separator, so "ｅｖｉｌ．ｃｏｍ" and "evil。com" break like evil.com.
  */
 export function inertText(value: string): string {
-  const text = stripInvisible(value).replace(/\P{ASCII}/gu, (c) => {
-    const folded = c.normalize("NFKC").replace("\u3002", ".");
-    return SEPARATORS.has(folded) ? folded : c;
-  });
+  const text = stripInvisible(value)
+    .replace(MARK_FLOOD, "$1")
+    .replace(/\P{ASCII}/gu, (c) => {
+      const folded = c.normalize("NFKC").replace("\u3002", ".");
+      return SEPARATORS.has(folded) ? folded : c;
+    })
+    .replace(DIGIT_RUN, (run) => {
+      if ((run.match(/\p{N}/gu)?.length ?? 0) < 7) return run;
+      let kept = 0;
+      return run.replace(/\p{N}/gu, (digit) => (++kept > 4 ? "•" : digit));
+    });
   // Cut on grapheme boundaries, so an emoji or an accented letter stays whole.
   const parts =
     text.length > CUSTOMER_TEXT_MAX

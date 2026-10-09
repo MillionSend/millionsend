@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import { createSettingsRouter } from "@/server/routers/settings";
+import { teamBootstrapRouter } from "@/server/routers/team-bootstrap";
 import { buildInvitationEmail, type SystemMailDeps } from "@/server/system-mail";
 import { type Context, createCallerFactory, router } from "@/server/trpc";
 
@@ -487,6 +488,71 @@ describe("settings.invitations limits", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("caps the invitations one member starts across teams, deleted teams included", async () => {
+    vi.stubEnv("INVITES_PER_TEAM_PER_DAY", "2");
+    await createUser("owner1");
+    const quiet = async () => {};
+    const factory = createCallerFactory(
+      router({
+        team: teamBootstrapRouter,
+        settings: createSettingsRouter({
+          cancelSubscription: quiet,
+          deleteSesIdentity: quiet,
+          deleteSesTenant: quiet,
+          deleteLogo: quiet,
+        }),
+      }),
+    );
+    const session = { user: { id: "owner1", email: "owner1@example.com", name: "owner1" } };
+    const as = (teamId: string | null) =>
+      factory({ db, session, teamId, role: teamId ? ("owner" as const) : null });
+    const refused = {
+      code: "TOO_MANY_REQUESTS",
+      message: "You reached your limit of 2 invitations a day. Try again tomorrow.",
+    };
+
+    const { teamId: first } = await as(null).team.createTeam({ name: "First" });
+    await as(first).settings.invitations.create({ email: "a@example.com" });
+    const { teamId: second } = await as(null).team.createTeam({ name: "Second" });
+    await as(second).settings.invitations.create({ email: "b@example.com" });
+    await expect(
+      as(second).settings.invitations.create({ email: "c@example.com" }),
+    ).rejects.toMatchObject(refused);
+
+    // Deleting the teams takes their invitation rows along, and gives nothing back.
+    await as(first).settings.team.delete();
+    await as(second).settings.team.delete();
+    const { teamId: third } = await as(null).team.createTeam({ name: "Third" });
+    await expect(
+      as(third).settings.invitations.create({ email: "c@example.com" }),
+    ).rejects.toMatchObject(refused);
+
+    // Another admin of the team has a count of their own.
+    await addMember(third, "admin1", "admin");
+    const admin = callerFor("admin1", third, "admin");
+    await expect(
+      admin.settings.invitations.create({ email: "c@example.com" }),
+    ).resolves.toMatchObject({ email: "c@example.com" });
+    // An invitation whose email is still going out has no audit row yet, and counts.
+    const fourth = await createTeam(db, "fourth");
+    await db.insert(schema.teamMembers).values({ teamId: fourth, userId: "admin1", role: "owner" });
+    await db.insert(schema.teamInvitations).values({
+      teamId: fourth,
+      email: "d@example.com",
+      invitedByUserId: "admin1",
+      expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+    });
+    await expect(
+      admin.settings.invitations.create({ email: "e@example.com" }),
+    ).rejects.toMatchObject(refused);
+    dashboard.locale = "pt-BR";
+    await expect(
+      admin.settings.invitations.create({ email: "e@example.com" }),
+    ).rejects.toMatchObject({
+      message: "Você atingiu o seu limite de 2 convites por dia. Tente de novo amanhã.",
+    });
   });
 
   it("refuses over the cap, a second pending invitation and an early resend in the dashboard's language", async () => {

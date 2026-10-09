@@ -205,6 +205,7 @@
     },
     "refused": {
       "daily": "Esta equipe atingiu o limite de {limit} convites por dia. Tente de novo amanhã.",
+      "dailyMember": "Você atingiu o seu limite de {limit} convites por dia. Tente de novo amanhã.",
       "hourly": "Convites demais nesta hora. Tente de novo mais tarde.",
       "duplicate": "Este endereço já tem um convite pendente. Reenvie o convite pela lista.",
       "cooldown": "Este convite acabou de ser enviado. Espere alguns minutos antes de reenviar.",

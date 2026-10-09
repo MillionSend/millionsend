@@ -36,7 +36,21 @@ import {
   SES_REGIONS,
 } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
-import { and, asc, count, desc, eq, gt, gte, isNull, lt, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  gte,
+  isNull,
+  lt,
+  ne,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { isHexColor } from "@/lib/hex-color";
@@ -205,29 +219,41 @@ async function inviteRefusal(
 }
 
 /**
- * Invitations the team started in the last day, whatever became of them.
- * Revoking deletes the row, so the day's revocations count as well: invite
- * and revoke would otherwise hand the invitation back.
+ * Invitations a team, or one member across all their teams, started in the
+ * last day, whatever became of them. A revoke and the team's deletion take
+ * the row along, but its member.invited audit row stays; a row whose audit
+ * row is not written yet (its email is still going out) counts itself.
  */
-async function invitesInLastDay(db: Db | Tx, teamId: string): Promise<number> {
+async function invitesInLastDay(
+  tx: Tx,
+  by: { teamId: string } | { userId: string },
+): Promise<number> {
   const since = new Date(Date.now() - DAY_MS);
-  const [created] = await db
+  const a = schema.auditLog;
+  const i = schema.teamInvitations;
+  const invited = and(eq(a.action, "member.invited"), gt(a.createdAt, since));
+  const [audited] = await tx
     .select({ n: count() })
-    .from(schema.teamInvitations)
+    .from(a)
     .where(
-      and(eq(schema.teamInvitations.teamId, teamId), gt(schema.teamInvitations.createdAt, since)),
+      and(invited, "teamId" in by ? eq(a.teamId, by.teamId) : eq(a.actorId, `user:${by.userId}`)),
     );
-  const [revoked] = await db
+  const [unaudited] = await tx
     .select({ n: count() })
-    .from(schema.auditLog)
+    .from(i)
     .where(
       and(
-        eq(schema.auditLog.teamId, teamId),
-        eq(schema.auditLog.action, "invitation.revoked"),
-        gt(schema.auditLog.createdAt, since),
+        "teamId" in by ? eq(i.teamId, by.teamId) : eq(i.invitedByUserId, by.userId),
+        gt(i.createdAt, since),
+        notExists(
+          tx
+            .select({ id: a.id })
+            .from(a)
+            .where(and(invited, eq(a.target, sql`'invitation:' || ${i.id}`))),
+        ),
       ),
     );
-  return (created?.n ?? 0) + (revoked?.n ?? 0);
+  return (audited?.n ?? 0) + (unaudited?.n ?? 0);
 }
 
 /**
@@ -519,16 +545,27 @@ export function createSettingsRouter(
           }
           try {
             const row = await ctx.db.transaction(async (tx) => {
-              // The team row's lock queues this team's invites, so two at
-              // once cannot both pass the daily cap.
+              // The team's and then the inviter's row lock queue the invites
+              // each cap counts, so two at once cannot both pass one.
               await tx
                 .select({ id: schema.teams.id })
                 .from(schema.teams)
                 .where(eq(schema.teams.id, ctx.teamId))
                 .for("update");
+              await tx
+                .select({ id: schema.user.id })
+                .from(schema.user)
+                .where(eq(schema.user.id, ctx.session.user.id))
+                .for("no key update");
               const cap = invitesPerTeamPerDay();
-              if ((await invitesInLastDay(tx, ctx.teamId)) >= cap) {
-                throw await inviteRefusal("TOO_MANY_REQUESTS", "daily", { limit: String(cap) });
+              const limit = { limit: String(cap) };
+              if ((await invitesInLastDay(tx, { teamId: ctx.teamId })) >= cap) {
+                throw await inviteRefusal("TOO_MANY_REQUESTS", "daily", limit);
+              }
+              // Per member too: deleting a team and starting another would
+              // otherwise hand its whole day back.
+              if ((await invitesInLastDay(tx, { userId: ctx.session.user.id })) >= cap) {
+                throw await inviteRefusal("TOO_MANY_REQUESTS", "dailyMember", limit);
               }
               const [inserted] = await tx
                 .insert(schema.teamInvitations)

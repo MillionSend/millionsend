@@ -205,6 +205,7 @@
     },
     "refused": {
       "daily": "This team reached its limit of {limit} invitations a day. Try again tomorrow.",
+      "dailyMember": "You reached your limit of {limit} invitations a day. Try again tomorrow.",
       "hourly": "Too many invitations this hour. Try again later.",
       "duplicate": "This address already has a pending invitation. Resend it from the list instead.",
       "cooldown": "This invitation was just sent. Wait a couple of minutes before resending.",

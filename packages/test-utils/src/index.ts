@@ -70,8 +70,9 @@ export async function createWebhookEndpoint(
 
 /**
  * Customer-typed names shaped like phishing lures: a link, an address, a bare
- * domain, look-alike dots, zero-width and bidi tricks, line breaks and
- * overlong text, each built around a domain the auto-linkers recognise.
+ * domain, look-alike dots, zero-width and bidi tricks, line breaks, overlong
+ * text and a phone number to call, each built around a domain or number the
+ * auto-linkers recognise.
  */
 export const LURE_NAMES = [
   "Your account is locked, visit acme-support.com",
@@ -87,6 +88,11 @@ export const LURE_NAMES = [
   "\u202emoc.troppus-emca\u202c",
   "Security notice\nVisit acme-support.com\n\nThe MillionSend team",
   `${"Urgent: verify your account now. ".repeat(3)}acme-support.com`,
+  "Account locked? Call +1 (888) 555-0199",
+  "Ligue 0800 555 0199 para desbloquear",
+  "Call \uff0b\uff11 \uff18\uff18\uff18 \uff15\uff15\uff15 \uff10\uff11\uff19\uff19",
+  `Call ${[..."8885550199"].map((digit) => `${digit}\ufe0f\u20e3`).join("")}`,
+  "Call 888\u30fc555\u30fc0199",
 ] as const;
 
 /**
@@ -112,9 +118,18 @@ export function readable(text: string | undefined): string {
 const linkifyIt = new LinkifyIt({ fuzzyIP: true });
 
 /**
+ * Seven or more digits joined only by spaces and punctuation: what iOS Mail's
+ * data detectors and the Gmail and Outlook apps offer to call. A modifier
+ * letter counts as punctuation, as libphonenumber reads the katakana
+ * prolonged sound mark (U+30FC).
+ */
+const PHONE_NUMBER = /\p{Nd}(?:[^\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{Nd}]{0,3}\p{Nd}){6,}/gu;
+
+/**
  * Every link two independent auto-linkers find in text (linkify-it, which
- * markdown-it and mailparser use, and linkifyjs), on the text as written and
- * as IDNA reads a host: compatibility forms folded, invisible characters gone.
+ * markdown-it and mailparser use, and linkifyjs), plus every number a phone
+ * detector would dial, on the text as written and as IDNA reads a host:
+ * compatibility forms folded, invisible characters gone.
  */
 export function autoLinks(text: string): string[] {
   const folded = text
@@ -125,6 +140,9 @@ export function autoLinks(text: string): string[] {
   for (const t of [text, folded]) {
     for (const match of linkifyIt.match(t) ?? []) found.add(match.url);
     for (const link of find(t)) found.add(link.href);
+    for (const [number] of t.matchAll(PHONE_NUMBER)) {
+      found.add(`tel:${number.replace(/\P{Nd}/gu, "")}`);
+    }
   }
   return [...found];
 }

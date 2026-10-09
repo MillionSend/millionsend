@@ -321,8 +321,8 @@ export const env = createEnv({
     // team owners) and team invitation emails, same forms as AUTH_EMAIL_FROM,
     // which it falls back to.
     NOTIFICATIONS_EMAIL_FROM: z.string().optional(),
-    // Invitations one team may create in a rolling day, revoked ones
-    // included. Read through invitesPerTeamPerDay().
+    // Invitations one team, and one member across all their teams, may
+    // create in a rolling day. Read through invitesPerTeamPerDay().
     INVITES_PER_TEAM_PER_DAY: z.coerce
       .number()
       .int()

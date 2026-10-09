@@ -36,10 +36,19 @@ describe("inertText", () => {
     expect(inertText("Café Ünïcode™")).toBe("Café Ünïcode™");
   });
 
+  it("prints no phone number a mail app would dial, and keeps shorter numbers", () => {
+    expect(inertText("Account locked? Call +1 (888) 555-0199")).toBe(
+      "Account locked? Call +1 (888) •••-••••",
+    );
+    expect(inertText("Acme 2026 Q4, order 123456")).toBe("Acme 2026 Q4, order 123456");
+  });
+
   it("cuts on a whole character and marks the cut", () => {
     const long = `${"🙂".repeat(CUSTOMER_TEXT_MAX)}x`;
     expect(inertText(long)).toBe(`${"🙂".repeat(CUSTOMER_TEXT_MAX - 1)}…`);
     expect(inertText("x".repeat(CUSTOMER_TEXT_MAX))).toBe("x".repeat(CUSTOMER_TEXT_MAX));
+    // One letter under hundreds of combining marks is a single character.
+    expect(inertText(`Z${"\u0336".repeat(500)}algo`)).toBe(`Z${"\u0336".repeat(4)}algo`);
   });
 });
 
