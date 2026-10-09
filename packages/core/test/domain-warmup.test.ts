@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { PGlite } from "@electric-sql/pglite";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -140,6 +141,20 @@ describe("the schedule", () => {
     const systemDomain = await newDomain(system, "instance-mail.com", registered);
     expect(await warmupCap(db, { teamId: system, domainId: systemDomain, at })).toBeNull();
     expect(await warmupCap(db, { teamId, domainId: null, at })).toBeNull();
+  });
+
+  it("answers an old domain from its own row, however many young domains its team has", async () => {
+    const teamId = await newTeam();
+    const old = await newDomain(teamId, "settled-brand.com", new Date("2014-03-01T00:00:00Z"));
+    for (let i = 0; i < 20; i++) await newDomain(teamId, `young-brand-${i}.com`, registered);
+    const query = vi.spyOn((db as unknown as { $client: PGlite }).$client, "query");
+    try {
+      expect(await warmupCap(db, { teamId, domainId: old, at: aged(HOUR_MS) })).toBeNull();
+      const results = await Promise.all(query.mock.results.map((r) => r.value));
+      expect(results.reduce((n, r) => n + r.rows.length, 0)).toBe(1);
+    } finally {
+      query.mockRestore();
+    }
   });
 });
 
