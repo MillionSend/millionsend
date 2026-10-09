@@ -174,12 +174,14 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         if (!hasLiveSubscription(team.planStatus)) {
           throw new TRPCError({ code: "PRECONDITION_FAILED" });
         }
-        if (rungByKey(input.rung).priceCents > teamRung(team.plan, team.planQuota).priceCents) {
-          await assertNotHeld(ctx.db, ctx.teamId);
-        }
         const change = await changeRung(
           { db: ctx.db, stripe: deps.stripe() },
-          { teamId: ctx.teamId, rung: input.rung },
+          {
+            teamId: ctx.teamId,
+            rung: input.rung,
+            // Up is judged against Stripe: a dropped webhook can leave the row on a higher rung.
+            beforeMoveUp: () => assertNotHeld(ctx.db, ctx.teamId),
+          },
         );
         await recordAudit(ctx, {
           action: "billing.plan_changed",

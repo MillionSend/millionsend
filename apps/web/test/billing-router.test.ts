@@ -734,6 +734,20 @@ describe("a suspended or flagged team", () => {
     expect(await auditRows()).toEqual([]);
   });
 
+  it("is judged against Stripe, not a row a dropped webhook left on the old higher rung", async () => {
+    const teamId = await subscribedTeam("pro_100k");
+    await db
+      .update(schema.teams)
+      .set({ plan: "scale", planQuota: 500_000 })
+      .where(eq(schema.teams.id, teamId));
+    await hold(teamId, "guardrail");
+    await expect(
+      callerFor(teamId, "owner").billing.changePlan({ rung: "scale_500k" }),
+    ).rejects.toMatchObject(held);
+    expect(calls.updates).toEqual([]);
+    expect(await auditRows()).toEqual([]);
+  });
+
   it("can still move down, keep its plan, turn overage off and open the portal to cancel", async () => {
     const teamId = await subscribedTeam("scale_500k", { overage: true });
     await hold(teamId, "suspension");
