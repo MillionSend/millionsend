@@ -527,6 +527,11 @@ async function releaseParked(
         );
       }
       warmup = run.warmups.get(domainId) ?? null;
+      // A row due on a later UTC day waits for that day's cap: today's must
+      // not carry it, or several days of the cap would land on one instant.
+      if (warmup && email.scheduledAt && utcDay(email.scheduledAt) > utcDay(run.now)) {
+        return null;
+      }
       if (warmup && run.warmupFull.has(warmup.key)) {
         run.heldDomains.add(domainId);
         return null;

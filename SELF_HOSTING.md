@@ -829,9 +829,10 @@ The cap is the lower of the plan's and the warm-up's, and no plan lifts it.
 Mail over it parks as `queued_quota` (`park_reason = 'warmup'`) and
 `quota.drain` releases it as the day allows; `429 daily_quota_exceeded` (SMTP
 `452`) with a warm-up message only when the team's parked backlog is full.
-50 clean sends since the last step (hard bounces under 2%, complaints under
-0.1%, no phishing-type monitor verdict) move a domain up a step early, and an
-operator can trust a team or a domain from its review page (audited).
+50 clean sends since the last step, the first a day old (hard bounces under
+2%, complaints under 0.1%, no phishing-type monitor verdict), move a domain up
+a step early, and an operator can trust a team or a domain from its review
+page (audited).
 
 The worker's `domain.age` job looks the age up off the send path, when a
 domain is added or verifies and from the `domains.reverify` sweep: RDAP via

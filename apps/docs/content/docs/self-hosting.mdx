@@ -917,10 +917,11 @@ plan never lifts it. Mail over it parks as `queued_quota` (with
 day's cap allows; the API answers `429 daily_quota_exceeded` with a warm-up
 message (SMTP `452`) only when the team's parked backlog is full (three days of
 its plan's volume). A domain moves up one step early once its sends since the
-last step are clean: at least 50, hard bounces under 2%, complaints under 0.1%
-and no phishing-type verdict from the content monitor (checked by the
-15-minute `safety.flags` job). An operator can trust a team, or one domain, on
-its Trust & safety review page, which lifts the warm-up and is audited.
+last step are clean: at least 50, the first a day old, hard bounces under 2%,
+complaints under 0.1% and no phishing-type verdict from the content monitor
+(checked by the 15-minute `safety.flags` job). An operator can trust a team, or
+one domain, on its Trust & safety review page, which lifts the warm-up and is
+audited.
 
 **The age lookup** runs in the worker's `domain.age` job, never on the send
 path: when a domain is added, when it verifies, and from the 15-minute

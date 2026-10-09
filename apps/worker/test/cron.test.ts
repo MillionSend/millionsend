@@ -1311,3 +1311,44 @@ it("drain releases a young domain's parked mail only as its warm-up allows, what
     .where(eq(schema.emails.teamId, teamId));
   expect(reasons.every((r) => r.reason === null)).toBe(true);
 });
+
+it("drain leaves a young domain's mail due on a later day to that day's warm-up", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "news.stacked-drain.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date("2026-10-09T09:00:00Z"),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
+  // Over its delivery day's cap at accept: the earlier days' room must not
+  // carry it, or their caps would all land on that one instant.
+  const due = await insertParked(new Date("2026-10-09T10:00:00Z"), "scheduled", {
+    domainId: domain.id,
+    parkReason: "warmup",
+    scheduledAt: new Date("2026-10-11T12:00:00Z"),
+  });
+  const enqueued: string[] = [];
+  const drain = (now: string) =>
+    drainQuotaParked(db, {
+      isCloud: false,
+      now: new Date(now),
+      enqueueSends: async (batch) => {
+        enqueued.push(...batch.map((j) => j.emailId));
+      },
+    });
+
+  expect(await drain("2026-10-09T15:00:00Z")).toEqual({ drained: 0, stillParked: 1 });
+  expect(await drain("2026-10-10T15:00:00Z")).toEqual({ drained: 0, stillParked: 1 });
+  expect(await drain("2026-10-11T00:15:00Z")).toEqual({ drained: 1, stillParked: 0 });
+  expect(enqueued).toEqual([due]);
+  expect(
+    await db
+      .select({ day: schema.domainWarmupUsage.day, accepted: schema.domainWarmupUsage.accepted })
+      .from(schema.domainWarmupUsage),
+  ).toEqual([{ day: "2026-10-11", accepted: 1 }]);
+});

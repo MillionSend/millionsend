@@ -158,7 +158,7 @@ it("moves a warming domain up a step once its sends are clean", async () => {
       name: "news.warming-up.com",
       region: "us-east-1",
       status: "verified",
-      registeredAt: new Date(NOW.getTime() - 5 * 3600_000),
+      registeredAt: new Date(NOW.getTime() - 3 * 24 * 3600_000),
     })
     .returning({ id: schema.domains.id });
   if (!domain) throw new Error("domain insert failed");
@@ -170,7 +170,7 @@ it("moves a warming domain up a step once its sends are clean", async () => {
       to: ["r@example.com"],
       subject: "s",
       latestStatus: "delivered" as const,
-      sentAt: new Date(NOW.getTime() - 2 * 3600_000),
+      sentAt: new Date(NOW.getTime() - 25 * 3600_000),
     })),
   );
   expect(await runSafetyFlags(db, { now: NOW })).toMatchObject({ graduated: 1 });
@@ -178,5 +178,5 @@ it("moves a warming domain up a step once its sends are clean", async () => {
     .select({ tier: schema.domains.warmupTier })
     .from(schema.domains)
     .where(eq(schema.domains.id, domain.id));
-  expect(row?.tier).toBe(1);
+  expect(row?.tier).toBe(2);
 });

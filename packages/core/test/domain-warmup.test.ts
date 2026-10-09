@@ -344,7 +344,10 @@ describe("the accept path", () => {
 
 describe("early graduation", () => {
   const NOW = new Date("2026-10-09T15:00:00Z");
-  const REGISTERED = new Date("2026-10-09T08:00:00Z");
+  // Three days old: the 1-7 day tier by the calendar since NOW - 2 days.
+  const REGISTERED = new Date(NOW.getTime() - 3 * DAY_MS);
+  // Settled, and a day into the tier: what a step needs behind it.
+  const DAY_OLD = new Date(NOW.getTime() - 25 * HOUR_MS);
 
   async function sent(
     teamId: string,
@@ -393,28 +396,46 @@ describe("early graduation", () => {
   it("moves a domain up one tier after 50 clean settled sends, then needs 50 more", async () => {
     const teamId = await newTeam();
     const domainId = await newDomain(teamId, "clean-sender.com", REGISTERED);
-    await sent(teamId, domainId, 49, new Date(NOW.getTime() - 2 * HOUR_MS));
+    await sent(teamId, domainId, 49, DAY_OLD);
     // Not yet settled: a bounce may still come back.
     await sent(teamId, domainId, 5, new Date(NOW.getTime() - 10 * 60_000));
     expect(await graduateWarmupDomains(db, NOW)).not.toContain("clean-sender.com");
 
     await sent(teamId, domainId, 1, new Date(NOW.getTime() - 2 * HOUR_MS));
     expect(await graduateWarmupDomains(db, NOW)).toContain("clean-sender.com");
-    expect(await tierOf(domainId)).toBe(1);
-    expect(await warmupCap(db, { teamId, domainId, at: NOW })).toMatchObject({ cap: 300 });
+    expect(await tierOf(domainId)).toBe(2);
+    expect(await warmupCap(db, { teamId, domainId, at: NOW })).toMatchObject({ cap: 2000 });
 
-    // The next step counts only what was sent since this one.
-    const later = new Date(NOW.getTime() + 3 * HOUR_MS);
-    expect(await graduateWarmupDomains(db, later)).not.toContain("clean-sender.com");
+    // The next step counts only what was sent since this one, and waits a
+    // day into it however clean those sends are.
     await sent(teamId, domainId, 50, new Date(NOW.getTime() + HOUR_MS));
-    expect(await graduateWarmupDomains(db, later)).toContain("clean-sender.com");
-    expect(await warmupCap(db, { teamId, domainId, at: later })).toMatchObject({ cap: 2000 });
+    expect(await graduateWarmupDomains(db, new Date(NOW.getTime() + 3 * HOUR_MS))).not.toContain(
+      "clean-sender.com",
+    );
+    const nextDay = new Date(NOW.getTime() + 26 * HOUR_MS);
+    expect(await graduateWarmupDomains(db, nextDay)).toContain("clean-sender.com");
+    expect(await warmupCap(db, { teamId, domainId, at: nextDay })).toBeNull();
+  });
+
+  it("does not let clean seed sends lift a fresh domain on its registration day", async () => {
+    const registered = new Date("2026-10-09T08:00:00Z");
+    const at = (hours: number) => new Date(registered.getTime() + hours * HOUR_MS);
+    const teamId = await newTeam();
+    const domainId = await newDomain(teamId, "seeded-sender.com", registered);
+    // Rounds of 50 sends to the sender's own inboxes, each settled before the
+    // next cron run: no bounce, no complaint, nothing for the judge to see.
+    for (const hour of [1, 3, 5]) {
+      await sent(teamId, domainId, 50, at(hour));
+      expect(await graduateWarmupDomains(db, at(hour + 1.5))).not.toContain("seeded-sender.com");
+    }
+    expect(await tierOf(domainId)).toBeNull();
+    expect(await warmupCap(db, { teamId, domainId, at: at(7) })).toMatchObject({ cap: 100 });
   });
 
   it("holds a domain back on a hard bounce rate of 2% or a complaint", async () => {
     const bouncy = await newTeam();
     const bouncyDomain = await newDomain(bouncy, "bouncy-sender.com", REGISTERED);
-    const ids = await sent(bouncy, bouncyDomain, 50, new Date(NOW.getTime() - 2 * HOUR_MS));
+    const ids = await sent(bouncy, bouncyDomain, 50, DAY_OLD);
     await db.insert(schema.emailEvents).values({
       emailId: ids[0] ?? "",
       type: "bounced",
@@ -423,12 +444,7 @@ describe("early graduation", () => {
     });
     const complainer = await newTeam();
     const complainerDomain = await newDomain(complainer, "spammy-sender.com", REGISTERED);
-    const more = await sent(
-      complainer,
-      complainerDomain,
-      60,
-      new Date(NOW.getTime() - 2 * HOUR_MS),
-    );
+    const more = await sent(complainer, complainerDomain, 60, DAY_OLD);
     await db
       .insert(schema.emailEvents)
       .values({ emailId: more[0] ?? "", type: "complained", occurredAt: NOW });
@@ -441,15 +457,15 @@ describe("early graduation", () => {
   it("holds a domain back on a phishing-type verdict, not on other abuse", async () => {
     const phisher = await newTeam();
     const phisherDomain = await newDomain(phisher, "lure-sender.com", REGISTERED);
-    await sent(phisher, phisherDomain, 50, new Date(NOW.getTime() - 2 * HOUR_MS));
+    await sent(phisher, phisherDomain, 50, DAY_OLD);
     await verdict(phisher, ["phishing_credentials"], ["harvests_secrets"]);
     const lure = await newTeam();
     const lureDomain = await newDomain(lure, "brand-lure.com", REGISTERED);
-    await sent(lure, lureDomain, 50, new Date(NOW.getTime() - 2 * HOUR_MS));
+    await sent(lure, lureDomain, 50, DAY_OLD);
     await verdict(lure, ["other_abuse"], ["impersonation"]);
     const bulk = await newTeam();
     const bulkDomain = await newDomain(bulk, "bulk-sender.com", REGISTERED);
-    await sent(bulk, bulkDomain, 50, new Date(NOW.getTime() - 2 * HOUR_MS));
+    await sent(bulk, bulkDomain, 50, DAY_OLD);
     await verdict(bulk, ["unsolicited_bulk"], ["unsolicited_bulk"]);
 
     const moved = await graduateWarmupDomains(db, NOW);
@@ -463,9 +479,9 @@ describe("early graduation", () => {
     const trusted = await newDomain(teamId, "trusted-grad.com", REGISTERED, {
       warmupTrustedAt: NOW,
     });
-    await sent(teamId, trusted, 50, new Date(NOW.getTime() - 2 * HOUR_MS));
+    await sent(teamId, trusted, 50, DAY_OLD);
     const plain = await newDomain(teamId, "plain-grad.com", REGISTERED);
-    await sent(teamId, plain, 50, new Date(NOW.getTime() - 2 * HOUR_MS));
+    await sent(teamId, plain, 50, DAY_OLD);
     await db.update(schema.instanceSettings).set({ warmupEnabled: false });
     try {
       expect(await graduateWarmupDomains(db, NOW)).toEqual([]);

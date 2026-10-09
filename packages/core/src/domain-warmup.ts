@@ -36,6 +36,13 @@ const WARMUP_GRADUATION_MAX_BOUNCE_RATE = 0.02;
 const WARMUP_GRADUATION_MAX_COMPLAINT_RATE = 0.001;
 /** A send counts toward graduation once its bounce has had time to come back. */
 const WARMUP_GRADUATION_SETTLE_MS = 3600_000;
+/**
+ * A step also needs a day of sending behind it: the window's first send at
+ * least this old. Complaints and verdicts lag the send and a phishing domain
+ * is spent within hours, so a few clean seed sends to the sender's own
+ * inboxes must not lift a fresh domain to full volume on its first day.
+ */
+const WARMUP_GRADUATION_MIN_SPAN_MS = DAY_MS;
 /** An abuse verdict of these kinds, the category the judge chose or a lure it saw, blocks graduation. */
 const PHISHING_CATEGORIES: readonly string[] = [
   "phishing_credentials",
@@ -180,10 +187,11 @@ export async function admitWarmup(
 /**
  * Early graduation, run by the safety cron: a domain still warming up moves
  * one tier up when its settled sends since its last tier change are clean —
- * at least WARMUP_GRADUATION_SENDS, hard bounces and complaints under their
- * lines, and no phishing-type verdict from the content monitor on its team. Rows
- * sharing a registrable domain move together, on their pooled sends, as they
- * share a counter. Returns the registrable domains that moved.
+ * at least WARMUP_GRADUATION_SENDS, the first a day old, hard bounces and
+ * complaints under their lines, and no phishing-type verdict from the content
+ * monitor on its team. Rows sharing a registrable domain move together, on
+ * their pooled sends, as they share a counter. Returns the registrable
+ * domains that moved.
  */
 export async function graduateWarmupDomains(db: Db, now: Date = new Date()): Promise<string[]> {
   if (!(await warmupSettings(db)).warmupEnabled) return [];
@@ -248,11 +256,13 @@ async function cleanSince(
 ): Promise<boolean> {
   const e = schema.emails;
   const teams = [...new Set(group.map((r) => r.teamId))];
+  const spanStart = new Date(now.getTime() - WARMUP_GRADUATION_MIN_SPAN_MS).toISOString();
   // Spelled out: inside a subquery drizzle leaves column names unqualified,
   // and emails and email_events both have an id.
   const [sends] = await db
     .select({
       sent: sql<number>`count(*)::int`,
+      dayOld: sql<number>`count(*) filter (where emails.sent_at <= ${spanStart}::timestamptz)::int`,
       bounced: sql<number>`count(*) filter (where exists (select 1 from email_events ev where ev.email_id = emails.id and ev.type = 'bounced' and ev.bounce_type = 'Permanent'))::int`,
       complained: sql<number>`count(*) filter (where exists (select 1 from email_events ev where ev.email_id = emails.id and ev.type = 'complained'))::int`,
     })
@@ -269,7 +279,7 @@ async function cleanSince(
       ),
     );
   const sent = sends?.sent ?? 0;
-  if (sent < WARMUP_GRADUATION_SENDS) return false;
+  if (sent < WARMUP_GRADUATION_SENDS || !sends?.dayOld) return false;
   if ((sends?.bounced ?? 0) / sent >= WARMUP_GRADUATION_MAX_BOUNCE_RATE) return false;
   if ((sends?.complained ?? 0) / sent >= WARMUP_GRADUATION_MAX_COMPLAINT_RATE) return false;
   const ms = schema.monitorSamples;
