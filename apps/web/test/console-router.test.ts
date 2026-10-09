@@ -800,6 +800,55 @@ describe("console.regions pacing numbers", () => {
   });
 });
 
+describe("console.regions during a region hold", () => {
+  it("keeps the metric and rate for the operator while the team sees only a delay", async () => {
+    vi.stubEnv("AWS_REGIONS", "");
+    vi.stubEnv("AWS_REGION", REGION);
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId, name: "held.example", region: REGION, status: "verified" })
+      .returning({ id: schema.domains.id });
+    const [broadcast] = await db
+      .insert(schema.broadcasts)
+      .values({
+        teamId,
+        from: "hi@held.example",
+        subject: "s",
+        status: "scheduled",
+        scheduledAt: new Date(Date.now() - 60_000),
+      })
+      .returning({ id: schema.broadcasts.id });
+    if (!domain || !broadcast) throw new Error("seed failed");
+    const reason = {
+      metric: "complaint" as const,
+      rate: 0.0009,
+      limit: 0.001,
+      windowHours: 24,
+      sent: 5000,
+      events: 5,
+    };
+    await db.delete(schema.regionBreakers);
+    await db
+      .insert(schema.regionBreakers)
+      .values({ region: REGION, paused: true, reason, pausedAt: new Date() });
+
+    const list = await operator().console.regions.list();
+    expect(list.served.find((r) => r.region === REGION)?.breaker).toMatchObject({
+      paused: true,
+      manualReason: null,
+      reason,
+    });
+
+    const { items } = await member().broadcasts.list({});
+    expect(items.find((b) => b.id === broadcast.id)?.held).toBe(true);
+    expect(JSON.stringify(items)).not.toMatch(/complaint|0\.0009|0\.09|review/i);
+
+    await db.delete(schema.regionBreakers);
+    await db.delete(schema.broadcasts).where(eq(schema.broadcasts.id, broadcast.id));
+    await db.delete(schema.domains).where(eq(schema.domains.id, domain.id));
+  });
+});
+
 describe("suspend / reinstate and the team's SES tenant", () => {
   let tenantTeam: string;
   const arn = (region: string) => `arn:aws:ses:${region}:123456789012:tenant/${tenantTeam}/tn-1`;

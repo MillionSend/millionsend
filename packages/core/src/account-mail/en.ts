@@ -101,11 +101,11 @@ export const en = {
     subject: '"{name}" is going out over {days} days',
     body: [
       "{first} of {count} emails went out in the first wave; the rest follows as capacity frees, the last about {finishesAt}.",
-      "Sends above the platform's daily capacity are spread over the following days; {team}'s transactional email is not held behind them.",
+      "Sends above the daily sending capacity are spread over the following days; {team}'s transactional email is not held behind them.",
     ],
     button: "Open broadcast",
     muted: [
-      "You get this once per broadcast that takes more than one day. The finish time is an estimate and moves as other teams send.",
+      "You get this once per broadcast that takes more than one day. The finish time is an estimate and can shift.",
     ],
   },
   "broadcast.held_quota": {
@@ -123,10 +123,10 @@ export const en = {
     },
   },
   "broadcast.held": {
-    subject: '"{name}" is on hold',
+    subject: '"{name}" is delayed',
     body: [
-      'Sending from {region} is paused across the platform while bounce and complaint rates settle, so "{name}" waits instead of going out; transactional email keeps flowing.',
-      "It resumes by itself — we re-check every 15 minutes — and you'll get the usual sent report when it's done.",
+      '"{name}" is waiting to send. Delivery is paused for now and resumes automatically, so you don\'t need to do anything; transactional email keeps flowing.',
+      "You'll get the usual sent report when it's done.",
     ],
     button: "Open broadcast",
   },

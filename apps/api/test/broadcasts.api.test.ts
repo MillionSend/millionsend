@@ -407,11 +407,25 @@ describe("broadcasts API platform breaker", () => {
     const { token, broadcastId } = await makeSendableTeam("bc-region-held");
     const res = await call(token, `/broadcasts/${broadcastId}/send`, {});
     expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({
+    const refusal = {
       statusCode: 403,
       name: "broadcasts_paused",
-      message: expect.stringContaining("us-east-1"),
+      message:
+        "Broadcasts can't be sent right now. Sending resumes automatically; try again later. Transactional email is unaffected.",
+    };
+    // Send-on-create and a later schedule meet the same answer.
+    const created = await call(token, "/broadcasts", {
+      ...draftBody(),
+      send: true,
+      scheduled_at: new Date(Date.now() + 86_400_000).toISOString(),
     });
+    expect(created.status).toBe(403);
+    for (const body of [await res.json(), await created.json()]) {
+      expect(body).toEqual(refusal);
+      expect(JSON.stringify(body)).not.toMatch(
+        /platform|\bSES\b|review|\brates?\b|complaint|bounce|us-east-1|operator|%/i,
+      );
+    }
     const [row] = await db
       .select({ status: schema.broadcasts.status })
       .from(schema.broadcasts)
