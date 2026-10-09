@@ -372,7 +372,12 @@ describe("early graduation", () => {
     return rows.map((r) => r.id);
   }
 
-  async function verdict(teamId: string, categories: string[], reasons: string[]) {
+  async function verdict(
+    teamId: string,
+    categories: string[],
+    reasons: string[],
+    judgedAt = new Date(NOW.getTime() - 2 * HOUR_MS),
+  ) {
     await db.insert(schema.monitorSamples).values({
       teamId,
       kind: "first_sends",
@@ -381,7 +386,7 @@ describe("early graduation", () => {
       verdict: "abuse",
       categories,
       reasons,
-      judgedAt: new Date(NOW.getTime() - 2 * HOUR_MS),
+      judgedAt,
     });
   }
 
@@ -467,10 +472,17 @@ describe("early graduation", () => {
     const bulkDomain = await newDomain(bulk, "bulk-sender.com", REGISTERED);
     await sent(bulk, bulkDomain, 50, DAY_OLD);
     await verdict(bulk, ["unsolicited_bulk"], ["unsolicited_bulk"]);
+    // Judged on the registration day, before the calendar's step to this
+    // tier: still the same sender's intent.
+    const early = await newTeam();
+    const earlyDomain = await newDomain(early, "first-day-lure.com", REGISTERED);
+    await sent(early, earlyDomain, 50, DAY_OLD);
+    await verdict(early, ["payment_redirect"], [], new Date(REGISTERED.getTime() + HOUR_MS));
 
     const moved = await graduateWarmupDomains(db, NOW);
     expect(moved).not.toContain("lure-sender.com");
     expect(moved).not.toContain("brand-lure.com");
+    expect(moved).not.toContain("first-day-lure.com");
     expect(moved).toContain("bulk-sender.com");
   });
 

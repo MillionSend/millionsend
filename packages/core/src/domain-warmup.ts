@@ -291,7 +291,9 @@ async function cleanSince(
         inArray(ms.teamId, teams),
         eq(ms.status, "judged"),
         eq(ms.verdict, "abuse"),
-        gte(ms.judgedAt, since),
+        // The whole warm-up, not only since the last step: a calendar step
+        // must not wash out a lure the judge saw on the first day.
+        gte(ms.judgedAt, new Date(now.getTime() - WARMUP_TIER_DAYS[2] * DAY_MS)),
       ),
     );
   return !verdicts.some(
