@@ -1,7 +1,7 @@
 import {
   associateDomainTenant,
   isTeamSuspended,
-  recordAudit,
+  recordTenantAudit,
   recordTenantStatus,
   syncTenantSendingStatus,
 } from "@millionsend/core";
@@ -107,13 +107,12 @@ export async function retryTenantStatus(
   await recordTenantStatus(db, { teamId, actor: "system", outcome });
 }
 
-/** Retries exhausted: the team's audit says so; each attempt's AWS error is in the logs. */
+/** Retries exhausted: the console's audit says so; each attempt's AWS error is in the logs. */
 export async function abandonTenantStatus(db: Db, teamId: string): Promise<void> {
-  await recordAudit(db, {
+  await recordTenantAudit(db, {
     teamId,
     actor: "system",
     action: "team.ses_tenant_update_failed",
-    target: { type: "team", id: teamId },
     metadata: { retrying: false },
   });
   console.error(

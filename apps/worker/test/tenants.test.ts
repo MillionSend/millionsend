@@ -170,6 +170,8 @@ const tenantRows = () =>
     .select({
       action: schema.auditLog.action,
       actorId: schema.auditLog.actorId,
+      teamId: schema.auditLog.teamId,
+      target: schema.auditLog.target,
       data: schema.auditLog.data,
     })
     .from(schema.auditLog);
@@ -193,7 +195,9 @@ it("the tenant.status retry applies the team's standing at run time in every dom
     {
       action: "team.ses_tenant_updated",
       actorId: "system",
-      data: { status: "DISABLED", regions: "sa-east-1, us-east-1" },
+      teamId: null,
+      target: `team:${teamId}`,
+      data: { team: "acme", status: "DISABLED", regions: "sa-east-1, us-east-1" },
     },
   ]);
 
@@ -259,7 +263,13 @@ it("the retry throws while a region still fails, and giving up is audited", asyn
 
   await abandonTenantStatus(db, teamId);
   expect(await tenantRows()).toEqual([
-    { action: "team.ses_tenant_update_failed", actorId: "system", data: { retrying: false } },
+    {
+      action: "team.ses_tenant_update_failed",
+      actorId: "system",
+      teamId: null,
+      target: `team:${teamId}`,
+      data: { team: "acme", retrying: false },
+    },
   ]);
   expect(error).toHaveBeenCalledTimes(1);
 });

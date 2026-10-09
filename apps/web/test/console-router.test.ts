@@ -780,9 +780,10 @@ describe("suspend / reinstate and the team's SES tenant", () => {
       failed: [],
     });
     expect((await auditRows("team.ses_tenant_updated"))[0]).toMatchObject({
-      teamId: tenantTeam,
+      teamId: null,
+      target: `team:${tenantTeam}`,
       actorId: `user:${OPERATOR}`,
-      data: { status: "DISABLED", regions: "sa-east-1, us-east-1" },
+      data: { team: "tenant-team", status: "DISABLED", regions: "sa-east-1, us-east-1" },
     });
 
     ses.calls.length = 0;
@@ -810,9 +811,11 @@ describe("suspend / reinstate and the team's SES tenant", () => {
     });
     expect(ses.retried).toEqual([tenantTeam]);
     expect((await auditRows("team.ses_tenant_update_failed"))[0]).toMatchObject({
-      teamId: tenantTeam,
+      teamId: null,
+      target: `team:${tenantTeam}`,
       actorId: `user:${OPERATOR}`,
       data: {
+        team: "tenant-team",
         status: "DISABLED",
         regions: "sa-east-1",
         failed: "us-east-1 (AccessDeniedException)",
@@ -822,6 +825,37 @@ describe("suspend / reinstate and the team's SES tenant", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     await operator().console.teams.reinstate({ id: tenantTeam });
     warn.mockRestore();
+  });
+
+  it("tenant rows are the operator's: never in the owner's audit log, always in the console's", async () => {
+    vi.stubEnv("SES_TENANTS", "true");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const actions = ["team.ses_tenant_updated", "team.ses_tenant_update_failed"];
+    fakeTenants({ "us-east-1": "AccessDeniedException" });
+    await operator().console.teams.suspend({ id: tenantTeam, reason: "phishing" });
+    fakeTenants();
+    await operator().console.teams.reinstate({ id: tenantTeam });
+    warn.mockRestore();
+
+    const owner = await callerFor(MEMBER, tenantTeam, "owner").audit.list({ limit: 50 });
+    expect(owner.items.map((r) => r.action)).toContain("team.suspended");
+    expect(owner.items.filter((r) => actions.includes(r.action))).toEqual([]);
+
+    const review = await operator().console.safety.review({ teamId: tenantTeam });
+    const reviewed = review.audit.filter((r) => actions.includes(r.action));
+    expect(reviewed.slice(0, 2).map((r) => [r.action, r.target])).toEqual([
+      ["team.ses_tenant_updated", `team:${tenantTeam}`],
+      ["team.ses_tenant_update_failed", `team:${tenantTeam}`],
+    ]);
+
+    const instance = await operator().console.audit.list({
+      action: "team.ses_tenant_update_failed",
+    });
+    expect(instance.items[0]).toMatchObject({
+      teamId: null,
+      target: `team:${tenantTeam}`,
+      data: { team: "tenant-team", retrying: true },
+    });
   });
 
   it("is a no-op without SES tenants", async () => {

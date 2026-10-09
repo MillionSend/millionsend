@@ -116,6 +116,36 @@ export async function syncTenantSendingStatus(
 }
 
 /**
+ * A tenant status audit row, for the operator alone. team_id stays null so
+ * the team's own audit never lists it: a phishing suspension is silent, and
+ * this row would tell the team its tenant was disabled. As with
+ * content.revealed, the target and `team` name the team in the console.
+ */
+export async function recordTenantAudit(
+  db: Db,
+  params: {
+    teamId: string;
+    actor: AuditActor;
+    action: "team.ses_tenant_updated" | "team.ses_tenant_update_failed";
+    metadata: Record<string, unknown>;
+  },
+): Promise<void> {
+  // A failed name lookup still writes the row, as recordAudit never fails its caller.
+  const [team] = await db
+    .select({ name: schema.teams.name })
+    .from(schema.teams)
+    .where(eq(schema.teams.id, params.teamId))
+    .catch(() => []);
+  await recordAudit(db, {
+    teamId: null,
+    actor: params.actor,
+    action: params.action,
+    target: { type: "team", id: params.teamId },
+    metadata: { team: team?.name, ...params.metadata },
+  });
+}
+
+/**
  * The audit row of one sync: the tenant updated everywhere, or failed
  * somewhere, which the caller has handed to the worker's tenant.status retry.
  */
@@ -125,11 +155,10 @@ export function recordTenantStatus(
 ): Promise<void> {
   const { outcome } = params;
   const failed = outcome.failed.length > 0;
-  return recordAudit(db, {
+  return recordTenantAudit(db, {
     teamId: params.teamId,
     actor: params.actor,
     action: failed ? "team.ses_tenant_update_failed" : "team.ses_tenant_updated",
-    target: { type: "team", id: params.teamId },
     metadata: {
       status: outcome.status,
       regions: outcome.updated.join(", "),

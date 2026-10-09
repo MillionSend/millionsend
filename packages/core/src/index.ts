@@ -483,6 +483,7 @@ export {
 export {
   associateDomainTenant,
   markDomainTenantAssociated,
+  recordTenantAudit,
   recordTenantStatus,
   syncTenantSendingStatus,
   type TenantSendingStatus,
