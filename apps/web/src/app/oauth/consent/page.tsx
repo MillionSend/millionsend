@@ -62,9 +62,10 @@ export default async function ConsentPage({
               name: client.name,
               uri: client.uri,
               // Where the code (and the user) end up after Allow — the one
-              // fact about the app the registrant could not make up.
+              // fact about the app the registrant could not make up. A
+              // native app's private-use scheme has no origin, so it shows whole.
               redirectOrigins: [
-                ...new Set(client.redirectUris.map(httpOrigin).filter((o) => o !== null)),
+                ...new Set(client.redirectUris.map((uri) => httpOrigin(uri) ?? uri)),
               ],
               // Only operator-trusted clients skip consent; everything else
               // self-registered and is shown as such.
