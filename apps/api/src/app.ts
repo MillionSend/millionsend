@@ -25,6 +25,7 @@ import {
   decryptEmailBody,
   emitContactEvents,
   emitSuppressionEvents,
+  enforceDomainWarmup,
   eraseRecipient,
   estimateAttachmentBytes,
   extractTokenPrefix,
@@ -35,7 +36,6 @@ import {
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
-  isTeamSuspended,
   type Keyring,
   MAX_ATTACHMENT_BYTES,
   makeUnsubscribeToken,
@@ -62,6 +62,7 @@ import {
   segmentContactsWhere,
   segmentFilterSchema,
   sendingBroadcasts,
+  suspendedSendRefusal,
   teamQuota,
   verifySenderDomain,
   type WebhookEnqueue,
@@ -215,6 +216,12 @@ export interface ApiDeps {
    */
   enqueueRecipientErase?: ((teamId: string, address: string) => Promise<void>) | undefined;
   /**
+   * Looks up a domain's registration date in the worker (the warm-up's
+   * input), on create and on verification. Optional: the worker's sweep
+   * asks for any domain that was never looked up.
+   */
+  enqueueDomainAge?: ((domainId: string) => Promise<void>) | undefined;
+  /**
    * The key the hosted unsubscribe page verifies tokens with (core
    * deriveUnsubscribeKey over MASTER_ENCRYPTION_KEY). With appBaseUrl it lets
    * POST /contacts/{id}/preferences-link mint links; omitted → that route 422s.
@@ -327,6 +334,15 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
           "Daily sending quota exceeded and the queued backlog is full; retry after the UTC day rolls over",
         ),
       };
+    case "warmup_backlog_full":
+      return {
+        status: 429 as const,
+        body: errorBody(
+          429,
+          "daily_quota_exceeded",
+          "New domain warm-up: this sending domain ramps up gradually and enough emails are already waiting; retry after the UTC day rolls over",
+        ),
+      };
     case "monthly_quota_exceeded":
       return {
         status: 429 as const,
@@ -364,12 +380,10 @@ async function sendingPausedError(
 ): Promise<ReturnType<typeof errorBody> | null> {
   // An operator suspension outranks the rates: keys still authenticate so
   // the caller learns why, but nothing leaves.
-  if (await isTeamSuspended(deps.db, auth.teamId)) {
-    return errorBody(
-      403,
-      "team_suspended",
-      "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
-    );
+  const suspended = (await fetchTeamStanding(deps.db, auth.teamId))?.suspended;
+  if (suspended) {
+    const refusal = suspendedSendRefusal(suspended.reason);
+    return errorBody(403, refusal.code, refusal.message);
   }
   const health = await fetchDeliverabilityHealth(deps.db, auth.teamId);
   const paused = health.reasons.find((r) => r.tier === "paused");
@@ -2682,18 +2696,14 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return fail(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE);
     }
-    // Platform breaker: the account-wide rate in this SES region is near
-    // SES's review line, so broadcasts wait; /emails is deliberately not
-    // gated by it.
-    const regionHold = await regionPause(db, domain.region);
-    if (regionHold) {
-      const metric = regionHold.reason?.metric === "bounce" ? "hard-bounce" : "complaint";
+    // Platform breaker or the operator's hold on this SES region: broadcasts
+    // wait; /emails is deliberately not gated by it. The caller is never
+    // told why: the platform's rates are not the customer's to see.
+    if (await regionPause(db, domain.region)) {
       return fail(
         403,
         "broadcasts_paused",
-        regionHold.manualReason
-          ? `Broadcast sending is paused in ${domain.region} by the instance operator. Transactional email is unaffected. Try again later.`
-          : `Broadcast sending is paused in ${domain.region} while the platform's ${metric} rate recovers. Transactional email is unaffected. Try again later.`,
+        "Broadcasts can't be sent right now. Sending resumes automatically; try again later. Transactional email is unaffected.",
       );
     }
     // The operator's pause is the team's own hold, transactional mail aside.
@@ -3798,7 +3808,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           startAfter?: Date;
           index: number;
           day: string;
+          at: Date;
           recipientCount: number;
+          domainId: string | null;
         }[] = [];
         for (const { payload, index } of payloads) {
           const result = await acceptEmail(deps, auth, payload, { tx: txDb, quota: "deferred" });
@@ -3808,7 +3820,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             parked: false,
             index,
             day: result.day,
+            at: result.at,
             recipientCount: result.recipientCount,
+            domainId: payload.domainId,
             ...(payload.scheduledAt ? { startAfter: payload.scheduledAt } : {}),
           });
         }
@@ -3828,7 +3842,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           if (!first) continue;
           // Items in one group share a delivery day; the first one's instant
           // places the hourly mirror like a single send's would.
-          const at = first.startAfter ?? new Date();
+          const { at } = first;
           const reservation = await reserveQuota(txDb, {
             teamId: auth.teamId,
             count: items.reduce((n, o) => n + o.recipientCount, 0),
@@ -3900,6 +3914,27 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
               ),
             );
           for (const o of toPark) o.parked = true;
+        }
+        // The warm-up after the plan, each item as its own send would meet it.
+        for (const o of out) {
+          if (o.parked) continue;
+          const warmup = await enforceDomainWarmup(txDb, {
+            teamId: auth.teamId,
+            domainId: o.domainId,
+            count: o.recipientCount,
+            quota,
+            day: o.day,
+            at: o.at,
+          });
+          if (warmup === "send") continue;
+          if (warmup === "backlog_full") {
+            throw new AcceptRejectedError({ ok: false, reason: "warmup_backlog_full" }, o.index);
+          }
+          await txDb
+            .update(schema.emails)
+            .set({ latestStatus: "queued_quota", parkReason: "warmup" })
+            .where(eq(schema.emails.id, o.id));
+          o.parked = true;
         }
         if (idemKey) {
           const recorded = await completeIdempotent(txDb, {

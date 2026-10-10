@@ -37,12 +37,17 @@ export const unsubscribeLogoRadiusEnum = pgEnum("unsubscribe_logo_radius", [
   "circle",
 ]);
 
-/** Why an operator suspended a team; owners hear about every reason but phishing. */
+/**
+ * Why a team is suspended; owners hear about every reason but phishing and
+ * review. `review` is the content monitor's own hold on a new team, pending
+ * an operator's release or phishing suspension.
+ */
 export const suspensionReasonEnum = pgEnum("suspension_reason", [
   "manual",
   "reputation",
   "phishing",
   "non_payment",
+  "review",
 ]);
 
 export const teams = pgTable(
@@ -116,6 +121,8 @@ export const teams = pgTable(
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
     suspensionReason: suspensionReasonEnum("suspension_reason"),
     suspensionNote: text("suspension_note"),
+    // Operator override: none of the team's domains warm up.
+    warmupTrustedAt: timestamp("warmup_trusted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

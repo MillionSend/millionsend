@@ -97,6 +97,9 @@ const app = createApi({
   enqueueWebhookDeliveries: async (deliveries) => {
     await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
   },
+  enqueueDomainAge: async (domainId) => {
+    await queue.send("domain.age", { domainId }, { dedupeKey: domainId });
+  },
   enqueueRecipientErase: async (teamId, address) => {
     await queue.send(
       "recipient.erase",

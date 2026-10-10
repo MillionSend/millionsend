@@ -3,7 +3,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   type AcceptEmailPayload,
   acceptEmail,
@@ -93,6 +93,39 @@ describe("acceptEmail", () => {
         ),
       );
     expect(row?.accepted).toBe(1);
+  });
+
+  it("charges a send scheduled in the past to today: an earlier day's quota never reopens", async () => {
+    vi.useFakeTimers({ now: new Date("2026-10-09T10:00:00Z"), toFake: ["Date"] });
+    try {
+      const team = await createTeam(db, "backdated-sender");
+      const [old] = await db
+        .insert(schema.domains)
+        .values({
+          teamId: team,
+          name: "backdated.dev",
+          region: "us-east-1",
+          status: "verified",
+          registeredAt: new Date("2014-01-01T00:00:00Z"),
+        })
+        .returning({ id: schema.domains.id });
+      const ceiling = Math.floor(teamRung("free", null).included * (1 + QUOTA_TOLERANCE));
+      await db
+        .insert(schema.usageCounters)
+        .values({ teamId: team, day: "2026-10-09", accepted: ceiling });
+      const result = await acceptEmail(
+        deps(),
+        { teamId: team, billing: FREE, apiKeyId: null },
+        payload({
+          from: "a@backdated.dev",
+          domainId: old?.id ?? null,
+          scheduledAt: new Date("2026-10-06T10:00:00Z"),
+        }),
+      );
+      expect(result).toMatchObject({ ok: true, parked: true, day: "2026-10-09" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects attachments whose decoded bytes exceed the cap", async () => {

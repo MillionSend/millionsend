@@ -59,7 +59,8 @@ remaining deltas are deliberate and loud:
 - Broadcasts support `canceled`, a status outside Resend's union, and
   broadcast sends, `POST /emails` and `POST /emails/batch` can return
   `403 sending_paused` when your bounce or complaint rate crosses the SES
-  enforcement thresholds. Broadcast sends alone can also return
+  enforcement thresholds, or while the team's sending is paused pending
+  review. Broadcast sends alone can also return
   `403 broadcasts_paused` while the platform's aggregate rate in the sender's
   SES region is recovering; it is per region, leaves transactional email
   untouched, and clears on its own.
@@ -76,7 +77,10 @@ remaining deltas are deliberate and loud:
   `429 monthly_quota_exceeded` on a monthly plan (Pro, Scale) at its included
   volume with overage off; turn on overage in Billing or wait for the period
   to renew (the message names the date). A batch is accepted or refused
-  whole.
+  whole. On any plan, a domain still in its
+  [new domain warm-up](/concepts/domains#new-domain-warm-up) answers the same
+  `429 daily_quota_exceeded`, with a message naming the warm-up, once a lot
+  of mail is already waiting.
 - `POST /contacts`, `POST /contacts/batch` and the audience alias return
   `403 plan_limit_reached` when a new contact would take the team past its
   plan's contact cap (1,000 on Free; paid plans are unlimited). Existing

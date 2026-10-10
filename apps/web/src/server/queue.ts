@@ -47,3 +47,15 @@ export async function enqueueRecipientErase(teamId: string, address: string): Pr
     { dedupeKey: `${teamId}:${hashRecipient(address)}` },
   );
 }
+
+/**
+ * Look up a domain's registration date in the worker, best-effort: the
+ * worker's sweep asks for any domain this misses.
+ */
+export async function enqueueDomainAge(domainId: string): Promise<void> {
+  try {
+    await (await getQueue()).send("domain.age", { domainId }, { dedupeKey: domainId });
+  } catch (err) {
+    console.warn("domain.age enqueue failed; the worker's sweep asks later", err);
+  }
+}

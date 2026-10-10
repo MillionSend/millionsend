@@ -72,6 +72,12 @@ export const emailEventTypeEnum = pgEnum("email_event_type", [
 ]);
 
 /**
+ * Why a queued_quota row waits: null for the team's plan or SES's own
+ * capacity, "warmup" for the sending domain's warm-up cap.
+ */
+export const emailParkReasonEnum = pgEnum("email_park_reason", ["warmup"]);
+
+/**
  * Lifecycle split (compliance by schema): the plaintext columns here are
  * metadata and live on the events/metadata retention clock; the body*
  * columns are content — AES-256-GCM ciphertext with a per-email wrapped DEK —
@@ -106,6 +112,7 @@ export const emails = pgTable(
     // body columns), so it belongs on the content retention clock.
     attachments: text("attachments"),
     latestStatus: emailStatusEnum("latest_status").notNull().default("queued"),
+    parkReason: emailParkReasonEnum("park_reason"),
     bodyCiphertext: bytea("body_ciphertext"),
     bodyIv: bytea("body_iv"),
     bodyWrappedDek: bytea("body_wrapped_dek"),

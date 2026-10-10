@@ -137,14 +137,6 @@
       "bannerAction": "Abrir configurações do SES",
       "lastEvent": "Último evento recebido",
       "never": "nunca"
-    },
-    "breaker": {
-      "paused": "As transmissões estão pausadas em {region}: a taxa de {metric} da plataforma está em {rate}%, perto da linha de revisão do SES para a conta inteira. E-mails transacionais continuam; as transmissões voltam sozinhas quando a taxa se recuperar.",
-      "metric": {
-        "bounce": "bounce permanente",
-        "complaint": "reclamação"
-      },
-      "held": "As transmissões estão pausadas em {region} pelo operador da instância. E-mails transacionais continuam; as transmissões retomam quando o operador liberar a retenção."
     }
   },
   "team": {
@@ -318,6 +310,8 @@
     "keepPlan": "Manter {plan}",
     "switchAtPeriodEnd": "Trocar no fim do período",
     "changeHint": "Subir de plano vale na hora, com a diferença rateada na próxima fatura. Descer vale quando o período renovar.",
+    "upgradesHeld": "Não é possível subir de plano nesta equipe no momento. Fale com o suporte se precisar de ajuda.",
+    "upgradesHeldLive": "Não é possível subir de plano nesta equipe no momento. Você ainda pode cancelar ou mudar para um plano menor. Fale com o suporte se precisar de ajuda.",
     "features": {
       "domains": "{n, plural, one {# domínio de envio} other {# domínios de envio}}",
       "domainsUnlimited": "Domínios de envio ilimitados",
@@ -431,6 +425,7 @@
       "team_broadcasts_resumed": "Retomou transmissões",
       "team_suspended": "Suspendeu a equipe",
       "team_reinstated": "Reativou a equipe",
+      "team_held_for_review": "Envio pausado aguardando revisão",
       "team_ses_tenant_updated": "Atualizou o status do tenant do SES",
       "team_ses_tenant_update_failed": "Falha ao atualizar o status do tenant do SES",
       "console_flag_opened": "Sinalizou a equipe",
@@ -445,6 +440,8 @@
       "monitor_override_cleared": "Removeu override de amostragem do monitor",
       "monitor_broadcasts_paused": "O monitor de conteúdo pausou transmissões",
       "monitor_broadcasts_resumed": "Retomou transmissões após pausa do monitor",
+      "warmup_trust_granted": "Liberou o aquecimento de domínio novo",
+      "warmup_trust_revoked": "Restabeleceu o aquecimento de domínio novo",
       "content_revealed": "Leu o conteúdo de mensagens",
       "content_accessed": "Um operador leu o conteúdo de mensagens",
       "support_view_started": "Modo de suporte iniciado",
@@ -490,8 +487,8 @@
         "note": "Parte de um broadcast ficou retida acima da cota."
       },
       "broadcast_held": {
-        "label": "Broadcast em espera",
-        "note": "O envio da região está pausado em toda a plataforma."
+        "label": "Broadcast atrasado",
+        "note": "Um broadcast aguarda para sair e retoma sozinho."
       },
       "quota": {
         "label": "Cota de envio",

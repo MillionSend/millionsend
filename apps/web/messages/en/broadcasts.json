@@ -6,6 +6,10 @@
     "sent": "Sent",
     "canceled": "Canceled"
   },
+  "held": {
+    "label": "Delayed",
+    "body": "Delivery is paused for now and resumes automatically. You don't need to do anything."
+  },
   "list": {
     "title": "Broadcasts",
     "new": "New broadcast",
@@ -95,7 +99,7 @@
     "stepLimitMonth": "{plan}'s monthly limit",
     "stepMoreReset": "{count} more when the limit resets at {reset}",
     "stepLastReset": "last {count} when the limit resets at {reset} · finishes about {time}",
-    "reason": "Sends above the platform's daily capacity are spread over the following days. Your transactional email is not held behind them.",
+    "reason": "Sends above the daily sending capacity are spread over the following days. Your transactional email is not held behind them.",
     "planFits": "{plan} sends all of them by {time}",
     "planFitsOverage": "{plan} with overage sends all of them by {time}",
     "todayAt": "today, {time}",

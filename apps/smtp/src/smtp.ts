@@ -3,11 +3,12 @@ import {
   type ApiKeyAuth,
   acceptEmail,
   authenticateApiKey,
+  fetchTeamStanding,
   formatMailbox,
-  isTeamSuspended,
   monthlyQuotaMessage,
   parseMailbox,
   reservedSenderRefusal,
+  suspendedSendRefusal,
   verifySenderDomain,
 } from "@millionsend/core";
 import { type AddressObject, simpleParser } from "mailparser";
@@ -117,12 +118,8 @@ async function handleMessage(
 
   // Read per message, as the HTTP API does: a suspension lands on the next
   // message of an open session, not on its next AUTH.
-  if (await isTeamSuspended(deps.db, auth.teamId)) {
-    throw smtpError(
-      550,
-      "This team is suspended by the instance operator. Sending is disabled until it is reinstated.",
-    );
-  }
+  const suspended = (await fetchTeamStanding(deps.db, auth.teamId))?.suspended;
+  if (suspended) throw smtpError(550, suspendedSendRefusal(suspended.reason).message);
   // The authenticated key's team decides which senders are allowed — the
   // MAIL FROM envelope identity is never trusted.
   const reserved = reservedSenderRefusal(from, deps.onboardingEmailFrom);
@@ -154,6 +151,9 @@ async function handleMessage(
   if (!result.ok) {
     if (result.reason === "quota_backlog_full") {
       throw smtpError(452, "Daily quota exceeded and the parked backlog is full");
+    }
+    if (result.reason === "warmup_backlog_full") {
+      throw smtpError(452, "New domain warm-up: enough mail is already waiting");
     }
     if (result.reason === "monthly_quota_exceeded") {
       throw smtpError(452, monthlyQuotaMessage(result));

@@ -795,6 +795,42 @@ describe("domains.get", () => {
     const domain = await caller.domains.get({ id });
     expect(domain.sentCount).toBe(0);
   });
+
+  it("asks for the domain's age when it is added and shows its warm-up while one applies", async () => {
+    const teamId = await createTeam(db);
+    const asked: string[] = [];
+    const caller = callerFor(teamId, {
+      ...fakeSes().deps,
+      enqueueDomainAge: async (domainId) => {
+        asked.push(domainId);
+      },
+    });
+    const { id } = await caller.domains.create({ name: "news.brand-new.com", region: "us-east-1" });
+    expect(asked).toEqual([id]);
+    // Off on a self-hosted instance until the operator turns it on.
+    expect((await caller.domains.get({ id })).warmup).toBeNull();
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+    const registeredAt = new Date(Date.now() - 2 * 86_400_000);
+    await db
+      .update(schema.domains)
+      .set({ registeredAt, ageSource: "rdap" })
+      .where(eq(schema.domains.id, id));
+    expect((await caller.domains.get({ id })).warmup).toEqual({
+      perDay: 300,
+      fullAt: new Date(registeredAt.getTime() + 30 * 86_400_000),
+      shared: false,
+    });
+    // A second young domain the team can send from: the day's volume is shared.
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "news.brand-newer.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date(Date.now() - 3_600_000),
+      ageSource: "rdap",
+    });
+    expect((await caller.domains.get({ id })).warmup).toMatchObject({ perDay: 300, shared: true });
+  });
 });
 
 describe("domains.delete", () => {

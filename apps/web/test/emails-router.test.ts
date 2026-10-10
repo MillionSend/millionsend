@@ -248,6 +248,20 @@ describe("emails.list sources", () => {
     expect(stats.hasBroadcasts).toBe(true);
   });
 
+  it("shows a row the domain's warm-up holds as warming up, apart from the plan's backlog", async () => {
+    const team = await createTeam(db, "team-a");
+    // The plan is spent today: a warm-up row still never reads as held by it.
+    await db.insert(schema.usageCounters).values({ teamId: team, day: utcDay(), accepted: 500 });
+    const warming = await insertEmail({
+      ...baseEmail(team),
+      latestStatus: "queued_quota",
+      parkReason: "warmup",
+    });
+    await insertEmail({ ...baseEmail(team), latestStatus: "queued_quota" });
+    expect((await caller(team).emails.get({ id: warming })).pending).toEqual({ kind: "warmup" });
+    expect((await caller(team).emails.stats()).queuedQuota).toBe(1);
+  });
+
   it("says what an unsent row waits for, and names its broadcast", async () => {
     const team = await createTeam(db, "team-a");
     const broadcastId = await broadcastFor(team);
@@ -277,6 +291,58 @@ describe("emails.list sources", () => {
     const done = await caller(team).emails.get({ id: sent });
     expect(done.pending).toBeNull();
     expect(done.broadcast).toBeNull();
+  });
+
+  it("shows a broadcast's waiting copies in a held region as delayed, never its other mail", async () => {
+    const team = await createTeam(db, "team-a");
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId: team, name: "acme.test", region: "sa-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    const broadcastId = await broadcastFor(team);
+    const copy = (to: string, over: Partial<typeof schema.emails.$inferInsert>) =>
+      insertEmail({ ...baseEmail(team), to: [to], domainId: domain.id, broadcastId, ...over });
+    const parked = await copy("a@example.com", { latestStatus: "queued_quota" });
+    const queued = await copy("b@example.com", { latestStatus: "queued" });
+    const delivered = await copy("c@example.com", {
+      latestStatus: "delivered",
+      sentAt: new Date(),
+    });
+    const tx = await insertEmail({
+      ...baseEmail(team),
+      domainId: domain.id,
+      latestStatus: "queued_quota",
+    });
+    await db.insert(schema.regionBreakers).values({
+      region: "sa-east-1",
+      paused: true,
+      reason: {
+        metric: "bounce",
+        rate: 0.05,
+        limit: 0.05,
+        windowHours: 24,
+        sent: 2000,
+        events: 100,
+      },
+      pausedAt: new Date(),
+    });
+
+    const held = async () =>
+      Object.fromEntries((await caller(team).emails.list({})).items.map((r) => [r.id, r.held]));
+    expect(await held()).toEqual({
+      [parked]: true,
+      [queued]: true,
+      [delivered]: false,
+      [tx]: false,
+    });
+    expect((await caller(team).emails.get({ id: parked })).pending).toEqual({ kind: "held" });
+    expect((await caller(team).emails.get({ id: queued })).pending).toEqual({ kind: "held" });
+    expect((await caller(team).emails.get({ id: tx })).pending).toEqual({ kind: "waiting" });
+
+    await db.update(schema.regionBreakers).set({ paused: false });
+    expect(Object.values(await held()).some(Boolean)).toBe(false);
+    expect((await caller(team).emails.get({ id: queued })).pending).toEqual({ kind: "queued" });
   });
 });
 

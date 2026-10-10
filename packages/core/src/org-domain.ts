@@ -1,174 +1,49 @@
-/**
- * Multi-part public suffixes we recognize when finding the registrable
- * domain. Load-bearing, not cosmetic: registrableDomain feeds DMARC lookups
- * and persisted domain scores, so a suffix missing here makes a subdomain
- * sender under it resolve to the public suffix itself — its DMARC gets looked
- * up at _dmarc.<suffix> and scored as missing. Covers the common ccTLD
- * second-level families.
- * ponytail: curated list, not the full Public Suffix List — wire in the PSL
- * if a customer's suffix ever falls outside it.
- */
-const MULTI_PART_SUFFIXES = new Set([
-  "ac.il",
-  "ac.jp",
-  "ac.kr",
-  "ac.nz",
-  "ac.uk",
-  "co.id",
-  "co.il",
-  "co.in",
-  "co.jp",
-  "co.ke",
-  "co.kr",
-  "co.nz",
-  "co.th",
-  "co.uk",
-  "co.za",
-  "com.ar",
-  "com.au",
-  "com.bd",
-  "com.bo",
-  "com.br",
-  "com.cn",
-  "com.co",
-  "com.do",
-  "com.ec",
-  "com.eg",
-  "com.gh",
-  "com.gt",
-  "com.hk",
-  "com.hn",
-  "com.mx",
-  "com.my",
-  "com.ng",
-  "com.ni",
-  "com.pa",
-  "com.pe",
-  "com.ph",
-  "com.pk",
-  "com.py",
-  "com.sa",
-  "com.sg",
-  "com.sv",
-  "com.tr",
-  "com.tw",
-  "com.uy",
-  "com.ve",
-  "com.vn",
-  "edu.au",
-  "edu.mx",
-  "firm.in",
-  "gen.in",
-  "go.jp",
-  "go.kr",
-  "gob.ar",
-  "gob.mx",
-  "gov.au",
-  "gov.uk",
-  "govt.nz",
-  "ind.in",
-  "me.uk",
-  "ne.jp",
-  "net.ar",
-  "net.au",
-  "net.bd",
-  "net.bo",
-  "net.br",
-  "net.cn",
-  "net.co",
-  "net.do",
-  "net.ec",
-  "net.eg",
-  "net.gh",
-  "net.gt",
-  "net.hk",
-  "net.hn",
-  "net.in",
-  "net.mx",
-  "net.my",
-  "net.ng",
-  "net.ni",
-  "net.nz",
-  "net.pa",
-  "net.pe",
-  "net.ph",
-  "net.pk",
-  "net.py",
-  "net.sa",
-  "net.sg",
-  "net.sv",
-  "net.tr",
-  "net.tw",
-  "net.uk",
-  "net.uy",
-  "net.ve",
-  "net.vn",
-  "net.za",
-  "or.jp",
-  "or.ke",
-  "or.kr",
-  "or.th",
-  "org.ar",
-  "org.au",
-  "org.bd",
-  "org.bo",
-  "org.br",
-  "org.cn",
-  "org.co",
-  "org.do",
-  "org.ec",
-  "org.eg",
-  "org.gh",
-  "org.gt",
-  "org.hk",
-  "org.hn",
-  "org.id",
-  "org.il",
-  "org.in",
-  "org.mx",
-  "org.my",
-  "org.ng",
-  "org.ni",
-  "org.nz",
-  "org.pa",
-  "org.pe",
-  "org.ph",
-  "org.pk",
-  "org.py",
-  "org.sa",
-  "org.sg",
-  "org.sv",
-  "org.tr",
-  "org.tw",
-  "org.uk",
-  "org.uy",
-  "org.ve",
-  "org.vn",
-  "org.za",
-  "web.za",
-]);
+import { getDomain } from "tldts";
 
-export function registrableDomain(hostname: string): string {
-  const labels = hostname.toLowerCase().replace(/\.$/, "").split(".");
-  const take = MULTI_PART_SUFFIXES.has(labels.slice(-2).join(".")) ? 3 : 2;
-  return labels.slice(-take).join(".");
+/** A hostname as DNS compares it: lowercase, without the root's trailing dot. */
+export function normalizeHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.$/, "");
 }
 
 /**
- * The registrable domain when the curated list can vouch for it: under a
- * listed multi-part suffix, or under a generic TLD. Null under a two-letter
- * ccTLD whose second level is not listed, where the last two labels may be a
- * public suffix themselves (gov.br, com.ua) rather than one organisation.
+ * The registrable domain under the ICANN section of the Public Suffix List:
+ * the name a registry sold (acme.com.br for news.acme.com.br, acme.app.br
+ * for mail.acme.app.br). Feeds DMARC lookups and link-domain checks, so
+ * it must never stop at a public suffix. A name with no registrable part (an
+ * IP, a bare suffix, a single label) comes back as is.
+ */
+export function registrableDomain(hostname: string): string {
+  const name = normalizeHostname(hostname);
+  return getDomain(name) ?? name;
+}
+
+/**
+ * The registrable domain one owner holds, with the private section of the
+ * list too: shop.eu.org, where registrableDomain says eu.org. What the
+ * warm-up dates and counts by: the ICANN name above a free subdomain
+ * service is the service's, years older than the names it hands out, and
+ * shared by strangers. A name with no registrable part comes back as is.
+ */
+export function ownerDomain(hostname: string): string {
+  const name = normalizeHostname(hostname);
+  return getDomain(name, { allowPrivateDomains: true }) ?? name;
+}
+
+/**
+ * The registrable domain when one owner holds everything under it. Null for
+ * a bare public suffix, and where the private section of the list draws an
+ * owner boundary below the ICANN answer (foo.eu.org, x.github.io): there the
+ * ICANN name is shared by strangers, and vouching for it would hand the team
+ * every brand under it.
  */
 export function vouchedRegistrableDomain(hostname: string): string | null {
-  const name = registrableDomain(hostname);
-  const labels = name.split(".");
-  if (labels.length === 3) return name;
-  return labels.length === 2 && (labels[1]?.length ?? 0) > 2 ? name : null;
+  const name = normalizeHostname(hostname);
+  const icann = getDomain(name);
+  return icann !== null && icann === getDomain(name, { allowPrivateDomains: true }) ? icann : null;
 }
 
 /** True when the hostname IS its registrable domain (apex send, no subdomain). */
 export function isRootDomainSend(hostname: string): boolean {
-  const name = hostname.toLowerCase().replace(/\.$/, "");
+  const name = normalizeHostname(hostname);
   return name === registrableDomain(name);
 }

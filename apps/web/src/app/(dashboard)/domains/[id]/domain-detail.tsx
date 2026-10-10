@@ -22,7 +22,7 @@ import { BtnSpinner, Spinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
 import { WarnCard } from "@/components/warn-card";
 import { OPEN_TRACKING_DOCS_URL } from "@/lib/docs-links";
-import { formatRelative, formatUtcMinute } from "@/lib/format";
+import { formatDay, formatRelative, formatUtcMinute } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { isLoopbackUrl } from "@/lib/url";
@@ -806,6 +806,38 @@ export function DomainDetail({ id }: { id: string }) {
             {t("detail.bannerVerifiedBody")}
           </span>
         </GradientBanner>
+      ) : null}
+
+      {status === "verified" && data.warmup ? (
+        <div
+          role="status"
+          className="ms-wrap-row"
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 12,
+            fontSize: 13.5,
+            border: "1px solid var(--ms-line)",
+            borderRadius: 12,
+            padding: "11px 16px",
+            marginTop: 12,
+            maxWidth: 1000,
+          }}
+        >
+          <span style={{ color: "var(--ms-bone)" }}>
+            {data.warmup.fullAt
+              ? t("detail.warmup", {
+                  perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
+                  date: formatDay(data.warmup.fullAt, locale),
+                })
+              : t("detail.warmupToday", {
+                  perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
+                })}
+          </span>
+          <span style={{ color: "var(--ms-muted)" }}>
+            {t(data.warmup.shared ? "detail.warmupBodyShared" : "detail.warmupBody")}
+          </span>
+        </div>
       ) : null}
 
       {/* Tracking and TLS settings are stored regardless of status and apply

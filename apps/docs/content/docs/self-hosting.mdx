@@ -783,18 +783,19 @@ A suspended team keeps its data and its keys authenticate, but every send
 answers `403 team_suspended` (SMTP `550`); a broadcast pause holds
 broadcasts while transactional mail flows; a daily ceiling caps the team's
 day under its plan. Owners are emailed about each action (except a phishing
-suspension), and every action lands in the audit log with its reason.
+suspension or a review hold), and every action lands in the audit log with
+its reason.
 
 ## Content monitoring (optional)
 
 Off by default. With a judge configured, a sample of accepted mail is
 scored 0–100 by TypeSafe Jev after SES has taken it and folded into a
 per-team risk the operator sees on Trust & safety.
-Nothing on the send path waits for it: a verdict never delays, holds or
-refuses a message, and a judge failure of any kind (feature off, missing
-credentials, throttling, timeout, upstream error, unparseable answer, body
-already purged by retention) records the sample as unjudged and changes
-nothing else. The deterministic content checks (the insights, the guardrail,
+Nothing on the send path waits for it: a verdict never delays the message
+it judges, which SES has already taken, and a judge failure of any kind
+(feature off, missing credentials, throttling, timeout, upstream error,
+unparseable answer, body already purged by retention) records the sample as
+unjudged and changes nothing else. The deterministic content checks (the insights, the guardrail,
 the account score) run on every send whether or not the judge is on.
 Self-hosters can leave it off.
 
@@ -804,9 +805,36 @@ alert line, and, for a team in the New tier only (inside its first 1,000
 sends or 72 hours, or under 10,000 sends within 7 days), pauses broadcasts
 when the risk passes the pause line and a sampled message scored 90 or more
 within a day (transactional mail keeps flowing; the team sees "paused
-pending review"; the operator resumes from the review page). It never
-suspends a team and never holds transactional mail: a person decides. The
-pause policy is a setting and can be switched off.
+pending review"; the operator resumes from the review page). The pause
+policy is a setting and can be switched off.
+
+**The review hold.** When one sampled message of a New-tier team is judged
+abuse at the hold score (90 by default) as credential phishing, brand
+impersonation or payment redirection, or with an impersonation,
+secret-harvesting or off-domain-lure finding, the team is suspended at once
+with the reason `review`: the API answers `403 sending_paused`, SMTP `550`,
+queued mail and broadcasts park, and with `SES_TENANTS` on its SES tenant is
+disabled. A run of lower verdicts holds the team too: by default the fifth
+such verdict from 80 within seven days of the team's first send. The operator
+is emailed at once, with the rule that held the team; the owner is not, and
+sees a neutral "Sending is paused pending review" notice. The team stays on Trust &
+safety with its flag open until the operator decides on its review page:
+**Release hold** reinstates it, the parked mail goes out, a broadcast pause
+the monitor applied before the hold is lifted as **Resume broadcasts** lifts
+it (a pause the operator set by hand stays), and the monitor flag the hold
+kept open is cleared in the operator's name (the automatic check does not
+reopen it while the same trigger holds); **Suspend for phishing** turns the
+hold into a phishing suspension. While the team is held, its later verdicts
+still move its risk and alert the operator as for any other team, but apply
+no pause, so a release leaves no monitor pause behind. A team is held once, by either
+rule: after a release its later verdicts only alert, so the released mail,
+judged again on its way out, neither holds it a second time nor pauses its
+broadcasts. A team already
+suspended keeps its suspension, and Probation, Established, Trusted and
+system teams are never held: they stay alert-only. The judge reads a message
+after SES has taken it, so the message that triggers the hold has already
+gone out; the hold stops what follows. `MONITOR_AUTO_HOLD=false` switches it
+off.
 
 **Turning it on** in the instance's `.env`, read by the worker and the app
 (a restart applies it):
@@ -888,12 +916,77 @@ is; the console wins.
 | `MONITOR_PAUSE_RISK` | 0.85 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |
 | `MONITOR_AUTO_PAUSE` | true | Whether the pause policy applies |
 | `MONITOR_FLAG_SCORE` | 70 | A sample counts as flagged in the console from this score |
+| `MONITOR_HOLD_SCORE` | 90 | New teams only: a phishing-type verdict from this score holds the team for review |
+| `MONITOR_HOLD_REPEAT_COUNT` | 5 | New teams only: this many phishing-type verdicts from the score below, within seven days of the team's first send, also hold it for review; 0 turns this off |
+| `MONITOR_HOLD_REPEAT_SCORE` | 80 | The score from which a phishing-type verdict counts toward the count above |
+| `MONITOR_AUTO_HOLD` | true | Whether the review hold applies |
 
 The risk is a decayed mean of the verdicts (half-life 7 days) with a prior
 that starts new teams higher. The Overview's Monitoring card charts the
 hourly sample count, and the operator is emailed, at most once every six
 hours, when more than 20% of an hour's samples (at least 20 of them) went
 unjudged, or as soon as TypeSafe rejects the API key.
+
+## New-domain warm-up (optional)
+
+Off by default on a self-hosted instance and on by default with `IS_CLOUD`.
+With it on, a sending domain gets a daily cap by the age of its registrable
+domain (the ICANN part of the Public Suffix List: `acme.com.br` for
+`mail.acme.com.br`), counted per UTC day across every team sending from it:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `WARMUP_ENABLED` | `false` (`true` with `IS_CLOUD`) | Whether the warm-up applies |
+| `WARMUP_CAP_FIRST_DAY` | 100 | Emails a day while the domain is under 24 hours old |
+| `WARMUP_CAP_FIRST_WEEK` | 300 | From day 1 to day 7, and for a domain of unknown age while its team is new or on probation |
+| `WARMUP_CAP_FIRST_MONTH` | 2000 | From day 7 to day 30; from day 30 only the plan applies |
+
+Each value is edited in the console under Trust & safety → Monitoring
+settings, or set as its environment variable until it is; the console wins.
+The effective cap is the lower of the plan's and the warm-up's, and buying a
+plan never lifts it. A team's warming domains (verified, under a cap and not
+trusted) also share one daily limit, the highest of their caps, counted per
+team and UTC day: a second fresh domain never adds volume, and each domain
+stays within its own cap. Mail over either parks as `queued_quota` (with
+`park_reason = 'warmup'`) and the 15-minute `quota.drain` releases it, oldest
+first, as both allow; the API answers `429 daily_quota_exceeded` with a warm-up
+message (SMTP `452`) only when the team's parked backlog is full (three days of
+its plan's volume, or of the domain's cap where that is more). A domain moves
+up one step early once its sends since the last step are clean: at least 50,
+the first a day old, hard bounces under 2%,
+complaints under 0.1% and no phishing-type verdict from the content monitor
+(checked by the 15-minute `safety.flags` job). An operator can trust a team, or
+one domain, on its Trust & safety review page, which lifts the warm-up and is
+audited.
+
+**The age lookup** runs in the worker's `domain.age` job, never on the send
+path: when a domain is added, when it verifies, and from the 15-minute
+`domains.reverify` sweep for any domain never looked up (rows from before the
+upgrade included). It tries, in order:
+
+1. RDAP from the server [IANA's bootstrap](https://data.iana.org/rdap/dns.json)
+   names for the TLD (refreshed daily), or a fixed server for `.io` and `.me`
+   (`rdap.identitydigital.services`), `.co` (`rdap.registry.co`) and `.us`
+   (`rdap.nic.us`), which the bootstrap does not list.
+2. WHOIS on TCP port 43 at the server `whois.iana.org` refers the TLD to.
+3. The first certificate issued for the name in Certificate Transparency
+   ([crt.sh](https://crt.sh), at most one request every 12 seconds).
+
+A name under a suffix of the list's private part, such as `shop.eu.org` from
+a free subdomain service, is its own domain for the warm-up: it is dated by
+step 3 alone, since no registry sold it, and counts apart from the service's
+other names.
+
+Otherwise the age is unknown: `.de`, `.eu` and `.ch`, for instance, publish
+no creation date. Requests carry the User-Agent
+`MillionSend-domain-age/1.0 (+https://millionsend.com)`, a `429` is honoured
+until its `Retry-After`, and a failed lookup retries with backoff before the
+domain is recorded as unknown. The worker therefore needs outbound HTTPS to
+`data.iana.org`, the registries' RDAP servers and `crt.sh`, and outbound TCP
+43, while the warm-up is on; with it off no lookup is made. The date, its
+source (`rdap`, `whois`, `ct` or `unknown`) and the time of the check are
+stored on the domain row; a certificate's date never replaces a registry's
+found on an earlier check.
 
 ## Content access (break-glass)
 
@@ -931,11 +1024,12 @@ number of messages — never the justification's text and never any content.
 
 **What the team sees, and when.** Seven days later a daily job adds a
 `content.accessed` row to the team's own audit log — dated at the access,
-not at the disclosure — and emails the team's owners in their own language:
-when it happened, the reason, how many messages, and what was withheld. The
-one exception is a team suspended for phishing since the grant, where the
-row and the notice are withheld; the grant records that the disclosure step
-ran either way, so it is not retried nightly.
+not at the disclosure — with the reason, how many messages and which fields
+were read. Nobody is emailed about an access, then or later. A team
+suspended for phishing never gets the row; the grant records that the
+disclosure step ran, so it is not retried nightly. A team held for review
+gets it once the hold ends: after a release the next daily run writes it,
+and if the hold becomes a phishing suspension it is withheld for good.
 
 **Turning it on** in the instance's `.env`, read by the worker and the app
 (a restart applies it):

@@ -215,7 +215,11 @@ export default function BroadcastsPage() {
                       </span>
                     </td>
                     <td>
-                      {status === "sending" && row.sentCount !== null ? (
+                      {row.held ? (
+                        <Tooltip inline text={t("held.body")}>
+                          <StatusPill status={status} hold={t("held.label")} />
+                        </Tooltip>
+                      ) : status === "sending" && row.sentCount !== null ? (
                         <Tooltip
                           inline
                           text={

@@ -1,5 +1,5 @@
 {
-  "id": "e2c0887f-b29a-438a-9abc-118c80ae3b62",
+  "id": "e8e9b472-b30b-4a8c-bd1a-d3a07ea6c4d7",
   "prevId": "df234c44-efe3-4bd3-8a03-fc99dee4ae16",
   "version": "7",
   "dialect": "postgresql",
@@ -4099,6 +4099,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "monitor_auto_hold": {
+          "name": "monitor_auto_hold",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "monitor_hold_score": {
+          "name": "monitor_hold_score",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "monitor_hold_repeat_count": {
+          "name": "monitor_hold_repeat_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "monitor_hold_repeat_score": {
+          "name": "monitor_hold_repeat_score",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -4431,6 +4455,12 @@
         },
         "broadcasts_resumed_at": {
           "name": "broadcasts_resumed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "held_at": {
+          "name": "held_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -5578,12 +5608,6 @@
         "logo_url": {
           "name": "logo_url",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "onboarding_email_sent_at": {
-          "name": "onboarding_email_sent_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -6873,7 +6897,8 @@
         "manual",
         "reputation",
         "phishing",
-        "non_payment"
+        "non_payment",
+        "review"
       ]
     },
     "public.unsubscribe_logo_radius": {
