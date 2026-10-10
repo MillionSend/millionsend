@@ -5,9 +5,11 @@ import {
   CONTACT_PROPERTY_VALUE_MAX_LENGTH,
   DAY_MS,
   formatMailbox,
+  isReservedTagName,
   parseMailbox,
   parseScheduledAt,
   parseSingleSender,
+  RESERVED_TAG_PREFIX,
   SCHEDULED_AT_FORMS,
   SEGMENT_FILTER_MAX_CONDITIONS,
   SEGMENT_FILTER_VALUE_MAX_LENGTH,
@@ -296,9 +298,21 @@ export const sendEmailRequestSchema = z
         `Deliver later: ISO 8601 with offset, or relative like "in 2 hours" (${SCHEDULED_AT_FORMS}); max 30 days ahead`,
       ),
     tags: z
-      .array(z.object({ name: z.string().min(1), value: z.string() }))
+      .array(
+        z.object({
+          name: z
+            .string()
+            .min(1)
+            .refine((name) => !isReservedTagName(name), {
+              message: `tag names starting with ${RESERVED_TAG_PREFIX} are reserved for MillionSend`,
+            }),
+          value: z.string(),
+        }),
+      )
       .optional()
-      .describe("Key/value labels attached to the email for filtering"),
+      .describe(
+        `Key/value labels attached to the email for filtering; names starting with ${RESERVED_TAG_PREFIX}, in any letter case, are reserved`,
+      ),
     // Topic-scoped send: recipients opted out of the topic (explicit
     // subscription row, else the topic's default) are dropped at accept
     // exactly like suppression-list hits.

@@ -9,6 +9,7 @@ import {
   acceptEmail,
   MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
+  SYSTEM_MAIL_TAG,
 } from "../src/accept-email.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type QuotaTeamRow, teamRung } from "../src/plans.js";
@@ -297,5 +298,25 @@ describe("acceptEmail", () => {
     );
     expect(account).toMatchObject({ ok: true, parked: false });
     expect(await rows()).toHaveLength(1);
+  });
+
+  it("keeps the system-mail mark on the account-mail path alone", async () => {
+    const tagged = await createTeam(db, "tagged");
+    const tags = { [SYSTEM_MAIL_TAG]: "password_reset", campaign: "launch" };
+    const storedTags = async (billing: QuotaTeamRow | "uncapped") => {
+      const result = await acceptEmail(
+        deps(),
+        { teamId: tagged, billing, apiKeyId: null },
+        payload({ domainId: null, tags }),
+      );
+      if (!result.ok) throw new Error(result.reason);
+      const [row] = await db
+        .select({ tags: schema.emails.tags })
+        .from(schema.emails)
+        .where(eq(schema.emails.id, result.id));
+      return row?.tags;
+    };
+    expect(await storedTags(FREE)).toEqual({ campaign: "launch" });
+    expect(await storedTags("uncapped")).toEqual(tags);
   });
 });

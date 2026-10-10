@@ -677,6 +677,63 @@ describe("batch permissive validation", () => {
   });
 });
 
+describe("reserved tag names", () => {
+  const batch = (items: unknown[], headers: Record<string, string> = {}) =>
+    app.request("/emails/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...headers },
+      body: JSON.stringify(items),
+    });
+
+  it("refuses a millionsend_ tag name in any letter case on POST /emails, accepting nothing", async () => {
+    const before = enqueuedSends.length;
+    for (const name of ["millionsend_system", "MillionSend_System", "MILLIONSEND_TEST"]) {
+      const res = await post({ ...validBody, tags: [{ name, value: "password_reset" }] });
+      expect(res.status, name).toBe(422);
+      expect(await res.json()).toMatchObject({
+        name: "validation_error",
+        message: expect.stringMatching(/^tags\.0\.name: .*millionsend_ are reserved/),
+      });
+    }
+    expect(enqueuedSends.length).toBe(before);
+  });
+
+  it("refuses the whole strict batch, and only that item in a permissive one", async () => {
+    const before = enqueuedSends.length;
+    const items = [
+      { ...validBody, to: ["tag-ok@example.com"] },
+      { ...validBody, tags: [{ name: "millionsend_system", value: "password_reset" }] },
+    ];
+    const strict = await batch(items);
+    expect(strict.status).toBe(422);
+    expect(await strict.json()).toMatchObject({
+      name: "validation_error",
+      message: expect.stringMatching(/^emails\.1: tags\.0\.name: /),
+    });
+    expect(enqueuedSends.length).toBe(before);
+
+    const permissive = await batch(items, { "x-batch-validation": "permissive" });
+    expect(permissive.status).toBe(200);
+    const body = (await permissive.json()) as {
+      data: { id: string }[];
+      errors: { index: number; message: string }[];
+    };
+    expect(body.data).toHaveLength(1);
+    expect(body.errors).toEqual([{ index: 1, message: expect.stringMatching(/reserved/) }]);
+  });
+
+  it("still stores any other tag name", async () => {
+    const res = await post({ ...validBody, tags: [{ name: "campaign", value: "launch" }] });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db
+      .select({ tags: schema.emails.tags })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, id));
+    expect(row?.tags).toEqual({ campaign: "launch" });
+  });
+});
+
 describe("attachments and custom headers", () => {
   const pdfBase64 = Buffer.from("%PDF-1.4 fake pdf bytes").toString("base64");
 

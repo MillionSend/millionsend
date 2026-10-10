@@ -101,6 +101,26 @@ export interface AcceptEmailPayload {
   topicId?: string | undefined;
 }
 
+/**
+ * Tag names MillionSend writes on its own mail. Every customer send path
+ * refuses them (isReservedTagName), so no customer tag passes for one.
+ */
+export const RESERVED_TAG_PREFIX = "millionsend_";
+
+/** In any letter case: a reserved name stays reserved however it is spelled. */
+export function isReservedTagName(name: string): boolean {
+  return name.toLowerCase().startsWith(RESERVED_TAG_PREFIX);
+}
+
+/**
+ * Marks the instance's account mail (sendSystemMail); the value names the
+ * kind. The worker trusts it: such mail ships its links untracked, is never
+ * drawn by the content monitor and, for the kinds in CREDENTIAL_MAIL_KINDS,
+ * loses its body once SES accepts it. So acceptEmail keeps it only on the
+ * account-mail path (billing "uncapped").
+ */
+export const SYSTEM_MAIL_TAG = `${RESERVED_TAG_PREFIX}system`;
+
 /** Decoded attachment bytes allowed per email, summed across attachments. */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
@@ -293,6 +313,13 @@ export async function acceptEmail(
       ? await sealAttachments(payload.attachments, deps.keyring, owner)
       : null;
 
+  // SECURITY: only the account-mail path may mark a row as system mail; any
+  // other caller's copy of the mark is dropped.
+  let tags = payload.tags ?? null;
+  if (tags && SYSTEM_MAIL_TAG in tags && auth.billing !== "uncapped") {
+    tags = Object.fromEntries(Object.entries(tags).filter(([name]) => name !== SYSTEM_MAIL_TAG));
+  }
+
   const quota: TeamQuota =
     auth.billing === "uncapped" ? { kind: "none" } : teamQuota(auth.billing, deps.isCloud);
   // Quota reservation, email insert, and the caller's in-transaction hook
@@ -361,7 +388,7 @@ export async function acceptEmail(
         bcc: bcc && bcc.length > 0 ? bcc : null,
         replyTo: payload.replyTo ?? null,
         subject: payload.subject,
-        tags: payload.tags ?? null,
+        tags,
         headers: payload.headers ?? null,
         attachments: sealedAttachments,
         topicId: payload.topicId ?? null,
