@@ -35,11 +35,11 @@ own_dumps() {
 
 # A dump holds a lock on every table until it ends, so one on every restart or
 # upgrade would hold the app's migrations behind it. 26h is one daily interval
-# plus the nightly dump's own run time. A listing that fails (empty bucket,
-# outage) counts as no recent dump.
+# plus a margin for the nightly dump's own run time. A listing that fails
+# (outage, bad credentials) counts as no recent dump.
 if [ "${1:-}" = --skip-if-recent ]; then
   shift
-  recent=$(own_dumps lsf --files-only --max-age 26h 2>/dev/null | tail -n 1) || recent=""
+  recent=$(own_dumps lsf --files-only --max-age 26h | tail -n 1) || recent=""
   if [ -n "$recent" ]; then
     echo "backup: start-up dump skipped, ${recent} is less than 26 hours old"
     exit 0
