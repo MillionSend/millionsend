@@ -23,8 +23,8 @@ describe("registrableDomain", () => {
   });
 
   it("follows the Public Suffix List past the old curated families", () => {
-    expect(registrableDomain("cartas.vinco.app.br")).toBe("vinco.app.br");
-    expect(registrableDomain("mail.kriter.ia.br")).toBe("kriter.ia.br");
+    expect(registrableDomain("mail.acme.app.br")).toBe("acme.app.br");
+    expect(registrableDomain("news.acme.ia.br")).toBe("acme.ia.br");
     expect(registrableDomain("pay.shop.com.ua")).toBe("shop.com.ua");
     // ICANN section only: a private suffix is not a name a registry sold.
     expect(registrableDomain("x.github.io")).toBe("github.io");

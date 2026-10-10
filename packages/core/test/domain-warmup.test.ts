@@ -55,7 +55,7 @@ async function newDomain(
 }
 
 describe("the schedule", () => {
-  const registered = new Date("2026-10-09T09:18:07Z");
+  const registered = new Date("2026-03-02T11:00:00Z");
   const aged = (ms: number) => new Date(registered.getTime() + ms);
 
   it("steps at 24 hours, 7 days and 30 days of registration age", () => {
@@ -159,10 +159,8 @@ describe("the schedule", () => {
 });
 
 describe("the accept path", () => {
-  // The incident's clock: the domain was registered at 09:18:07Z, the team
-  // signed up at 09:46Z and sent from about 10:00Z.
-  const NOW = new Date("2026-10-09T10:00:00Z");
-  const REGISTERED = new Date("2026-10-09T09:18:07Z");
+  const NOW = new Date("2026-03-02T12:00:00Z");
+  const REGISTERED = new Date(NOW.getTime() - HOUR_MS);
   const enqueued: string[] = [];
   const deps = () => ({
     db,
@@ -519,11 +517,11 @@ describe("the accept path", () => {
     });
   });
 
-  it("replays the incident: 1,074 sends on the registration day, 100 go and 974 wait", async () => {
+  it("holds a fast-burn day: 500 sends on the registration day, 100 go and 400 wait", async () => {
     const teamId = await newTeam({ plan: "pro", planQuota: 100_000 });
-    const domainId = await newDomain(teamId, "incident-replay.com", REGISTERED);
+    const domainId = await newDomain(teamId, "fast-burn.com", REGISTERED);
     const refused: string[] = [];
-    for (let i = 0; i < 1074; i++) {
+    for (let i = 0; i < 500; i++) {
       const result = await send(teamId, PRO, domainId, { to: [`victim${i}@example.com`] });
       if (!result.ok) refused.push(result.reason);
     }
@@ -531,7 +529,7 @@ describe("the accept path", () => {
     expect(await rows(teamId)).toEqual(
       expect.arrayContaining([
         { status: "queued", reason: null, n: 100 },
-        { status: "queued_quota", reason: "warmup", n: 974 },
+        { status: "queued_quota", reason: "warmup", n: 400 },
       ]),
     );
     expect(await periodAccepted(teamId)).toBe(100);

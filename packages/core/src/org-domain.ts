@@ -7,8 +7,8 @@ export function normalizeHostname(hostname: string): string {
 
 /**
  * The registrable domain under the ICANN section of the Public Suffix List:
- * the name a registry sold (acme.com.br for news.acme.com.br, vinco.app.br
- * for cartas.vinco.app.br). Feeds DMARC lookups and link-domain checks, so
+ * the name a registry sold (acme.com.br for news.acme.com.br, acme.app.br
+ * for mail.acme.app.br). Feeds DMARC lookups and link-domain checks, so
  * it must never stop at a public suffix. A name with no registrable part (an
  * IP, a bare suffix, a single label) comes back as is.
  */
