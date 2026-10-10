@@ -113,6 +113,39 @@ describe("/unsubscribe/[token] route", () => {
     expect(new URL(post.headers.get("location") ?? "").origin).toBe(APP);
   });
 
+  it("a suspended team's recipients still opt out, and land on the done state, not the team's redirect", async () => {
+    vi.stubEnv("APP_BASE_URL", APP);
+    const teamId = await createTeam(db, "acme");
+    await db
+      .update(schema.teams)
+      .set({
+        unsubscribeRedirectUrl: "https://acme.example/bye",
+        suspendedAt: new Date(),
+        suspensionReason: "phishing",
+      })
+      .where(eq(schema.teams.id, teamId));
+    const contactId = await seedContact(teamId);
+    const token = makeUnsubscribeToken({ contactId, secretKey });
+
+    const post = await call("POST", token);
+    expect(post.status).toBe(303);
+    expect(post.headers.get("location")).toBe(
+      `${APP}/unsubscribe/confirm/${encodeURIComponent(token)}?done=1`,
+    );
+    const [contact] = await db
+      .select({ unsubscribed: schema.contacts.unsubscribed })
+      .from(schema.contacts)
+      .where(eq(schema.contacts.id, contactId));
+    expect(contact?.unsubscribed).toBe(true);
+
+    // An unpaid invoice leaves the team's redirect standing.
+    await db
+      .update(schema.teams)
+      .set({ suspensionReason: "non_payment" })
+      .where(eq(schema.teams.id, teamId));
+    expect((await call("POST", token)).headers.get("location")).toBe("https://acme.example/bye");
+  });
+
   it("retains a global unsubscribe as a suppression, once", async () => {
     vi.stubEnv("APP_BASE_URL", APP);
     const teamId = await createTeam(db, "acme");

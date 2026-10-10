@@ -664,6 +664,7 @@ async function sendQueued(
           : undefined;
       html = rewriteForTracking(html, {
         emailId: email.id,
+        teamId: email.teamId,
         trackingBaseUrl,
         click,
         open,

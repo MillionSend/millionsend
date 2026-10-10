@@ -61,6 +61,15 @@ export function teamStandingOf(row: {
   };
 }
 
+/**
+ * Whether the team's links in mail already delivered stop leading anywhere:
+ * tracked clicks, and the hosted unsubscribe page's hop to the team's site.
+ * An unpaid invoice says nothing about the mail, so it leaves them working.
+ */
+export function linksDisabled(standing: TeamStanding): boolean {
+  return standing.suspended !== null && standing.suspended.reason !== "non_payment";
+}
+
 /** A team's operator overrides; null when the team does not exist. */
 export async function fetchTeamStanding(db: Db, teamId: string): Promise<TeamStanding | null> {
   const [row] = await db

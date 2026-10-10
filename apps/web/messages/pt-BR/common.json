@@ -96,6 +96,13 @@
     "retry": "Tentar de novo",
     "cta": "Ir para o painel"
   },
+  "trackedLink": {
+    "disabledTitle": "Este link foi desativado.",
+    "disabledBody": "Ele veio em um e-mail enviado pela MillionSend e não leva mais a lugar nenhum.",
+    "confirmTitle": "Confira para onde este link vai.",
+    "confirmBody": "Ele veio em um e-mail enviado pela MillionSend e leva para {host}. Não é mais possível confirmar quem o enviou, então continue só se você confia nesse site.",
+    "confirmCta": "Continuar para {host}"
+  },
   "confirmWord": "EXCLUIR",
   "typeToConfirm": "Digite {word} para confirmar",
   "loadError": {

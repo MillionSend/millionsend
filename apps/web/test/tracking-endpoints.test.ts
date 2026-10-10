@@ -1,8 +1,15 @@
 import { deriveTrackingKey, makeClickToken, makeOpenToken } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
-import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
+import {
+  createTeam,
+  createTestDb,
+  createWebhookEndpoint,
+  legacyClickToken,
+} from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import en from "../messages/en/common.json";
+import ptBR from "../messages/pt-BR/common.json";
 
 // A known 32-byte master key so the endpoints derive the same tracking key we
 // sign tokens with here. Set before the route modules read env.
@@ -42,6 +49,15 @@ async function seedEmail(): Promise<{ emailId: string; teamId: string }> {
     .values({ teamId, from: "sender@example.com", to: ["rcpt@example.com"], subject: "Hi" })
     .returning({ id: schema.emails.id });
   return { emailId: email?.id ?? "", teamId };
+}
+
+/** The click token the worker mints for a seeded email: its id, its team, the url. */
+async function clickToken(emailId: string, url: string, key = secretKey): Promise<string> {
+  const [email] = await db
+    .select({ teamId: schema.emails.teamId })
+    .from(schema.emails)
+    .where(eq(schema.emails.id, emailId));
+  return makeClickToken({ emailId, teamId: email?.teamId ?? "", url, secretKey: key });
 }
 
 // A phone's mail client: what a person's fetch looks like.
@@ -85,7 +101,7 @@ describe("click endpoint /t/c", () => {
   it("records a unique click and 302s to the signed url", async () => {
     const { emailId, teamId } = await seedEmail();
     const url = "https://shop.example.com/product?id=9";
-    const token = makeClickToken({ emailId, url, secretKey });
+    const token = await clickToken(emailId, url);
 
     const res = await clickGet(...req(token));
     expect(res.status).toBe(302);
@@ -110,7 +126,7 @@ describe("click endpoint /t/c", () => {
 
   it("records a repeat click after the damping window without advancing the counter", async () => {
     const { emailId, teamId } = await seedEmail();
-    const token = makeClickToken({ emailId, url: "https://shop.example.com/", secretKey });
+    const token = await clickToken(emailId, "https://shop.example.com/");
 
     await clickGet(...req(token));
     await backdateEvents(emailId, "clicked", 120_000);
@@ -121,14 +137,10 @@ describe("click endpoint /t/c", () => {
 
   it("a person who clicks a second link within a minute has both clicks recorded, counted once", async () => {
     const { emailId, teamId } = await seedEmail();
-    await clickGet(
-      ...req(makeClickToken({ emailId, url: "https://shop.example.com/a", secretKey })),
-    );
+    await clickGet(...req(await clickToken(emailId, "https://shop.example.com/a")));
     // Seconds later: past the burst window, inside the damping one.
     await backdateEvents(emailId, "clicked", 5_000);
-    await clickGet(
-      ...req(makeClickToken({ emailId, url: "https://shop.example.com/b", secretKey })),
-    );
+    await clickGet(...req(await clickToken(emailId, "https://shop.example.com/b")));
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 2, counter: 1 });
     expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
   });
@@ -144,7 +156,7 @@ describe("click endpoint /t/c", () => {
       .values({ emailId, type: "delivered", occurredAt: new Date(Date.now() - 45_000) });
     await openGet(...req(makeOpenToken({ emailId, secretKey }), spoofed));
     const url = "https://shop.example.com/";
-    const res = await clickGet(...req(makeClickToken({ emailId, url, secretKey }), spoofed));
+    const res = await clickGet(...req(await clickToken(emailId, url), spoofed));
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(url);
     // Two prefetch rows (the pixel, the link), one email prefetched.
@@ -171,7 +183,7 @@ describe("click endpoint /t/c", () => {
     expect(row?.status).toBe("queued");
     // The person on a current Chrome, later, is a click.
     await clickGet(
-      ...req(makeClickToken({ emailId, url, secretKey }), {
+      ...req(await clickToken(emailId, url), {
         "user-agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
       }),
@@ -181,7 +193,7 @@ describe("click endpoint /t/c", () => {
 
   it("a click on a message with no open yet records the open too, marked as inferred", async () => {
     const { emailId, teamId } = await seedEmail();
-    const token = makeClickToken({ emailId, url: "https://shop.example.com/", secretKey });
+    const token = await clickToken(emailId, "https://shop.example.com/");
     await clickGet(...req(token));
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
     expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
@@ -205,7 +217,7 @@ describe("click endpoint /t/c", () => {
   it("a click after a real open adds no open", async () => {
     const { emailId, teamId } = await seedEmail();
     await openGet(...req(makeOpenToken({ emailId, secretKey })));
-    await clickGet(...req(makeClickToken({ emailId, url: "https://x.example.com/", secretKey })));
+    await clickGet(...req(await clickToken(emailId, "https://x.example.com/")));
     expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
     const [open] = await db
       .select({ data: schema.emailEvents.data })
@@ -217,7 +229,7 @@ describe("click endpoint /t/c", () => {
   it("a link a security scanner follows is a prefetch, not a click, and still redirects", async () => {
     const { emailId, teamId } = await seedEmail();
     const url = "https://shop.example.com/";
-    const token = makeClickToken({ emailId, url, secretKey });
+    const token = await clickToken(emailId, url);
     const res = await clickGet(...req(token, { "user-agent": "Barracuda Sentinel (EE)" }));
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(url);
@@ -242,14 +254,14 @@ describe("click endpoint /t/c", () => {
     const { emailId, teamId } = await seedEmail();
     await openGet(...req(makeOpenToken({ emailId, secretKey }), { "user-agent": "Mozilla/5.0" }));
     expect(await counts(emailId, teamId, "opened")).toEqual({ events: 0, counter: 0 });
-    await clickGet(...req(makeClickToken({ emailId, url: "https://x.example.com/", secretKey })));
+    await clickGet(...req(await clickToken(emailId, "https://x.example.com/")));
     expect(await counts(emailId, teamId, "opened")).toEqual({ events: 1, counter: 1 });
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
   });
 
   it("promotes the email status to clicked", async () => {
     const { emailId } = await seedEmail();
-    const token = makeClickToken({ emailId, url: "https://x.example.com/", secretKey });
+    const token = await clickToken(emailId, "https://x.example.com/");
     await clickGet(...req(token));
     const [row] = await db
       .select({ status: schema.emails.latestStatus })
@@ -260,11 +272,7 @@ describe("click endpoint /t/c", () => {
 
   it("404s a tampered token instead of redirecting off-site", async () => {
     const { emailId, teamId } = await seedEmail();
-    const token = makeClickToken({
-      emailId,
-      url: "https://safe.example.com/",
-      secretKey,
-    });
+    const token = await clickToken(emailId, "https://safe.example.com/");
     // Flip a payload character: the mac no longer matches, so nothing is signed.
     const tampered = `${token.slice(0, -3)}AAA`;
 
@@ -277,14 +285,214 @@ describe("click endpoint /t/c", () => {
   it("404s a token signed with a foreign key (no open redirect)", async () => {
     const { emailId } = await seedEmail();
     const foreign = deriveTrackingKey(Buffer.from("A".repeat(32), "utf8"));
-    const token = makeClickToken({
-      emailId,
-      url: "https://evil.example.com/",
-      secretKey: foreign,
-    });
+    const token = await clickToken(emailId, "https://evil.example.com/", foreign);
     const res = await clickGet(...req(token));
     expect(res.status).toBe(404);
     expect(res.headers.get("location")).toBeNull();
+  });
+});
+
+describe("a click on mail whose sender no longer vouches for it", () => {
+  const url = "https://shop.example.com/sale?id=9";
+
+  async function suspend(
+    teamId: string,
+    reason: (typeof schema.suspensionReasonEnum.enumValues)[number],
+  ) {
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: reason })
+      .where(eq(schema.teams.id, teamId));
+  }
+
+  it.each(["phishing", "review", "manual", "reputation"] as const)(
+    "a team suspended for %s shows the disabled page, never the destination, and the click still records",
+    async (reason) => {
+      const { emailId, teamId } = await seedEmail();
+      await suspend(teamId, reason);
+      const res = await clickGet(...req(await clickToken(emailId, url)));
+      expect(res.status).toBe(410);
+      expect(res.headers.get("location")).toBeNull();
+      expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+      const page = await res.text();
+      expect(page).toContain(en.trackedLink.disabledTitle);
+      expect(page).not.toContain("shop.example.com");
+      expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+    },
+  );
+
+  it("a team suspended for an unpaid invoice keeps its links", async () => {
+    const { emailId, teamId } = await seedEmail();
+    await suspend(teamId, "non_payment");
+    const res = await clickGet(...req(await clickToken(emailId, url)));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(url);
+  });
+
+  it("a token minted before the team was signed answers to the team on its email row", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = legacyClickToken({ emailId, url, secretKey });
+    expect((await clickGet(...req(token))).headers.get("location")).toBe(url);
+    await suspend(teamId, "phishing");
+    expect((await clickGet(...req(token))).status).toBe(410);
+  });
+
+  it("after the email row ages out, the signed team still decides; an old token names none, so the reader confirms", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const signed = await clickToken(emailId, url);
+    const legacy = legacyClickToken({ emailId, url, secretKey });
+    await db.delete(schema.emails).where(eq(schema.emails.id, emailId));
+
+    const followed = await clickGet(...req(signed));
+    expect(followed.status).toBe(302);
+    expect(followed.headers.get("location")).toBe(url);
+
+    const asked = await clickGet(...req(legacy));
+    expect(asked.status).toBe(200);
+    expect(asked.headers.get("location")).toBeNull();
+    const page = await asked.text();
+    expect(page).toContain(en.trackedLink.confirmTitle);
+    expect(page).toContain("<strong>shop.example.com</strong>");
+    expect(page).toContain('href="https://shop.example.com/sale?id=9"');
+
+    await suspend(teamId, "phishing");
+    expect((await clickGet(...req(signed))).status).toBe(410);
+  });
+
+  it("a deleted team's links ask the reader to confirm the destination", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = await clickToken(emailId, url);
+    await db.delete(schema.teams).where(eq(schema.teams.id, teamId));
+    const res = await clickGet(...req(token));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.text()).toContain('href="https://shop.example.com/sale?id=9"');
+  });
+
+  it("escapes the destination it names: a host may hold a quote", async () => {
+    const { emailId } = await seedEmail();
+    const token = legacyClickToken({ emailId, url: `https://a"b.example/it's?c=1&d=2`, secretKey });
+    await db.delete(schema.emails).where(eq(schema.emails.id, emailId));
+    const page = await (await clickGet(...req(token))).text();
+    expect(page).toContain("<strong>a&quot;b.example</strong>");
+    expect(page).toContain('href="https://a&quot;b.example/it&#39;s?c=1&amp;d=2"');
+    expect(page).not.toContain('a"b');
+  });
+
+  it("speaks the reader's language", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const token = await clickToken(emailId, url);
+    await suspend(teamId, "manual");
+    const res = await clickGet(
+      ...req(token, { "user-agent": IPHONE, "accept-language": "pt-BR,pt;q=0.9,en;q=0.8" }),
+    );
+    const page = await res.text();
+    expect(page).toContain('<html lang="pt-BR">');
+    expect(page).toContain(ptBR.trackedLink.disabledTitle);
+  });
+});
+
+describe("a click on a branded tracking host", () => {
+  const url = "https://shop.example.com/sale?id=9";
+  const onHost = (token: string, host: string) =>
+    clickGet(...req(token, { "user-agent": IPHONE, "x-tracking-host": host }));
+
+  it("redirects only for the team holding the host's domain, and records nothing for another", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const other = await createTeam(db, "bank");
+    const domain = { region: "us-east-1", trackingSubdomain: "links" };
+    await db.insert(schema.domains).values([
+      { ...domain, teamId, name: "shop.example", status: "verified" },
+      { ...domain, teamId: other, name: "bank.example", status: "verified" },
+      // A claim on the same name that never verified holds nothing.
+      { ...domain, teamId, name: "bank.example", status: "pending" },
+    ]);
+
+    for (const token of [
+      await clickToken(emailId, url),
+      legacyClickToken({ emailId, url, secretKey }),
+    ]) {
+      for (const host of ["Links.Bank.example", "links.bank.example."]) {
+        const borrowed = await onHost(token, host);
+        expect(borrowed.status, host).toBe(404);
+        expect(borrowed.headers.get("location")).toBeNull();
+      }
+    }
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+
+    const token = await clickToken(emailId, url);
+    for (const host of ["links.shop.example", "links.unclaimed.example"]) {
+      const res = await onHost(token, host);
+      expect(res.status, host).toBe(302);
+      expect(res.headers.get("location")).toBe(url);
+    }
+  });
+});
+
+describe("a click on the cloud, where a team's links ship only on its branded host", () => {
+  const url = "https://shop.example.com/sale?id=9";
+  // "" rather than "false": under SKIP_ENV_VALIDATION the env proxy carries
+  // raw strings, where "false" would be truthy.
+  const cloud = (on: boolean) => vi.stubEnv("IS_CLOUD", on ? "true" : "");
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("the dashboard host refuses a token that names its team, and records nothing", async () => {
+    cloud(true);
+    const { emailId, teamId } = await seedEmail();
+    const res = await clickGet(...req(await clickToken(emailId, url)));
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+    for (const type of ["clicked", "opened", "prefetched"] as const) {
+      expect(await counts(emailId, teamId, type), type).toEqual({ events: 0, counter: 0 });
+    }
+  });
+
+  it("the team's branded host, through the tracking edge, still redirects", async () => {
+    cloud(true);
+    const { emailId, teamId } = await seedEmail();
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "shop.example",
+      region: "us-east-1",
+      status: "verified",
+      trackingSubdomain: "links",
+    });
+    const res = await clickGet(
+      ...req(await clickToken(emailId, url), {
+        "user-agent": IPHONE,
+        "x-tracking-host": "links.shop.example",
+      }),
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(url);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+  });
+
+  it("a token from before links named their team still answers on the dashboard host", async () => {
+    cloud(true);
+    const { emailId, teamId } = await seedEmail();
+    const token = legacyClickToken({ emailId, url, secretKey });
+    const res = await clickGet(...req(token));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(url);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+    // Its team's standing still decides, read through the email row.
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+      .where(eq(schema.teams.id, teamId));
+    expect((await clickGet(...req(token))).status).toBe(410);
+  });
+
+  it("self-host is unchanged: the app's own host redirects a token that names its team", async () => {
+    cloud(false);
+    const { emailId, teamId } = await seedEmail();
+    const res = await clickGet(...req(await clickToken(emailId, url)));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(url);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
   });
 });
 
@@ -293,8 +501,8 @@ describe("click bursts", () => {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
   const human = { "user-agent": DESKTOP };
   const link = (name: string) => `https://shop.example.com/${name}`;
-  const click = (emailId: string, name: string, headers = human) =>
-    clickGet(...req(makeClickToken({ emailId, url: link(name), secretKey }), headers));
+  const click = async (emailId: string, name: string, headers = human) =>
+    clickGet(...req(await clickToken(emailId, link(name)), headers));
 
   // The clock stands still so a burst's hits share one instant, however
   // long each request takes here; time moves only when a test says so.

@@ -631,7 +631,7 @@ it("clickTracking on routes <a href> through /t/c and the token verifies to the 
   expect(mime).not.toContain("dest.test");
   const match = mime.match(/\/t\/c\/([A-Za-z0-9_.-]+)/);
   expect(match).not.toBeNull();
-  expect(verifyClickToken(match?.[1] ?? "", trackingSecret)).toEqual({ emailId, url });
+  expect(verifyClickToken(match?.[1] ?? "", trackingSecret)).toEqual({ emailId, teamId, url });
 });
 
 it("account mail ships untracked on a tracking domain and loses its body once SES holds it", async () => {

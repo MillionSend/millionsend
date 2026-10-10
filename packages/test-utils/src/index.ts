@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +40,20 @@ export async function createTeam(db: Db, slug = "acme"): Promise<string> {
     .returning({ id: schema.teams.id });
   if (!team) throw new Error("team insert failed");
   return team.id;
+}
+
+/**
+ * A click token in the shape minted before the team was signed into it,
+ * `emailId "\n" url`, as tokens of that age still sit in inboxes.
+ */
+export function legacyClickToken(params: {
+  emailId: string;
+  url: string;
+  secretKey: Buffer;
+}): string {
+  const payload = Buffer.from(`${params.emailId}\n${params.url}`, "utf8").toString("base64url");
+  const mac = createHmac("sha256", params.secretKey).update(payload).digest("base64url");
+  return `${payload}.${mac}`;
 }
 
 /**
