@@ -25,6 +25,7 @@ import {
   decryptEmailBody,
   emitContactEvents,
   emitSuppressionEvents,
+  enforceDomainWarmup,
   eraseRecipient,
   estimateAttachmentBytes,
   extractTokenPrefix,
@@ -217,6 +218,12 @@ export interface ApiDeps {
    */
   enqueueRecipientErase?: ((teamId: string, address: string) => Promise<void>) | undefined;
   /**
+   * Looks up a domain's registration date in the worker (the warm-up's
+   * input), on create and on verification. Optional: the worker's sweep
+   * asks for any domain that was never looked up.
+   */
+  enqueueDomainAge?: ((domainId: string) => Promise<void>) | undefined;
+  /**
    * The key the hosted unsubscribe page verifies tokens with (core
    * deriveUnsubscribeKey over MASTER_ENCRYPTION_KEY). With appBaseUrl it lets
    * POST /contacts/{id}/preferences-link mint links; omitted → that route 422s.
@@ -327,6 +334,15 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
           429,
           "daily_quota_exceeded",
           "Daily sending quota exceeded and the queued backlog is full; retry after the UTC day rolls over",
+        ),
+      };
+    case "warmup_backlog_full":
+      return {
+        status: 429 as const,
+        body: errorBody(
+          429,
+          "daily_quota_exceeded",
+          "New domain warm-up: this sending domain ramps up gradually and enough emails are already waiting; retry after the UTC day rolls over",
         ),
       };
     case "monthly_quota_exceeded":
@@ -3823,7 +3839,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           startAfter?: Date;
           index: number;
           day: string;
+          at: Date;
           recipientCount: number;
+          domainId: string | null;
         }[] = [];
         for (const { payload, index } of payloads) {
           const result = await acceptEmail(deps, auth, payload, { tx: txDb, quota: "deferred" });
@@ -3833,7 +3851,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             parked: false,
             index,
             day: result.day,
+            at: result.at,
             recipientCount: result.recipientCount,
+            domainId: payload.domainId,
             ...(payload.scheduledAt ? { startAfter: payload.scheduledAt } : {}),
           });
         }
@@ -3853,7 +3873,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           if (!first) continue;
           // Items in one group share a delivery day; the first one's instant
           // places the hourly mirror like a single send's would.
-          const at = first.startAfter ?? new Date();
+          const { at } = first;
           const reservation = await reserveQuota(txDb, {
             teamId: auth.teamId,
             count: items.reduce((n, o) => n + o.recipientCount, 0),
@@ -3925,6 +3945,27 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
               ),
             );
           for (const o of toPark) o.parked = true;
+        }
+        // The warm-up after the plan, each item as its own send would meet it.
+        for (const o of out) {
+          if (o.parked) continue;
+          const warmup = await enforceDomainWarmup(txDb, {
+            teamId: auth.teamId,
+            domainId: o.domainId,
+            count: o.recipientCount,
+            quota,
+            day: o.day,
+            at: o.at,
+          });
+          if (warmup === "send") continue;
+          if (warmup === "backlog_full") {
+            throw new AcceptRejectedError({ ok: false, reason: "warmup_backlog_full" }, o.index);
+          }
+          await txDb
+            .update(schema.emails)
+            .set({ latestStatus: "queued_quota", parkReason: "warmup" })
+            .where(eq(schema.emails.id, o.id));
+          o.parked = true;
         }
         if (idemKey) {
           const recorded = await completeIdempotent(txDb, {

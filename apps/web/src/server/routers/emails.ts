@@ -126,6 +126,7 @@ type PendingSend =
   | { kind: "queued" }
   | { kind: "plan"; resumesAt: Date }
   | { kind: "waiting" }
+  | { kind: "warmup" }
   | { kind: "held" }
   | { kind: "paced"; from: Date | null; to: Date | null };
 
@@ -137,6 +138,7 @@ async function pendingSend(
     sentAt: Date | null;
     scheduledAt: Date | null;
     broadcastId: string | null;
+    parkReason: string | null;
     held: boolean;
   },
 ): Promise<PendingSend | null> {
@@ -149,6 +151,8 @@ async function pendingSend(
       : { kind: "queued" };
   }
   if (email.latestStatus !== "queued_quota") return null;
+  // The sending domain's warm-up: it frees by itself, so no limit to raise.
+  if (email.parkReason === "warmup") return { kind: "warmup" };
   // A hold by the team's own cap outranks capacity: its reset is the date.
   const hold = await planHoldUntil(db, teamId, now);
   if (hold) return { kind: "plan", resumesAt: hold };
@@ -281,7 +285,13 @@ export const emailsRouter = router({
       // Transactional only: a paced broadcast's rows wait for capacity, and
       // the broadcast's own page says when they go.
       .where(
-        and(eq(t.teamId, ctx.teamId), eq(t.latestStatus, "queued_quota"), isNull(t.broadcastId)),
+        and(
+          eq(t.teamId, ctx.teamId),
+          eq(t.latestStatus, "queued_quota"),
+          isNull(t.broadcastId),
+          // A young domain's warm-up frees by itself, not at the plan's reset.
+          isNull(t.parkReason),
+        ),
       );
 
     // Whether the team ever sent a broadcast copy: the source tabs show from

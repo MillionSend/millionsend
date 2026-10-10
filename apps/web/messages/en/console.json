@@ -758,6 +758,40 @@
           "unsolicited_bulk": "Reads as bulk mail to people who never opted in (spam-style promotion from a stranger) rather than opted-in marketing or cold B2B outreach. The model cannot see consent, so newsletters often land near this line.",
           "prompt_injection": "The text tries to tell a reviewer or model to change its verdict or ignore the policy."
         }
+      },
+      "warmup": {
+        "title": "Domain warm-up",
+        "subtitle": "Young sending domains send under a daily cap by registration age, and a team's warming domains share one daily limit, the highest of their caps; mail over either waits. Trust lifts the cap for the team or for one domain.",
+        "off": "Warm-up is off on this instance. Trust set here applies once it is on.",
+        "teamTrusted": "The team is trusted since {date}: none of its domains warm up.",
+        "trustTeam": "Trust team",
+        "untrustTeam": "Remove team trust",
+        "trustDomain": "Trust",
+        "untrustDomain": "Remove trust",
+        "cols": {
+          "domain": "Domain",
+          "registered": "Registered",
+          "today": "Today",
+          "trust": "Trust"
+        },
+        "registered": "{date} · {source}",
+        "sources": {
+          "rdap": "RDAP",
+          "whois": "WHOIS",
+          "ct": "first certificate",
+          "unknown": "unknown"
+        },
+        "unknownAge": "Unknown",
+        "notChecked": "Not looked up yet",
+        "today": "{used} of {cap} · full volume {date}",
+        "todayNoDate": "{used} of {cap}",
+        "pool": "Shared by the team's warming domains today: {used} of {cap}",
+        "full": "Full volume",
+        "trusted": "Trusted",
+        "toast": {
+          "trusted": "Warm-up lifted for {name}",
+          "untrusted": "Warm-up restored for {name}"
+        }
       }
     },
     "metric": {
@@ -802,14 +836,16 @@
         "tiers": "Tiers",
         "broadcasts": "Broadcasts",
         "escalation": "Escalation and caps",
-        "thresholds": "Thresholds and policy"
+        "thresholds": "Thresholds and policy",
+        "warmup": "New-domain warm-up"
       },
       "groupsSub": {
         "launch": "A team's first sends and hours are judged in full, then the ramp rate applies until its send count or day, whichever comes first.",
         "tiers": "Probation runs from the ramp's end to day 30; Established from day 30; Trusted needs 120 days, 50,000 sends and no flag in 90 days.",
         "broadcasts": "A broadcast is judged as its own HTML plus this many rendered copies; recipients are never sampled per message on top.",
         "escalation": "A failing critical or major content check multiplies the rate; two force it. Caps stop sampling silently, never sending.",
-        "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more; the review hold suspends a new team when one message is judged phishing at the hold score, or the set number of them at the lower score in its first week, until you release it."
+        "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more; the review hold suspends a new team when one message is judged phishing at the hold score, or the set number of them at the lower score in its first week, until you release it.",
+        "warmup": "A daily cap on each sending domain by its registration age, counted per UTC day, and one daily limit a team's warming domains share, the highest of their caps; mail over either waits and goes out as they allow. No plan lifts them. A domain whose age no registry publishes gets the 1 to 7 day cap while its team is new or on probation. 50 clean sends move a domain up a step early."
       },
       "fields": {
         "firstSends": "First sends judged in full",
@@ -833,7 +869,11 @@
         "holdScore": "Hold a new team for review from score",
         "holdRepeatCount": "Hold a new team after this many phishing verdicts in its first week",
         "holdRepeatScore": "A phishing verdict counts toward that from score",
-        "autoHold": "Review hold"
+        "autoHold": "Review hold",
+        "warmupEnabled": "Warm up new domains",
+        "warmupCapFirstDay": "Cap · under 24 hours",
+        "warmupCapFirstWeek": "Cap · 1 to 7 days",
+        "warmupCapFirstMonth": "Cap · 7 to 30 days"
       },
       "hints": {
         "firstSends": "a team's first N accepted messages",
@@ -857,7 +897,11 @@
         "holdScore": "new tier only, on a phishing, brand impersonation or payment redirect verdict",
         "holdRepeatCount": "the week runs from the team's first send; 0 turns this off",
         "holdRepeatScore": "the same phishing verdicts as above, at a lower score",
-        "autoHold": "whether those verdicts suspend the team until you release it; the owner sees a neutral pause"
+        "autoHold": "whether those verdicts suspend the team until you release it; the owner sees a neutral pause",
+        "warmupEnabled": "on by default on the cloud; from 30 days a domain sends at its plan's volume",
+        "warmupCapFirstDay": "emails a day from a domain registered under 24 hours ago",
+        "warmupCapFirstWeek": "emails a day from day 1 to 7, and for an unknown age on a new team",
+        "warmupCapFirstMonth": "emails a day from day 7 to 30"
       },
       "kinds": {
         "count": "whole number",

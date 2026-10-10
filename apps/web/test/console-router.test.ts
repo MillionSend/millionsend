@@ -489,7 +489,7 @@ describe("console.monitor", () => {
   it("reads every setting with its source, and the judge as off by default", async () => {
     const got = await operator().console.monitor.settings.get();
     expect(got.judge).toEqual({ on: false });
-    expect(got.settings).toHaveLength(22);
+    expect(got.settings).toHaveLength(26);
     expect(got.settings.find((s) => s.key === "firstSends")).toEqual({
       key: "firstSends",
       value: 1000,
@@ -543,6 +543,21 @@ describe("console.monitor", () => {
       ),
     ).toMatchObject({ value: 1000, source: "default" });
     expect(await operator().console.monitor.settings.update({})).toEqual({ changed: [] });
+  });
+
+  it("reports the warm-up on by default for the cloud only", async () => {
+    const warmup = async () =>
+      (await operator().console.monitor.settings.get()).settings.find(
+        (s) => s.key === "warmupEnabled",
+      );
+    expect(await warmup()).toMatchObject({ value: false, source: "default", default: false });
+    vi.stubEnv("IS_CLOUD", "true");
+    expect(await warmup()).toMatchObject({
+      value: true,
+      source: "default",
+      default: true,
+      fallback: true,
+    });
   });
 
   it("refuses values outside their kind and thresholds out of order", async () => {
@@ -699,6 +714,73 @@ describe("console.monitor", () => {
     await expect(member().console.monitor.setOverride({ teamId })).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
+  });
+});
+
+describe("console.safety.setWarmupTrust", () => {
+  it("trusts one domain or the whole team, audited on the instance's log, operator only", async () => {
+    const warm = await createTeam(db, "warm-trust");
+    await db.insert(schema.teamMembers).values({ teamId: warm, userId: MEMBER, role: "owner" });
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({
+        teamId: warm,
+        name: "mail.fresh-trust.com",
+        region: REGION,
+        status: "verified",
+        registeredAt: new Date(),
+        ageSource: "rdap",
+      })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    await expect(
+      callerFor(MEMBER, warm, "owner").console.safety.setWarmupTrust({
+        teamId: warm,
+        trusted: true,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      operator().console.safety.setWarmupTrust({ teamId, domainId: domain.id, trusted: true }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    await operator().console.safety.setWarmupTrust({
+      teamId: warm,
+      domainId: domain.id,
+      trusted: true,
+    });
+    const domainTrust = async () =>
+      (
+        await db
+          .select({ at: schema.domains.warmupTrustedAt })
+          .from(schema.domains)
+          .where(eq(schema.domains.id, domain.id))
+      )[0]?.at ?? null;
+    expect(await domainTrust()).toBeInstanceOf(Date);
+    expect((await auditRows("warmup.trust_granted"))[0]).toMatchObject({
+      teamId: null,
+      target: `team:${warm}`,
+      actorId: `user:${OPERATOR}`,
+      data: { team: "warm-trust", domain: "mail.fresh-trust.com" },
+    });
+
+    await operator().console.safety.setWarmupTrust({ teamId: warm, trusted: true });
+    expect((await team(warm)).warmupTrustedAt).toBeInstanceOf(Date);
+    await operator().console.safety.setWarmupTrust({ teamId: warm, trusted: false });
+    expect((await team(warm)).warmupTrustedAt).toBeNull();
+    expect((await auditRows("warmup.trust_revoked"))[0]).toMatchObject({
+      teamId: null,
+      target: `team:${warm}`,
+      data: { team: "warm-trust" },
+    });
+
+    const review = await operator().console.safety.review({ teamId: warm });
+    expect(review.warmup.trustedAt).toBeNull();
+    expect(review.warmup.domains).toMatchObject([
+      { name: "mail.fresh-trust.com", ageSource: "rdap", trustedAt: expect.any(Date) },
+    ]);
+    // The owner's own audit log never shows the lever.
+    const own = await callerFor(MEMBER, warm, "owner").audit.list({ limit: 50 });
+    expect(own.items.filter((r) => r.action.startsWith("warmup."))).toEqual([]);
   });
 });
 

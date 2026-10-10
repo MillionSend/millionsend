@@ -440,6 +440,8 @@
       "monitor_override_cleared": "Removeu override de amostragem do monitor",
       "monitor_broadcasts_paused": "O monitor de conteúdo pausou transmissões",
       "monitor_broadcasts_resumed": "Retomou transmissões após pausa do monitor",
+      "warmup_trust_granted": "Liberou o aquecimento de domínio novo",
+      "warmup_trust_revoked": "Restabeleceu o aquecimento de domínio novo",
       "content_revealed": "Leu o conteúdo de mensagens",
       "content_accessed": "Um operador leu o conteúdo de mensagens",
       "support_view_started": "Modo de suporte iniciado",

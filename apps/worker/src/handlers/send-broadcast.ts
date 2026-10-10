@@ -33,15 +33,19 @@ import {
   type RegionCapacity,
   recordMonitorSample,
   regionPause,
+  releaseQuota,
   reserveQuota,
+  reserveWarmup,
   roundUpToSlot,
   segmentContactsWhere,
   substituteUnsubscribeUrl,
+  utcDay,
+  warmupCap,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { EmailSendRequest, EnqueueEmailSends } from "@millionsend/queue";
-import { and, asc, eq, gt, inArray, isNotNull, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import { mailOwners, type SystemMailer } from "../system-mail.js";
 
 /**
@@ -373,6 +377,15 @@ export async function sendBroadcast(
       // A billing period can renew under a long walk (the daily counter follows
       // the clock by itself); each page reserves against the period current now.
       quota = (await fetchTeamQuota(db, broadcast.teamId, deps.isCloud)) ?? quota;
+      // The sending domain's warm-up and the team's shared one, read per page
+      // like the quota: once either day is spent, the rest of the page parks
+      // at insert behind it.
+      const warmup = await warmupCap(db, {
+        teamId: broadcast.teamId,
+        domainId: domain.id,
+        at: new Date(),
+      });
+      let warmupFull = false;
       const contacts = await db
         .select({
           id: schema.contacts.id,
@@ -485,6 +498,7 @@ export async function sendBroadcast(
         // Past the share's room the row parks at once: no reservation and no
         // job, the drain reserves on release (the existing parking contract).
         const paced = emitted >= admitted;
+        const held = !paced && warmupFull;
         // Quota reservation and email insert commit atomically (the quota
         // contract), same as the API accept path — a broadcast must not
         // bypass the plan's cap.
@@ -504,7 +518,8 @@ export async function sendBroadcast(
               to: [contact.email],
               replyTo,
               subject: applyMergeFields(broadcast.subject, contact, { html: false }),
-              latestStatus: paced ? "queued_quota" : "queued",
+              latestStatus: paced || held ? "queued_quota" : "queued",
+              parkReason: held ? "warmup" : null,
               // The drip lives on the row: the send handler defers to it and
               // the reconcile sweep leaves a not-yet-due row alone instead of
               // re-enqueueing every throttled send each pass.
@@ -520,13 +535,27 @@ export async function sendBroadcast(
             })
             .returning({ id: schema.emails.id });
           if (!row) return null;
-          if (paced) return { id: row.id, parked: true };
-          const reservation = await reserveQuota(tx as unknown as Db, {
+          if (paced || held) return { id: row.id, parked: true };
+          const txDb = tx as unknown as Db;
+          const reservation = await reserveQuota(txDb, {
             teamId: broadcast.teamId,
             count: 1,
             quota,
           });
-          if (reservation.reserved) return { id: row.id, parked: false };
+          if (reservation.reserved) {
+            if (!warmup || (await reserveWarmup(txDb, warmup, 1, utcDay())).reserved) {
+              return { id: row.id, parked: false };
+            }
+            // Over the warm-up: the plan's unit goes back, the row parks for
+            // the drain, which charges them all again on release.
+            await releaseQuota(txDb, { teamId: broadcast.teamId, count: 1, quota });
+            await tx
+              .update(schema.emails)
+              .set({ latestStatus: "queued_quota", parkReason: "warmup" })
+              .where(eq(schema.emails.id, row.id));
+            warmupFull = true;
+            return { id: row.id, parked: true };
+          }
           // Over the plan cap: park as queued_quota — accepted but not
           // enqueued; the quota drain moves it to queued once the cap has
           // room again (the UTC rollover, the period renewal, overage on).
@@ -712,6 +741,8 @@ async function reportWalkEnd(
   quota: NonNullable<Awaited<ReturnType<typeof fetchTeamQuota>>>,
 ): Promise<void> {
   if (!deps.mailer) return;
+  // Rows a domain's warm-up holds are left out: neither the plan nor the
+  // platform's capacity is why they wait, and the domain page says when.
   const [{ parked } = { parked: 0 }] = await db
     .select({ parked: sql<number>`count(*)::int` })
     .from(schema.emails)
@@ -719,6 +750,7 @@ async function reportWalkEnd(
       and(
         eq(schema.emails.broadcastId, broadcast.id),
         eq(schema.emails.latestStatus, "queued_quota"),
+        isNull(schema.emails.parkReason),
       ),
     );
   if (parked === 0) return;

@@ -87,6 +87,7 @@ export {
   type AcceptEmailResult,
   acceptEmail,
   countDistinctRecipients,
+  enforceDomainWarmup,
   estimateAttachmentBytes,
   isOnboardingSender,
   MAX_ATTACHMENT_BYTES,
@@ -261,6 +262,13 @@ export {
   type WindowCounts,
 } from "./deliverability.js";
 export {
+  createDomainAgeResolver,
+  DomainAgeRetryableError,
+  domainsAwaitingAge,
+  markDomainAgeUnknown,
+  recordDomainAge,
+} from "./domain-age.js";
+export {
   createFixedWindowLimiter,
   DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
@@ -279,6 +287,15 @@ export {
   sesGateFromRecordStatus,
   strictDomainStatus,
 } from "./domain-status.js";
+export {
+  type DomainWarmupRow,
+  graduateWarmupDomains,
+  pruneWarmupUsage,
+  reserveWarmup,
+  teamWarmupOverview,
+  type WarmupCap,
+  warmupCap,
+} from "./domain-warmup.js";
 export { firstRow, resultRows } from "./driver-result.js";
 export {
   CHECKS,
@@ -358,6 +375,7 @@ export {
   type MonitorSettingSource,
   type MonitorSettings,
   type MonitorSettingsRow,
+  monitorSettingDefault,
   monitorSettingsReader,
   monitorThresholdsOrdered,
   resolveMonitorSettings,

@@ -71,6 +71,7 @@
     "@sentry/core": "^11.1.0",
     "@sentry/node": "^11.1.0",
     "drizzle-orm": "^0.45.2",
+    "tldts": "^7.4.10",
     "zod": "^4.6.3"
   },
   "devDependencies": {

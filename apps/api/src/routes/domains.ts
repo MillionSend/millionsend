@@ -298,6 +298,14 @@ export function registerDomainRoutes(
   // CreateEmailIdentity throttle for everyone.
   const createLimited = createFixedWindowLimiter(DOMAIN_CREATE_LIMIT_PER_HOUR, 3_600_000);
 
+  const queueDomainAge = async (domainId: string) => {
+    try {
+      await deps.enqueueDomainAge?.(domainId);
+    } catch (err) {
+      console.warn("domain.age enqueue failed; the worker's sweep asks later", err);
+    }
+  };
+
   // Engagement tracking is app-layer: the branded CNAME points at THIS app
   // host, not SES — so it only exists once APP_BASE_URL names a real host, and
   // only where this deployment can actually serve a customer hostname.
@@ -491,6 +499,7 @@ export function registerDomainRoutes(
         target: { type: "domain", id: row.id },
         metadata: { name: row.name, region },
       });
+      await queueDomainAge(row.id);
       return c.json(
         {
           ...toWire(row),
@@ -623,6 +632,7 @@ export function registerDomainRoutes(
           target: { type: "domain", id: domain.id },
           metadata: { name: domain.name },
         });
+        await queueDomainAge(domain.id);
       }
       // Full object with per-record status — the promised "fresh status"
       // without a get_domain round-trip. Additive over the SDK's { id }.

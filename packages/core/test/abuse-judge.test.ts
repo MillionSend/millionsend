@@ -313,16 +313,20 @@ describe("buildJudgeBlock", () => {
     expect(block).toContain("  Entrar -> acme.com.br");
   });
 
-  it("never lists a suffix the list cannot vouch for as the team's", () => {
+  it("lists the registrable domain the suffix list gives, never a suffix strangers share", () => {
     const line = (verifiedDomains: string[]) =>
       buildJudgeBlock({ ...base, team: { ...base.team, verifiedDomains } })
         .split("\n")
         .find((l) => l.startsWith("Verified domains:"));
-    expect(line(["x.prefeitura.sp.gov.br"])).toBe("Verified domains: x.prefeitura.sp.gov.br");
+    expect(line(["x.prefeitura.sp.gov.br"])).toBe(
+      "Verified domains: x.prefeitura.sp.gov.br, prefeitura.sp.gov.br",
+    );
     expect(line(["loja.app.br"])).toBe("Verified domains: loja.app.br");
-    expect(line(["pay.shop.com.ua"])).toBe("Verified domains: pay.shop.com.ua");
+    expect(line(["pay.shop.com.ua"])).toBe("Verified domains: pay.shop.com.ua, shop.com.ua");
     expect(line(["mail.acme.com"])).toBe("Verified domains: mail.acme.com, acme.com");
     expect(line(["acme.dev"])).toBe("Verified domains: acme.dev");
+    // eu.org hands out names to anyone: the team owns foo.eu.org, never eu.org.
+    expect(line(["mail.foo.eu.org"])).toBe("Verified domains: mail.foo.eu.org");
   });
 
   it("keeps a header label at the start of the body off the start of a line", () => {

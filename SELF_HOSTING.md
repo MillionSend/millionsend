@@ -842,6 +842,45 @@ them) went unjudged, or as soon as TypeSafe rejects the API key.
 </details>
 
 <details>
+<summary><b>New-domain warm-up (optional)</b></summary>
+
+Off by default here and on by default with `IS_CLOUD`. With it on, a sending
+domain gets a daily cap by the age of its registrable domain (ICANN section of
+the Public Suffix List; under a private-section suffix, such as `shop.eu.org`
+from a free subdomain service, the name itself, dated by its certificates
+only), counted per UTC day across every team sending from it:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `WARMUP_ENABLED` | `false` (`true` with `IS_CLOUD`) | Whether the warm-up applies |
+| `WARMUP_CAP_FIRST_DAY` | 100 | Emails a day while the domain is under 24 hours old |
+| `WARMUP_CAP_FIRST_WEEK` | 300 | Day 1 to 7, and an unknown age while the team is new or on probation |
+| `WARMUP_CAP_FIRST_MONTH` | 2000 | Day 7 to 30; from day 30 only the plan applies |
+
+The console (Trust & safety → Monitoring settings) wins over the environment.
+The cap is the lower of the plan's and the warm-up's, and no plan lifts it.
+A team's warming domains also share one daily limit, the highest of their
+caps, counted per team and UTC day, so a second fresh domain never adds
+volume. Mail over either parks as `queued_quota` (`park_reason = 'warmup'`)
+and `quota.drain` releases it as both allow; `429 daily_quota_exceeded` (SMTP
+`452`) with a warm-up message only when the team's parked backlog is full.
+50 clean sends since the last step, the first a day old (hard bounces under
+2%, complaints under 0.1%, no phishing-type monitor verdict), move a domain up
+a step early, and an operator can trust a team or a domain from its review
+page (audited).
+
+The worker's `domain.age` job looks the age up off the send path, when a
+domain is added or verifies and from the `domains.reverify` sweep: RDAP via
+IANA's bootstrap (plus fixed servers for `.io`, `.me`, `.co` and `.us`), then
+the registry's WHOIS on TCP 43, then the first certificate on crt.sh, else
+unknown; a certificate's date never replaces a registry's found before. It
+needs outbound HTTPS and TCP 43 while the warm-up is on and makes no lookup
+while it is off. The full description is in the docs' self-hosting
+page.
+
+</details>
+
+<details>
 <summary><b>Content access (break-glass)</b></summary>
 
 Off by default. With it on, an authorised operator can read the subject and

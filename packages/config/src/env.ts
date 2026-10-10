@@ -259,6 +259,13 @@ export const env = createEnv({
     MONITOR_HOLD_SCORE: z.coerce.number().int().min(0).max(100).optional(),
     MONITOR_HOLD_REPEAT_COUNT: z.coerce.number().int().min(0).optional(),
     MONITOR_HOLD_REPEAT_SCORE: z.coerce.number().int().min(0).max(100).optional(),
+    // New-domain warm-up: a daily cap per sending domain by registration age
+    // (unset follows IS_CLOUD). Instance settings in the same console page
+    // override these, like the MONITOR_* values above.
+    WARMUP_ENABLED: z.enum(["true", "false", "1", "0"]).optional(),
+    WARMUP_CAP_FIRST_DAY: z.coerce.number().int().min(0).optional(),
+    WARMUP_CAP_FIRST_WEEK: z.coerce.number().int().min(0).optional(),
+    WARMUP_CAP_FIRST_MONTH: z.coerce.number().int().min(0).optional(),
 
     // Read-only support view: the instance operator may open a team's
     // dashboard as its owner sees it, for 30 minutes, with a reason and a

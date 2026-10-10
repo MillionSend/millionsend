@@ -16,13 +16,17 @@ import {
 } from "@millionsend/config";
 import {
   committedDailyVolume,
+  createDomainAgeResolver,
+  DomainAgeRetryableError,
   deriveSamplingKey,
   deriveTrackingKey,
   deriveUnsubscribeKey,
+  domainsAwaitingAge,
   eraseRecipient,
   getInstanceSettings,
   hashRecipient,
   type MonitorDeps,
+  markDomainAgeUnknown,
   monitorSettingsReader,
   pacingHorizonDays,
   pausedRegions,
@@ -31,6 +35,7 @@ import {
   pruneProbes,
   purgeExpiredIdempotencyKeys,
   type QueuedWebhookDelivery,
+  recordDomainAge,
   recordProbes,
   recountStaleSegments,
   regionBulkCounts,
@@ -253,6 +258,13 @@ const enqueueWebhook = async (deliveries: readonly QueuedWebhookDelivery[]): Pro
   await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
 };
 
+const enqueueDomainAge = async (domainId: string): Promise<void> => {
+  await queue.send("domain.age", { domainId }, { dedupeKey: domainId });
+};
+// One resolver for the process: it holds the RDAP bootstrap, the WHOIS
+// referrals, the hosts in Retry-After backoff and the crt.sh clock.
+const domainAge = createDomainAgeResolver();
+
 const enqueueBroadcast = async (broadcastId: string, startAfter?: Date): Promise<void> => {
   await queue.send(
     "broadcast.send",
@@ -395,9 +407,9 @@ await queue.scheduleCrons({
     const result = await runSafetyFlags(db, {
       monitorFlagRisk: judge ? (await monitorSettings()).flagRisk : Number.POSITIVE_INFINITY,
     });
-    if (result.opened > 0 || result.cleared > 0) {
+    if (result.opened > 0 || result.cleared > 0 || result.graduated > 0) {
       console.log(
-        `safety.flags: teams=${result.teams} opened=${result.opened} cleared=${result.cleared}`,
+        `safety.flags: teams=${result.teams} opened=${result.opened} cleared=${result.cleared} warmupGraduated=${result.graduated}`,
       );
     }
   },
@@ -432,9 +444,20 @@ await queue.scheduleCrons({
     );
   },
   "domains.reverify": async () => {
-    const result = await reverifyDomains(db, { clientForRegion, resolver: nodeDnsResolver });
+    const result = await reverifyDomains(db, {
+      clientForRegion,
+      resolver: nodeDnsResolver,
+      enqueueDomainAge,
+    });
     if (result.checked > 0 || result.failed > 0) {
       console.log(`domains.reverify: checked=${result.checked} failed=${result.failed}`);
+    }
+    // Domains no age lookup has answered for: rows from before the job, a
+    // lost enqueue, or added while the warm-up was off.
+    if ((await monitorSettings()).warmupEnabled) {
+      const awaiting = await domainsAwaitingAge(db);
+      for (const domainId of awaiting) await enqueueDomainAge(domainId);
+      if (awaiting.length > 0) console.log(`domains.age: queued=${awaiting.length}`);
     }
     // Branded tracking CNAMEs never gate domain status, so reverify above skips
     // them; sweep them here to clear a resolved subdomain's clock or unset one
@@ -514,6 +537,10 @@ await queue.workDeadLetter("abuse.judge", async ({ sampleId }) => {
 });
 
 await queue.workDeadLetter("tenant.status", ({ teamId }) => abandonTenantStatus(db, teamId));
+
+// Every source kept failing: the domain reads as unknown age, which the
+// warm-up treats by the team's standing, until verification asks again.
+await queue.workDeadLetter("domain.age", ({ domainId }) => markDomainAgeUnknown(db, domainId));
 
 await queue.work(
   "email.send",
@@ -660,6 +687,25 @@ await queue.work(
   ({ teamId }) => retryTenantStatus(db, { clientForRegion, enabled: sesTenantsEnabled() }, teamId),
   { pollingIntervalSeconds: 30 },
 );
+
+// One lane: crt.sh is spaced per process, and a lookup is a few slow GETs.
+// A retryable failure throws into pg-boss's backoff.
+await queue.work("domain.age", async ({ domainId }) => {
+  // No registry is asked while the warm-up is off; the sweep asks once it is on.
+  if (!(await monitorSettings()).warmupEnabled) return;
+  try {
+    const age = await recordDomainAge(db, domainAge, domainId);
+    if (age) {
+      console.log(
+        `domain.age: ${age.domain ?? "-"} source=${age.source} registered=${age.registeredAt?.toISOString() ?? "unknown"}`,
+      );
+    }
+  } catch (err) {
+    if (err instanceof DomainAgeRetryableError)
+      console.warn(`domain.age: ${err.message}; retrying`);
+    throw err;
+  }
+});
 
 // Erasure scans a team's whole history; it runs here so the request that
 // asked for it returns at once.

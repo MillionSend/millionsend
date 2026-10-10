@@ -33,6 +33,10 @@ const GROUPS = [
       "autoHold",
     ],
   },
+  {
+    key: "warmup",
+    fields: ["warmupEnabled", "warmupCapFirstDay", "warmupCapFirstWeek", "warmupCapFirstMonth"],
+  },
 ] as const;
 
 type Draft = string | boolean | null;
