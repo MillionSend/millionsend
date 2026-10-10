@@ -382,6 +382,17 @@ console-code emails lose their body once SES accepts them, since the link or cod
 a live credential; the other notices keep theirs for the usual retention window. Until a
 team holds the domain they go straight through SES and leave no trace.
 
+What a customer typed (team, person, domain, key and broadcast names, webhook URLs,
+addresses) never appears in a subject, and the body prints it as text no mail client turns
+into a link (a hair space follows each `.`, `@`, `:` and `\`) or a number to call (a run of
+seven or more digits keeps its first four, unless it is exactly one date such as `09/10/2026`
+or `2026-10-09`, or one span of up to ten years such as `2025-2026`), cut at 64 characters.
+Team and display names with a link scheme, an `@`, a line break or an invisible character
+are refused when set; the joiners and selectors inside an emoji or a Persian or Indic word
+are writing, not hidden text, and stay in names and in mail. A team, and one member across
+all their teams, creates at most `INVITES_PER_TEAM_PER_DAY` invitations a day (default 50,
+revoked ones and those of deleted teams included), one pending per address.
+
 That team is the instance's own, and an operator can mark it as such: on the `system` plan
 it is never capped or billed and its badge reads System. On a self-hosted instance plans
 carry no limits, so the mark only labels the team.
