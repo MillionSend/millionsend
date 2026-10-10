@@ -105,8 +105,10 @@ export {
   accountMailPhrase,
   buildAccountMail,
   CANCEL_REMINDER_DAYS,
+  formatMailAge,
   formatMailDate,
   formatMailDateTime,
+  formatMailPercent,
   freeCapText,
   isMailLocale,
   MAIL_LOCALES,
@@ -240,6 +242,14 @@ export {
   type KmsDekClient,
   KmsKeyring,
 } from "./crypto/kms-keyring.js";
+export {
+  CUSTOMER_SLOTS,
+  CUSTOMER_TEXT_MAX,
+  fillMailTemplate,
+  inertText,
+  isPlainName,
+  stripInvisible,
+} from "./customer-text.js";
 export {
   broadcastSendSpacingMs,
   type DeliverabilityEvaluation,

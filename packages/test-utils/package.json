@@ -15,9 +15,12 @@
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",
     "@millionsend/db": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "linkify-it": "^5.0.2",
+    "linkifyjs": "^4.3.3"
   },
   "devDependencies": {
+    "@types/linkify-it": "^5.0.0",
     "@types/node": "^22.20.2",
     "typescript": "^7.0.2"
   }

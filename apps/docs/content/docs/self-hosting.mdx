@@ -161,6 +161,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys, both or neither. When set, sign-in, sign-up, password reset and the onboarding "Send email" button verify a challenge token (invisible or managed widgets both work). Unset, every form runs without a captcha. |
 | `ONBOARDING_EMAIL_FROM` | Sender of the onboarding "Send email" button, as `Name <user@domain>` or a bare address on a domain verified in this SES account. It carries one fixed test email per team, to the team's owner (a verified address, where the instance verifies), and nothing else: a send from it through the API, SMTP, MCP, a broadcast or a dashboard test is refused (`422 reserved_sender` on the API), even for a team that verified its domain. Leave unset to hide the button. |
 | `NOTIFICATIONS_EMAIL_FROM` | Sender for the notices to team owners (quota, bounce/complaint rates, a domain verifying or losing its records, a new API key, a rotated webhook secret, a member joining, a broadcast that went out or is held, billing on the cloud) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. Verify its domain in a team to log these emails there. |
+| `INVITES_PER_TEAM_PER_DAY` | Invitations one team, and one member across all their teams, may create in a rolling day, revoked ones and those of deleted teams included (default `50`). Past it, new invitations are refused until the day rolls over. |
 | `SENTRY_DSN` / `SENTRY_BROWSER_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | Optional error tracking through the Sentry SDK; off while `SENTRY_DSN` is unset. See [Error tracking](#error-tracking-optional). |
 
 ### Worker sizing
@@ -703,6 +704,22 @@ language of its contact in the team that holds the sender's domain (the row
 sign-up enrolls, below), else English. Each owner chooses which of these
 notices they get under **Settings → Notifications**; mail about a person's
 own account and the security receipts are always sent.
+
+What a customer typed (a team, person, domain, key or broadcast name, a
+webhook URL, an address) never appears in a subject. In the body it prints as
+text no mail client turns into a link: line breaks and invisible or
+direction-changing characters are dropped (the joiners and selectors inside
+an emoji or a Persian or Indic word stay), it stops at 64 characters, and a
+hair space follows each `.`, `@`, `:` and `\`, so `acme.dev` still reads as
+acme.dev without becoming one. A run of seven or more digits keeps its first
+four, so no mail app offers to call it, unless the run is exactly one date
+(`09/10/2026`, `2026-10-09`) or one span of up to ten years (`2025-2026`),
+which prints as typed. Team and display names with a link
+scheme, an `@`, a line break or any other invisible character, or longer than
+64 characters, are refused when set. A team may hold one pending invitation per
+address, a resend waits two minutes, and the team, and each member across all
+their teams, creates at most `INVITES_PER_TEAM_PER_DAY` invitations a day
+(default 50, revoked ones and those of deleted teams included).
 
 Verify the sender's
 domain under **Domains** in a team, and from then on those emails are logged

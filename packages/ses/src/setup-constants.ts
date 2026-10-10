@@ -332,6 +332,11 @@ TURNSTILE_SECRET_KEY=
 # log these emails there.
 NOTIFICATIONS_EMAIL_FROM=
 
+# Invitations one team, and one member across all their teams, may create in
+# a rolling day, revoked ones and those of deleted teams included. Past it,
+# new invitations are refused until the day rolls over.
+# INVITES_PER_TEAM_PER_DAY=50
+
 # Reverse proxies whose forwarded-client-IP headers (X-Forwarded-For,
 # CF-Connecting-IP) are trusted, comma-separated. Default: loopback only,
 # which covers a proxy on the same host. Add your proxy's address when it
