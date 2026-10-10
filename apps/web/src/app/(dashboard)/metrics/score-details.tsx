@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { CopyButton } from "@/components/copy-chip";
+import { DotParts } from "@/components/dot-parts";
 import { Drawer } from "@/components/drawer";
 import { Skeleton } from "@/components/skeleton";
 import { formatScoreTenths } from "@/lib/score-band";
@@ -426,10 +427,12 @@ export function ScoreDetailsDrawer({ open, onClose }: { open: boolean; onClose: 
                       marginTop: 2,
                     }}
                   >
-                    {t("liftLine", {
-                      title: insights(`check.${best.id}.title`),
-                      score: points(data.scoreTenths + best.liftTenths),
-                    })}
+                    <DotParts
+                      text={t("liftLine", {
+                        title: insights(`check.${best.id}.title`),
+                        score: points(data.scoreTenths + best.liftTenths),
+                      })}
+                    />
                   </span>
                 </span>
                 <span style={{ gridColumn: "2", justifySelf: "start" }}>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { NoticeStrip } from "@/components/notice-strip";
 import { useTRPC } from "@/lib/trpc";
@@ -9,11 +10,13 @@ import { useTRPC } from "@/lib/trpc";
  * Global deliverability notice. Renders nothing while the health query is
  * unresolved or "ok" (a thin strip needs no ghost — it would itself be the
  * layout shift it means to avoid). "warning" is an amber nudge; "paused" is a
- * red strip that mirrors the send guard's block. Both link to /metrics.
+ * red strip that mirrors the send guard's block. Both link to /metrics,
+ * except on /metrics itself.
  */
 export function DeliverabilityBanner() {
   const t = useTranslations("deliverability");
   const locale = useLocale();
+  const onMetrics = usePathname() === "/metrics";
   const trpc = useTRPC();
   const { data } = useQuery(trpc.metrics.health.queryOptions());
 
@@ -37,10 +40,10 @@ export function DeliverabilityBanner() {
 
   return (
     <NoticeStrip
-      href="/metrics"
+      href={onMetrics ? undefined : "/metrics"}
       tone={paused ? "danger" : "warn"}
       text={text}
-      action={t("banner.action")}
+      action={onMetrics ? undefined : t("banner.action")}
     />
   );
 }

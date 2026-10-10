@@ -522,3 +522,24 @@
 [data-tippy-root] #slash-command + div {
   display: none;
 }
+
+/* Maily's block toolbars (the button block's runs 586px wide) wrap onto a
+   second row inside a phone screen instead of running off its edge; Maily
+   positions the toolbar from its measured size. */
+@media (max-width: 639px) {
+  .ms-maily [class~="mly:w-max"][class~="mly:rounded-lg"] {
+    max-width: calc(100vw - 24px);
+    margin-inline: 12px;
+  }
+  .ms-maily [class~="mly:w-max"][class~="mly:rounded-lg"] > [class~="mly:items-stretch"] {
+    flex-wrap: wrap;
+  }
+}
+/* The block handle hangs left of the block, in a gutter that the 16px
+   content padding below 900px does not leave: without its "+" (the slash
+   menu adds blocks too) it fits on screen, keeping the ⠿ menu. */
+@media (max-width: 899px) {
+  .ms-maily .tippy-box[data-placement^="left"] [class~="mly:pr-1.5"] > :first-child {
+    display: none;
+  }
+}

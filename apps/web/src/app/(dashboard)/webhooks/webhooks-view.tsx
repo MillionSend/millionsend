@@ -174,18 +174,16 @@ export function WebhooksView() {
       <PageHeader
         title={nav("webhooks")}
         actions={
-          <>
-            <button
-              type="button"
-              className="ms-btn ms-btn-primary"
-              onClick={() => setCreateOpen(true)}
-            >
-              <PlusGlyph size={14} />
-              {t("addWebhook")}
-            </button>
-            <ResourceApiButton resource="webhooks" />
-          </>
+          <button
+            type="button"
+            className="ms-btn ms-btn-primary"
+            onClick={() => setCreateOpen(true)}
+          >
+            <PlusGlyph size={14} />
+            {t("addWebhook")}
+          </button>
         }
+        menu={<ResourceApiButton resource="webhooks" />}
       />
 
       {listQuery.isPending ? <WebhooksSkeleton /> : null}

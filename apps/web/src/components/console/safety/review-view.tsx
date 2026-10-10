@@ -3,9 +3,11 @@
 import { AUDIT_ACTIONS } from "@millionsend/core/audit-actions";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
 import { CopyChip } from "@/components/copy-chip";
+import { DotParts } from "@/components/dot-parts";
+import { KvRow } from "@/components/kv-row";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -34,7 +36,6 @@ import { RevealCell, useContentReveal } from "./reveal";
 const TILE: React.CSSProperties = { padding: "16px 20px" };
 // The monitoring rows are sentences, not figures: sans, left, the body size.
 const KV_VALUE: React.CSSProperties = {
-  textAlign: "left",
   fontFamily: "var(--ms-font-sans)",
   fontSize: 13,
 };
@@ -156,12 +157,14 @@ export function ReviewView({ teamId }: { teamId: string }) {
     owner,
   };
   const subtitle = (
-    <>
-      {flag?.status === "open"
-        ? t("proof", { ...proofValues, since: formatRelative(flag.openedAt, locale) })
-        : t("proofNoFlag", proofValues)}{" "}
-      · <CopyChip value={team.id} wrap />
-    </>
+    <DotParts
+      text={
+        flag?.status === "open"
+          ? t("proof", { ...proofValues, since: formatRelative(flag.openedAt, locale) })
+          : t("proofNoFlag", proofValues)
+      }
+      tail={<CopyChip value={team.id} wrap />}
+    />
   );
   const flagOpen = flag?.status === "open";
   const submitFlag = () => {
@@ -200,7 +203,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         }
         title={team.name}
         subtitle={subtitle}
-        actions={
+        badges={
           <>
             <span className={`ms-badge ms-badge-${standingBadge[0]}`}>{standingBadge[1]}</span>
             {team.broadcastsPausedByOperatorAt ? (
@@ -211,6 +214,10 @@ export function ReviewView({ teamId }: { teamId: string }) {
                 {t(flagOpen ? "badges.flagOpen" : "badges.flagCleared")}
               </span>
             ) : null}
+          </>
+        }
+        actions={
+          <>
             <RequestAccessButton
               on={contentReveal}
               disabled={!contentReveal || flaggedEmails.length === 0}
@@ -259,37 +266,37 @@ export function ReviewView({ teamId }: { teamId: string }) {
                 </button>
               </Tooltip>
             ) : null}
-            <PopoverMenu
-              boxed
-              ariaLabel={common("actions")}
-              items={[
-                ...(heldForReview
-                  ? [
-                      { label: safety("menu.release"), onSelect: () => actions.reinstate(target) },
-                      {
-                        label: safety("menu.convert"),
-                        danger: true,
-                        onSelect: () => actions.suspend(target),
-                      },
-                    ]
-                  : [
-                      team.suspendedAt
-                        ? {
-                            label: safety("menu.reinstate"),
-                            onSelect: () => actions.reinstate(target),
-                          }
-                        : {
-                            label: safety("menu.suspend"),
-                            danger: true,
-                            onSelect: () => actions.suspend(target),
-                          },
-                    ]),
-                ...(flagOpen
-                  ? []
-                  : [{ label: t("openFlag"), onSelect: () => setFlagDialog(true) }]),
-              ]}
-            />
           </>
+        }
+        menu={
+          <PopoverMenu
+            boxed
+            ariaLabel={common("actions")}
+            items={[
+              ...(heldForReview
+                ? [
+                    { label: safety("menu.release"), onSelect: () => actions.reinstate(target) },
+                    {
+                      label: safety("menu.convert"),
+                      danger: true,
+                      onSelect: () => actions.suspend(target),
+                    },
+                  ]
+                : [
+                    team.suspendedAt
+                      ? {
+                          label: safety("menu.reinstate"),
+                          onSelect: () => actions.reinstate(target),
+                        }
+                      : {
+                          label: safety("menu.suspend"),
+                          danger: true,
+                          onSelect: () => actions.suspend(target),
+                        },
+                  ]),
+              ...(flagOpen ? [] : [{ label: t("openFlag"), onSelect: () => setFlagDialog(true) }]),
+            ]}
+          />
         }
       />
 
@@ -395,71 +402,62 @@ export function ReviewView({ teamId }: { teamId: string }) {
           <p style={{ margin: 0, fontSize: 13, color: "var(--ms-muted)" }}>{monitorT("exempt")}</p>
         ) : (
           <>
-            <dl
-              className="ms-kv"
-              style={{ gridTemplateColumns: "max-content 1fr", marginBottom: 16 }}
-            >
-              <dt>{monitorT("tier")}</dt>
-              <dd style={KV_VALUE}>
-                {monitorT("tierValue", {
-                  tier: tiers(monitor.tier),
-                  rate: percentRate(monitor.decision.rate),
-                })}
-                {monitor.decision.elevated.length > 0
-                  ? ` · ${monitor.decision.elevated.map((e) => monitorT(`elevated.${e}`)).join(" · ")}`
-                  : ""}
-              </dd>
-              <dt>{monitorT("samples")}</dt>
-              <dd style={KV_VALUE}>
+            <dl className="ms-kv ms-kv-cols" style={{ marginBottom: 16 }}>
+              <KvRow label={monitorT("tier")} valueStyle={KV_VALUE}>
+                {[
+                  monitorT("tierValue", {
+                    tier: tiers(monitor.tier),
+                    rate: percentRate(monitor.decision.rate),
+                  }),
+                  ...monitor.decision.elevated.map((e) => monitorT(`elevated.${e}`)),
+                ].join(" · ")}
+              </KvRow>
+              <KvRow label={monitorT("samples")} valueStyle={KV_VALUE}>
                 {monitorT("samplesValue", {
                   samples: monitor.samples7d,
                   flagged: monitor.flagged7d,
                   unjudged: monitor.unjudged7d,
                 })}
-              </dd>
-              <dt>{monitorT("verdicts")}</dt>
-              <dd style={KV_VALUE}>
+              </KvRow>
+              <KvRow label={monitorT("verdicts")} valueStyle={KV_VALUE}>
                 {monitor.topReasons.length > 0
                   ? monitorT.rich("verdictsReasons", {
                       clean: monitor.judged7d - monitor.flagged7d,
                       flagged: monitor.flagged7d,
+                      part: (chunks) => <span className="ms-part">{chunks}</span>,
                       reasons: () => <ReasonCodes codes={monitor.topReasons} />,
                     })
                   : monitorT("verdictsValue", {
                       clean: monitor.judged7d - monitor.flagged7d,
                       flagged: monitor.flagged7d,
                     })}
-              </dd>
-              <dt>{monitorT("lastSample")}</dt>
-              <dd style={KV_VALUE}>
+              </KvRow>
+              <KvRow label={monitorT("lastSample")} valueStyle={KV_VALUE}>
                 {monitor.lastSampleAt ? (
                   <RelativeTime date={monitor.lastSampleAt} />
                 ) : (
                   common("none")
                 )}
-              </dd>
-              <dt>{monitorT("model")}</dt>
-              <dd style={KV_VALUE}>
+              </KvRow>
+              <KvRow label={monitorT("model")} valueStyle={KV_VALUE}>
                 {monitor.judge.on
                   ? `${monitor.judge.provider} · ${monitor.judge.model}`
                   : monitorT("modelOff")}
-              </dd>
-              <dt>{monitorT("override")}</dt>
-              <dd style={KV_VALUE}>
+              </KvRow>
+              <KvRow label={monitorT("override")} valueStyle={KV_VALUE}>
                 {monitor.override
                   ? monitorT("overrideValue", {
                       until: formatDayTime(monitor.override.until, locale),
                     })
                   : monitorT("overrideNone")}
-              </dd>
-              <dt>{monitorT("pause")}</dt>
-              <dd style={KV_VALUE}>
+              </KvRow>
+              <KvRow label={monitorT("pause")} valueStyle={KV_VALUE}>
                 {monitor.broadcastsPausedAt
                   ? monitorT("pauseValue", {
                       since: formatDayTime(monitor.broadcastsPausedAt, locale),
                     })
                   : monitorT("pauseNone")}
-              </dd>
+              </KvRow>
             </dl>
             <CardHead title={monitorT("samplesTitle")} subtitle={monitorT("samplesSubtitle")} />
             <Table>
@@ -627,7 +625,14 @@ export function ReviewView({ teamId }: { teamId: string }) {
                       common("none")
                     )}
                   </td>
-                  <td style={{ fontSize: 12, color: "var(--ms-muted)", whiteSpace: "normal" }}>
+                  <td
+                    style={{
+                      fontSize: 12,
+                      color: "var(--ms-muted)",
+                      whiteSpace: "normal",
+                      minWidth: 260,
+                    }}
+                  >
                     {!email.model
                       ? common("none")
                       : email.model.status === "judged" && email.model.score !== null
@@ -906,17 +911,22 @@ function WarmupCard({
 /** Reason codes, each explained on hover; a code this build has no text for stays plain. */
 function ReasonCodes({ codes }: { codes: string[] }) {
   const monitorT = useTranslations("console.safety.review.monitor");
+  // The comma is kept on its code's line: the tooltip trigger is an inline
+  // box, so a bare ", " after it could start the next line.
   return codes.map((code, i) => (
-    <span key={code}>
-      {i > 0 ? ", " : null}
-      {monitorT.has(`reasonCodes.${code}`) ? (
-        <Tooltip inline text={monitorT(`reasonCodes.${code}`)} triggerClassName="ms-reason-code">
-          {code}
-        </Tooltip>
-      ) : (
-        code
-      )}
-    </span>
+    <Fragment key={code}>
+      {i > 0 ? " " : null}
+      <span style={{ whiteSpace: "nowrap" }}>
+        {monitorT.has(`reasonCodes.${code}`) ? (
+          <Tooltip inline text={monitorT(`reasonCodes.${code}`)} triggerClassName="ms-reason-code">
+            {code}
+          </Tooltip>
+        ) : (
+          code
+        )}
+        {i < codes.length - 1 ? "," : null}
+      </span>
+    </Fragment>
   ));
 }
 
@@ -958,9 +968,11 @@ function Tile({
   children: React.ReactNode;
 }) {
   return (
-    <div className="ms-card" style={TILE}>
+    // A label that wraps pushes only its own value down: values share the
+    // row's bottom line.
+    <div className="ms-card" style={{ ...TILE, display: "flex", flexDirection: "column" }}>
       <div className="ms-microlabel">{label}</div>
-      <div className="ms-digits" style={{ fontSize: 26, marginTop: 2, color }}>
+      <div className="ms-digits" style={{ fontSize: 26, marginTop: "auto", paddingTop: 2, color }}>
         {children}
       </div>
     </div>

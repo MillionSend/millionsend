@@ -121,7 +121,13 @@ describe("the team's id on the console's team screens", () => {
       role: null,
     }).console.safety.review({ teamId });
     const html = renderToStaticMarkup(createElement(ReviewView, { teamId }));
-    expect(html).toMatch(new RegExp(`owner — · ${copyChip(teamId).source}`));
+    // The chip is the meta line's last " · " part (DotParts), so the line
+    // breaks before it rather than inside "owner …".
+    expect(html).toMatch(
+      new RegExp(
+        `<span class="ms-part">owner —\u00a0·</span> <span class="ms-part">${copyChip(teamId).source}`,
+      ),
+    );
   });
 
   it("is one Copy ID away in the Teams list's row menu", () => {
@@ -186,7 +192,8 @@ describe("the View as owner dialog", () => {
     const html = render({ sent: true, to: "op@example.com", minutes: 10 });
     expect(html).toContain("Code from your email");
     expect(html).toContain('autoComplete="one-time-code"');
-    expect(html).toContain("Sent to op@example.com. It works once, for 10 minutes.");
+    // A narrow dialog breaks the address after its "@" and dots, never mid-label.
+    expect(html).toContain("Sent to op@<wbr/>example.<wbr/>com. It works once, for 10 minutes.");
     expect(html).toContain("Send a new code");
     expect(html).toContain("Start session · 30 min");
   });

@@ -142,18 +142,16 @@ export default function TopicsPage() {
       <PageHeader
         title={t("title")}
         actions={
-          <>
-            <button
-              type="button"
-              className="ms-btn ms-btn-primary"
-              onClick={() => setCreateOpen(true)}
-            >
-              <PlusGlyph size={14} />
-              {t("create")}
-            </button>
-            <ResourceApiButton resource="topics" />
-          </>
+          <button
+            type="button"
+            className="ms-btn ms-btn-primary"
+            onClick={() => setCreateOpen(true)}
+          >
+            <PlusGlyph size={14} />
+            {t("create")}
+          </button>
         }
+        menu={<ResourceApiButton resource="topics" />}
       />
       <AudienceTabs />
 

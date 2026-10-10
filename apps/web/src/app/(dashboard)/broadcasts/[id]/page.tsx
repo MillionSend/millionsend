@@ -222,11 +222,11 @@ export default function BroadcastDetailPage() {
       ) : null}
 
       <div
-        className="ms-meta-grid"
+        className="ms-meta-grid ms-stat-strip"
         style={{
           display: "grid",
           // Seven stats wrap by content rather than crush at laptop widths; the
-          // narrow-screen rules still force two and one columns.
+          // narrow-screen rules still force two columns.
           gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
           gap: 22,
           padding: "20px 0",

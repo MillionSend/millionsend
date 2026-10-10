@@ -36,8 +36,8 @@ export function SearchBox({
 
   return (
     // Search takes whatever the row has left, so the fixed-width selects end
-    // flush with the table's right edge.
-    <span style={{ flex: "1 1 160px", minWidth: 0 }}>
+    // flush with the table's right edge; below 200px they wrap instead.
+    <span style={{ flex: "1 1 200px", minWidth: 0 }}>
       <input
         ref={ref}
         className="ms-input"

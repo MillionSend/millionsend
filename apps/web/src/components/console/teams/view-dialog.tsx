@@ -6,6 +6,7 @@ import {
 } from "@millionsend/core/support-view-reasons";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { Breakable } from "@/components/breakable";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
@@ -173,7 +174,10 @@ export function ViewDialog({
                 gap: 8,
               }}
             >
-              {t("codeSent", { email: step.to, minutes: step.minutes })}
+              {/* One flex item: bare, each text run and <wbr> would sit a gap apart. */}
+              <span>
+                <Breakable text={t("codeSent", { email: step.to, minutes: step.minutes })} />
+              </span>
               <button
                 type="button"
                 className="ms-btn ms-btn-ghost ms-btn-sm"

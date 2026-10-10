@@ -26,20 +26,24 @@ import { type BroadcastStatus, PacingSteps, PILL_VARIANT, StatusPill } from "./p
 
 // Fixed layout keeps the percentage column shares; the min width makes the
 // wrapper scroll on narrow screens instead of squeezing nowrap cells together.
-const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 640 };
+// 880px keeps the name about 180px once the date column takes its fixed
+// width (components.css, .ms-col-date) below 1200px.
+const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 880 };
 
 function BroadcastsHead() {
   const t = useTranslations("broadcasts");
   return (
     <thead>
       <tr>
-        <th style={{ width: "30%" }}>{t("list.name")}</th>
+        <th className="ms-col-lead" style={{ width: "30%" }}>
+          {t("list.name")}
+        </th>
         <th style={{ width: "13%" }}>{t("list.status")}</th>
         <th style={{ width: "20%" }}>{t("list.targeting")}</th>
         <th className="right" style={{ width: "13%" }}>
           {t("list.recipients")}
         </th>
-        <th className="right">{t("list.created")}</th>
+        <th className="right ms-col-date">{t("list.created")}</th>
         <th className="right" style={{ width: 44 }} />
       </tr>
     </thead>
@@ -155,12 +159,8 @@ export default function BroadcastsPage() {
     <>
       <PageHeader
         title={t("list.title")}
-        actions={
-          <>
-            <NewBroadcastButton />
-            <ResourceApiButton resource="broadcasts" />
-          </>
-        }
+        actions={<NewBroadcastButton />}
+        menu={<ResourceApiButton resource="broadcasts" />}
       />
 
       {query.isPending ? (
@@ -253,7 +253,7 @@ export default function BroadcastsPage() {
                         <StatusPill status={status} />
                       )}
                     </td>
-                    <td>{row.segmentName ?? t("composer.segmentNone")}</td>
+                    <td className="ms-cell-clip">{row.segmentName ?? t("composer.segmentNone")}</td>
                     <td className="right ms-digits">
                       {status === "sending" && row.sentCount !== null ? (
                         <>

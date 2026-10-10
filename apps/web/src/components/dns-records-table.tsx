@@ -110,8 +110,11 @@ function RecordsTable({
   return (
     /* tableLayout fixed so the pill cells can end-ellipsize long values; the
        min width makes the wrapper scroll on phones instead of collapsing the
-       Value column to nothing. */
-    <Table className="ms-mono dense" style={{ fontSize: 13, tableLayout: "fixed", minWidth: 720 }}>
+       Value column to nothing, and the Priority column gets its own room. */
+    <Table
+      className="ms-mono dense"
+      style={{ fontSize: 13, tableLayout: "fixed", minWidth: showPriority ? 820 : 720 }}
+    >
       <thead>
         <tr className="ms-mono">
           <th style={{ width: 64 }}>{t("detail.columns.type")}</th>
@@ -157,7 +160,7 @@ export function DnsRecordsTable({
 }) {
   const t = useTranslations("domains");
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       {GROUPS.map((group) => {
         const rows = records.filter((r) => r.group === group);
         const showPriority = rows.some((r) => r.priority !== undefined);
@@ -257,7 +260,7 @@ export function DnsRecordsTable({
 export function DnsRecordsTableSkeleton({ showStatus = false }: { showStatus?: boolean }) {
   const t = useTranslations("domains");
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       {GROUPS.filter((group) => GROUP_ROWS[group] > 0).map((group) => (
         <div key={group} style={{ maxWidth: 1000 }}>
           <p className="ms-microlabel" style={{ margin: "0 0 8px" }}>
