@@ -192,7 +192,8 @@ describe("the View as owner dialog", () => {
     const html = render({ sent: true, to: "op@example.com", minutes: 10 });
     expect(html).toContain("Code from your email");
     expect(html).toContain('autoComplete="one-time-code"');
-    expect(html).toContain("Sent to op@example.com. It works once, for 10 minutes.");
+    // A narrow dialog breaks the address after its "@" and dots, never mid-label.
+    expect(html).toContain("Sent to op@<wbr/>example.<wbr/>com. It works once, for 10 minutes.");
     expect(html).toContain("Send a new code");
     expect(html).toContain("Start session · 30 min");
   });
