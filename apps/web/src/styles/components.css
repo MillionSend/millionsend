@@ -2771,13 +2771,16 @@ summary:focus-visible,
 /* Touch: iOS Safari zooms the page into a text field under 16px when it takes
    focus, so on touch screens every text field (and the Select trigger, which
    reads as one) runs at the touch input size; a code editor's highlight layers
-   follow its textarea so the glyphs stay aligned. Desktop keeps 14px.
-   !important beats the inline sizes some fields carry. */
+   follow its textarea so the glyphs stay aligned. The email editor's body is
+   a field too, and the size iOS reads is its root's: its paragraphs and
+   headings keep their own. Desktop keeps 14px. !important beats the inline
+   sizes some fields carry. */
 @media (pointer: coarse) {
   .ms-input,
   textarea,
   input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
-  .ms-code-editor-hl {
+  .ms-code-editor-hl,
+  .ms-maily .ProseMirror {
     font-size: var(--ms-fs-input-touch) !important;
   }
 }

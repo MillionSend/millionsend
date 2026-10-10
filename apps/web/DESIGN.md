@@ -144,10 +144,10 @@ section of `components.css`; every rule above it holds at every width.
   containers, anything focused programmatically via `tabindex="-1"` — gets
   `outline: none`. No browser-blue outline anywhere, ever.
 - **Text fields on touch screens:** under `(pointer: coarse)` every text
-  input, textarea and the `<Select>` trigger runs at 16px
-  (`--ms-fs-input-touch`), the only size outside the type scale: iOS Safari
-  zooms the page into any field under 16px when it takes focus. Desktop
-  keeps 14px.
+  input, textarea, the `<Select>` trigger and the email editor's body runs at
+  16px (`--ms-fs-input-touch`), the only size outside the type scale: iOS
+  Safari zooms the page into any field under 16px when it takes focus.
+  Desktop keeps 14px.
 - **Select:** never render native `<select>`. Use `<Select>` from
   `src/components/select.tsx` — compact `.ms-input` trigger with a `.ms-chev`
   chevron, `.ms-menu` listbox popover, built-in search when there are more
