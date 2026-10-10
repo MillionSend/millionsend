@@ -2,11 +2,15 @@ import { oauthProvider } from "@better-auth/oauth-provider";
 import { accountEmailFrom, env, isCloudDeployment, signupOpen } from "@millionsend/config";
 import {
   ALL_TEAMS_GRANT,
+  CUSTOMER_TEXT_MAX,
   enrollSystemContact,
+  fillTemplate,
   findSenderDomainOwner,
   isLoopbackUrl,
+  isPlainName,
   MCP_SCOPES,
   removeSystemContact,
+  stripInvisible,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
 import { type BetterAuthPlugin, betterAuth } from "better-auth";
@@ -19,6 +23,8 @@ import { headers } from "next/headers";
 import { mcpResourceUrl, resolveBaseUrl } from "@/lib/api-base-url";
 import { httpOrigin } from "@/lib/http-url";
 import { isAppLocale, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE } from "@/lib/locale-cookie";
+import enCommon from "../../messages/en/common.json";
+import ptBRCommon from "../../messages/pt-BR/common.json";
 import { accountMailLocale, localeFromHeaders } from "./locale";
 import { getActiveMembership, listMemberships } from "./membership";
 import { enqueueRecipientErase } from "./queue";
@@ -59,8 +65,24 @@ const CLIENT_LINK_FIELDS = ["client_uri", "logo_uri", "tos_uri", "policy_uri"] a
  * read as something it is not.
  */
 const MAX_REGISTRATION_JSON = 16 * 1024;
-const MAX_CLIENT_NAME = 64;
-const INVISIBLE_OR_CONTROL = /[\p{Cc}\p{Cf}]/gu;
+
+const NAME_RULE = { en: enCommon.nameRule, "pt-BR": ptBRCommon.nameRule } as const;
+
+/**
+ * Sign-up and the profile endpoint store the display name that system mail
+ * prints, so it must be a plain name (isPlainName), refused in the
+ * requester's language.
+ */
+function assertPlainName(body: unknown, headers: Headers | undefined): void {
+  const name = (body as { name?: unknown } | undefined)?.name;
+  if (typeof name !== "string" || isPlainName(name)) return;
+  throw new APIError("BAD_REQUEST", {
+    code: "INVALID_NAME",
+    message: fillTemplate(NAME_RULE[localeFromHeaders(headers)], {
+      max: String(CUSTOMER_TEXT_MAX),
+    }),
+  });
+}
 
 /**
  * Refuses account deletion while the user is the only owner of any team:
@@ -542,6 +564,11 @@ export function createAuth(
         // still guards the paths that create users elsewhere (social sign-in).
         if (ctx.path === "/sign-up/email") {
           await assertSignupAllowed(db, signupOpen());
+          assertPlainName(ctx.body, ctx.headers);
+          return;
+        }
+        if (ctx.path === "/update-user") {
+          assertPlainName(ctx.body, ctx.headers);
           return;
         }
         if (ctx.path !== "/oauth2/register") return;
@@ -554,8 +581,8 @@ export function createAuth(
           });
         }
         if (typeof body.client_name === "string") {
-          body.client_name = Array.from(body.client_name.replace(INVISIBLE_OR_CONTROL, ""))
-            .slice(0, MAX_CLIENT_NAME)
+          body.client_name = Array.from(stripInvisible(body.client_name))
+            .slice(0, CUSTOMER_TEXT_MAX)
             .join("")
             .trim();
         }

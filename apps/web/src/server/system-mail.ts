@@ -11,7 +11,7 @@ import {
   accountMailCard,
   accountMailPhrase,
   buildAccountMail,
-  fillTemplate as fill,
+  fillMailTemplate as fill,
   type MailLocale,
   type SystemMailMessage,
   sendSystemMail,
@@ -175,14 +175,13 @@ export function buildInvitationEmail(input: {
     days: String(input.expiresInDays),
     email: input.to,
   };
-  const subject = fill(m.subject, values);
   const body = fill(m.body, values);
   const expiry = fill(m.expiry, values);
   const noAccount = fill(m.noAccount, values);
   return {
     from: notificationsEmailFrom() ?? "",
     to: input.to,
-    subject,
+    subject: m.subject,
     ...accountMailCard({
       paragraphs: [body],
       button: m.button,
