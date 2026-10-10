@@ -1,4 +1,12 @@
 /* Base surface + canonical helper classes (verbatim from source tokens.css). */
+/* iOS Safari scales up text it judges small for its block (text autosizing):
+   in a list that scrolls sideways, a row with a long value would render at
+   nearly twice the size of the rows around it. Safari reads only the prefixed
+   property, and the build's autoprefixer drops a prefixed copy that sits
+   beside the unprefixed one, so the prefixed one stands alone. */
+html {
+  -webkit-text-size-adjust: 100%;
+}
 .ms-root,
 body.ms {
   /* margin reset lives here because the canvas sets it at page level —
