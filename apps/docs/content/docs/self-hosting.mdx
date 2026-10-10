@@ -875,13 +875,15 @@ policy is a setting and can be switched off.
 
 **The review hold.** When one sampled message of a New-tier team is judged
 abuse at the hold score (90 by default) as credential phishing, brand
-impersonation or payment redirection, or with an impersonation,
-secret-harvesting or off-domain-lure finding, the team is suspended at once
+impersonation or payment redirection, or with an impersonation or
+secret-harvesting finding, the team is suspended at once
 with the reason `review`: the API answers `403 sending_paused`, SMTP `550`,
 queued mail and broadcasts park, and with `SES_TENANTS` on its SES tenant is
 disabled. A run of lower verdicts holds the team too: by default the fifth
-such verdict from 80 within seven days of the team's first send. The operator
-is emailed at once, with the rule that held the team; the owner is not, and
+such verdict from 80 within seven days of the team's first send. A link to
+another domain counts toward neither rule on its own: legitimate mail often
+links elsewhere. The operator is emailed at once, with the rule that held the
+team; the owner is not, and
 sees a neutral "Sending is paused pending review" notice. The team stays on Trust &
 safety with its flag open until the operator decides on its review page:
 **Release hold** reinstates it, the parked mail goes out, a broadcast pause
