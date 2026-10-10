@@ -11,6 +11,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useId, useState } from "react";
+import { DotParts } from "@/components/dot-parts";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
@@ -316,7 +317,7 @@ function RevealDialog({
           </div>
           <div>
             <div className="ms-microlabel">{t("recorded")}</div>
-            {t("recordedValue")}
+            <DotParts text={t("recordedValue")} />
           </div>
         </div>
         <p style={{ margin: 0, fontSize: 12.5, color: "var(--ms-muted)" }}>{t("note")}</p>
