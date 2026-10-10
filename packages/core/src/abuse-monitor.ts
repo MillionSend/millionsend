@@ -42,18 +42,16 @@ export const MONITOR_PAUSE_VERDICT_WINDOW_MS = DAY_MS;
 export const MONITOR_ALERT_INTERVAL_MS = DAY_MS;
 /**
  * The phishing-type verdicts the review hold acts on: the category the judge
- * chose, or a lure it saw. Any other abuse stays alert-only.
+ * chose, or a reason it gave. Any other abuse stays alert-only. Not
+ * off_domain_lure: a link elsewhere is common in legitimate mail, so it
+ * counts only beside a phishing category or reason.
  */
 export const MONITOR_HOLD_CATEGORIES = [
   "phishing_credentials",
   "brand_impersonation",
   "payment_redirect",
 ] as const;
-export const MONITOR_HOLD_REASONS = [
-  "impersonation",
-  "harvests_secrets",
-  "off_domain_lure",
-] as const;
+export const MONITOR_HOLD_REASONS = ["impersonation", "harvests_secrets"] as const;
 /**
  * The repeat hold counts the verdicts of a team's first week of sending,
  * from its first send: a phisher who signs up and waits a week before

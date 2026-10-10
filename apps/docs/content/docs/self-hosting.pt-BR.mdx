@@ -884,13 +884,15 @@ uma configuração e pode ser desligada.
 **A retenção para revisão.** Quando uma mensagem amostrada de uma equipe no
 nível Nova é julgada abuso na pontuação de retenção (90 por padrão) como
 phishing de credenciais, falsificação de marca ou desvio de pagamento, ou com
-uma constatação de falsificação, coleta de segredos ou isca fora do domínio, a
-equipe é suspensa na hora com o motivo `review`: a API responde
+uma constatação de falsificação ou coleta de segredos, a equipe é suspensa na
+hora com o motivo `review`: a API responde
 `403 sending_paused`, o SMTP `550`, o e-mail na fila e os broadcasts ficam
 estacionados e, com `SES_TENANTS` ligado, o tenant do SES dela é desativado.
 Uma sequência de veredictos mais baixos também retém a equipe: por padrão, o
 quinto desses veredictos a partir de 80 em até sete dias do primeiro envio da
-equipe. O operador é avisado por e-mail na hora, com a regra que reteve a
+equipe. Um link para outro domínio, sozinho, não conta para nenhuma das duas
+regras: e-mail legítimo costuma ter links para outros lugares. O operador é
+avisado por e-mail na hora, com a regra que reteve a
 equipe; o proprietário não, e vê um aviso neutro de "envio pausado aguardando
 revisão". A equipe fica em Confiança e
 segurança com a sinalização aberta até o operador decidir na página de

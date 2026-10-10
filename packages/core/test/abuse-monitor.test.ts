@@ -747,7 +747,7 @@ describe("the review hold", () => {
       await applyJudgedSample(db, S, { teamId, score: 99, now: NOW }).then((o) => o.held),
     ).toBeNull();
     expect((await team(teamId))?.suspendedAt).toBeNull();
-    // The line is a setting; a lure reason alone is enough.
+    // The line is a setting; a phishing reason alone is enough.
     expect(
       await held(
         85,
@@ -878,6 +878,42 @@ describe("the review hold", () => {
     });
     expect(await flags(teamId)).toMatchObject([{ reason: "monitor", status: "open" }]);
     expect(await audits(teamId)).toMatchObject([{ action: "team.held_for_review" }]);
+  });
+
+  it("counts a link to another domain only beside a phishing category or reason", async () => {
+    // An agency mailing for several brands from its own subdomains: every
+    // link to a client's site reads as off its domain.
+    const OTHER = {
+      verdict: "abuse" as const,
+      categories: ["other_abuse"],
+      reasons: ["off_domain_lure"],
+    };
+    const BULK = {
+      verdict: "abuse" as const,
+      categories: ["unsolicited_bulk"],
+      reasons: ["off_domain_lure", "unsolicited_bulk"],
+    };
+    /** The holds of one new team judged once at 96 and another five times at 85. */
+    const holds = async (slug: string, mark = (v: typeof OTHER) => v) => {
+      const once = await newTeam(`${slug}-once`);
+      const run = await newTeam(`${slug}-run`);
+      const rules = [await judge(once, 96, mark(OTHER), minute(1))];
+      for (const [i, v] of [OTHER, BULK, OTHER, BULK, OTHER].entries()) {
+        rules.push(await judge(run, 85, mark(v), minute(i + 1)));
+      }
+      return rules.filter((r) => r !== null);
+    };
+    expect(await holds("link")).toEqual([]);
+    const held = [{ rule: "score" }, { rule: "repeat", verdicts: 5 }];
+    expect(
+      await holds("link-phishing", (v) => ({ ...v, categories: ["phishing_credentials"] })),
+    ).toEqual(held);
+    expect(
+      await holds("link-impersonation", (v) => ({
+        ...v,
+        reasons: [...v.reasons, "impersonation"],
+      })),
+    ).toEqual(held);
   });
 
   it("counts only the verdicts of the team's first seven days of sending, from its first send", async () => {
