@@ -243,8 +243,7 @@ export function OnboardingSteps({
 
   const snippetBase = {
     apiUrl,
-    // The shared sender runs as written; otherwise the team's own domain.
-    from: sender ?? (verifiedDomain ? `onboarding@${verifiedDomain}` : t("step2.fromPlaceholder")),
+    from: verifiedDomain ? `onboarding@${verifiedDomain}` : t("step2.fromPlaceholder"),
     to: userEmail,
     subject: t("step2.subject"),
     html: t("step2.html"),
@@ -486,19 +485,21 @@ export function OnboardingSteps({
             {verifying || sendFirst.isPending ? t("step2.sending") : t("step2.sendCta")}
           </button>
           {turnstile.slot}
-          {sendFirst.isSuccess ? (
+          {sendFirst.data?.sent ? (
             <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>
-              {t("step2.sentTo", { to: userEmail })}
+              {t("step2.sentTo", { to: sendFirst.data.to })}
             </span>
+          ) : sendFirst.data ? (
+            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>{t("step2.alreadySent")}</span>
           ) : captchaFailed || sendFirst.error?.data?.code === "FORBIDDEN" ? (
             <span style={{ fontSize: 13, color: "var(--ms-danger)" }}>
               {t("step2.captchaFailed")}
             </span>
-          ) : sendFirst.error?.data?.code === "TOO_MANY_REQUESTS" ? (
-            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>{t("step2.sendLimited")}</span>
           ) : sendFirst.isError ? (
             <span style={{ fontSize: 13, color: "var(--ms-danger)" }}>{t("step2.sendError")}</span>
-          ) : null}
+          ) : (
+            <span style={{ fontSize: 13, color: "var(--ms-muted)" }}>{t("step2.sendHint")}</span>
+          )}
         </div>
       ) : null}
     </div>

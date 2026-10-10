@@ -1,16 +1,20 @@
 import { createHmac, hkdfSync } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import type { JudgeVerdict } from "./abuse-judge/types.js";
 import { recordAudit } from "./audit.js";
 import { MONITOR_SETTING_DEFAULTS, type MonitorSettings } from "./monitor-settings.js";
+import { fetchTeamStanding, suspendTeam } from "./team-standing.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
  * The content monitor's sampling and risk model. After SES accepts a
  * message a keyed draw decides whether the judge sees it; verdicts decay
  * into a per-team risk that opens the monitor flag, alerts the operator and,
- * for a new team, pauses broadcasts. Every function here is safe to skip:
+ * for a new team, pauses broadcasts; a confident phishing verdict on a new
+ * team, or a run of slightly less confident ones in its first week, holds
+ * all of its sending for review. Every function here is safe to skip:
  * nothing on the send path waits for a verdict.
  */
 
@@ -36,6 +40,26 @@ export const MONITOR_FLAGGED_RATE_MULTIPLIER = 4;
 export const MONITOR_PAUSE_VERDICT_SCORE = 90;
 export const MONITOR_PAUSE_VERDICT_WINDOW_MS = DAY_MS;
 export const MONITOR_ALERT_INTERVAL_MS = DAY_MS;
+/**
+ * The phishing-type verdicts the review hold acts on: the category the judge
+ * chose, or a lure it saw. Any other abuse stays alert-only.
+ */
+export const MONITOR_HOLD_CATEGORIES = [
+  "phishing_credentials",
+  "brand_impersonation",
+  "payment_redirect",
+] as const;
+export const MONITOR_HOLD_REASONS = [
+  "impersonation",
+  "harvests_secrets",
+  "off_domain_lure",
+] as const;
+/**
+ * The repeat hold counts the verdicts of a team's first week of sending,
+ * from its first send: a phisher who signs up and waits a week before
+ * sending is still covered. A team that has not sent has nothing to count.
+ */
+export const MONITOR_HOLD_REPEAT_DAYS = 7;
 /** Samples are metadata on the probes' clock. */
 export const MONITOR_SAMPLE_RETENTION_DAYS = 90;
 /** A pending sample older than this had its job lost; pg-boss's last retry lands well inside it. */
@@ -290,6 +314,7 @@ const EMPTY_ROW = (teamId: string): TeamMonitorRow => ({
   overrideUntil: null,
   broadcastsPausedAt: null,
   broadcastsResumedAt: null,
+  heldAt: null,
   alertedAt: null,
   updatedAt: new Date(0),
 });
@@ -461,19 +486,88 @@ export interface VerdictOutcome {
   alert: boolean;
   /** Broadcasts were paused now by the policy. */
   paused: boolean;
+  /** The team was suspended for review now by the hold policy, under this rule. */
+  held: HoldRule | null;
+}
+
+/** One verdict from `holdScore`, or the `verdicts`th from `holdRepeatScore` in the first week of sending. */
+export type HoldRule = { rule: "score" } | { rule: "repeat"; verdicts: number };
+
+/** A verdict as the judge returns it or as its sample stores it. */
+interface HoldVerdictFields {
+  score: number | null;
+  verdict: string | null;
+  categories: readonly string[] | null;
+  reasons: readonly string[] | null;
+}
+
+/** One verdict is a phishing-type abuse call from `holdScore`. */
+export function isHoldVerdict(v: HoldVerdictFields, holdScore: number): boolean {
+  return (
+    v.verdict === "abuse" &&
+    v.score !== null &&
+    v.score >= holdScore &&
+    ((v.categories ?? []).some((c) => (MONITOR_HOLD_CATEGORIES as readonly string[]).includes(c)) ||
+      (v.reasons ?? []).some((r) => (MONITOR_HOLD_REASONS as readonly string[]).includes(r)))
+  );
+}
+
+/**
+ * The repeat hold: this verdict is at least the `holdRepeatCount`th
+ * phishing-type one from `holdRepeatScore` judged in the team's first week
+ * of sending. The stored verdicts include this one: the judge writes it in
+ * the transaction that folds it.
+ */
+async function repeatHold(
+  db: Db,
+  s: MonitorSettings,
+  row: Pick<TeamMonitorRow, "teamId" | "firstSendAt">,
+  verdict: HoldVerdictFields,
+  now: Date,
+): Promise<HoldRule | null> {
+  if (s.holdRepeatCount === 0 || !row.firstSendAt || !isHoldVerdict(verdict, s.holdRepeatScore)) {
+    return null;
+  }
+  const until = new Date(row.firstSendAt.getTime() + MONITOR_HOLD_REPEAT_DAYS * DAY_MS);
+  if (now >= until) return null;
+  const judged = await db
+    .select({
+      score: ms.score,
+      verdict: ms.verdict,
+      categories: ms.categories,
+      reasons: ms.reasons,
+    })
+    .from(ms)
+    .where(
+      and(
+        eq(ms.teamId, row.teamId),
+        eq(ms.status, "judged"),
+        gte(ms.score, s.holdRepeatScore),
+        lt(ms.judgedAt, until),
+      ),
+    );
+  const verdicts = judged.filter((v) => isHoldVerdict(v, s.holdRepeatScore)).length;
+  return verdicts >= s.holdRepeatCount ? { rule: "repeat", verdicts } : null;
 }
 
 /**
  * A judged sample's score folded into the team's risk, then the thresholds.
  * The flag itself is the safety cron's (it reads the risk off the
- * standings); this writes the alert stamp and, for a new team under the
- * pause policy, the pause: the monitor's own column and the operator hold
- * every send surface already honours.
+ * standings); this writes the alert stamp and, for a new team, the policies:
+ * the broadcast pause (the monitor's own column and the operator hold every
+ * send surface already honours) and, on a confident phishing verdict or the
+ * repeat hold's count of them, the review hold (a suspension, with the flag
+ * that keeps it on the list).
  */
 export async function applyJudgedSample(
   db: Db,
   s: MonitorSettings,
-  input: { teamId: string; score: number; now?: Date },
+  input: {
+    teamId: string;
+    score: number;
+    verdict?: Pick<JudgeVerdict, "verdict" | "categories" | "reasons"> | undefined;
+    now?: Date;
+  },
 ): Promise<VerdictOutcome> {
   const now = input.now ?? new Date();
   // Judge lanes run side by side; the team's fold is serialised on an
@@ -492,6 +586,40 @@ export async function applyJudgedSample(
         set: { ...next, riskUpdatedAt: now, updatedAt: now },
       });
     const tier = monitorTier(await loadMonitorState(t, { ...row, risk: next.risk }, now), s, now);
+    let held: HoldRule | null = null;
+    const verdict = input.verdict && { ...input.verdict, score: input.score };
+    const rule =
+      s.autoHold && tier === "new" && row.heldAt === null && verdict
+        ? isHoldVerdict(verdict, s.holdScore)
+          ? ({ rule: "score" } as const)
+          : await repeatHold(t, s, row, verdict, now)
+        : null;
+    if (rule) {
+      // A standing suspension is the operator's call and stays as it is.
+      const suspended = await suspendTeam(t, {
+        teamId: input.teamId,
+        reason: "review",
+        now,
+        ifNotSuspended: true,
+      });
+      if (suspended) {
+        held = rule;
+        await t.update(tm).set({ heldAt: now }).where(eq(tm.teamId, input.teamId));
+        const samples = await monitorSamplesByTeam(t, [input.teamId], now);
+        await t
+          .insert(schema.teamFlags)
+          .values({
+            teamId: input.teamId,
+            reason: "monitor",
+            detail: {
+              risk: Number(next.risk.toFixed(3)),
+              samples: samples.get(input.teamId) ?? 1,
+            },
+            openedAt: now,
+          })
+          .onConflictDoNothing();
+      }
+    }
     let alert = false;
     if (next.risk >= s.alertRisk) {
       const stamped = await t
@@ -510,11 +638,18 @@ export async function applyJudgedSample(
       alert = stamped.length > 0;
     }
     let paused = false;
+    // A team held for review is never paused by the policy, during the hold
+    // or after its release: the backlog sampled before the hold is judged
+    // after it and keeps the risk past the line, so a pause would outlive the
+    // release and park the broadcasts the release let go.
     if (
       s.autoPause &&
       tier === "new" &&
       next.risk >= s.pauseRisk &&
-      row.broadcastsPausedAt === null
+      row.broadcastsPausedAt === null &&
+      held === null &&
+      row.heldAt === null &&
+      (await fetchTeamStanding(t, input.teamId))?.suspended?.reason !== "review"
     ) {
       // Only verdicts since the operator last resumed count: a reviewed
       // episode's evidence must not pause the team again on its own.
@@ -538,7 +673,7 @@ export async function applyJudgedSample(
       if ((hot?.n ?? 0) > 0 || input.score >= MONITOR_PAUSE_VERDICT_SCORE) {
         // A team the operator already holds is theirs; the policy only
         // stamps a team nothing else holds, so its Resume lifts its own hold.
-        const held = await t
+        const stamped = await t
           .update(schema.teams)
           .set({ broadcastsPausedByOperatorAt: now })
           .where(
@@ -548,14 +683,22 @@ export async function applyJudgedSample(
             ),
           )
           .returning({ id: schema.teams.id });
-        if (held.length > 0) {
+        if (stamped.length > 0) {
           await t.update(tm).set({ broadcastsPausedAt: now }).where(eq(tm.teamId, input.teamId));
           paused = true;
         }
       }
     }
-    return { risk: next.risk, tier, alert, paused };
+    return { risk: next.risk, tier, alert, paused, held };
   });
+  if (outcome.held) {
+    await recordAudit(db, {
+      teamId: input.teamId,
+      actor: "system",
+      action: "team.held_for_review",
+      target: { type: "team", id: input.teamId },
+    });
+  }
   if (outcome.paused) {
     await recordAudit(db, {
       teamId: input.teamId,

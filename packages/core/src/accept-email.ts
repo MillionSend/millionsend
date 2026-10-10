@@ -4,8 +4,9 @@ import { schema } from "@millionsend/db";
 import { and, count, eq } from "drizzle-orm";
 import { type EmailAttachment, encryptEmailBody, sealAttachments } from "./crypto/envelope.js";
 import type { Keyring } from "./crypto/keyring.js";
-import { type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
-import { quotaChargeAt, reserveQuota } from "./quota.js";
+import { admitWarmup } from "./domain-warmup.js";
+import { monthlyCapacity, type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
+import { quotaChargeAt, releaseQuota, reserveQuota } from "./quota.js";
 import { parseSingleSender } from "./sender-address.js";
 import { extractAddrSpec, findSuppressed, normalizeAddress } from "./suppressions.js";
 import { type SendRefusal, sendRefusal } from "./team-standing.js";
@@ -26,61 +27,6 @@ export type SenderDomainVerdict =
   | { ok: true; domainId: string; region: string; fromDomain: string; address: string }
   | { ok: false; reason: "invalid_sender"; fromDomain: null }
   | { ok: false; reason: "unverified_domain"; fromDomain: string };
-
-/** True when `from` is the instance's shared onboarding sender (same addr-spec). */
-export function isOnboardingSender(from: string, onboardingFrom: string | undefined): boolean {
-  if (!onboardingFrom) return false;
-  const sender = parseSingleSender(from);
-  const platform = parseSingleSender(onboardingFrom);
-  return sender !== null && platform !== null && sender.address === platform.address;
-}
-
-export type OnboardingSenderVerdict =
-  | { ok: true; domainId: null; address: string }
-  | { ok: false; reason: "recipient_not_member" | "recipient_not_verified" };
-
-/**
- * The instance's shared onboarding sender (ONBOARDING_EMAIL_FROM): any team
- * may send from it without a verified domain, but only to its own members'
- * inboxes — so the first-email snippet runs as written and the shared
- * address can never reach a stranger. Verified members only where the
- * instance verifies: an account is created with any address and no proof of
- * ownership, so an unverified member's inbox may belong to someone else, and
- * the body is the caller's.
- * Null when `from` is not that sender; callers then fall through to
- * verifySenderDomain.
- */
-export async function verifyOnboardingSender(
-  db: Db,
-  teamId: string,
-  from: string,
-  recipients: readonly string[],
-  onboardingFrom: string | undefined,
-  opts: {
-    /**
-     * Whether members must have verified their address. True wherever the
-     * instance verifies (accountMailDeliverable); an instance that cannot
-     * send the link has nobody verified, and its members stay reachable.
-     */
-    requireVerified: boolean;
-  } = { requireVerified: true },
-): Promise<OnboardingSenderVerdict | null> {
-  if (!isOnboardingSender(from, onboardingFrom)) return null;
-  const members = await db
-    .select({ email: schema.user.email, verified: schema.user.emailVerified })
-    .from(schema.teamMembers)
-    .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
-    .where(eq(schema.teamMembers.teamId, teamId));
-  const allowed = new Map(members.map((m) => [normalizeAddress(m.email), m.verified]));
-  for (const r of recipients) {
-    const address = extractAddrSpec(r);
-    const verified = address === null ? undefined : allowed.get(normalizeAddress(address));
-    if (verified === undefined) return { ok: false, reason: "recipient_not_member" };
-    if (opts.requireVerified && !verified) return { ok: false, reason: "recipient_not_verified" };
-  }
-  // parseSingleSender succeeded inside isOnboardingSender.
-  return { ok: true, domainId: null, address: parseSingleSender(from)?.address ?? "" };
-}
 
 /**
  * Sender domain must be one of the team's verified domains — otherwise any
@@ -149,7 +95,7 @@ export interface AcceptEmailPayload {
   attachments?: EmailAttachment[] | undefined;
   scheduledAt?: Date | undefined;
   /** From verifySenderDomain — callers verify the sender before accepting;
-   * null only for the shared onboarding sender (verifyOnboardingSender). */
+   * null only for the dashboard's onboarding email from ONBOARDING_EMAIL_FROM. */
   domainId: string | null;
   /** Topic-scoped send; callers validate team ownership before accepting. */
   topicId?: string | undefined;
@@ -173,6 +119,53 @@ export function estimateAttachmentBytes(
 export const QUOTA_BACKLOG_DAYS = 3;
 
 /**
+ * Parked mail a team may hold behind a domain's warm-up: QUOTA_BACKLOG_DAYS
+ * of what its plan would send in a day (a monthly volume spread over 30),
+ * or of the warm-up cap where that is more. The plan's own volume, not the
+ * cap, so a new domain's burst is held rather than refused.
+ */
+function warmupBacklogLimit(quota: TeamQuota, cap: number): number {
+  const planDay = quota.kind === "none" ? 0 : monthlyCapacity(quota) / 30;
+  return Math.ceil(QUOTA_BACKLOG_DAYS * Math.max(cap, planDay));
+}
+
+async function countParked(db: Db, teamId: string): Promise<number> {
+  const [parked] = await db
+    .select({ n: count() })
+    .from(schema.emails)
+    .where(and(eq(schema.emails.teamId, teamId), eq(schema.emails.latestStatus, "queued_quota")));
+  return parked?.n ?? 0;
+}
+
+/**
+ * The new-domain warm-up on one send its plan already admitted, inside the
+ * accept transaction: "send" when the sending domain's cap and the team's
+ * shared warm-up limit for the delivery day both have room (now reserved);
+ * "park" when either has none, the plan's units handed back so the row
+ * parks as queued_quota with reason "warmup" and the drain charges them all
+ * again on release; "backlog_full" when the team already holds all the
+ * parked mail it may. Every accept surface enforces the warm-up through
+ * this one call.
+ */
+export async function enforceDomainWarmup(
+  tx: Db,
+  send: {
+    teamId: string;
+    domainId: string | null;
+    count: number;
+    quota: TeamQuota;
+    day: string;
+    at: Date;
+  },
+): Promise<"send" | "park" | "backlog_full"> {
+  const warmup = await admitWarmup(tx, send);
+  if (warmup.admitted) return "send";
+  await releaseQuota(tx, send);
+  const limit = warmupBacklogLimit(send.quota, warmup.cap.cap);
+  return (await countParked(tx, send.teamId)) >= limit ? "backlog_full" : "park";
+}
+
+/**
  * Distinct mailboxes an email reaches: what the daily quota charges, since
  * every recipient is one SES message and one unit of shared reputation.
  */
@@ -191,15 +184,22 @@ export type AcceptEmailResult =
       ok: true;
       id: string;
       parked: boolean;
-      /** Distinct mailboxes charged to the quota, and the UTC day they count against. */
+      /**
+       * Distinct mailboxes charged to the quota, the UTC day they count
+       * against, and the instant they count at: the delivery time, now for
+       * an immediate or backdated send.
+       */
       recipientCount: number;
       day: string;
+      at: Date;
       /** The cap the reservation ran against, for callers that reserve in bulk. */
       quota: TeamQuota;
     }
   | { ok: false; reason: "all_suppressed" }
   | { ok: false; reason: "attachments_too_large"; maxBytes: number }
   | { ok: false; reason: "quota_backlog_full" }
+  /** The sending domain's warm-up cap is spent and the team's parked backlog is full. */
+  | { ok: false; reason: "warmup_backlog_full" }
   /**
    * A monthly plan at its cap: the included volume with overage off, or the
    * hard cap past it with overage on. Refused outright, nothing parks for a month.
@@ -299,9 +299,9 @@ export async function acceptEmail(
   // commit atomically (the quota contract). Over a DAILY cap mail is parked
   // as queued_quota — still accepted, drained after the midnight rollover;
   // a scheduled send is charged to its delivery day, so a team cannot stack
-  // many days of the cap onto one future instant (quotaChargeAt: a past one
-  // is today). A monthly plan counts every accept against the current
-  // billing period, whenever it delivers.
+  // many days of the cap onto one future instant. A past scheduled_at sends
+  // now and counts now (quotaChargeAt). A monthly plan counts every accept
+  // against the current billing period, whenever it delivers.
   const deliveryAt = quotaChargeAt(payload.scheduledAt);
   const day = utcDay(deliveryAt);
   const runAccept = async (txDb: Db) => {
@@ -328,17 +328,26 @@ export async function acceptEmail(
           ? (quota.dailyCeiling ?? null)
           : null;
     if (!reservation.reserved && dayLimit !== null) {
-      const [parked] = await txDb
-        .select({ n: count() })
-        .from(schema.emails)
-        .where(
-          and(
-            eq(schema.emails.teamId, auth.teamId),
-            eq(schema.emails.latestStatus, "queued_quota"),
-          ),
-        );
-      if ((parked?.n ?? 0) >= dayLimit * QUOTA_BACKLOG_DAYS) return "quota_backlog_full" as const;
+      if ((await countParked(txDb, auth.teamId)) >= dayLimit * QUOTA_BACKLOG_DAYS) {
+        return "quota_backlog_full" as const;
+      }
     }
+    // The plan said yes; the sending domain's warm-up has the last word. A
+    // deferred batch runs the same gate after its own reservation.
+    let parkReason: "warmup" | null = null;
+    if (reservation.reserved && opts.quota !== "deferred" && auth.billing !== "uncapped") {
+      const warmup = await enforceDomainWarmup(txDb, {
+        teamId: auth.teamId,
+        domainId: payload.domainId,
+        count: recipientCount,
+        quota,
+        day,
+        at: deliveryAt,
+      });
+      if (warmup === "backlog_full") return "warmup_backlog_full" as const;
+      if (warmup === "park") parkReason = "warmup";
+    }
+    const parked = !reservation.reserved || parkReason !== null;
     const [row] = await txDb
       .insert(schema.emails)
       .values({
@@ -356,7 +365,8 @@ export async function acceptEmail(
         headers: payload.headers ?? null,
         attachments: sealedAttachments,
         topicId: payload.topicId ?? null,
-        latestStatus: reservation.reserved ? "queued" : "queued_quota",
+        latestStatus: parked ? "queued_quota" : "queued",
+        parkReason,
         scheduledAt: payload.scheduledAt ?? null,
         bodyCiphertext: encrypted.ciphertext,
         bodyIv: encrypted.iv,
@@ -366,12 +376,14 @@ export async function acceptEmail(
       .returning({ id: schema.emails.id });
     if (!row) throw new Error("email insert returned no row");
     await opts.completeInTx?.(txDb, row.id);
-    return { id: row.id, parked: !reservation.reserved };
+    return { id: row.id, parked };
   };
   const accepted = opts.tx
     ? await runAccept(opts.tx)
     : await deps.db.transaction((tx) => runAccept(tx as unknown as Db));
-  if (accepted === "quota_backlog_full") return { ok: false, reason: "quota_backlog_full" };
+  if (accepted === "quota_backlog_full" || accepted === "warmup_backlog_full") {
+    return { ok: false, reason: accepted };
+  }
   if (accepted === "monthly_quota_exceeded") {
     return {
       ok: false,
@@ -396,5 +408,13 @@ export async function acceptEmail(
       console.error("email.send enqueue failed; reconcile sweep will recover", err);
     }
   }
-  return { ok: true, id: accepted.id, parked: accepted.parked, recipientCount, day, quota };
+  return {
+    ok: true,
+    id: accepted.id,
+    parked: accepted.parked,
+    recipientCount,
+    day,
+    at: deliveryAt,
+    quota,
+  };
 }

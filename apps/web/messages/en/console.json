@@ -432,6 +432,7 @@
       "open": "Open team",
       "view": "View as owner",
       "viewOff": "Off on this instance: SUPPORT_VIEW=on turns it on",
+      "viewSilent": "Not while the team is suspended for phishing or held for review",
       "limits": "Adjust limits",
       "plan": "Change plan",
       "pause": "Pause broadcasts",
@@ -445,6 +446,8 @@
       "pausedNotified": "Broadcasts paused for {team} · owner notified",
       "suspended": "{team} suspended · {reason}",
       "reinstated": "{team} reinstated",
+      "suspendedTenantFailed": "{team} suspended · SES did not disable its tenant in {regions}; retrying in the background",
+      "reinstatedTenantFailed": "{team} reinstated · SES did not re-enable its tenant in {regions}; retrying in the background",
       "limits": "Limits saved for {team}",
       "plan": "{team} · {from} → {to}",
       "error": "The action failed: {message}"
@@ -526,7 +529,7 @@
     },
     "reinstateDialog": {
       "title": "Reinstate {team}",
-      "lead": "Sends go out again at once; held broadcasts resume within 15 minutes. The owner is emailed unless the suspension was for phishing.",
+      "lead": "Sends go out again at once; held broadcasts resume within 15 minutes. The owner is emailed unless the suspension was for phishing or a review hold.",
       "confirm": "Reinstate team"
     },
     "viewDialog": {
@@ -547,6 +550,7 @@
         "support_view_live": "A support view is already live. Open the dashboard and end it from its banner before starting another.",
         "sign_in_again": "Starting a support view needs a recent sign-in. Sign out and back in, then start it again.",
         "own_team": "You are a member of this team; open it from the team switcher instead.",
+        "silent_suspension": "This team is suspended for phishing or held for review, so no support view can start.",
         "reference_required": "A ticket reference is required."
       }
     },
@@ -619,6 +623,8 @@
       "reopen": "Reopen",
       "suspend": "Suspend team",
       "reinstate": "Reinstate team",
+      "release": "Release hold",
+      "convert": "Suspend for phishing",
       "reveal": "Request content access",
       "clearTip": "Marks the flag reviewed and closes it, with an audit entry. Risk, sampling and any pause stay as they are. While the same trigger holds, the automatic check will not reopen it; if the trigger lapses and comes back, a new flag opens. Left alone, an automatic flag closes itself once its trigger is gone. A flag opened in the last 90 days keeps the team out of the Trusted tier either way.",
       "reopenTip": "Opens it again as a manual flag, which the automatic check never closes.",
@@ -635,6 +641,7 @@
       "proofNoFlag": "{plan} · {region} · {domains, plural, one {# domain} other {# domains}} · owner {owner}",
       "badges": {
         "suspended": "Suspended",
+        "heldForReview": "Held for review",
         "guardrailPaused": "Guardrail paused",
         "guardrailWarning": "Guardrail warning",
         "guardrailOk": "Guardrail ok",
@@ -753,6 +760,40 @@
           "unsolicited_bulk": "Reads as bulk mail to people who never opted in (spam-style promotion from a stranger) rather than opted-in marketing or cold B2B outreach. The model cannot see consent, so newsletters often land near this line.",
           "prompt_injection": "The text tries to tell a reviewer or model to change its verdict or ignore the policy."
         }
+      },
+      "warmup": {
+        "title": "Domain warm-up",
+        "subtitle": "Young sending domains send under a daily cap by registration age, and a team's warming domains share one daily limit, the highest of their caps; mail over either waits. Trust lifts the cap for the team or for one domain.",
+        "off": "Warm-up is off on this instance. Trust set here applies once it is on.",
+        "teamTrusted": "The team is trusted since {date}: none of its domains warm up.",
+        "trustTeam": "Trust team",
+        "untrustTeam": "Remove team trust",
+        "trustDomain": "Trust",
+        "untrustDomain": "Remove trust",
+        "cols": {
+          "domain": "Domain",
+          "registered": "Registered",
+          "today": "Today",
+          "trust": "Trust"
+        },
+        "registered": "{date} · {source}",
+        "sources": {
+          "rdap": "RDAP",
+          "whois": "WHOIS",
+          "ct": "first certificate",
+          "unknown": "unknown"
+        },
+        "unknownAge": "Unknown",
+        "notChecked": "Not looked up yet",
+        "today": "{used} of {cap} · full volume {date}",
+        "todayNoDate": "{used} of {cap}",
+        "pool": "Shared by the team's warming domains today: {used} of {cap}",
+        "full": "Full volume",
+        "trusted": "Trusted",
+        "toast": {
+          "trusted": "Warm-up lifted for {name}",
+          "untrusted": "Warm-up restored for {name}"
+        }
       }
     },
     "metric": {
@@ -797,14 +838,16 @@
         "tiers": "Tiers",
         "broadcasts": "Broadcasts",
         "escalation": "Escalation and caps",
-        "thresholds": "Thresholds and policy"
+        "thresholds": "Thresholds and policy",
+        "warmup": "New-domain warm-up"
       },
       "groupsSub": {
         "launch": "A team's first sends and hours are judged in full, then the ramp rate applies until its send count or day, whichever comes first.",
         "tiers": "Probation runs from the ramp's end to day 30; Established from day 30; Trusted needs 120 days, 50,000 sends and no flag in 90 days.",
         "broadcasts": "A broadcast is judged as its own HTML plus this many rendered copies; recipients are never sampled per message on top.",
         "escalation": "A failing critical or major content check multiplies the rate; two force it. Caps stop sampling silently, never sending.",
-        "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more."
+        "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert emails you once a day per team; the pause holds a new team's broadcasts when a sampled message also scored 90 or more; the review hold suspends a new team when one message is judged phishing at the hold score, or the set number of them at the lower score in its first week, until you release it.",
+        "warmup": "A daily cap on each sending domain by its registration age, counted per UTC day, and one daily limit a team's warming domains share, the highest of their caps; mail over either waits and goes out as they allow. No plan lifts them. A domain whose age no registry publishes gets the 1 to 7 day cap while its team is new or on probation. 50 clean sends move a domain up a step early."
       },
       "fields": {
         "firstSends": "First sends judged in full",
@@ -824,7 +867,15 @@
         "alertRisk": "Email the operator at risk",
         "pauseRisk": "Pause a new team's broadcasts at risk",
         "autoPause": "Pause policy",
-        "flagScore": "A sample counts as flagged from score"
+        "flagScore": "A sample counts as flagged from score",
+        "holdScore": "Hold a new team for review from score",
+        "holdRepeatCount": "Hold a new team after this many phishing verdicts in its first week",
+        "holdRepeatScore": "A phishing verdict counts toward that from score",
+        "autoHold": "Review hold",
+        "warmupEnabled": "Warm up new domains",
+        "warmupCapFirstDay": "Cap · under 24 hours",
+        "warmupCapFirstWeek": "Cap · 1 to 7 days",
+        "warmupCapFirstMonth": "Cap · 7 to 30 days"
       },
       "hints": {
         "firstSends": "a team's first N accepted messages",
@@ -843,8 +894,16 @@
         "flagRisk": "opens the monitor flag and quadruples the team's rate",
         "alertRisk": "emails the operator, once per team per day",
         "pauseRisk": "new tier only, with a verdict of 90 or more in the last day",
-        "autoPause": "whether the pause above is applied; a human decides everything else",
-        "flagScore": "the judge's own abuse verdict starts at 65"
+        "autoPause": "whether the pause above is applied",
+        "flagScore": "the judge's own abuse verdict starts at 65",
+        "holdScore": "new tier only, on a phishing, brand impersonation or payment redirect verdict",
+        "holdRepeatCount": "the week runs from the team's first send; 0 turns this off",
+        "holdRepeatScore": "the same phishing verdicts as above, at a lower score",
+        "autoHold": "whether those verdicts suspend the team until you release it; the owner sees a neutral pause",
+        "warmupEnabled": "on by default on the cloud; from 30 days a domain sends at its plan's volume",
+        "warmupCapFirstDay": "emails a day from a domain registered under 24 hours ago",
+        "warmupCapFirstWeek": "emails a day from day 1 to 7, and for an unknown age on a new team",
+        "warmupCapFirstMonth": "emails a day from day 7 to 30"
       },
       "kinds": {
         "count": "whole number",
@@ -965,6 +1024,7 @@
       "phishing": "abuse",
       "non_payment": "non-payment"
     },
-    "broadcastsPendingReview": "Broadcasts are paused for this team pending review since {since}. Transactional email is unaffected."
+    "broadcastsPendingReview": "Broadcasts are paused for this team pending review since {since}. Transactional email is unaffected.",
+    "sendingPendingReview": "Sending is paused for this team pending review since {since}. New sends are refused and queued email waits until the review is complete; data stays."
   }
 }

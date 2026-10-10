@@ -26,6 +26,7 @@ import {
   decryptEmailBody,
   emitContactEvents,
   emitSuppressionEvents,
+  enforceDomainWarmup,
   eraseRecipient,
   estimateAttachmentBytes,
   extractTokenPrefix,
@@ -55,6 +56,7 @@ import {
   releaseIdempotent,
   releasePeriodCount,
   reserveDailyQuota,
+  reservedSenderRefusal,
   reserveQuota,
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
@@ -64,11 +66,10 @@ import {
   segmentFilterSchema,
   sendingBroadcasts,
   sendRefusal,
-  sendRefusalMessage,
+  sendRefusalError,
   teamQuota,
   transitionQueueState,
   utcDay,
-  verifyOnboardingSender,
   verifySenderDomain,
   type WebhookEnqueue,
 } from "@millionsend/core";
@@ -192,12 +193,10 @@ export interface ApiDeps {
   keyring: Keyring;
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
-  /** ONBOARDING_EMAIL_FROM: the shared first-email sender (core verifyOnboardingSender). */
+  /** ONBOARDING_EMAIL_FROM: no customer send may use it (core reservedSenderRefusal). */
   onboardingEmailFrom?: string | undefined;
   /** OPENAI_APPS_CHALLENGE_TOKEN: served at /.well-known/openai-apps-challenge. */
   openaiAppsChallengeToken?: string | undefined;
-  /** Whether the shared sender reaches only members who verified their address (the instance verifies). */
-  requireVerifiedMembers?: boolean | undefined;
   /**
    * Hands an accepted email to the send queue. REQUIRED: accepting mail
    * without a producer would strand it in "queued" forever.
@@ -222,6 +221,12 @@ export interface ApiDeps {
    * Optional: without it the delete request erases inline before returning.
    */
   enqueueRecipientErase?: ((teamId: string, address: string) => Promise<void>) | undefined;
+  /**
+   * Looks up a domain's registration date in the worker (the warm-up's
+   * input), on create and on verification. Optional: the worker's sweep
+   * asks for any domain that was never looked up.
+   */
+  enqueueDomainAge?: ((domainId: string) => Promise<void>) | undefined;
   /**
    * The key the hosted unsubscribe page verifies tokens with (core
    * deriveUnsubscribeKey over MASTER_ENCRYPTION_KEY). With appBaseUrl it lets
@@ -335,6 +340,15 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
           "Daily sending quota exceeded and the queued backlog is full; retry after the UTC day rolls over",
         ),
       };
+    case "warmup_backlog_full":
+      return {
+        status: 429 as const,
+        body: errorBody(
+          429,
+          "daily_quota_exceeded",
+          "New domain warm-up: this sending domain ramps up gradually and enough emails are already waiting; retry after the UTC day rolls over",
+        ),
+      };
     case "monthly_quota_exceeded":
       return {
         status: 429 as const,
@@ -366,7 +380,8 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>) {
  * Resend's SDK union (see docs/resend-compatibility.md, known deltas).
  */
 function refusalBody(refusal: SendRefusal) {
-  return errorBody(403, refusal.reason, sendRefusalMessage(refusal));
+  const { code, message } = sendRefusalError(refusal);
+  return errorBody(403, code, message);
 }
 
 /** Refusal from acceptEmail inside a caller-owned batch transaction. */
@@ -2650,6 +2665,8 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     if (refusal) return { ok: false as const, status: 403 as const, body: refusalBody(refusal) };
     // Same boundary as /emails: only a verified team domain may appear as
     // the sender.
+    const reserved = reservedSenderRefusal(broadcast.from, deps.onboardingEmailFrom);
+    if (reserved) return fail(422, reserved.name, reserved.message);
     const domain = await verifySenderDomain(db, auth.teamId, broadcast.from);
     if (!domain.ok) {
       return fail(
@@ -2665,18 +2682,14 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return fail(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE);
     }
-    // Platform breaker: the account-wide rate in this SES region is near
-    // SES's review line, so broadcasts wait; /emails is deliberately not
-    // gated by it.
-    const regionHold = await regionPause(db, domain.region);
-    if (regionHold) {
-      const metric = regionHold.reason?.metric === "bounce" ? "hard-bounce" : "complaint";
+    // Platform breaker or the operator's hold on this SES region: broadcasts
+    // wait; /emails is deliberately not gated by it. The caller is never
+    // told why: the platform's rates are not the customer's to see.
+    if (await regionPause(db, domain.region)) {
       return fail(
         403,
         "broadcasts_paused",
-        regionHold.manualReason
-          ? `Broadcast sending is paused in ${domain.region} by the instance operator. Transactional email is unaffected. Try again later.`
-          : `Broadcast sending is paused in ${domain.region} while the platform's ${metric} rate recovers. Transactional email is unaffected. Try again later.`,
+        "Broadcasts can't be sent right now. Sending resumes automatically; try again later. Transactional email is unaffected.",
       );
     }
     // The operator's pause is the team's own hold, transactional mail aside.
@@ -3512,32 +3525,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       return c.json(errorBody(404, "not_found", "Topic not found"), 404);
     }
 
-    // The shared onboarding sender needs no verified domain but may only
-    // reach the team's own inboxes; anything else is the verified-domain rule.
-    const onboarding = await verifyOnboardingSender(
-      deps.db,
-      auth.teamId,
-      body.from,
-      [...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])],
-      deps.onboardingEmailFrom,
-      { requireVerified: deps.requireVerifiedMembers ?? true },
-    );
-    if (onboarding && !onboarding.ok) {
-      return c.json(
-        errorBody(
-          422,
-          "validation_error",
-          onboarding.reason === "recipient_not_verified"
-            ? "The onboarding sender can only send to members who verified their email"
-            : "The onboarding sender can only send to your team's own members",
-        ),
-        422,
-      );
-    }
-    // The shared sender goes out exactly as configured: a caller's display
-    // name on the instance's own address would let it pose as the platform.
-    const from = onboarding ? (deps.onboardingEmailFrom ?? body.from) : body.from;
-    const domain = onboarding ?? (await verifySenderDomain(deps.db, auth.teamId, body.from));
+    const reserved = reservedSenderRefusal(body.from, deps.onboardingEmailFrom);
+    if (reserved) return c.json(errorBody(422, reserved.name, reserved.message), 422);
+    const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
     if (!domain.ok) {
       return c.json(
         errorBody(
@@ -3550,12 +3540,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         422,
       );
     }
-    // A domain-restricted key is confined to its domain, the shared sender included.
-    if (
-      domain.domainId === null
-        ? auth.domainId !== null
-        : keyForbidsSendingDomain(auth, domain.domainId)
-    ) {
+    if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
     }
 
@@ -3599,25 +3584,20 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     }
 
     try {
-      const result = await acceptEmail(
-        deps,
-        auth,
-        toAcceptPayload({ ...body, from }, domain.domainId),
-        {
-          completeInTx: idemKey
-            ? async (tx, emailId) => {
-                const recorded = await completeIdempotent(tx, {
-                  teamId: auth.teamId,
-                  key: idemKey,
-                  emailIds: [emailId],
-                });
-                // Another owner took over and recorded its own response:
-                // abort so this branch produces no second email.
-                if (!recorded) throw new IdempotencyTakeoverError();
-              }
-            : undefined,
-        },
-      );
+      const result = await acceptEmail(deps, auth, toAcceptPayload(body, domain.domainId), {
+        completeInTx: idemKey
+          ? async (tx, emailId) => {
+              const recorded = await completeIdempotent(tx, {
+                teamId: auth.teamId,
+                key: idemKey,
+                emailIds: [emailId],
+              });
+              // Another owner took over and recorded its own response:
+              // abort so this branch produces no second email.
+              if (!recorded) throw new IdempotencyTakeoverError();
+            }
+          : undefined,
+      });
       if (!result.ok) {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         const rejection = acceptRejection(result);
@@ -3687,6 +3667,8 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     if (body.topic_id != null && !(await findTeamTopic(deps.db, auth.teamId, body.topic_id))) {
       return { status: 404, name: "not_found", message: "Topic not found" };
     }
+    const reserved = reservedSenderRefusal(body.from, deps.onboardingEmailFrom);
+    if (reserved) return { status: 422, ...reserved };
     const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
     if (!domain.ok) {
       return {
@@ -3802,7 +3784,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           startAfter?: Date;
           index: number;
           day: string;
+          at: Date;
           recipientCount: number;
+          domainId: string | null;
         }[] = [];
         for (const { payload, index } of payloads) {
           const result = await acceptEmail(deps, auth, payload, { tx: txDb, quota: "deferred" });
@@ -3812,7 +3796,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             parked: false,
             index,
             day: result.day,
+            at: result.at,
             recipientCount: result.recipientCount,
+            domainId: payload.domainId,
             ...(payload.scheduledAt ? { startAfter: payload.scheduledAt } : {}),
           });
         }
@@ -3832,7 +3818,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
           if (!first) continue;
           // Items in one group share a delivery day; the first one's instant
           // places the hourly mirror like a single send's would.
-          const at = quotaChargeAt(first.startAfter);
+          const { at } = first;
           const reservation = await reserveQuota(txDb, {
             teamId: auth.teamId,
             count: items.reduce((n, o) => n + o.recipientCount, 0),
@@ -3905,6 +3891,27 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             );
           for (const o of toPark) o.parked = true;
         }
+        // The warm-up after the plan, each item as its own send would meet it.
+        for (const o of out) {
+          if (o.parked) continue;
+          const warmup = await enforceDomainWarmup(txDb, {
+            teamId: auth.teamId,
+            domainId: o.domainId,
+            count: o.recipientCount,
+            quota,
+            day: o.day,
+            at: o.at,
+          });
+          if (warmup === "send") continue;
+          if (warmup === "backlog_full") {
+            throw new AcceptRejectedError({ ok: false, reason: "warmup_backlog_full" }, o.index);
+          }
+          await txDb
+            .update(schema.emails)
+            .set({ latestStatus: "queued_quota", parkReason: "warmup" })
+            .where(eq(schema.emails.id, o.id));
+          o.parked = true;
+        }
         if (idemKey) {
           const recorded = await completeIdempotent(txDb, {
             teamId: auth.teamId,
@@ -3957,8 +3964,13 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       }
       if (err instanceof AcceptRejectedError) {
         const rejection = acceptRejection(err.result);
+        // The team's admission refuses the whole batch, not the item it met first.
+        const teamRefusal =
+          err.result.reason === "team_suspended" || err.result.reason === "sending_paused";
         return c.json(
-          { ...rejection.body, message: `emails.${err.index}: ${rejection.body.message}` },
+          teamRefusal
+            ? rejection.body
+            : { ...rejection.body, message: `emails.${err.index}: ${rejection.body.message}` },
           rejection.status,
         );
       }

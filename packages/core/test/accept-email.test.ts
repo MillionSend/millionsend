@@ -3,13 +3,12 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   type AcceptEmailPayload,
   acceptEmail,
   MAX_ATTACHMENT_BYTES,
   QUOTA_BACKLOG_DAYS,
-  verifyOnboardingSender,
 } from "../src/accept-email.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import { OVERAGE_HARD_CAP, QUOTA_TOLERANCE, type QuotaTeamRow, teamRung } from "../src/plans.js";
@@ -34,58 +33,6 @@ beforeAll(async () => {
   domainId = domain.id;
 });
 afterAll(() => close());
-
-describe("verifyOnboardingSender", () => {
-  const platform = "MillionSend <onboarding@ms.example>";
-  it("only the shared sender qualifies, and only for the team's own members", async () => {
-    await db
-      .insert(schema.user)
-      .values([
-        { id: "member-1", name: "Ada", email: "Ada@Example.com", emailVerified: true },
-        { id: "member-2", name: "Bob", email: "bob@example.com" },
-      ])
-      .onConflictDoNothing();
-    await db.insert(schema.teamMembers).values([
-      { teamId, userId: "member-1", role: "owner" },
-      { teamId, userId: "member-2", role: "member" },
-    ]);
-
-    expect(
-      await verifyOnboardingSender(db, teamId, "a@acme.dev", ["ada@example.com"], platform),
-    ).toBeNull();
-    expect(
-      await verifyOnboardingSender(db, teamId, platform, ["ada@example.com"], undefined),
-    ).toBeNull();
-    expect(
-      await verifyOnboardingSender(
-        db,
-        teamId,
-        "onboarding@ms.example",
-        ["ada@example.com"],
-        platform,
-      ),
-    ).toEqual({ ok: true, domainId: null, address: "onboarding@ms.example" });
-    expect(
-      await verifyOnboardingSender(
-        db,
-        teamId,
-        platform,
-        ["Ada <ada@example.com>", "stranger@example.com"],
-        platform,
-      ),
-    ).toEqual({ ok: false, reason: "recipient_not_member" });
-    // A member whose address was never verified may be anyone's inbox —
-    // unless the instance cannot verify anyone, where members stay reachable.
-    expect(
-      await verifyOnboardingSender(db, teamId, platform, ["bob@example.com"], platform),
-    ).toEqual({ ok: false, reason: "recipient_not_verified" });
-    expect(
-      await verifyOnboardingSender(db, teamId, platform, ["bob@example.com"], platform, {
-        requireVerified: false,
-      }),
-    ).toMatchObject({ ok: true });
-  });
-});
 
 const deps = () => ({
   db,
@@ -146,6 +93,39 @@ describe("acceptEmail", () => {
         ),
       );
     expect(row?.accepted).toBe(1);
+  });
+
+  it("charges a send scheduled in the past to today: an earlier day's quota never reopens", async () => {
+    vi.useFakeTimers({ now: new Date("2026-10-09T10:00:00Z"), toFake: ["Date"] });
+    try {
+      const team = await createTeam(db, "backdated-sender");
+      const [old] = await db
+        .insert(schema.domains)
+        .values({
+          teamId: team,
+          name: "backdated.dev",
+          region: "us-east-1",
+          status: "verified",
+          registeredAt: new Date("2014-01-01T00:00:00Z"),
+        })
+        .returning({ id: schema.domains.id });
+      const ceiling = Math.floor(teamRung("free", null).included * (1 + QUOTA_TOLERANCE));
+      await db
+        .insert(schema.usageCounters)
+        .values({ teamId: team, day: "2026-10-09", accepted: ceiling });
+      const result = await acceptEmail(
+        deps(),
+        { teamId: team, billing: FREE, apiKeyId: null },
+        payload({
+          from: "a@backdated.dev",
+          domainId: old?.id ?? null,
+          scheduledAt: new Date("2026-10-06T10:00:00Z"),
+        }),
+      );
+      expect(result).toMatchObject({ ok: true, parked: true, day: "2026-10-09" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects attachments whose decoded bytes exceed the cap", async () => {
@@ -292,6 +272,7 @@ describe("acceptEmail", () => {
     expect(await acceptEmail(deps(), heldAuth, payload({ domainId: null }))).toEqual({
       ok: false,
       reason: "team_suspended",
+      suspension: "manual",
     });
 
     await db

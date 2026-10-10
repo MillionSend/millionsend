@@ -1,0 +1,49 @@
+% IANA WHOIS server
+% for more information on IANA, visit http://www.iana.org
+% This query returned 1 object
+
+domain:       CO
+
+organisation: Ministry of Information and Communications Technologies (MinTIC)
+address:      Edificio Murillo Toro
+address:      Cra.8 #Entre Calles 12A y 12B
+address:      Bogotá D.C. Cundinamarca 111711
+address:      Colombia
+
+contact:      administrative
+name:         Thiago Grijo Dal-Toe
+organisation: Ministry of Information and Communications Technologies (MinTIC)
+address:      Edificio Murillo Toro
+address:      Cra.8 #Entre Calles 12A y 12B
+address:      Bogotá D.C. Cundinamarca 111711
+address:      Colombia
+phone:        +57 (601) 344 3460
+fax-no:       +57 (601) 344 2248
+e-mail:       cctld.co@mintic.gov.co
+
+contact:      technical
+name:         CTO
+organisation: CentralNic
+address:      Saddlers House, 4th Floor
+address:      44 Gutter Lane
+address:      London EC2V 6BR
+address:      United Kingdom of Great Britain and Northern Ireland (the)
+phone:        +44 20 33 88 0600
+fax-no:       +44 20 33 88 0601
+e-mail:       tld.ops@centralnic.com
+
+nserver:      A.REGISTRYDNS.CO 194.169.218.57 2001:67c:13cc:0:0:0:1:57
+nserver:      B.REGISTRYDNS.CO 185.24.64.57 2a04:2b00:13cc:0:0:0:1:57
+nserver:      C.REGISTRYDNS.CO 212.18.248.57 2a04:2b00:13ee:0:0:0:0:57
+nserver:      D.REGISTRYDNS.CO 212.18.249.57 2a04:2b00:13ff:0:0:0:0:57
+ds-rdata:     7786 8 2 eb84f864cbe86e913796d2c8dd81933aa2c94bbcfb73419a42250bc4650b081b
+
+whois:        whois.registry.co
+
+status:       ACTIVE
+remarks:      Registration information: http://www.registry.co
+
+created:      1991-12-24
+changed:      2026-02-17
+source:       IANA
+

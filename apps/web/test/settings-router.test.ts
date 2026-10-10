@@ -1,4 +1,4 @@
-import { DAY_MS, utcDay } from "@millionsend/core";
+import { DAY_MS, SUSPENSION_REASONS, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { SES_REGIONS } from "@millionsend/ses";
@@ -293,6 +293,41 @@ describe("settings.team.delete", () => {
     expect(await db.select().from(schema.broadcasts)).toEqual([]);
     expect((await db.select().from(schema.oauthConsent)).map((c) => c.id)).toEqual(["there"]);
   });
+
+  it.each(SUSPENSION_REASONS)(
+    "refuses the owner of a team suspended for %s before anything is cancelled or removed",
+    async (reason) => {
+      stubCloud();
+      const teamId = await createTeam(db, "held");
+      await addMember(teamId, "alice", "owner");
+      await db.insert(schema.domains).values({ teamId, name: "held.test", region: "us-east-1" });
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, teamId));
+      const calls: string[] = [];
+      const deps: TeamDeletionDeps = {
+        cancelSubscription: async () => void calls.push("stripe"),
+        deleteSesIdentity: async () => void calls.push("ses"),
+        deleteSesTenant: async () => void calls.push("tenant"),
+        deleteLogo: async () => void calls.push("logo"),
+      };
+
+      await expect(
+        deletionCaller("alice", teamId, "owner", deps).settings.team.delete(),
+      ).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        // A team suspended for phishing or held for review is never told it is suspended.
+        message: ["phishing", "review"].includes(reason)
+          ? "This isn't available for this team right now. Contact support if you need help."
+          : "This team is suspended and can't be deleted. Contact support.",
+      });
+      expect(calls).toEqual([]);
+      expect(await db.select().from(schema.teams)).toHaveLength(1);
+      expect(await db.select().from(schema.teamMembers)).toHaveLength(1);
+      expect(await db.select().from(schema.domains)).toHaveLength(1);
+    },
+  );
 });
 
 describe("settings.locale", () => {

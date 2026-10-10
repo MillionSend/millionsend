@@ -101,11 +101,11 @@ export const en = {
     subject: '"{name}" is going out over {days} days',
     body: [
       "{first} of {count} emails went out in the first wave; the rest follows as capacity frees, the last about {finishesAt}.",
-      "Sends above the platform's daily capacity are spread over the following days; {team}'s transactional email is not held behind them.",
+      "Sends above the daily sending capacity are spread over the following days; {team}'s transactional email is not held behind them.",
     ],
     button: "Open broadcast",
     muted: [
-      "You get this once per broadcast that takes more than one day. The finish time is an estimate and moves as other teams send.",
+      "You get this once per broadcast that takes more than one day. The finish time is an estimate and can shift.",
     ],
   },
   "broadcast.held_quota": {
@@ -123,10 +123,10 @@ export const en = {
     },
   },
   "broadcast.held": {
-    subject: '"{name}" is on hold',
+    subject: '"{name}" is delayed',
     body: [
-      'Sending from {region} is paused across the platform while bounce and complaint rates settle, so "{name}" waits instead of going out; transactional email keeps flowing.',
-      "It resumes by itself — we re-check every 15 minutes — and you'll get the usual sent report when it's done.",
+      '"{name}" is waiting to send. Delivery is paused for now and resumes automatically, so you don\'t need to do anything; transactional email keeps flowing.',
+      "You'll get the usual sent report when it's done.",
     ],
     button: "Open broadcast",
   },
@@ -134,7 +134,7 @@ export const en = {
     subject: "Payment failed for {team}'s {plan} plan",
     body: [
       "We couldn't charge the card on file for {team}'s {plan} plan.",
-      "{retry} Nothing changes yet: {team} keeps sending {cap}. If the invoice stays unpaid, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
+      "{retry} For now {team} keeps its {plan} plan ({cap}). If the invoice stays unpaid, Stripe cancels the subscription and {team} returns to Free ({freeCap} emails a day).",
     ],
     button: "Pay the invoice",
     muted: ["Or update the card from Billing: {billingUrl}"],
@@ -146,7 +146,7 @@ export const en = {
   "billing.plan_activated": {
     subject: "{team} is on {plan}",
     body: [
-      "Your subscription is active: {team} now sends {cap}, and anything parked over the old cap is released within minutes.",
+      "Your subscription is active: {plan} allows {cap}, and mail parked over the old cap no longer waits on it.",
       "Receipts and invoices come from Stripe; the subscription is managed from Billing.",
     ],
     button: "Open billing",
@@ -154,7 +154,7 @@ export const en = {
   "billing.plan_changed": {
     subject: "{team} moved from {old} to {new}",
     body: [
-      "From now on {team} sends {cap}. On a lower cap, sends already accepted are unaffected; past the new cap, daily plans wait for the next UTC day and monthly plans either bill overage (when it is on) or refuse new API sends until the period renews.",
+      "{team} is now on {new}, which allows {cap}. On a lower cap, sends already accepted are unaffected; past the new cap, daily plans wait for the next UTC day and monthly plans either bill overage (when it is on) or refuse new API sends until the period renews.",
       "Proration shows on the next Stripe invoice.",
     ],
     button: "Open billing",
@@ -171,14 +171,14 @@ export const en = {
     subject: "Reminder: {team}'s {plan} plan ends on {date}",
     body: [
       "On {date} {team} returns to Free: {freeCap} emails a day, and anything over the cap waits for the next day.",
-      "Resume the plan from Billing to keep sending {cap}.",
+      "Resume the plan from Billing to stay on {plan} ({cap}).",
     ],
     button: "Open billing",
   },
   "billing.downgraded": {
     subject: "{team} is now on Free",
     body: [
-      "The {plan} plan ended on {date}. From today {team} sends up to {freeCap} emails a day; anything over waits for the next UTC day, and broadcasts over the cap go out in parts.",
+      "The {plan} plan ended on {date}. From today {team} is on Free: up to {freeCap} emails a day, anything over waits for the next UTC day, and broadcasts over the cap go out in parts.",
       "Verified domains, contacts and API keys are untouched. Pick a plan again from Billing whenever you need more.",
     ],
     button: "Open billing",
@@ -222,7 +222,7 @@ export const en = {
   "monitor.alert": {
     subject: "Content monitor: {team} needs a look",
     body: [
-      "The content monitor's risk for {team} reached {risk} ({tier} tier, {samples} samples judged in the last 7 days, {flagged} over the flag line). The model reads a sample of accepted mail; nothing was paused or held on its account.",
+      "The content monitor's risk for {team} reached {risk} ({tier} tier, {samples} samples judged in the last 7 days, {flagged} over the flag line). The model reads a sample of accepted mail; this alert by itself pauses and holds nothing.",
       "Open the review page to see the sampled verdicts, the content checks and the team's history, and decide. This notice repeats at most once a day per team while the risk stays over the line.",
     ],
     button: "Open review",
@@ -235,6 +235,19 @@ export const en = {
     ],
     button: "Open review",
   },
+  "monitor.team_held": {
+    subject: "Content monitor held {team} for review",
+    body: [
+      "{team} is in the new tier and a sampled message scored {score} ({verdict}). {rule} Under the hold policy every send of the team is now refused or parked: the API and SMTP refuse, queued mail and broadcasts wait, and its SES tenant is disabled where tenants are on. The sampled message itself had already gone out when it was judged.",
+      "The owner sees sending as paused pending review and is not emailed. Open the review page to release the team, which sends the held mail, or to suspend it for phishing.",
+    ],
+    button: "Open review",
+    extra: {
+      score: "This one verdict held the team: the hold score is {line}.",
+      repeat:
+        "This verdict held the team as its phishing-type verdict number {n} at or above {line} in its first week of sending.",
+    },
+  },
   "monitor.degraded": {
     subject: "Content monitor: {rate} of samples went unjudged in the last hour",
     body: [
@@ -245,24 +258,6 @@ export const en = {
     muted: [
       "Sent to the instance operator at most once every six hours while the share stays over 20% or the provider keeps rejecting the API key.",
     ],
-  },
-  "content.access_notice": {
-    subject: "An operator read content in {team}",
-    body: [
-      "On {when}, an authorised operator of this instance read the subject and rendered text of {emails} in {team}, for a recorded security reason: {reason}.",
-      "Recipient addresses, attachments, message headers and the raw HTML were withheld, and the access closed after 30 minutes. It is recorded in this team's audit log with the same date, and in the instance's own log since it happened.",
-      "This notice is required of us within seven days of such an access and is sent whether or not anything came of it. Reply to this email if you want to know more.",
-    ],
-    button: "Open audit log",
-    extra: {
-      one: "one message",
-      many: "{n} messages",
-      phishing_or_malware: "suspected phishing or malware",
-      complaint_spike: "a spike in spam complaints",
-      provider_report: "an abuse report from a mailbox provider",
-      legal_request: "a legal request",
-      owner_support_request: "a support request from this team",
-    },
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 

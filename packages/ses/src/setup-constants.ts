@@ -55,8 +55,9 @@ export const SES_IAM_POLICY = {
       Action: ["ses:SendEmail", "ses:SendRawEmail", "ses:GetAccount"],
       Resource: "*",
     },
-    // Per-team SES tenants (SES_TENANTS). Tenant ARNs have no documented
-    // resource-level scope, so the actions stay account-wide.
+    // Per-team SES tenants (SES_TENANTS); suspending a team disables its
+    // tenant's sending. Tenant ARNs have no documented resource-level scope,
+    // so the actions stay account-wide.
     {
       Effect: "Allow",
       Action: [
@@ -65,6 +66,7 @@ export const SES_IAM_POLICY = {
         "ses:DeleteTenant",
         "ses:CreateTenantResourceAssociation",
         "ses:DeleteTenantResourceAssociation",
+        "ses:UpdateReputationEntityCustomerManagedStatus",
       ],
       Resource: "*",
     },
@@ -179,7 +181,9 @@ SES_CONFIGURATION_SET=
 
 # One SES tenant per team, so SES tracks bounce/complaint reputation per
 # customer instead of per account and can pause one sender without pausing
-# the rest. Defaults to IS_CLOUD; the IAM policy needs the ses:*Tenant* actions.
+# the rest; suspending a team disables its tenant. Defaults to IS_CLOUD; the
+# IAM policy needs the ses:*Tenant* actions and
+# ses:UpdateReputationEntityCustomerManagedStatus.
 SES_TENANTS=
 
 # --- Optional ---
@@ -194,6 +198,13 @@ SES_TENANTS=
 ABUSE_JUDGE=off
 ABUSE_JUDGE_API_KEY=
 ABUSE_JUDGE_MODEL=jev-1.13.0
+
+# New-domain warm-up (see "New-domain warm-up" in SELF_HOSTING.md): a daily
+# cap per sending domain by its registration age. Unset follows IS_CLOUD. The
+# caps (WARMUP_CAP_FIRST_DAY/_WEEK/_MONTH) are edited in the console (Trust &
+# safety → Monitoring settings) or seeded here. While on, the worker looks
+# domain ages up over RDAP, WHOIS (TCP 43) and crt.sh.
+WARMUP_ENABLED=
 
 # Break-glass content access (see "Content access (break-glass)" in
 # SELF_HOSTING.md): with this on, the console can unwrap the subject and
@@ -294,12 +305,11 @@ PRIVACY_URL=
 # Leave unset to hide password recovery and skip verification entirely.
 AUTH_EMAIL_FROM=
 
-# Shared sender for the onboarding "Send email" button and snippet, as
-# "Name <user@domain>" or a bare address on a domain verified in this SES
-# account. Any team may send from it, only to members who verified their
-# address (where the instance verifies), and always as configured here.
-# Leave unset to hide the button; the snippet then asks for the team's own
-# domain.
+# Sender of the onboarding "Send email" button, as "Name <user@domain>" or a
+# bare address on a domain verified in this SES account. It carries one fixed
+# test email per team, to the team's owner, and nothing else: API, SMTP and
+# broadcast sends from this address are refused, even for a team that
+# verified its domain. Leave unset to hide the button.
 ONBOARDING_EMAIL_FROM=
 
 # Domain-verification token from OpenAI's plugin portal (platform.openai.com

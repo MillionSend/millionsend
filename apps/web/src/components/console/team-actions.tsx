@@ -21,6 +21,8 @@ export interface TeamActionTarget {
   plan: string;
   planQuota: number | null;
   suspendedAt: Date | null;
+  /** A review hold opens Suspend on phishing, the conversion it usually ends in. */
+  suspensionReason?: string | null;
   broadcastsPausedByOperatorAt: Date | null;
 }
 
@@ -64,8 +66,8 @@ export function useTeamActions(onChanged: () => void): TeamActions {
     trpc.console.teams.detail.queryOptions({ id: dialog?.team.id ?? "" }, { enabled: needsDetail }),
   );
 
-  const done = (message: string, teamId: string) => {
-    toast(message);
+  const done = (message: string, teamId: string, tone?: "warn") => {
+    toast(message, tone);
     setDialog(null);
     void queryClient.invalidateQueries({
       queryKey: trpc.console.teams.detail.queryKey({ id: teamId }),
@@ -175,7 +177,9 @@ export function useTeamActions(onChanged: () => void): TeamActions {
               {
                 onSuccess: () =>
                   done(
-                    t(input.notify ? "toast.pausedNotified" : "toast.paused", { team: team.name }),
+                    t(input.notify && !team.suspendedAt ? "toast.pausedNotified" : "toast.paused", {
+                      team: team.name,
+                    }),
                     team.id,
                   ),
               },
@@ -186,20 +190,26 @@ export function useTeamActions(onChanged: () => void): TeamActions {
       {dialog?.kind === "suspend" ? (
         <SuspendDialog
           name={team.name}
+          initialReason={team.suspensionReason === "review" ? "phishing" : undefined}
           pending={suspend.isPending}
           onClose={close}
           onSubmit={(input) =>
             suspend.mutate(
               { id: team.id, ...input },
               {
-                onSuccess: () =>
+                onSuccess: ({ tenant }) => {
+                  const regions = tenant?.failed.map((f) => f.region).join(", ");
                   done(
-                    t("toast.suspended", {
-                      team: team.name,
-                      reason: t(`suspendDialog.reasons.${input.reason}`),
-                    }),
+                    regions
+                      ? t("toast.suspendedTenantFailed", { team: team.name, regions })
+                      : t("toast.suspended", {
+                          team: team.name,
+                          reason: t(`suspendDialog.reasons.${input.reason}`),
+                        }),
                     team.id,
-                  ),
+                    regions ? "warn" : undefined,
+                  );
+                },
               },
             )
           }
@@ -213,7 +223,18 @@ export function useTeamActions(onChanged: () => void): TeamActions {
           onSubmit={() =>
             reinstate.mutate(
               { id: team.id },
-              { onSuccess: () => done(t("toast.reinstated", { team: team.name }), team.id) },
+              {
+                onSuccess: ({ tenant }) => {
+                  const regions = tenant?.failed.map((f) => f.region).join(", ");
+                  done(
+                    regions
+                      ? t("toast.reinstatedTenantFailed", { team: team.name, regions })
+                      : t("toast.reinstated", { team: team.name }),
+                    team.id,
+                    regions ? "warn" : undefined,
+                  );
+                },
+              },
             )
           }
         />
@@ -243,25 +264,30 @@ export function useTeamActions(onChanged: () => void): TeamActions {
 
 /**
  * The Teams list's "…" items for one team, from the shared actions: Open
- * team, View as owner (when `supportView` is given: disabled with the env
- * named while the feature is off), Adjust limits, Change plan, separator,
- * Pause/Resume broadcasts, Suspend/Reinstate team. `labels` come from
- * console.teams.menu.
+ * team, View as owner (when `options` are given: disabled with the reason
+ * while the feature is off or the team is silently suspended), Adjust
+ * limits, Change plan, separator, Pause/Resume broadcasts, Suspend/Reinstate
+ * team. `labels` come from console.teams.menu.
  */
 export function teamMenuItems(
   team: TeamActionTarget,
   actions: TeamActions,
   labels: (key: string) => string,
-  options?: { supportView: boolean },
+  options?: { supportView: boolean; silentlySuspended: boolean },
 ): (PopoverMenuItem | null)[] {
+  const viewOff = !options?.supportView
+    ? "viewOff"
+    : options.silentlySuspended
+      ? "viewSilent"
+      : null;
   return [
     { label: labels("open"), onSelect: () => actions.openTeam(team) },
     options
       ? {
           label: labels("view"),
           onSelect: () => actions.viewAsOwner(team),
-          disabled: !options.supportView,
-          ...(options.supportView ? {} : { title: labels("viewOff") }),
+          disabled: viewOff !== null,
+          ...(viewOff ? { title: labels(viewOff) } : {}),
         }
       : null,
     { label: labels("limits"), onSelect: () => actions.adjustLimits(team) },

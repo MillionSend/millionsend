@@ -6,6 +6,10 @@
     "sent": "Enviada",
     "canceled": "Cancelada"
   },
+  "held": {
+    "label": "Atrasada",
+    "body": "O envio está pausado por enquanto e retoma automaticamente. Você não precisa fazer nada."
+  },
   "list": {
     "title": "Transmissões",
     "new": "Nova transmissão",
@@ -95,7 +99,7 @@
     "stepLimitMonth": "limite mensal do {plan}",
     "stepMoreReset": "mais {count} quando o limite reinicia às {reset}",
     "stepLastReset": "últimos {count} quando o limite reinicia às {reset} · termina por volta de {time}",
-    "reason": "Envios acima da capacidade diária da plataforma são distribuídos pelos dias seguintes. Seu e-mail transacional não fica retido atrás deles.",
+    "reason": "Envios acima da capacidade diária de envio são distribuídos pelos dias seguintes. Seu e-mail transacional não fica retido atrás deles.",
     "planFits": "{plan} envia todos até {time}",
     "planFitsOverage": "{plan} com excedente envia todos até {time}",
     "todayAt": "hoje, {time}",

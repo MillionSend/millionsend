@@ -6,7 +6,8 @@ import {
   formatMailbox,
   monthlyQuotaMessage,
   parseMailbox,
-  sendRefusalMessage,
+  reservedSenderRefusal,
+  sendRefusalError,
   verifySenderDomain,
 } from "@millionsend/core";
 import { type AddressObject, simpleParser } from "mailparser";
@@ -32,6 +33,8 @@ export interface SmtpDeps extends AcceptEmailDeps {
   allowInsecureAuth?: boolean | undefined;
   /** Defaults to MAX_MESSAGE_BYTES; lowered only by tests. */
   maxMessageBytes?: number | undefined;
+  /** ONBOARDING_EMAIL_FROM: refused as a From like on the HTTP API. */
+  onboardingEmailFrom?: string | undefined;
 }
 
 function smtpError(responseCode: number, message: string): Error {
@@ -115,6 +118,8 @@ async function handleMessage(
 
   // The authenticated key's team decides which senders are allowed — the
   // MAIL FROM envelope identity is never trusted.
+  const reserved = reservedSenderRefusal(from, deps.onboardingEmailFrom);
+  if (reserved) throw smtpError(550, reserved.message);
   const domain = await verifySenderDomain(deps.db, auth.teamId, from);
   if (!domain.ok) {
     throw smtpError(
@@ -146,11 +151,16 @@ async function handleMessage(
     // The pause lifts by itself as the trailing rates fall, so the client
     // keeps the message and retries; a suspension waits on the operator.
     if (result.reason === "sending_paused") {
-      throw smtpError(451, `4.7.1 ${sendRefusalMessage(result)}`);
+      throw smtpError(451, `4.7.1 ${sendRefusalError(result).message}`);
     }
-    if (result.reason === "team_suspended") throw smtpError(550, sendRefusalMessage(result));
+    if (result.reason === "team_suspended") {
+      throw smtpError(550, sendRefusalError(result).message);
+    }
     if (result.reason === "quota_backlog_full") {
       throw smtpError(452, "Daily quota exceeded and the parked backlog is full");
+    }
+    if (result.reason === "warmup_backlog_full") {
+      throw smtpError(452, "New domain warm-up: enough mail is already waiting");
     }
     if (result.reason === "monthly_quota_exceeded") {
       throw smtpError(452, monthlyQuotaMessage(result));

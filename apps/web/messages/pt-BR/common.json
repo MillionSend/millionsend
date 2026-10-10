@@ -109,5 +109,11 @@
     "end": "Encerrar sessão",
     "back": "Voltar ao console",
     "readOnly": "Modo de suporte somente leitura: nada pode ser alterado aqui."
+  },
+  "suspensionLock": {
+    "deleteTeam": "Esta equipe está suspensa e não pode ser excluída. Fale com o suporte.",
+    "deleteDomain": "Esta equipe está suspensa, então os domínios dela não podem ser excluídos. Fale com o suporte.",
+    "invite": "Esta equipe está suspensa, então ninguém novo pode entrar nela. Fale com o suporte.",
+    "unavailable": "Isso não está disponível para esta equipe no momento. Fale com o suporte se precisar de ajuda."
   }
 }

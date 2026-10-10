@@ -72,7 +72,7 @@ export interface SendDeps {
   ses: SesSender;
   /** Deployment-wide SES configuration set, used when the domain has none. */
   defaultConfigurationSet?: string | undefined;
-  /** ONBOARDING_EMAIL_FROM: sends from it carry no team domain (see core isOnboardingSender). */
+  /** ONBOARDING_EMAIL_FROM: the fixed onboarding email carries no team domain (see core isOnboardingSender). */
   onboardingEmailFrom?: string | undefined;
   /**
    * Awaited right before the send claim, after every check that can still
@@ -893,8 +893,9 @@ export async function sendEmail(
   }
   // The content monitor's draw, the same best-effort rule: the send is done,
   // a failure here is logged and changes nothing. The instance's own account
-  // mail is never customer content, so it is never drawn.
-  if (deps.monitor && !systemMail) {
+  // mail and the fixed onboarding email are never customer content, so they
+  // are never drawn.
+  if (deps.monitor && !systemMail && !platformSend) {
     try {
       await sampleAcceptedEmail(db, deps.monitor, {
         teamId: email.teamId,

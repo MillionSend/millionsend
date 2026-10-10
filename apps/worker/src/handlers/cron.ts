@@ -16,13 +16,17 @@ import {
   recordAudit,
   releaseQuota,
   reserveQuota,
+  reserveWarmup,
   SES_QUOTA_SLOT_MS,
   type TeamQuota,
   teamQuota,
   transitionQueueState,
+  utcDay,
+  type WarmupCap,
   WEBHOOK_BACKLOG_AGE_MS,
   WEBHOOK_MAX_AGE_MS,
   type WebhookEnqueue,
+  warmupCap,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { affectedRows, keysetCursorWhere, schema } from "@millionsend/db";
@@ -185,6 +189,16 @@ export interface DrainResult {
 /** Sentinel: the row left queued_quota concurrently; roll the reservation back. */
 class DrainRaced extends Error {}
 
+/**
+ * Sentinel: the sending domain's warm-up, or the team's shared one, is spent
+ * for the day; roll the plan's reservation back.
+ */
+class WarmupHeld extends Error {
+  constructor(readonly full: "domain" | "pool") {
+    super(`warm-up ${full} full`);
+  }
+}
+
 /** Parked rows loaded per page; the backlog is unbounded (see acceptEmail). */
 const DRAIN_PAGE = 500;
 
@@ -195,6 +209,15 @@ interface DrainRun {
   heldTeams: Set<string>;
   /** Teams already asked whether the deliverability pause holds them. */
   checkedTeams: Set<string>;
+  /** The warm-up cap per sending domain row, read once per run. */
+  warmups: Map<string, WarmupCap | null>;
+  /**
+   * Registrable domains whose warm-up day is spent, teams whose shared one
+   * is, and the domain rows that leave the page query with them.
+   */
+  warmupFull: Set<string>;
+  poolFull: Set<string>;
+  heldDomains: Set<string>;
   failures: unknown[];
 }
 
@@ -228,6 +251,10 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
     now: deps.now ?? new Date(),
     heldTeams: new Set(),
     checkedTeams: new Set(),
+    warmups: new Map(),
+    warmupFull: new Set(),
+    poolFull: new Set(),
+    heldDomains: new Set(),
     failures: [],
   };
   let drained = 0;
@@ -345,6 +372,7 @@ async function releaseParkedRows(
       .select({
         id: schema.emails.id,
         teamId: schema.emails.teamId,
+        domainId: schema.emails.domainId,
         broadcastId: schema.emails.broadcastId,
         ...QUOTA_COLUMNS,
         scheduledAt: schema.emails.scheduledAt,
@@ -364,14 +392,20 @@ async function releaseParkedRows(
           // team releases only its transactional rows.
           isNull(schema.teams.suspendedAt),
           or(isNull(schema.emails.broadcastId), isNull(schema.teams.broadcastsPausedByOperatorAt)),
-          // A row due on a later UTC day is charged on that day, when it
-          // comes: reserved against today, days of the cap could all go out
-          // at one future instant.
+          // A row due on a later UTC day is charged on that day, its warm-up
+          // included, when it comes: reserved against today, days of the cap
+          // could all go out at one future instant.
           or(
             isNull(schema.emails.scheduledAt),
             lt(schema.emails.scheduledAt, nextUtcDayStart(run.now)),
           ),
           run.heldTeams.size > 0 ? notInArray(schema.emails.teamId, [...run.heldTeams]) : undefined,
+          run.heldDomains.size > 0
+            ? or(
+                isNull(schema.emails.domainId),
+                notInArray(schema.emails.domainId, [...run.heldDomains]),
+              )
+            : undefined,
           opts.held.length > 0 ? notInArray(region, [...opts.held]) : undefined,
           cursorId
             ? keysetCursorWhere(schema.emails.createdAt, schema.emails.id, cursorId)
@@ -487,6 +521,7 @@ async function releaseParked(
   email: QuotaTeamRow & {
     id: string;
     teamId: string;
+    domainId: string | null;
     broadcastId: string | null;
     scheduledAt: Date | null;
     region: string;
@@ -501,6 +536,7 @@ async function releaseParked(
   const quota = teamQuota(email, deps.isCloud);
   // Charged the way accept charged it: one unit per distinct mailbox.
   const units = countDistinctRecipients(email.to, email.cc, email.bcc);
+  const { domainId } = email;
   try {
     // Past the deliverability pause line nothing of the team leaves the
     // drain: its transactional rows would only park again at send time, and
@@ -513,11 +549,31 @@ async function releaseParked(
         return null;
       }
     }
+    // Every release passes the sending domain's warm-up too, whatever parked
+    // the row: the plan's midnight must not let a young domain burst.
+    let warmup: WarmupCap | null = null;
+    if (domainId) {
+      if (!run.warmups.has(domainId)) {
+        run.warmups.set(
+          domainId,
+          await warmupCap(db, { teamId: email.teamId, domainId, at: run.now }),
+        );
+      }
+      warmup = run.warmups.get(domainId) ?? null;
+      if (warmup && (run.warmupFull.has(warmup.key) || run.poolFull.has(warmup.teamId))) {
+        run.heldDomains.add(domainId);
+        return null;
+      }
+    }
     const outcome = await db
       .transaction(async (tx) => {
         const txDb = tx as unknown as Db;
         const reservation = await reserveQuota(txDb, { teamId: email.teamId, count: units, quota });
         if (!reservation.reserved) return "exhausted" as const;
+        if (warmup) {
+          const held = await reserveWarmup(txDb, warmup, units, utcDay(run.now));
+          if (!held.reserved) throw new WarmupHeld(held.full);
+        }
         const moved = await transitionQueueState(txDb, email.id, {
           from: "queued_quota",
           to: "queued",
@@ -533,10 +589,17 @@ async function releaseParked(
       })
       .catch((err) => {
         if (err instanceof DrainRaced) return "raced" as const;
+        if (err instanceof WarmupHeld) return err.full === "pool" ? "pool_full" : "domain_full";
         throw err;
       });
     if (outcome === "exhausted") {
       run.heldTeams.add(email.teamId);
+      return null;
+    }
+    if (outcome === "domain_full" || outcome === "pool_full") {
+      if (warmup && outcome === "pool_full") run.poolFull.add(warmup.teamId);
+      else if (warmup) run.warmupFull.add(warmup.key);
+      if (domainId) run.heldDomains.add(domainId);
       return null;
     }
     if (outcome === "raced") return null;
@@ -734,6 +797,8 @@ const REVERIFY_BATCH = 100;
 export interface ReverifyDomainsDeps {
   clientForRegion: (region: string) => SesIdentityClient;
   resolver: DnsResolver;
+  /** The domain.age job, asked again when a domain verifies. */
+  enqueueDomainAge?: ((domainId: string) => Promise<void>) | undefined;
   now?: Date;
   batchSize?: number;
 }
@@ -772,6 +837,7 @@ export async function reverifyDomains(db: Db, deps: ReverifyDomainsDeps): Promis
       dkimSelector: schema.domains.dkimSelector,
       dkimPublicKey: schema.domains.dkimPublicKey,
       trackingSubdomain: schema.domains.trackingSubdomain,
+      status: schema.domains.status,
       verifiedAt: schema.domains.verifiedAt,
     })
     .from(schema.domains)
@@ -809,6 +875,11 @@ export async function reverifyDomains(db: Db, deps: ReverifyDomainsDeps): Promis
           ...(status === "verified" && !domain.verifiedAt ? { verifiedAt: now } : {}),
         })
         .where(eq(schema.domains.id, domain.id));
+      if (status === "verified" && domain.status !== "verified") {
+        await deps.enqueueDomainAge?.(domain.id).catch((err) => {
+          console.warn(`domains.reverify: ${domain.name} age lookup not queued`, err);
+        });
+      }
     } catch (err) {
       if ((err as { name?: string }).name === "NotFoundException") {
         // The SES identity is gone (deleted outside the app): the stored

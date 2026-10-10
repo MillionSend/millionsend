@@ -1005,7 +1005,12 @@ describe("quota backlog cap", () => {
       message: expect.stringMatching(/^emails\.0: /),
     });
 
-    for (const { id } of filler) await db.delete(schema.emails).where(eq(schema.emails.id, id));
+    await db.delete(schema.emails).where(
+      inArray(
+        schema.emails.id,
+        filler.map((row) => row.id),
+      ),
+    );
     await db
       .update(schema.usageCounters)
       .set({ accepted: 0 })
