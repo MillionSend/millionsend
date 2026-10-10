@@ -10,6 +10,7 @@ import {
   DnsRecordsTable,
   DnsRecordsTableSkeleton,
 } from "@/components/dns-records-table";
+import { DotParts } from "@/components/dot-parts";
 import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
@@ -822,14 +823,18 @@ export function DomainDetail({ id }: { id: string }) {
           }}
         >
           <span style={{ color: "var(--ms-bone)" }}>
-            {data.warmup.fullAt
-              ? t("detail.warmup", {
-                  perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
-                  date: formatDay(data.warmup.fullAt, locale),
-                })
-              : t("detail.warmupToday", {
-                  perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
-                })}
+            <DotParts
+              text={
+                data.warmup.fullAt
+                  ? t("detail.warmup", {
+                      perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
+                      date: formatDay(data.warmup.fullAt, locale),
+                    })
+                  : t("detail.warmupToday", {
+                      perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
+                    })
+              }
+            />
           </span>
           <span style={{ color: "var(--ms-muted)" }}>
             {t(data.warmup.shared ? "detail.warmupBodyShared" : "detail.warmupBody")}
