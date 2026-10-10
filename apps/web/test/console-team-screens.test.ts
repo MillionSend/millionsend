@@ -86,10 +86,13 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
-/** The chip a value an engineer pastes sits in: the whole value, then its copy button. */
+/**
+ * The chip a value an engineer pastes sits in: the whole value, wrapping
+ * on a narrow screen rather than cut off, then its copy button.
+ */
 const copyChip = (value: string) =>
   new RegExp(
-    `<span class="ms-chip"><span[^>]*>${value}</span><button type="button" aria-label="Copy"`,
+    `<span class="ms-chip"><span style="min-width:0;overflow-wrap:anywhere">${value}</span><button type="button" aria-label="Copy"`,
   );
 
 describe("the team's id on the console's team screens", () => {
@@ -155,12 +158,12 @@ describe("the team's id on the console's team screens", () => {
 });
 
 describe("the View as owner dialog", () => {
-  const render = (step: Parameters<typeof ViewDialog>[0]["step"]) =>
+  const render = (step: Parameters<typeof ViewDialog>[0]["step"], error: string | null = null) =>
     renderToStaticMarkup(
       createElement(ViewDialog, {
         name: "acme",
         pending: false,
-        error: null,
+        error,
         step,
         onClose: () => {},
         onSendCode: () => {},
@@ -197,5 +200,15 @@ describe("the View as owner dialog", () => {
     });
     expect(failed).toContain("The code email could not be sent");
     expect(failed).toContain("Yours is older: sign out and back in, then start it again.");
+  });
+
+  it("offers a code again once the server stops letting the sign-in stand in", () => {
+    const html = render(
+      { sent: false, reason: "send_failed", signedInRecently: true, minutes: 15 },
+      "code_required",
+    );
+    expect(html).toContain("A sign-in no longer stands in for the code: email yourself one.");
+    expect(html).not.toContain("The code email could not be sent");
+    expect(html).toContain("Email me a code");
   });
 });

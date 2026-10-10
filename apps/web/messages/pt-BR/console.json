@@ -563,7 +563,7 @@
         "own_team": "Você é membro desta equipe; abra-a pelo seletor de equipes.",
         "silent_suspension": "Esta equipe está suspensa por phishing ou retida para revisão, então nenhum modo de suporte pode começar.",
         "reference_required": "Uma referência de chamado é obrigatória.",
-        "code_required": "Digite o código do seu e-mail.",
+        "code_required": "Um login não vale mais no lugar do código: envie um para o seu e-mail.",
         "code_invalid": "Esse código não confere. Confira o e-mail e tente de novo.",
         "code_void": "Esse código não vale mais: expirou, já foi usado ou recebeu tentativas erradas demais. Envie outro.",
         "code_limit": "Códigos demais nesta hora. Tente de novo mais tarde."

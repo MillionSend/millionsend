@@ -18,6 +18,7 @@ import {
   CONSOLE_CODE_MINUTES,
   CONSOLE_CODE_TRIES,
   CONSOLE_CODES_PER_HOUR,
+  consoleStepUp,
   resetConsoleCodeSends,
 } from "@/server/console-code";
 import type { SessionRole } from "@/server/membership";
@@ -445,6 +446,29 @@ describe("console.teams.startSupportView", () => {
     expect(await resolveSupportView(db, OPERATOR, grant.id)).toBeNull();
     expect((await resolveSupportView(db, OPERATOR, next.grantId))?.grantId).toBe(next.grantId);
   });
+
+  it("ends a view already past its deadline as expiry, dated at the deadline", async () => {
+    const first = await start();
+    const deadline = new Date(Date.now() - 60_000);
+    await db
+      .update(schema.supportViewGrants)
+      .set({
+        createdAt: new Date(deadline.getTime() - SUPPORT_VIEW_MINUTES * 60_000),
+        expiresAt: deadline,
+      })
+      .where(eq(schema.supportViewGrants.id, first.id));
+    await start({ reference: "#6" });
+    expect(await grantRow(first.id)).toMatchObject({ endedBy: "expiry", endedAt: deadline });
+    const ended = (await auditRows("support.view_ended")).filter(
+      (row) => row.target === `support_view:${first.id}`,
+    );
+    expect(ended).toEqual([
+      expect.objectContaining({
+        actorId: "system",
+        data: { by: "expiry", minutes: SUPPORT_VIEW_MINUTES, procedures: 0 },
+      }),
+    ]);
+  });
 });
 
 describe("the emailed code in front of a start", () => {
@@ -580,6 +604,17 @@ describe("the emailed code in front of a start", () => {
     await expect(startWith(second)).rejects.toMatchObject({ message: "code_void" });
     await operator().console.teams.sendSupportViewCode();
     expect((await startWith(sentCode())).grantId).toBeTruthy();
+  });
+
+  it("is the operator's alone: under another user's session it is no code at all", async () => {
+    canSendMail();
+    await operator().console.teams.sendSupportViewCode();
+    const code = sentCode();
+    await expect(consoleStepUp(db, { user: user(MEMBER) }, code)).rejects.toMatchObject({
+      message: "code_void",
+    });
+    // The other session's try cost the operator nothing.
+    expect((await startWith(code)).grantId).toBeTruthy();
   });
 
   it("limits how many codes one operator is sent in an hour", async () => {

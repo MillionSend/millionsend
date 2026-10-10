@@ -39,7 +39,7 @@ export function ViewDialog({
   name,
   pending,
   error,
-  step,
+  step: answered,
   onClose,
   onSendCode,
   onSubmit,
@@ -60,6 +60,9 @@ export function ViewDialog({
   const [reason, setReason] = useState<SupportViewReason>("support_ticket");
   const [reference, setReference] = useState("");
   const [code, setCode] = useState("");
+  // A fallback the server no longer honors (its mark lapsed, or a code has
+  // gone out since) comes back as code_required: offer to email one again.
+  const step = error === "code_required" ? null : answered;
   const trimmed = reference.trim();
   const digits = code.replace(/\D/g, "");
   const valid =
