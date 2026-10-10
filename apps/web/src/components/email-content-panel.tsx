@@ -329,42 +329,45 @@ export function EmailContentPanel({
     >
       {/* The tab bar outlives the body purge: insights are content-derived
         metadata and deliberately survive it, so the purge message replaces
-        only the preview/text/html panels. */}
+        only the preview/text/html panels. Its tabs scroll sideways as one line
+        (a tab wrapped under its neighbours reads as a different control); the
+        tools drop to a line of their own when they do not fit beside them. */}
       <div
-        className="ms-scroll-x"
         style={{
           display: "flex",
+          flexWrap: "wrap",
           alignItems: "center",
           gap: 6,
           padding: "10px 12px",
           borderBottom: "1px solid var(--ms-line)",
-          // One line that scrolls sideways on a phone: a tab that wraps
-          // under its neighbours reads as a different control.
-          overflowX: "auto",
-          flexWrap: "nowrap",
         }}
       >
-        {TAB_KEYS.map((key) => (
-          <button
-            key={key}
-            type="button"
-            style={{
-              flex: "none",
-              whiteSpace: "nowrap",
-              fontSize: 13,
-              padding: "5px 11px",
-              borderRadius: 8,
-              border: 0,
-              cursor: "pointer",
-              background: tab === key ? "var(--ms-panel-raised)" : "none",
-              color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
-              font: "inherit",
-            }}
-            onClick={() => setTab(key)}
-          >
-            {tabLabels[key]}
-          </button>
-        ))}
+        <div
+          className="ms-scroll-x"
+          style={{ display: "flex", gap: 6, overflowX: "auto", flex: "0 1 auto", minWidth: 0 }}
+        >
+          {TAB_KEYS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              style={{
+                flex: "none",
+                whiteSpace: "nowrap",
+                fontSize: 13,
+                padding: "5px 11px",
+                borderRadius: 8,
+                border: 0,
+                cursor: "pointer",
+                background: tab === key ? "var(--ms-panel-raised)" : "none",
+                color: tab === key ? "var(--ms-bone)" : "var(--ms-muted)",
+                font: "inherit",
+              }}
+              onClick={() => setTab(key)}
+            >
+              {tabLabels[key]}
+            </button>
+          ))}
+        </div>
         {currentContent ? (
           <span
             style={{

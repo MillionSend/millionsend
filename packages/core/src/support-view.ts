@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, isNull, type SQL, sql } from "drizzle-orm";
-import { auditRow, recordAudit } from "./audit.js";
+import { type AuditEvent, auditRow, recordAudit } from "./audit.js";
 import { SUPPORT_VIEW_REASONS, type SupportViewReason } from "./support-view-reasons.js";
 
 export { SUPPORT_VIEW_REASONS, type SupportViewReason };
@@ -10,10 +10,10 @@ export { SUPPORT_VIEW_REASONS, type SupportViewReason };
 export const SUPPORT_VIEW_MINUTES = 30;
 
 /**
- * How recent the operator's sign-in must be to start a view, so a stolen
- * long-lived session cannot open one.
- * ponytail: a recent sign-in stands in for step-up auth; require a second
- * factor once the instance has one.
+ * How long a step-up to start a view counts: a sign-in this recent stands in
+ * for the emailed one-time code when none can reach the operator, and a code
+ * confirmed on a session covers that session's starts for as long. Past it,
+ * a stolen session needs the operator's mailbox to open a view.
  */
 export const SUPPORT_VIEW_SIGN_IN_MINUTES = 15;
 
@@ -83,9 +83,10 @@ export function liveSupportViewOfOperator(
 }
 
 /**
- * Opens a view on `teamId` for the operator, ending the one they may still
- * hold (one live view per operator, and no nesting). Records the start in
- * the audit log with the team set, so the team's own trail shows it at once.
+ * Opens a view on `teamId` for the operator. A view they still hold, from
+ * a closed tab or another team, ends first exactly as End session ends it,
+ * so there is one live view per operator. Records the start in the audit
+ * log with the team set, so the team's own trail shows it at once.
  */
 export async function startSupportView(
   db: Db,
@@ -98,19 +99,36 @@ export async function startSupportView(
   },
   now: Date = new Date(),
 ): Promise<SupportViewGrant> {
-  const previous = await liveSupportViewOfOperator(db, input.operatorUserId, now);
-  if (previous) await endSupportView(db, previous, { by: "operator" }, now);
   const expiresAt = new Date(now.getTime() + SUPPORT_VIEW_MINUTES * 60_000);
-  // The start row is the owner's only record of the session, so it commits
-  // with the grant or the view does not open; recordAudit would swallow a
-  // failed write.
+  // The audit rows are the owner's only record of either session, so they
+  // commit with the grants or nothing changes: a start that fails leaves
+  // the previous view live. recordAudit would swallow a failed write.
   return db.transaction(async (tx) => {
-    const [grant] = await tx
+    const t = tx as unknown as Db;
+    // Two starts by one operator queue here, so the later one ends the
+    // earlier one's view instead of tripping the one-live-view index.
+    await t.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`support_view:${input.operatorUserId}`}))`,
+    );
+    const [previous] = await t
+      .select()
+      .from(g)
+      .where(and(eq(g.operatorUserId, input.operatorUserId), isNull(g.endedAt)));
+    if (previous) {
+      const ended = await closeGrant(
+        t,
+        previous,
+        previous.expiresAt <= now ? { by: "expiry" } : { by: "operator" },
+        now,
+      );
+      if (ended) await t.insert(schema.auditLog).values(auditRow(ended));
+    }
+    const [grant] = await t
       .insert(g)
       .values({ ...input, createdAt: now, expiresAt })
       .returning();
     if (!grant) throw new Error("support view insert returned no row");
-    await tx.insert(schema.auditLog).values(
+    await t.insert(schema.auditLog).values(
       auditRow({
         teamId: grant.teamId,
         actor: { userId: grant.operatorUserId },
@@ -127,26 +145,32 @@ export async function startSupportView(
   });
 }
 
+type EndableGrant = Pick<
+  SupportViewGrant,
+  "id" | "teamId" | "operatorUserId" | "createdAt" | "expiresAt"
+>;
+type EndedBy = { by: "operator" | "expiry" } | { by: "owner"; userId: string };
+
 /**
- * Ends a grant once; false when it had already ended. The audit row names
- * who ended it and how many distinct procedures were read, never which
- * rows they returned. Expiry is dated at the deadline, not at the request
- * that noticed it.
+ * Marks a grant ended once and returns its audit event, or null when it had
+ * already ended. The event names who ended it and how many distinct
+ * procedures were read, never which rows they returned. Expiry is dated at
+ * the deadline, not at the request that noticed it.
  */
-export async function endSupportView(
+async function closeGrant(
   db: Db,
-  grant: Pick<SupportViewGrant, "id" | "teamId" | "operatorUserId" | "createdAt" | "expiresAt">,
-  ended: { by: "operator" | "expiry" } | { by: "owner"; userId: string },
-  now: Date = new Date(),
-): Promise<boolean> {
+  grant: EndableGrant,
+  ended: EndedBy,
+  now: Date,
+): Promise<AuditEvent | null> {
   const endedAt = ended.by === "expiry" ? grant.expiresAt : now;
   const [row] = await db
     .update(g)
     .set({ endedAt, endedBy: ended.by })
     .where(and(eq(g.id, grant.id), isNull(g.endedAt)))
     .returning({ procedures: g.procedures });
-  if (!row) return false;
-  await recordAudit(db, {
+  if (!row) return null;
+  return {
     teamId: grant.teamId,
     actor:
       ended.by === "expiry"
@@ -159,8 +183,19 @@ export async function endSupportView(
       minutes: Math.round((endedAt.getTime() - grant.createdAt.getTime()) / 60_000),
       procedures: Object.keys(row.procedures).length,
     },
-  });
-  return true;
+  };
+}
+
+/** Ends a grant once and audits it; false when it had already ended. */
+export async function endSupportView(
+  db: Db,
+  grant: EndableGrant,
+  ended: EndedBy,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const event = await closeGrant(db, grant, ended, now);
+  if (event) await recordAudit(db, event);
+  return event !== null;
 }
 
 /** Counts one read of `path` on the grant: procedure names and counts, nothing of what they returned. */

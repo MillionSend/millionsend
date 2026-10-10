@@ -107,35 +107,46 @@ export function FromField({
           value={parts.local}
           onChange={(e) => update({ local: e.target.value.trim() })}
         />
-        <span className="ms-mono" style={{ color: "var(--ms-muted)" }} aria-hidden="true">
-          @
+        {/* The "@" wraps together with the domain, never alone at a line's end. */}
+        <span
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flex: noDomains ? "0 0 auto" : "1 1 170px",
+            minWidth: 0,
+          }}
+        >
+          <span className="ms-mono" style={{ color: "var(--ms-muted)" }} aria-hidden="true">
+            @
+          </span>
+          {noDomains ? (
+            <Link
+              href="/domains/new"
+              className="ms-btn ms-btn-secondary"
+              style={{ flex: "0 0 auto" }}
+            >
+              {t("composer.fromAddDomain")}
+            </Link>
+          ) : (
+            <div style={{ flex: "1 1 150px", minWidth: 140 }}>
+              <Select
+                width="100%"
+                ariaLabel={t("composer.fromDomainLabel")}
+                value={parts.domain}
+                onChange={(next) => {
+                  if (next === ADD_DOMAIN) {
+                    // Programmatic push — the anchor/back guards never see it.
+                    if (confirmUnsavedNavigation()) router.push("/domains/new");
+                  } else {
+                    update({ domain: next });
+                  }
+                }}
+                options={options}
+              />
+            </div>
+          )}
         </span>
-        {noDomains ? (
-          <Link
-            href="/domains/new"
-            className="ms-btn ms-btn-secondary"
-            style={{ flex: "0 0 auto" }}
-          >
-            {t("composer.fromAddDomain")}
-          </Link>
-        ) : (
-          <div style={{ flex: "1 1 150px", minWidth: 140 }}>
-            <Select
-              width="100%"
-              ariaLabel={t("composer.fromDomainLabel")}
-              value={parts.domain}
-              onChange={(next) => {
-                if (next === ADD_DOMAIN) {
-                  // Programmatic push — the anchor/back guards never see it.
-                  if (confirmUnsavedNavigation()) router.push("/domains/new");
-                } else {
-                  update({ domain: next });
-                }
-              }}
-              options={options}
-            />
-          </div>
-        )}
       </div>
     </div>
   );

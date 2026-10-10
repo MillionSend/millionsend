@@ -353,67 +353,72 @@ export function WebhookDetail({ id }: { id: string }) {
           </>
         }
         actions={
-          <>
-            <div style={{ position: "relative" }}>
-              <button
-                type="button"
-                className="ms-btn ms-btn-secondary"
-                disabled={testMutation.isPending}
-                onClick={() => testMutation.mutate({ id })}
+          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="ms-btn ms-btn-secondary"
+              disabled={testMutation.isPending}
+              onClick={() => testMutation.mutate({ id })}
+            >
+              <BtnSpinner on={testMutation.isPending} />
+              {t("detail.sendTest")}
+            </button>
+            {testSent || testError ? (
+              <span
+                className="ms-action-note"
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  right: 0,
+                  whiteSpace: "nowrap",
+                  color: testError ? "var(--ms-danger)" : "var(--ms-muted)",
+                  fontSize: "var(--ms-fs-label)",
+                }}
               >
-                <BtnSpinner on={testMutation.isPending} />
-                {t("detail.sendTest")}
-              </button>
-              {testSent || testError ? (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 6px)",
-                    right: 0,
-                    whiteSpace: "nowrap",
-                    color: testError ? "var(--ms-danger)" : "var(--ms-muted)",
-                    fontSize: "var(--ms-fs-label)",
-                  }}
-                >
-                  {testError ? t(`detail.${testError}`) : `✓ ${t("detail.testQueued")}`}
-                </span>
-              ) : null}
-            </div>
-            <PopoverMenu
-              boxed
-              ariaLabel={t("detail.moreActions")}
-              items={[
-                {
-                  label: t("edit"),
-                  onSelect: () =>
-                    setEditTarget({
-                      id,
-                      url: data.url,
-                      description: data.description,
-                      eventTypes: data.eventTypes,
-                    }),
-                },
-                { label: t("rotateSecret"), onSelect: () => setRotating(true) },
-                null,
-                {
-                  label: data.enabled ? t("disable") : t("enable"),
-                  onSelect: () => void toggleEnabled(data),
-                },
-                null,
-                {
-                  label: t("delete"),
-                  danger: true,
-                  onSelect: () => setConfirmingDelete(true),
-                },
-              ]}
-            />
-          </>
+                {testError ? t(`detail.${testError}`) : `✓ ${t("detail.testQueued")}`}
+              </span>
+            ) : null}
+          </div>
+        }
+        menu={
+          <PopoverMenu
+            boxed
+            ariaLabel={t("detail.moreActions")}
+            items={[
+              {
+                label: t("edit"),
+                onSelect: () =>
+                  setEditTarget({
+                    id,
+                    url: data.url,
+                    description: data.description,
+                    eventTypes: data.eventTypes,
+                  }),
+              },
+              { label: t("rotateSecret"), onSelect: () => setRotating(true) },
+              null,
+              {
+                label: data.enabled ? t("disable") : t("enable"),
+                onSelect: () => void toggleEnabled(data),
+              },
+              null,
+              {
+                label: t("delete"),
+                danger: true,
+                onSelect: () => setConfirmingDelete(true),
+              },
+            ]}
+          />
         }
       />
 
       {data.status === "auto_disabled" ? (
-        <div style={{ display: "flex", gap: 12, alignItems: "flex-start", maxWidth: 1000 }}>
-          <div style={{ flex: 1 }}>
+        <div
+          className="ms-wrap-row"
+          style={{ display: "flex", columnGap: 12, alignItems: "flex-start", maxWidth: 1000 }}
+        >
+          {/* The button drops under the strip before the strip's text gets narrower than this. */}
+          <div style={{ flex: "1 1 288px" }}>
             <NoticeStrip tone="warn" text={t("queue.autoDisabled")} />
           </div>
           <button

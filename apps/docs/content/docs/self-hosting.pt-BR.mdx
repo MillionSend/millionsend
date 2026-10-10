@@ -162,7 +162,7 @@ auto-hospedada não tem limites de plano.
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PORTAL_CONFIG` | Somente na nuvem hospedada; ignorados quando `IS_CLOUD=false`. Chave de API do Stripe, o segredo de assinatura do endpoint de webhook em `/api/billing/webhook` e um id opcional de configuração do portal do cliente. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciais OAuth do "Continuar com Google". O botão só aparece com ambas definidas. URL de callback: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
-| `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha, confirmação de e-mail), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha e a confirmação no cadastro só existem com isto definido e credenciais SES configuradas — deixe vazio para pular as duas. Verifique o domínio em um time em **Domínios** e esses e-mails passam a ser registrados lá, com as novas contas como seus contatos (veja [E-mails de conta](#e-mails-de-conta-contatos-e-novidades)). |
+| `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha, confirmação de e-mail, o código de uso único do console), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha e a confirmação no cadastro só existem com isto definido e credenciais SES configuradas — deixe vazio para pular as duas. Verifique o domínio em um time em **Domínios** e esses e-mails passam a ser registrados lá, com as novas contas como seus contatos (veja [E-mails de conta](#e-mails-de-conta-contatos-e-novidades)). |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login, o cadastro, a redefinição de senha e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
 | `ONBOARDING_EMAIL_FROM` | Remetente do botão "Enviar e-mail" do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Leva um único e-mail de teste fixo por time, para o dono do time (um endereço confirmado, onde a instância confirma e-mails), e nada mais: um envio a partir dele pela API, SMTP, MCP, um broadcast ou um teste do painel é recusado (`422 reserved_sender` na API), mesmo para um time que verificou o domínio. Deixe vazio para ocultar o botão. |
 | `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos donos do time (cota quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para o time, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. Verifique o domínio em um time para registrar esses e-mails lá. |
@@ -743,7 +743,10 @@ dia (padrão 50, contando os revogados e os de times excluídos).
 Esse time é o da própria instância, e o operador pode marcá-lo como tal: no
 plano `system` ele nunca tem limite nem cobrança, o selo diz System e a aba
 Cobrança mostra um aviso no lugar dos planos. Numa instância auto-hospedada
-os planos não impõem limites, então a marca só o rotula.
+os planos não impõem limites, mas a marca faz mais que rotulá-lo: o monitor
+de conteúdo nunca o retém, o aquecimento de domínio novo nunca limita os
+domínios dele, e os contatos dele são a lista da qual uma suspensão
+descadastra os membros de um time.
 
 O mesmo time é a audiência das novidades do produto. Em uma instância com
 `ALLOW_SIGNUP=true`, toda conta nova vira um contato ali com a propriedade
@@ -815,14 +818,35 @@ um teto diário limita o dia da equipe abaixo do plano. Os proprietários são
 avisados por e-mail a cada ação (exceto suspensão por phishing ou retenção
 para revisão), e cada ação entra no log de auditoria com o motivo.
 
-Enquanto uma equipe está suspensa, os avisos de cota, entregabilidade,
-transmissões retidas e transmissões pausadas param. Os e-mails de cobrança
-também param quando a suspensão é por phishing ou uma retenção para revisão
-(a Stripe continua enviando os próprios recibos), e continuam chegando com
-qualquer outro motivo. O e-mail para o operador, como os alertas do monitor
-de conteúdo sobre a equipe, continua saindo. Ninguém numa equipe suspensa pode
-excluí-la, remover os domínios dela (a API também responde
-`403 team_suspended`) nem convidar ninguém, e um membro de uma equipe suspensa
+Enquanto uma equipe está suspensa, os únicos e-mails sobre ela que ainda
+chegam aos proprietários são os avisos de suspensão e de reativação, os
+e-mails de cobrança e os recibos de segurança (uma nova chave de API, um
+segredo de webhook rotacionado, um membro que entrou). Os avisos de domínio,
+webhook, transmissão, cota e entregabilidade param, assim como qualquer
+outro aviso sobre a equipe. Numa suspensão por phishing ou numa retenção
+para revisão nada sobre a equipe sai, nem a cobrança (a Stripe continua
+enviando os próprios recibos). Os e-mails sobre a própria conta de uma
+pessoa, como uma redefinição de senha ou uma verificação de e-mail, e os
+e-mails para o operador, como os alertas do monitor de conteúdo sobre a
+equipe, continuam saindo.
+
+Uma suspensão por qualquer motivo que não seja uma retenção para revisão ou
+falta de pagamento também descadastra todos os membros da equipe da lista
+de contatos da própria instância (os contatos da equipe no plano `system`,
+para onde vão os anúncios do produto), mesmo um membro que também pertença
+a uma equipe em situação regular. É o mesmo descadastro do painel, e a linha
+do tempo de cada contato diz o motivo; nenhum webhook é disparado. Uma
+retenção para revisão que vira suspensão por phishing os descadastra nesse
+momento. Reativar a equipe não os inscreve de novo: só a própria inscrição
+deles faz isso. Só uma equipe no plano `system` conta como essa lista: se
+a equipe que tem o domínio do remetente não estiver nele, uma suspensão não
+descadastra ninguém. Ao atualizar para esta versão, os membros das equipes
+já suspensas por um desses motivos são descadastrados uma vez, exceto um
+contato que mudou depois da suspensão da equipe, como quem se inscreveu de
+novo.
+
+Ninguém numa equipe suspensa pode excluí-la, remover os domínios dela (a API
+também responde `403 team_suspended`) nem convidar ninguém, e um membro de uma equipe suspensa
 por phishing ou retida para revisão não pode criar novas equipes. Com esses
 dois motivos, cada uma dessas recusas é uma única linha neutra que nunca diz
 suspensa ("Isso não está disponível para esta equipe no momento. Fale com o
@@ -886,8 +910,8 @@ liberar a equipe não deixa pausa do monitor para trás.
 Uma equipe é retida uma vez só, por qualquer das regras: depois de liberada,
 seus veredictos seguintes só geram alerta, então o e-mail liberado, julgado de
 novo na saída, não a retém outra vez nem pausa seus broadcasts. Uma equipe já suspensa mantém a suspensão, e equipes nos níveis Probatória,
-Estabelecida e Confiável e as de sistema nunca são retidas: ficam só no
-alerta. O
+Estabelecida e Confiável nunca são retidas: ficam só no alerta. A equipe de
+sistema fica isenta: o monitor nunca a amostra. O
 juiz lê uma mensagem depois que o SES a recebeu, então a mensagem que dispara
 a retenção já saiu; a retenção barra o que vem depois.
 `MONITOR_AUTO_HOLD=false` a desliga.
@@ -1153,11 +1177,25 @@ nada dele chegou a ninguém. Toda alteração é recusada: o servidor responde
 do que a tela mostra.
 
 **Por quanto tempo.** 30 minutos, verificados a cada requisição. Um modo
-ativo por operador; iniciar outro encerra o anterior, e um modo não inicia
-outro. O operador encerra pela faixa, o proprietário em Configurações →
-Acesso de suporte, e a expiração encerra na requisição seguinte. Iniciar um
-modo exige um login feito nos últimos 15 minutos, para que uma sessão antiga
-roubada não consiga abrir um.
+ativo por operador: iniciar outro, pelo console ou de dentro de um modo,
+encerra antes o que está ativo, exatamente como Encerrar sessão, e é assim
+que termina um modo deixado aberto numa aba fechada. O operador encerra pela
+faixa, o proprietário em Configurações → Acesso de suporte, e a expiração
+encerra na requisição seguinte.
+
+**Como iniciar.** O diálogo envia um código de 6 dígitos ao e-mail do
+próprio operador, a partir de `AUTH_EMAIL_FROM`. Ele vale uma vez, por 10
+minutos; cinco tentativas erradas o anulam, um código novo substitui o
+anterior, e cada operador recebe no máximo cinco por hora. Só fica guardado
+um hash com chave derivada de `BETTER_AUTH_SECRET`. Um código confirmado vale
+para os inícios daquela sessão do navegador por 15 minutos, então abrir
+vários modos pede um código só; sair da conta encerra isso. Quando a
+instância não consegue enviar o código (sem `AUTH_EMAIL_FROM` ou sem
+credenciais do SES) ou o e-mail dele falha, seja no próprio envio ou, quando
+uma equipe detém o domínio do remetente, depois na fila (recusado, com falha,
+devolvido ou retido antes do SES), o diálogo diz isso, e por 10 minutos um
+login feito nos últimos 15 minutos vale no lugar do código. De um jeito ou de
+outro, uma sessão antiga roubada não consegue abrir um modo.
 
 **O que é registrado.** `support.view_started` e `support.view_ended`, na
 auditoria da instância e, na hora, no Registro de auditoria da própria

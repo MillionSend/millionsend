@@ -9,9 +9,11 @@ import { useCallback, useRef, useState } from "react";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
+import { KvRow } from "@/components/kv-row";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { RelativeTime } from "@/components/relative-time";
+import { SectionCard } from "@/components/section-card";
 import { Select } from "@/components/select";
 import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -30,40 +32,6 @@ import { useCountdown } from "@/lib/use-countdown";
 import { useSwitchLocale } from "@/lib/use-switch-locale";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter } from "../emails/list-parts";
-
-function SectionCard({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  /** Right-aligned control on the title row (the card's primary action). */
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="ms-card" style={{ padding: 24 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          margin: "0 0 18px",
-        }}
-      >
-        <h2
-          className="ms-display"
-          style={{ fontSize: "var(--ms-fs-h2)", color: "var(--ms-bone)", margin: 0 }}
-        >
-          {title}
-        </h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
 
 function TeamSection({ billing }: { billing: boolean }) {
   const t = useTranslations("settings");
@@ -532,7 +500,7 @@ function PendingInvitations() {
       <div className="ms-microlabel" style={{ marginBottom: 8 }}>
         {t("invitations.pending.title")}
       </div>
-      <Table>
+      <Table style={{ whiteSpace: "nowrap" }}>
         <thead>
           <tr>
             <th>{t("invitations.pending.email")}</th>
@@ -679,7 +647,7 @@ function MembersSection() {
         ) : null
       }
     >
-      <Table>
+      <Table style={{ whiteSpace: "nowrap" }}>
         <thead>
           <tr>
             <th>{t("members.name")}</th>
@@ -837,18 +805,13 @@ function SupportAccessSection() {
       </p>
       {live ? (
         <dl className="ms-kv">
-          <dt>{t("operator")}</dt>
-          <dd>{actors("operator")}</dd>
-          <dt>{t("started")}</dt>
-          <dd>{formatDayTime(live.startedAt, locale)}</dd>
-          <dt>{t("expires")}</dt>
-          <dd>
+          <KvRow label={t("operator")}>{actors("operator")}</KvRow>
+          <KvRow label={t("started")}>{formatDayTime(live.startedAt, locale)}</KvRow>
+          <KvRow label={t("expires")}>
             <SupportEndsAt expiresAt={live.expiresAt} />
-          </dd>
-          <dt>{t("reason")}</dt>
-          <dd>{t(`reasons.${live.reason}`)}</dd>
-          <dt>{t("reference")}</dt>
-          <dd>{live.reference ?? "—"}</dd>
+          </KvRow>
+          <KvRow label={t("reason")}>{t(`reasons.${live.reason}`)}</KvRow>
+          <KvRow label={t("reference")}>{live.reference ?? "—"}</KvRow>
         </dl>
       ) : (
         <p style={{ margin: 0, color: "var(--ms-bone)", fontSize: "var(--ms-fs-ui)" }}>
@@ -1141,7 +1104,7 @@ function DangerSection() {
           <ChevronGlyph direction="down" />
         </span>
       </summary>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
+      <div className="ms-actions" style={{ marginTop: 18 }}>
         {active?.role === "owner" ? (
           <button
             type="button"

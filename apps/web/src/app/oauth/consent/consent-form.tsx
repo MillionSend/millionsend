@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import styles from "@/components/auth/auth.module.css";
 import { AuthScreen } from "@/components/auth/auth-screen";
+import { DotParts } from "@/components/dot-parts";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
 import { authClient } from "@/lib/auth-client";
@@ -131,14 +132,20 @@ export function ConsentForm({
           }}
         >
           <strong>
-            {t("unverified")}
-            {app.registeredAt
-              ? ` · ${t("registered", {
-                  date: new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
-                    new Date(app.registeredAt),
-                  ),
-                })}`
-              : null}
+            <DotParts
+              text={[
+                t("unverified"),
+                ...(app.registeredAt
+                  ? [
+                      t("registered", {
+                        date: new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
+                          new Date(app.registeredAt),
+                        ),
+                      }),
+                    ]
+                  : []),
+              ].join(" · ")}
+            />
           </strong>
           <span>{t("unverifiedNote")}</span>
           {redirects}
@@ -187,7 +194,14 @@ export function ConsentForm({
               {t("noTeam")} <Link href="/onboarding">{t("createTeam")}</Link>
             </p>
           )}
-          <span style={{ fontSize: "var(--ms-fs-micro)", color: "var(--ms-faint)" }}>
+          <span
+            style={{
+              display: "block",
+              lineHeight: 1.45,
+              fontSize: "var(--ms-fs-micro)",
+              color: "var(--ms-faint)",
+            }}
+          >
             {teamId === ALL_TEAMS ? t("allTeamsNote") : t("teamNote")}
           </span>
         </div>

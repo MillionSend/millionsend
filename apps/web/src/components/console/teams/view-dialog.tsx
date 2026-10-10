@@ -6,38 +6,59 @@ import {
 } from "@millionsend/core/support-view-reasons";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { Breakable } from "@/components/breakable";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
+import { formatMmSs } from "@/lib/format";
+import { useCountdown } from "@/lib/use-countdown";
+import type { CodeStep } from "./types";
 
 export interface ViewInput {
   reason: SupportViewReason;
   reference: string;
+  code?: string;
 }
 
 const KNOWN_ERRORS = [
   "support_view_off",
-  "support_view_live",
   "sign_in_again",
   "own_team",
   "silent_suspension",
   "reference_required",
+  "code_required",
+  "code_invalid",
+  "code_void",
+  "code_limit",
 ];
 
-/** Names a reason and a request, then opens the team's dashboard read-only for 30 minutes. */
+/**
+ * Names a reason and a request, emails the operator a one-time code, then
+ * opens the team's dashboard read-only for 30 minutes. When the code cannot
+ * go out, says why and lets a recent sign-in stand in; while a code this
+ * session confirmed still covers it, goes straight to the start.
+ */
 export function ViewDialog({
   name,
   pending,
   error,
+  step: answered,
+  verifiedUntil,
   onClose,
+  onSendCode,
   onSubmit,
 }: {
   name: string;
   pending: boolean;
   /** The server's refusal code, shown in the dialog's own words when it is one it knows. */
   error: string | null;
+  /** What the last code request answered; null before the first. */
+  step: CodeStep | null;
+  /** Until when a code confirmed on this session covers the start; null when none does. */
+  verifiedUntil: Date | null;
   onClose: () => void;
+  onSendCode: () => void;
   onSubmit: (input: ViewInput) => void;
 }) {
   const t = useTranslations("console.teams.viewDialog");
@@ -45,12 +66,24 @@ export function ViewDialog({
   const id = useId();
   const [reason, setReason] = useState<SupportViewReason>("support_ticket");
   const [reference, setReference] = useState("");
+  const [code, setCode] = useState("");
+  const left = useCountdown(verifiedUntil);
+  // Whatever stood in for a new code (a recent sign-in, a code confirmed
+  // earlier) and no longer does comes back as code_required: offer to email one.
+  const lapsed = error === "code_required";
+  const verified = left > 0 && !lapsed;
+  const step = lapsed || verified ? null : answered;
   const trimmed = reference.trim();
-  const valid = trimmed.length > 0;
+  const digits = code.replace(/\D/g, "");
+  const valid =
+    trimmed.length > 0 &&
+    (verified || step === null || (step.sent ? digits.length === 6 : step.signedInRecently));
 
   function submit() {
     if (pending || !valid) return;
-    onSubmit({ reason, reference: trimmed });
+    if (verified) onSubmit({ reason, reference: trimmed });
+    else if (!step) onSendCode();
+    else onSubmit({ reason, reference: trimmed, ...(step.sent ? { code: digits } : {}) });
   }
 
   return (
@@ -109,6 +142,67 @@ export function ViewDialog({
           <b style={{ color: "var(--ms-bone)", fontWeight: 600 }}>{t("hiddenTitle")}</b>
           {t("hiddenBody")}
         </div>
+        {verified ? (
+          <p style={{ margin: "14px 0 0", color: "var(--ms-muted)", fontSize: 13 }}>
+            {t("verified", { left: formatMmSs(left) })}
+          </p>
+        ) : step?.sent ? (
+          <div className="ms-field" style={{ marginTop: 14 }}>
+            <label htmlFor={`${id}-code`}>{t("code")}</label>
+            <input
+              id={`${id}-code`}
+              type="text"
+              className="ms-input mono"
+              style={{ width: "100%" }}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={12}
+              // biome-ignore lint/a11y/noAutofocus: the field appears in answer to the operator's own click, and the code is the next thing to type
+              autoFocus
+              disabled={pending}
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+            />
+            <p
+              style={{
+                margin: "6px 0 0",
+                color: "var(--ms-muted)",
+                fontSize: "var(--ms-fs-label)",
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              {/* One flex item: bare, each text run and <wbr> would sit a gap apart. */}
+              <span>
+                <Breakable text={t("codeSent", { email: step.to, minutes: step.minutes })} />
+              </span>
+              <button
+                type="button"
+                className="ms-btn ms-btn-ghost ms-btn-sm"
+                disabled={pending}
+                onClick={() => {
+                  setCode("");
+                  onSendCode();
+                }}
+              >
+                {t("codeResend")}
+              </button>
+            </p>
+          </div>
+        ) : step ? (
+          <p
+            style={{
+              margin: "14px 0 0",
+              color: step.signedInRecently ? "var(--ms-muted)" : "var(--ms-warn)",
+              fontSize: 13,
+            }}
+          >
+            {t(`fallback.${step.reason}`, { minutes: step.minutes })}{" "}
+            {t(step.signedInRecently ? "fallback.fresh" : "fallback.stale")}
+          </p>
+        ) : null}
         {error ? (
           <p
             style={{
@@ -126,7 +220,7 @@ export function ViewDialog({
           </button>
           <button type="submit" className="ms-btn ms-btn-primary" disabled={pending || !valid}>
             <BtnSpinner on={pending} />
-            {t("confirm")} <ConfirmKeycap />
+            {t(step || verified ? "confirm" : "sendCode")} <ConfirmKeycap />
           </button>
         </ModalFooter>
       </form>
