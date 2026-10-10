@@ -11,6 +11,7 @@ import {
   raisesQuota,
   recordTenantStatus,
   resumeMonitorPause,
+  SILENT_SUSPENSIONS,
   SUPPORT_VIEW_REASONS,
   SUPPORT_VIEW_SIGN_IN_MINUTES,
   SUSPENSION_REASONS,
@@ -49,8 +50,6 @@ const SORT_KEYS = [
   "created",
 ] as const;
 const PAUSE_REASONS = ["complaints", "report", "manual"] as const;
-/** Suspensions the owner never hears about, on the way in or out. */
-const SILENT_SUSPENSIONS: readonly string[] = ["phishing", "review"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const t = schema.teams;
@@ -634,7 +633,7 @@ export const consoleTeamsRouter = router({
         target: { type: "team", id: team.id },
         metadata: { name: team.name, reason: team.suspensionReason },
       });
-      if (team.suspendedAt && !SILENT_SUSPENSIONS.includes(team.suspensionReason ?? "")) {
+      if (team.suspendedAt && !isSilentlySuspended(team)) {
         await mailTeamOwners(ctx.db, team, "team.reinstated", "/emails", () => ({}));
       }
       if (team.suspensionReason === "review") {
