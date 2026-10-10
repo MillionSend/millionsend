@@ -392,6 +392,41 @@ describe("a click on mail whose sender no longer vouches for it", () => {
   });
 });
 
+describe("a click on a branded tracking host", () => {
+  const url = "https://shop.example.com/sale?id=9";
+  const onHost = (token: string, host: string) =>
+    clickGet(...req(token, { "user-agent": IPHONE, "x-tracking-host": host }));
+
+  it("redirects only for the team holding the host's domain, and records nothing for another", async () => {
+    const { emailId, teamId } = await seedEmail();
+    const other = await createTeam(db, "bank");
+    const domain = { region: "us-east-1", trackingSubdomain: "links" };
+    await db.insert(schema.domains).values([
+      { ...domain, teamId, name: "shop.example", status: "verified" },
+      { ...domain, teamId: other, name: "bank.example", status: "verified" },
+      // A claim on the same name that never verified holds nothing.
+      { ...domain, teamId, name: "bank.example", status: "pending" },
+    ]);
+
+    for (const token of [
+      await clickToken(emailId, url),
+      legacyClickToken({ emailId, url, secretKey }),
+    ]) {
+      const borrowed = await onHost(token, "Links.Bank.example");
+      expect(borrowed.status).toBe(404);
+      expect(borrowed.headers.get("location")).toBeNull();
+    }
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
+
+    const token = await clickToken(emailId, url);
+    for (const host of ["links.shop.example", "links.unclaimed.example"]) {
+      const res = await onHost(token, host);
+      expect(res.status, host).toBe(302);
+      expect(res.headers.get("location")).toBe(url);
+    }
+  });
+});
+
 describe("click bursts", () => {
   const DESKTOP =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";

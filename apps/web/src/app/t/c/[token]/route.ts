@@ -6,12 +6,13 @@ import {
   verifyClickToken,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import en from "../../../../../messages/en/common.json";
 import ptBR from "../../../../../messages/pt-BR/common.json";
 import { localeFromHeaders } from "../../../../server/locale";
 import { enqueueWebhookDeliveries } from "../../../../server/queue";
+import { trackingHostIs } from "../../../../server/tracking-host";
 import { engagementHit, recordEngagement, trackingKey } from "../../record";
 
 const MESSAGES = { en: en.trackedLink, "pt-BR": ptBR.trackedLink } as const;
@@ -29,7 +30,7 @@ const MESSAGES = { en: en.trackedLink, "pt-BR": ptBR.trackedLink } as const;
  * the destination's host and leaves the click to the reader.
  *
  * Reachable on any host: a domain's custom tracking subdomain is CNAME'd to the
- * app, so this handler serves the branded links too.
+ * app, so this handler serves the branded links too, each only for its own team.
  */
 export async function GET(request: Request, ctx: { params: Promise<{ token: string }> }) {
   const { token } = await ctx.params;
@@ -42,6 +43,10 @@ export async function GET(request: Request, ctx: { params: Promise<{ token: stri
   }
 
   const db = getDb();
+  const teamId = await senderTeam(db, parsed.emailId, parsed.teamId);
+  if (teamId && !(await hostServesTeam(db, request, teamId))) {
+    return new Response(null, { status: 404 });
+  }
   // Recorded whatever the page answers: the reader clicked either way.
   await recordEngagement(
     db,
@@ -50,20 +55,20 @@ export async function GET(request: Request, ctx: { params: Promise<{ token: stri
     enqueueWebhookDeliveries,
     engagementHit(request, parsed.url),
   );
-  const vouched = await senderVouches(db, parsed.emailId, parsed.teamId);
-  if (vouched === true) return Response.redirect(parsed.url, 302);
-  return linkPage(request, vouched === null ? new URL(parsed.url) : null);
+  const standing = teamId ? await fetchTeamStanding(db, teamId) : null;
+  if (standing && !linksDisabled(standing)) return Response.redirect(parsed.url, 302);
+  return linkPage(request, standing ? null : new URL(parsed.url));
 }
 
 /**
- * The standing of the team on the email row, else of the team the token
- * signed once the row has aged out; null when there is no team to ask.
+ * The team on the email row, else the team the token signed once the row
+ * has aged out; null when there is no team to ask.
  */
-async function senderVouches(
+async function senderTeam(
   db: Db,
   emailId: string,
   signedTeamId: string | null,
-): Promise<boolean | null> {
+): Promise<string | null> {
   // Non-uuid ids can't be minted by us, but a raw string must never reach a
   // uuid column — Postgres would 500 instead of answering.
   const uuid = z.uuid();
@@ -74,9 +79,24 @@ async function senderVouches(
         .where(eq(schema.emails.id, emailId))
         .limit(1)
     : [];
-  const teamId = email?.teamId ?? (uuid.safeParse(signedTeamId).success ? signedTeamId : null);
-  const standing = teamId ? await fetchTeamStanding(db, teamId) : null;
-  return standing ? !linksDisabled(standing) : null;
+  return email?.teamId ?? (uuid.safeParse(signedTeamId).success ? signedTeamId : null);
+}
+
+/**
+ * SECURITY: a branded tracking host redirects only for the team holding its
+ * domain; otherwise any team's token would redirect from another team's
+ * domain. The tracking edge names the host a reader's click came in on
+ * (X-Tracking-Host). A request naming none, or naming a host no team holds
+ * verified, is not judged here.
+ */
+async function hostServesTeam(db: Db, request: Request, teamId: string): Promise<boolean> {
+  const host = request.headers.get("x-tracking-host")?.trim();
+  if (!host) return true;
+  const holders = await db
+    .select({ teamId: schema.domains.teamId })
+    .from(schema.domains)
+    .where(and(eq(schema.domains.status, "verified"), trackingHostIs(host)));
+  return holders.length === 0 || holders.some((holder) => holder.teamId === teamId);
 }
 
 const STYLE = [
