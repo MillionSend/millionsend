@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { ChartDialog } from "@/components/console/chart-dialog";
+import { DotParts } from "@/components/dot-parts";
 import { Skeleton } from "@/components/skeleton";
 import { Tooltip } from "@/components/tooltip";
 import { formatPercent } from "@/lib/console-format";
@@ -48,7 +49,7 @@ export function MonitoringCard() {
         {t("title")}
       </h3>
       <p style={{ margin: "4px 0 12px", fontSize: 13, color: "var(--ms-muted)" }}>
-        {data.judge.on ? t("subtitle") : t("off")}
+        <DotParts text={data.judge.on ? t("subtitle") : t("off")} />
       </p>
     </>
   );

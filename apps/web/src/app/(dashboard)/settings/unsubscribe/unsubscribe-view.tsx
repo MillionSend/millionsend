@@ -12,6 +12,7 @@ import { isHexColor } from "@/lib/hex-color";
 import { isHttpUrl } from "@/lib/http-url";
 import { useTRPC } from "@/lib/trpc";
 import { UNSUBSCRIBE_LOGO_RADIUS, type UnsubscribeLogoRadius } from "@/lib/unsubscribe-theme";
+import { useTeamRole } from "@/lib/use-team-role";
 
 interface Draft {
   brandName: string;
@@ -124,8 +125,7 @@ export function UnsubscribeView() {
   const { data } = useQuery(trpc.settings.unsubscribe.get.queryOptions());
   const { data: team } = useQuery(trpc.settings.team.get.queryOptions());
   const { data: topics } = useQuery(trpc.topics.list.queryOptions());
-  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
-  const role = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
+  const role = useTeamRole();
   const canManage = role === "owner" || role === "admin";
 
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -162,9 +162,9 @@ export function UnsubscribeView() {
   const logoAvailable = Boolean(team?.logoUrl);
 
   return (
-    <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
+    <div className="ms-unsub-layout">
       <form
-        style={{ flex: "1 1 360px", maxWidth: 480 }}
+        className="ms-unsub-form"
         onSubmit={(e) => {
           e.preventDefault();
           if (redirectInvalid || colorInvalid) return;

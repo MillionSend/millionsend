@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
+import { Breakable } from "@/components/breakable";
 import { ContactAvatar } from "@/components/contact-avatar";
 import { EmptyState } from "@/components/empty-state";
 import { PlusGlyph } from "@/components/icons/nav-icons";
@@ -20,6 +21,7 @@ import { Table } from "@/components/table";
 import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "../list-parts";
 
 const REASONS = ["hard_bounce", "complaint", "manual", "one_click_unsubscribe"] as const;
@@ -76,8 +78,7 @@ export default function SuppressionsPage() {
     ),
   );
   const stats = useQuery(trpc.emails.suppressions.stats.queryOptions());
-  const teamList = useQuery(trpc.team.list.queryOptions());
-  const role = teamList.data?.teams.find((m) => m.teamId === teamList.data?.activeTeamId)?.role;
+  const role = useTeamRole();
   const canRemove = role === "owner" || role === "admin";
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
@@ -220,7 +221,9 @@ export default function SuppressionsPage() {
           <Table>
             <thead>
               <tr>
-                <th style={{ width: "40%" }}>{t("suppressions.email")}</th>
+                <th className="ms-col-lead" style={{ width: "40%" }}>
+                  {t("suppressions.email")}
+                </th>
                 <th style={{ width: "18%" }}>{t("suppressions.origin")}</th>
                 <th>{t("suppressions.added")}</th>
                 {/* Overflow-action column — no header label. */}
@@ -230,11 +233,13 @@ export default function SuppressionsPage() {
             <tbody>
               {items.map((row) => (
                 <tr key={row.id}>
-                  <td className="ms-mono">
+                  <td className="ms-mono ms-cell-wrap">
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
                       <ContactAvatar email={row.email ?? ""} size={28} />
                       {row.email ? (
-                        <Link href={`/emails/suppressions/${row.id}`}>{row.email}</Link>
+                        <Link href={`/emails/suppressions/${row.id}`}>
+                          <Breakable text={row.email} />
+                        </Link>
                       ) : (
                         <span style={{ color: "var(--ms-faint)" }}>—</span>
                       )}

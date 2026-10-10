@@ -1,10 +1,9 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useTRPC } from "@/lib/trpc";
 import { useActiveTabInView } from "@/lib/use-active-tab-in-view";
+import { useTeamRole } from "@/lib/use-team-role";
 
 const TABS = [
   { key: "settings", href: "/settings" },
@@ -33,10 +32,7 @@ export function SettingsTabsNav({
   const t = useTranslations("settings.tabs");
   const router = useRouter();
   const pathname = usePathname();
-  const tabsRef = useActiveTabInView(pathname);
-  const trpc = useTRPC();
-  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
-  const role = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
+  const role = useTeamRole();
   // Unlisted keys are always shown; each page gates itself too, so a hidden
   // tab is a missing route rather than a hidden link.
   const visible: Partial<Record<TabKey, boolean>> = {
@@ -45,6 +41,9 @@ export function SettingsTabsNav({
     smtp: showSmtp,
     audit: role === "owner" || role === "admin",
   };
+  // The audit tab joins the row only once the role is known, after the first
+  // render; keying on it reveals the active tab again when it arrives.
+  const tabsRef = useActiveTabInView(`${pathname} ${visible.audit}`);
   return (
     <div ref={tabsRef} className="ms-tabs bleed" style={{ marginBottom: 24 }}>
       {TABS.filter((tab) => visible[tab.key] ?? true).map(({ key, href }) => (

@@ -20,6 +20,7 @@ import { type RangeKey, rangeSince } from "@/lib/list-range";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, ListSkeleton, SearchBox, StateCard } from "./list-parts";
 
 // Keep in enum order (packages/db schema.emailStatusEnum) — the router input
@@ -97,8 +98,7 @@ export default function EmailsPage() {
   const usage = useQuery(trpc.settings.usage.recent.queryOptions({}));
   const apiKeys = useQuery(trpc.apiKeys.list.queryOptions());
   const domains = useQuery(trpc.domains.list.queryOptions());
-  const teamList = useQuery(trpc.team.list.queryOptions());
-  const role = teamList.data?.teams.find((m) => m.teamId === teamList.data?.activeTeamId)?.role;
+  const role = useTeamRole();
   const canExport = role === "owner" || role === "admin";
 
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
