@@ -559,7 +559,7 @@
   "safety": {
     "title": "Confiança e segurança",
     "info": "Uma equipe entra aqui quando o guardrail de entregabilidade vira alerta ou pausa, as reclamações passam de 0,1% ou os hard bounces de 5% em 7 dias, o risco do monitor de conteúdo cruza a linha de sinalização (conteúdo amostrado julgado pelo modelo), o score da conta cai abaixo de 5, ou um operador a sinaliza à mão. Sinalizações automáticas somem sozinhas quando o gatilho passa; uma que você limpa fica limpa enquanto o mesmo gatilho durar.",
-    "proof": "{open, plural, =0 {# abertas} one {# aberta} other {# abertas}} · {guardrailPaused, plural, =0 {# pausadas pelo guardrail} one {# pausada pelo guardrail} other {# pausadas pelo guardrail}} · {suspended, plural, =0 {# suspensas} one {# suspensa} other {# suspensas}} · {revealsThisWeek, plural, one {# revelação de conteúdo} other {# revelações de conteúdo}} esta semana",
+    "proof": "{open, plural, =0 {# abertas} one {# aberta} other {# abertas}} · {guardrailPaused, plural, =0 {# pausadas pelo guardrail} one {# pausada pelo guardrail} other {# pausadas pelo guardrail}} · {suspended, plural, =0 {# suspensas} one {# suspensa} other {# suspensas}} · {revealsThisWeek, plural, =0 {# revelações de conteúdo} one {# revelação de conteúdo} other {# revelações de conteúdo}} esta semana",
     "search": "Buscar equipes, proprietários, domínios",
     "filters": {
       "status": "Status: {value}",
