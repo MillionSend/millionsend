@@ -524,6 +524,8 @@ describe("the emailed code in front of a start", () => {
       subject: "Your MillionSend console code",
       kind: "console_code",
     });
+    // The operator's own account mail names no team, so no suspension mutes it.
+    expect(mail.aboutTeamId).toBeUndefined();
     // The worker drops the body once SES holds it, as for a reset link.
     expect(CREDENTIAL_MAIL_KINDS.has(mail.kind)).toBe(true);
     expect(mail.html).toContain(code);
