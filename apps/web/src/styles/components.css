@@ -1543,6 +1543,14 @@ button.ms-notice-strip-action {
   border-radius: var(--ms-r-input);
   cursor: pointer;
 }
+/* Radio cards sit inside a .ms-field, whose "label" rule (a muted block)
+   outranks .ms-radio-card: this keeps the radio beside its text, at the
+   body colour. */
+.ms-field .ms-radio-card {
+  display: flex;
+  margin: 0;
+  color: inherit;
+}
 .ms-radio-card input {
   margin-top: 3px;
   accent-color: var(--ms-steel);
