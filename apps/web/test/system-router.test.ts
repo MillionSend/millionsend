@@ -404,8 +404,7 @@ describe("system.sesEnv / system.eventsHealth", () => {
     });
   });
 
-  it("platformBreakers: null while nothing is paused, rows for self-host members, operator-only on cloud", async () => {
-    expect(await dbCaller("member", "u2").system.platformBreakers()).toBeNull();
+  it("leaves region holds to the console: no dashboard banner feed, on self-host or cloud", async () => {
     await db.insert(schema.regionBreakers).values({
       region: "sa-east-1",
       paused: true,
@@ -419,14 +418,13 @@ describe("system.sesEnv / system.eventsHealth", () => {
       },
       pausedAt: new Date(),
     });
-    expect(await dbCaller("member", "u2").system.platformBreakers()).toMatchObject([
-      { region: "sa-east-1", reason: { metric: "complaint" } },
-    ]);
+    const banner = (role: "owner" | "member", userId: string) =>
+      (dbCaller(role, userId).system as unknown as { platformBreakers: () => Promise<unknown> })
+        .platformBreakers;
+    await expect(banner("member", "u2")()).rejects.toMatchObject({ code: "NOT_FOUND" });
     vi.stubEnv("IS_CLOUD", "true");
-    expect(await dbCaller("owner", "u2").system.platformBreakers()).toBeNull();
-    expect(await dbCaller("owner").system.platformBreakers()).toMatchObject([
-      { region: "sa-east-1" },
-    ]);
+    await expect(banner("owner", "u2")()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(banner("owner", "u1")()).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("eventsHealth is null while ingestion is not configured", async () => {

@@ -8,12 +8,7 @@ import {
   servedRegions,
   trackingSubdomainsSupported,
 } from "@millionsend/config";
-import {
-  committedDailyVolume,
-  getInstanceSettings,
-  pausedRegions,
-  sesEventsHealth,
-} from "@millionsend/core";
+import { committedDailyVolume, getInstanceSettings, sesEventsHealth } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import {
   createSesAccountClient,
@@ -157,7 +152,7 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
       trackingSubdomainsSupported: trackingSubdomainsSupported(),
       // Why cloud domains without a tracking subdomain ship untracked links.
       trackingRequiresSubdomain: isCloudDeployment(),
-      // The shared first-email sender the onboarding snippet and button use; null hides the button.
+      // The sender of the onboarding button's fixed email; null hides the button.
       onboardingSender: env.ONBOARDING_EMAIL_FROM ?? null,
     })),
 
@@ -181,22 +176,6 @@ export function createSystemRouter(deps: SystemSesDeps = defaultSesDeps) {
         console.error("SES events health probe failed", error);
         return null;
       }
-    }),
-
-    /**
-     * Regions where the platform breaker holds broadcasts, for the dashboard
-     * banner; null when none are paused or the caller may not see instance
-     * facts (cloud tenants — only the operator can act on it there).
-     */
-    platformBreakers: teamProcedure.query(async ({ ctx }) => {
-      if (isCloudDeployment() && !(await isInstanceOperator(ctx.db, ctx.session.user.id))) {
-        return null;
-      }
-      const paused = await pausedRegions(ctx.db);
-      // The hold reason is the operator's own note; tenants learn only that it is a hold.
-      return paused.length > 0
-        ? paused.map(({ manualReason, ...row }) => ({ ...row, held: manualReason !== null }))
-        : null;
     }),
 
     /** Env-side SES settings the setup page reports alongside awsReadiness. */

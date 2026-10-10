@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { BillingStripe } from "@millionsend/billing";
 import {
   DAY_MS,
@@ -313,6 +314,7 @@ describe("billing router", () => {
       usage: { accepted: 0, reportedOverage: 0 },
       hasCustomer: false,
       hasLiveSubscription: false,
+      upgradesHeld: false,
     });
   });
 
@@ -558,7 +560,7 @@ describe("billing router", () => {
     const owner = callerFor(teamId, "owner");
     await owner.billing.changePlan({ rung: "scale_500k" });
     expect(h.sent.map((m) => [m.kind, m.to, m.subject])).toEqual([
-      ["billing.plan_changed", "ada@example.com", "acme moved from Pro 100K to Scale 500K"],
+      ["billing.plan_changed", "ada@example.com", "Your team moved from Pro 100K to Scale 500K"],
     ]);
     expect(h.sent[0]?.from).toBe("MillionSend <notices@mail.example.com>");
     expect(h.sent[0]?.text).toContain("https://app.example.com/settings/billing");
@@ -572,8 +574,8 @@ describe("billing router", () => {
     await owner.billing.changePlan({ rung: "scale_1m" });
     expect(calls.scheduleReleases).toEqual(["sub_sched_1"]);
     expect(h.sent.map((m) => m.subject)).toEqual([
-      "acme moved from Pro 100K to Scale 500K",
-      "acme moved from Scale 500K to Scale 1M",
+      "Your team moved from Pro 100K to Scale 500K",
+      "Your team moved from Scale 500K to Scale 1M",
     ]);
     expect((await teamRow(teamId))?.pendingRung).toBeNull();
   });
@@ -671,6 +673,129 @@ describe("billing router", () => {
     vi.stubEnv("STRIPE_PORTAL_CONFIG", "bpc_1");
     await owner.billing.portal();
     expect(calls.portals[1]).toMatchObject({ configuration: "bpc_1" });
+  });
+});
+
+describe("a suspended or flagged team", () => {
+  /**
+   * Suspends the team as the operator console does, or opens a flag of that
+   * kind: one of the safety cron's abuse signals, or else an operator's call.
+   */
+  async function hold(
+    teamId: string,
+    by: "suspension" | "monitor" | "guardrail" | "complaints" | "manual" | "score" | "report",
+  ) {
+    if (by === "suspension") {
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+        .where(eq(schema.teams.id, teamId));
+    } else {
+      const cron = by === "monitor" || by === "guardrail" || by === "complaints";
+      await db
+        .insert(schema.teamFlags)
+        .values({ teamId, reason: by, openedBy: cron ? null : "op1" });
+    }
+  }
+  const held = { code: "FORBIDDEN", message: "upgrades_held" };
+
+  it("cannot start a checkout; status says so", async () => {
+    // An operator's flag holds whatever its kind: a reopened score flag, a report.
+    for (const by of [
+      "suspension",
+      "monitor",
+      "guardrail",
+      "complaints",
+      "manual",
+      "score",
+      "report",
+    ] as const) {
+      const teamId = await createTeam(db, `held-${by}`);
+      await hold(teamId, by);
+      const owner = callerFor(teamId, "owner");
+      expect((await owner.billing.status()).upgradesHeld).toBe(true);
+      await expect(owner.billing.checkout({ rung: "pro_100k" })).rejects.toMatchObject(held);
+    }
+    expect(calls.customers).toEqual([]);
+    expect(calls.checkouts).toEqual([]);
+    expect(await auditRows()).toEqual([]);
+  });
+
+  it("is told upgrades are unavailable, never why", () => {
+    for (const locale of ["en", "pt-BR"]) {
+      const { billing } = JSON.parse(
+        readFileSync(new URL(`../messages/${locale}/settings.json`, import.meta.url), "utf8"),
+      );
+      for (const key of ["upgradesHeld", "upgradesHeldLive"]) {
+        expect(billing[key], `${locale} ${key}`).not.toMatch(/suspen|review|revis|flag|sinaliz/i);
+      }
+    }
+  });
+
+  it("the cron's own score or report flag, or a cleared flag, holds nothing", async () => {
+    const flags = [
+      { reason: "score" },
+      { reason: "report" },
+      { reason: "manual", openedBy: "op1", status: "cleared", clearedAt: new Date() },
+      { reason: "monitor", status: "cleared", clearedAt: new Date() },
+    ] as const;
+    for (const [i, flag] of flags.entries()) {
+      const teamId = await createTeam(db, `flagged-${i}`);
+      await db.insert(schema.teamFlags).values({ teamId, ...flag });
+      expect((await callerFor(teamId, "owner").billing.status()).upgradesHeld).toBe(false);
+    }
+  });
+
+  it("cannot move up or turn overage on", async () => {
+    const teamId = await subscribedTeam("pro_100k");
+    await hold(teamId, "monitor");
+    const owner = callerFor(teamId, "owner");
+    await expect(owner.billing.changePlan({ rung: "pro_200k" })).rejects.toMatchObject(held);
+    await expect(owner.billing.changePlan({ rung: "scale_2_5m" })).rejects.toMatchObject(held);
+    await expect(owner.billing.setOverage({ enabled: true })).rejects.toMatchObject(held);
+    expect(calls.updates).toEqual([]);
+    expect(calls.itemCreates).toEqual([]);
+    expect(h.runCronNow).not.toHaveBeenCalled();
+    expect(await teamRow(teamId)).toMatchObject({
+      plan: "pro",
+      planQuota: 100_000,
+      overageEnabled: false,
+    });
+    expect(await auditRows()).toEqual([]);
+  });
+
+  it("is judged against Stripe, not a row a dropped webhook left on the old higher rung", async () => {
+    const teamId = await subscribedTeam("pro_100k");
+    await db
+      .update(schema.teams)
+      .set({ plan: "scale", planQuota: 500_000 })
+      .where(eq(schema.teams.id, teamId));
+    await hold(teamId, "guardrail");
+    await expect(
+      callerFor(teamId, "owner").billing.changePlan({ rung: "scale_500k" }),
+    ).rejects.toMatchObject(held);
+    expect(calls.updates).toEqual([]);
+    expect(await auditRows()).toEqual([]);
+  });
+
+  it("can still move down, keep its plan, turn overage off and open the portal to cancel", async () => {
+    const teamId = await subscribedTeam("scale_500k", { overage: true });
+    await hold(teamId, "suspension");
+    const owner = callerFor(teamId, "owner");
+    expect((await owner.billing.status()).upgradesHeld).toBe(true);
+    expect(await owner.billing.changePlan({ rung: "pro_100k" })).toEqual({
+      applied: "period_end",
+      at: PERIOD_END,
+    });
+    expect(await owner.billing.changePlan({ rung: "scale_500k" })).toEqual({
+      applied: "unscheduled",
+    });
+    await owner.billing.setOverage({ enabled: false });
+    expect((await teamRow(teamId))?.overageEnabled).toBe(false);
+    expect(await owner.billing.portal()).toEqual({ url: "https://billing.stripe.com/p/1" });
+    expect(calls.portals).toEqual([
+      { customer: "cus_1", return_url: "https://app.example.com/settings/billing" },
+    ]);
   });
 });
 

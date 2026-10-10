@@ -6,15 +6,17 @@ import {
   EnvKeyring,
   formatMailDate,
   hashRecipient,
+  reserveWarmup,
   utcDay,
   verifyUnsubscribeToken,
+  warmupCap,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { EmailSendRequest } from "@millionsend/queue";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { reconcileStalledBroadcasts } from "../src/handlers/cron.js";
 import {
   applyMergeFields,
@@ -211,7 +213,7 @@ it("a broadcast with no segment or topic fans out to ALL subscribed team contact
   expect(await finalizeBroadcast(db, deps, broadcastId)).toBe(true);
   // The owners' report: what went out, to how many, with the link.
   expect(mail.sends.map((s) => [s.to, s.kind, s.subject])).toEqual([
-    ["acme-owner@example.com", "broadcast.sent", '"launch" went out to 2 recipients'],
+    ["acme-owner@example.com", "broadcast.sent", "Your broadcast went out to 2 recipients"],
   ]);
   expect(mail.sends[0]?.text).toContain('"launch" was handed to 2 contacts of acme;');
   expect(mail.sends[0]?.text).not.toContain("could not be sent");
@@ -426,7 +428,7 @@ it("a paced broadcast tells the owners once at walk end, then reports when the l
   const { deps } = makeDeps({ sesQuota: controls, ...mail });
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
   expect(mail.sends.map((s) => [s.kind, s.subject])).toEqual([
-    ["broadcast.sending", '"launch" is going out over 3 days'],
+    ["broadcast.sending", "Your broadcast is going out over 3 days"],
   ]);
   expect(mail.sends[0]?.text).toContain("1 of 3 emails went out in the first wave");
   expect(mail.sends[0]?.text).toMatch(/the last about .* UTC\./);
@@ -455,7 +457,7 @@ it("a paced broadcast tells the owners once at walk end, then reports when the l
   await settleRows(broadcastId);
   expect(await finalizeBroadcast(db, deps, broadcastId)).toBe(true);
   expect(mail.sends.map((s) => s.kind)).toEqual(["broadcast.sending", "broadcast.sent"]);
-  expect(mail.sends[1]?.subject).toBe('"launch" went out to 3 recipients');
+  expect(mail.sends[1]?.subject).toBe("Your broadcast went out to 3 recipients");
   expect(mail.sends[1]?.text).toContain("1 could not be sent.");
   const [row] = await db
     .select({ status: schema.broadcasts.status, sentAt: schema.broadcasts.sentAt })
@@ -623,7 +625,7 @@ it("cloud fan-out reserves daily quota and parks the overflow as queued_quota", 
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
   // Anything parked turns the report into the quota notice.
   expect(mail.sends.map((s) => [s.to, s.subject])).toEqual([
-    ["quota-owner@example.com", '"launch": 1 of 3 recipients are waiting for the quota'],
+    ["quota-owner@example.com", "1 of 3 broadcast recipients are waiting for the quota"],
   ]);
   expect(mail.sends[0]?.text).toContain(
     "2 emails went out; 1 are parked because quota reached its quota of 100.",
@@ -673,7 +675,7 @@ it("cloud fan-out on a monthly plan parks at the included volume and names the r
 
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
   expect(mail.sends.map((s) => s.subject)).toEqual([
-    '"launch": 2 of 3 recipients are waiting for the quota',
+    "2 of 3 broadcast recipients are waiting for the quota",
   ]);
   expect(mail.sends[0]?.text).toContain(
     "1 emails went out; 2 are parked because monthly reached its quota of 100,000.",
@@ -1313,8 +1315,9 @@ it("defers the fan-out while the sender domain's region is held by the platform 
   // Said once, however many waits the hold lasts.
   expect(await sendBroadcast(db, deps, { broadcastId })).toBe("deferred");
   expect(rescheduled).toHaveLength(2);
-  expect(mail.sends.map((s) => s.subject)).toEqual(['"launch" is on hold']);
-  expect(mail.sends[0]?.text).toContain("Sending from us-east-1 is paused");
+  expect(mail.sends.map((s) => s.subject)).toEqual(["Your broadcast is waiting to send"]);
+  expect(mail.sends[0]?.text).toContain("Delivery is paused for now and resumes automatically");
+  expect(mail.sends[0]?.text).not.toMatch(/platform|us-east-1|rates?\b|bounce|complaint/i);
   expect(mail.sends[0]?.text).toContain(`${BASE_URL}/broadcasts/${broadcastId}`);
   expect(enqueued).toEqual([]);
   const [row] = await db
@@ -1323,4 +1326,92 @@ it("defers the fan-out while the sender domain's region is held by the platform 
     .where(eq(schema.broadcasts.id, broadcastId));
   expect(row?.status).toBe("scheduled");
   await db.delete(schema.regionBreakers);
+});
+
+describe("new-domain warm-up", () => {
+  // One instant per test: the warm-up counts per UTC day, and a rollover
+  // between seeding a counter and the fan-out would read a fresh day.
+  const NOW = new Date("2026-10-09T10:00:00Z");
+  beforeAll(async () => {
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  });
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("cloud fan-out from a young domain sends up to its warm-up and parks the rest without a quota notice", async () => {
+    const { teamId: wTeamId } = await seedTeam("warmbc", [
+      { email: "w1@example.com" },
+      { email: "w2@example.com" },
+      { email: "w3@example.com" },
+    ]);
+    await db
+      .update(schema.domains)
+      .set({ registeredAt: new Date(NOW.getTime() - 2 * 3600_000), ageSource: "rdap" })
+      .where(eq(schema.domains.teamId, wTeamId));
+    // 98 of the registration day's 100 are spent: room for 2 of 3.
+    await db
+      .insert(schema.domainWarmupUsage)
+      .values({ registrableDomain: "warmbc.dev", day: utcDay(NOW), accepted: 98 });
+    const broadcastId = await insertBroadcast({ teamId: wTeamId, from: "Acme <hi@warmbc.dev>" });
+    const mail = captureMailer();
+    const { deps, enqueued } = makeDeps({ isCloud: true, ...mail });
+
+    expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+    const rows = await emailsOf(broadcastId);
+    const queued = rows.filter((r) => r.latestStatus === "queued");
+    expect(queued).toHaveLength(2);
+    expect(rows.filter((r) => r.latestStatus === "queued_quota")).toMatchObject([
+      { parkReason: "warmup" },
+    ]);
+    expect(enqueued.sort()).toEqual(queued.map((r) => r.id).sort());
+    // The plan's unit for the held row went back.
+    const [counter] = await db
+      .select()
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, wTeamId));
+    expect(counter?.accepted).toBe(2);
+    expect(mail.sends.filter((s) => /quota/i.test(s.subject))).toEqual([]);
+  });
+
+  it("cloud fan-out from a young domain parks what its team's other young domain already spent of their shared day", async () => {
+    const { teamId: pTeamId } = await seedTeam("poolbc", [
+      { email: "p1@example.com" },
+      { email: "p2@example.com" },
+      { email: "p3@example.com" },
+    ]);
+    const [other] = await db
+      .insert(schema.domains)
+      .values({
+        teamId: pTeamId,
+        name: "poolbc-two.dev",
+        region: "us-east-1",
+        status: "verified",
+        verifiedAt: NOW,
+      })
+      .returning({ id: schema.domains.id });
+    if (!other) throw new Error("domain insert failed");
+    await db
+      .update(schema.domains)
+      .set({ registeredAt: new Date(NOW.getTime() - 2 * 3600_000), ageSource: "rdap" })
+      .where(eq(schema.domains.teamId, pTeamId));
+    // 98 of the registration day's 100 already went out from the other domain.
+    const cap = await warmupCap(db, { teamId: pTeamId, domainId: other.id, at: NOW });
+    if (!cap) throw new Error("no warm-up cap");
+    await reserveWarmup(db, cap, 98, utcDay(NOW));
+    const broadcastId = await insertBroadcast({ teamId: pTeamId, from: "Acme <hi@poolbc.dev>" });
+    const { deps, enqueued } = makeDeps({ isCloud: true });
+
+    expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+    const rows = await emailsOf(broadcastId);
+    const queued = rows.filter((r) => r.latestStatus === "queued");
+    expect(queued).toHaveLength(2);
+    expect(rows.filter((r) => r.latestStatus === "queued_quota")).toMatchObject([
+      { parkReason: "warmup" },
+    ]);
+    expect(enqueued.sort()).toEqual(queued.map((r) => r.id).sort());
+  });
 });

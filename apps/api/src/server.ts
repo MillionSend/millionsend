@@ -1,6 +1,5 @@
 import { serve } from "@hono/node-server";
 import {
-  accountMailDeliverable,
   env,
   servedRegions,
   sesTenantsEnabled,
@@ -89,7 +88,6 @@ const app = createApi({
   isCloud: env.IS_CLOUD,
   onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
   openaiAppsChallengeToken: env.OPENAI_APPS_CHALLENGE_TOKEN,
-  requireVerifiedMembers: accountMailDeliverable(),
   rateLimitPerMinute: env.API_RATE_LIMIT_PER_MINUTE,
   revision: env.MILLIONSEND_REVISION,
   appBaseUrl: env.APP_BASE_URL,
@@ -98,6 +96,9 @@ const app = createApi({
   unsubscribeSecretKey: deriveUnsubscribeKey(Buffer.from(env.MASTER_ENCRYPTION_KEY, "base64")),
   enqueueWebhookDeliveries: async (deliveries) => {
     await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
+  },
+  enqueueDomainAge: async (domainId) => {
+    await queue.send("domain.age", { domainId }, { dedupeKey: domainId });
   },
   enqueueRecipientErase: async (teamId, address) => {
     await queue.send(

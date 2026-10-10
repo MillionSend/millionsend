@@ -3,6 +3,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -26,6 +27,9 @@ export const domainStatusEnum = pgEnum("domain_status", [
 ]);
 
 export const tlsModeEnum = pgEnum("tls_mode", ["opportunistic", "enforced"]);
+
+/** Where a domain's registration date came from; "unknown" when no source had one. */
+export const domainAgeSourceEnum = pgEnum("domain_age_source", ["rdap", "whois", "ct", "unknown"]);
 
 export const domains = pgTable(
   "domains",
@@ -69,6 +73,18 @@ export const domains = pgTable(
     // null = no valid DMARC record found, or never checked.
     dmarcPolicy: text("dmarc_policy").$type<"none" | "quarantine" | "reject">(),
     dmarcCheckedAt: timestamp("dmarc_checked_at", { withTimezone: true }),
+    // When the registrable domain (the name a registry sold) was registered,
+    // written by the domain.age job off the send path; null until a source
+    // had a date. Drives the new-domain warm-up.
+    registeredAt: timestamp("registered_at", { withTimezone: true }),
+    ageSource: domainAgeSourceEnum("age_source"),
+    ageCheckedAt: timestamp("age_checked_at", { withTimezone: true }),
+    // Early graduation: the warm-up tier clean sends earned ahead of the
+    // calendar, and when, which starts the next clean window.
+    warmupTier: smallint("warmup_tier"),
+    warmupTierAt: timestamp("warmup_tier_at", { withTimezone: true }),
+    // Operator override: no warm-up for this domain row.
+    warmupTrustedAt: timestamp("warmup_trusted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),

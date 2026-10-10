@@ -38,6 +38,7 @@ export async function applyStatusCas(db: Db, emailId: string, next: EmailStatus)
  * queued_quota → queued, or accept-time parking queued → queued_quota).
  * Never overwrites an email that has already entered the event ladder, nor
  * one a send lane has claimed (sent_at set): its quota is spent either way.
+ * A row leaving the park leaves its park reason behind.
  */
 export async function transitionQueueState(
   db: Db,
@@ -47,7 +48,7 @@ export async function transitionQueueState(
   const t = schema.emails;
   const rows = await db.execute<{ id: string }>(sql`
     update ${t}
-    set latest_status = ${params.to}
+    set latest_status = ${params.to}${params.to === "queued" ? sql`, park_reason = null` : sql``}
     where ${t.id} = ${emailId}
       and ${t.latestStatus} = ${params.from}
       and ${t.sentAt} is null

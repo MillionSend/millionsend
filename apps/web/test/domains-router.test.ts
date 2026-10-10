@@ -1,5 +1,5 @@
 import { createPublicKey } from "node:crypto";
-import { PLAN_DOMAIN_LIMIT } from "@millionsend/core";
+import { PLAN_DOMAIN_LIMIT, SUSPENSION_REASONS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
@@ -795,9 +795,72 @@ describe("domains.get", () => {
     const domain = await caller.domains.get({ id });
     expect(domain.sentCount).toBe(0);
   });
+
+  it("asks for the domain's age when it is added and shows its warm-up while one applies", async () => {
+    const teamId = await createTeam(db);
+    const asked: string[] = [];
+    const caller = callerFor(teamId, {
+      ...fakeSes().deps,
+      enqueueDomainAge: async (domainId) => {
+        asked.push(domainId);
+      },
+    });
+    const { id } = await caller.domains.create({ name: "news.brand-new.com", region: "us-east-1" });
+    expect(asked).toEqual([id]);
+    // Off on a self-hosted instance until the operator turns it on.
+    expect((await caller.domains.get({ id })).warmup).toBeNull();
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+    const registeredAt = new Date(Date.now() - 2 * 86_400_000);
+    await db
+      .update(schema.domains)
+      .set({ registeredAt, ageSource: "rdap" })
+      .where(eq(schema.domains.id, id));
+    expect((await caller.domains.get({ id })).warmup).toEqual({
+      perDay: 300,
+      fullAt: new Date(registeredAt.getTime() + 30 * 86_400_000),
+      shared: false,
+    });
+    // A second young domain the team can send from: the day's volume is shared.
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "news.brand-newer.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date(Date.now() - 3_600_000),
+      ageSource: "rdap",
+    });
+    expect((await caller.domains.get({ id })).warmup).toMatchObject({ perDay: 300, shared: true });
+  });
 });
 
 describe("domains.delete", () => {
+  it.each(SUSPENSION_REASONS)(
+    "refuses an admin of a team suspended for %s before SES is touched",
+    async (reason) => {
+      const teamId = await createTeam(db);
+      const { deps, calls } = fakeSes();
+      const caller = callerFor(teamId, deps, "admin");
+      const { id } = await caller.domains.create({ name: "example.com", region: "us-east-1" });
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, teamId));
+      const before = calls.length;
+
+      await expect(caller.domains.delete({ id })).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        // A team suspended for phishing or held for review is never told it is suspended.
+        message: ["phishing", "review"].includes(reason)
+          ? "This isn't available for this team right now. Contact support if you need help."
+          : "This team is suspended, so its domains can't be deleted. Contact support.",
+      });
+      expect(calls).toHaveLength(before);
+      expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(
+        1,
+      );
+    },
+  );
+
   it("deletes the SES identity and the row", async () => {
     const teamId = await createTeam(db);
     const { deps, calls } = fakeSes();

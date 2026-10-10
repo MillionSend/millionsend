@@ -75,6 +75,11 @@ incluído, uma vez por período; o e-mail de limite atingido diz se os envios
 agora cobram excedente ou são recusados. Não há `quota.paused` em planos
 mensais. Um envio agendado conta no período em que foi aceito.
 
+Em todo plano, um domínio de envio com menos de 30 dias também tem o seu
+próprio limite diário (veja [Domínios](/pt-BR/concepts/domains#aquecimento-de-domínio-novo)).
+Uma mudança de plano nunca o libera, e o que ele retém fica estacionado como
+`queued_quota` sem contar no plano até o dreno liberá-lo.
+
 ## O modelo no Stripe
 
 - Um **produto** por plano pago (Starter, Pro, Scale), localizado por
@@ -140,6 +145,20 @@ linha, `teams.overage_enabled`, que é o que toda superfície de envio lê.
    pede o motivo do cancelamento). Trocas de plano não são oferecidas lá: o
    portal do Stripe não consegue atualizar uma assinatura com mais de um
    item, e um degrau mensal tem dois.
+
+Uma equipe não pode comprar nem subir de plano enquanto estiver suspensa
+(por qualquer motivo) ou tiver uma sinalização aberta em Confiança e
+segurança que a rotina de segurança abriu por abuso (`monitor`, `guardrail`
+ou `complaints`) ou que um operador abriu ou reabriu, de qualquer tipo:
+`billing.checkout`, uma subida em `billing.changePlan` e ligar o excedente
+respondem `FORBIDDEN` (`upgrades_held`), e a página de cobrança diz que não
+é possível subir de plano, sem dizer por quê. Reativar a equipe limpa a
+sinalização que a suspensão abriu e deixa qualquer outra sinalização aberta
+como está. Descer, manter o degrau atual, desligar o
+excedente e **Gerenciar cobrança** (onde fica o cancelamento) continuam
+abertos. A configuração que o `--portal` cria não oferece troca de plano; a
+configuração padrão da conta pode oferecer, então defina
+`STRIPE_PORTAL_CONFIG`.
 
 As colunas de plano são escritas a partir de uma assinatura buscada no
 Stripe — pelo handler do webhook e pelos dois procedimentos do painel acima —

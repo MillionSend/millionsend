@@ -61,6 +61,7 @@ export async function mailTeamOwners(
         locale: owner.locale,
         path,
         values: { team: team.name, ...values(owner.locale) },
+        aboutTeamId: team.id,
       }),
     );
   }

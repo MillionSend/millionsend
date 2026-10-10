@@ -4,6 +4,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { type AcceptEmailDeps, acceptEmail } from "./accept-email.js";
 import type { AccountMailKind } from "./account-mail.js";
 import { parseSingleSender } from "./sender-address.js";
+import { fetchTeamStanding, SILENT_SUSPENSIONS } from "./team-standing.js";
 
 /**
  * Tag every system email carries; the value names the kind. A label only:
@@ -47,6 +48,23 @@ export type SystemMailKind =
   | "updates.confirm"
   | AccountMailKind;
 
+/**
+ * Automated notices about a team that go nowhere while it is suspended, for
+ * any reason: each describes a team that could still send or nudges it to
+ * pay for more, and a team suspended for phishing must not learn from them
+ * that it was caught. The suspension and reinstatement notices keep their own
+ * rules, and mail about a person's own account names no team.
+ */
+export const MUTED_WHILE_SUSPENDED: ReadonlySet<SystemMailKind> = new Set<SystemMailKind>([
+  "quota.warning",
+  "quota.reached",
+  "quota.paused",
+  "broadcast.held_quota",
+  "deliverability.warning",
+  "deliverability.paused",
+  "broadcast.held",
+]);
+
 export interface SystemMailMessage {
   /** `Name <user@domain>` or a bare address; one of the instance's sender env vars. */
   from: string;
@@ -55,6 +73,12 @@ export interface SystemMailMessage {
   html: string;
   text: string;
   kind: SystemMailKind;
+  /**
+   * The team an owner notice is about, which the suspension mutes check. Mail
+   * to the instance operator never names one: a verdict on a suspended team is
+   * what the operator needs to see.
+   */
+  aboutTeamId?: string | undefined;
 }
 
 export interface SenderDomainOwner {
@@ -130,7 +154,19 @@ const warnedSenders = new Set<string>();
 export async function sendSystemMail(
   deps: SystemSendDeps,
   message: SystemMailMessage,
-): Promise<"pipeline" | "raw"> {
+): Promise<"pipeline" | "raw" | "muted"> {
+  const suspended = message.aboutTeamId
+    ? (await fetchTeamStanding(deps.db, message.aboutTeamId))?.suspended
+    : null;
+  // A silent suspension mutes billing mail too, while Stripe still sends its
+  // own receipts; any other suspension keeps its billing mail.
+  if (
+    suspended &&
+    (MUTED_WHILE_SUSPENDED.has(message.kind) ||
+      (message.kind.startsWith("billing.") && SILENT_SUSPENSIONS.includes(suspended.reason)))
+  ) {
+    return "muted";
+  }
   const owner = await findSenderDomainOwner(deps.db, message.from);
   if (!owner) {
     if (!warnedSenders.has(message.from)) {

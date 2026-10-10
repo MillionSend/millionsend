@@ -15,7 +15,7 @@ import { BtnSpinner } from "@/components/spinner";
 import { Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
-import { formatDayTime, formatRelative } from "@/lib/format";
+import { formatDay, formatDayTime, formatRelative } from "@/lib/format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
@@ -99,6 +99,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         plan: data.team.plan,
         planQuota: data.team.planQuota,
         suspendedAt: data.team.suspendedAt,
+        suspensionReason: data.team.suspensionReason,
         broadcastsPausedByOperatorAt: data.team.broadcastsPausedByOperatorAt,
       });
     },
@@ -141,6 +142,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
     plan: team.plan,
     planQuota: team.planQuota,
     suspendedAt: team.suspendedAt,
+    suspensionReason: team.suspensionReason,
     broadcastsPausedByOperatorAt: team.broadcastsPausedByOperatorAt,
   };
   const owner = team.owners[0]?.email ?? common("none");
@@ -171,13 +173,16 @@ export function ReviewView({ teamId }: { teamId: string }) {
     );
   };
 
-  const standingBadge = team.suspendedAt
-    ? ["danger", t("badges.suspended")]
-    : standing.guardrail === "paused"
-      ? ["danger", t("badges.guardrailPaused")]
-      : standing.guardrail === "warning"
-        ? ["warn", t("badges.guardrailWarning")]
-        : ["neutral", t("badges.guardrailOk")];
+  const heldForReview = team.suspensionReason === "review";
+  const standingBadge = heldForReview
+    ? ["warn", t("badges.heldForReview")]
+    : team.suspendedAt
+      ? ["danger", t("badges.suspended")]
+      : standing.guardrail === "paused"
+        ? ["danger", t("badges.guardrailPaused")]
+        : standing.guardrail === "warning"
+          ? ["warn", t("badges.guardrailWarning")]
+          : ["neutral", t("badges.guardrailOk")];
 
   return (
     <>
@@ -253,13 +258,27 @@ export function ReviewView({ teamId }: { teamId: string }) {
               boxed
               ariaLabel={common("actions")}
               items={[
-                team.suspendedAt
-                  ? { label: safety("menu.reinstate"), onSelect: () => actions.reinstate(target) }
-                  : {
-                      label: safety("menu.suspend"),
-                      danger: true,
-                      onSelect: () => actions.suspend(target),
-                    },
+                ...(heldForReview
+                  ? [
+                      { label: safety("menu.release"), onSelect: () => actions.reinstate(target) },
+                      {
+                        label: safety("menu.convert"),
+                        danger: true,
+                        onSelect: () => actions.suspend(target),
+                      },
+                    ]
+                  : [
+                      team.suspendedAt
+                        ? {
+                            label: safety("menu.reinstate"),
+                            onSelect: () => actions.reinstate(target),
+                          }
+                        : {
+                            label: safety("menu.suspend"),
+                            danger: true,
+                            onSelect: () => actions.suspend(target),
+                          },
+                    ]),
                 ...(flagOpen
                   ? []
                   : [{ label: t("openFlag"), onSelect: () => setFlagDialog(true) }]),
@@ -634,6 +653,12 @@ export function ReviewView({ teamId }: { teamId: string }) {
         </Table>
       </div>
 
+      <WarmupCard
+        team={{ id: team.id, name: team.name }}
+        warmup={query.data.warmup}
+        onChanged={refetch}
+      />
+
       <div className="ms-card" style={{ padding: 0 }}>
         <CardHead inset title={t("audit.title")} subtitle={t("audit.subtitle")} />
         <Table>
@@ -723,6 +748,153 @@ export function ReviewView({ teamId }: { teamId: string }) {
       {actions.dialogs}
       {reveal.dialogs}
     </>
+  );
+}
+
+type WarmupOverview = {
+  enabled: boolean;
+  trustedAt: Date | string | null;
+  domains: {
+    id: string;
+    name: string;
+    registeredAt: Date | string | null;
+    ageSource: string | null;
+    ageCheckedAt: Date | string | null;
+    trustedAt: Date | string | null;
+    today: { cap: number; used: number; fullAt: Date | string | null } | null;
+  }[];
+  pool: { cap: number; used: number } | null;
+};
+
+/** The team's domains under the new-domain warm-up, and the operator's trust over it. */
+function WarmupCard({
+  team,
+  warmup,
+  onChanged,
+}: {
+  team: { id: string; name: string };
+  warmup: WarmupOverview;
+  onChanged: () => void;
+}) {
+  const t = useTranslations("console.safety.review.warmup");
+  const common = useTranslations("console.common");
+  const locale = useLocale();
+  const nf = new Intl.NumberFormat(locale);
+  const trpc = useTRPC();
+  const trust = useMutation(trpc.console.safety.setWarmupTrust.mutationOptions());
+  const set = (trusted: boolean, domain?: { id: string; name: string }) =>
+    trust.mutate(
+      { teamId: team.id, trusted, ...(domain ? { domainId: domain.id } : {}) },
+      {
+        onSuccess: () => {
+          toast(
+            t(trusted ? "toast.trusted" : "toast.untrusted", { name: domain?.name ?? team.name }),
+          );
+          onChanged();
+        },
+      },
+    );
+  const teamTrusted = warmup.trustedAt !== null;
+  return (
+    <div className="ms-card" style={{ padding: 0, marginBottom: 16 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "wrap",
+          padding: "20px 20px 0",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <CardHead
+            title={t("title")}
+            subtitle={
+              !warmup.enabled
+                ? t("off")
+                : teamTrusted
+                  ? t("teamTrusted", { date: formatDayTime(warmup.trustedAt ?? 0, locale) })
+                  : t("subtitle")
+            }
+          />
+        </div>
+        <button
+          type="button"
+          className="ms-btn ms-btn-secondary"
+          disabled={trust.isPending}
+          onClick={() => set(!teamTrusted)}
+        >
+          <BtnSpinner on={trust.isPending} />
+          {t(teamTrusted ? "untrustTeam" : "trustTeam")}
+        </button>
+      </div>
+      {warmup.pool ? (
+        <div style={{ padding: "8px 20px 0", fontSize: 13, color: "var(--ms-muted)" }}>
+          {t("pool", { used: nf.format(warmup.pool.used), cap: nf.format(warmup.pool.cap) })}
+        </div>
+      ) : null}
+      <Table>
+        <thead>
+          <tr>
+            <th>{t("cols.domain")}</th>
+            <th>{t("cols.registered")}</th>
+            <th>{t("cols.today")}</th>
+            <th className="right">{t("cols.trust")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {warmup.domains.length === 0 ? (
+            <tr>
+              <td colSpan={4} style={{ color: "var(--ms-muted)" }}>
+                {common("none")}
+              </td>
+            </tr>
+          ) : (
+            warmup.domains.map((domain) => (
+              <tr key={domain.id}>
+                <td className="ms-mono">{domain.name}</td>
+                <td style={{ color: "var(--ms-muted)" }}>
+                  {domain.registeredAt
+                    ? t("registered", {
+                        date: formatDay(domain.registeredAt, locale),
+                        source: t(`sources.${domain.ageSource ?? "unknown"}`),
+                      })
+                    : t(domain.ageCheckedAt ? "unknownAge" : "notChecked")}
+                </td>
+                <td>
+                  {domain.trustedAt
+                    ? t("trusted")
+                    : domain.today
+                      ? t(domain.today.fullAt ? "today" : "todayNoDate", {
+                          used: nf.format(domain.today.used),
+                          cap: nf.format(domain.today.cap),
+                          date: domain.today.fullAt ? formatDay(domain.today.fullAt, locale) : "",
+                        })
+                      : t("full")}
+                </td>
+                <td className="right">
+                  <button
+                    type="button"
+                    className="ms-link"
+                    style={{
+                      font: "inherit",
+                      padding: 0,
+                      background: "none",
+                      border: 0,
+                      cursor: "pointer",
+                    }}
+                    disabled={trust.isPending}
+                    onClick={() => set(!domain.trustedAt, domain)}
+                  >
+                    {t(domain.trustedAt ? "untrustDomain" : "trustDomain")}
+                  </button>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </Table>
+    </div>
   );
 }
 

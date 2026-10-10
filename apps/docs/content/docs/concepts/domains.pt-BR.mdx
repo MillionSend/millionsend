@@ -57,6 +57,39 @@ adicione de novo na outra região — os registros DNS mudam, já que as
 identidades do SES são por região. No MillionSend Cloud, um nome de domínio
 que outro time já tem está tomado em todas as regiões.
 
+## Aquecimento de domínio novo
+
+No MillionSend Cloud, um domínio registrado há pouco tempo envia aos poucos
+enquanto constrói reputação com os provedores de e-mail. A idade é a do
+domínio registrado (`acme.com` para `mail.acme.com`; um nome de um serviço
+gratuito de subdomínios, como `shop.eu.org`, conta como domínio próprio),
+lida de dados públicos quando o domínio é adicionado, e o limite conta por
+dia UTC:
+
+| Idade do domínio | E-mails por dia |
+| --- | --- |
+| Menos de 24 horas | 100 |
+| De 1 a 7 dias | 300 |
+| De 7 a 30 dias | 2.000 |
+| 30 dias ou mais | só o limite do seu plano |
+
+Um domínio que envia de forma limpa (poucos bounces, nenhuma reclamação de
+spam) sobe um degrau antes. O limite vale além do seu plano, e mudar de plano
+não o libera. Enquanto ele vale, a página do domínio mostra "Em aquecimento:
+N/dia hoje · volume total a partir de …".
+
+Os domínios novos da sua equipe compartilham um único volume diário, o maior
+entre os limites deles, e cada um continua dentro do seu: adicionar outro
+domínio novo não acrescenta volume. Domínios com 30 dias ou mais ficam de
+fora. Quando mais de um domínio seu está em aquecimento, a página do domínio
+avisa que o volume é compartilhado.
+
+O que passa do limite do dia nunca é recusado nem perdido: é aceito, aparece
+como **Aguardando** e sai conforme o limite permite, do mais antigo para o
+mais novo. Só quando já há muita coisa aguardando um envio responde
+`429 daily_quota_exceeded` (SMTP `452`) com uma mensagem que cita o
+aquecimento; tente de novo depois da virada do dia UTC.
+
 ## Configuração por domínio
 
 Depois de verificado, a aba **Configuração** de um domínio controla:

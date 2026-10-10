@@ -72,6 +72,11 @@ volume, once per period; the reached mail says whether sends now bill overage
 or are refused. There is no `quota.paused` on monthly plans. A scheduled send
 counts against the period it is accepted in.
 
+On every plan, a sending domain under 30 days old also has its own daily cap
+(see [Domains](/concepts/domains#new-domain-warm-up)). A plan change never
+lifts it, and mail it holds parks as `queued_quota` without counting against
+the plan until the drain releases it.
+
 ## The Stripe model
 
 - One **product** per paid plan (Starter, Pro, Scale), found again by
@@ -136,6 +141,19 @@ worker reports, so the customer's **overage** switch is a plain row flag,
    cancellation reason). Plan changes are not offered there: Stripe's portal
    cannot update a subscription with more than one item, and a monthly rung
    has two.
+
+A team cannot buy or move up while it is suspended (for any reason) or
+holds an open Trust & safety flag that the safety job opened for abuse
+(`monitor`, `guardrail` or `complaints`) or that an operator opened or
+reopened, whatever its kind: `billing.checkout`, a move up in
+`billing.changePlan` and switching overage on answer `FORBIDDEN`
+(`upgrades_held`), and the billing page says upgrades are unavailable,
+without saying why. Reinstating a team clears the flag its suspension
+opened and leaves any other open flag as it is. Moving down,
+keeping the current rung, switching overage off and **Manage billing**
+(where cancelling lives) stay open. The configuration `--portal` provisions
+offers no plan switch at all; the account's default configuration may, so
+set `STRIPE_PORTAL_CONFIG`.
 
 The plan columns are written from a subscription fetched from Stripe — by
 the webhook handler and by the two dashboard procedures above — never from a

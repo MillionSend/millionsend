@@ -1,5 +1,5 @@
 {
-  "subject": "{inviter} invited you to {team} on MillionSend",
+  "subject": "You've been invited to a team on MillionSend",
   "body": "{inviter} invited you to join {team} on MillionSend as {role}.",
   "roles": {
     "member": "a member",

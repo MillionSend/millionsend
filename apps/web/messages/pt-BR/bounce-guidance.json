@@ -76,7 +76,7 @@
     },
     "suppressed": {
       "title": "Na lista de supressão do SES",
-      "body": "Este endereço devolveu ou recebeu reclamação recentemente na plataforma e foi suprimido globalmente.",
+      "body": "Este endereço devolveu ou recebeu reclamação recentemente e foi suprimido globalmente.",
       "action": "Só reenvie se tiver confirmado que a caixa postal voltou a ser válida."
     },
     "onAccountSuppressionList": {

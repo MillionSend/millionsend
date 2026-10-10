@@ -1,12 +1,20 @@
-import { PLAN_TEAM_LIMIT } from "@millionsend/core";
+import { PLAN_TEAM_LIMIT, SUSPENSION_REASONS } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTestDb } from "@millionsend/test-utils";
+import { createTestDb, REAL_NAMES, REFUSED_NAMES } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getActiveMembership } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import type { Context } from "@/server/trpc";
+
+// The request language server-side refusals are written in (NEXT_LOCALE).
+const locale = vi.hoisted(() => ({ cookie: undefined as string | undefined }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: () => (locale.cookie ? { value: locale.cookie } : undefined),
+  }),
+}));
 
 let db: Db;
 let close: () => Promise<void>;
@@ -17,6 +25,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  locale.cookie = undefined;
   await close();
 });
 
@@ -50,6 +59,21 @@ describe("team.createTeam", () => {
     expect(members).toHaveLength(1);
     expect(members[0]?.userId).toBe("u1");
     expect(members[0]?.role).toBe("owner");
+  });
+
+  it("refuses a name that could read as a link or hide characters; real names in any script are fine", async () => {
+    await insertUser("u1", "u1@example.com");
+    for (const name of REFUSED_NAMES) {
+      await expect(callerFor("u1").team.createTeam({ name }), name).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+      });
+    }
+    expect(await db.select().from(schema.teams)).toEqual([]);
+    for (const name of REAL_NAMES) {
+      const { teamId } = await callerFor("u1").team.createTeam({ name });
+      const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+      expect(team?.name, name).toBe(name);
+    }
   });
 
   it("suffixes the slug when the name collides", async () => {
@@ -139,6 +163,48 @@ describe("team.createTeam", () => {
     await expect(caller.team.createTeam({ name: "Acme" })).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     });
+  });
+
+  it("refuses anyone in a team suspended for phishing or held for review, owner or member; other suspensions do not count", async () => {
+    await insertUser("owner", "owner@example.com");
+    await insertUser("member", "member@example.com");
+    await insertUser("outsider", "outsider@example.com");
+    const { teamId } = await callerFor("owner").team.createTeam({ name: "Phish" });
+    await db.insert(schema.teamMembers).values({ teamId, userId: "member", role: "member" });
+
+    // Every reason the schema has, so `review` is covered once it exists.
+    const silent: readonly string[] = ["phishing", "review"];
+    for (const reason of SUSPENSION_REASONS) {
+      await db
+        .update(schema.teams)
+        .set({ suspendedAt: new Date(), suspensionReason: reason })
+        .where(eq(schema.teams.id, teamId));
+      for (const user of ["owner", "member"]) {
+        if (!silent.includes(reason)) {
+          await callerFor(user).team.createTeam({ name: `Allowed ${reason}` });
+          continue;
+        }
+        await expect(
+          callerFor(user).team.createTeam({ name: "Again" }),
+          `${reason} ${user}`,
+        ).rejects.toMatchObject({
+          code: "PRECONDITION_FAILED",
+          message:
+            "This isn't available for this team right now. Contact support if you need help.",
+        });
+      }
+    }
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+      .where(eq(schema.teams.id, teamId));
+    locale.cookie = "pt-BR";
+    await expect(callerFor("owner").team.createTeam({ name: "Again" })).rejects.toMatchObject({
+      message:
+        "Isso não está disponível para esta equipe no momento. Fale com o suporte se precisar de ajuda.",
+    });
+    await callerFor("outsider").team.createTeam({ name: "Clean" });
+    expect(await db.select().from(schema.teams).where(eq(schema.teams.name, "Again"))).toEqual([]);
   });
 });
 

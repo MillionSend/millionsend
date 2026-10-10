@@ -12,6 +12,7 @@
   "cancel": "Cancel",
   "openNav": "Open navigation",
   "signOut": "Log out",
+  "nameRule": "Names can't contain links, email addresses, line breaks or hidden characters, and can be up to {max} characters long.",
   "accountMenu": {
     "onboarding": "Onboarding",
     "appearance": "Appearance",
@@ -109,5 +110,11 @@
     "end": "End session",
     "back": "Back to console",
     "readOnly": "Read-only support view: nothing can be changed here."
+  },
+  "suspensionLock": {
+    "deleteTeam": "This team is suspended and can't be deleted. Contact support.",
+    "deleteDomain": "This team is suspended, so its domains can't be deleted. Contact support.",
+    "invite": "This team is suspended, so no one new can join it. Contact support.",
+    "unavailable": "This isn't available for this team right now. Contact support if you need help."
   }
 }

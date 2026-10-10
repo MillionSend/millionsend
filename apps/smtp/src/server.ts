@@ -39,6 +39,7 @@ const server = createSmtpServer({
     ? { tls: { cert: readFileSync(certPath), key: readFileSync(keyPath) } }
     : {}),
   allowInsecureAuth: env.SMTP_ALLOW_INSECURE_AUTH,
+  onboardingEmailFrom: env.ONBOARDING_EMAIL_FROM,
 });
 
 server.on("error", (err) => {
