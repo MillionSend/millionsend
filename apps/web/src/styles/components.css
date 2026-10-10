@@ -941,26 +941,6 @@ table.ms-table {
   border-color: var(--ms-line-strong);
   color: var(--ms-bone);
 }
-/* A page-level strip runs edge to edge on phones and scrolls under the
-   gutter; the inner padding keeps its first tab on the title's line. */
-@media (max-width: 899px) {
-  .ms-tabs.bleed {
-    margin-inline: -16px;
-    padding-inline: 16px;
-    scroll-padding-inline: 16px;
-    scrollbar-width: none;
-  }
-  .ms-tabs.bleed::-webkit-scrollbar {
-    display: none;
-  }
-}
-/* With a mouse a sideways-scrolling strip hides its last tabs (settings has
-   eight), so from 900px a page-level strip wraps instead. */
-@media (min-width: 900px) {
-  .ms-tabs.bleed {
-    flex-wrap: wrap;
-  }
-}
 
 /* Toast host (toast.tsx): a row across the viewport bottom, the toast centred
    in it at its own width up to the full row. A box hung at left: 50% would
@@ -1417,28 +1397,6 @@ button.ms-notice-strip-action {
   left: 0;
   right: 0;
   bottom: 0;
-}
-/* Fixed-layout lists (broadcasts, contacts): on a wide desktop the lead
-   column holds its share and the date column takes the rest. Narrower, the
-   shares plus cell padding would leave the date no width at all, drawn under
-   the row menu, so the date gets a fixed width and the lead column takes
-   what is left; !important beats the share set inline. */
-@media (max-width: 1199px) {
-  .ms-table th.ms-col-lead {
-    width: auto !important;
-  }
-  .ms-table th.ms-col-date {
-    width: 104px;
-  }
-}
-/* A cell that takes what the other columns leave and ellipsizes inside it
-   (the emails list's subject): with max-width 0 its text does not set the
-   table's minimum width, so a long subject never pushes the time column off
-   a desktop. Phones keep the full-width table that scrolls. */
-@media (min-width: 900px) {
-  .ms-table td.ms-cell-fill {
-    max-width: 0;
-  }
 }
 /* Console lists keep every cell on one line (the wrapper scrolls sideways
    instead) on slightly tighter cells, and print their figures in mono at
@@ -2162,6 +2120,19 @@ summary:focus-visible,
     min-width: 0;
   }
 }
+/* Fixed-layout lists (broadcasts, contacts): on a wide desktop the lead
+   column holds its share and the date column takes the rest. Narrower, the
+   shares plus cell padding would leave the date no width at all, drawn under
+   the row menu, so the date gets a fixed width and the lead column takes
+   what is left; !important beats the share set inline. */
+@media (max-width: 1199px) {
+  .ms-table th.ms-col-lead {
+    width: auto !important;
+  }
+  .ms-table th.ms-col-date {
+    width: 104px;
+  }
+}
 
 @media (max-width: 899px) {
   /* App shell: topbar over content; sidebar becomes an off-canvas drawer. */
@@ -2221,6 +2192,17 @@ summary:focus-visible,
   .ms-main [id] {
     scroll-margin-top: calc(var(--ms-support-strip-h, 0px) + 64px);
   }
+  /* A page-level tab strip runs edge to edge and scrolls under the gutter;
+     the inner padding keeps its first tab on the title's line. */
+  .ms-tabs.bleed {
+    margin-inline: -16px;
+    padding-inline: 16px;
+    scroll-padding-inline: 16px;
+    scrollbar-width: none;
+  }
+  .ms-tabs.bleed::-webkit-scrollbar {
+    display: none;
+  }
 
   /* Page header: the title keeps the first line to itself; the actions take
      the next line at full width, and a button that does not fit beside its
@@ -2234,9 +2216,7 @@ summary:focus-visible,
     flex: 1 1 auto;
     justify-content: center;
   }
-  .ms-page-actions > .ms-page-menu,
-  .ms-page-actions > .ms-btn-icon,
-  .ms-page-actions > .ms-menu-trigger-bare {
+  .ms-page-actions > .ms-page-menu {
     flex: 0 0 auto;
   }
   /* A lone icon action ("</>" on a detail page) stays on the title's line
@@ -2619,6 +2599,18 @@ summary:focus-visible,
   .ms-mobile-topbar,
   .ms-drawer-scrim {
     display: none;
+  }
+  /* With a mouse a sideways-scrolling strip hides its last tabs (settings has
+     eight), so a page-level strip wraps instead. */
+  .ms-tabs.bleed {
+    flex-wrap: wrap;
+  }
+  /* A cell that takes what the other columns leave and ellipsizes inside it
+     (the emails list's subject): with max-width 0 its text does not set the
+     table's minimum width, so a long subject never pushes the time column off
+     a desktop. Phones keep the full-width table that scrolls. */
+  .ms-table td.ms-cell-fill {
+    max-width: 0;
   }
 }
 

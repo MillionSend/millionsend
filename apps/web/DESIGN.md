@@ -125,9 +125,8 @@ footer. Tables scroll horizontally **inside their own wrapper** (the shared
 `<Table>`) — the page itself never scrolls horizontally. On touch screens
 keycaps are hidden, small glyph controls (✕, ⓘ, a chip's copy button) get a
 finger-sized hit area, and bulk-select checkboxes show in a column of their
-own. The phone rules live in the delimited responsive section at the end of
-`components.css`; the rules above that hold at every width sit with their
-components.
+own. The narrow-desktop and phone rules live in the delimited responsive
+section of `components.css`; every rule above it holds at every width.
 
 ## Controls
 
