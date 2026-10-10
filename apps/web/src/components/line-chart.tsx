@@ -38,7 +38,7 @@ function niceStep(raw: number): number {
  * Floating hover panel shared by every chart (the line chart, both
  * sparklines, the metrics rate bars). It never covers the pointer or the
  * hovered point: placeChartTip sets it above the plot, centred on the
- * pointer, or below the plot when the viewport has no room above. Portaled
+ * pointer, and keeps it off a finger (panel-placement.ts). Portaled
  * and fixed like tooltip.tsx, so no card or dialog clips it; measured after
  * render and re-placed on scroll. pointer-events: none keeps hover tracking
  * simple.

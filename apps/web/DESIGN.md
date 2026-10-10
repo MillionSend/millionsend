@@ -97,8 +97,9 @@ chart hover tips — measure themselves after rendering and stay inside the
 viewport with a 12px margin: they flip above or below, shift sideways, and
 cap their size (`src/lib/panel-placement.ts`). A **chart tip** never covers
 the pointer or the hovered point: it sits above the plot, centred on the
-pointer, or below the plot when the viewport has no room above, and keeps a
-fingertip clear of a touch.
+pointer. Without room above, a mouse's tip drops below the plot; a touch's
+never does (the hand would hide it) but rises from above the fingertip,
+beside the touched column.
 
 **Narrow desktop (900–1199px).** Beside the sidebar the content column is
 under 880px: the console's 4-up grids go 2-up and its 2/1 splits stack, a

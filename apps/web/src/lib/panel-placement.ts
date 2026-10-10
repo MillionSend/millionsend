@@ -118,29 +118,65 @@ export function trackedPointer(event: {
 }
 
 /* How far a chart tip keeps from the pointer: a mouse arrow hangs below its
-   hot spot, and a finger covers its touch point and more below it. */
+   hot spot. A fingertip covers its touch point and a margin around it, and
+   the finger and hand cover everything below it. */
 const MOUSE_CLEARANCE = { above: 4, below: 24 };
-const FINGER_CLEARANCE = { above: 32, below: 64 };
+const FINGERTIP = { above: 32, halfWidth: 22 };
+const CHART_TIP_GAP = 8;
 
 /**
  * Where a chart's hover tip goes, in viewport coordinates: above the plot,
- * centred on the pointer's x and shifted to stay inside the viewport, or
- * below the plot when the viewport has less room above. It never covers the
- * pointer or the hovered point, and a finger keeps a fingertip of clearance.
+ * centred on the pointer's x and shifted to stay inside the viewport. With
+ * a mouse it drops below the plot when the viewport has less room above;
+ * under a finger it never does (the hand would hide it), and instead rises
+ * from above the fingertip beside the touched column, over the rest of the
+ * plot. It never covers the pointer or the hovered point.
  */
-export function placeChartTip(plot: Box, pointer: ChartPointer, tip: Size, viewport: Size) {
-  const clear = pointer.touch ? FINGER_CLEARANCE : MOUSE_CLEARANCE;
-  return placePanel(
+export function placeChartTip(
+  plot: Box,
+  pointer: ChartPointer,
+  tip: Size,
+  viewport: Size,
+): PanelPlacement {
+  const options = { align: "center", prefer: "above", gap: CHART_TIP_GAP } as const;
+  if (!pointer.touch) {
+    return placePanel(
+      {
+        left: pointer.x,
+        right: pointer.x,
+        top: Math.min(plot.top, pointer.y - MOUSE_CLEARANCE.above),
+        bottom: Math.max(plot.bottom, pointer.y + MOUSE_CLEARANCE.below),
+      },
+      tip,
+      viewport,
+      options,
+    );
+  }
+  const abovePlot = placePanel(
     {
       left: pointer.x,
       right: pointer.x,
-      top: Math.min(plot.top, pointer.y - clear.above),
-      bottom: Math.max(plot.bottom, pointer.y + clear.below),
+      top: Math.min(plot.top, pointer.y - FINGERTIP.above),
+      bottom: plot.bottom,
     },
     tip,
     viewport,
-    { align: "center", prefer: "above", gap: 8 },
+    options,
   );
+  if (abovePlot.above && abovePlot.maxHeight >= tip.height) return abovePlot;
+  const width = Math.min(tip.width, viewport.width - 2 * PANEL_MARGIN);
+  const beside =
+    pointer.x >= viewport.width / 2
+      ? pointer.x - FINGERTIP.halfWidth - CHART_TIP_GAP - width
+      : pointer.x + FINGERTIP.halfWidth + CHART_TIP_GAP;
+  const top = Math.max(PANEL_MARGIN, pointer.y - FINGERTIP.above - CHART_TIP_GAP - tip.height);
+  return {
+    left: clampInto(beside, width, viewport.width),
+    top,
+    bottom: viewport.height - top - tip.height,
+    maxHeight: viewport.height - top - PANEL_MARGIN,
+    above: true,
+  };
 }
 
 /** The layout viewport, which excludes a classic scrollbar (window.inner* includes it). */

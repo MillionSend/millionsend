@@ -112,6 +112,20 @@ describe("placeChartTip", () => {
     expect(placed.top + tip.height).toBe(305 - 32 - 8);
   });
 
+  it("never drops under a finger: with no room above the plot it rises beside the touched column", () => {
+    const top = box(16, 20, 300, 228);
+    const finger = { x: 300, y: 120, touch: true };
+    const placed = placeChartTip(top, finger, tip, phone);
+    expect(placed).toMatchObject({ above: true, left: 120, top: 16 });
+    expect(placed.left + tip.width).toBeLessThan(finger.x - 22);
+    expect(placed.top + tip.height).toBeLessThan(finger.y - 32);
+  });
+
+  it("keeps beside a touch so high on the screen that the tip cannot clear it from above", () => {
+    const placed = placeChartTip(box(16, 20, 300, 228), { x: 60, y: 40, touch: true }, tip, phone);
+    expect(placed).toMatchObject({ top: 12, left: 60 + 22 + 8 });
+  });
+
   it("drops below the plot, past the mouse arrow, when the viewport has no room above", () => {
     const top = box(16, 20, 300, 52);
     const placed = placeChartTip(top, { x: 160, y: 66, touch: false }, tip, phone);
