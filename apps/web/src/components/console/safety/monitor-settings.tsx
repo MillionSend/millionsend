@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
-import { DotParts } from "@/components/dot-parts";
 import { KvRow } from "@/components/kv-row";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
@@ -293,7 +292,11 @@ function Field({
         onChange={(event) => onChange(event.target.value)}
       />
       <div style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 4 }}>
-        <DotParts text={`${t(`hints.${setting.key}`)} · ${t(`kinds.${setting.kind}`)}`} />
+        {/* The kind ("número inteiro") stays whole and its dot never starts a
+            line; unlike DotParts, it may share the hint's last line. */}
+        {t(`hints.${setting.key}`)}
+        {"\u00a0· "}
+        <span style={{ whiteSpace: "nowrap" }}>{t(`kinds.${setting.kind}`)}</span>
       </div>
       {meta}
     </div>
