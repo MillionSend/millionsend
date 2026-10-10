@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { formatDayTime, formatUtcTimestamp } from "@/lib/format";
 import { useTRPC } from "@/lib/trpc";
+import { useTeamRole } from "@/lib/use-team-role";
 
 type BounceData = {
   bounceType?: string;
@@ -107,8 +108,7 @@ export default function SuppressionDetailPage() {
   const queryClient = useQueryClient();
 
   const query = useQuery(trpc.emails.suppressions.get.queryOptions({ id }, { retry: false }));
-  const teamList = useQuery(trpc.team.list.queryOptions());
-  const role = teamList.data?.teams.find((m) => m.teamId === teamList.data?.activeTeamId)?.role;
+  const role = useTeamRole();
   const canRemove = role === "owner" || role === "admin";
   const removeMutation = useMutation(
     trpc.emails.suppressions.remove.mutationOptions({

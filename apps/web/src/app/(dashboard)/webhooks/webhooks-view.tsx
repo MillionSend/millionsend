@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
+import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
@@ -237,7 +238,7 @@ export function WebhooksView() {
                           textUnderlineOffset: 3,
                         }}
                       >
-                        {displayUrl(webhook.url)}
+                        <Breakable text={displayUrl(webhook.url)} />
                       </Link>
                     </span>
                     <QueueLine queued={webhook.queued} oldestQueuedAt={webhook.oldestQueuedAt} />

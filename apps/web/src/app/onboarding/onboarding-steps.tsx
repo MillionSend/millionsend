@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { LANG_META, LangIcon } from "@/components/api-sheet";
+import { KeepHyphenated } from "@/components/breakable";
 import { CodeHighlight } from "@/components/code-highlight";
 import { CopyGlyph } from "@/components/copy-chip";
 import { DeliveredOdometer } from "@/components/delivered-odometer";
@@ -360,7 +361,7 @@ export function OnboardingSteps({
     return (
       <div>
         <h1 className="ms-display" style={{ fontSize: "var(--ms-fs-h1)", margin: 0 }}>
-          {t("title")}
+          <KeepHyphenated text={t("title")} />
         </h1>
         <div style={{ marginTop: 32, display: "grid", gap: 20 }}>
           <Skeleton width="100%" height={132} radius="var(--ms-r-card)" />
@@ -525,7 +526,7 @@ export function OnboardingSteps({
   return (
     <div style={{ overflow: "hidden" }}>
       <h1 className="ms-display" style={{ fontSize: "var(--ms-fs-h1)", margin: 0 }}>
-        {t("title")}
+        <KeepHyphenated text={t("title")} />
       </h1>
       <div style={{ fontSize: 14, color: "var(--ms-muted)", marginTop: 6 }}>{t("subtitle")}</div>
 

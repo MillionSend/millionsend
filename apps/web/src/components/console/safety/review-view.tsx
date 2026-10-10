@@ -560,7 +560,12 @@ export function ReviewView({ teamId }: { teamId: string }) {
                 <span>{emails(`insights.check.${check.id}.title`)}</span>
                 <span
                   className="ms-mono"
-                  style={{ marginLeft: "auto", fontSize: 12, color: "var(--ms-muted)" }}
+                  style={{
+                    marginLeft: "auto",
+                    fontSize: 12,
+                    color: "var(--ms-muted)",
+                    whiteSpace: "nowrap",
+                  }}
                 >
                   {t("checks.count", { emails: check.emails })}
                 </span>

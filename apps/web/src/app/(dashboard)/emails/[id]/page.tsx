@@ -15,7 +15,7 @@ import { EmailContentPanel } from "@/components/email-content-panel";
 import { EmailStatusIcon, EventIconTile } from "@/components/email-status-icon";
 import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
-import { Skeleton, SkeletonChip } from "@/components/skeleton";
+import { Skeleton, SkeletonBadge, SkeletonChip } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Tooltip } from "@/components/tooltip";
 import {
@@ -304,57 +304,25 @@ function EmailDetailSkeleton() {
 
       <div style={{ marginTop: 26 }}>
         <div className="ms-microlabel">{t("detail.events")}</div>
-        <div
-          style={{
-            marginTop: 12,
-            border: "1px solid var(--ms-line)",
-            borderRadius: 14,
-            padding: "30px 26px",
-            backgroundImage: "radial-gradient(var(--ms-line) 1px, transparent 1px)",
-            backgroundSize: "18px 18px",
-            backgroundPosition: "center",
-            display: "flex",
-            alignItems: "center",
-            overflowX: "auto",
-          }}
-        >
+        <div className="ms-events">
           {[0, 1, 2].map((index) => (
             <div key={index} style={{ display: "contents" }}>
               {index > 0 ? (
-                <div
-                  style={{
-                    flex: "none",
-                    minWidth: 56,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 5,
-                    padding: "0 4px",
-                  }}
-                >
+                <div className="ms-events-gap">
                   <span className="ms-mono" style={{ fontSize: 10.5, display: "flex" }}>
                     <Skeleton width={32} height="1lh" />
                   </span>
-                  <span style={{ height: 1, background: "var(--ms-line-strong)", width: "100%" }} />
+                  <span className="ms-events-line" />
                 </div>
               ) : null}
-              <div
-                style={{
-                  background: "var(--ms-panel)",
-                  border: "1px solid var(--ms-line)",
-                  borderRadius: 12,
-                  padding: "12px 16px",
-                  width: 264,
-                  boxSizing: "border-box",
-                  flex: "none",
-                }}
-              >
-                <div style={{ fontSize: 13.5, fontWeight: 600, display: "flex" }}>
-                  <Skeleton width={70} height="1lh" />
-                </div>
-                <div className="ms-mono" style={{ fontSize: 11.5, marginTop: 7, display: "flex" }}>
-                  <Skeleton width={168} height="1lh" />
-                </div>
+              <div className="ms-events-node">
+                <Skeleton width={34} height={34} radius={10} />
+                <span style={{ marginTop: 10, display: "flex" }}>
+                  <SkeletonBadge width={74} />
+                </span>
+                <span style={{ fontSize: 12, marginTop: 7, display: "flex" }}>
+                  <Skeleton width={96} height="1lh" />
+                </span>
               </div>
             </div>
           ))}
@@ -505,43 +473,16 @@ function PendingEvents({
   }
   return (
     <>
-      <div
-        style={{
-          marginTop: 12,
-          border: "1px solid var(--ms-line)",
-          borderRadius: 14,
-          padding: "30px 26px",
-          backgroundImage: "radial-gradient(var(--ms-line) 1px, transparent 1px)",
-          backgroundSize: "18px 18px",
-          backgroundPosition: "center",
-          display: "flex",
-          alignItems: "flex-start",
-          gap: 6,
-          overflowX: "auto",
-        }}
-      >
+      <div className="ms-events">
         {nodes.map((node, i) => (
           <div key={node.label} style={{ display: "contents" }}>
             {i > 0 ? (
               <span
                 aria-hidden="true"
-                style={{
-                  flex: "1 0 40px",
-                  marginTop: 17,
-                  borderTop: `1px ${node.estimate ? "dashed" : "solid"} var(--ms-line-strong)`,
-                }}
+                className={node.estimate ? "ms-events-link dashed" : "ms-events-link"}
               />
             ) : null}
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                textAlign: "center",
-                flex: "none",
-                maxWidth: 240,
-              }}
-            >
+            <div className="ms-events-node">
               <EventIconTile type={node.type} dashed={node.estimate ?? false} />
               <span className="ms-badge ms-badge-neutral" style={{ marginTop: 10 }}>
                 {node.label}
@@ -897,21 +838,7 @@ export default function EmailDetailPage() {
             {t("detail.noEvents")}
           </p>
         ) : (
-          <div
-            style={{
-              marginTop: 12,
-              border: "1px solid var(--ms-line)",
-              borderRadius: 14,
-              padding: "30px 26px",
-              backgroundImage: "radial-gradient(var(--ms-line) 1px, transparent 1px)",
-              backgroundSize: "18px 18px",
-              backgroundPosition: "center",
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 6,
-              overflowX: "auto",
-            }}
-          >
+          <div className="ms-events">
             {groups.map((group, index) => {
               const { type, first } = group;
               const count = group.occurrences.length;
@@ -1013,47 +940,24 @@ export default function EmailDetailPage() {
                   ) : null}
                 </>
               );
-              const cardStyle: React.CSSProperties = {
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                textAlign: "center",
-                background: "none",
-                border: 0,
-                padding: 0,
-                flex: "none",
-              };
               return (
                 <div key={first.id} style={{ display: "contents" }}>
                   {delta != null ? (
-                    <div
-                      style={{
-                        flex: "none",
-                        minWidth: 56,
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: 4,
-                        padding: "0 6px",
-                        alignSelf: "flex-start",
-                        marginTop: 0,
-                      }}
-                    >
+                    <div className="ms-events-gap">
                       <span
                         className="ms-mono"
                         style={{ fontSize: 10.5, color: "var(--ms-muted)" }}
                       >
                         +{formatDurationShort(delta)}
                       </span>
-                      <span
-                        style={{ height: 1, background: "var(--ms-line-strong)", width: "100%" }}
-                      />
+                      <span className="ms-events-line" />
                     </div>
                   ) : null}
                   {opens ? (
                     <button
                       type="button"
-                      style={{ ...cardStyle, color: "inherit", font: "inherit", cursor: "pointer" }}
+                      className="ms-events-node"
+                      style={{ color: "inherit", font: "inherit", cursor: "pointer" }}
                       onClick={() =>
                         opens === "group" ? setGroupDrawer(first.id) : setDrawer(opens)
                       }
@@ -1061,37 +965,20 @@ export default function EmailDetailPage() {
                       {card}
                     </button>
                   ) : (
-                    <div style={cardStyle}>{card}</div>
+                    <div className="ms-events-node">{card}</div>
                   )}
                 </div>
               );
             })}
             {eventsStalled ? (
               <>
-                <div
-                  style={{
-                    flex: "none",
-                    minWidth: 56,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "0 6px",
-                    alignSelf: "flex-start",
-                  }}
-                >
+                <div className="ms-events-gap">
                   <span className="ms-mono" style={{ fontSize: 10.5 }}>
                     &nbsp;
                   </span>
-                  <span
-                    style={{
-                      height: 0,
-                      borderTop: "1px dashed var(--ms-line-strong)",
-                      width: "100%",
-                    }}
-                  />
+                  <span className="ms-events-line dashed" />
                 </div>
-                <div style={{ flex: "none" }}>
+                <div className="ms-events-node">
                   <Tooltip text={t("detail.eventsStalled")}>
                     <span
                       aria-hidden="true"

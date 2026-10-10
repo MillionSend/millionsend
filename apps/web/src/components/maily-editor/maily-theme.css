@@ -537,9 +537,14 @@
 }
 /* The block handle hangs left of the block, in a gutter that the 16px
    content padding below 900px does not leave: without its "+" (the slash
-   menu adds blocks too) it fits on screen, keeping the ⠿ menu. */
+   menu adds blocks too) it fits on screen, keeping the ⠿ menu, and the
+   wider text inset seats it inside the editor's frame, clear of the
+   screen's 12px margin. */
 @media (max-width: 899px) {
   .ms-maily .tippy-box[data-placement^="left"] [class~="mly:pr-1.5"] > :first-child {
     display: none;
+  }
+  .ms-maily .ProseMirror {
+    padding-left: 30px;
   }
 }

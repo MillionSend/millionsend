@@ -416,8 +416,13 @@ export function FinishCell({
   const about = roundUpToQuarterHour(finishesAt);
   return (
     <>
+      {/* The day and the time each stay whole: a narrow column breaks between
+          them, never inside the zone ("GMT-3"). */}
       <div style={{ fontSize: 13, marginTop: 7 }}>
-        <span title={formatUtcTimestamp(about)}>{formatFinishAbout(about, locale)}</span>
+        <span title={formatUtcTimestamp(about)}>
+          <span className="ms-part">{formatStepDay(about, locale)},</span>{" "}
+          <span className="ms-part">{formatStepTime(about, locale)}</span>
+        </span>
       </div>
       {startedAt ? (
         <div style={{ fontSize: 12, color: "var(--ms-faint)", marginTop: 4 }}>

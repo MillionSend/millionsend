@@ -25,6 +25,7 @@ import { formatDay, formatDayTime, formatUsd } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { UPGRADES_HELD } from "@/lib/trpc-error";
+import { useTeamRole } from "@/lib/use-team-role";
 import { QuotaRow } from "../usage/usage-view";
 
 const PLANS = ["free", "starter", "pro", "scale"] as const satisfies readonly Plan[];
@@ -98,8 +99,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         ? POST_CHECKOUT_POLL_MS
         : false,
   });
-  const teams = useQuery(trpc.team.list.queryOptions());
-  const role = teams.data?.teams.find((m) => m.teamId === teams.data.activeTeamId)?.role;
+  const role = useTeamRole();
   const canManage = role === "owner" || role === "admin";
 
   const redirect = { onSuccess: ({ url }: { url: string }) => window.location.assign(url) };
