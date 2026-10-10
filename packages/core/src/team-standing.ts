@@ -20,7 +20,7 @@ export const SILENT_SUSPENSIONS: readonly string[] = ["phishing", "review"];
  * instance's own contact list. A review hold is still pending a verdict, and
  * non_payment is a billing state.
  */
-export const UNSUBSCRIBING_SUSPENSIONS: readonly string[] = ["manual", "reputation", "phishing"];
+const UNSUBSCRIBING_SUSPENSIONS: readonly string[] = ["manual", "reputation", "phishing"];
 
 /** Whether the team row is under a silent suspension. */
 export function isSilentlySuspended(team: {
