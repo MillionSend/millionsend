@@ -429,6 +429,73 @@ describe("a click on a branded tracking host", () => {
   });
 });
 
+describe("a click on the cloud, where a team's links ship only on its branded host", () => {
+  const url = "https://shop.example.com/sale?id=9";
+  // "" rather than "false": under SKIP_ENV_VALIDATION the env proxy carries
+  // raw strings, where "false" would be truthy.
+  const cloud = (on: boolean) => vi.stubEnv("IS_CLOUD", on ? "true" : "");
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("the dashboard host refuses a token that names its team, and records nothing", async () => {
+    cloud(true);
+    const { emailId, teamId } = await seedEmail();
+    const res = await clickGet(...req(await clickToken(emailId, url)));
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+    for (const type of ["clicked", "opened", "prefetched"] as const) {
+      expect(await counts(emailId, teamId, type), type).toEqual({ events: 0, counter: 0 });
+    }
+  });
+
+  it("the team's branded host, through the tracking edge, still redirects", async () => {
+    cloud(true);
+    const { emailId, teamId } = await seedEmail();
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "shop.example",
+      region: "us-east-1",
+      status: "verified",
+      trackingSubdomain: "links",
+    });
+    const res = await clickGet(
+      ...req(await clickToken(emailId, url), {
+        "user-agent": IPHONE,
+        "x-tracking-host": "links.shop.example",
+      }),
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(url);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+  });
+
+  it("a token from before links named their team still answers on the dashboard host", async () => {
+    cloud(true);
+    const { emailId, teamId } = await seedEmail();
+    const token = legacyClickToken({ emailId, url, secretKey });
+    const res = await clickGet(...req(token));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(url);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+    // Its team's standing still decides, read through the email row.
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "phishing" })
+      .where(eq(schema.teams.id, teamId));
+    expect((await clickGet(...req(token))).status).toBe(410);
+  });
+
+  it("self-host is unchanged: the app's own host redirects a token that names its team", async () => {
+    cloud(false);
+    const { emailId, teamId } = await seedEmail();
+    const res = await clickGet(...req(await clickToken(emailId, url)));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(url);
+    expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 1, counter: 1 });
+  });
+});
+
 describe("click bursts", () => {
   const DESKTOP =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";

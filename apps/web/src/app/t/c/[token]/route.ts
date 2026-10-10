@@ -1,3 +1,4 @@
+import { isCloudDeployment } from "@millionsend/config";
 import {
   escapeHtml,
   fetchTeamStanding,
@@ -41,10 +42,21 @@ export async function GET(request: Request, ctx: { params: Promise<{ token: stri
   if (!parsed || !/^https?:\/\//i.test(parsed.url) || !URL.canParse(parsed.url)) {
     return new Response(null, { status: 404 });
   }
+  // The host a reader's click came in on, as the tracking edge names it.
+  const trackingHost = request.headers.get("x-tracking-host")?.trim() || null;
+  // SECURITY: the cloud mints a team's links only on its branded host (the
+  // worker's requireBrandedHost), and every branded click reaches the app
+  // through the tracking edge. A token that names its team and arrives
+  // without the edge's header was built by hand on the app's own host:
+  // refused, nothing recorded. A token from before links named their team
+  // keeps the checks below, as mail already in inboxes may point it here.
+  if (parsed.teamId && !trackingHost && isCloudDeployment()) {
+    return new Response(null, { status: 404 });
+  }
 
   const db = getDb();
   const teamId = await senderTeam(db, parsed.emailId, parsed.teamId);
-  if (teamId && !(await hostServesTeam(db, request, teamId))) {
+  if (teamId && trackingHost && !(await hostServesTeam(db, trackingHost, teamId))) {
     return new Response(null, { status: 404 });
   }
   // Recorded whatever the page answers: the reader clicked either way.
@@ -85,13 +97,9 @@ async function senderTeam(
 /**
  * SECURITY: a branded tracking host redirects only for the team holding its
  * domain; otherwise any team's token would redirect from another team's
- * domain. The tracking edge names the host a reader's click came in on
- * (X-Tracking-Host). A request naming none, or naming a host no team holds
- * verified, is not judged here.
+ * domain. A host no team holds verified is not judged here.
  */
-async function hostServesTeam(db: Db, request: Request, teamId: string): Promise<boolean> {
-  const host = request.headers.get("x-tracking-host")?.trim();
-  if (!host) return true;
+async function hostServesTeam(db: Db, host: string, teamId: string): Promise<boolean> {
   const holders = await db
     .select({ teamId: schema.domains.teamId })
     .from(schema.domains)
