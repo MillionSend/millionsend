@@ -154,4 +154,6 @@ you can't fully trust anyway.
 ## API keys and domains
 
 An API key can be scoped to a single domain; such a key can only send from
-that domain (other domains return `403 restricted_api_key`).
+that domain (other domains return `403 restricted_api_key`). Keys it creates
+through the API are scoped to the same domain: an omitted `domain_id` inherits
+it, and any other domain returns `403 restricted_api_key`.

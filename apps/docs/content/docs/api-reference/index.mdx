@@ -40,6 +40,11 @@ and `DELETE /emails/{id}` need full access, since reads return stored bodies
 and the team's whole archive. A key can additionally be scoped to a single
 domain, restricting which `from` addresses it may send.
 
+A key created with `POST /api-keys` is never broader than the key that
+created it. A domain-scoped key creates keys scoped to its own domain: an
+omitted or null `domain_id` inherits that domain, and any other domain returns
+`403 restricted_api_key`.
+
 ## Resend compatibility
 
 Request and response shapes match Resend's API, so official Resend SDKs work

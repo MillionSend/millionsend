@@ -1,11 +1,18 @@
 import { randomBytes } from "node:crypto";
-import { EnvKeyring, generateApiKey, MAX_ACTIVE_API_KEYS } from "@millionsend/core";
+import { OpenAPIHono } from "@hono/zod-openapi";
+import {
+  authenticateApiKey,
+  EnvKeyring,
+  generateApiKey,
+  MAX_ACTIVE_API_KEYS,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { createApi } from "../src/app.js";
+import { createApi, type Env } from "../src/app.js";
+import { registerApiKeyRoutes } from "../src/routes/api-keys.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -14,8 +21,10 @@ let teamId: string;
 let otherTeamId: string;
 let fullKey: string;
 let sendKey: string;
+let scopedKey: string;
 let otherTeamKey: string;
 let verifiedDomainId: string;
+let secondDomainId: string;
 let pendingDomainId: string;
 let otherTeamDomainId: string;
 
@@ -65,6 +74,8 @@ beforeAll(async () => {
   verifiedDomainId = await insertDomain(teamId, "verified.example.com", "verified");
   pendingDomainId = await insertDomain(teamId, "pending.example.com", "pending");
   otherTeamDomainId = await insertDomain(otherTeamId, "other.example.com", "verified");
+  secondDomainId = await insertDomain(teamId, "second.example.com", "verified");
+  scopedKey = await insertKey(teamId, { domainId: verifiedDomainId });
 
   app = createApi({
     db,
@@ -251,5 +262,61 @@ describe("permission confinement", () => {
       expect(res.status, `${method} ${path}`).toBe(403);
       expect(await res.json()).toMatchObject({ statusCode: 403, name: "restricted_api_key" });
     }
+  });
+});
+
+describe("a minted key is never broader than its minter", () => {
+  it("gives a domain-scoped minter's domain to a key minted with domain_id omitted or null", async () => {
+    for (const body of [{ name: "child" }, { name: "child", domain_id: null }]) {
+      const res = await call(scopedKey, "POST", "/api-keys", body);
+      expect(res.status).toBe(200);
+      const { id } = (await res.json()) as { id: string };
+      const [row] = await db.select().from(schema.apiKeys).where(eq(schema.apiKeys.id, id));
+      expect(row?.domainId).toBe(verifiedDomainId);
+      const [audit] = await db
+        .select()
+        .from(schema.auditLog)
+        .where(eq(schema.auditLog.target, `api_key:${id}`));
+      expect(audit?.data).toMatchObject({ domainId: verifiedDomainId });
+    }
+  });
+
+  it("403s a domain-scoped minter naming another domain, but not its own", async () => {
+    const other = await call(scopedKey, "POST", "/api-keys", {
+      name: "wider",
+      domain_id: secondDomainId,
+    });
+    expect(other.status).toBe(403);
+    expect(await other.json()).toMatchObject({ statusCode: 403, name: "restricted_api_key" });
+
+    const own = await call(scopedKey, "POST", "/api-keys", {
+      name: "same",
+      domain_id: verifiedDomainId.toUpperCase(),
+    });
+    expect(own.status).toBe(200);
+  });
+
+  it("refuses a full_access key to a sending_access minter even past the route gate", async () => {
+    // requireFullAccess turns a sending key away before the handler runs, so
+    // mount the routes bare to prove the handler's own check.
+    const auth = await authenticateApiKey(db, sendKey);
+    if (!auth) throw new Error("seeded key did not authenticate");
+    const bare = new OpenAPIHono<Env>();
+    bare.use(async (c, next) => {
+      c.set("auth", auth);
+      await next();
+    });
+    registerApiKeyRoutes(bare, db);
+    const mint = (body: unknown) =>
+      bare.request("/api-keys", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const wider = await mint({ name: "wider", permission: "full_access" });
+    expect(wider.status).toBe(403);
+    expect(await wider.json()).toMatchObject({ statusCode: 403, name: "restricted_api_key" });
+    expect((await mint({ name: "same", permission: "sending_access" })).status).toBe(200);
   });
 });
