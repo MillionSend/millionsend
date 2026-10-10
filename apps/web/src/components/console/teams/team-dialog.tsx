@@ -2,6 +2,7 @@
 
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useMemo } from "react";
+import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
 import { Skeleton } from "@/components/skeleton";
@@ -36,12 +37,14 @@ function LiveViewLine({ expiresAt }: { expiresAt: Date }) {
 
 /** Everything the console knows about one team, with Adjust limits as the way out. */
 export function TeamDialog({
+  id,
   name,
   detail,
   onClose,
   onAdjustLimits,
   onViewAsOwner,
 }: {
+  id: string;
   name: string;
   detail: TeamDetail | undefined;
   onClose: () => void;
@@ -57,6 +60,15 @@ export function TeamDialog({
 
   const owner = detail?.members.find((m) => m.role === "owner") ?? detail?.members[0];
   const memberEmails = detail?.members.map((m) => m.email).join(", ") ?? "";
+  // Known before the detail loads, so it never waits behind a skeleton.
+  const idRow = (
+    <>
+      <dt>{t("detail.id")}</dt>
+      <dd>
+        <CopyChip value={id} wrap />
+      </dd>
+    </>
+  );
 
   return (
     <Modal open onClose={onClose} onConfirm={onAdjustLimits} title={name} size="wide">
@@ -98,6 +110,7 @@ export function TeamDialog({
       {detail ? (
         <>
           <dl className="ms-kv">
+            {idRow}
             <dt>{t("detail.type")}</dt>
             <dd>{planLabel(planName(detail.plan), detail.planQuota)}</dd>
             <dt>{t("detail.owner")}</dt>
@@ -163,6 +176,7 @@ export function TeamDialog({
         </>
       ) : (
         <dl className="ms-kv">
+          {idRow}
           {["type", "owner", "members", "region", "guardrail", "created", "stripe", "ceiling"].map(
             (key) => (
               <Fragment key={key}>

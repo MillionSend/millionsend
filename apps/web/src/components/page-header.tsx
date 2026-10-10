@@ -15,7 +15,7 @@ export function PageHeader({
 }: {
   title: string;
   /** Mono proof strip under the H1 — the resource's own numbers. */
-  subtitle?: string;
+  subtitle?: React.ReactNode;
   /** Breadcrumb row above the H1 ("Emails / Email details"). */
   breadcrumb?: React.ReactNode;
   actions?: React.ReactNode;

@@ -25,8 +25,8 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ilike, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { isUniqueViolation } from "@/lib/db-errors";
 import { escapeLike } from "@/lib/sql";
+import { consoleStepUp, sendConsoleCode, signedInRecently } from "../../console-code";
 import { getQueue } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
 import {
@@ -287,10 +287,29 @@ export const consoleTeamsRouter = router({
   }),
 
   /**
+   * The first step of View as owner: a one-time code to the operator's own
+   * address. When it cannot go out, the answer says why and whether the
+   * operator's sign-in is recent enough to stand in for it.
+   */
+  sendSupportViewCode: operatorProcedure.mutation(async ({ ctx }) => {
+    if (!supportViewEnabled()) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_off" });
+    }
+    const sent = await sendConsoleCode(ctx.db, ctx.operator);
+    if (sent.sent) return sent;
+    return {
+      ...sent,
+      signedInRecently: signedInRecently(ctx.session),
+      minutes: SUPPORT_VIEW_SIGN_IN_MINUTES,
+    };
+  }),
+
+  /**
    * Opens the team's dashboard as its owner sees it, read-only, for 30
    * minutes: a grant on the operator's own session (never a session for the
-   * owner), named by a cookie the context re-checks on every request. No mail
-   * goes out: the team's audit trail carries the start at once, written with
+   * owner), named by a cookie the context re-checks on every request. A view
+   * the operator still holds, from a closed tab included, ends first. No mail
+   * goes to the team: its audit trail carries the start at once, written with
    * the grant, and the owner can end the view from Settings.
    */
   startSupportView: operatorProcedure
@@ -300,22 +319,15 @@ export const consoleTeamsRouter = router({
         reason: z.enum(SUPPORT_VIEW_REASONS),
         reference: z.string().trim().max(200).optional(),
         note: z.string().trim().max(1000).optional(),
+        code: z
+          .string()
+          .regex(/^\d{6}$/)
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       if (!supportViewEnabled()) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_off" });
-      }
-      // No nesting: a live view is left through its banner, not replaced from inside.
-      if (ctx.supportView) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_live" });
-      }
-      const signedInAt = ctx.session.session?.createdAt;
-      if (
-        !signedInAt ||
-        Date.now() - signedInAt.getTime() > SUPPORT_VIEW_SIGN_IN_MINUTES * 60_000
-      ) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "sign_in_again" });
       }
       const team = await loadTeam(ctx.db, input.id);
       const [own] = await ctx.db
@@ -334,21 +346,14 @@ export const consoleTeamsRouter = router({
       if (!reference) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "reference_required" });
       }
-      let grant: Awaited<ReturnType<typeof startSupportView>>;
-      try {
-        grant = await startSupportView(ctx.db, {
-          teamId: team.id,
-          operatorUserId: ctx.operator.id,
-          reason: input.reason,
-          reference,
-          note: input.note || null,
-        });
-      } catch (error) {
-        // The one-live-view-per-operator index, tripped by two starts racing:
-        // the other one won, so this reads as a view already being live.
-        if (!isUniqueViolation(error)) throw error;
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "support_view_live" });
-      }
+      await consoleStepUp(ctx.db, ctx.session, input.code);
+      const grant = await startSupportView(ctx.db, {
+        teamId: team.id,
+        operatorUserId: ctx.operator.id,
+        reason: input.reason,
+        reference,
+        note: input.note || null,
+      });
       ctx.setSupportViewCookie?.({ id: grant.id, expiresAt: grant.expiresAt });
       return { grantId: grant.id, expiresAt: grant.expiresAt };
     }),

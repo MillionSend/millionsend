@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  CREDENTIAL_MAIL_KINDS,
   EnvKeyring,
   encryptEmailBody,
   SUPPORT_VIEW_MINUTES,
@@ -10,8 +11,14 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { asc, eq, isNull } from "drizzle-orm";
+import { asc, eq, isNull, like } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  CONSOLE_CODE_MINUTES,
+  CONSOLE_CODE_TRIES,
+  CONSOLE_CODES_PER_HOUR,
+  resetConsoleCodeSends,
+} from "@/server/console-code";
 import type { SessionRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import { resolveSupportView } from "@/server/support-view";
@@ -32,6 +39,7 @@ const h = vi.hoisted(() => ({
   cookieSets: [] as { name: string; value: string; options: Record<string, unknown> }[],
   cookieDeletes: [] as string[],
   sent: [] as SystemMailMessage[],
+  failSend: false,
 }));
 
 vi.mock("@/server/queue", () => ({
@@ -42,7 +50,16 @@ vi.mock("@/server/queue", () => ({
 }));
 vi.mock("@/server/system-mail", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/system-mail")>();
-  return { ...actual, sendAccountMail: (m: SystemMailMessage) => void h.sent.push(m) };
+  return {
+    ...actual,
+    sendAccountMail: (m: SystemMailMessage) => void h.sent.push(m),
+    defaultSystemMailDeps: {
+      send: async (m: SystemMailMessage) => {
+        if (h.failSend) throw new Error("SES refused the message");
+        h.sent.push(m);
+      },
+    },
+  };
 });
 // The route handlers (tRPC, export) resolve the db, the session and the
 // cookies themselves; the same PGlite and a scripted cookie jar stand in.
@@ -100,15 +117,25 @@ beforeAll(async () => {
 });
 afterAll(() => close());
 
+const AUTH_SECRET = randomBytes(32).toString("base64");
+
 beforeEach(() => {
   vi.stubEnv("SUPPORT_VIEW", "on");
   vi.stubEnv("APP_BASE_URL", APP);
   vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <hello@example.com>");
+  vi.stubEnv("BETTER_AUTH_SECRET", AUTH_SECRET);
+  // No SES reach unless a test grants it, so the instance cannot email a
+  // code and a recent sign-in stands in, as on an instance without mail.
+  vi.stubEnv("AWS_ACCESS_KEY_ID", "");
+  vi.stubEnv("AWS_SECRET_ACCESS_KEY", "");
+  vi.stubEnv("AWS_DEFAULT_CHAIN", "");
+  resetConsoleCodeSends();
   h.session = null;
   h.cookies.clear();
   h.cookieSets = [];
   h.cookieDeletes = [];
   h.sent = [];
+  h.failSend = false;
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -116,7 +143,14 @@ afterEach(async () => {
   await db.execute(
     "update support_view_grants set ended_at = now(), ended_by = 'operator' where ended_at is null",
   );
+  await db.delete(schema.verification).where(like(schema.verification.identifier, "console-code%"));
 });
+
+/** SES reach, so the instance can email the operator a code. */
+function canSendMail() {
+  vi.stubEnv("AWS_ACCESS_KEY_ID", "test-key");
+  vi.stubEnv("AWS_SECRET_ACCESS_KEY", "test-secret");
+}
 
 const user = (id: string) => ({ id, email: `${id}@example.com`, name: id });
 
@@ -248,7 +282,9 @@ describe("console.teams.startSupportView", () => {
     expect(h.sent).toEqual([]);
   });
 
-  it("opens no view when its audit row cannot be written", async () => {
+  it("opens no view when its audit row cannot be written, and leaves the live one live", async () => {
+    const live = await start();
+    const ended = (await auditRows("support.view_ended")).length;
     await db.execute(
       "create function refuse_support_start() returns trigger language plpgsql as $$ begin raise exception 'audit down'; end $$",
     );
@@ -256,12 +292,14 @@ describe("console.teams.startSupportView", () => {
       "create trigger refuse_support_start before insert on audit_log for each row when (new.action = 'support.view_started') execute function refuse_support_start()",
     );
     try {
-      await expect(start()).rejects.toThrow();
-      const live = await db
+      await expect(start({ reference: "#2" })).rejects.toThrow();
+      // The end of the live view rolls back with the failed start.
+      const open = await db
         .select()
         .from(schema.supportViewGrants)
         .where(isNull(schema.supportViewGrants.endedAt));
-      expect(live).toEqual([]);
+      expect(open.map((g) => g.id)).toEqual([live.id]);
+      expect(await auditRows("support.view_ended")).toHaveLength(ended);
     } finally {
       await db.execute("drop trigger refuse_support_start on audit_log");
       await db.execute("drop function refuse_support_start");
@@ -306,26 +344,46 @@ describe("console.teams.startSupportView", () => {
     expect((await resolveSupportView(db, OPERATOR, second.id))?.grantId).toBe(second.id);
   });
 
-  it("never leaves two live grants when starts run at once", async () => {
-    const results = await Promise.allSettled([
+  it("leaves exactly one live grant when starts run at once, the later replacing the earlier", async () => {
+    const [first, second] = await Promise.all([
       operator().console.teams.startSupportView({ id: teamId, reason: "other", reference: "#1" }),
       operator().console.teams.startSupportView({ id: teamId, reason: "other", reference: "#2" }),
     ]);
-    // Whoever loses the one-live-view index is told a view is live, never a
-    // raw database error; the winner's grant is the only one still open.
-    for (const result of results) {
-      if (result.status === "rejected") {
-        expect(result.reason).toMatchObject({
-          code: "PRECONDITION_FAILED",
-          message: "support_view_live",
-        });
-      }
-    }
     const live = await db
       .select()
       .from(schema.supportViewGrants)
       .where(isNull(schema.supportViewGrants.endedAt));
     expect(live).toHaveLength(1);
+    const winner = live[0]?.id;
+    const loser = winner === first.grantId ? second.grantId : first.grantId;
+    expect([first.grantId, second.grantId]).toContain(winner);
+    expect(await grantRow(loser)).toMatchObject({ endedBy: "operator" });
+  });
+
+  it("ends the live view on another team first, as End session does, and its owner sees it end", async () => {
+    const otherTeam = await createTeam(db, "globex");
+    const first = await start();
+    const before = (await auditRows("support.view_ended")).length;
+    await operator().console.teams.startSupportView({
+      id: otherTeam,
+      reason: "other",
+      reference: "#9",
+    });
+    expect(await grantRow(first.id)).toMatchObject({ endedBy: "operator" });
+    const ended = await auditRows("support.view_ended");
+    expect(ended).toHaveLength(before + 1);
+    expect(ended.at(-1)).toMatchObject({
+      teamId,
+      actorId: `user:${OPERATOR}`,
+      target: `support_view:${first.id}`,
+      data: { by: "operator", minutes: 0, procedures: 0 },
+    });
+    // The owner's card shows nothing live, and the team's own trail the end.
+    expect((await owner().team.supportView.current()).live).toBeNull();
+    const trail = await owner().audit.list({});
+    expect(
+      trail.items.filter((r) => r.target === `support_view:${first.id}`).map((r) => r.action),
+    ).toEqual(["support.view_ended", "support.view_started"]);
   });
 
   it("has no reason that is not a request the customer made", async () => {
@@ -337,11 +395,202 @@ describe("console.teams.startSupportView", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
-  it("cannot be nested: a view cannot start another", async () => {
+  it("replaces a live view from under it, as after its tab was closed", async () => {
     const grant = await start();
-    await expect(
-      viewer(grant).console.teams.startSupportView({ id: teamId, reason: "other" }),
-    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "support_view_live" });
+    const setCookie = vi.fn();
+    const next = await viewer(grant, {
+      setSupportViewCookie: setCookie,
+    }).console.teams.startSupportView({ id: teamId, reason: "other", reference: "#5" });
+    expect(next.grantId).not.toBe(grant.id);
+    expect(await grantRow(grant.id)).toMatchObject({ endedBy: "operator" });
+    expect(setCookie).toHaveBeenCalledWith({ id: next.grantId, expiresAt: next.expiresAt });
+    expect(await resolveSupportView(db, OPERATOR, grant.id)).toBeNull();
+    expect((await resolveSupportView(db, OPERATOR, next.grantId))?.grantId).toBe(next.grantId);
+  });
+});
+
+describe("the emailed code in front of a start", () => {
+  const stale = () =>
+    callerFor(OPERATOR, ownTeamId, "owner", {
+      session: {
+        user: user(OPERATOR),
+        session: {
+          id: "s-old",
+          createdAt: new Date(Date.now() - (SUPPORT_VIEW_SIGN_IN_MINUTES + 1) * 60_000),
+        },
+      },
+    });
+  const startWith = (code?: string, caller = operator()) =>
+    caller.console.teams.startSupportView({
+      id: teamId,
+      reason: "support_ticket",
+      reference: "#4812",
+      ...(code === undefined ? {} : { code }),
+    });
+  const sentCode = () => {
+    const code = h.sent.at(-1)?.text.match(/\b\d{6}\b/)?.[0];
+    if (!code) throw new Error("no code in the last mail");
+    return code;
+  };
+  const otherCode = (code: string) => String((Number(code) + 1) % 1_000_000).padStart(6, "0");
+  const codeRows = () =>
+    db
+      .select()
+      .from(schema.verification)
+      .where(like(schema.verification.identifier, "console-code%"));
+
+  it("mails the operator a code from AUTH_EMAIL_FROM and keeps only a keyed hash of it", async () => {
+    canSendMail();
+    expect(await operator().console.teams.sendSupportViewCode()).toEqual({
+      sent: true,
+      to: "op@example.com",
+      minutes: CONSOLE_CODE_MINUTES,
+    });
+    expect(h.sent).toHaveLength(1);
+    const mail = h.sent[0] as SystemMailMessage;
+    const code = sentCode();
+    expect(mail).toMatchObject({
+      from: "MillionSend <hello@example.com>",
+      to: "op@example.com",
+      subject: "Your MillionSend console code",
+      kind: "console_code",
+    });
+    // The worker drops the body once SES holds it, as for a reset link.
+    expect(CREDENTIAL_MAIL_KINDS.has(mail.kind)).toBe(true);
+    expect(mail.html).toContain(code);
+    expect(mail.text).toContain(`It works once, for ${CONSOLE_CODE_MINUTES} minutes.`);
+    expect(mail.text).toContain("Didn't ask for it?");
+    // Nothing of any team, the one about to be viewed included.
+    for (const part of [mail.subject, mail.text, mail.html]) expect(part).not.toContain("acme");
+
+    const rows = await codeRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.identifier).toBe(`console-code:${OPERATOR}`);
+    expect(rows[0]?.value).toMatch(/^[0-9a-f]{64}:0$/);
+    expect(rows[0]?.value).not.toContain(code);
+    const minutes = ((rows[0]?.expiresAt.getTime() ?? 0) - Date.now()) / 60_000;
+    expect(minutes).toBeGreaterThan(CONSOLE_CODE_MINUTES - 1);
+    expect(minutes).toBeLessThanOrEqual(CONSOLE_CODE_MINUTES);
+  });
+
+  it("writes the code in the operator's language under a fixed subject", async () => {
+    canSendMail();
+    await db.update(schema.user).set({ locale: "pt-BR" }).where(eq(schema.user.id, OPERATOR));
+    try {
+      await operator().console.teams.sendSupportViewCode();
+    } finally {
+      await db.update(schema.user).set({ locale: null }).where(eq(schema.user.id, OPERATOR));
+    }
+    expect(h.sent.at(-1)?.subject).toBe("Seu código do console MillionSend");
+    expect(h.sent.at(-1)?.text).toContain(`Ele vale uma vez, por ${CONSOLE_CODE_MINUTES} minutos.`);
+  });
+
+  it("starts the view with the code, once, leaving the team's start row as it was", async () => {
+    canSendMail();
+    await operator().console.teams.sendSupportViewCode();
+    const code = sentCode();
+    // The sign-in is old: the code alone is what lets the operator in.
+    const result = await startWith(code, stale());
+    const started = (await auditRows("support.view_started")).at(-1);
+    expect(started?.target).toBe(`support_view:${result.grantId}`);
+    expect(started?.data).toEqual({ reason: "support_ticket", reference: "#4812", minutes: 30 });
+    expect(await codeRows()).toEqual([]);
+    await expect(startWith(code)).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: "code_void",
+    });
+  });
+
+  it("asks for the code while the instance can send one, however fresh the sign-in", async () => {
+    canSendMail();
+    await expect(startWith()).rejects.toMatchObject({ message: "code_required" });
+    await operator().console.teams.sendSupportViewCode();
+    await expect(startWith()).rejects.toMatchObject({ message: "code_required" });
+    expect(
+      await db
+        .select()
+        .from(schema.supportViewGrants)
+        .where(isNull(schema.supportViewGrants.endedAt)),
+    ).toEqual([]);
+  });
+
+  it("voids a code after its wrong tries, the right one included after that", async () => {
+    canSendMail();
+    await operator().console.teams.sendSupportViewCode();
+    const code = sentCode();
+    for (let i = 1; i < CONSOLE_CODE_TRIES; i++) {
+      await expect(startWith(otherCode(code))).rejects.toMatchObject({ message: "code_invalid" });
+    }
+    await expect(startWith(otherCode(code))).rejects.toMatchObject({ message: "code_void" });
+    await expect(startWith(code)).rejects.toMatchObject({ message: "code_void" });
+    expect(await codeRows()).toEqual([]);
+  });
+
+  it("takes only the newest code, and none past its minutes", async () => {
+    canSendMail();
+    await operator().console.teams.sendSupportViewCode();
+    const first = sentCode();
+    await operator().console.teams.sendSupportViewCode();
+    const second = sentCode();
+    if (first !== second) {
+      await expect(startWith(first)).rejects.toMatchObject({ message: "code_invalid" });
+    }
+    await db
+      .update(schema.verification)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.verification.identifier, `console-code:${OPERATOR}`));
+    await expect(startWith(second)).rejects.toMatchObject({ message: "code_void" });
+    await operator().console.teams.sendSupportViewCode();
+    expect((await startWith(sentCode())).grantId).toBeTruthy();
+  });
+
+  it("limits how many codes one operator is sent in an hour", async () => {
+    canSendMail();
+    for (let i = 0; i < CONSOLE_CODES_PER_HOUR; i++) {
+      await operator().console.teams.sendSupportViewCode();
+    }
+    await expect(operator().console.teams.sendSupportViewCode()).rejects.toMatchObject({
+      code: "TOO_MANY_REQUESTS",
+      message: "code_limit",
+    });
+    expect(h.sent).toHaveLength(CONSOLE_CODES_PER_HOUR);
+  });
+
+  it("lets a recent sign-in stand in when the instance cannot send mail, and says so", async () => {
+    expect(await operator().console.teams.sendSupportViewCode()).toEqual({
+      sent: false,
+      reason: "no_mail",
+      signedInRecently: true,
+      minutes: SUPPORT_VIEW_SIGN_IN_MINUTES,
+    });
+    expect(await stale().console.teams.sendSupportViewCode()).toMatchObject({
+      sent: false,
+      signedInRecently: false,
+    });
+    expect(h.sent).toEqual([]);
+    expect((await startWith()).grantId).toBeTruthy();
+    await expect(startWith(undefined, stale())).rejects.toMatchObject({
+      message: "sign_in_again",
+    });
+  });
+
+  it("lets a recent sign-in stand in only after the server's own send failed", async () => {
+    canSendMail();
+    h.failSend = true;
+    expect(await operator().console.teams.sendSupportViewCode()).toEqual({
+      sent: false,
+      reason: "send_failed",
+      signedInRecently: true,
+      minutes: SUPPORT_VIEW_SIGN_IN_MINUTES,
+    });
+    await expect(startWith(undefined, stale())).rejects.toMatchObject({
+      message: "sign_in_again",
+    });
+    expect((await startWith()).grantId).toBeTruthy();
+    // A send that goes through closes the fallback again.
+    h.failSend = false;
+    await operator().console.teams.sendSupportViewCode();
+    await expect(startWith()).rejects.toMatchObject({ message: "code_required" });
   });
 });
 
@@ -843,6 +1092,27 @@ describe("through the tRPC route (cookie to context)", () => {
     expect(after.data.activeTeamId).toBe(ownTeamId);
     expect(h.cookieDeletes).toContain("ms_support_view");
     expect(h.cookies.has("ms_support_view")).toBe(false);
+  });
+
+  it("replaces the live view a closed tab left behind, through the cookie it left", async () => {
+    h.session = { user: user(OPERATOR), session: { id: "s-op", createdAt: new Date() } };
+    const first = await mutate("console.teams.startSupportView", {
+      id: teamId,
+      reason: "other",
+      reference: "#1",
+    });
+    const firstId = first.data.grantId as string;
+    // The tab is gone; its cookie still rides on every console request.
+    expect(h.cookies.get("ms_support_view")).toBe(firstId);
+    const second = await mutate("console.teams.startSupportView", {
+      id: teamId,
+      reason: "other",
+      reference: "#2",
+    });
+    expect(second.status).toBe(200);
+    expect(h.cookies.get("ms_support_view")).toBe(second.data.grantId);
+    expect(await grantRow(firstId)).toMatchObject({ endedBy: "operator" });
+    expect((await call("support.current")).data).toMatchObject({ grantId: second.data.grantId });
   });
 
   it("ignores a grant of another operator's making", async () => {

@@ -41,6 +41,7 @@ import { isHexColor } from "@/lib/hex-color";
 import { isHttpUrl } from "@/lib/http-url";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
+import { requireAuthSecret } from "../auth-secret";
 import { getStripe } from "../billing";
 import { activeLocale } from "../locale";
 import { poweredByLocked } from "../powered-by";
@@ -152,16 +153,6 @@ async function removeMembership(db: Db, teamId: string, userId: string): Promise
       .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.userId, userId)));
     await revokeTeamGrants(tx, teamId, userId);
   });
-}
-
-function requireAuthSecret(): string {
-  if (!env.BETTER_AUTH_SECRET) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "BETTER_AUTH_SECRET is required",
-    });
-  }
-  return env.BETTER_AUTH_SECRET;
 }
 
 function inviteAcceptUrl(inviteId: string): string {

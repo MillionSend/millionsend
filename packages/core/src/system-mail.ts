@@ -17,23 +17,26 @@ export const SYSTEM_MAIL_TAG = "millionsend_system";
 /**
  * Kinds whose body holds a live credential (a signed link that resets a
  * password, verifies an address, accepts an invitation or confirms a
- * subscription). The worker purges these the moment SES accepts the message:
- * the row lives in the team that owns the sender domain, where every member,
- * full-access key and connected app could otherwise read the link while it is
- * valid. Every other kind carries plain dashboard links and keeps its body for
- * the normal retention window.
+ * subscription, or the console's one-time code). The worker purges these
+ * the moment SES accepts the message: the row lives in the team that owns
+ * the sender domain, where every member, full-access key and connected app
+ * could otherwise read the credential while it is valid. Every other kind
+ * carries plain dashboard links and keeps its body for the normal retention
+ * window.
  */
 export const CREDENTIAL_MAIL_KINDS: ReadonlySet<string> = new Set<SystemMailKind>([
   "password_reset",
   "email_verification",
   "invitation",
   "updates.confirm",
+  "console_code",
 ]);
 
 export type SystemMailKind =
   | "password_reset"
   | "email_verification"
   | "invitation"
+  | "console_code"
   | "quota.warning"
   | "quota.reached"
   | "quota.paused"
