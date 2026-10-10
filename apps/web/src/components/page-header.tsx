@@ -24,8 +24,11 @@ export function PageHeader({
   titleAdornment,
 }: {
   title: string;
-  /** Mono proof strip under the H1 — the resource's own numbers, " · "-separated. */
-  subtitle?: string;
+  /**
+   * Mono proof strip under the H1 — the resource's own numbers. A string is
+   * " · "-joined parts and breaks only between them.
+   */
+  subtitle?: React.ReactNode;
   /** Breadcrumb row above the H1 ("Emails / Email details"). */
   breadcrumb?: React.ReactNode;
   actions?: React.ReactNode;
@@ -80,7 +83,7 @@ export function PageHeader({
                 className="ms-mono"
                 style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 8 }}
               >
-                <DotParts text={subtitle} />
+                {typeof subtitle === "string" ? <DotParts text={subtitle} /> : subtitle}
               </div>
             ) : null}
           </div>

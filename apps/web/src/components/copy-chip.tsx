@@ -61,15 +61,21 @@ export function CopyMark({ copied, size = 13 }: { copied: boolean; size?: number
   );
 }
 
-/** Mono chip with a copy→check affordance. `display` masks what's shown; the full `value` is copied. */
+/**
+ * Mono chip with a copy→check affordance. `display` masks what's shown; the
+ * full `value` is copied. `wrap` breaks a value that must always show whole
+ * (an id) across lines instead of ellipsizing it.
+ */
 export function CopyChip({
   value,
   display,
   title,
+  wrap,
 }: {
   value: string;
   display?: React.ReactNode;
   title?: string;
+  wrap?: boolean;
 }) {
   const { copied, copy, label } = useCopy(value);
   return (
@@ -78,7 +84,11 @@ export function CopyChip({
           minWidth 0 lets this flex item shrink below the nowrap value's min-content,
           otherwise it overflows the chip's max-width instead of ellipsizing. */}
       <span
-        style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        style={
+          wrap
+            ? { minWidth: 0, overflowWrap: "anywhere" }
+            : { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+        }
       >
         {display ?? value}
       </span>

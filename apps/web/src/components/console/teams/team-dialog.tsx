@@ -2,6 +2,7 @@
 
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
+import { CopyChip } from "@/components/copy-chip";
 import { KvRow } from "@/components/kv-row";
 import { Modal } from "@/components/modal";
 import { ModalFooter } from "@/components/modal-footer";
@@ -37,12 +38,14 @@ function LiveViewLine({ expiresAt }: { expiresAt: Date }) {
 
 /** Everything the console knows about one team, with Adjust limits as the way out. */
 export function TeamDialog({
+  id,
   name,
   detail,
   onClose,
   onAdjustLimits,
   onViewAsOwner,
 }: {
+  id: string;
   name: string;
   detail: TeamDetail | undefined;
   onClose: () => void;
@@ -63,6 +66,12 @@ export function TeamDialog({
       ? "viewSilent"
       : null;
   const memberEmails = detail?.members.map((m) => m.email).join(", ") ?? "";
+  // Known before the detail loads, so it never waits behind a skeleton.
+  const idRow = (
+    <KvRow label={t("detail.id")}>
+      <CopyChip value={id} wrap />
+    </KvRow>
+  );
 
   return (
     <Modal open onClose={onClose} onConfirm={onAdjustLimits} title={name} size="wide">
@@ -104,6 +113,7 @@ export function TeamDialog({
       {detail ? (
         <>
           <dl className="ms-kv">
+            {idRow}
             <KvRow label={t("detail.type")}>
               {planLabel(planName(detail.plan), detail.planQuota)}
             </KvRow>
@@ -163,6 +173,7 @@ export function TeamDialog({
         </>
       ) : (
         <dl className="ms-kv">
+          {idRow}
           {["type", "owner", "members", "region", "guardrail", "created", "stripe", "ceiling"].map(
             (key) => (
               <KvRow key={key} label={t(`detail.${key}`)}>

@@ -375,6 +375,52 @@ it("a suspended team hears none of its automated notices through the system mail
   ]);
 });
 
+it("a suspended team hears no domain notice, and its security receipts only while the suspension is not silent", async () => {
+  vi.stubEnv("NOTIFICATIONS_EMAIL_FROM", "MillionSend <notify@mail.system.test>");
+  const system = await createTeam(db, "system");
+  await db.insert(schema.domains).values({
+    teamId: system,
+    name: "mail.system.test",
+    region: "us-east-1",
+    status: "verified",
+    verifiedAt: new Date(),
+  });
+  const suspend = (reason: "manual" | "phishing") =>
+    db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: reason })
+      .where(eq(schema.teams.id, teamId));
+  const join = async () => {
+    const id = randomUUID();
+    await db.insert(schema.user).values({ id, name: "Jo", email: `${id}@example.com` });
+    await db.insert(schema.teamMembers).values({ teamId, userId: id, role: "member" });
+    await audit("member.joined", { actor: `user:${id}`, target: `user:${id}`, data: {} });
+  };
+  const sweep = () =>
+    sweepNotifications(db, {
+      ...deps(false),
+      mailer: createSystemMailer({ db, keyring, enqueueSend: async () => {} }),
+    });
+  const mailed = async () =>
+    (
+      await db
+        .select({ tags: schema.emails.tags })
+        .from(schema.emails)
+        .where(eq(schema.emails.teamId, system))
+    ).map((row) => row.tags);
+
+  await suspend("manual");
+  await domain();
+  await join();
+  await sweep();
+  expect(await mailed()).toEqual([{ millionsend_system: "member.joined" }]);
+
+  await suspend("phishing");
+  await join();
+  await sweep();
+  expect(await mailed()).toEqual([{ millionsend_system: "member.joined" }]);
+});
+
 it("without a configured sender the mailer is a no-op", async () => {
   vi.stubEnv("NOTIFICATIONS_EMAIL_FROM", "");
   vi.stubEnv("AUTH_EMAIL_FROM", "");

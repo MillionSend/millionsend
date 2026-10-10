@@ -19,6 +19,7 @@ import { formatDay } from "@/lib/format";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useCopied } from "@/lib/use-copied";
 import { LoadErrorCard } from "../safety/parts";
 import { GuardrailLabel, PlanBadge, RegionLabel, usePlanName } from "./cells";
 import type { TeamRow } from "./types";
@@ -90,6 +91,7 @@ function SkeletonRows() {
 export function TeamsView() {
   const t = useTranslations("console.teams");
   const common = useTranslations("console.common");
+  const { copied, copy } = useCopied();
   const domains = useTranslations("domains");
   const locale = useLocale();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
@@ -283,6 +285,11 @@ export function TeamsView() {
                             {row.name}
                           </span>
                         </Tooltip>
+                        {copied === row.id ? (
+                          <span style={{ marginLeft: 8, color: "var(--ms-muted)", fontSize: 12.5 }}>
+                            ✓ {common("copied")}
+                          </span>
+                        ) : null}
                       </td>
                       <td>
                         <PlanBadge plan={row.plan} planQuota={row.planQuota} />
@@ -327,6 +334,7 @@ export function TeamsView() {
                           items={teamMenuItems(row, actions, (key) => t(`menu.${key}`), {
                             supportView,
                             silentlySuspended: row.silentlySuspended,
+                            copyId: copy,
                           })}
                         />
                       </td>

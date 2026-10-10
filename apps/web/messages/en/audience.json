@@ -192,6 +192,7 @@
       "topic_opt_in": "Opted in to {name}",
       "topic_opt_out": "Opted out of {name}",
       "unsubscribed": "Unsubscribed",
+      "unsubscribed_team_suspended": "Unsubscribed: a team they belong to was suspended",
       "resubscribed": "Resubscribed",
       "segment_added": "Added to segment {name}",
       "segment_removed": "Removed from segment {name}"
