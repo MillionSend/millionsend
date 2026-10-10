@@ -7,13 +7,14 @@ import {
   generateApiKey,
   hashRecipient,
   OVERAGE_HARD_CAP,
+  utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import nodemailer from "nodemailer";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSmtpServer,
   MAX_CONNECTIONS_PER_IP,
@@ -68,6 +69,7 @@ const serverDeps = () => ({
   keyring,
   isCloud: true,
   allowInsecureAuth: true,
+  onboardingEmailFrom: "MillionSend <hello@ms.example>",
   enqueueEmailSend: async (emailId: string, opts?: { startAfter?: Date }) => {
     enqueued.push({ emailId, ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}) });
   },
@@ -265,6 +267,34 @@ describe("smtp relay", () => {
     ).rejects.toMatchObject({ responseCode: 554 });
   });
 
+  it("refuses the instance's onboarding sender with 550, even from the team holding its domain", async () => {
+    await db.insert(schema.domains).values({
+      teamId,
+      name: "ms.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    });
+    const auth = { user: SMTP_USERNAME, pass: token };
+    for (const from of ["MillionSend <hello@ms.example>", "HELLO@ms.example"]) {
+      await expect(
+        transport(auth).sendMail({ from, to: "r@example.com", subject: "s", text: "t" }),
+      ).rejects.toMatchObject({
+        responseCode: 550,
+        response: expect.stringContaining(
+          "hello@ms.example is reserved for MillionSend's own onboarding email. Add and verify a domain to send your own emails: https://docs.millionsend.com/concepts/domains",
+        ),
+      });
+    }
+    const ok = await transport(auth).sendMail({
+      from: "news@ms.example",
+      to: "r@example.com",
+      subject: "s",
+      text: "t",
+    });
+    expect(ok.response).toContain("Queued as");
+  });
+
   it("stores display names canonically quoted", async () => {
     const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail({
       from: { name: "Doe, John", address: "a@acme.dev" },
@@ -428,5 +458,101 @@ describe("smtp relay", () => {
     await setAccepted(cap - 1);
     const info = await transport({ user: SMTP_USERNAME, pass: token }).sendMail(mail);
     expect(info.response).toContain("Queued as");
+  });
+});
+
+describe("new-domain warm-up", () => {
+  // One instant per test: the warm-up counts per UTC day, and a rollover
+  // between seeding a counter and sending would read a fresh day.
+  const NOW = new Date("2026-10-09T10:00:00Z");
+  beforeAll(async () => {
+    await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  });
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A Free team sending from young domains, with an SMTP key. */
+  async function warmTeam(slug: string, names: string[]) {
+    const warm = await createTeam(db, slug);
+    const domains = await db
+      .insert(schema.domains)
+      .values(
+        names.map((name) => ({
+          teamId: warm,
+          name,
+          region: "us-east-1",
+          status: "verified" as const,
+          verifiedAt: NOW,
+          registeredAt: new Date(NOW.getTime() - 3600_000),
+        })),
+      )
+      .returning({ id: schema.domains.id });
+    const key = generateApiKey();
+    await db.insert(schema.apiKeys).values({
+      teamId: warm,
+      name: "smtp",
+      tokenPrefix: key.tokenPrefix,
+      keyHash: key.keyHash,
+      last4: key.last4,
+    });
+    const send = (from: string, to: string | string[] = "r@example.com") =>
+      transport({ user: SMTP_USERNAME, pass: key.token }).sendMail({
+        from,
+        to,
+        subject: "s",
+        text: "t",
+      });
+    return { warm, domains, send };
+  }
+
+  it("parks a young domain's mail past its cap, then answers 452 naming the warm-up once the backlog is full", async () => {
+    const { warm, domains, send: sendFrom } = await warmTeam("smtp-warm", ["fresh-smtp.com"]);
+    const domain = domains[0];
+    if (!domain) throw new Error("domain insert failed");
+    await db
+      .insert(schema.domainWarmupUsage)
+      .values({ registrableDomain: "fresh-smtp.com", day: utcDay(NOW), accepted: 100 });
+    const send = () => sendFrom("a@fresh-smtp.com");
+
+    const info = await send();
+    expect(await emailRow(info.response ?? "")).toMatchObject({
+      latestStatus: "queued_quota",
+      parkReason: "warmup",
+    });
+    // Free's backlog: three days of its 100 a day.
+    await db.insert(schema.emails).values(
+      Array.from({ length: 299 }, () => ({
+        teamId: warm,
+        domainId: domain.id,
+        from: "a@fresh-smtp.com",
+        to: ["r@example.com"],
+        subject: "s",
+        latestStatus: "queued_quota" as const,
+        parkReason: "warmup" as const,
+      })),
+    );
+    await expect(send()).rejects.toMatchObject({
+      responseCode: 452,
+      response: expect.stringContaining("New domain warm-up"),
+    });
+  });
+
+  it("holds a team's second young domain once their shared day is spent", async () => {
+    const { send } = await warmTeam("smtp-pool", ["pool-one-smtp.com", "pool-two-smtp.com"]);
+    const fifty = (prefix: string) =>
+      Array.from({ length: 50 }, (_, i) => `${prefix}${i}@example.com`);
+    for (const prefix of ["a", "b"]) {
+      const info = await send("a@pool-one-smtp.com", fifty(prefix));
+      expect(await emailRow(info.response ?? "")).toMatchObject({ latestStatus: "queued" });
+    }
+    const info = await send("a@pool-two-smtp.com");
+    expect(await emailRow(info.response ?? "")).toMatchObject({
+      latestStatus: "queued_quota",
+      parkReason: "warmup",
+    });
   });
 });

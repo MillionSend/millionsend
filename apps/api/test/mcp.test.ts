@@ -547,6 +547,25 @@ describe("tools", () => {
     await client.close();
   });
 
+  it("refuses the instance's onboarding sender through the same rule as the REST API", async () => {
+    const reserving = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: false,
+      appBaseUrl,
+      onboardingEmailFrom: "MillionSend <hello@acme.dev>",
+      enqueueEmailSend: async () => {},
+    });
+    const client = await connect(await mintToken(), reserving);
+    const sent = await client.callTool({
+      name: "send_email",
+      arguments: { from: "hello@acme.dev", to: ["mcp@acme.dev"], subject: "no", text: "no" },
+    });
+    expect(sent.isError).toBe(true);
+    expect(resultJson(sent)).toMatchObject({ statusCode: 422, name: "reserved_sender" });
+    await client.close();
+  });
+
   it("contact tools: create, get by email, update, segment membership", async () => {
     const client = await connect(await mintToken());
     const created = await client.callTool({

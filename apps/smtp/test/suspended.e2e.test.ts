@@ -81,3 +81,18 @@ it("refuses a suspended team's message with 550 and accepts it again once reinst
   const info = await transport().sendMail(mail);
   expect(info.response).toContain("Queued as");
 });
+
+it("refuses a team held for review with a neutral 550", async () => {
+  await db
+    .update(schema.teams)
+    .set({ suspendedAt: new Date(), suspensionReason: "review" })
+    .where(eq(schema.teams.id, teamId));
+  const refused = transport().sendMail(mail);
+  await expect(refused).rejects.toMatchObject({
+    responseCode: 550,
+    response: expect.stringContaining("Sending is paused pending review"),
+  });
+  await expect(refused).rejects.not.toMatchObject({
+    response: expect.stringMatching(/suspend/i),
+  });
+});

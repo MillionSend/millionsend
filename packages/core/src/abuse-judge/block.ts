@@ -129,8 +129,8 @@ function oneLine(s: string): string {
  * registrable domain. Links are listed by registrable domain, so a team that
  * verified only mail.acme.com.br must also be seen to own acme.com.br, or
  * every link to its own site reads as off-domain. A name the list cannot
- * vouch for is left out: under gov.br or com.ua the last two labels are a
- * public suffix, and listing one would hand the team every brand under it.
+ * vouch for is left out: eu.org above foo.eu.org is shared by strangers, and
+ * listing it would hand the team every brand under it.
  */
 function verifiedDomains(names: string[]): string[] {
   const verified = names.map(oneLine);

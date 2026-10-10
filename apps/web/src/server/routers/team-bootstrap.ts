@@ -16,6 +16,8 @@ import { isUniqueViolation } from "@/lib/db-errors";
 import { slugify } from "@/lib/slug";
 import { recordAudit } from "../audit";
 import { listMemberships } from "../membership";
+import { belongsToSilentlySuspendedTeam, suspensionLockError } from "../suspension-lock";
+import { teamNameSchema } from "../team-name";
 import {
   type AuthSession,
   adminProcedure,
@@ -76,12 +78,12 @@ export const teamBootstrapRouter = router({
     current: adminProcedure.query(async ({ ctx }) => {
       const enabled = supportViewEnabled();
       const live = enabled ? await liveSupportViewForTeam(ctx.db, ctx.teamId) : null;
+      // To the team the view is MillionSend's: the operator's name, email and id stay out.
       return {
         enabled,
         live: live
           ? {
               id: live.id,
-              operator: live.operator,
               reason: live.reason,
               reference: live.reference,
               startedAt: live.createdAt,
@@ -141,8 +143,11 @@ export const teamBootstrapRouter = router({
     }),
 
   createTeam: protectedProcedure
-    .input(z.object({ name: z.string().trim().min(1).max(80) }))
+    .input(z.object({ name: teamNameSchema }))
     .mutation(async ({ ctx, input }) => {
+      if (await belongsToSilentlySuspendedTeam(ctx.db, ctx.session.user.id)) {
+        throw await suspensionLockError("unavailable");
+      }
       if (env.IS_CLOUD) {
         const userId = ctx.session.user.id;
         const [memberships, bestPlan] = await Promise.all([

@@ -5,6 +5,7 @@ import {
   generateApiKey,
   hashApiKey,
   PLAN_DOMAIN_LIMIT,
+  SUSPENSION_REASONS,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -1128,6 +1129,49 @@ describe("DELETE /domains/{id}", () => {
     expect(res.status).toBe(200);
     expect(await db.select().from(schema.domains).where(eq(schema.domains.id, id))).toHaveLength(0);
   });
+
+  it.each(SUSPENSION_REASONS)(
+    "403s a team suspended for %s before SES is touched; the key still authenticates",
+    async (reason) => {
+      const { client, calls } = fakeSes();
+      const app = makeApp({ client });
+      const { id } = await createDomain(app, `held-${reason.replace("_", "-")}.example.com`);
+      const suspend = (on: boolean) =>
+        db
+          .update(schema.teams)
+          .set(
+            on
+              ? { suspendedAt: new Date(), suspensionReason: reason }
+              : { suspendedAt: null, suspensionReason: null },
+          )
+          .where(eq(schema.teams.id, teamId));
+      await suspend(true);
+      const before = calls.length;
+      try {
+        const res = await call(app, fullKey, "DELETE", `/domains/${id}`);
+        expect(res.status).toBe(403);
+        const body = await res.json();
+        if (["phishing", "review"].includes(reason)) {
+          // Neither the error's name nor its message tells the team it is suspended.
+          expect(body).toEqual({
+            statusCode: 403,
+            name: "forbidden",
+            message:
+              "This isn't available for this team right now. Contact support if you need help.",
+          });
+        } else {
+          expect(body).toMatchObject({ statusCode: 403, name: "team_suspended" });
+        }
+        expect(calls.length).toBe(before);
+        expect(
+          await db.select().from(schema.domains).where(eq(schema.domains.id, id)),
+        ).toHaveLength(1);
+      } finally {
+        await suspend(false);
+      }
+      expect((await call(app, fullKey, "DELETE", `/domains/${id}`)).status).toBe(200);
+    },
+  );
 
   it("404s a foreign team's domain without touching SES", async () => {
     const { client, calls } = fakeSes();

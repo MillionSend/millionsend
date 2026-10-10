@@ -106,3 +106,28 @@ it("keeps the send's outcome when the draw throws, and draws nothing without the
   expect(await samplesFor(system)).toEqual([]);
   expect(queued).toEqual([]);
 });
+
+it("never draws the fixed onboarding email, nor counts it as the team's first send", async () => {
+  const onboardingEmailFrom = "MillionSend <hello@ms.example>";
+  const fresh = await createTeam(db, "onboarding-only");
+  const queued: string[] = [];
+  const monitor: MonitorDeps = {
+    samplingKey: Buffer.alloc(32, 7),
+    settings: async () => MONITOR_SETTING_DEFAULTS,
+    enqueueJudge: async (id) => void queued.push(id),
+  };
+  const emailId = await insertEmail({
+    teamId: fresh,
+    domainId: null,
+    from: onboardingEmailFrom,
+    subject: "It works.",
+  });
+  expect(await sendEmail(db, { keyring, ses, monitor, onboardingEmailFrom }, { emailId })).toBe(
+    "sent",
+  );
+  expect(await samplesFor(emailId)).toEqual([]);
+  expect(queued).toEqual([]);
+  expect(
+    await db.select().from(schema.teamMonitor).where(eq(schema.teamMonitor.teamId, fresh)),
+  ).toEqual([]);
+});

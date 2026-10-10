@@ -1,5 +1,6 @@
 "use client";
 
+import { CUSTOMER_TEXT_MAX } from "@millionsend/core/customer-text";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -24,6 +25,7 @@ import { TEAM_LOGO_ACCEPT, TEAM_LOGO_MAX_BYTES } from "@/lib/image-type";
 import { isAppLocale, LOCALES } from "@/lib/locale-cookie";
 import { removeTeamLogo, uploadTeamLogo } from "@/lib/team-logo-api";
 import { useTRPC } from "@/lib/trpc";
+import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
 import { useCountdown } from "@/lib/use-countdown";
 import { useSwitchLocale } from "@/lib/use-switch-locale";
 import { useTeamRole } from "@/lib/use-team-role";
@@ -65,6 +67,7 @@ function SectionCard({
 
 function TeamSection({ billing }: { billing: boolean }) {
   const t = useTranslations("settings");
+  const common = useTranslations("common");
   const trpc = useTRPC();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -193,7 +196,7 @@ function TeamSection({ billing }: { billing: boolean }) {
                   className="ms-input"
                   style={{ flex: 1, minWidth: 0, maxWidth: 420 }}
                   required
-                  maxLength={80}
+                  maxLength={CUSTOMER_TEXT_MAX}
                   disabled={rename.isPending}
                   value={name}
                   onChange={(e) => setDraft(e.target.value)}
@@ -221,7 +224,9 @@ function TeamSection({ billing }: { billing: boolean }) {
                   fontSize: "var(--ms-fs-label)",
                 }}
               >
-                {t("team.error")}
+                {trpcErrorCode(rename.error) === "BAD_REQUEST"
+                  ? common("nameRule", { max: CUSTOMER_TEXT_MAX })
+                  : t("team.error")}
               </p>
             ) : null}
           </form>
@@ -474,7 +479,10 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           </div>
           {create.isError ? (
             <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
-              {t("invitations.invite.error")}
+              {trpcErrorCode(create.error) === "TOO_MANY_REQUESTS" ||
+              trpcErrorCode(create.error) === "CONFLICT"
+                ? create.error.message
+                : guardMessage(create.error, t("invitations.invite.error"))}
             </p>
           ) : null}
           <ModalFooter>
@@ -779,6 +787,7 @@ function SupportEndsAt({ expiresAt }: { expiresAt: Date }) {
  */
 function SupportAccessSection() {
   const t = useTranslations("settings.supportAccess");
+  const actors = useTranslations("settings.audit.actors");
   const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -829,9 +838,7 @@ function SupportAccessSection() {
       {live ? (
         <dl className="ms-kv">
           <dt>{t("operator")}</dt>
-          <dd>
-            {live.operator.name} · <span className="ms-mono">{live.operator.email}</span>
-          </dd>
+          <dd>{actors("operator")}</dd>
           <dt>{t("started")}</dt>
           <dd>{formatDayTime(live.startedAt, locale)}</dd>
           <dt>{t("expires")}</dt>

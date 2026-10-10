@@ -56,8 +56,8 @@ export const PILL_VARIANT: Record<BroadcastStatus, keyof typeof TONE_COLOR> = {
 
 /**
  * Broadcast status pill; "sending" carries a pulsing dot — it is the only
- * live state. A `hold` replaces the sending pill with the still reason
- * ("Waiting for the plan · resumes …"), drawn as a warning.
+ * live state. A `hold` replaces the pill with the still reason ("Waiting for
+ * the plan · resumes …", "Delayed"), drawn as a warning.
  */
 export function StatusPill({
   status,
@@ -361,25 +361,32 @@ export function progressLine(
   });
 }
 
-/** The detail page's status cell: the pill (or the plan hold), and how far the send is. */
+/** The detail page's status cell: the pill (or the hold), and how far the send is. */
 export function SendingStatus({
   status,
   progress,
   planHold,
+  held,
   locale,
 }: {
   status: BroadcastStatus;
   progress: SendingProgress | null;
   planHold: Date | null;
+  held: boolean;
   locale: string;
 }) {
   const t = useTranslations("broadcasts");
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
-  const hold =
-    status === "sending" && planHold
+  const hold = held
+    ? t("held.label")
+    : status === "sending" && planHold
       ? t("detail.planHold", { date: formatStepDay(planHold, locale) })
       : undefined;
-  const line = status === "sending" && progress ? progressLine(progress, t, nf) : null;
+  const line = held
+    ? t("held.body")
+    : status === "sending" && progress
+      ? progressLine(progress, t, nf)
+      : null;
   return (
     <>
       <div style={{ marginTop: 6 }}>

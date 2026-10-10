@@ -1,9 +1,10 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, LURE_NAMES, mailLinks } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { runPlatformBreaker } from "../src/handlers/platform-breaker.js";
+import { regionPausedMail } from "../src/notifications/templates.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -67,6 +68,8 @@ it("trips the region, mails the operator with the contributors, and stays quiet 
   expect(sends[0]).toMatchObject({ to: "op@example.com" });
   expect(sends[0]?.subject).toContain("paused in sa-east-1");
   expect(sends[0]?.text).toContain("Noisy Sender: 0 hard bounces, 5 complaints");
+  // The dashboard carries no hold banner: the details live in the console.
+  expect(sends[0]?.text).toContain("Open console: https://app.example.test/console/regions");
 
   expect(await runPlatformBreaker(db, { mailer, now: NOW })).toEqual({ tripped: [], resumed: [] });
   expect(sends).toHaveLength(1);
@@ -78,4 +81,22 @@ it("trips the region, mails the operator with the contributors, and stays quiet 
   });
   expect(sends[1]?.subject).toContain("resumed in sa-east-1");
   expect((await db.select().from(schema.regionBreakers))[0]?.paused).toBe(false);
+});
+
+it("names contributing teams called like lures with no link but the console's", () => {
+  const url = "https://app.example.test/console";
+  const mail = regionPausedMail({
+    region: "sa-east-1",
+    metric: "complaint",
+    rate: 0.0008,
+    limit: 0.001,
+    windowHours: 24,
+    sent: 1000,
+    events: 8,
+    contributors: LURE_NAMES.map((team) => ({ team, hardBounced: 0, complained: 1 })),
+    url,
+  });
+  expect(
+    mailLinks(mail).filter((link) => link !== url && link !== "https://millionsend.com"),
+  ).toEqual([]);
 });

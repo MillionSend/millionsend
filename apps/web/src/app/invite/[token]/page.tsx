@@ -8,6 +8,7 @@ import { AuthShell } from "@/components/auth-shell";
 import { BtnSpinner } from "@/components/spinner";
 import { authClient } from "@/lib/auth-client";
 import { useTRPC } from "@/lib/trpc";
+import { guardMessage } from "@/lib/trpc-error";
 
 const muted = { margin: 0, color: "var(--ms-muted)", fontSize: "var(--ms-fs-ui)" } as const;
 
@@ -86,7 +87,7 @@ export default function AcceptInvitePage() {
           <p style={{ ...muted, color: "var(--ms-danger)" }}>
             {accept.error.data?.code === "FORBIDDEN"
               ? t("invitations.accept.emailMismatch")
-              : t("invitations.accept.invalid")}
+              : guardMessage(accept.error, t("invitations.accept.invalid"))}
           </p>
         ) : (
           <>

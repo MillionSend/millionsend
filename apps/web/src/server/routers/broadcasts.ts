@@ -14,6 +14,7 @@ import {
   PAUSE_COMPLAINT_RATE,
   parseSingleSender,
   regionPause,
+  reservedSenderRefusal,
   splitPersonName,
   substituteUnsubscribeUrl,
   verifySenderDomain,
@@ -29,7 +30,12 @@ import enDeliverability from "../../../messages/en/deliverability.json";
 import ptBRDeliverability from "../../../messages/pt-BR/deliverability.json";
 import type { AppLocale } from "../../i18n/request";
 import { fetchQuotaRow } from "../billing";
-import { planBroadcastSend, planHoldUntil, sendingProgress } from "../broadcast-plan";
+import {
+  heldBroadcastIds,
+  planBroadcastSend,
+  planHoldUntil,
+  sendingProgress,
+} from "../broadcast-plan";
 import { resolveEditorSave } from "../email-content";
 import { getKeyring } from "../keyring";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
@@ -89,24 +95,15 @@ async function deliverabilityGuard(ctx: { db: Db; teamId: string }): Promise<TRP
 }
 
 /**
- * PRECONDITION_FAILED while the platform breaker holds broadcasts in the
- * sender domain's SES region (the account-wide rate is near SES's review
- * line, or the operator held it); transactional mail is not affected, so
- * only broadcasts check this.
+ * PRECONDITION_FAILED while broadcasts are held in the sender domain's SES
+ * region (the platform breaker, or the operator's hold); transactional mail
+ * is not affected, so only broadcasts check this. The message never says
+ * why: the platform's rates are not the customer's to see.
  */
 async function regionGuard(db: Db, region: string): Promise<TRPCError | null> {
-  const pause = await regionPause(db, region);
-  if (!pause) return null;
+  if (!(await regionPause(db, region))) return null;
   const { t } = await sendGuardTranslator();
-  return new TRPCError({
-    code: "PRECONDITION_FAILED",
-    message: pause.manualReason
-      ? t("sendGuard.regionHeld", { region })
-      : t("sendGuard.regionPaused", {
-          region,
-          metric: t(`metric.${pause.reason?.metric ?? "complaint"}`),
-        }),
-  });
+  return new TRPCError({ code: "PRECONDITION_FAILED", message: t("sendGuard.regionHeld") });
 }
 
 /**
@@ -119,7 +116,13 @@ async function standingGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError
   const { t } = await sendGuardTranslator();
   return new TRPCError({
     code: "PRECONDITION_FAILED",
-    message: t(standing.suspended ? "sendGuard.suspended" : "sendGuard.operatorPaused"),
+    message: t(
+      standing.suspended?.reason === "review"
+        ? "sendGuard.pendingReview"
+        : standing.suspended
+          ? "sendGuard.suspended"
+          : "sendGuard.operatorPaused",
+    ),
   });
 }
 
@@ -283,6 +286,7 @@ export const broadcastsRouter = router({
           id: b.id,
           name: b.name,
           subject: b.subject,
+          from: b.from,
           status: b.status,
           segmentId: b.segmentId,
           topicId: b.topicId,
@@ -307,12 +311,14 @@ export const broadcastsRouter = router({
       const progress = page.items.some((row) => row.status === "sending")
         ? await sendingProgress(ctx.db, ctx.teamId)
         : new Map<string, never>();
+      const held = await heldBroadcastIds(ctx.db, ctx.teamId, page.items);
       return {
         ...page,
         items: page.items.map((row) => {
           const p = progress.get(row.id);
           return {
             ...row,
+            held: held.has(row.id),
             sentCount: p?.sentCount ?? null,
             parkedCount: p?.parkedCount ?? null,
             finishesAt: p?.finishesAt ?? null,
@@ -374,13 +380,16 @@ export const broadcastsRouter = router({
     // Parked rows with no room under the team's own cap wait for its reset, not for capacity.
     const planHold =
       progress && progress.parkedCount > 0 ? await planHoldUntil(ctx.db, ctx.teamId) : null;
+    // The planner knows nothing of a region hold: its forecast would be wrong while one lasts.
+    const held = (await heldBroadcastIds(ctx.db, ctx.teamId, [row])).has(row.id);
     return {
       ...row,
       hiddenBySupportView,
+      held,
       sentCount: progress?.sentCount ?? null,
       parkedCount: progress?.parkedCount ?? null,
-      finishesAt: progress?.finishesAt ?? null,
-      releases: progress?.releases ?? [],
+      finishesAt: held ? null : (progress?.finishesAt ?? null),
+      releases: held ? [] : (progress?.releases ?? []),
       sent: progress?.sent ?? [],
       startedAt: row.status === "sending" ? row.scheduledAt : null,
       planHold: planHold ? { resumesAt: planHold } : null,
@@ -543,6 +552,8 @@ export const broadcastsRouter = router({
       // verified team domain may appear as the sender. The worker re-checks
       // at fan-out, but failing there leaves the broadcast stuck in
       // "scheduled" with no user-visible reason.
+      const reserved = reservedSenderRefusal(row.from, env.ONBOARDING_EMAIL_FROM);
+      if (reserved) throw new TRPCError({ code: "PRECONDITION_FAILED", message: reserved.message });
       const sender = await verifySenderDomain(ctx.db, ctx.teamId, row.from);
       if (!sender.ok) {
         throw new TRPCError({
@@ -620,6 +631,8 @@ export const broadcastsRouter = router({
       if (!input.html && !input.text) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Write some content first." });
       }
+      const reserved = reservedSenderRefusal(input.from, env.ONBOARDING_EMAIL_FROM);
+      if (reserved) throw new TRPCError({ code: "PRECONDITION_FAILED", message: reserved.message });
       const sender = await verifySenderDomain(ctx.db, ctx.teamId, input.from);
       if (!sender.ok) {
         throw new TRPCError({
