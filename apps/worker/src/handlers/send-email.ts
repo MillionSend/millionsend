@@ -423,10 +423,14 @@ export async function sendEmail(
     await parkQueued(db, email, standing.suspended ? "team suspended" : "broadcasts paused");
     return "parked";
   }
+  // Account mail (core sendSystemMail); acceptEmail keeps this mark on no
+  // other path, so a customer row cannot carry it.
+  const systemMail = email.tags?.[SYSTEM_MAIL_TAG] !== undefined;
   // Transactional mail accepted before the team crossed the deliverability
-  // pause line parks the same way; a broadcast row parks below, once a stop
-  // has been honored.
-  if (!email.broadcastId && (await deliverabilityHold(db, email.teamId))) {
+  // pause line parks the same way, all but account mail, which must go out
+  // whatever the rates; a broadcast row parks below, once a stop has been
+  // honored.
+  if (!email.broadcastId && !systemMail && (await deliverabilityHold(db, email.teamId))) {
     await parkQueued(db, email, "sending paused");
     return "parked";
   }
@@ -557,7 +561,6 @@ export async function sendEmail(
   // Account mail (core sendSystemMail) carries live credentials — reset and
   // verification links — so its anchors are never rewritten through the
   // redirect and no pixel rides along, whatever the domain's toggles say.
-  const systemMail = email.tags?.[SYSTEM_MAIL_TAG] !== undefined;
   const click = (domain?.clickTracking ?? false) && !systemMail;
   const open = (domain?.openTracking ?? false) && !systemMail;
   let html = body.html;

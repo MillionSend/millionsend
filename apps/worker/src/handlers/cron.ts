@@ -18,6 +18,7 @@ import {
   reserveQuota,
   reserveWarmup,
   SES_QUOTA_SLOT_MS,
+  SYSTEM_MAIL_TAG,
   type TeamQuota,
   teamQuota,
   transitionQueueState,
@@ -205,10 +206,12 @@ const DRAIN_PAGE = 500;
 /** What one drain run carries between its passes. */
 interface DrainRun {
   now: Date;
-  /** Teams found at their cap, or held by the deliverability pause, leave every later page query. */
+  /** Teams found at their cap leave every later page query. */
   heldTeams: Set<string>;
   /** Teams already asked whether the deliverability pause holds them. */
   checkedTeams: Set<string>;
+  /** Teams the pause holds: only their account mail stays in later page queries. */
+  pausedTeams: Set<string>;
   /** The warm-up cap per sending domain row, read once per run. */
   warmups: Map<string, WarmupCap | null>;
   /**
@@ -251,6 +254,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
     now: deps.now ?? new Date(),
     heldTeams: new Set(),
     checkedTeams: new Set(),
+    pausedTeams: new Set(),
     warmups: new Map(),
     warmupFull: new Set(),
     poolFull: new Set(),
@@ -364,6 +368,7 @@ async function releaseParkedRows(
 ): Promise<{ total: number; byRegion: Map<string, number> }> {
   const regions = deps.sesQuota?.regions ?? [];
   const region = sql<string>`coalesce(${schema.domains.region}, ${regions[0] ?? ""})`;
+  const systemMail = sql<boolean>`coalesce(${schema.emails.tags} ? ${SYSTEM_MAIL_TAG}, false)`;
   const byRegion = new Map<string, number>();
   let total = 0;
   let cursorId: string | undefined;
@@ -380,6 +385,7 @@ async function releaseParkedRows(
         cc: schema.emails.cc,
         bcc: schema.emails.bcc,
         region,
+        systemMail,
       })
       .from(schema.emails)
       .innerJoin(schema.teams, eq(schema.emails.teamId, schema.teams.id))
@@ -400,6 +406,9 @@ async function releaseParkedRows(
             lt(schema.emails.scheduledAt, nextUtcDayStart(run.now)),
           ),
           run.heldTeams.size > 0 ? notInArray(schema.emails.teamId, [...run.heldTeams]) : undefined,
+          run.pausedTeams.size > 0
+            ? or(notInArray(schema.emails.teamId, [...run.pausedTeams]), systemMail)
+            : undefined,
           run.heldDomains.size > 0
             ? or(
                 isNull(schema.emails.domainId),
@@ -528,6 +537,7 @@ async function releaseParked(
     to: string[];
     cc: string[] | null;
     bcc: string[] | null;
+    systemMail: boolean;
   },
   run: DrainRun,
   throttleAt: Date | null,
@@ -539,15 +549,16 @@ async function releaseParked(
   const { domainId } = email;
   try {
     // Past the deliverability pause line nothing of the team leaves the
-    // drain: its transactional rows would only park again at send time, and
-    // its broadcast backlog waits for the rates to recover.
-    if (!run.checkedTeams.has(email.teamId)) {
-      const held = await deliverabilityHold(db, email.teamId);
-      run.checkedTeams.add(email.teamId);
-      if (held) {
-        run.heldTeams.add(email.teamId);
-        return null;
+    // drain but its account mail, which goes out whatever the rates: its
+    // other transactional rows would only park again at send time, and its
+    // broadcast backlog waits for the rates to recover.
+    if (!email.systemMail) {
+      if (!run.checkedTeams.has(email.teamId)) {
+        const held = await deliverabilityHold(db, email.teamId);
+        run.checkedTeams.add(email.teamId);
+        if (held) run.pausedTeams.add(email.teamId);
       }
+      if (run.pausedTeams.has(email.teamId)) return null;
     }
     // Every release passes the sending domain's warm-up too, whatever parked
     // the row: the plan's midnight must not let a young domain burst.

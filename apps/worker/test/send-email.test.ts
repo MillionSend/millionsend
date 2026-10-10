@@ -1,9 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
+  acceptEmail,
   EnvKeyring,
   encryptEmailBody,
   hashRecipient,
+  SYSTEM_MAIL_TAG,
   sealAttachments,
+  sendSystemMail,
   utcDay,
   verifyClickToken,
   verifyOpenToken,
@@ -1508,6 +1511,86 @@ it("parks a paused team's queued rows before SES, broadcast ones too, drip or no
     await sendEmail(db, { keyring, ses: system.ses }, { emailId: await insertEmail(own) }),
   ).toBe("sent");
   expect(system.sends).toHaveLength(1);
+});
+
+it("a paused team off the System plan still sends its account mail; a customer's copy of the mark parks", async () => {
+  const team = await createTeam(db, "paused-account-mail");
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: team,
+      name: "accounts.paused-account-mail.dev",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  const from = "Accounts <no-reply@accounts.paused-account-mail.dev>";
+  const enqueued: string[] = [];
+  const accept = {
+    db,
+    keyring,
+    isCloud: false,
+    enqueueEmailSend: async (id: string) => void enqueued.push(id),
+  };
+  // Accepted while the team is healthy: past the pause line accept refuses it.
+  const customer = await acceptEmail(
+    accept,
+    {
+      teamId: team,
+      billing: {
+        plan: "free",
+        planQuota: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        overageEnabled: false,
+      },
+      apiKeyId: null,
+    },
+    {
+      from,
+      to: ["r@example.com"],
+      subject: "Reset your password",
+      html: "<p>reset</p>",
+      tags: { [SYSTEM_MAIL_TAG]: "password_reset" },
+      domainId: domain?.id ?? null,
+    },
+  );
+  if (!customer.ok) throw new Error(customer.reason);
+  // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+  const pastTheLine = { sent: 200, hardBounced: 20 };
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId: team, day: utcDay(), ...pastTheLine })
+    .onConflictDoUpdate({
+      target: [schema.usageCounters.teamId, schema.usageCounters.day],
+      set: pastTheLine,
+    });
+  // The team holds the sender's domain, so its account mail rides the pipeline into it.
+  const raw = async () => {
+    throw new Error("account mail left the pipeline");
+  };
+  expect(
+    await sendSystemMail(
+      { ...accept, raw },
+      {
+        from,
+        to: "ada@example.com",
+        subject: "Reset your password",
+        html: "<p>reset</p>",
+        text: "reset",
+        kind: "password_reset",
+      },
+    ),
+  ).toBe("pipeline");
+  const account = enqueued.find((id) => id !== customer.id) ?? "";
+
+  const { ses, sends } = fakeSes("pause-account-mail");
+  expect(await sendEmail(db, { keyring, ses }, { emailId: account })).toBe("sent");
+  expect(await sendEmail(db, { keyring, ses }, { emailId: customer.id })).toBe("parked");
+  expect(sends.map((s) => s.emailId)).toEqual([account]);
+  const [parked] = await db.select().from(schema.emails).where(eq(schema.emails.id, customer.id));
+  expect(parked?.latestStatus).toBe("queued_quota");
 });
 
 it("a broadcast row parks on the bulk share or a held region; a transactional row only at the total, which the probe hears", async () => {

@@ -115,9 +115,10 @@ export function isReservedTagName(name: string): boolean {
 /**
  * Marks the instance's account mail (sendSystemMail); the value names the
  * kind. The worker trusts it: such mail ships its links untracked, is never
- * drawn by the content monitor and, for the kinds in CREDENTIAL_MAIL_KINDS,
- * loses its body once SES accepts it. So acceptEmail keeps it only on the
- * account-mail path (billing "uncapped").
+ * drawn by the content monitor, is never held by the deliverability pause
+ * and, for the kinds in CREDENTIAL_MAIL_KINDS, loses its body once SES
+ * accepts it. So acceptEmail keeps it only on the account-mail path (billing
+ * "uncapped").
  */
 export const SYSTEM_MAIL_TAG = `${RESERVED_TAG_PREFIX}system`;
 

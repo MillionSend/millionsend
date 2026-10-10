@@ -1,4 +1,4 @@
-import { DAY_MS, dailyCeiling, teamRung, utcDay } from "@millionsend/core";
+import { DAY_MS, dailyCeiling, SYSTEM_MAIL_TAG, teamRung, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -1105,6 +1105,37 @@ it("drain holds a young domain's warm-up mail while its team is past the pause l
     .where(eq(schema.usageCounters.teamId, teamId));
   expect(await drainQuotaParked(db, deps)).toEqual({ drained: 1, stillParked: 0 });
   expect(enqueued).toEqual([held]);
+});
+
+it("drain releases the account mail of a team past the pause line, off the System plan, and holds the rest", async () => {
+  // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: today(), sent: 200, hardBounced: 20 });
+  const account = { tags: { [SYSTEM_MAIL_TAG]: "password_reset" } };
+  const first = await insertParked(new Date("2026-08-13T00:00:00Z"), "reset", account);
+  // More than a page of the team's other mail between the two, so the last
+  // reset comes on a page whose query already leaves the held team out.
+  await db.insert(schema.emails).values(
+    Array.from({ length: 500 }, (_, i) => ({
+      teamId,
+      from: "a@acme.dev",
+      to: ["r@example.com"],
+      subject: "held",
+      latestStatus: "queued_quota" as const,
+      createdAt: new Date(Date.parse("2026-08-13T01:00:00Z") + i * 1000),
+    })),
+  );
+  const last = await insertParked(new Date("2026-08-14T00:00:00Z"), "reset", account);
+  const enqueued: string[] = [];
+  const result = await drainQuotaParked(db, {
+    isCloud: false,
+    enqueueSends: async (batch) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  });
+  expect(result).toEqual({ drained: 2, stillParked: 500 });
+  expect(enqueued).toEqual([first, last]);
 });
 
 it("drain holds a paused team's broadcast rows and releases its transactional ones", async () => {

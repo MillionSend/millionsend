@@ -173,8 +173,9 @@ export function sendRefusalError(refusal: SendRefusal): {
  * Whether the deliverability pause holds mail a team already has waiting,
  * at send time and in the drain: what was accepted before the team crossed
  * the line (a schedule can sit 30 days) must not reach SES while it is past
- * it. The instance's own (system) team is exempt: its account mail must go
- * out whatever its rates.
+ * it. Account mail must go out whatever the rates: the instance's own
+ * (system) team is exempt here, and callers pass any row carrying
+ * SYSTEM_MAIL_TAG, whatever its team, without asking.
  */
 export async function deliverabilityHold(db: Db, teamId: string): Promise<boolean> {
   const [team] = await db
