@@ -654,12 +654,14 @@ S3_BACKUP_BUCKET=millionsend-backups
 
 Depois adicione `backup` a `COMPOSE_PROFILES` no `.env` e rode
 `docker compose up -d`: o serviço faz um dump imediatamente e, depois disso,
-um por dia no `BACKUP_CRON` (padrão `0 3 * * *`, UTC). Só a forma diária
-`<minuto> <hora> * * *` é aceita — o sidecar roda sem privilégios como
+um por dia no `BACKUP_CRON` (padrão `0 3 * * *`, UTC). Esse primeiro dump é
+pulado quando o bucket já tem um das últimas 26 horas, para que reinícios e
+atualizações não façam outro: um dump mantém um bloqueio em todas as tabelas
+até terminar, e as migrações do app ficariam esperando por ele. Só a forma
+diária `<minuto> <hora> * * *` é aceita — o sidecar roda sem privilégios como
 `postgres`, com todas as capabilities removidas, então a agenda é um loop de
-sleep em vez de crond, e qualquer outro formato faz o serviço sair com código
-1. Cada dump é um
-`pg_dump -Fc` (formato custom comprimido, nomeado
+sleep em vez de crond, e qualquer outro formato faz o serviço sair com
+código 1. Cada dump é um `pg_dump -Fc` (formato custom comprimido, nomeado
 `millionsend-YYYYMMDD-HHMMSS.dump`), o tamanho enviado é verificado contra o
 bucket antes de qualquer outra coisa, e dumps mais antigos que
 `BACKUP_RETENTION_DAYS` (padrão 14) são removidos. `S3_BACKUP_PREFIX` (padrão
@@ -682,6 +684,13 @@ O `deploy/docker-compose.yml` standalone roda a imagem publicada
 `ghcr.io/millionsend/backup` (`MILLIONSEND_BACKUP_IMAGE` a fixa, como
 `MILLIONSEND_IMAGE` fixa o app); um clone do repositório a constrói a partir de
 `scripts/backup`. A restauração usa o mesmo contêiner nos dois casos.
+
+Para um dump avulso (antes de um salto grande de versão, por exemplo), rode um
+ciclo à mão; ele faz o dump mesmo que o bucket já tenha um recente:
+
+```sh
+docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup
+```
 
 ### Restauração
 
