@@ -396,8 +396,11 @@ revoked ones and those of deleted teams included), one pending per address.
 That team is the instance's own, and an operator can mark it as such: on the `system` plan
 it is never capped or billed and its badge reads System. On a self-hosted instance plans
 carry no limits, but the mark does more than label the team: the content monitor never
-holds it, the new-domain warm-up never caps its domains, and its contacts are the list a
-suspension unsubscribes a team's members from.
+holds it, the new-domain warm-up never caps its domains, a pause for its bounce or complaint
+rate refuses its new sends but never holds mail it already queued, and its contacts are the
+list a suspension unsubscribes a team's members from. Account mail is exempt from that pause
+whatever its team's plan: the pause neither refuses nor holds what the instance's own
+account-mail path sends, the only path that can tag an email `millionsend_system`.
 
 On an instance with `ALLOW_SIGNUP=true`, every new account becomes a contact of that team
 (`source: signup`) once its address is verified; the sign-up screen says so, and deleting the

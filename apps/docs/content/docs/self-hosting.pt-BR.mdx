@@ -745,8 +745,13 @@ plano `system` ele nunca tem limite nem cobrança, o selo diz System e a aba
 Cobrança mostra um aviso no lugar dos planos. Numa instância auto-hospedada
 os planos não impõem limites, mas a marca faz mais que rotulá-lo: o monitor
 de conteúdo nunca o retém, o aquecimento de domínio novo nunca limita os
-domínios dele, e os contatos dele são a lista da qual uma suspensão
-descadastra os membros de um time.
+domínios dele, uma pausa pela taxa de bounce ou de reclamação recusa os
+envios novos dele mas nunca retém o que ele já pôs na fila, e os contatos
+dele são a lista da qual uma suspensão descadastra os membros de um time.
+Os e-mails de conta também ficam fora dessa pausa, seja qual for o plano do
+time deles: ela não recusa nem retém o que sai pelo caminho de e-mails de
+conta da própria instância, o único que pode pôr a tag `millionsend_system`
+num e-mail.
 
 O mesmo time é a audiência das novidades do produto. Em uma instância com
 `ALLOW_SIGNUP=true`, toda conta nova vira um contato ali com a propriedade
