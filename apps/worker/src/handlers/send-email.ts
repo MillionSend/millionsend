@@ -412,11 +412,20 @@ export async function sendEmail(
   try {
     outcome = await sendQueued(db, deps, email);
   } catch (err) {
-    // A retry may still send it, too late for a one-time code. The send's
-    // own error is the one the job reports.
-    await noteConsoleCodeUndelivered(db, email).catch((noteErr: unknown) => {
-      console.error(`email.send: console code fallback not marked for ${email.id}`, noteErr);
-    });
+    // A retry may still send it, too late for a one-time code. A claim that
+    // stands is one SES took, failing only in the bookkeeping after: that
+    // code is on its way. The send's own error is the one the job reports.
+    if (email.tags?.[SYSTEM_MAIL_TAG] === "console_code") {
+      try {
+        const [row] = await db
+          .select({ sentAt: schema.emails.sentAt })
+          .from(schema.emails)
+          .where(eq(schema.emails.id, email.id));
+        if (!row?.sentAt) await noteConsoleCodeUndelivered(db, email);
+      } catch (noteErr) {
+        console.error(`email.send: console code fallback not marked for ${email.id}`, noteErr);
+      }
+    }
     throw err;
   }
   if (outcome === "failed" || outcome === "suppressed" || outcome === "parked") {

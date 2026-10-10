@@ -186,6 +186,16 @@ describe("a console code email the queue accepted and could not deliver", () => 
     expect(await codeRow()).toBeDefined();
   });
 
+  it("stays shut when SES took the email and only the bookkeeping after failed", async () => {
+    const messageId = `mid-${crypto.randomUUID()}`;
+    const took: SesSender = { sendRaw: async () => ({ messageId }) };
+    expect(await sendEmail(db, { keyring, ses: took }, { emailId: await codeMail() })).toBe("sent");
+    // The same message id again: recording it fails once SES has the email.
+    const emailId = await codeMail();
+    await expect(sendEmail(db, { keyring, ses: took }, { emailId })).rejects.toThrow();
+    expect(await fallbackMark()).toBeUndefined();
+  });
+
   it("opens it when SES reports a bounce or a reject, not on its accept", async () => {
     let emailId = await codeMail();
     expect(await send(emailId, "accept")).toBe("sent");
