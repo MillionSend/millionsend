@@ -832,10 +832,12 @@ a uma equipe em situação regular. É o mesmo descadastro do painel, e a linha
 do tempo de cada contato diz o motivo; nenhum webhook é disparado. Uma
 retenção para revisão que vira suspensão por phishing os descadastra nesse
 momento. Reativar a equipe não os inscreve de novo: só a própria inscrição
-deles faz isso. Uma instância sem equipe no plano `system` não tem essa
-lista. Ao atualizar para esta versão, os membros das equipes já suspensas
-por um desses motivos são descadastrados uma vez, exceto um contato que
-mudou depois da suspensão da equipe, como quem se inscreveu de novo.
+deles faz isso. Só uma equipe no plano `system` conta como essa lista: se
+a equipe que tem o domínio do remetente não estiver nele, uma suspensão não
+descadastra ninguém. Ao atualizar para esta versão, os membros das equipes
+já suspensas por um desses motivos são descadastrados uma vez, exceto um
+contato que mudou depois da suspensão da equipe, como quem se inscreveu de
+novo.
 
 Ninguém numa equipe suspensa pode excluí-la, remover os domínios dela (a API
 também responde `403 team_suspended`) nem convidar ninguém, e um membro de uma equipe suspensa

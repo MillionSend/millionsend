@@ -821,10 +821,11 @@ go), even a member who also belongs to a team in good standing. It is the
 dashboard's unsubscribe, and each contact's timeline says why; no webhook
 fires. A review hold that becomes a phishing suspension unsubscribes them
 then. Reinstating the team does not subscribe them again: only their own
-opt-in does. An instance with no team on the `system` plan has no such list.
-On upgrading to this release, the members of teams already suspended for
-one of those reasons are unsubscribed once, except a contact that changed
-after its team's suspension, such as one who opted in again.
+opt-in does. Only a team on the `system` plan counts as that list: if the
+team that holds the sender's domain is not on it, a suspension unsubscribes
+nobody. On upgrading to this release, the members of teams already
+suspended for one of those reasons are unsubscribed once, except a contact
+that changed after its team's suspension, such as one who opted in again.
 
 Nobody on a suspended team can delete it, remove its domains (the API
 answers `403 team_suspended` there too) or invite anyone, and a member of a team
