@@ -2,7 +2,13 @@ import { env } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
-import { loadMonitorState, monitorTier, teamMonitorRow } from "./abuse-monitor.js";
+import {
+  loadMonitorState,
+  MONITOR_HOLD_CATEGORIES,
+  MONITOR_HOLD_REASONS,
+  monitorTier,
+  teamMonitorRow,
+} from "./abuse-monitor.js";
 import { firstRow } from "./driver-result.js";
 import {
   getMonitorSettingsRow,
@@ -45,17 +51,6 @@ const WARMUP_GRADUATION_SETTLE_MS = 3600_000;
  * inboxes must not lift a fresh domain to full volume on its first day.
  */
 const WARMUP_GRADUATION_MIN_SPAN_MS = DAY_MS;
-/** An abuse verdict of these kinds, the category the judge chose or a lure it saw, blocks graduation. */
-const PHISHING_CATEGORIES: readonly string[] = [
-  "phishing_credentials",
-  "brand_impersonation",
-  "payment_redirect",
-];
-const PHISHING_REASONS: readonly string[] = [
-  "impersonation",
-  "harvests_secrets",
-  "off_domain_lure",
-];
 
 /** The registration age's tier at `at`. */
 export function ageTier(registeredAt: Date, at: Date): number {
@@ -371,10 +366,11 @@ async function cleanSince(
         gte(ms.judgedAt, new Date(now.getTime() - WARMUP_TIER_DAYS[2] * DAY_MS)),
       ),
     );
+  // A phishing-type verdict, the kinds the review hold acts on, blocks graduation.
   return !verdicts.some(
     (v) =>
-      v.categories?.some((c) => PHISHING_CATEGORIES.includes(c)) ||
-      v.reasons?.some((r) => PHISHING_REASONS.includes(r)),
+      v.categories?.some((c) => (MONITOR_HOLD_CATEGORIES as readonly string[]).includes(c)) ||
+      v.reasons?.some((r) => (MONITOR_HOLD_REASONS as readonly string[]).includes(r)),
   );
 }
 
