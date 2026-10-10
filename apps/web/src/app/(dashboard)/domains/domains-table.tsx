@@ -280,7 +280,7 @@ export function DomainsView() {
                         <td style={{ color: "var(--ms-muted)" }}>
                           <RegionLabel region={domain.region} />
                         </td>
-                        <td className="right">
+                        <td className="right" style={{ color: "var(--ms-muted)" }}>
                           <RelativeTime date={domain.createdAt} />
                         </td>
                         <td className="right" style={{ width: 40 }}>
