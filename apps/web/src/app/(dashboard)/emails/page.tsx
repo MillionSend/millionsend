@@ -177,9 +177,9 @@ export default function EmailsPage() {
             <Link className="ms-btn ms-btn-secondary" href="/emails/suppressions">
               {t("list.suppressionList")}
             </Link>
-            <ApiDocsButton />
           </>
         }
+        menu={<ApiDocsButton />}
       />
 
       {capReached && cap ? (
@@ -203,7 +203,7 @@ export default function EmailsPage() {
             })}
           </span>
           {stats.data && stats.data.queuedQuota > 0 ? (
-            <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
+            <span style={{ fontSize: 13.5, color: "var(--ms-bone)", flex: "1 1 320px" }}>
               {cap.monthly && usage.data?.period
                 ? t("list.capBanner.queuedMonth", {
                     count: nf.format(stats.data.queuedQuota),
@@ -276,7 +276,7 @@ export default function EmailsPage() {
         <GroupedMultiSelect
           value={statuses}
           onChange={setStatuses}
-          width={156}
+          width="max-content"
           ariaLabel={t("list.status")}
           summary={
             <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>

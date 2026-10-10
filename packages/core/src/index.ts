@@ -179,6 +179,14 @@ export {
 } from "./broadcast-pacing.js";
 export { canonicalBodyHash, canonicalStringify } from "./canonical-json.js";
 export { forwardedClientIp } from "./client-ip.js";
+export {
+  bindConsoleCodeMail,
+  CONSOLE_CODE_MINUTES,
+  consoleCodeId,
+  consoleCodeUnsentId,
+  noteConsoleCodeUndelivered,
+  replaceConsoleCodeRow,
+} from "./console-code.js";
 export { type ContactActivityRow, recordContactActivity } from "./contact-activities.js";
 export {
   type ContactEvent,
@@ -564,11 +572,12 @@ export {
 export {
   CREDENTIAL_MAIL_KINDS,
   findSenderDomainOwner,
-  MUTED_WHILE_SUSPENDED,
+  SENT_WHILE_SUSPENDED,
   type SenderDomainOwner,
   SYSTEM_MAIL_TAG,
   type SystemMailKind,
   type SystemMailMessage,
+  type SystemMailOptions,
   SystemMailRefused,
   type SystemSendDeps,
   sendSystemMail,

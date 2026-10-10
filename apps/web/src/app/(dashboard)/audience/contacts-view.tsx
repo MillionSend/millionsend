@@ -44,8 +44,9 @@ const BULK_BATCH = 100;
 
 // Fixed layout: column shares hold and long cells truncate instead of pushing
 // the trailing columns past the page edge. The floor keeps the status badge
-// readable at its 15% share; narrower viewports scroll the Table box.
-const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 720 };
+// readable at its 15% share, and the email about 240px once the date column
+// takes its fixed width below 1200px; narrower viewports scroll the Table box.
+const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 860 };
 
 function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
   const t = useTranslations("audience");
@@ -53,10 +54,12 @@ function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
     <thead>
       <tr>
         <th className="ms-check-cell">{selectAll}</th>
-        <th style={{ width: "40%" }}>{t("contacts.email")}</th>
+        <th className="ms-col-lead" style={{ width: "40%" }}>
+          {t("contacts.email")}
+        </th>
         <th style={{ width: "22%" }}>{t("contacts.segments")}</th>
         <th style={{ width: "15%" }}>{t("contacts.status")}</th>
-        <th className="right">{t("contacts.added")}</th>
+        <th className="right ms-col-date">{t("contacts.added")}</th>
         <th className="right" style={{ width: 40 }} />
       </tr>
     </thead>
@@ -505,14 +508,14 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
               onCsv={() => setImportOpen(true)}
               onMigrate={() => setMigrateOpen(true)}
             />
-            <ResourceApiButton resource="contacts" />
           </>
         }
+        menu={<ResourceApiButton resource="contacts" />}
       />
       <AudienceTabs />
 
       <div
-        className="ms-meta-grid"
+        className="ms-meta-grid ms-stat-strip"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(3, 1fr) auto",

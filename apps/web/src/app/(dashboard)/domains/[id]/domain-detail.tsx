@@ -10,6 +10,7 @@ import {
   DnsRecordsTable,
   DnsRecordsTableSkeleton,
 } from "@/components/dns-records-table";
+import { DotParts } from "@/components/dot-parts";
 import { LoadError } from "@/components/load-error";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
@@ -670,92 +671,88 @@ export function DomainDetail({ id }: { id: string }) {
           </>
         }
         actions={
+          needsDnsCheck ? (
+            <button
+              type="button"
+              className="ms-btn ms-btn-primary"
+              title={t("detail.checkDnsTooltip")}
+              disabled={verify.isPending || minSpin}
+              onClick={runCheck}
+            >
+              <BtnSpinner on={verify.isPending || minSpin} />
+              {t("detail.checkDns")}
+            </button>
+          ) : null
+        }
+        menu={
           <>
-            {needsDnsCheck ? (
-              <button
-                type="button"
-                className="ms-btn ms-btn-primary"
-                title={t("detail.checkDnsTooltip")}
-                disabled={verify.isPending || minSpin}
-                onClick={runCheck}
+            <PopoverMenu
+              boxed
+              ariaLabel={t("detail.moreActions")}
+              items={[
+                // The header Check DNS button hides once everything is
+                // verified; keep a manual re-check reachable here for the
+                // rare case a record was removed and SES has not caught up.
+                ...(needsDnsCheck
+                  ? []
+                  : [{ label: t("detail.recheckDns"), onSelect: runCheck }, null]),
+                {
+                  label: t("detail.forwardInstructions"),
+                  onSelect: () => {
+                    window.location.href = `mailto:?subject=${encodeURIComponent(
+                      t("detail.forwardSubject", { domain: data.name }),
+                    )}&body=${encodeURIComponent(recordsText())}`;
+                  },
+                },
+                {
+                  label: t("detail.copyInstructions"),
+                  disabled: !records.isSuccess,
+                  onSelect: () => void copyToClipboard(recordsText(), "instructions"),
+                },
+                {
+                  label: t("detail.copyAsPrompt"),
+                  disabled: !records.isSuccess,
+                  onSelect: () => void copyToClipboard(aiPrompt(), "prompt"),
+                },
+                null,
+                ...(
+                  [
+                    ["openInCursor", "cursor://anysphere.cursor-deeplink/prompt?text="],
+                    ["openInClaude", "https://claude.ai/new?q="],
+                    ["openInChatgpt", "https://chatgpt.com/?q="],
+                  ] as const
+                ).map(([key, base]) => ({
+                  label: t(`detail.${key}`),
+                  trailing: "↗",
+                  onSelect: () => {
+                    window.open(`${base}${encodeURIComponent(aiPrompt())}`, "_blank", "noreferrer");
+                  },
+                })),
+                null,
+                {
+                  label: t("detail.deleteDomain"),
+                  danger: true,
+                  onSelect: () => {
+                    setConfirmText("");
+                    setConfirmingDelete(true);
+                  },
+                },
+              ]}
+            />
+            {copiedKey ? (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  right: 0,
+                  whiteSpace: "nowrap",
+                  color: "var(--ms-muted)",
+                  fontSize: "var(--ms-fs-label)",
+                }}
               >
-                <BtnSpinner on={verify.isPending || minSpin} />
-                {t("detail.checkDns")}
-              </button>
+                ✓ {common("copied")}
+              </span>
             ) : null}
-            <div style={{ position: "relative" }}>
-              <PopoverMenu
-                boxed
-                ariaLabel={t("detail.moreActions")}
-                items={[
-                  // The header Check DNS button hides once everything is
-                  // verified; keep a manual re-check reachable here for the
-                  // rare case a record was removed and SES has not caught up.
-                  ...(needsDnsCheck
-                    ? []
-                    : [{ label: t("detail.recheckDns"), onSelect: runCheck }, null]),
-                  {
-                    label: t("detail.forwardInstructions"),
-                    onSelect: () => {
-                      window.location.href = `mailto:?subject=${encodeURIComponent(
-                        t("detail.forwardSubject", { domain: data.name }),
-                      )}&body=${encodeURIComponent(recordsText())}`;
-                    },
-                  },
-                  {
-                    label: t("detail.copyInstructions"),
-                    disabled: !records.isSuccess,
-                    onSelect: () => void copyToClipboard(recordsText(), "instructions"),
-                  },
-                  {
-                    label: t("detail.copyAsPrompt"),
-                    disabled: !records.isSuccess,
-                    onSelect: () => void copyToClipboard(aiPrompt(), "prompt"),
-                  },
-                  null,
-                  ...(
-                    [
-                      ["openInCursor", "cursor://anysphere.cursor-deeplink/prompt?text="],
-                      ["openInClaude", "https://claude.ai/new?q="],
-                      ["openInChatgpt", "https://chatgpt.com/?q="],
-                    ] as const
-                  ).map(([key, base]) => ({
-                    label: t(`detail.${key}`),
-                    trailing: "↗",
-                    onSelect: () => {
-                      window.open(
-                        `${base}${encodeURIComponent(aiPrompt())}`,
-                        "_blank",
-                        "noreferrer",
-                      );
-                    },
-                  })),
-                  null,
-                  {
-                    label: t("detail.deleteDomain"),
-                    danger: true,
-                    onSelect: () => {
-                      setConfirmText("");
-                      setConfirmingDelete(true);
-                    },
-                  },
-                ]}
-              />
-              {copiedKey ? (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 6px)",
-                    right: 0,
-                    whiteSpace: "nowrap",
-                    color: "var(--ms-muted)",
-                    fontSize: "var(--ms-fs-label)",
-                  }}
-                >
-                  ✓ {common("copied")}
-                </span>
-              ) : null}
-            </div>
           </>
         }
       />
@@ -791,7 +788,7 @@ export function DomainDetail({ id }: { id: string }) {
           <span style={{ fontSize: 13.5, color: "var(--ms-warn)" }}>
             {t("detail.bannerLooking")}
           </span>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
+          <span style={{ fontSize: 13.5, color: "var(--ms-bone)", flex: "1 1 320px" }}>
             {provider
               ? t("detail.bannerLookingBody", { provider: provider.name })
               : t("detail.bannerLookingBodyGeneric")}
@@ -803,7 +800,7 @@ export function DomainDetail({ id }: { id: string }) {
           <span style={{ fontSize: 13.5, color: "var(--ms-success)" }}>
             {t("detail.bannerVerified")}
           </span>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
+          <span style={{ fontSize: 13.5, color: "var(--ms-bone)", flex: "1 1 320px" }}>
             {t("detail.bannerVerifiedBody")}
           </span>
         </GradientBanner>
@@ -826,14 +823,18 @@ export function DomainDetail({ id }: { id: string }) {
           }}
         >
           <span style={{ color: "var(--ms-bone)" }}>
-            {data.warmup.fullAt
-              ? t("detail.warmup", {
-                  perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
-                  date: formatDay(data.warmup.fullAt, locale),
-                })
-              : t("detail.warmupToday", {
-                  perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
-                })}
+            <DotParts
+              text={
+                data.warmup.fullAt
+                  ? t("detail.warmup", {
+                      perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
+                      date: formatDay(data.warmup.fullAt, locale),
+                    })
+                  : t("detail.warmupToday", {
+                      perDay: new Intl.NumberFormat(locale).format(data.warmup.perDay),
+                    })
+              }
+            />
           </span>
           <span style={{ color: "var(--ms-muted)" }}>
             {t(data.warmup.shared ? "detail.warmupBodyShared" : "detail.warmupBody")}

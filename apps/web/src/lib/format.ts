@@ -181,6 +181,24 @@ export function displayUrl(url: string): string {
   return url.replace(/^https?:\/\//, "");
 }
 
+/**
+ * An address, URL or domain name rather than prose or a figure: one token,
+ * with an "@" or a "/" in it, or dot-separated labels with a letter in them.
+ */
+export function isAddressLike(text: string): boolean {
+  if (/[ \t\n]/.test(text)) return false;
+  return /[@/]/.test(text) || (/^[\w-]+(\.[\w-]+)+$/.test(text) && /[a-z]/i.test(text));
+}
+
+/**
+ * A " · "-joined value cut into its parts, each but the last keeping its "·"
+ * behind a no-break space, so the dot never starts a line.
+ */
+export function dotParts(text: string): string[] {
+  const parts = text.split(" · ");
+  return parts.map((part, i) => (i < parts.length - 1 ? `${part}\u00a0·` : part));
+}
+
 const QUARTER_HOUR_MS = 15 * 60_000;
 
 /** The instant when it is less than a day old, else null. */

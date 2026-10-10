@@ -149,18 +149,12 @@ export default function SuppressionsPage() {
         title={t("suppressions.title")}
         {...(subtitle ? { subtitle } : {})}
         actions={
-          <>
-            <button
-              type="button"
-              className="ms-btn ms-btn-primary"
-              onClick={() => setAddOpen(true)}
-            >
-              <PlusGlyph size={14} />
-              {t("suppressions.add")}
-            </button>
-            <ApiDocsButton />
-          </>
+          <button type="button" className="ms-btn ms-btn-primary" onClick={() => setAddOpen(true)}>
+            <PlusGlyph size={14} />
+            {t("suppressions.add")}
+          </button>
         }
+        menu={<ApiDocsButton />}
       />
 
       <div

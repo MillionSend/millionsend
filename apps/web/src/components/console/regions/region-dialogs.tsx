@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { CopyChip } from "@/components/copy-chip";
+import { DotParts } from "@/components/dot-parts";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Skeleton } from "@/components/skeleton";
@@ -172,7 +173,9 @@ export function QuotaDialog({
               onChange={(e) => setDesired(e.target.value)}
             />
             <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>
-              {t("quotaDialog.hint", { current: f.n(max), sent: f.n(region.sent24h) })}
+              <DotParts
+                text={t("quotaDialog.hint", { current: f.n(max), sent: f.n(region.sent24h) })}
+              />
             </p>
           </div>
           <div className="ms-field" style={{ marginTop: 14 }}>

@@ -173,9 +173,9 @@ export function ApiKeysView() {
               <PlusGlyph size={14} />
               {t("createKey")}
             </button>
-            <ResourceApiButton resource="apiKeys" />
           </>
         }
+        menu={<ResourceApiButton resource="apiKeys" />}
       />
 
       {listQuery.isPending ? <KeysSkeleton /> : null}
@@ -217,8 +217,11 @@ export function ApiKeysView() {
                     <span
                       style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
                     >
-                      <NavTile name="api-keys" color={TONE_COLOR.neutral} />
-                      {key.name}
+                      {/* The tile never wraps away from the name; the badges may. */}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <NavTile name="api-keys" color={TONE_COLOR.neutral} />
+                        {key.name}
+                      </span>
                       <span
                         className={`ms-badge ms-badge-${
                           key.permission === "sending_access" ? "info" : "neutral"

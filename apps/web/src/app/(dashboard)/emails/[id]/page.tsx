@@ -8,7 +8,8 @@ import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
-import { CopyChip, CopyGlyph } from "@/components/copy-chip";
+import { Breakable } from "@/components/breakable";
+import { CopyBlock, CopyChip } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
 import { EmailContentPanel } from "@/components/email-content-panel";
 import { EmailStatusIcon, EventIconTile } from "@/components/email-status-icon";
@@ -152,7 +153,7 @@ function Meta({
         className={mono ? "ms-mono" : undefined}
         style={{ fontSize: mono ? 13 : 14, marginTop: 5, overflowWrap: "anywhere" }}
       >
-        {children}
+        {typeof children === "string" ? <Breakable text={children} /> : children}
       </div>
     </div>
   );
@@ -237,38 +238,6 @@ function ApplePrivateRelaySteps({ from }: { from: string }) {
       >
         {t("article")} ↗
       </a>
-    </div>
-  );
-}
-
-/** Mono code block with a top-right copy glyph (SMTP responses, diagnostics). */
-function CodeBlock({ value }: { value: string }) {
-  return (
-    <div
-      style={{
-        position: "relative",
-        background: "var(--ms-inset)",
-        border: "1px solid var(--ms-line)",
-        borderRadius: 10,
-        padding: "14px 16px",
-      }}
-    >
-      <pre
-        className="ms-mono"
-        style={{
-          margin: 0,
-          fontSize: 12,
-          lineHeight: 1.7,
-          color: "var(--ms-bone)",
-          whiteSpace: "pre-wrap",
-          overflowWrap: "anywhere",
-        }}
-      >
-        {value}
-      </pre>
-      <span style={{ position: "absolute", top: 10, right: 12 }}>
-        <CopyGlyph value={value} />
-      </span>
     </div>
   );
 }
@@ -814,7 +783,7 @@ export default function EmailDetailPage() {
         title={recipient ?? email.subject}
         leading={<EmailStatusIcon status={email.latestStatus} size={42} />}
         subtitle={sublineParts.join(" · ")}
-        actions={<ApiDocsButton />}
+        menu={<ApiDocsButton />}
       />
 
       {hardBounced ? (
@@ -835,7 +804,7 @@ export default function EmailDetailPage() {
           <span style={{ fontSize: 13.5, color: "var(--ms-danger)" }}>
             {t("detail.bounceBanner.hard")}
           </span>
-          <span style={{ fontSize: 13.5, color: "var(--ms-bone)" }}>
+          <span style={{ fontSize: 13.5, color: "var(--ms-bone)", flex: "1 1 320px" }}>
             {t.rich("detail.bounceBanner.suppressed", {
               link: (chunks) => (
                 <Link href="/emails/suppressions" className="ms-link">
@@ -1188,7 +1157,7 @@ export default function EmailDetailPage() {
             <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>
               {t("bouncedDrawer.smtpResponse")}
             </div>
-            <CodeBlock value={bounceDiag} />
+            <CopyBlock value={bounceDiag} />
           </>
         ) : null}
         <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>

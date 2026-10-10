@@ -30,10 +30,10 @@
   },
   "devDependencies": {
     "@millionsend/test-utils": "workspace:*",
-    "@modelcontextprotocol/client": "2.0.0",
-    "@types/node": "^22.20.2",
-    "resend": "^6.27.0",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@types/node": "^22.20.5",
+    "resend": "^6.32.1",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.3"
   }
 }

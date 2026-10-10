@@ -337,6 +337,13 @@
       "when": 1791593051425,
       "tag": "0047_onboarding_email_sent",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1791600587991,
+      "tag": "0048_suspended_team_unsubscribe",
+      "breakpoints": true
     }
   ]
 }

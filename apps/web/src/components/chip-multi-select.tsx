@@ -106,8 +106,9 @@ export function ChipMultiSelect({
 
   const showMenu = open && suggestions.length > 0 && !disabled;
   const activeId = showMenu ? `${listboxId}-${activeIndex}` : undefined;
-  const panelStyle = useAnchoredPanel(showMenu ? rootRef.current : null, {
+  const panelStyle = useAnchoredPanel(showMenu ? rootRef.current : null, menuRef, {
     maxHeight: LIST_MAX_HEIGHT,
+    onAnchorHidden: () => setOpen(false),
   });
 
   return (

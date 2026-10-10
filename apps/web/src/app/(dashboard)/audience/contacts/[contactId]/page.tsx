@@ -27,6 +27,7 @@ const ACTIVITY_TYPES = [
   "topic_opt_in",
   "topic_opt_out",
   "unsubscribed",
+  "unsubscribed_team_suspended",
   "resubscribed",
   "segment_added",
   "segment_removed",
@@ -42,6 +43,7 @@ const ACTIVITY_DOT: Record<KnownActivityType, string> = {
   resubscribed: "var(--ms-success)",
   topic_opt_out: "var(--ms-danger)",
   unsubscribed: "var(--ms-danger)",
+  unsubscribed_team_suspended: "var(--ms-danger)",
   segment_added: "var(--ms-neutral)",
   segment_removed: "var(--ms-neutral)",
 };
@@ -637,7 +639,9 @@ export default function ContactDetailPage() {
             <p className="ms-microlabel" style={{ margin: "0 0 8px", fontSize: 10.5 }}>
               {t("detail.properties")}
             </p>
-            <div style={{ display: "grid", gap: 8 }}>
+            {/* A shrinkable track: an auto one takes the two inputs' intrinsic
+                width and pushes the values and their ✕ off a phone's dialog. */}
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }}>
               {editProps.map((prop, i) => (
                 // Rows are positional and may hold blank keys mid-edit, so the
                 // array index is the only stable identity here.

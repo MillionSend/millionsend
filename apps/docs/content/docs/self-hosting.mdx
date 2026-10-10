@@ -157,7 +157,7 @@ deployments — see [Billing](/billing); a self-hosted instance has no plan limi
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PORTAL_CONFIG` | Hosted cloud only; ignored when `IS_CLOUD=false`. Stripe API key, the signing secret of the webhook endpoint at `/api/billing/webhook`, and an optional customer-portal configuration id. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials for "Continue with Google". The button appears only when both are set. Callback URL: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Same, for GitHub. Callback URL: `{APP_BASE_URL}/api/auth/callback/github`. |
-| `AUTH_EMAIL_FROM` | Sender for the emails to a person about their own account (password reset, email verification, the welcome, a password-changed receipt, an app granted access), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery and sign-up verification only exist when this is set and SES credentials are configured — leave unset to skip both. Verify its domain in a team under **Domains** and those emails are logged there, with new accounts as its contacts (see [Account mail](#account-mail-contacts-and-product-updates)). |
+| `AUTH_EMAIL_FROM` | Sender for the emails to a person about their own account (password reset, email verification, the welcome, a password-changed receipt, an app granted access, the console's one-time code), as `Name <user@domain>` or a bare address; its domain must be a verified identity in this instance's SES account. Password recovery and sign-up verification only exist when this is set and SES credentials are configured — leave unset to skip both. Verify its domain in a team under **Domains** and those emails are logged there, with new accounts as its contacts (see [Account mail](#account-mail-contacts-and-product-updates)). |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile keys, both or neither. When set, sign-in, sign-up, password reset and the onboarding "Send email" button verify a challenge token (invisible or managed widgets both work). Unset, every form runs without a captcha. |
 | `ONBOARDING_EMAIL_FROM` | Sender of the onboarding "Send email" button, as `Name <user@domain>` or a bare address on a domain verified in this SES account. It carries one fixed test email per team, to the team's owner (a verified address, where the instance verifies), and nothing else: a send from it through the API, SMTP, MCP, a broadcast or a dashboard test is refused (`422 reserved_sender` on the API), even for a team that verified its domain. Leave unset to hide the button. |
 | `NOTIFICATIONS_EMAIL_FROM` | Sender for the notices to team owners (quota, bounce/complaint rates, a domain verifying or losing its records, a new API key, a rotated webhook secret, a member joining, a broadcast that went out or is held, billing on the cloud) and for team invitation emails, same forms as `AUTH_EMAIL_FROM`, which it falls back to. With neither set, only the webhook events go out and invitations are link-only. Verify its domain in a team to log these emails there. |
@@ -730,7 +730,9 @@ through SES and leave no trace, as before.
 That team is the instance's own, and an operator can mark it as such: on the
 `system` plan it is never capped or billed, its badge reads System and the
 Billing tab shows a notice instead of plans. On a self-hosted instance plans
-carry no limits, so the mark only labels the team.
+carry no limits, but the mark does more than label the team: the content
+monitor never holds it, the new-domain warm-up never caps its domains, and
+its contacts are the list a suspension unsubscribes a team's members from.
 
 The same team is the audience for product updates. On an instance with
 `ALLOW_SIGNUP=true`, every new account becomes a contact there with a
@@ -804,13 +806,31 @@ day under its plan. Owners are emailed about each action (except a phishing
 suspension or a review hold), and every action lands in the audit log with
 its reason.
 
-While a team is suspended, its quota, deliverability, broadcast-hold and
-broadcast-pause notices stop. Its billing mail stops too when the suspension
-is for phishing or a review hold (Stripe still sends its own receipts), and
-keeps coming under any other reason. Mail to the operator, such as the
-content monitor's alerts about the team, still goes out. Nobody on a
-suspended team can delete it, remove its domains (the API answers
-`403 team_suspended` there too) or invite anyone, and a member of a team
+While a team is suspended, the only mail about it that still reaches its
+owners is the suspension and reinstatement notices, billing mail and the
+security receipts (a new API key, a rotated webhook secret, a member who
+joined). Its domain, webhook, broadcast, quota and deliverability notices
+stop, and so does any other notice about the team. Under a phishing
+suspension or a review hold nothing about the team goes out, billing
+included (Stripe still sends its own receipts). Mail about a person's own
+account, such as a password reset or an email verification, and mail to the
+operator, such as the content monitor's alerts about the team, still go out.
+
+A suspension for any reason but a review hold or non-payment also
+unsubscribes every member of the team from the instance's own contact list
+(the contacts of the team on the `system` plan, where product announcements
+go), even a member who also belongs to a team in good standing. It is the
+dashboard's unsubscribe, and each contact's timeline says why; no webhook
+fires. A review hold that becomes a phishing suspension unsubscribes them
+then. Reinstating the team does not subscribe them again: only their own
+opt-in does. Only a team on the `system` plan counts as that list: if the
+team that holds the sender's domain is not on it, a suspension unsubscribes
+nobody. On upgrading to this release, the members of teams already
+suspended for one of those reasons are unsubscribed once, except a contact
+that changed after its team's suspension, such as one who opted in again.
+
+Nobody on a suspended team can delete it, remove its domains (the API
+answers `403 team_suspended` there too) or invite anyone, and a member of a team
 suspended for phishing or held for review cannot create new teams. Under
 those two reasons each of these refusals is one neutral line that never says
 suspended ("This isn't available for this team right now. Contact support if
@@ -867,8 +887,9 @@ no pause, so a release leaves no monitor pause behind. A team is held once, by e
 rule: after a release its later verdicts only alert, so the released mail,
 judged again on its way out, neither holds it a second time nor pauses its
 broadcasts. A team already
-suspended keeps its suspension, and Probation, Established, Trusted and
-system teams are never held: they stay alert-only. The judge reads a message
+suspended keeps its suspension, and Probation, Established and Trusted teams
+are never held: they stay alert-only. The system team is exempt: the monitor
+never samples it. The judge reads a message
 after SES has taken it, so the message that triggers the hold has already
 gone out; the hold stops what follows. `MONITOR_AUTO_HOLD=false` switches it
 off.
@@ -1110,11 +1131,23 @@ the server answers `FORBIDDEN` to any mutation while the view is live,
 whatever the screen shows.
 
 **How long.** 30 minutes, enforced on every request. One live view per
-operator, starting another ends the previous, and a view cannot start
-another. The operator ends it from the banner, the owner from Settings →
-Support access, and expiry ends it on the next request. Starting one needs a
-sign-in from the last 15 minutes, so a stolen long-lived session cannot open
-a view.
+operator: starting another, from the console or from under a view, ends the
+live one first exactly as End session does, which is how a view left open in
+a closed tab ends. The operator ends it from the banner, the owner from
+Settings → Support access, and expiry ends it on the next request.
+
+**Starting one.** The dialog emails a 6-digit code to the operator's own
+address, from `AUTH_EMAIL_FROM`. It works once, for 10 minutes; five wrong
+tries void it, a new code replaces the old one, and one operator is sent at
+most five an hour. Only a hash keyed by `BETTER_AUTH_SECRET` is stored. A
+code that checks out covers that browser session's starts for 15 minutes, so
+opening several views takes one code; signing out ends it. When the instance
+cannot send the code (no `AUTH_EMAIL_FROM` or no SES credentials) or its
+email fails, whether the send itself or, when a team holds the sender's
+domain, the queued email later (refused, failed, bounced, or held back from
+SES), the dialog says so and for 10 minutes a sign-in from the last 15
+minutes stands in for the code. Either way a stolen long-lived session cannot
+open a view.
 
 **What is logged.** `support.view_started` and `support.view_ended`, in the
 instance audit and, at once, in the team's own Settings → Audit log: who,

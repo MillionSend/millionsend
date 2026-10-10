@@ -3,6 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { ChartDialog, type Period } from "@/components/console/chart-dialog";
+import { DotParts } from "@/components/dot-parts";
 import { durationUnit, formatPercent } from "@/lib/console-format";
 import { ProbeChart, TeamsChart } from "./charts";
 import type { Summary } from "./health-card";
@@ -28,7 +29,11 @@ function Tile({
         type="button"
         className="ms-card"
         style={{
-          display: "block",
+          // A block button centres its content in a taller grid row; the
+          // column keeps every tile's label on one top line.
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "flex-start",
           width: "100%",
           padding: "16px 20px",
           cursor: "pointer",
@@ -42,7 +47,9 @@ function Tile({
         <div className="ms-digits" style={{ fontSize: 26, lineHeight: 1.2, marginTop: 4 }}>
           {value}
         </div>
-        <div style={{ fontSize: 13, color: "var(--ms-muted)", marginTop: 2 }}>{sub}</div>
+        <div style={{ fontSize: 13, color: "var(--ms-muted)", marginTop: 2 }}>
+          <DotParts text={sub} />
+        </div>
       </button>
       {open ? (
         <ChartDialog open onClose={() => setOpen(false)} title={title}>
