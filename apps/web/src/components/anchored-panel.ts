@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffectEvent, useLayoutEffect, useState } from "react";
-import { PANEL_MARGIN, type PanelPlacement, placePanel, viewportSize } from "@/lib/panel-placement";
+import {
+  PANEL_MAX_WIDTH,
+  type PanelPlacement,
+  placePanel,
+  viewportSize,
+} from "@/lib/panel-placement";
 
 const ANCHOR_GAP = 6;
 const MIN_HEIGHT = 160;
@@ -73,7 +78,7 @@ export function useAnchoredPanel(
   return {
     position: "fixed",
     ...(width !== undefined ? { width } : { minWidth: placed?.anchorWidth ?? rect?.width ?? 0 }),
-    maxWidth: `calc(100vw - ${PANEL_MARGIN * 2}px)`,
+    maxWidth: PANEL_MAX_WIDTH,
     ...(placed && room !== undefined
       ? {
           left: placed.left,

@@ -1,5 +1,7 @@
 /** Room every floating panel keeps from the viewport edges: menus, listboxes, tooltips, chart tips. */
 export const PANEL_MARGIN = 12;
+/** The widest a floating panel may be, as a CSS length: the viewport less the margin on each side. */
+export const PANEL_MAX_WIDTH = `calc(100vw - ${PANEL_MARGIN * 2}px)`;
 
 export interface Box {
   left: number;

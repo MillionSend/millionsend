@@ -3,7 +3,12 @@
 import { useTranslations } from "next-intl";
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { PANEL_MARGIN, type PanelPlacement, placePanel, viewportSize } from "@/lib/panel-placement";
+import {
+  PANEL_MAX_WIDTH,
+  type PanelPlacement,
+  placePanel,
+  viewportSize,
+} from "@/lib/panel-placement";
 import { ChevronGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
 
@@ -294,7 +299,7 @@ export function Select({
                   : { left: rect?.left ?? 0, top: (rect?.bottom ?? 0) + MENU_GAP }),
                 minWidth,
                 width: "max-content",
-                maxWidth: `min(${MENU_MAX_WIDTH}px, calc(100vw - ${PANEL_MARGIN * 2}px))`,
+                maxWidth: `min(${MENU_MAX_WIDTH}px, ${PANEL_MAX_WIDTH})`,
                 zIndex: "var(--ms-z-menu)",
                 // Rows must scroll to the panel edge and clip on the radius —
                 // panel padding would crop them mid-item at the scroll boundary.

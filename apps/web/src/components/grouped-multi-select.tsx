@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { PANEL_MAX_WIDTH } from "@/lib/panel-placement";
 import { useAnchoredPanel } from "./anchored-panel";
 import { ChevronGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
@@ -286,7 +287,7 @@ export function GroupedMultiSelect({
               style={{
                 ...panelStyle,
                 width: "max-content",
-                maxWidth: "min(320px, calc(100vw - 24px))",
+                maxWidth: `min(320px, ${PANEL_MAX_WIDTH})`,
                 padding: 0,
                 overflow: "hidden",
                 zIndex: "var(--ms-z-menu)",

@@ -2,7 +2,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { PANEL_MARGIN, type PanelPlacement, placePanel, viewportSize } from "@/lib/panel-placement";
+import {
+  PANEL_MAX_WIDTH,
+  type PanelPlacement,
+  placePanel,
+  viewportSize,
+} from "@/lib/panel-placement";
 import { EllipsisGlyph } from "./icons/nav-icons.js";
 import { Spinner } from "./spinner";
 
@@ -172,7 +177,7 @@ export function PopoverMenu({
   const position: React.CSSProperties = {
     position: "fixed",
     width: "max-content",
-    maxWidth: `calc(100vw - ${PANEL_MARGIN * 2}px)`,
+    maxWidth: PANEL_MAX_WIDTH,
     ...(placed
       ? { left: placed.left, top: placed.top, maxHeight: placed.maxHeight, overflowY: "auto" }
       : { left: rect?.left ?? 0, top: (rect?.bottom ?? 0) + GAP }),
