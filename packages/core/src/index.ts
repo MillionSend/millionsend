@@ -621,7 +621,6 @@ export {
   fetchTeamStanding,
   isSilentlySuspended,
   isTeamSuspended,
-  linksDisabled,
   SILENT_SUSPENSIONS,
   STANDING_COLUMNS,
   SUSPENSION_REASONS,
@@ -694,3 +693,9 @@ export {
   type WebhookPayload,
   type WebhookSignatureHeaders,
 } from "./webhooks.js";
+
+// Its own statement, apart from the team-standing block above, so edits to
+// either touch different lines. Blank lines around this comment end Biome's
+// run of exports, which would otherwise merge the two.
+
+export { linksDisabled } from "./team-standing.js";
