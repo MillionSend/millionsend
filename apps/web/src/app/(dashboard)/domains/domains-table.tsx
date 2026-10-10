@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ResourceApiButton } from "@/components/api-sheet";
+import { Breakable } from "@/components/breakable";
 import { CopyChip } from "@/components/copy-chip";
 import { EmptyState } from "@/components/empty-state";
 import { ExportCsvLink } from "@/components/export-csv-link";
@@ -268,7 +269,9 @@ export function DomainsView() {
                               name="domains"
                               color={TONE_COLOR[DOMAIN_TONE[shown(domain)]]}
                             />
-                            <Link href={`/domains/${domain.id}`}>{domain.name}</Link>
+                            <Link href={`/domains/${domain.id}`}>
+                              <Breakable text={domain.name} />
+                            </Link>
                           </span>
                         </td>
                         <td>
