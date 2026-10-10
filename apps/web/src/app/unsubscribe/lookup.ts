@@ -2,6 +2,9 @@ import { env } from "@millionsend/config";
 import {
   deriveUnsubscribeKey,
   isSubscribedToTopic,
+  linksDisabled,
+  STANDING_COLUMNS,
+  teamStandingOf,
   verifyUnsubscribeToken,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -132,6 +135,7 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
       poweredBy: tm.unsubscribePoweredBy,
       plan: tm.plan,
       currentPeriodEnd: tm.currentPeriodEnd,
+      ...STANDING_COLUMNS,
     })
     .from(c)
     .innerJoin(tm, eq(tm.id, c.teamId))
@@ -145,7 +149,9 @@ export async function targetForToken(db: Db, token: string): Promise<Unsubscribe
     brandName: contact.brandName ?? contact.teamName,
     message: contact.message,
     successMessage: contact.successMessage,
-    redirectUrl: contact.redirectUrl,
+    // Disabled links take the hop to the team's site with them; the opt-out
+    // itself always goes through.
+    redirectUrl: linksDisabled(teamStandingOf(contact)) ? null : contact.redirectUrl,
     // Storage off ⇒ stored URLs may be dead; fall back to name/wordmark.
     logoUrl: contact.hideBranding && uploadsEnabled() ? contact.logoUrl : null,
     logoRadius: contact.logoRadius,

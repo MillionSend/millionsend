@@ -55,9 +55,9 @@ export function teamStandingOf(row: {
 }
 
 /**
- * Whether the team's tracked links in mail already delivered stop leading
- * anywhere. An unpaid invoice says nothing about the mail, so it leaves them
- * working.
+ * Whether the team's links in mail already delivered stop leading anywhere:
+ * tracked clicks, and the hosted unsubscribe page's hop to the team's site.
+ * An unpaid invoice says nothing about the mail, so it leaves them working.
  */
 export function linksDisabled(standing: TeamStanding): boolean {
   return standing.suspended !== null && standing.suspended.reason !== "non_payment";
