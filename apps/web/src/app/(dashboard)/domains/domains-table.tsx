@@ -34,7 +34,7 @@ import {
 } from "./domain-status";
 import { RegionLabel } from "./region-label";
 
-/** Mirrors the loaded rows: mono domain link, status badge, region label, relative time. */
+/** Mirrors the loaded rows: mono domain link, status badge, region label, relative time, action. */
 function SkeletonRows() {
   const widths = [180, 120, 90];
   return (
@@ -52,6 +52,9 @@ function SkeletonRows() {
           </td>
           <td className="right">
             <Skeleton width={48} />
+          </td>
+          <td className="right" style={{ width: 40 }}>
+            <Skeleton width={28} height={28} radius={8} />
           </td>
         </tr>
       ))}
@@ -249,6 +252,8 @@ export function DomainsView() {
                     <th className="right" style={{ width: "13%" }}>
                       {t("list.columns.created")}
                     </th>
+                    {/* Overflow-action column — no header label. */}
+                    <th className="right" />
                   </tr>
                 </thead>
                 {domains.isPending ? (
@@ -273,47 +278,40 @@ export function DomainsView() {
                           <RegionLabel region={domain.region} />
                         </td>
                         <td className="right">
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 10,
-                              justifyContent: "flex-end",
-                            }}
-                          >
-                            <RelativeTime date={domain.createdAt} />
-                            <PopoverMenu
-                              ariaLabel={t("detail.moreActions")}
-                              items={[
-                                {
-                                  label: t("list.rowDetails"),
-                                  onSelect: () => router.push(`/domains/${domain.id}`),
-                                },
-                                ...(domain.status !== "verified" && canManage
-                                  ? [
-                                      {
-                                        label: t("detail.checkDns"),
-                                        busy: checkingId === domain.id,
-                                        keepOpen: true,
-                                        onSelect: () => {
-                                          setCheckingId(domain.id);
-                                          verifyMutation.mutate({ id: domain.id });
-                                        },
+                          <RelativeTime date={domain.createdAt} />
+                        </td>
+                        <td className="right" style={{ width: 40 }}>
+                          <PopoverMenu
+                            ariaLabel={t("detail.moreActions")}
+                            items={[
+                              {
+                                label: t("list.rowDetails"),
+                                onSelect: () => router.push(`/domains/${domain.id}`),
+                              },
+                              ...(domain.status !== "verified" && canManage
+                                ? [
+                                    {
+                                      label: t("detail.checkDns"),
+                                      busy: checkingId === domain.id,
+                                      keepOpen: true,
+                                      onSelect: () => {
+                                        setCheckingId(domain.id);
+                                        verifyMutation.mutate({ id: domain.id });
                                       },
-                                    ]
-                                  : []),
-                                null,
-                                {
-                                  label: t("detail.deleteDomain"),
-                                  danger: true,
-                                  onSelect: () => {
-                                    setConfirmText("");
-                                    setDeleteTarget({ id: domain.id, name: domain.name });
-                                  },
+                                    },
+                                  ]
+                                : []),
+                              null,
+                              {
+                                label: t("detail.deleteDomain"),
+                                danger: true,
+                                onSelect: () => {
+                                  setConfirmText("");
+                                  setDeleteTarget({ id: domain.id, name: domain.name });
                                 },
-                              ]}
-                            />
-                          </span>
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     ))}
