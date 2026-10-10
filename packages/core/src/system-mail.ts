@@ -52,20 +52,26 @@ export type SystemMailKind =
   | AccountMailKind;
 
 /**
- * Automated notices about a team that go nowhere while it is suspended, for
- * any reason: each describes a team that could still send or nudges it to
- * pay for more, and a team suspended for phishing must not learn from them
- * that it was caught. The suspension and reinstatement notices keep their own
- * rules, and mail about a person's own account names no team.
+ * The only notices about a team that still reach it while it is suspended:
+ * the suspension and reinstatement (each under its own rules), the security
+ * receipts and billing. Everything else about the team is muted, so a new
+ * kind stays quiet until it is listed here, and a silent suspension mutes
+ * these too: the team must not learn that it was caught (Stripe still sends
+ * its own receipts). Mail about a person's own account and mail to the
+ * operator name no team, so no suspension mutes them.
  */
-export const MUTED_WHILE_SUSPENDED: ReadonlySet<SystemMailKind> = new Set<SystemMailKind>([
-  "quota.warning",
-  "quota.reached",
-  "quota.paused",
-  "broadcast.held_quota",
-  "deliverability.warning",
-  "deliverability.paused",
-  "broadcast.held",
+export const SENT_WHILE_SUSPENDED: ReadonlySet<SystemMailKind> = new Set<SystemMailKind>([
+  "team.suspended",
+  "team.reinstated",
+  "api_key.created",
+  "webhook.secret_rotated",
+  "member.joined",
+  "billing.payment_failed",
+  "billing.plan_activated",
+  "billing.plan_changed",
+  "billing.cancel_scheduled",
+  "billing.cancel_reminder",
+  "billing.downgraded",
 ]);
 
 export interface SystemMailMessage {
@@ -171,12 +177,9 @@ export async function sendSystemMail(
   const suspended = message.aboutTeamId
     ? (await fetchTeamStanding(deps.db, message.aboutTeamId))?.suspended
     : null;
-  // A silent suspension mutes billing mail too, while Stripe still sends its
-  // own receipts; any other suspension keeps its billing mail.
   if (
     suspended &&
-    (MUTED_WHILE_SUSPENDED.has(message.kind) ||
-      (message.kind.startsWith("billing.") && SILENT_SUSPENSIONS.includes(suspended.reason)))
+    (SILENT_SUSPENSIONS.includes(suspended.reason) || !SENT_WHILE_SUSPENDED.has(message.kind))
   ) {
     return "muted";
   }

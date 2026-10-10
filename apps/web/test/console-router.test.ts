@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { recordAudit, upgradesHeld } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -1245,5 +1246,34 @@ describe("review holds", () => {
     expect(await auditRows("team.suspended")).not.toContainEqual(
       expect.objectContaining({ teamId: id }),
     );
+  });
+});
+
+describe("suspension and the system team's contacts", () => {
+  it("a review hold turned phishing takes its people off the system team's list, and reinstating leaves them off", async () => {
+    const system = await createTeam(db, randomUUID());
+    await db.update(schema.teams).set({ plan: "system" }).where(eq(schema.teams.id, system));
+    const held = await createTeam(db, randomUUID());
+    const userId = randomUUID();
+    const email = `${userId}@example.com`;
+    await db.insert(schema.user).values({ id: userId, name: "Held", email });
+    await db.insert(schema.teamMembers).values({ teamId: held, userId, role: "owner" });
+    await db.insert(schema.contacts).values({ teamId: system, email });
+    const unsubscribed = async () => {
+      const [row] = await db
+        .select({ unsubscribed: schema.contacts.unsubscribed })
+        .from(schema.contacts)
+        .where(and(eq(schema.contacts.teamId, system), eq(schema.contacts.email, email)));
+      return row?.unsubscribed;
+    };
+
+    await db
+      .update(schema.teams)
+      .set({ suspendedAt: new Date(), suspensionReason: "review" })
+      .where(eq(schema.teams.id, held));
+    await operator().console.teams.suspend({ id: held, reason: "phishing" });
+    expect(await unsubscribed()).toBe(true);
+    await operator().console.teams.reinstate({ id: held });
+    expect(await unsubscribed()).toBe(true);
   });
 });

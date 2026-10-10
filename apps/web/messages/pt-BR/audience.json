@@ -192,6 +192,7 @@
       "topic_opt_in": "Optou por entrar em {name}",
       "topic_opt_out": "Optou por sair de {name}",
       "unsubscribed": "Descadastrado",
+      "unsubscribed_team_suspended": "Descadastrado: uma equipe da qual faz parte foi suspensa",
       "resubscribed": "Reinscrito",
       "segment_added": "Adicionado ao segmento {name}",
       "segment_removed": "Removido do segmento {name}"
