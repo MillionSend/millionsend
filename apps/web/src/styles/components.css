@@ -1294,8 +1294,11 @@ button.ms-notice-strip-action {
   max-width: calc(100vw - 48px);
   max-height: calc(100dvh - 48px);
   overflow-y: auto;
-  /* An address in a confirm message breaks rather than run under the edge. */
-  overflow-wrap: break-word;
+  /* A URL or address in a confirm message breaks rather than run under the
+     edge. "anywhere", not "break-word": only it also lowers the text's
+     min-content width, which sizes the auto track of a dialog's grid form,
+     so a long URL cannot widen the form past the dialog. */
+  overflow-wrap: anywhere;
   animation: ms-fade var(--ms-dur-drawer) var(--ms-ease);
 }
 /* The last thing in every dialog, scrolling with the content rather than
