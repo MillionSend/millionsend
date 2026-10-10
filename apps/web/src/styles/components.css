@@ -1417,9 +1417,9 @@ button.ms-notice-strip-action {
 }
 /* Fixed-layout lists (broadcasts, contacts): on a wide desktop the lead
    column holds its share and the date column takes the rest. Narrower, the
-   shares plus cell padding would leave the date no width at all (it drew
-   under the row menu), so the date gets a fixed width and the lead column
-   takes what is left; !important beats the share set inline. */
+   shares plus cell padding would leave the date no width at all, drawn under
+   the row menu, so the date gets a fixed width and the lead column takes
+   what is left; !important beats the share set inline. */
 @media (max-width: 1199px) {
   .ms-table th.ms-col-lead {
     width: auto !important;
@@ -1429,7 +1429,7 @@ button.ms-notice-strip-action {
   }
 }
 /* A cell that takes what the other columns leave and ellipsizes inside it
-   (the emails list's subject): with max-width 0 its text no longer sets the
+   (the emails list's subject): with max-width 0 its text does not set the
    table's minimum width, so a long subject never pushes the time column off
    a desktop. Phones keep the full-width table that scrolls. */
 @media (min-width: 900px) {
@@ -2241,17 +2241,17 @@ summary:focus-visible,
   .ms-page-row:has(> .ms-page-actions > .ms-page-menu:only-child) > .ms-page-title {
     padding-right: 40px;
   }
-  /* An address or URL title at the display size runs three to six lines
-     here; it takes the card-title size instead, line box included.
+  /* An address, URL or domain title at the display size runs three to six
+     lines here; it takes the card-title size instead, line box included.
      !important beats the inline page-title size. */
   .ms-page-heading:has(> .ms-data-title),
   .ms-data-title {
     font-size: var(--ms-fs-h2) !important;
   }
   /* A note hung under a header action (the composer's "test sent to …")
-     joins the flow on the line under its button: hung there it covered the
-     step bar below the header, and a long one ran off the viewport.
-     !important beats the inline anchoring. */
+     joins the flow on the line under its button: hung there it would cover
+     the step bar below the header, and a long one would run off the
+     viewport. !important beats the inline anchoring. */
   .ms-page-actions > div:has(> .ms-action-note) {
     flex-wrap: wrap;
   }
@@ -2301,8 +2301,8 @@ summary:focus-visible,
     width: auto !important;
   }
 
-  /* Console grids: 3-up collapses to 2-up (4-up and the 2/1 splits already
-     did, in the block above). */
+  /* Console grids: 3-up collapses to 2-up (4-up and the 2/1 splits collapse
+     in the narrow-desktop block above). */
   .ms-grid-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2476,6 +2476,16 @@ summary:focus-visible,
     transform: none;
     flex-wrap: wrap;
     justify-content: center;
+  }
+  /* Its edit menu hangs from the bar's right end rather than from the
+     button, which sits too far right for the menu to fit; !important beats
+     the inline anchoring. */
+  .ms-bulk-bar > div:has(> .ms-menu) {
+    position: static !important;
+  }
+  .ms-bulk-bar .ms-menu {
+    left: auto !important;
+    right: 0;
   }
   /* Toasts drop from under the topbar: at the bottom they would sit on a
      dialog's footer buttons for their whole lifetime. */

@@ -44,8 +44,9 @@ const BULK_BATCH = 100;
 
 // Fixed layout: column shares hold and long cells truncate instead of pushing
 // the trailing columns past the page edge. The floor keeps the status badge
-// readable at its 15% share; narrower viewports scroll the Table box.
-const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 720 };
+// readable at its 15% share, and the email about 240px once the date column
+// takes its fixed width below 1200px; narrower viewports scroll the Table box.
+const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 860 };
 
 function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
   const t = useTranslations("audience");

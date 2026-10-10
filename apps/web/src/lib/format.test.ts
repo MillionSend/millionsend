@@ -36,9 +36,11 @@ it("cuts a dot-joined value into parts that each keep their trailing dot", () =>
   expect(dotParts("sandbox")).toEqual(["sandbox"]);
 });
 
-it("tells an address or URL from prose and figures", () => {
+it("tells an address, URL or domain from prose and figures", () => {
   expect(isAddressLike("bruno.holanda@sabordaterra.com.br")).toBe(true);
   expect(isAddressLike("https://api.example.com/hooks/1")).toBe(true);
+  expect(isAddressLike("news.example-shop.com.br")).toBe(true);
   expect(isAddressLike("153.623")).toBe(false);
+  expect(isAddressLike("1.234,56")).toBe(false);
   expect(isAddressLike("Clientes ativos em São Paulo / Moema")).toBe(false);
 });

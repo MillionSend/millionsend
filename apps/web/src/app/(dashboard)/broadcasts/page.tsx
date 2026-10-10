@@ -26,7 +26,9 @@ import { type BroadcastStatus, PacingSteps, PILL_VARIANT, StatusPill } from "./p
 
 // Fixed layout keeps the percentage column shares; the min width makes the
 // wrapper scroll on narrow screens instead of squeezing nowrap cells together.
-const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 640 };
+// 880px keeps the name about 180px once the date column takes its fixed
+// width (components.css, .ms-col-date) below 1200px.
+const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 880 };
 
 function BroadcastsHead() {
   const t = useTranslations("broadcasts");

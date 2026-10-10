@@ -181,9 +181,13 @@ export function displayUrl(url: string): string {
   return url.replace(/^https?:\/\//, "");
 }
 
-/** An address or URL rather than prose: one token, with an "@" or a "/" in it. */
+/**
+ * An address, URL or domain name rather than prose or a figure: one token,
+ * with an "@" or a "/" in it, or dot-separated labels with a letter in them.
+ */
 export function isAddressLike(text: string): boolean {
-  return !/[ \t\n]/.test(text) && /[@/]/.test(text);
+  if (/[ \t\n]/.test(text)) return false;
+  return /[@/]/.test(text) || (/^[\w-]+(\.[\w-]+)+$/.test(text) && /[a-z]/i.test(text));
 }
 
 /**
