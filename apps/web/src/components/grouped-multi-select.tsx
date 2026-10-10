@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { PANEL_MAX_WIDTH } from "@/lib/panel-placement";
 import { useAnchoredPanel } from "./anchored-panel";
 import { ChevronGlyph } from "./icons/nav-icons";
 import { useDismiss } from "./popover-menu";
@@ -82,7 +83,9 @@ export function GroupedMultiSelect({
   const dismissRefs = useMemo(() => [rootRef, menuRef], []);
   // Portaled and fixed under the trigger: inside a dialog (a scroll
   // container) an in-flow panel would be clipped at the dialog's edge.
-  const panelStyle = useAnchoredPanel(open ? rootRef.current : null);
+  const panelStyle = useAnchoredPanel(open ? rootRef.current : null, menuRef, {
+    onAnchorHidden: () => setOpen(false),
+  });
   const listboxId = useId();
 
   // Filter, then flatten in group order so keyboard nav and rendering agree.
@@ -284,7 +287,7 @@ export function GroupedMultiSelect({
               style={{
                 ...panelStyle,
                 width: "max-content",
-                maxWidth: "min(320px, calc(100vw - 32px))",
+                maxWidth: `min(320px, ${PANEL_MAX_WIDTH})`,
                 padding: 0,
                 overflow: "hidden",
                 zIndex: "var(--ms-z-menu)",

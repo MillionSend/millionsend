@@ -4,8 +4,10 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { regionFlag } from "@/app/(dashboard)/domains/regions";
+import { DotParts } from "@/components/dot-parts";
+import { KvRow } from "@/components/kv-row";
 import { PopoverMenu } from "@/components/popover-menu";
 import { Sparkline } from "@/components/sparkline";
 import { toast } from "@/components/toast";
@@ -190,7 +192,9 @@ export function QuotaBar({
   );
 }
 
-function Dot({ tone }: { tone: "success" | "warn" | "danger" | "info" | "steel" }) {
+type DotTone = "success" | "warn" | "danger" | "info" | "steel";
+
+function Dot({ tone }: { tone: DotTone }) {
   return <span className="ms-dot" style={{ background: `var(--ms-${tone})`, marginRight: 6 }} />;
 }
 
@@ -241,7 +245,8 @@ export function RegionCard({ region, onChanged }: { region: ServedRegion; onChan
           ? t("eventsIdle")
           : t("eventsLag", { lag: formatDurationShort(pipeline.eventsLagSeconds * 1000) });
 
-  const rows: [string, React.ReactNode][] = [
+  // [label, value, status dot]
+  const rows: [string, string, DotTone?][] = [
     [
       t("maxRate"),
       account
@@ -263,10 +268,8 @@ export function RegionCard({ region, onChanged }: { region: ServedRegion; onChan
     ],
     [
       t("enforcement"),
-      <>
-        <Dot tone={enforcement === "HEALTHY" ? "success" : "warn"} />
-        {enforcement ? enforcement.toLowerCase() : t("planUnknown")}
-      </>,
+      enforcement ? enforcement.toLowerCase() : t("planUnknown"),
+      enforcement === "HEALTHY" ? "success" : "warn",
     ],
     [t("domains"), t("domainsValue", { count: region.domainsVerified })],
     [
@@ -279,54 +282,31 @@ export function RegionCard({ region, onChanged }: { region: ServedRegion; onChan
           })
         : t("queueEmpty"),
     ],
-    [
-      t("txParked"),
-      txParked ? (
-        <>
-          <Dot tone="danger" />
-          {t("txParkedAt", { ago: formatRelative(txParked, f.locale) })}
-        </>
-      ) : (
-        <>
-          <Dot tone="success" />
-          {t("txParkedNone")}
-        </>
-      ),
-    ],
+    txParked
+      ? [t("txParked"), t("txParkedAt", { ago: formatRelative(txParked, f.locale) }), "danger"]
+      : [t("txParked"), t("txParkedNone"), "success"],
     sandbox
-      ? [
-          t("productionRow"),
-          <>
-            <Dot tone="warn" />
-            {t("productionPending")}
-          </>,
-        ]
-      : [
-          t("breaker"),
-          breaker && breaker.manualReason !== null ? (
-            <>
-              <Dot tone="danger" />
-              {t("breakerManual")}
-            </>
-          ) : breaker?.reason ? (
-            <>
-              <Dot tone="danger" />
-              {t("breakerOpen", {
+      ? [t("productionRow"), t("productionPending"), "warn"]
+      : breaker && breaker.manualReason !== null
+        ? [t("breaker"), t("breakerManual"), "danger"]
+        : breaker?.reason
+          ? [
+              t("breaker"),
+              t("breakerOpen", {
                 metric: t(`metric.${breaker.reason.metric}`),
                 rate: f.pct2(breaker.reason.rate),
-              })}
-            </>
-          ) : (
-            <>
-              <Dot tone="success" />
-              {t("breakerRates", {
+              }),
+              "danger",
+            ]
+          : [
+              t("breaker"),
+              t("breakerRates", {
                 closed: t("breakerClosed"),
                 bounce: region.week ? f.pct2(region.week.hardBounceRate) : "—",
                 complaint: region.week ? f.pct2(region.week.complaintRate) : "—",
-              })}
-            </>
-          ),
-        ],
+              }),
+              "success",
+            ],
     [t("events"), list.data ? events(list.data) : "—"],
     [
       t("cost"),
@@ -354,15 +334,17 @@ export function RegionCard({ region, onChanged }: { region: ServedRegion; onChan
         <span style={{ fontSize: 20, lineHeight: 1 }} aria-hidden="true">
           {regionFlag(region.region)}
         </span>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600 }}>{domains(`regions.${region.region}`)}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600 }}>
+            {domains(`regions.${region.region}`)}{" "}
+            <span className="ms-title-badges">
+              <RegionBadge status={region.status} />
+            </span>
+          </div>
           <div className="ms-mono" style={{ fontSize: 12, color: "var(--ms-muted)" }}>
-            {region.region} · {t(sandbox ? "sandboxLower" : "production")}
+            <DotParts text={`${region.region} · ${t(sandbox ? "sandboxLower" : "production")}`} />
           </div>
         </div>
-        <span style={{ marginLeft: "auto" }}>
-          <RegionBadge status={region.status} />
-        </span>
         <RegionMenu region={region} onChanged={onChanged} />
       </div>
       <div>
@@ -396,24 +378,28 @@ export function RegionCard({ region, onChanged }: { region: ServedRegion; onChan
           style={{ marginTop: 6 }}
         />
         {split && region.share !== null && region.usableReserve !== null ? (
+          // Each legend entry wraps whole; the reserve note is the one place
+          // an entry may break, when it alone is wider than the card.
           <div
             style={{
               display: "flex",
-              gap: 10,
+              gap: "2px 14px",
               flexWrap: "wrap",
               marginTop: 8,
               fontSize: 11.5,
               color: "var(--ms-bone)",
             }}
           >
-            <span>
+            <span className="ms-part">
               <Dot tone="steel" />
               {t("legendBroadcasts", { sent: f.n(region.bulkSent24h), share: f.n(region.share) })}
             </span>
-            <span>
-              <Dot tone={split.segments[1]?.color === "var(--ms-warn)" ? "warn" : "info"} />
-              {t("legendTransactional", { sent: f.n(region.txSent24h ?? 0) })}{" "}
-              <span style={{ color: "var(--ms-muted)" }}>
+            <span style={{ minWidth: 0 }}>
+              <span className="ms-part">
+                <Dot tone={split.segments[1]?.color === "var(--ms-warn)" ? "warn" : "info"} />
+                {t("legendTransactional", { sent: f.n(region.txSent24h ?? 0) })}
+              </span>{" "}
+              <span className="ms-part" style={{ color: "var(--ms-muted)" }}>
                 {t("legendUsable", { usable: f.n(region.usableReserve) })}
               </span>
             </span>
@@ -421,11 +407,10 @@ export function RegionCard({ region, onChanged }: { region: ServedRegion; onChan
         ) : null}
       </div>
       <dl className="ms-kv">
-        {rows.map(([label, value]) => (
-          <Fragment key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </Fragment>
+        {rows.map(([label, value, tone]) => (
+          <KvRow key={label} label={label}>
+            <DotParts lead={tone ? <Dot tone={tone} /> : null} text={value} />
+          </KvRow>
         ))}
       </dl>
       <span

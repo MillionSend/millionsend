@@ -152,9 +152,9 @@ export function DomainsView() {
               <PlusGlyph size={14} />
               {t("list.addDomain")}
             </Link>
-            <ResourceApiButton resource="domains" />
           </>
         }
+        menu={<ResourceApiButton resource="domains" />}
       />
 
       <AwsCredentialsBanner />

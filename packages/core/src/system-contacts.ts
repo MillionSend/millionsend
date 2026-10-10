@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, eq, sql } from "drizzle-orm";
-import { recordContactActivity } from "./contact-activities.js";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { type ContactActivityRow, recordContactActivity } from "./contact-activities.js";
 import { eraseRecipient } from "./erase-recipient.js";
 import { splitPersonName } from "./person-name.js";
 import { clearUnsubscribeSuppression } from "./suppressions.js";
@@ -73,6 +73,42 @@ export async function confirmSystemContact(
   if (!resubscribed) return;
   await clearUnsubscribeSuppression(db, teamId, user.email);
   await recordContactActivity(db, { teamId, contactId: resubscribed.id, type: "resubscribed" });
+}
+
+/**
+ * A suspension over the rules: every member's contact in the instance's own
+ * team (the `system` plan) is unsubscribed, even one who also belongs to a
+ * team in good standing. The state is the dashboard's unsubscribe; no
+ * webhook fires, since that team did not act, and only the person's own
+ * opt-in (confirmSystemContact) undoes it. Returns the timeline rows, for
+ * the caller to record once its transaction commits.
+ */
+export async function unsubscribeSuspendedMembers(
+  db: Db,
+  teamId: string,
+): Promise<ContactActivityRow[]> {
+  const c = schema.contacts;
+  const m = schema.teamMembers;
+  const u = schema.user;
+  const now = new Date();
+  const rows = await db
+    .update(c)
+    .set({ unsubscribed: true, unsubscribedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(c.unsubscribed, false),
+        inArray(
+          c.teamId,
+          db
+            .select({ id: schema.teams.id })
+            .from(schema.teams)
+            .where(eq(schema.teams.plan, "system")),
+        ),
+        sql`lower(${c.email}) in (select lower(${u.email}) from ${m} join ${u} on ${u.id} = ${m.userId} where ${m.teamId} = ${teamId})`,
+      ),
+    )
+    .returning({ teamId: c.teamId, contactId: c.id });
+  return rows.map((row) => ({ ...row, type: "unsubscribed_team_suspended" }));
 }
 
 /**

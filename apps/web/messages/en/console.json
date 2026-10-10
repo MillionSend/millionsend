@@ -32,7 +32,7 @@
     "to": "To",
     "total": "total",
     "average": "average",
-    "hoverHint": "Hover for exact values. Presets or a custom range.",
+    "hoverHint": "Hover or tap for exact values. Presets or a custom range.",
     "vsPrevious": "{delta} vs previous",
     "ofTeams": "{shown} of {total} teams",
     "period": {
@@ -215,7 +215,7 @@
     "planUnknown": "unknown",
     "enforcement": "Enforcement",
     "domains": "Domains",
-    "domainsValue": "{count} verified",
+    "domainsValue": "{count, plural, other {# verified}}",
     "breaker": "Breaker",
     "breakerClosed": "closed",
     "breakerOpen": "open · {metric} {rate}",
@@ -393,7 +393,7 @@
       "check1Production": "GetAccount answers · production"
     },
     "sold": {
-      "text": "Sold {committed}/day against a {share}/day broadcast share in {region}",
+      "text": "Sold {committed}/day against a {share}/day broadcast share in <nowrap>{region}</nowrap>",
       "backlog": " · {waiting} waiting, clears about {clears}",
       "action": "Request quota increase",
       "justification": "Broadcast backlog clears by {date}; the plans sold outrun the broadcast share of the quota."
@@ -401,7 +401,7 @@
   },
   "teams": {
     "title": "Teams",
-    "proof": "{total} teams · {free} free · {paid} paid · {system} system · {suspended} suspended",
+    "proof": "{total} teams · {free} free · {paid} paid · {system} system · {suspended, plural, other {# suspended}}",
     "search": "Search teams, owners, domains, ids",
     "filters": {
       "type": "Type: {value}",
@@ -430,6 +430,7 @@
     "empty": "0 teams match.",
     "menu": {
       "open": "Open team",
+      "copyId": "Copy ID",
       "view": "View as owner",
       "viewOff": "Off on this instance: SUPPORT_VIEW=on turns it on",
       "viewSilent": "Not while the team is suspended for phishing or held for review",
@@ -453,13 +454,14 @@
       "error": "The action failed: {message}"
     },
     "detail": {
+      "id": "Team ID",
       "lead": "Everything the console knows about the team. Bodies are not here.",
       "sent30d": "Sent 30d",
       "contacts": "Contacts",
       "score": "Score",
       "scoreOf": "{score} / 10",
       "domains": "Domains",
-      "domainsValue": "{count} verified",
+      "domainsValue": "{count, plural, other {# verified}}",
       "type": "Type",
       "owner": "Owner",
       "members": "Members",
@@ -534,7 +536,7 @@
     },
     "viewDialog": {
       "title": "View {team} as its owner",
-      "lead": "Opens the team dashboard read-only under a banner, for 30 minutes. Every procedure read is counted on the session, and the session appears in the team's own audit at once.",
+      "lead": "Opens the team dashboard read-only under a banner, for 30 minutes, once a one-time code from your email confirms it is you. A view you still have open ends first. Every procedure read is counted on the session, and the session appears in the team's own audit at once.",
       "reasons": {
         "support_ticket": "Support ticket",
         "billing_dispute": "Billing dispute",
@@ -544,14 +546,28 @@
       "referencePlaceholder": "#4812",
       "hiddenTitle": "Sent bodies stay hidden here too.",
       "hiddenBody": "The content of a broadcast that has gone out, and of every sent email, follows the Trust & safety reveal rule, not the support view. A draft or scheduled broadcast stays readable.",
+      "sendCode": "Email me a code",
+      "code": "Code from your email",
+      "codeSent": "Sent to {email}. It works once, for {minutes} minutes.",
+      "codeResend": "Send a new code",
+      "verified": "The code you confirmed in this session still covers starting a view ({left} left).",
+      "fallback": {
+        "no_mail": "This instance cannot send email (it needs AUTH_EMAIL_FROM and SES credentials), so no code goes out: a sign-in from the last {minutes} minutes stands in for it.",
+        "send_failed": "The code email could not be sent, so a sign-in from the last {minutes} minutes stands in for it.",
+        "fresh": "Yours is recent enough: start the session.",
+        "stale": "Yours is older: sign out and back in, then start it again."
+      },
       "confirm": "Start session · 30 min",
       "errors": {
         "support_view_off": "Support view is off on this instance (SUPPORT_VIEW=on turns it on).",
-        "support_view_live": "A support view is already live. Open the dashboard and end it from its banner before starting another.",
-        "sign_in_again": "Starting a support view needs a recent sign-in. Sign out and back in, then start it again.",
+        "sign_in_again": "Without an emailed code, starting a support view needs a recent sign-in. Sign out and back in, then start it again.",
         "own_team": "You are a member of this team; open it from the team switcher instead.",
         "silent_suspension": "This team is suspended for phishing or held for review, so no support view can start.",
-        "reference_required": "A ticket reference is required."
+        "reference_required": "A ticket reference is required.",
+        "code_required": "A code is needed now: email yourself one.",
+        "code_invalid": "That code is not right. Check the email and try again.",
+        "code_void": "That code no longer works: it expired, was used, or took too many wrong tries. Send a new one.",
+        "code_limit": "Too many codes this hour. Try again later."
       }
     },
     "ownerTip": "Owner: {email}"
@@ -669,7 +685,7 @@
       },
       "emails": {
         "title": "Flagged emails · {count}",
-        "subtitle": "Sent in the last 7 days with a failing critical or major check. Subject and body are content and stay encrypted; the pill explains itself on hover.",
+        "subtitle": "Sent in the last 7 days with a failing critical or major check. Subject and body are content and stay encrypted; the pill explains itself on hover or tap.",
         "sent": "Sent",
         "from": "From",
         "recipients": "Recipients",
@@ -711,7 +727,7 @@
         "samplesValue": "{samples} · {flagged} flagged · {unjudged} unjudged",
         "verdicts": "Verdicts",
         "verdictsValue": "{clean} clean · {flagged} flagged",
-        "verdictsReasons": "{clean} clean · {flagged} flagged: <reasons></reasons>",
+        "verdictsReasons": "<part>{clean} clean ·</part> <part>{flagged} flagged: <reasons></reasons></part>",
         "lastSample": "Last sample",
         "model": "Model",
         "override": "Override",

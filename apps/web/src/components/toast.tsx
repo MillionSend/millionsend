@@ -44,16 +44,7 @@ export function ToastHost() {
   }, [current]);
   if (!current) return null;
   return (
-    <div
-      style={{
-        position: "fixed",
-        left: "50%",
-        bottom: 24,
-        transform: "translateX(-50%)",
-        zIndex: "var(--ms-z-menu)",
-        maxWidth: "calc(100vw - 32px)",
-      }}
-    >
+    <div className="ms-toast-host">
       <div role="status" className={`ms-toast ms-toast-${current.tone}`}>
         <span className="ms-toast-icon" aria-hidden="true">
           {ICON[current.tone]}

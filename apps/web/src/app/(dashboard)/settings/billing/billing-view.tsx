@@ -13,9 +13,10 @@ import {
 } from "@millionsend/core/plans";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { type CSSProperties, type ReactNode, useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { Modal } from "@/components/modal";
 import { Odometer } from "@/components/odometer";
+import { SectionCard } from "@/components/section-card";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
@@ -47,43 +48,9 @@ const STATUS_TONE = {
 const POST_CHECKOUT_POLLS = 6;
 const POST_CHECKOUT_POLL_MS = 2500;
 
-function Card({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  /** Right-aligned control on the title row (the card's primary action). */
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="ms-card" style={{ padding: 24 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          margin: "0 0 18px",
-        }}
-      >
-        <h2
-          className="ms-display"
-          style={{ fontSize: "var(--ms-fs-h2)", color: "var(--ms-bone)", margin: 0 }}
-        >
-          {title}
-        </h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 function BillingSkeleton({ title }: { title: string }) {
   return (
-    <Card title={title}>
+    <SectionCard title={title}>
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
         <Skeleton width={120} height={28} />
         <Skeleton width={64} height={20} radius={999} />
@@ -92,7 +59,7 @@ function BillingSkeleton({ title }: { title: string }) {
         <Skeleton width={90} height={40} />
         <Skeleton width={140} height={40} />
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -250,7 +217,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
   } = status.data;
   if (plan === "system") {
     return (
-      <Card title={t("plan")}>
+      <SectionCard title={t("plan")}>
         <span
           className="ms-display"
           style={{ fontSize: "var(--ms-fs-h1)", color: "var(--ms-bone)", lineHeight: 1 }}
@@ -260,7 +227,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         <p style={{ margin: "14px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
           {t("systemNotice")}
         </p>
-      </Card>
+      </SectionCard>
     );
   }
   const current = PLAN_RUNGS.find((r) => r.key === currentKey) ?? PLAN_RUNGS[0];
@@ -306,14 +273,19 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 20 }}>
       {notice}
 
-      <Card
+      <SectionCard
         title={t("plan")}
         action={canManage && hasCustomer ? portalButton(t("manage"), "ms-btn-secondary") : null}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 12px" }}>
           <span
             className="ms-display"
-            style={{ fontSize: "var(--ms-fs-h1)", color: "var(--ms-bone)", lineHeight: 1 }}
+            style={{
+              fontSize: "var(--ms-fs-h1)",
+              color: "var(--ms-bone)",
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+            }}
           >
             {planLabel(plan, planQuota)}
           </span>
@@ -403,9 +375,9 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         >
           {failed ? t("error") : canManage ? t("manageHint") : t("readOnly")}
         </p>
-      </Card>
+      </SectionCard>
 
-      <Card title={t("usageTitle")}>
+      <SectionCard title={t("usageTitle")}>
         {quota.kind === "month" ? (
           <>
             <QuotaRow
@@ -454,9 +426,9 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
             limit={quota.kind === "day" ? quota.limit : null}
           />
         )}
-      </Card>
+      </SectionCard>
 
-      <Card
+      <SectionCard
         title={t("plansTitle")}
         action={
           <button
@@ -486,7 +458,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
             );
           })}
         </div>
-      </Card>
+      </SectionCard>
       {/* The ladder needs more width than the content column beside the
           sidebar gives it, so it opens in a dialog that fills the viewport. */}
       <Modal

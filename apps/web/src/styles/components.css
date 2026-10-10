@@ -275,6 +275,28 @@
   grid-row: span 2;
   min-width: 0;
 }
+/* Generic flex rows that may not fit their column (a phone, a narrow
+   desktop): they wrap at every width rather than squeeze or overflow. */
+.ms-wrap-row {
+  flex-wrap: wrap;
+}
+/* Steppers (add domain): the preview column wraps under the form card
+   instead of being crushed beside it, on a narrow desktop too. */
+.ms-stepper {
+  flex-wrap: wrap;
+}
+/* A row of buttons under a form or a section: they wrap, and on a phone the
+   wrapped ones share each line's width (see the 639px block). */
+.ms-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+/* List filter rows wrap at every width: a select that does not fit beside
+   the search drops to the next line rather than pushing the page sideways. */
+.ms-filter-row {
+  flex-wrap: wrap;
+}
 /* Pill tabs on code panels (SDK sheets, the onboarding snippet). */
 .ms-code-tab {
   border: 0;
@@ -583,6 +605,104 @@ table.ms-table {
   font-size: inherit;
 }
 
+/* Page header (page-header.tsx). The title block grows from its natural
+   width; the actions share its row only while both fit at that width, and
+   otherwise wrap whole onto the row under the meta line, at any viewport. */
+.ms-page-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 14px 16px;
+}
+.ms-page-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Inline flow, so the badges follow the title's last word and wrap under it
+   as a group; the space before them is set at the title's size. */
+.ms-page-heading {
+  font-size: var(--ms-fs-h1);
+  line-height: 1.15;
+}
+.ms-page-heading > h1 {
+  display: inline;
+}
+/* Status badges right after a title (page header, card title), on its line. */
+.ms-title-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+.ms-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+/* A wrapper kept for an absolutely placed note lines its button up with the rest. */
+.ms-page-actions > div {
+  display: flex;
+}
+/* The trailing "…" or "</>" never starts a row alone: the action before it
+   holds the icon's room (30px + the 10px gap) as a margin that the icon's
+   negative margin takes back, so a row can only break before the pair. */
+.ms-page-menu {
+  display: inline-flex;
+  position: relative;
+  flex: none;
+}
+.ms-page-actions > :has(+ .ms-page-menu) {
+  margin-right: 40px;
+}
+.ms-page-menu:not(:first-child) {
+  margin-left: -40px;
+}
+/* When the icon is the only action, the title block gives way instead (it
+   wraps, the icon stays beside it). */
+.ms-page-row:has(> .ms-page-actions > .ms-page-menu:only-child) > .ms-page-title {
+  flex-basis: 0;
+}
+
+/* A dot-joined value's part (dot-parts.tsx): lines break between parts, and
+   inside one only when it is longer than a whole line. */
+.ms-part {
+  display: inline-block;
+  max-width: 100%;
+}
+
+/* Breadcrumb row: segments wrap whole; the current page, which the H1
+   repeats, is cut with an ellipsis rather than wrapped. */
+.ms-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 13px;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+.ms-crumb-seg {
+  display: inline-flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+.ms-crumb-end {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ms-muted);
+  /* Room for descenders inside the clip, without growing the row. */
+  padding: 2px 0;
+  margin: -2px 0;
+}
+
 /* Breadcrumb link — quiet until hover, when the shared dotted underline appears. */
 .ms-crumb {
   color: var(--ms-muted);
@@ -821,20 +941,23 @@ table.ms-table {
   border-color: var(--ms-line-strong);
   color: var(--ms-bone);
 }
-/* A page-level strip runs edge to edge on phones and scrolls under the
-   gutter; the inner padding keeps its first tab on the title's line. */
-@media (max-width: 899px) {
-  .ms-tabs.bleed {
-    margin-inline: -16px;
-    padding-inline: 16px;
-    scroll-padding-inline: 16px;
-    scrollbar-width: none;
-  }
-  .ms-tabs.bleed::-webkit-scrollbar {
-    display: none;
-  }
-}
 
+/* Toast host (toast.tsx): a row across the viewport bottom, the toast centred
+   in it at its own width up to the full row. A box hung at left: 50% would
+   shrink to half the viewport and wrap a short message into three lines. */
+.ms-toast-host {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 24px;
+  display: flex;
+  justify-content: center;
+  z-index: var(--ms-z-menu);
+  pointer-events: none;
+}
+.ms-toast-host > :where(*) {
+  pointer-events: auto;
+}
 /* Toast — near-black ground with a faint status-tinted glow (the system's one gradient) */
 .ms-toast {
   display: inline-flex;
@@ -922,8 +1045,9 @@ table.ms-table {
    full-width one-liner (global deliverability notices, the templates HTML banner). */
 .ms-notice-strip {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   padding: 9px 14px;
   margin-bottom: 18px;
   border-radius: var(--ms-r-input);
@@ -934,10 +1058,31 @@ table.ms-table {
   line-height: 1.4;
   text-decoration: none;
 }
+/* The text keeps at least this much width beside the action; below it the
+   action wraps whole onto the line under the text. */
+.ms-notice-strip-text {
+  flex: 1 1 288px;
+  min-width: 0;
+}
 .ms-notice-strip-action {
   margin-left: auto;
   opacity: 0.8;
   white-space: nowrap;
+}
+button.ms-notice-strip-action {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+/* A strip's button pair (the support view's). */
+.ms-notice-strip-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 .ms-notice-strip-info {
   color: var(--ms-info);
@@ -1129,20 +1274,21 @@ table.ms-table {
   max-width: calc(100vw - 48px);
   max-height: calc(100dvh - 48px);
   overflow-y: auto;
+  /* A URL or address in a confirm message breaks rather than run under the
+     edge. "anywhere", not "break-word": only it also lowers the text's
+     min-content width, which sizes the auto track of a dialog's grid form,
+     so a long URL cannot widen the form past the dialog. */
+  overflow-wrap: anywhere;
   animation: ms-fade var(--ms-dur-drawer) var(--ms-ease);
 }
-/* Pinned to the bottom while a tall dialog scrolls, opaque so rows slide
-   under it; its 28px bottom padding is the panel's, so at rest the buttons
-   sit exactly where a short dialog puts them. */
+/* The last thing in every dialog, scrolling with the content rather than
+   pinned over it; its bottom padding is the panel's bottom edge. */
 .ms-modal-footer {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
-  position: sticky;
-  bottom: 0;
   padding: 22px 0 28px;
-  background: var(--ms-panel);
 }
 .ms-modal h2 {
   font-family: var(--ms-font-sans);
@@ -1266,11 +1412,13 @@ table.ms-table {
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
-/* The health card's rows: a dot, the probe, the reading pushed right. */
+/* The health card's rows: a dot, the probe, the reading pushed right, or
+   onto the line under them whole when it does not fit beside them. */
 .ms-health-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 2px 10px;
   width: 100%;
   padding: 9px 8px;
   margin: 0 -8px;
@@ -1299,25 +1447,51 @@ table.ms-table {
   outline: none;
   box-shadow: var(--ms-focus-ring);
 }
-/* Key/value list inside cards (region cards, the team dialog). */
+/* Key/value list (kv-row.tsx: region cards, the team dialog, settings). One
+   row per pair: the value sits right-aligned on its label's line when the
+   whole of it fits there, and otherwise takes the line under the label at
+   full width. A " · "-joined value breaks only between its parts, in
+   balanced lines; a part breaks inside itself only when it alone is wider
+   than the list. */
 .ms-kv {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   font-size: var(--ms-fs-label);
-  align-items: baseline;
   margin: 0;
 }
+.ms-kv-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+}
 .ms-kv dt {
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--ms-muted);
   margin: 0;
 }
 .ms-kv dd {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   font-family: var(--ms-font-mono);
   font-size: 12px;
   text-align: right;
+  text-wrap: balance;
   overflow-wrap: anywhere;
+}
+/* Values read from a label column instead: left-aligned after at least
+   8.5rem of label while they keep 14rem beside it, and stacked under their
+   label below that (phones). */
+.ms-kv-cols dt {
+  flex: 0 0 auto;
+  min-width: 8.5rem;
+}
+.ms-kv-cols dd {
+  flex: 1 1 14rem;
+  text-align: left;
 }
 /* Radio-card rows in the console dialogs. */
 .ms-radio-card {
@@ -1329,6 +1503,14 @@ table.ms-table {
   border: 1px solid var(--ms-line);
   border-radius: var(--ms-r-input);
   cursor: pointer;
+}
+/* Radio cards sit inside a .ms-field, whose "label" rule (a muted block)
+   outranks .ms-radio-card: this keeps the radio beside its text, at the
+   body colour. */
+.ms-field .ms-radio-card {
+  display: flex;
+  margin: 0;
+  color: inherit;
 }
 .ms-radio-card input {
   margin-top: 3px;
@@ -1782,6 +1964,9 @@ summary:focus-visible,
   /* Modal-level so a tooltip inside a modal wins; ties with the overlay
      resolve by DOM order — the tooltip portal mounts after the modal's. */
   z-index: var(--ms-z-modal);
+  /* The max-width below is the whole panel, padding and border included,
+     which is what tooltip.tsx clamps into the viewport. */
+  box-sizing: border-box;
   background: var(--ms-panel);
   border: 1px solid var(--ms-line-strong);
   border-radius: 8px;
@@ -1790,7 +1975,7 @@ summary:focus-visible,
      panel to one word per line; the component clamps it back into view. */
   width: max-content;
   /* Wide enough that typical hints render as one line; long text still wraps. */
-  max-width: min(420px, calc(100vw - 32px));
+  max-width: min(420px, calc(100vw - 24px));
   font-size: 12px;
   line-height: 1.45;
   color: var(--ms-bone);
@@ -1897,14 +2082,56 @@ summary:focus-visible,
 
 /* ============================================================================
    RESPONSIVE — mobile pass (breakpoint 900px; DESIGN.md Layout).
-   Media queries only: desktop ≥900px keeps every rule above pixel-identical.
-   !important is required only where a rule overrides an inline style. */
+   Media queries only: narrow desktops (900–1199px) get the first blocks, and
+   from 1200px every rule above holds as written. !important is required only
+   where a rule overrides an inline style. */
 
 /* Side sheets: a fixed panel on wide screens; the phone rule below widens it
    to the viewport, and must come after this one to win. */
 .ms-sheet {
   width: 440px;
   max-width: calc(100vw - 24px);
+}
+
+/* Narrow desktops: beside the sidebar the content column is under 880px,
+   where a console KPI card would get under 210px and the 1fr side of a 2/1
+   split under 290px. The 4-up rows go 2-up and the splits stack. */
+@media (max-width: 1199px) {
+  .ms-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ms-grid-21,
+  .ms-grid-12 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* There too, a detail page's meta grid lays out as many columns as keep each
+   value 11rem wide, instead of its fixed three or four (!important beats the
+   page's inline template; stat strips keep theirs), and from here down no
+   value widens its column past its share: a long chip ellipsizes instead of
+   pushing the page sideways. */
+@media (min-width: 900px) and (max-width: 1199px) {
+  .ms-meta-grid:not(.ms-stat-strip) {
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)) !important;
+  }
+}
+@media (max-width: 1199px) {
+  .ms-meta-grid > :where(*) {
+    min-width: 0;
+  }
+}
+/* Fixed-layout lists (broadcasts, contacts): on a wide desktop the lead
+   column holds its share and the date column takes the rest. Narrower, the
+   shares plus cell padding would leave the date no width at all, drawn under
+   the row menu, so the date gets a fixed width and the lead column takes
+   what is left; !important beats the share set inline. */
+@media (max-width: 1199px) {
+  .ms-table th.ms-col-lead {
+    width: auto !important;
+  }
+  .ms-table th.ms-col-date {
+    width: 104px;
+  }
 }
 
 @media (max-width: 899px) {
@@ -1960,45 +2187,70 @@ summary:focus-visible,
   .ms-main {
     padding: 16px !important;
   }
+  /* An in-page jump (the health pill, a DNS group) lands below the sticky
+     topbar and the support strip instead of under them. */
+  .ms-main [id] {
+    scroll-margin-top: calc(var(--ms-support-strip-h, 0px) + 64px);
+  }
+  /* A page-level tab strip runs edge to edge and scrolls under the gutter;
+     the inner padding keeps its first tab on the title's line. */
+  .ms-tabs.bleed {
+    margin-inline: -16px;
+    padding-inline: 16px;
+    scroll-padding-inline: 16px;
+    scrollbar-width: none;
+  }
+  .ms-tabs.bleed::-webkit-scrollbar {
+    display: none;
+  }
 
   /* Page header: the title keeps the first line to itself; the actions take
      the next line at full width, and a button that does not fit beside its
      neighbours drops to a line of its own. */
-  .ms-page-row {
-    flex-wrap: wrap;
-    row-gap: 14px;
-  }
-  .ms-page-title {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
   .ms-page-actions {
     flex: 1 1 100%;
-    flex-wrap: wrap;
   }
   .ms-page-actions > *,
-  .ms-page-actions > .ms-tooltip-trigger > .ms-btn {
+  .ms-page-actions > .ms-tooltip-trigger > .ms-btn,
+  .ms-page-actions > div > .ms-btn:not(.ms-btn-icon) {
     flex: 1 1 auto;
     justify-content: center;
   }
-  .ms-page-actions > .ms-badge,
-  .ms-page-actions > .ms-page-badge {
+  .ms-page-actions > .ms-page-menu {
     flex: 0 0 auto;
   }
-  .ms-page-actions > .ms-btn-icon,
-  .ms-page-actions > .ms-menu-trigger-bare {
-    flex: 0 0 auto;
+  /* A lone icon action ("</>" on a detail page) stays on the title's line
+     instead of taking a row of its own. */
+  .ms-page-row {
+    position: relative;
   }
-  /* A note hung under a header action (the composer's "test sent to …") reads
-     from the action's left edge: right-anchored and nowrap, a long one ran off
-     the viewport. !important beats the inline anchoring. */
+  .ms-page-actions:has(> .ms-page-menu:only-child) {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+  .ms-page-row:has(> .ms-page-actions > .ms-page-menu:only-child) > .ms-page-title {
+    padding-right: 40px;
+  }
+  /* An address, URL or domain title at the display size runs three to six
+     lines here; it takes the card-title size instead, line box included.
+     !important beats the inline page-title size. */
+  .ms-page-heading:has(> .ms-data-title),
+  .ms-data-title {
+    font-size: var(--ms-fs-h2) !important;
+  }
+  /* A note hung under a header action (the composer's "test sent to …")
+     joins the flow on the line under its button: hung there it would cover
+     the step bar below the header, and a long one would run off the
+     viewport. !important beats the inline anchoring. */
+  .ms-page-actions > div:has(> .ms-action-note) {
+    flex-wrap: wrap;
+  }
   .ms-action-note {
-    left: 0;
-    right: auto !important;
+    position: static !important;
+    flex-basis: 100%;
+    margin-top: 6px;
     white-space: normal !important;
-    width: max-content;
-    max-width: calc(100vw - 32px);
   }
   /* A split (primary button + menu root) grows like any action; the button
      inside must take that width too, or it floats centered in empty space. */
@@ -2012,60 +2264,52 @@ summary:focus-visible,
   .ms-table {
     white-space: nowrap;
   }
+  /* Chrome breaks at a <wbr> even under nowrap: an address's break points
+     (breakable.tsx) would undo the one-line cells. */
+  .ms-table wbr {
+    display: none;
+  }
+  /* In a fixed-layout list a nowrap cell would run over its neighbours. */
+  .ms-table td.ms-cell-clip {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .ms-table td > span {
     flex-wrap: nowrap !important;
   }
 
-  /* Filter rows wrap; the search field takes the full first line. */
-  .ms-filter-row {
-    flex-wrap: wrap;
-  }
+  /* The search field takes the full first line. */
   .ms-filter-row > :first-child {
     flex: 1 1 100% !important;
     min-width: 0 !important;
     max-width: none !important;
   }
-  /* Each select takes a full line too; a fixed 160px pill on a phone is a
-     clipped label. The root carries an inline width, hence the override. */
+  /* The selects share the lines under it, at least 200px each (a fixed
+     160px pill clips its label); the root carries an inline width, hence
+     the override. Phones give each its own line (below). */
   .ms-filter-row > div {
-    flex: 1 1 100%;
-    width: 100% !important;
+    flex: 1 1 200px;
+    width: auto !important;
   }
 
-  /* Console grids: 4-up and 3-up collapse to 2-up; the 2/1 splits stack. */
-  .ms-grid-4,
+  /* Console grids: 3-up collapses to 2-up (4-up and the 2/1 splits collapse
+     in the narrow-desktop block above). */
   .ms-grid-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .ms-grid-21,
-  .ms-grid-12 {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  /* Generic flex rows that may not fit a phone width. */
-  .ms-wrap-row {
-    flex-wrap: wrap;
   }
 
   /* Meta/stat grids: 4-up (or 3-up) collapses to 2-up, then 1-up below. */
   .ms-meta-grid {
-    grid-template-columns: repeat(2, 1fr) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
   .ms-meta-tall {
     grid-row: auto;
   }
 
-  /* Steppers: the add-domain preview column wraps under the form card
-     instead of being crushed beside it; step content can always shrink. */
-  .ms-stepper {
-    flex-wrap: wrap;
-  }
+  /* Steppers: the form card takes the line; step content can always shrink. */
   .ms-stepper > form {
     width: 100% !important;
     max-width: 520px;
-  }
-  .ms-stepper-side {
-    flex: 1 1 260px !important;
   }
   .ms-step > * {
     min-width: 0;
@@ -2164,8 +2408,13 @@ summary:focus-visible,
   .ms-meta-grid {
     grid-template-columns: minmax(0, 1fr) !important;
   }
-  .ms-meta-grid > .ms-kpi-metrics {
-    min-width: 0;
+  /* Stat strips (big figures) stay two-up: one per line, the broadcast's
+     seven figures would fill two screens. Their chart takes a full row. */
+  .ms-meta-grid.ms-stat-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .ms-stat-strip > .ms-kpi-metrics {
+    grid-column: 1 / -1;
   }
   .ms-sparkline {
     max-width: none !important;
@@ -2195,9 +2444,45 @@ summary:focus-visible,
   .ms-step > .ms-stepper-rail {
     width: 18px !important;
   }
+  .ms-actions > * {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  /* A strip's button pair takes the line under the text and shares it. */
+  .ms-notice-strip-actions {
+    flex: 1 1 100%;
+  }
+  .ms-notice-strip-actions > * {
+    flex: 1 1 0;
+    justify-content: center;
+  }
   /* Popover panels never exceed the viewport (12px margins). */
   .ms-menu {
     max-width: min(320px, calc(100vw - 24px)) !important;
+  }
+  /* The bulk bar spans the screen (12px margins) and wraps its buttons. */
+  .ms-bulk-bar {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  /* Its edit menu hangs from the bar's right end rather than from the
+     button, which sits too far right for the menu to fit; !important beats
+     the inline anchoring. */
+  .ms-bulk-bar > div:has(> .ms-menu) {
+    position: static !important;
+  }
+  .ms-bulk-bar .ms-menu {
+    left: auto !important;
+    right: 0;
+  }
+  /* Toasts drop from under the topbar: at the bottom they would sit on a
+     dialog's footer buttons for their whole lifetime. */
+  .ms-toast-host {
+    top: calc(var(--ms-support-strip-h, 0px) + 60px);
+    bottom: auto;
   }
   /* Keyboard hints are meaningless on touch. */
   .ms-cmdk-hints,
@@ -2223,10 +2508,16 @@ summary:focus-visible,
 }
 
 @media (max-width: 479px) {
+  .ms-filter-row > div {
+    flex-basis: 100%;
+  }
   .ms-modal {
     width: calc(100vw - 24px);
     max-width: calc(100vw - 24px);
-    padding: 20px;
+    padding: 20px 20px 0;
+  }
+  .ms-modal-footer {
+    padding-bottom: 20px;
   }
   .ms-empty {
     padding: 56px 16px;
@@ -2248,11 +2539,78 @@ summary:focus-visible,
   }
 }
 
+/* Bulk-select checkboxes on touch or narrow screens: no hover reveals the
+   box hung in the left gutter, and a phone has no gutter to hang it in, so
+   it takes a first column of its own and always shows. The gutter's inline
+   offset is undone with it. */
+@media (max-width: 899px), (hover: none) {
+  .ms-table-gutter {
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+  }
+  .ms-table .ms-check-cell {
+    width: 28px;
+    padding: 0 0 0 6px;
+  }
+  .ms-table .ms-check-cell .ms-checkbox {
+    position: static;
+    transform: none;
+    opacity: 1;
+    vertical-align: middle;
+  }
+}
+
+/* Touch: small glyph controls (a dialog's ✕, an ⓘ, a chip's copy button,
+   breadcrumb links) get a finger-sized hit area around an unchanged glyph. */
+@media (pointer: coarse) {
+  .ms-modal-close,
+  .ms-tooltip-trigger:not(.inline),
+  .ms-chip button,
+  button.ms-notice-strip-action,
+  .ms-crumb {
+    position: relative;
+  }
+  .ms-modal-close::after,
+  .ms-tooltip-trigger:not(.inline)::after,
+  .ms-chip button::after,
+  button.ms-notice-strip-action::after {
+    content: "";
+    position: absolute;
+    inset: -9px;
+  }
+  .ms-crumb::after {
+    content: "";
+    position: absolute;
+    inset: -8px -3px;
+  }
+}
+
+/* Touch screens of any width (a tablet too): keyboard hints mean nothing
+   without a keyboard. */
+@media (hover: none) and (pointer: coarse) {
+  .ms-btn .ms-keycap,
+  .ms-cmdk-hints {
+    display: none;
+  }
+}
+
 @media (min-width: 900px) {
   /* Mobile-only chrome never renders on desktop. */
   .ms-mobile-topbar,
   .ms-drawer-scrim {
     display: none;
+  }
+  /* With a mouse a sideways-scrolling strip hides its last tabs (settings has
+     eight), so a page-level strip wraps instead. */
+  .ms-tabs.bleed {
+    flex-wrap: wrap;
+  }
+  /* A cell that takes what the other columns leave and ellipsizes inside it
+     (the emails list's subject): with max-width 0 its text does not set the
+     table's minimum width, so a long subject never pushes the time column off
+     a desktop. Phones keep the full-width table that scrolls. */
+  .ms-table td.ms-cell-fill {
+    max-width: 0;
   }
 }
 
@@ -2881,7 +3239,9 @@ summary:focus-visible,
   margin-top: 3px;
   color: var(--ms-success);
 }
-@media (max-width: 899px) {
+/* Four cards need about 980px of dialog: below that the ladder goes 2×2 so
+   a card's nowrap button stays inside it. */
+@media (max-width: 1119px) {
   .ms-plans {
     grid-template-columns: 1fr 1fr;
   }
@@ -2986,6 +3346,8 @@ summary:focus-visible,
 .ms-plan-strip-price {
   font-size: 13px;
   color: var(--ms-muted);
+  /* "from $20 /" over "month" reads as a broken price; balanced lines keep the amount whole. */
+  text-wrap: balance;
 }
 /* Sized with its padding inside the box, leaving a rim of the page around it. */
 .ms-modal-full {
@@ -3141,7 +3503,9 @@ summary:focus-visible,
   font-size: 13px;
   line-height: 1.55;
 }
-@media (max-width: 899px) {
+/* Beside the sidebar below 1200px the note's column would be under 100px
+   wide, one word per line: it goes under the steps instead. */
+@media (max-width: 1199px) {
   .ms-pacing {
     grid-template-columns: minmax(0, 1fr);
   }

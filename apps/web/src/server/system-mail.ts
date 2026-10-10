@@ -14,6 +14,7 @@ import {
   fillMailTemplate as fill,
   type MailLocale,
   type SystemMailMessage,
+  type SystemMailOptions,
   sendSystemMail,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
@@ -21,10 +22,12 @@ import { createSesSendClient, sendSimpleEmail } from "@millionsend/ses";
 import { and, eq, gt, like, ne } from "drizzle-orm";
 import { appBaseUrl } from "@/lib/api-base-url";
 import { DOCS_URL } from "@/lib/docs-links";
+import enConsoleCode from "../../messages/en/console-code-email.json";
 import enInvite from "../../messages/en/invite-email.json";
 import en from "../../messages/en/reset-email.json";
 import enUpdates from "../../messages/en/updates.json";
 import enVerify from "../../messages/en/verify-email.json";
+import ptBRConsoleCode from "../../messages/pt-BR/console-code-email.json";
 import ptBRInvite from "../../messages/pt-BR/invite-email.json";
 import ptBR from "../../messages/pt-BR/reset-email.json";
 import ptBRUpdates from "../../messages/pt-BR/updates.json";
@@ -43,6 +46,7 @@ const MESSAGES = { en, "pt-BR": ptBR } as const;
 const INVITE_MESSAGES = { en: enInvite, "pt-BR": ptBRInvite } as const;
 const VERIFY_MESSAGES = { en: enVerify, "pt-BR": ptBRVerify } as const;
 const UPDATES_MESSAGES = { en: enUpdates.email, "pt-BR": ptBRUpdates.email } as const;
+const CONSOLE_CODE_MESSAGES = { en: enConsoleCode, "pt-BR": ptBRConsoleCode } as const;
 
 export type { MailLocale };
 
@@ -126,6 +130,28 @@ export function buildVerificationEmail(input: {
       muted: [`${expiry} ${m.ignore}`],
     }),
     kind: "email_verification",
+  };
+}
+
+/** The console's one-time code, from the auth sender, to the operator's own address. */
+export function buildConsoleCodeEmail(input: {
+  to: string;
+  code: string;
+  minutes: number;
+  locale: MailLocale;
+}): SystemMailMessage {
+  const m = CONSOLE_CODE_MESSAGES[input.locale];
+  const expiry = fill(m.expiry, { minutes: String(input.minutes) });
+  return {
+    from: env.AUTH_EMAIL_FROM ?? "",
+    to: input.to,
+    subject: m.subject,
+    ...accountMailCard({
+      heading: input.code,
+      paragraphs: [m.body],
+      muted: [`${expiry} ${m.ignore}`],
+    }),
+    kind: "console_code",
   };
 }
 
@@ -290,7 +316,7 @@ export function sendAccountMail(
 
 /** Mail seam so tests capture sends instead of stubbing the pipeline or the AWS SDK. */
 export interface SystemMailDeps {
-  send(message: SystemMailMessage): Promise<void>;
+  send(message: SystemMailMessage, opts?: SystemMailOptions): Promise<void>;
 }
 
 /**
@@ -301,7 +327,7 @@ export interface SystemMailDeps {
  * is nothing worth caching.
  */
 export const defaultSystemMailDeps: SystemMailDeps = {
-  send: async (message) => {
+  send: async (message, opts) => {
     await sendSystemMail(
       {
         db: getDb(),
@@ -319,6 +345,7 @@ export const defaultSystemMailDeps: SystemMailDeps = {
           ),
       },
       message,
+      opts,
     );
   },
 };

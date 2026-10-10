@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { KvRow } from "@/components/kv-row";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
 import { BtnSpinner } from "@/components/spinner";
@@ -139,23 +140,11 @@ export function MonitorSettingsView() {
       <div className="ms-card" style={{ padding: 20, marginBottom: 16 }}>
         <CardHead title={t("judge.title")} />
         {judge.on ? (
-          <dl className="ms-kv" style={{ gridTemplateColumns: "max-content 1fr" }}>
-            <dt>{t("judge.provider")}</dt>
-            <dd style={{ textAlign: "left" }}>{judge.provider}</dd>
-            <dt>{t("judge.model")}</dt>
-            <dd style={{ textAlign: "left" }}>{judge.model}</dd>
-            {judge.region ? (
-              <>
-                <dt>{t("judge.region")}</dt>
-                <dd style={{ textAlign: "left" }}>{judge.region}</dd>
-              </>
-            ) : null}
-            {judge.baseUrl ? (
-              <>
-                <dt>{t("judge.baseUrl")}</dt>
-                <dd style={{ textAlign: "left", overflowWrap: "anywhere" }}>{judge.baseUrl}</dd>
-              </>
-            ) : null}
+          <dl className="ms-kv ms-kv-cols">
+            <KvRow label={t("judge.provider")}>{judge.provider}</KvRow>
+            <KvRow label={t("judge.model")}>{judge.model}</KvRow>
+            {judge.region ? <KvRow label={t("judge.region")}>{judge.region}</KvRow> : null}
+            {judge.baseUrl ? <KvRow label={t("judge.baseUrl")}>{judge.baseUrl}</KvRow> : null}
           </dl>
         ) : (
           <p style={{ margin: 0, fontSize: 13 }}>{t("judge.off")}</p>
@@ -303,7 +292,11 @@ function Field({
         onChange={(event) => onChange(event.target.value)}
       />
       <div style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 4 }}>
-        {t(`hints.${setting.key}`)} · {t(`kinds.${setting.kind}`)}
+        {/* The kind ("número inteiro") stays whole and its dot never starts a
+            line; unlike DotParts, it may share the hint's last line. */}
+        {t(`hints.${setting.key}`)}
+        {"\u00a0· "}
+        <span style={{ whiteSpace: "nowrap" }}>{t(`kinds.${setting.kind}`)}</span>
       </div>
       {meta}
     </div>
