@@ -2209,6 +2209,10 @@ summary:focus-visible,
   .ms-meta-grid:not(.ms-stat-strip) {
     grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)) !important;
   }
+  /* A value that would fold in one track (a broadcast's From) takes the row. */
+  .ms-meta-grid > .ms-meta-wide {
+    grid-column: 1 / -1;
+  }
 }
 @media (max-width: 1199px) {
   .ms-meta-grid > :where(*) {

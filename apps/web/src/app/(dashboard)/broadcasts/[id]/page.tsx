@@ -212,7 +212,7 @@ export default function BroadcastDetailPage() {
             </div>
           )}
         </div>
-        <div>
+        <div className="ms-meta-wide">
           <Microlabel>{t("detail.from")}</Microlabel>
           <div style={{ marginTop: 5 }}>
             {broadcast ? (
