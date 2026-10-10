@@ -2233,7 +2233,7 @@ summary:focus-visible,
 /* A badge holding a long value (an API key's domain) ellipsizes rather than
    push its list past a narrow desktop; the value rides in its title. */
 @media (min-width: 900px) and (max-width: 1199px) {
-  .ms-table .ms-badge {
+  .ms-table .ms-badge-clip {
     max-width: 16rem;
     overflow: hidden;
     text-overflow: ellipsis;

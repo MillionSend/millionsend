@@ -230,7 +230,10 @@ export function ApiKeysView() {
                         {t(key.permission === "sending_access" ? "scope.sending" : "scope.full")}
                       </span>
                       {key.domainName ? (
-                        <span className="ms-badge ms-badge-neutral" title={key.domainName}>
+                        <span
+                          className="ms-badge ms-badge-neutral ms-badge-clip"
+                          title={key.domainName}
+                        >
                           {key.domainName}
                         </span>
                       ) : null}
