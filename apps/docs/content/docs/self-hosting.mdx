@@ -887,8 +887,9 @@ no pause, so a release leaves no monitor pause behind. A team is held once, by e
 rule: after a release its later verdicts only alert, so the released mail,
 judged again on its way out, neither holds it a second time nor pauses its
 broadcasts. A team already
-suspended keeps its suspension, and Probation, Established, Trusted and
-system teams are never held: they stay alert-only. The judge reads a message
+suspended keeps its suspension, and Probation, Established and Trusted teams
+are never held: they stay alert-only. The system team is exempt: the monitor
+never samples it. The judge reads a message
 after SES has taken it, so the message that triggers the hold has already
 gone out; the hold stops what follows. `MONITOR_AUTO_HOLD=false` switches it
 off.

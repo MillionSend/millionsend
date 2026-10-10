@@ -37,8 +37,6 @@ export async function assertTeamNotSuspended(
 
 /** Whether the user owns or belongs, in any role, to a team under a silent suspension. */
 export async function belongsToSilentlySuspendedTeam(db: Db, userId: string): Promise<boolean> {
-  // Matched here rather than in SQL: a reason the schema lacks yet would be
-  // an invalid enum literal to Postgres.
   const suspended = await db
     .select({ reason: schema.teams.suspensionReason })
     .from(schema.teamMembers)
