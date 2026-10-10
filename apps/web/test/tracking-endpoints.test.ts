@@ -412,9 +412,11 @@ describe("a click on a branded tracking host", () => {
       await clickToken(emailId, url),
       legacyClickToken({ emailId, url, secretKey }),
     ]) {
-      const borrowed = await onHost(token, "Links.Bank.example");
-      expect(borrowed.status).toBe(404);
-      expect(borrowed.headers.get("location")).toBeNull();
+      for (const host of ["Links.Bank.example", "links.bank.example."]) {
+        const borrowed = await onHost(token, host);
+        expect(borrowed.status, host).toBe(404);
+        expect(borrowed.headers.get("location")).toBeNull();
+      }
     }
     expect(await counts(emailId, teamId, "clicked")).toEqual({ events: 0, counter: 0 });
 
