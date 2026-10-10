@@ -32,7 +32,7 @@
     "to": "To",
     "total": "total",
     "average": "average",
-    "hoverHint": "Hover for exact values. Presets or a custom range.",
+    "hoverHint": "Hover or tap for exact values. Presets or a custom range.",
     "vsPrevious": "{delta} vs previous",
     "ofTeams": "{shown} of {total} teams",
     "period": {
@@ -215,7 +215,7 @@
     "planUnknown": "unknown",
     "enforcement": "Enforcement",
     "domains": "Domains",
-    "domainsValue": "{count} verified",
+    "domainsValue": "{count, plural, other {# verified}}",
     "breaker": "Breaker",
     "breakerClosed": "closed",
     "breakerOpen": "open · {metric} {rate}",
@@ -401,7 +401,7 @@
   },
   "teams": {
     "title": "Teams",
-    "proof": "{total} teams · {free} free · {paid} paid · {system} system · {suspended} suspended",
+    "proof": "{total} teams · {free} free · {paid} paid · {system} system · {suspended, plural, other {# suspended}}",
     "search": "Search teams, owners, domains, ids",
     "filters": {
       "type": "Type: {value}",
@@ -459,7 +459,7 @@
       "score": "Score",
       "scoreOf": "{score} / 10",
       "domains": "Domains",
-      "domainsValue": "{count} verified",
+      "domainsValue": "{count, plural, other {# verified}}",
       "type": "Type",
       "owner": "Owner",
       "members": "Members",
@@ -669,7 +669,7 @@
       },
       "emails": {
         "title": "Flagged emails · {count}",
-        "subtitle": "Sent in the last 7 days with a failing critical or major check. Subject and body are content and stay encrypted; the pill explains itself on hover.",
+        "subtitle": "Sent in the last 7 days with a failing critical or major check. Subject and body are content and stay encrypted; the pill explains itself on hover or tap.",
         "sent": "Sent",
         "from": "From",
         "recipients": "Recipients",

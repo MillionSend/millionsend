@@ -932,7 +932,30 @@ table.ms-table {
     display: none;
   }
 }
+/* With a mouse a sideways-scrolling strip hides its last tabs (settings has
+   eight), so from 900px a page-level strip wraps instead. */
+@media (min-width: 900px) {
+  .ms-tabs.bleed {
+    flex-wrap: wrap;
+  }
+}
 
+/* Toast host (toast.tsx): a row across the viewport bottom, the toast centred
+   in it at its own width up to the full row. A box hung at left: 50% would
+   shrink to half the viewport and wrap a short message into three lines. */
+.ms-toast-host {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 24px;
+  display: flex;
+  justify-content: center;
+  z-index: var(--ms-z-menu);
+  pointer-events: none;
+}
+.ms-toast-host > :where(*) {
+  pointer-events: auto;
+}
 /* Toast — near-black ground with a faint status-tinted glow (the system's one gradient) */
 .ms-toast {
   display: inline-flex;
@@ -1020,8 +1043,9 @@ table.ms-table {
    full-width one-liner (global deliverability notices, the templates HTML banner). */
 .ms-notice-strip {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   padding: 9px 14px;
   margin-bottom: 18px;
   border-radius: var(--ms-r-input);
@@ -1032,10 +1056,31 @@ table.ms-table {
   line-height: 1.4;
   text-decoration: none;
 }
+/* The text keeps at least this much width beside the action; below it the
+   action wraps whole onto the line under the text. */
+.ms-notice-strip-text {
+  flex: 1 1 288px;
+  min-width: 0;
+}
 .ms-notice-strip-action {
   margin-left: auto;
   opacity: 0.8;
   white-space: nowrap;
+}
+button.ms-notice-strip-action {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+/* A strip's button pair (the support view's). */
+.ms-notice-strip-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 .ms-notice-strip-info {
   color: var(--ms-info);
@@ -1227,20 +1272,18 @@ table.ms-table {
   max-width: calc(100vw - 48px);
   max-height: calc(100dvh - 48px);
   overflow-y: auto;
+  /* An address in a confirm message breaks rather than run under the edge. */
+  overflow-wrap: break-word;
   animation: ms-fade var(--ms-dur-drawer) var(--ms-ease);
 }
-/* Pinned to the bottom while a tall dialog scrolls, opaque so rows slide
-   under it; its 28px bottom padding is the panel's, so at rest the buttons
-   sit exactly where a short dialog puts them. */
+/* The last thing in every dialog, scrolling with the content rather than
+   pinned over it; its bottom padding is the panel's bottom edge. */
 .ms-modal-footer {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
-  position: sticky;
-  bottom: 0;
   padding: 22px 0 28px;
-  background: var(--ms-panel);
 }
 .ms-modal h2 {
   font-family: var(--ms-font-sans);
@@ -1364,11 +1407,13 @@ table.ms-table {
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
-/* The health card's rows: a dot, the probe, the reading pushed right. */
+/* The health card's rows: a dot, the probe, the reading pushed right, or
+   onto the line under them whole when it does not fit beside them. */
 .ms-health-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 2px 10px;
   width: 100%;
   padding: 9px 8px;
   margin: 0 -8px;
@@ -1397,25 +1442,51 @@ table.ms-table {
   outline: none;
   box-shadow: var(--ms-focus-ring);
 }
-/* Key/value list inside cards (region cards, the team dialog). */
+/* Key/value list (kv-row.tsx: region cards, the team dialog, settings). One
+   row per pair: the value sits right-aligned on its label's line when the
+   whole of it fits there, and otherwise takes the line under the label at
+   full width. A " · "-joined value breaks only between its parts, in
+   balanced lines; a part breaks inside itself only when it alone is wider
+   than the list. */
 .ms-kv {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   font-size: var(--ms-fs-label);
-  align-items: baseline;
   margin: 0;
 }
+.ms-kv-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+}
 .ms-kv dt {
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--ms-muted);
   margin: 0;
 }
 .ms-kv dd {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   font-family: var(--ms-font-mono);
   font-size: 12px;
   text-align: right;
+  text-wrap: balance;
   overflow-wrap: anywhere;
+}
+/* Values read from a label column instead: left-aligned after at least
+   8.5rem of label while they keep 14rem beside it, and stacked under their
+   label below that (phones). */
+.ms-kv-cols dt {
+  flex: 0 0 auto;
+  min-width: 8.5rem;
+}
+.ms-kv-cols dd {
+  flex: 1 1 14rem;
+  text-align: left;
 }
 /* Radio-card rows in the console dialogs. */
 .ms-radio-card {
@@ -2312,9 +2383,35 @@ summary:focus-visible,
   .ms-step > .ms-stepper-rail {
     width: 18px !important;
   }
+  .ms-actions > * {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  /* A strip's button pair takes the line under the text and shares it. */
+  .ms-notice-strip-actions {
+    flex: 1 1 100%;
+  }
+  .ms-notice-strip-actions > * {
+    flex: 1 1 0;
+    justify-content: center;
+  }
   /* Popover panels never exceed the viewport (12px margins). */
   .ms-menu {
     max-width: min(320px, calc(100vw - 24px)) !important;
+  }
+  /* The bulk bar spans the screen (12px margins) and wraps its buttons. */
+  .ms-bulk-bar {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  /* Toasts drop from under the topbar: at the bottom they would sit on a
+     dialog's footer buttons for their whole lifetime. */
+  .ms-toast-host {
+    top: calc(var(--ms-support-strip-h, 0px) + 60px);
+    bottom: auto;
   }
   /* Keyboard hints are meaningless on touch. */
   .ms-cmdk-hints,
@@ -2340,10 +2437,16 @@ summary:focus-visible,
 }
 
 @media (max-width: 479px) {
+  .ms-filter-row > div {
+    flex-basis: 100%;
+  }
   .ms-modal {
     width: calc(100vw - 24px);
     max-width: calc(100vw - 24px);
-    padding: 20px;
+    padding: 20px 20px 0;
+  }
+  .ms-modal-footer {
+    padding-bottom: 20px;
   }
   .ms-empty {
     padding: 56px 16px;
@@ -2362,6 +2465,61 @@ summary:focus-visible,
   .ms-grid-3,
   .ms-grid-2 {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Bulk-select checkboxes on touch or narrow screens: no hover reveals the
+   box hung in the left gutter, and a phone has no gutter to hang it in, so
+   it takes a first column of its own and always shows. The gutter's inline
+   offset is undone with it. */
+@media (max-width: 899px), (hover: none) {
+  .ms-table-gutter {
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+  }
+  .ms-table .ms-check-cell {
+    width: 28px;
+    padding: 0 0 0 6px;
+  }
+  .ms-table .ms-check-cell .ms-checkbox {
+    position: static;
+    transform: none;
+    opacity: 1;
+    vertical-align: middle;
+  }
+}
+
+/* Touch: small glyph controls (a dialog's ✕, an ⓘ, a chip's copy button,
+   breadcrumb links) get a finger-sized hit area around an unchanged glyph. */
+@media (pointer: coarse) {
+  .ms-modal-close,
+  .ms-tooltip-trigger:not(.inline),
+  .ms-chip button,
+  button.ms-notice-strip-action,
+  .ms-crumb {
+    position: relative;
+  }
+  .ms-modal-close::after,
+  .ms-tooltip-trigger:not(.inline)::after,
+  .ms-chip button::after,
+  button.ms-notice-strip-action::after {
+    content: "";
+    position: absolute;
+    inset: -9px;
+  }
+  .ms-crumb::after {
+    content: "";
+    position: absolute;
+    inset: -8px -3px;
+  }
+}
+
+/* Touch screens of any width (a tablet too): keyboard hints mean nothing
+   without a keyboard. */
+@media (hover: none) and (pointer: coarse) {
+  .ms-btn .ms-keycap,
+  .ms-cmdk-hints {
+    display: none;
   }
 }
 

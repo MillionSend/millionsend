@@ -32,7 +32,7 @@
     "to": "Até",
     "total": "total",
     "average": "média",
-    "hoverHint": "Passe o mouse para ver os valores exatos. Períodos prontos ou um intervalo personalizado.",
+    "hoverHint": "Passe o mouse ou toque para ver os valores exatos. Períodos prontos ou um intervalo personalizado.",
     "vsPrevious": "{delta} vs. período anterior",
     "ofTeams": "{shown} de {total} equipes",
     "period": {
@@ -215,7 +215,7 @@
     "planUnknown": "desconhecido",
     "enforcement": "Enforcement",
     "domains": "Domínios",
-    "domainsValue": "{count} verificados",
+    "domainsValue": "{count, plural, =0 {# verificados} one {# verificado} other {# verificados}}",
     "breaker": "Breaker",
     "breakerClosed": "fechado",
     "breakerOpen": "aberto · {metric} {rate}",
@@ -401,7 +401,7 @@
   },
   "teams": {
     "title": "Equipes",
-    "proof": "{total} equipes · {free} free · {paid} pagas · {system} sistema · {suspended} suspensas",
+    "proof": "{total} equipes · {free} free · {paid} pagas · {system} sistema · {suspended, plural, =0 {# suspensas} one {# suspensa} other {# suspensas}}",
     "search": "Buscar equipes, proprietários, domínios, ids",
     "filters": {
       "type": "Tipo: {value}",
@@ -459,7 +459,7 @@
       "score": "Score",
       "scoreOf": "{score} / 10",
       "domains": "Domínios",
-      "domainsValue": "{count} verificados",
+      "domainsValue": "{count, plural, =0 {# verificados} one {# verificado} other {# verificados}}",
       "type": "Tipo",
       "owner": "Proprietário",
       "members": "Membros",
@@ -559,7 +559,7 @@
   "safety": {
     "title": "Confiança e segurança",
     "info": "Uma equipe entra aqui quando o guardrail de entregabilidade vira alerta ou pausa, as reclamações passam de 0,1% ou os hard bounces de 5% em 7 dias, o risco do monitor de conteúdo cruza a linha de sinalização (conteúdo amostrado julgado pelo modelo), o score da conta cai abaixo de 5, ou um operador a sinaliza à mão. Sinalizações automáticas somem sozinhas quando o gatilho passa; uma que você limpa fica limpa enquanto o mesmo gatilho durar.",
-    "proof": "{open} abertas · {guardrailPaused} pausadas pelo guardrail · {suspended} suspensas · {revealsThisWeek, plural, one {# revelação de conteúdo} other {# revelações de conteúdo}} esta semana",
+    "proof": "{open, plural, =0 {# abertas} one {# aberta} other {# abertas}} · {guardrailPaused, plural, =0 {# pausadas pelo guardrail} one {# pausada pelo guardrail} other {# pausadas pelo guardrail}} · {suspended, plural, =0 {# suspensas} one {# suspensa} other {# suspensas}} · {revealsThisWeek, plural, one {# revelação de conteúdo} other {# revelações de conteúdo}} esta semana",
     "search": "Buscar equipes, proprietários, domínios",
     "filters": {
       "status": "Status: {value}",
@@ -669,7 +669,7 @@
       },
       "emails": {
         "title": "E-mails sinalizados · {count}",
-        "subtitle": "Enviados nos últimos 7 dias com uma checagem crítica ou importante falhando. Assunto e corpo são conteúdo e ficam criptografados; a pílula se explica ao passar o mouse.",
+        "subtitle": "Enviados nos últimos 7 dias com uma checagem crítica ou importante falhando. Assunto e corpo são conteúdo e ficam criptografados; a pílula se explica ao passar o mouse ou tocar.",
         "sent": "Enviado",
         "from": "De",
         "recipients": "Destinatários",

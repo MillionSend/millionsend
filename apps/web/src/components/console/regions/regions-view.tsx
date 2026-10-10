@@ -2,8 +2,10 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { DOMAIN_REGIONS, regionFlag } from "@/app/(dashboard)/domains/regions";
+import { KvRow } from "@/components/kv-row";
+import { NoticeStrip } from "@/components/notice-strip";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { SortableTh, type SortDir } from "@/components/sortable-th";
@@ -246,38 +248,26 @@ export function RegionsView() {
       ) : (
         <>
           {oversold && oversold.share !== null && committed !== null ? (
-            <div role="status" className="ms-notice-strip ms-notice-strip-warn ms-wrap-row">
-              <span>
-                {t("sold.text", {
+            <NoticeStrip
+              tone="warn"
+              text={
+                t("sold.text", {
                   committed: f.n(committed),
                   share: f.n(oversold.share),
                   region: oversold.region,
-                })}
-                {oversold.bulkParked > 0
+                }) +
+                (oversold.bulkParked > 0
                   ? t("sold.backlog", {
                       waiting: f.n(oversold.bulkParked),
                       clears: oversold.lastFinishesAt
                         ? f.clearsAbout(oversold.lastFinishesAt)
                         : "—",
                     })
-                  : null}
-              </span>
-              <button
-                type="button"
-                className="ms-notice-strip-action"
-                style={{
-                  background: "none",
-                  border: 0,
-                  padding: 0,
-                  cursor: "pointer",
-                  font: "inherit",
-                  color: "inherit",
-                }}
-                onClick={() => setQuotaFor(oversold)}
-              >
-                {t("sold.action")} →
-              </button>
-            </div>
+                  : "")
+              }
+              action={t("sold.action")}
+              onAction={() => setQuotaFor(oversold)}
+            />
           ) : null}
           {quotaFor ? (
             <QuotaDialog
@@ -432,7 +422,9 @@ export function RegionsView() {
                           <div
                             style={{
                               display: "flex",
+                              flexWrap: "wrap",
                               justifyContent: "space-between",
+                              gap: "0 12px",
                               fontSize: "var(--ms-fs-label)",
                               padding: "0 20px 4px",
                             }}
@@ -442,7 +434,11 @@ export function RegionsView() {
                             </span>
                             <span
                               className="ms-mono ms-digits"
-                              style={{ color: "var(--ms-muted)", fontSize: 12 }}
+                              style={{
+                                color: "var(--ms-muted)",
+                                fontSize: 12,
+                                whiteSpace: "nowrap",
+                              }}
                             >
                               {t("sparks.total", {
                                 count: f.n(r.daily.reduce((sum, p) => sum + p.sent, 0)),
@@ -491,10 +487,9 @@ export function RegionsView() {
                       "postgres",
                     ] as const
                   ).map((row) => (
-                    <Fragment key={row}>
-                      <dt>{t(`perRegion.rows.${row}`)}</dt>
-                      <dd>{t(`perRegion.rows.${row}Value`)}</dd>
-                    </Fragment>
+                    <KvRow key={row} label={t(`perRegion.rows.${row}`)}>
+                      {t(`perRegion.rows.${row}Value`)}
+                    </KvRow>
                   ))}
                 </dl>
               </div>

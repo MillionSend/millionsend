@@ -11,6 +11,7 @@ function CloseGlyph({ onClose }: { onClose: () => void }) {
   return (
     <button
       type="button"
+      className="ms-modal-close"
       onClick={onClose}
       aria-label={t("close")}
       style={{

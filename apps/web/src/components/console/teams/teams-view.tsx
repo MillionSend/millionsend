@@ -19,6 +19,7 @@ import { formatDay } from "@/lib/format";
 import { formatScoreTenths } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { LoadErrorCard } from "../safety/parts";
 import { GuardrailLabel, PlanBadge, RegionLabel, usePlanName } from "./cells";
 import type { TeamRow } from "./types";
 
@@ -164,7 +165,7 @@ export function TeamsView() {
         free: nf.format(summary.data.teams.free),
         paid: nf.format(summary.data.teams.paid),
         system: nf.format(summary.data.teams.system),
-        suspended: nf.format(summary.data.teams.suspended),
+        suspended: summary.data.teams.suspended,
       })
     : undefined;
 
@@ -181,7 +182,7 @@ export function TeamsView() {
         className="ms-filter-row"
         style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
       >
-        <div style={{ flex: 1, minWidth: 160 }}>
+        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
           <input
             type="text"
             className="ms-input"
@@ -238,17 +239,7 @@ export function TeamsView() {
       </div>
 
       {list.isError ? (
-        <div
-          className="ms-card"
-          style={{ padding: 20, display: "flex", gap: 14, alignItems: "center" }}
-        >
-          <p style={{ margin: 0, color: "var(--ms-bone)", fontSize: "var(--ms-fs-ui)" }}>
-            {common("loadError")}
-          </p>
-          <button type="button" className="ms-btn ms-btn-secondary" onClick={() => list.refetch()}>
-            {common("retry")}
-          </button>
-        </div>
+        <LoadErrorCard onRetry={() => void list.refetch()} />
       ) : (
         <div className="ms-card" style={{ padding: 0, overflow: "hidden" }}>
           <Table className="nowrap">
