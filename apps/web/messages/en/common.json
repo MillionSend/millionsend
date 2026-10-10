@@ -12,6 +12,7 @@
   "cancel": "Cancel",
   "openNav": "Open navigation",
   "signOut": "Log out",
+  "nameRule": "Names can't contain links, email addresses, line breaks or hidden characters, and can be up to {max} characters long.",
   "accountMenu": {
     "onboarding": "Onboarding",
     "appearance": "Appearance",

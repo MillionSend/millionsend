@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { captchaHeaders, useTurnstile } from "@/components/turnstile";
 import { authClient } from "@/lib/auth-client";
+import { typedEmail } from "@/lib/email-input";
 import styles from "./auth.module.css";
 import { StrengthMeter } from "./auth-form";
 import { AuthScreen } from "./auth-screen";
@@ -88,7 +89,7 @@ export function ForgotPasswordForm({
                 placeholder={t("emailPlaceholder")}
                 required
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => setEmail(typedEmail(e.target.value))}
               />
             </div>
             {captchaFailed ? <p className={styles.error}>{t("captcha")}</p> : null}

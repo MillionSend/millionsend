@@ -10,7 +10,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, LURE_NAMES, mailLinks, readable } from "@millionsend/test-utils";
 import { eq, like, sql } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sweepNotifications } from "../src/handlers/notify.js";
@@ -19,7 +19,7 @@ import { createSystemMailer } from "../src/system-mail.js";
 let db: Db;
 let close: () => Promise<void>;
 let teamId: string;
-let sends: { to: string; subject: string; text: string }[];
+let sends: { to: string; subject: string; text: string; html?: string }[];
 let enqueued: string[];
 
 const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
@@ -54,8 +54,8 @@ afterEach(async () => {
 const deps = (isCloud = true, now?: Date) => ({
   isCloud,
   mailer: {
-    send: async (to: string, m: { subject: string; text: string }) => {
-      sends.push({ to, subject: m.subject, text: m.text });
+    send: async (to: string, m: { subject: string; text: string; html: string }) => {
+      sends.push({ to, subject: m.subject, text: m.text, html: m.html });
     },
   },
   enqueueWebhook: async (rows: readonly QueuedWebhookDelivery[]) => {
@@ -135,7 +135,7 @@ it("quota paused fires once when the ceiling is reached, after warning and reach
   expect(sends.map((s) => s.subject)).toEqual([
     expect.stringContaining("80%"),
     expect.stringContaining("quota reached"),
-    expect.stringContaining("sending paused until the quota resets"),
+    "Sending paused until the quota resets",
   ]);
   expect(sends[2]?.text).toContain("50% past its 100 quota");
   expect((await deliveries()).map((d) => d.type)).toEqual([
@@ -197,7 +197,7 @@ it("monthly quota warning and reached fire once per billing period, with the per
 
   await used(100_000);
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
-  expect(sends[1]?.subject).toContain("this period's sending quota reached");
+  expect(sends[1]?.subject).toBe("This period's sending quota reached");
   expect(sends[1]?.text).toContain(
     `New API sends are refused until the period renews on ${formatMailDate("en", periodEnd)} or overage is turned on in Billing; broadcasts park until then.`,
   );
@@ -242,7 +242,7 @@ it("a monthly period that rolled before its renewal webhook is judged by the row
     .values({ teamId, periodStart: periodEnd, accepted: 100_000 });
   const later = new Date(periodEnd.getTime() + 3_600_000);
   expect(await sweepNotifications(db, deps(true, later))).toEqual({ sent: 1 });
-  expect(sends[0]?.subject).toContain("this period's sending quota reached");
+  expect(sends[0]?.subject).toBe("This period's sending quota reached");
   expect(
     await db
       .select({ kind: schema.teamNotifications.kind, key: schema.teamNotifications.periodKey })
@@ -260,7 +260,7 @@ it("self-host has no quota to notify about", async () => {
 it("deliverability pause fires once per episode and again after recovery", async () => {
   await counters({ sent: 200, complained: 3 });
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
-  expect(sends[0]?.subject).toContain("sending paused");
+  expect(sends[0]?.subject).toBe("Sending paused (complaint rate)");
   expect(sends[0]?.text).toContain("complaint rate");
   const [row] = await deliveries();
   expect(row?.type).toBe("deliverability.paused");
@@ -334,8 +334,8 @@ it("a warning that escalates to a pause notifies both once", async () => {
   await counters({ sent: 1000, hardBounced: 60 });
   await sweepNotifications(db, deps());
   expect(sends.map((s) => s.subject)).toEqual([
-    expect.stringContaining("at risk"),
-    expect.stringContaining("sending paused"),
+    "Your hard-bounce rate is at risk",
+    "Sending paused (hard-bounce rate)",
   ]);
   await sweepNotifications(db, deps());
   expect(sends).toHaveLength(2);
@@ -454,7 +454,10 @@ it("a failing endpoint mails once per episode; a success ends it", async () => {
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
   await delivery("exhausted");
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
-  expect(sends[0]?.subject).toContain("receiver.example.com are failing");
+  expect(sends[0]?.subject).toBe("Webhook deliveries are failing");
+  expect(readable(sends[0]?.text)).toContain(
+    "The last 10 deliveries to https://receiver.example.com/hook failed on every retry, so notify-team is missing events.",
+  );
   expect(sends[0]?.text).toContain(`https://app.example.test/webhooks/${await endpoint()}`);
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
 
@@ -485,7 +488,9 @@ it("a backlog older than six hours mails once per UTC day; yesterday's claim is 
   await delivery("failed", { nextAttemptAt: new Date(Date.now() - 7 * 3_600_000) });
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
   expect(sends[0]?.subject).toContain("backing up");
-  expect(sends[0]?.text).toContain("2 deliveries to https://receiver.example.com/hook are waiting");
+  expect(readable(sends[0]?.text)).toContain(
+    "2 deliveries to https://receiver.example.com/hook are waiting",
+  );
   expect(sends[0]?.text).toContain("due for 7 h");
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
   const tomorrow = new Date(Date.now() + 24 * 3_600_000);
@@ -551,7 +556,8 @@ async function claims(prefix: string) {
 it("a domain is announced once when it verifies; losing a record says so once and re-arms the announcement", async () => {
   const id = await domain();
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
-  expect(sends.map((s) => s.subject)).toEqual(["mail.acme.dev is verified"]);
+  expect(sends.map((s) => s.subject)).toEqual(["Your domain is verified"]);
+  expect(readable(sends[0]?.text)).toContain("The DNS records for mail.acme.dev check out");
   expect(sends[0]?.text).toContain(`https://app.example.test/domains/${id}`);
   await sweepNotifications(db, deps(false));
   expect(sends).toHaveLength(1);
@@ -560,8 +566,8 @@ it("a domain is announced once when it verifies; losing a record says so once an
   await sweepNotifications(db, deps(false));
   await sweepNotifications(db, deps(false));
   expect(sends.map((s) => s.subject)).toEqual([
-    "mail.acme.dev is verified",
-    "mail.acme.dev lost its verification",
+    "Your domain is verified",
+    "A domain lost its verification",
   ]);
   expect(sends[1]?.text).toContain("DKIM or MAIL FROM");
   expect(await claims("domain.")).toEqual([`domain.lost:${id}`]);
@@ -574,7 +580,7 @@ it("a domain is announced once when it verifies; losing a record says so once an
   // SES giving up is terminal: the mail says to add the domain again.
   await setDomain(id, "failed");
   await sweepNotifications(db, deps(false));
-  expect(sends[3]?.text).toContain("given up on mail.acme.dev");
+  expect(readable(sends[3]?.text)).toContain("given up on mail.acme.dev");
   expect(sends[3]?.text).toContain("https://app.example.test/domains\n");
 
   await db.delete(schema.domains).where(eq(schema.domains.id, id));
@@ -645,8 +651,8 @@ it("a new API key is reported once to the owners and to the person who created i
   });
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 1 });
   expect(sends.map((s) => s.to).sort()).toEqual(["ada@example.com", "owner@example.com"]);
-  expect(sends[0]?.subject).toBe("New API key in notify-team: ci");
-  expect(sends[0]?.text).toContain(
+  expect(sends[0]?.subject).toBe("A new API key was created");
+  expect(readable(sends[0]?.text)).toContain(
     'Ada created the API key "ci" (ms_live_abc…wxyz, sending access, limited to mail.acme.dev) in notify-team.',
   );
   expect(sends[0]?.text).toContain("https://app.example.test/api-keys");
@@ -695,8 +701,8 @@ it("a rotated webhook secret names the endpoint and the old secret's deadline", 
     },
   });
   await sweepNotifications(db, deps(false));
-  expect(sends.map((s) => s.subject)).toEqual(["Webhook secret rotated for receiver.example.com"]);
-  expect(sends[0]?.text).toContain(
+  expect(sends.map((s) => s.subject)).toEqual(["A webhook signing secret was rotated"]);
+  expect(readable(sends[0]?.text)).toContain(
     "Owner rotated the signing secret of https://receiver.example.com/hook in notify-team.",
   );
   expect(sends[0]?.text).toContain("until September 10, 2026 at 3:00 PM UTC;");
@@ -717,8 +723,8 @@ it("a member who joined is reported to the other owners, never to themselves", a
   await audit("member.joined", { actor: "user:j", target: "user:j", data: { role: "owner" } });
   await sweepNotifications(db, deps(false));
   expect(sends.map((s) => s.to)).toEqual(["owner@example.com"]);
-  expect(sends[0]?.subject).toBe("Jo joined notify-team");
-  expect(sends[0]?.text).toContain(
+  expect(sends[0]?.subject).toBe("A new member joined your team");
+  expect(readable(sends[0]?.text)).toContain(
     "Jo (jo@example.com) accepted the invitation and is now an owner of notify-team.",
   );
 });
@@ -753,7 +759,7 @@ it("a scheduled cancellation is recalled three days out, once, on the cloud only
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
   await sweepNotifications(db, deps());
   expect(sends.map((s) => s.subject)).toEqual([
-    `Reminder: notify-team's Pro 100K plan ends on ${formatMailDate("en", endsAt)}`,
+    `Reminder: your Pro 100K plan ends on ${formatMailDate("en", endsAt)}`,
   ]);
   expect(sends[0]?.text).toContain("to stay on Pro 100K (up to 100,000 emails a month)");
 
@@ -769,7 +775,7 @@ it("a paid period that lapsed past its grace reads as the downgrade, keyed like 
   expect(await sweepNotifications(db, deps(false))).toEqual({ sent: 0 });
   expect(await sweepNotifications(db, deps())).toEqual({ sent: 1 });
   await sweepNotifications(db, deps());
-  expect(sends.map((s) => s.subject)).toEqual(["notify-team is now on Free"]);
+  expect(sends.map((s) => s.subject)).toEqual(["Your team is now on Free"]);
   expect(sends[0]?.text).toContain("The Scale 500K plan ended on");
   expect(
     await db
@@ -795,7 +801,7 @@ it("an owner whose account contact is pt-BR reads the notice in pt-BR", async ()
     .values({ teamId: home, email: "owner@example.com", properties: { locale: "pt-BR" } });
   await domain();
   await sweepNotifications(db, deps(false));
-  expect(sends.map((s) => s.subject)).toEqual(["mail.acme.dev está verificado"]);
+  expect(sends.map((s) => s.subject)).toEqual(["Seu domínio está verificado"]);
 });
 
 it("an owner who turned a notice off is skipped for it, and still gets a security receipt", async () => {
@@ -816,6 +822,60 @@ it("an owner who turned a notice off is skipped for it, and still gets a securit
   });
   await sweepNotifications(db, deps(false));
   expect(sends.map((s) => [s.to, s.subject])).toEqual([
-    ["owner@example.com", "New API key in notify-team: ci"],
+    ["owner@example.com", "A new API key was created"],
   ]);
+});
+
+it("a team, its people and its endpoint named like lures get every notice with no link but its own", async () => {
+  const [teamName, personName, , , keyName, , , , , , , joinerName] = LURE_NAMES;
+  await db.update(schema.teams).set({ name: teamName }).where(eq(schema.teams.id, teamId));
+  await db.update(schema.user).set({ name: personName }).where(eq(schema.user.id, "owner"));
+  await db
+    .update(schema.webhookEndpoints)
+    .set({ url: "https://acme-support.com/hook" })
+    .where(eq(schema.webhookEndpoints.teamId, teamId));
+  await counters({ accepted: 80, sent: 1000, hardBounced: 45 });
+  await delivery("exhausted", { count: 10 });
+  await domain();
+  const [key] = await db
+    .insert(schema.apiKeys)
+    .values({ teamId, name: keyName, tokenPrefix: "ms_live_abc", keyHash: "h1", last4: "wxyz" })
+    .returning({ id: schema.apiKeys.id });
+  await audit("api_key.created", {
+    target: `api_key:${key?.id}`,
+    data: { name: keyName, permission: "full_access", domainId: null },
+  });
+  await audit("webhook.secret_rotated", {
+    target: `webhook:${await endpoint()}`,
+    data: { url: "https://acme-support.com/hook", previousSecretExpiresAt: null },
+  });
+  await db.insert(schema.user).values({ id: "j", name: joinerName, email: "jo@acme-support.com" });
+  await db.insert(schema.teamMembers).values({ teamId, userId: "j", role: "member" });
+  await audit("member.joined", { actor: "user:j", target: "user:j", data: { role: "member" } });
+
+  await sweepNotifications(db, deps());
+  expect(sends.map((s) => s.subject).sort()).toEqual(
+    [
+      "80% of today's sending quota used",
+      "A new API key was created",
+      "A new member joined your team",
+      "A webhook signing secret was rotated",
+      "Webhook deliveries are failing",
+      "Your domain is verified",
+      "Your hard-bounce rate is at risk",
+    ].sort(),
+  );
+  for (const mail of sends) {
+    const links = mailLinks({ subject: mail.subject, text: mail.text, html: mail.html ?? "" });
+    expect(
+      links.filter(
+        (link) =>
+          !link.startsWith("https://app.example.test/") && link !== "https://millionsend.com",
+      ),
+      mail.subject,
+    ).toEqual([]);
+  }
+  expect(readable(sends.find((s) => s.subject.startsWith("80%"))?.text)).toContain(
+    "Your account is locked, visit acme-support.com has used 80 of its 100 emails for today.",
+  );
 });

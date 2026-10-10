@@ -1,16 +1,10 @@
-import {
-  accountMailCard,
-  formatMailDate,
-  type MailContent,
-  OVERAGE_HARD_CAP,
-  QUOTA_TOLERANCE,
-} from "@millionsend/core";
+import { accountMailCard, inertText, type MailContent } from "@millionsend/core";
 
 export type { MailContent };
 
 /**
- * Owner notices on the shared account-mail card: the notice names its button
- * and one muted footnote, and the text version reads "Button: url".
+ * Operator notices on the shared account-mail card: the notice names its
+ * button and one muted footnote, and the text version reads "Button: url".
  */
 function layout(input: {
   subject: string;
@@ -30,151 +24,6 @@ function layout(input: {
 }
 
 const percent = (rate: number) => `${(rate * 100).toFixed(2)}%`;
-const tolerance = `${Math.round(QUOTA_TOLERANCE * 100)}%`;
-const resetTime = (at: Date) => `${at.toISOString().slice(11, 16)} UTC`;
-const metricName = (metric: "bounce" | "complaint") =>
-  metric === "bounce" ? "hard-bounce rate" : "complaint rate";
-
-export function quotaWarningMail(input: {
-  team: string;
-  used: number;
-  limit: number;
-  resetsAt: Date;
-  url: string;
-}): MailContent {
-  return layout({
-    subject: `${input.team}: 80% of today's sending quota used`,
-    paragraphs: [
-      `${input.team} has used ${input.used} of its ${input.limit} emails for today.`,
-      `Sends keep going out until ${tolerance} past the quota; after that they queue until the quota resets at ${resetTime(input.resetsAt)}. A higher plan raises the daily quota immediately.`,
-    ],
-    button: { label: "Review your plan", url: input.url },
-    footnote: "You get this once per day when a team you own nears its quota.",
-  });
-}
-
-export function quotaReachedMail(input: {
-  team: string;
-  used: number;
-  limit: number;
-  ceiling: number;
-  resetsAt: Date;
-  url: string;
-}): MailContent {
-  const headroom = Math.max(0, input.ceiling - input.used);
-  return layout({
-    subject: `${input.team}: today's sending quota reached`,
-    paragraphs: [
-      `${input.team} has used its ${input.limit} emails for today (${input.used} accepted).`,
-      `${headroom} more still go out today (sends pass until ${tolerance} past the quota); anything past that is queued and sent after the quota resets at ${resetTime(input.resetsAt)}. A higher plan raises the daily quota immediately and releases queued mail within minutes.`,
-    ],
-    button: { label: "Review your plan", url: input.url },
-    footnote: "You get this once per day when a team you own reaches its quota.",
-  });
-}
-
-export function quotaPausedMail(input: {
-  team: string;
-  used: number;
-  limit: number;
-  resetsAt: Date;
-  url: string;
-}): MailContent {
-  return layout({
-    subject: `${input.team}: sending paused until the quota resets`,
-    paragraphs: [
-      `${input.team} has used ${input.used} emails today, ${tolerance} past its ${input.limit} quota, so new sends are queued instead of sent.`,
-      `Queued mail goes out after the quota resets at ${resetTime(input.resetsAt)}. A higher plan raises the daily quota immediately and releases the queue within minutes.`,
-    ],
-    button: { label: "Review your plan", url: input.url },
-    footnote: "You get this once per day when a team you own passes the ceiling of its quota.",
-  });
-}
-
-const count = (n: number) => n.toLocaleString("en-US");
-
-export function quotaMonthlyWarningMail(input: {
-  team: string;
-  used: number;
-  limit: number;
-  renewsAt: Date;
-  overage: boolean;
-  url: string;
-}): MailContent {
-  return layout({
-    subject: `${input.team}: 80% of this period's sending quota used`,
-    paragraphs: [
-      `${input.team} has used ${count(input.used)} of the ${count(input.limit)} emails included in its plan this billing period, which renews on ${formatMailDate("en", input.renewsAt)}.`,
-      input.overage
-        ? "Sends past the quota bill at your plan's overage rate and show on the next invoice. A higher plan includes more emails at a lower rate."
-        : "At the quota, new API sends are refused and broadcasts park until the period renews. Turn on overage in Billing to keep sending past it, or move to a higher plan.",
-    ],
-    button: { label: "Review your plan", url: input.url },
-    footnote: "You get this once per billing period when a team you own nears its quota.",
-  });
-}
-
-export function quotaMonthlyReachedMail(input: {
-  team: string;
-  used: number;
-  limit: number;
-  renewsAt: Date;
-  overage: boolean;
-  url: string;
-}): MailContent {
-  const renews = formatMailDate("en", input.renewsAt);
-  return layout({
-    subject: `${input.team}: this period's sending quota reached`,
-    paragraphs: [
-      `${input.team} has used the ${count(input.limit)} emails included in its plan this billing period (${count(input.used)} accepted).`,
-      input.overage
-        ? `Sends past the quota now bill at your plan's overage rate and show on the next invoice. They stop at ${OVERAGE_HARD_CAP} times the included volume (${count(input.limit * OVERAGE_HARD_CAP)}) until the period renews on ${renews}; a higher plan includes more emails at a lower rate.`
-        : `New API sends are refused until the period renews on ${renews} or overage is turned on in Billing; broadcasts park until then. A higher plan raises the quota immediately and releases parked mail within minutes.`,
-    ],
-    button: { label: "Review your plan", url: input.url },
-    footnote: "You get this once per billing period when a team you own reaches its quota.",
-  });
-}
-
-export function deliverabilityWarningMail(input: {
-  team: string;
-  metric: "bounce" | "complaint";
-  rate: number;
-  limit: number;
-  windowDays: number;
-  url: string;
-}): MailContent {
-  return layout({
-    subject: `${input.team}: ${metricName(input.metric)} at risk`,
-    paragraphs: [
-      `${input.team}'s ${metricName(input.metric)} over the last ${input.windowDays} days is ${percent(input.rate)}, above the ${percent(input.limit)} risk line. Sending continues, but broadcasts are slowed while it stays there.`,
-      input.metric === "bounce"
-        ? "Hard bounces come from addresses that do not exist. Remove old or unverified addresses from your lists; every bounced address is already on your suppression list."
-        : "Complaints come from recipients who did not expect the email. Send only to people who opted in, keep the unsubscribe link visible, and pause lists that have not heard from you in months.",
-    ],
-    button: { label: "Open metrics", url: input.url },
-    footnote: "You get this once per episode; it clears when the rate drops back under the line.",
-  });
-}
-
-export function deliverabilityPausedMail(input: {
-  team: string;
-  metric: "bounce" | "complaint";
-  rate: number;
-  limit: number;
-  windowDays: number;
-  url: string;
-}): MailContent {
-  return layout({
-    subject: `${input.team}: sending paused (${metricName(input.metric)})`,
-    paragraphs: [
-      `${input.team}'s ${metricName(input.metric)} over the last ${input.windowDays} days reached ${percent(input.rate)}, at or above the ${percent(input.limit)} pause line. New sends are refused until it recovers.`,
-      "The pause lifts on its own once the rate over the window drops back under the line. Clean the recipient list first, or the next sends will trip it again.",
-    ],
-    button: { label: "Open metrics", url: input.url },
-    footnote: "You get this once per episode.",
-  });
-}
 
 const metricLabel = (metric: "bounce" | "complaint") =>
   metric === "bounce" ? "hard-bounce" : "complaint";
@@ -196,7 +45,7 @@ export function regionPausedMail(input: {
       `Across every team sending from ${input.region}, the ${metricLabel(input.metric)} rate over the last ${input.windowHours} hours is ${percent(input.rate)} (${input.events} of ${input.sent} sends), within 80% of SES's ${percent(input.limit)} review line for the whole account.`,
       "Broadcasts in this region are held until the rate drops back under the line; transactional email keeps flowing. Teams behind the events in the last 24 hours:",
       ...input.contributors.map(
-        (c) => `${c.team}: ${c.hardBounced} hard bounces, ${c.complained} complaints`,
+        (c) => `${inertText(c.team)}: ${c.hardBounced} hard bounces, ${c.complained} complaints`,
       ),
     ],
     button: { label: "Open console", url: input.url },
@@ -212,70 +61,5 @@ export function regionResumedMail(input: { region: string; url: string }): MailC
     ],
     button: { label: "Open console", url: input.url },
     footnote: "Sent to the instance operator when a region breaker clears.",
-  });
-}
-
-const host = (endpoint: string) => new URL(endpoint).host;
-const age = (ms: number) =>
-  ms >= 3_600_000
-    ? `${Math.floor(ms / 3_600_000)} h`
-    : `${Math.max(1, Math.floor(ms / 60_000))} min`;
-
-export function webhookFailingMail(input: {
-  team: string;
-  endpoint: string;
-  streak: number;
-  disableAfter: number;
-  url: string;
-}): MailContent {
-  return layout({
-    subject: `${input.team}: webhook deliveries to ${host(input.endpoint)} are failing`,
-    paragraphs: [
-      `The last ${input.streak} deliveries to ${input.endpoint} failed on every retry, so ${input.team} is missing events.`,
-      `Check that the receiver is up, answers 2xx quickly, and verifies with the current signing secret. Retries continue on their own; after ${input.disableAfter} failed deliveries in a row the endpoint is disabled.`,
-    ],
-    button: { label: "Open the endpoint", url: input.url },
-    footnote: "You get this once per episode; it clears when a delivery succeeds again.",
-  });
-}
-
-export function webhookAutoDisabledMail(input: {
-  team: string;
-  endpoint: string;
-  after: number;
-  url: string;
-}): MailContent {
-  return layout({
-    subject: `${input.team}: webhook ${host(input.endpoint)} disabled after repeated failures`,
-    paragraphs: [
-      `${input.endpoint} was disabled automatically after ${input.after} deliveries in a row failed on every retry. Events are no longer queued for it.`,
-      "Fix the receiver, then re-enable the endpoint from its page. Events that happen while it is disabled are not replayed.",
-    ],
-    button: { label: "Open the endpoint", url: input.url },
-    footnote: "You get this each time an endpoint of a team you own is disabled automatically.",
-  });
-}
-
-export function webhookBacklogMail(input: {
-  team: string;
-  endpoint: string;
-  queued: number;
-  /** Where the count stopped: past it the mail says "more than". */
-  cap: number;
-  oldestAgeMs: number;
-  url: string;
-}): MailContent {
-  const queued =
-    input.queued > input.cap
-      ? `More than ${input.cap.toLocaleString("en-US")}`
-      : String(input.queued);
-  return layout({
-    subject: `${input.team}: webhook deliveries to ${host(input.endpoint)} are backing up`,
-    paragraphs: [
-      `${queued} deliveries to ${input.endpoint} are waiting; the oldest has been due for ${age(input.oldestAgeMs)}. The receiver is slow, rate-limiting, or failing, so events reach it late.`,
-      "Deliveries older than 24 hours are dropped. Speed up the receiver, or subscribe the endpoint only to the events it needs.",
-    ],
-    button: { label: "Open the endpoint", url: input.url },
-    footnote: "You get this at most once per day per endpoint.",
   });
 }

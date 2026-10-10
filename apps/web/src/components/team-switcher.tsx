@@ -1,5 +1,6 @@
 "use client";
 
+import { CUSTOMER_TEXT_MAX } from "@millionsend/core/customer-text";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
@@ -244,7 +245,7 @@ export function TeamSwitcher({
               className="ms-input"
               style={{ width: "100%" }}
               required
-              maxLength={80}
+              maxLength={CUSTOMER_TEXT_MAX}
               disabled={createTeam.isPending}
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
@@ -254,7 +255,9 @@ export function TeamSwitcher({
             <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
               {createTeam.error.data?.code === "FORBIDDEN"
                 ? t("limit")
-                : guardMessage(createTeam.error, t("error"))}
+                : createTeam.error.data?.code === "BAD_REQUEST"
+                  ? tCommon("nameRule", { max: CUSTOMER_TEXT_MAX })
+                  : guardMessage(createTeam.error, t("error"))}
             </p>
           ) : null}
           <ModalFooter>

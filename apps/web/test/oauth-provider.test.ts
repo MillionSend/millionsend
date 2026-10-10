@@ -70,7 +70,7 @@ async function signUp(
   requestHeaders?: Record<string, string>,
 ): Promise<{ userId: string; cookie: string }> {
   const { headers, response } = await auth.api.signUpEmail({
-    body: { name: email, email, password: "correct horse battery" },
+    body: { name: email.split("@")[0] ?? email, email, password: "correct horse battery" },
     returnHeaders: true,
     ...(requestHeaders ? { headers: new Headers(requestHeaders) } : {}),
   });
@@ -737,7 +737,8 @@ describe("connected-app receipt", () => {
     await authorize(clientId, cookie);
     expect(sent.map((m) => m.kind)).toEqual(["mcp.connected"]);
     expect(sent[0]).toMatchObject({ to: "ada@example.com" });
-    expect(sent[0]?.subject).toContain("Claude Code");
+    expect(sent[0]?.subject).toBe("An app is connected to your MillionSend account");
+    expect(sent[0]?.text).toContain("You allowed Claude Code to act on acme");
     expect(sent[0]?.text).toContain("emails:send");
     expect(sent[0]?.text).toContain("/settings/connected-apps");
     // Granting the same app again later (prompt=consent brings the screen
@@ -766,6 +767,6 @@ describe("connected-app receipt", () => {
       .filter((c) => !c.startsWith("NEXT_LOCALE="))
       .join("; ");
     await authorize(clientId, bare);
-    expect(sent[0]?.subject).toBe("Claude Code foi conectado à sua conta do MillionSend");
+    expect(sent[0]?.subject).toBe("Um app foi conectado à sua conta do MillionSend");
   });
 });
