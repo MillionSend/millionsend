@@ -28,7 +28,12 @@ import { and, asc, eq, ilike, isNotNull, isNull, or, type SQL, sql } from "drizz
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
-import { consoleStepUp, sendConsoleCode, signedInRecently } from "../../console-code";
+import {
+  consoleCodeVerifiedUntil,
+  consoleStepUp,
+  sendConsoleCode,
+  signedInRecently,
+} from "../../console-code";
 import { getQueue } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
 import {
@@ -306,6 +311,11 @@ export const consoleTeamsRouter = router({
       minutes: SUPPORT_VIEW_SIGN_IN_MINUTES,
     };
   }),
+
+  /** Until when a code confirmed on this session lets View as owner start without a new one. */
+  supportViewVerified: operatorProcedure.query(async ({ ctx }) => ({
+    until: await consoleCodeVerifiedUntil(ctx.db, ctx.session),
+  })),
 
   /**
    * Opens the team's dashboard as its owner sees it, read-only, for 30

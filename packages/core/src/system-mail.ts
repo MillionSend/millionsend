@@ -136,6 +136,15 @@ export interface SystemSendDeps extends AcceptEmailDeps {
   raw(message: SystemMailMessage, owner: SenderDomainOwner | null): Promise<void>;
 }
 
+export interface SystemMailOptions {
+  /**
+   * Runs in the accept transaction with the new email's id, so a row naming
+   * that email commits with it, before the worker can take its job. Never
+   * runs on the raw path, which leaves no email row.
+   */
+  completeInTx?: ((tx: Db, emailId: string) => Promise<void>) | undefined;
+}
+
 const warnedSenders = new Set<string>();
 
 /**
@@ -157,6 +166,7 @@ const warnedSenders = new Set<string>();
 export async function sendSystemMail(
   deps: SystemSendDeps,
   message: SystemMailMessage,
+  opts: SystemMailOptions = {},
 ): Promise<"pipeline" | "raw" | "muted"> {
   const suspended = message.aboutTeamId
     ? (await fetchTeamStanding(deps.db, message.aboutTeamId))?.suspended
@@ -195,6 +205,7 @@ export async function sendSystemMail(
         domainId: owner.domainId,
         tags: { [SYSTEM_MAIL_TAG]: message.kind },
       },
+      { completeInTx: opts.completeInTx },
     );
   } catch (err) {
     console.error(`system mail: accept failed for ${message.kind}, sending raw`, err);

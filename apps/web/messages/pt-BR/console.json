@@ -550,6 +550,7 @@
       "code": "Código do seu e-mail",
       "codeSent": "Enviado para {email}. Vale uma vez, por {minutes} minutos.",
       "codeResend": "Enviar outro código",
+      "verified": "O código que você confirmou nesta sessão ainda vale para iniciar um modo de suporte (restam {left}).",
       "fallback": {
         "no_mail": "Esta instância não envia e-mail (precisa de AUTH_EMAIL_FROM e de credenciais do SES), então nenhum código sai: um login feito nos últimos {minutes} minutos vale no lugar dele.",
         "send_failed": "O e-mail com o código não pôde ser enviado, então um login feito nos últimos {minutes} minutos vale no lugar dele.",
@@ -563,7 +564,7 @@
         "own_team": "Você é membro desta equipe; abra-a pelo seletor de equipes.",
         "silent_suspension": "Esta equipe está suspensa por phishing ou retida para revisão, então nenhum modo de suporte pode começar.",
         "reference_required": "Uma referência de chamado é obrigatória.",
-        "code_required": "Um login não vale mais no lugar do código: envie um para o seu e-mail.",
+        "code_required": "Agora é preciso um código: envie um para o seu e-mail.",
         "code_invalid": "Esse código não confere. Confira o e-mail e tente de novo.",
         "code_void": "Esse código não vale mais: expirou, já foi usado ou recebeu tentativas erradas demais. Envie outro.",
         "code_limit": "Códigos demais nesta hora. Tente de novo mais tarde."

@@ -14,6 +14,7 @@ import {
   fillMailTemplate as fill,
   type MailLocale,
   type SystemMailMessage,
+  type SystemMailOptions,
   sendSystemMail,
 } from "@millionsend/core";
 import { type Db, getDb, schema } from "@millionsend/db";
@@ -315,7 +316,7 @@ export function sendAccountMail(
 
 /** Mail seam so tests capture sends instead of stubbing the pipeline or the AWS SDK. */
 export interface SystemMailDeps {
-  send(message: SystemMailMessage): Promise<void>;
+  send(message: SystemMailMessage, opts?: SystemMailOptions): Promise<void>;
 }
 
 /**
@@ -326,7 +327,7 @@ export interface SystemMailDeps {
  * is nothing worth caching.
  */
 export const defaultSystemMailDeps: SystemMailDeps = {
-  send: async (message) => {
+  send: async (message, opts) => {
     await sendSystemMail(
       {
         db: getDb(),
@@ -344,6 +345,7 @@ export const defaultSystemMailDeps: SystemMailDeps = {
           ),
       },
       message,
+      opts,
     );
   },
 };

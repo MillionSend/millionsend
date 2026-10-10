@@ -1,13 +1,17 @@
 import { randomBytes } from "node:crypto";
 import {
+  CONSOLE_CODE_MINUTES,
   CREDENTIAL_MAIL_KINDS,
   EnvKeyring,
   encryptEmailBody,
+  noteConsoleCodeUndelivered,
   SUPPORT_VIEW_MINUTES,
   SUPPORT_VIEW_REASONS,
   SUPPORT_VIEW_SIGN_IN_MINUTES,
   SUSPENSION_REASONS,
   type SystemMailMessage,
+  type SystemMailOptions,
+  sendSystemMail,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -15,7 +19,6 @@ import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { asc, eq, isNull, like } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  CONSOLE_CODE_MINUTES,
   CONSOLE_CODE_TRIES,
   CONSOLE_CODES_PER_HOUR,
   consoleStepUp,
@@ -42,6 +45,8 @@ const h = vi.hoisted(() => ({
   cookieDeletes: [] as string[],
   sent: [] as SystemMailMessage[],
   failSend: false,
+  /** Set: account mail goes this way instead of into `sent`. */
+  deliver: null as null | ((m: SystemMailMessage, opts?: SystemMailOptions) => Promise<void>),
 }));
 
 vi.mock("@/server/queue", () => ({
@@ -56,8 +61,9 @@ vi.mock("@/server/system-mail", async (importOriginal) => {
     ...actual,
     sendAccountMail: (m: SystemMailMessage) => void h.sent.push(m),
     defaultSystemMailDeps: {
-      send: async (m: SystemMailMessage) => {
+      send: async (m: SystemMailMessage, opts?: SystemMailOptions) => {
         if (h.failSend) throw new Error("SES refused the message");
+        if (h.deliver) return h.deliver(m, opts);
         h.sent.push(m);
       },
     },
@@ -138,6 +144,7 @@ beforeEach(() => {
   h.cookieDeletes = [];
   h.sent = [];
   h.failSend = false;
+  h.deliver = null;
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -556,7 +563,10 @@ describe("the emailed code in front of a start", () => {
     const started = (await auditRows("support.view_started")).at(-1);
     expect(started?.target).toBe(`support_view:${result.grantId}`);
     expect(started?.data).toEqual({ reason: "support_ticket", reference: "#4812", minutes: 30 });
-    expect(await codeRows()).toEqual([]);
+    // The code is spent; what stays is the mark of the session that entered it.
+    expect((await codeRows()).map((row) => row.identifier)).toEqual([
+      "console-code-verified:s-old",
+    ]);
     await expect(startWith(code)).rejects.toMatchObject({
       code: "PRECONDITION_FAILED",
       message: "code_void",
@@ -660,10 +670,152 @@ describe("the emailed code in front of a start", () => {
       message: "sign_in_again",
     });
     expect((await startWith()).grantId).toBeTruthy();
-    // A send that goes through closes the fallback again.
+    // While the mark stands, asking again sends nothing and answers the same.
     h.failSend = false;
-    await operator().console.teams.sendSupportViewCode();
+    expect(await operator().console.teams.sendSupportViewCode()).toMatchObject({
+      sent: false,
+      reason: "send_failed",
+    });
+    expect(h.sent).toEqual([]);
+    // Once it lapses a code goes out, and that closes the fallback.
+    await db
+      .update(schema.verification)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.verification.identifier, `console-code-unsent:${OPERATOR}`));
+    expect(await operator().console.teams.sendSupportViewCode()).toMatchObject({ sent: true });
     await expect(startWith()).rejects.toMatchObject({ message: "code_required" });
+  });
+
+  it("lets a recent sign-in stand in once the queue fails a code it had accepted", async () => {
+    canSendMail();
+    // A team holds the sender's domain, so the code rides the send queue.
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({
+        teamId: ownTeamId,
+        name: "example.com",
+        region: "us-east-1",
+        status: "verified",
+        verifiedAt: new Date(),
+      })
+      .returning({ id: schema.domains.id });
+    if (!domain) throw new Error("domain insert failed");
+    h.deliver = async (m, opts) => {
+      await sendSystemMail(
+        {
+          db,
+          keyring: EnvKeyring.fromBase64(TEST_KEK),
+          isCloud: false,
+          enqueueEmailSend: async () => {},
+          raw: async () => {
+            throw new Error("a team holds the sender's domain");
+          },
+        },
+        m,
+        opts,
+      );
+    };
+    const mails = () =>
+      db.select().from(schema.emails).where(eq(schema.emails.domainId, domain.id));
+    try {
+      expect(await operator().console.teams.sendSupportViewCode()).toMatchObject({ sent: true });
+      const [mail] = await mails();
+      if (!mail) throw new Error("the code email was not accepted");
+      // Accepted is not delivered: the code is what starts a view meanwhile.
+      await expect(startWith()).rejects.toMatchObject({ message: "code_required" });
+      // What the worker does once SES refuses or bounces it, or it never leaves.
+      await noteConsoleCodeUndelivered(db, mail);
+      expect(await operator().console.teams.sendSupportViewCode()).toEqual({
+        sent: false,
+        reason: "send_failed",
+        signedInRecently: true,
+        minutes: SUPPORT_VIEW_SIGN_IN_MINUTES,
+      });
+      expect(await mails()).toHaveLength(1);
+      await expect(startWith(undefined, stale())).rejects.toMatchObject({
+        message: "sign_in_again",
+      });
+      expect((await startWith()).grantId).toBeTruthy();
+    } finally {
+      await db.delete(schema.emails).where(eq(schema.emails.domainId, domain.id));
+      await db.delete(schema.domains).where(eq(schema.domains.id, domain.id));
+    }
+  });
+
+  describe("once confirmed", () => {
+    /** A sign-in of the operator's with its session row, older than a sign-in that stands in. */
+    async function signIn(at = new Date(Date.now() - (SUPPORT_VIEW_SIGN_IN_MINUTES + 1) * 60_000)) {
+      const id = crypto.randomUUID();
+      await db.insert(schema.session).values({
+        id,
+        token: crypto.randomUUID(),
+        userId: OPERATOR,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        createdAt: at,
+      });
+      return {
+        id,
+        caller: callerFor(OPERATOR, ownTeamId, "owner", {
+          session: { user: user(OPERATOR), session: { id, createdAt: at } },
+        }),
+      };
+    }
+
+    it("covers the starts of the session that confirmed it, for its minutes", async () => {
+      canSendMail();
+      const session = await signIn();
+      await session.caller.console.teams.sendSupportViewCode();
+      const first = await startWith(sentCode(), session.caller);
+      const { until } = await session.caller.console.teams.supportViewVerified();
+      const minutes = ((until?.getTime() ?? 0) - Date.now()) / 60_000;
+      expect(minutes).toBeGreaterThan(SUPPORT_VIEW_SIGN_IN_MINUTES - 1);
+      expect(minutes).toBeLessThanOrEqual(SUPPORT_VIEW_SIGN_IN_MINUTES);
+      const second = await startWith(undefined, session.caller);
+      expect(second.grantId).not.toBe(first.grantId);
+      expect(h.sent).toHaveLength(1);
+      await db
+        .update(schema.verification)
+        .set({ expiresAt: new Date(Date.now() - 1000) })
+        .where(eq(schema.verification.identifier, `console-code-verified:${session.id}`));
+      await expect(startWith(undefined, session.caller)).rejects.toMatchObject({
+        message: "code_required",
+      });
+      expect(await session.caller.console.teams.supportViewVerified()).toEqual({ until: null });
+    });
+
+    it("is that session's alone, and ends when it signs out", async () => {
+      canSendMail();
+      const session = await signIn();
+      const other = await signIn();
+      await session.caller.console.teams.sendSupportViewCode();
+      await startWith(sentCode(), session.caller);
+      await expect(startWith(undefined, other.caller)).rejects.toMatchObject({
+        message: "code_required",
+      });
+      expect(await other.caller.console.teams.supportViewVerified()).toEqual({ until: null });
+      // Signing out deletes the session's row.
+      await db.delete(schema.session).where(eq(schema.session.id, session.id));
+      await expect(startWith(undefined, session.caller)).rejects.toMatchObject({
+        message: "code_required",
+      });
+      expect(await session.caller.console.teams.supportViewVerified()).toEqual({ until: null });
+    });
+
+    it("comes only from a code that checks out, never from a sign-in standing in", async () => {
+      canSendMail();
+      const session = await signIn();
+      await session.caller.console.teams.sendSupportViewCode();
+      await expect(startWith(otherCode(sentCode()), session.caller)).rejects.toMatchObject({
+        message: "code_invalid",
+      });
+      await expect(startWith(undefined, session.caller)).rejects.toMatchObject({
+        message: "code_required",
+      });
+      vi.stubEnv("AWS_ACCESS_KEY_ID", "");
+      const fresh = await signIn(new Date());
+      expect((await startWith(undefined, fresh.caller)).grantId).toBeTruthy();
+      expect(await fresh.caller.console.teams.supportViewVerified()).toEqual({ until: null });
+    });
   });
 });
 

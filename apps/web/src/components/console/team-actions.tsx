@@ -94,11 +94,23 @@ export function useTeamActions(onChanged: () => void): TeamActions {
   );
   const suspend = useMutation(trpc.console.teams.suspend.mutationOptions({ onError: failed }));
   const reinstate = useMutation(trpc.console.teams.reinstate.mutationOptions({ onError: failed }));
-  // A refusal stays in the dialog (the code is one it can explain); success
-  // leaves for the dashboard in this tab, so the layout reads the new cookie.
+  // Asked each time the dialog opens: a code this session confirmed may
+  // have lapsed since, or been confirmed in another tab.
+  const verified = useQuery(
+    trpc.console.teams.supportViewVerified.queryOptions(undefined, {
+      enabled: dialog?.kind === "view",
+      staleTime: 0,
+    }),
+  );
+  // A refusal stays in the dialog (the code is one it can explain) and asks
+  // again after the confirmed code: a start that failed after its code
+  // checked out needs no second one, and a lapsed mark must stop offering a
+  // start without one. Success leaves for the dashboard in this tab, so the
+  // layout reads the new cookie.
   const view = useMutation(
     trpc.console.teams.startSupportView.mutationOptions({
       onSuccess: () => window.location.assign("/"),
+      onError: () => void verified.refetch(),
     }),
   );
   const viewCode = useMutation(trpc.console.teams.sendSupportViewCode.mutationOptions());
@@ -129,6 +141,7 @@ export function useTeamActions(onChanged: () => void): TeamActions {
           pending={view.isPending || view.isSuccess || viewCode.isPending}
           error={(view.error ?? viewCode.error)?.message ?? null}
           step={viewCode.data ?? null}
+          verifiedUntil={verified.data?.until ?? null}
           onClose={close}
           onSendCode={() => {
             view.reset();

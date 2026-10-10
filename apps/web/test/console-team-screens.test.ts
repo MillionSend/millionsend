@@ -158,13 +158,18 @@ describe("the team's id on the console's team screens", () => {
 });
 
 describe("the View as owner dialog", () => {
-  const render = (step: Parameters<typeof ViewDialog>[0]["step"], error: string | null = null) =>
+  const render = (
+    step: Parameters<typeof ViewDialog>[0]["step"],
+    error: string | null = null,
+    verifiedUntil: Date | null = null,
+  ) =>
     renderToStaticMarkup(
       createElement(ViewDialog, {
         name: "acme",
         pending: false,
         error,
         step,
+        verifiedUntil,
         onClose: () => {},
         onSendCode: () => {},
         onSubmit: () => {},
@@ -207,8 +212,23 @@ describe("the View as owner dialog", () => {
       { sent: false, reason: "send_failed", signedInRecently: true, minutes: 15 },
       "code_required",
     );
-    expect(html).toContain("A sign-in no longer stands in for the code: email yourself one.");
+    expect(html).toContain("A code is needed now: email yourself one.");
     expect(html).not.toContain("The code email could not be sent");
     expect(html).toContain("Email me a code");
+  });
+
+  it("goes straight to the start while a code confirmed in this session covers it", () => {
+    const until = new Date(Date.now() + 5 * 60_000);
+    const html = render(null, null, until);
+    expect(html).toContain("Start session · 30 min");
+    expect(html).not.toContain("Email me a code");
+    expect(html).not.toContain("Code from your email");
+    expect(html).toMatch(
+      /The code you confirmed in this session still covers starting a view \(0[45]:\d\d left\)\./,
+    );
+    // The server's clock ended it first: a code again.
+    const lapsed = render(null, "code_required", until);
+    expect(lapsed).toContain("Email me a code");
+    expect(lapsed).not.toContain("still covers");
   });
 });

@@ -10,6 +10,8 @@ import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
+import { formatMmSs } from "@/lib/format";
+import { useCountdown } from "@/lib/use-countdown";
 import type { CodeStep } from "./types";
 
 export interface ViewInput {
@@ -33,13 +35,15 @@ const KNOWN_ERRORS = [
 /**
  * Names a reason and a request, emails the operator a one-time code, then
  * opens the team's dashboard read-only for 30 minutes. When the code cannot
- * go out, says why and lets a recent sign-in stand in.
+ * go out, says why and lets a recent sign-in stand in; while a code this
+ * session confirmed still covers it, goes straight to the start.
  */
 export function ViewDialog({
   name,
   pending,
   error,
   step: answered,
+  verifiedUntil,
   onClose,
   onSendCode,
   onSubmit,
@@ -50,6 +54,8 @@ export function ViewDialog({
   error: string | null;
   /** What the last code request answered; null before the first. */
   step: CodeStep | null;
+  /** Until when a code confirmed on this session covers the start; null when none does. */
+  verifiedUntil: Date | null;
   onClose: () => void;
   onSendCode: () => void;
   onSubmit: (input: ViewInput) => void;
@@ -60,18 +66,22 @@ export function ViewDialog({
   const [reason, setReason] = useState<SupportViewReason>("support_ticket");
   const [reference, setReference] = useState("");
   const [code, setCode] = useState("");
-  // A fallback the server no longer honors (its mark lapsed, or a code has
-  // gone out since) comes back as code_required: offer to email one again.
-  const step = error === "code_required" ? null : answered;
+  const left = useCountdown(verifiedUntil);
+  // Whatever stood in for a new code (a recent sign-in, a code confirmed
+  // earlier) and no longer does comes back as code_required: offer to email one.
+  const lapsed = error === "code_required";
+  const verified = left > 0 && !lapsed;
+  const step = lapsed || verified ? null : answered;
   const trimmed = reference.trim();
   const digits = code.replace(/\D/g, "");
   const valid =
     trimmed.length > 0 &&
-    (step === null || (step.sent ? digits.length === 6 : step.signedInRecently));
+    (verified || step === null || (step.sent ? digits.length === 6 : step.signedInRecently));
 
   function submit() {
     if (pending || !valid) return;
-    if (!step) onSendCode();
+    if (verified) onSubmit({ reason, reference: trimmed });
+    else if (!step) onSendCode();
     else onSubmit({ reason, reference: trimmed, ...(step.sent ? { code: digits } : {}) });
   }
 
@@ -131,7 +141,11 @@ export function ViewDialog({
           <b style={{ color: "var(--ms-bone)", fontWeight: 600 }}>{t("hiddenTitle")}</b>
           {t("hiddenBody")}
         </div>
-        {step?.sent ? (
+        {verified ? (
+          <p style={{ margin: "14px 0 0", color: "var(--ms-muted)", fontSize: 13 }}>
+            {t("verified", { left: formatMmSs(left) })}
+          </p>
+        ) : step?.sent ? (
           <div className="ms-field" style={{ marginTop: 14 }}>
             <label htmlFor={`${id}-code`}>{t("code")}</label>
             <input
@@ -202,7 +216,7 @@ export function ViewDialog({
           </button>
           <button type="submit" className="ms-btn ms-btn-primary" disabled={pending || !valid}>
             <BtnSpinner on={pending} />
-            {t(step ? "confirm" : "sendCode")} <ConfirmKeycap />
+            {t(step || verified ? "confirm" : "sendCode")} <ConfirmKeycap />
           </button>
         </ModalFooter>
       </form>

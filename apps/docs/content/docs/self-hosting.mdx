@@ -1118,11 +1118,15 @@ Settings → Support access, and expiry ends it on the next request.
 **Starting one.** The dialog emails a 6-digit code to the operator's own
 address, from `AUTH_EMAIL_FROM`. It works once, for 10 minutes; five wrong
 tries void it, a new code replaces the old one, and one operator is sent at
-most five an hour. Only a hash keyed by `BETTER_AUTH_SECRET` is stored. When
-the instance cannot send it (no `AUTH_EMAIL_FROM` or no SES credentials) or
-the send fails, the dialog says so and a sign-in from the last 15 minutes
-stands in for the code. Either way a stolen long-lived session cannot open a
-view.
+most five an hour. Only a hash keyed by `BETTER_AUTH_SECRET` is stored. A
+code that checks out covers that browser session's starts for 15 minutes, so
+opening several views takes one code; signing out ends it. When the instance
+cannot send the code (no `AUTH_EMAIL_FROM` or no SES credentials) or its
+email fails, whether the send itself or, when a team holds the sender's
+domain, the queued email later (refused, failed, bounced, or held back from
+SES), the dialog says so and for 10 minutes a sign-in from the last 15
+minutes stands in for the code. Either way a stolen long-lived session cannot
+open a view.
 
 **What is logged.** `support.view_started` and `support.view_ended`, in the
 instance audit and, at once, in the team's own Settings → Audit log: who,

@@ -10,9 +10,10 @@ export { SUPPORT_VIEW_REASONS, type SupportViewReason };
 export const SUPPORT_VIEW_MINUTES = 30;
 
 /**
- * How recent the operator's sign-in must be to start a view when the
- * emailed one-time code cannot go out, so a stolen long-lived session cannot
- * open one either way.
+ * How long a step-up to start a view counts: a sign-in this recent stands in
+ * for the emailed one-time code when none can reach the operator, and a code
+ * confirmed on a session covers that session's starts for as long. Past it,
+ * a stolen session needs the operator's mailbox to open a view.
  */
 export const SUPPORT_VIEW_SIGN_IN_MINUTES = 15;
 

@@ -20,6 +20,7 @@ import {
   MONITOR_ANOMALY_CHECKS,
   type MonitorDeps,
   makeUnsubscribeToken,
+  noteConsoleCodeUndelivered,
   openAttachments,
   parseSingleSender,
   purgedEmailBodyColumns,
@@ -407,6 +408,28 @@ export async function sendEmail(
   // Only queued emails are sendable: quota-parked, already-sent, and failed
   // rows are skipped no matter how the job arrived.
   if (email?.latestStatus !== "queued") return "skipped";
+  let outcome: SendOutcome;
+  try {
+    outcome = await sendQueued(db, deps, email);
+  } catch (err) {
+    // A retry may still send it, too late for a one-time code. The send's
+    // own error is the one the job reports.
+    await noteConsoleCodeUndelivered(db, email).catch((noteErr: unknown) => {
+      console.error(`email.send: console code fallback not marked for ${email.id}`, noteErr);
+    });
+    throw err;
+  }
+  if (outcome === "failed" || outcome === "suppressed" || outcome === "parked") {
+    await noteConsoleCodeUndelivered(db, email);
+  }
+  return outcome;
+}
+
+async function sendQueued(
+  db: Db,
+  deps: SendDeps,
+  email: typeof schema.emails.$inferSelect,
+): Promise<SendOutcome> {
   if (email.scheduledAt && email.scheduledAt.getTime() > Date.now()) {
     // Returning without re-enqueueing would ack the job and strand the
     // email forever; hand it back to the queue for its due time.

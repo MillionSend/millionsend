@@ -1160,11 +1160,15 @@ encerra na requisição seguinte.
 próprio operador, a partir de `AUTH_EMAIL_FROM`. Ele vale uma vez, por 10
 minutos; cinco tentativas erradas o anulam, um código novo substitui o
 anterior, e cada operador recebe no máximo cinco por hora. Só fica guardado
-um hash com chave derivada de `BETTER_AUTH_SECRET`. Quando a instância não
-consegue enviá-lo (sem `AUTH_EMAIL_FROM` ou sem credenciais do SES) ou o
-envio falha, o diálogo diz isso, e um login feito nos últimos 15 minutos vale
-no lugar do código. De um jeito ou de outro, uma sessão antiga roubada não
-consegue abrir um modo.
+um hash com chave derivada de `BETTER_AUTH_SECRET`. Um código confirmado vale
+para os inícios daquela sessão do navegador por 15 minutos, então abrir
+vários modos pede um código só; sair da conta encerra isso. Quando a
+instância não consegue enviar o código (sem `AUTH_EMAIL_FROM` ou sem
+credenciais do SES) ou o e-mail dele falha, seja no próprio envio ou, quando
+uma equipe detém o domínio do remetente, depois na fila (recusado, com falha,
+devolvido ou retido antes do SES), o diálogo diz isso, e por 10 minutos um
+login feito nos últimos 15 minutos vale no lugar do código. De um jeito ou de
+outro, uma sessão antiga roubada não consegue abrir um modo.
 
 **O que é registrado.** `support.view_started` e `support.view_ended`, na
 auditoria da instância e, na hora, no Registro de auditoria da própria

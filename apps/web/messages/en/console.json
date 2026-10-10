@@ -550,6 +550,7 @@
       "code": "Code from your email",
       "codeSent": "Sent to {email}. It works once, for {minutes} minutes.",
       "codeResend": "Send a new code",
+      "verified": "The code you confirmed in this session still covers starting a view ({left} left).",
       "fallback": {
         "no_mail": "This instance cannot send email (it needs AUTH_EMAIL_FROM and SES credentials), so no code goes out: a sign-in from the last {minutes} minutes stands in for it.",
         "send_failed": "The code email could not be sent, so a sign-in from the last {minutes} minutes stands in for it.",
@@ -563,7 +564,7 @@
         "own_team": "You are a member of this team; open it from the team switcher instead.",
         "silent_suspension": "This team is suspended for phishing or held for review, so no support view can start.",
         "reference_required": "A ticket reference is required.",
-        "code_required": "A sign-in no longer stands in for the code: email yourself one.",
+        "code_required": "A code is needed now: email yourself one.",
         "code_invalid": "That code is not right. Check the email and try again.",
         "code_void": "That code no longer works: it expired, was used, or took too many wrong tries. Send a new one.",
         "code_limit": "Too many codes this hour. Try again later."
