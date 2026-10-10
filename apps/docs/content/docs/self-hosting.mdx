@@ -787,13 +787,30 @@ day under its plan. Owners are emailed about each action (except a phishing
 suspension or a review hold), and every action lands in the audit log with
 its reason.
 
-While a team is suspended, its quota, deliverability, broadcast-hold and
-broadcast-pause notices stop. Its billing mail stops too when the suspension
-is for phishing or a review hold (Stripe still sends its own receipts), and
-keeps coming under any other reason. Mail to the operator, such as the
-content monitor's alerts about the team, still goes out. Nobody on a
-suspended team can delete it, remove its domains (the API answers
-`403 team_suspended` there too) or invite anyone, and a member of a team
+While a team is suspended, the only mail about it that still reaches its
+owners is the suspension and reinstatement notices, billing mail and the
+security receipts (a new API key, a rotated webhook secret, a member who
+joined). Its domain, webhook, broadcast, quota and deliverability notices
+stop, and so does any other notice about the team. Under a phishing
+suspension or a review hold nothing about the team goes out, billing
+included (Stripe still sends its own receipts). Mail about a person's own
+account, such as a password reset or an email verification, and mail to the
+operator, such as the content monitor's alerts about the team, still go out.
+
+A suspension for any reason but a review hold or non-payment also
+unsubscribes every member of the team from the instance's own contact list
+(the contacts of the team on the `system` plan, where product announcements
+go), even a member who also belongs to a team in good standing. It is the
+dashboard's unsubscribe, and each contact's timeline says why; no webhook
+fires. A review hold that becomes a phishing suspension unsubscribes them
+then. Reinstating the team does not subscribe them again: only their own
+opt-in does. An instance with no team on the `system` plan has no such list.
+On upgrading to this release, the members of teams already suspended for
+one of those reasons are unsubscribed once, except a contact that changed
+after its team's suspension, such as one who opted in again.
+
+Nobody on a suspended team can delete it, remove its domains (the API
+answers `403 team_suspended` there too) or invite anyone, and a member of a team
 suspended for phishing or held for review cannot create new teams. Under
 those two reasons each of these refusals is one neutral line that never says
 suspended ("This isn't available for this team right now. Contact support if

@@ -793,14 +793,33 @@ um teto diário limita o dia da equipe abaixo do plano. Os proprietários são
 avisados por e-mail a cada ação (exceto suspensão por phishing ou retenção
 para revisão), e cada ação entra no log de auditoria com o motivo.
 
-Enquanto uma equipe está suspensa, os avisos de cota, entregabilidade,
-transmissões retidas e transmissões pausadas param. Os e-mails de cobrança
-também param quando a suspensão é por phishing ou uma retenção para revisão
-(a Stripe continua enviando os próprios recibos), e continuam chegando com
-qualquer outro motivo. O e-mail para o operador, como os alertas do monitor
-de conteúdo sobre a equipe, continua saindo. Ninguém numa equipe suspensa pode
-excluí-la, remover os domínios dela (a API também responde
-`403 team_suspended`) nem convidar ninguém, e um membro de uma equipe suspensa
+Enquanto uma equipe está suspensa, os únicos e-mails sobre ela que ainda
+chegam aos proprietários são os avisos de suspensão e de reativação, os
+e-mails de cobrança e os recibos de segurança (uma nova chave de API, um
+segredo de webhook rotacionado, um membro que entrou). Os avisos de domínio,
+webhook, transmissão, cota e entregabilidade param, assim como qualquer
+outro aviso sobre a equipe. Numa suspensão por phishing ou numa retenção
+para revisão nada sobre a equipe sai, nem a cobrança (a Stripe continua
+enviando os próprios recibos). Os e-mails sobre a própria conta de uma
+pessoa, como uma redefinição de senha ou uma verificação de e-mail, e os
+e-mails para o operador, como os alertas do monitor de conteúdo sobre a
+equipe, continuam saindo.
+
+Uma suspensão por qualquer motivo que não seja uma retenção para revisão ou
+falta de pagamento também descadastra todos os membros da equipe da lista
+de contatos da própria instância (os contatos da equipe no plano `system`,
+para onde vão os anúncios do produto), mesmo um membro que também pertença
+a uma equipe em situação regular. É o mesmo descadastro do painel, e a linha
+do tempo de cada contato diz o motivo; nenhum webhook é disparado. Uma
+retenção para revisão que vira suspensão por phishing os descadastra nesse
+momento. Reativar a equipe não os inscreve de novo: só a própria inscrição
+deles faz isso. Uma instância sem equipe no plano `system` não tem essa
+lista. Ao atualizar para esta versão, os membros das equipes já suspensas
+por um desses motivos são descadastrados uma vez, exceto um contato que
+mudou depois da suspensão da equipe, como quem se inscreveu de novo.
+
+Ninguém numa equipe suspensa pode excluí-la, remover os domínios dela (a API
+também responde `403 team_suspended`) nem convidar ninguém, e um membro de uma equipe suspensa
 por phishing ou retida para revisão não pode criar novas equipes. Com esses
 dois motivos, cada uma dessas recusas é uma única linha neutra que nunca diz
 suspensa ("Isso não está disponível para esta equipe no momento. Fale com o
