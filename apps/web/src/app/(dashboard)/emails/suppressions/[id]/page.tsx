@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
+import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyBlock } from "@/components/copy-chip";
 import { GuidanceBlock } from "@/components/guidance-block";
@@ -214,7 +215,7 @@ export default function SuppressionDetailPage() {
             {t("suppressions.detail.recipient")}
           </div>
           <div className="ms-mono" style={{ fontSize: 13, marginTop: 5, overflowWrap: "anywhere" }}>
-            {row.email ?? "—"}
+            {row.email ? <Breakable text={row.email} /> : "—"}
           </div>
         </div>
         <div>

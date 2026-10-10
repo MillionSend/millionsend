@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { DotParts } from "@/components/dot-parts";
 import { KvRow } from "@/components/kv-row";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
@@ -292,7 +293,7 @@ function Field({
         onChange={(event) => onChange(event.target.value)}
       />
       <div style={{ fontSize: 12, color: "var(--ms-muted)", marginTop: 4 }}>
-        {t(`hints.${setting.key}`)} · {t(`kinds.${setting.kind}`)}
+        <DotParts text={`${t(`hints.${setting.key}`)} · ${t(`kinds.${setting.kind}`)}`} />
       </div>
       {meta}
     </div>

@@ -8,6 +8,7 @@ import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { ApiDocsButton } from "@/components/api-sheet";
+import { Breakable } from "@/components/breakable";
 import { CopyBlock, CopyChip } from "@/components/copy-chip";
 import { Drawer } from "@/components/drawer";
 import { EmailContentPanel } from "@/components/email-content-panel";
@@ -152,7 +153,7 @@ function Meta({
         className={mono ? "ms-mono" : undefined}
         style={{ fontSize: mono ? 13 : 14, marginTop: 5, overflowWrap: "anywhere" }}
       >
-        {children}
+        {typeof children === "string" ? <Breakable text={children} /> : children}
       </div>
     </div>
   );
