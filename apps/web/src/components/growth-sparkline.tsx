@@ -8,7 +8,8 @@
  * mechanics as the metrics line chart).
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { type ChartPointer, trackedPointer } from "@/lib/panel-placement";
 import { ChartTip } from "./line-chart";
 
 interface DayCount {
@@ -67,13 +68,8 @@ export function GrowthSparkline({
   width?: number;
   height?: number;
 }) {
-  const [hover, setHover] = useState<{
-    index: number;
-    px: number;
-    py: number;
-    /** Rendered width at hover time: the svg stretches to its container on phones. */
-    w: number;
-  } | null>(null);
+  const plotRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<{ index: number; pointer: ChartPointer } | null>(null);
   const series = buildSeries(added, unsubscribed, baseline);
   if (series.length === 0) {
     return (
@@ -116,20 +112,19 @@ export function GrowthSparkline({
   const area = `M${totalPoints[0]} L${totalPoints.slice(1).join(" L")} L${(width - pad).toFixed(1)},${height - pad} L${pad},${height - pad} Z`;
 
   function track(event: React.PointerEvent<HTMLDivElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const px = event.clientX - rect.left;
-    const py = event.clientY - rect.top;
+    const pointer = trackedPointer(event);
     // Pointer position in viewBox units: the svg may be stretched to the container.
-    const localX = rect.width > 0 ? (px / rect.width) * width : px;
+    const localX = pointer.width > 0 ? (pointer.x / pointer.width) * width : pointer.x;
     const frac = series.length <= 1 ? 1 : (localX - pad) / (width - pad * 2);
     const index = Math.min(series.length - 1, Math.max(0, Math.round(frac * (series.length - 1))));
-    setHover({ index, px, py, w: rect.width });
+    setHover({ index, pointer });
   }
 
   const hovered = hover ? series[hover.index] : undefined;
 
   return (
     <div
+      ref={plotRef}
       className="ms-sparkline"
       style={{ position: "relative", width: "100%", maxWidth: width, height, touchAction: "pan-y" }}
       onPointerMove={track}
@@ -172,27 +167,42 @@ export function GrowthSparkline({
               stroke="var(--ms-line-strong)"
               vectorEffect="non-scaling-stroke"
             />
-            <circle
-              cx={x(hover.index)}
-              cy={y(hovered.total)}
-              r={2.5}
-              fill="var(--ms-success)"
-              stroke="var(--ms-panel)"
-              strokeWidth={1.5}
-            />
-            <circle
-              cx={x(hover.index)}
-              cy={y(hovered.out)}
-              r={2.5}
-              fill="var(--ms-danger)"
-              stroke="var(--ms-panel)"
-              strokeWidth={1.5}
-            />
+            {/* Dots as zero-length round-capped strokes: a circle would stretch
+                into an oval with the svg on a phone; a non-scaling stroke stays round. */}
+            {(
+              [
+                [hovered.total, "var(--ms-success)"],
+                [hovered.out, "var(--ms-danger)"],
+              ] as const
+            ).map(([value, color]) => (
+              <g key={color}>
+                <line
+                  x1={x(hover.index)}
+                  x2={x(hover.index)}
+                  y1={y(value)}
+                  y2={y(value)}
+                  stroke="var(--ms-panel)"
+                  strokeWidth={8}
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+                <line
+                  x1={x(hover.index)}
+                  x2={x(hover.index)}
+                  y1={y(value)}
+                  y2={y(value)}
+                  stroke={color}
+                  strokeWidth={5}
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </g>
+            ))}
           </>
         ) : null}
       </svg>
       {hover && hovered ? (
-        <ChartTip x={hover.px} y={hover.py} width={hover.w} height={height}>
+        <ChartTip plot={plotRef} pointer={hover.pointer}>
           <div
             className="ms-mono"
             style={{ fontSize: 11, color: "var(--ms-muted)", marginBottom: 4 }}

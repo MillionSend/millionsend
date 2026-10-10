@@ -60,7 +60,7 @@ function ConditionPopover({
   const trpc = useTRPC();
   const panelRef = useRef<HTMLDivElement>(null);
   const id = useId();
-  const style = useAnchoredPanel(anchor, {
+  const style = useAnchoredPanel(anchor, panelRef, {
     width: PANEL_WIDTH,
     flipThreshold: PANEL_FLIP_THRESHOLD,
   });

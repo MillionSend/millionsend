@@ -1782,6 +1782,9 @@ summary:focus-visible,
   /* Modal-level so a tooltip inside a modal wins; ties with the overlay
      resolve by DOM order — the tooltip portal mounts after the modal's. */
   z-index: var(--ms-z-modal);
+  /* The max-width below is the whole panel, padding and border included,
+     which is what tooltip.tsx clamps into the viewport. */
+  box-sizing: border-box;
   background: var(--ms-panel);
   border: 1px solid var(--ms-line-strong);
   border-radius: 8px;
@@ -1790,7 +1793,7 @@ summary:focus-visible,
      panel to one word per line; the component clamps it back into view. */
   width: max-content;
   /* Wide enough that typical hints render as one line; long text still wraps. */
-  max-width: min(420px, calc(100vw - 32px));
+  max-width: min(420px, calc(100vw - 24px));
   font-size: 12px;
   line-height: 1.45;
   color: var(--ms-bone);

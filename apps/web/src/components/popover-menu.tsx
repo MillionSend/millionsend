@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { PANEL_MARGIN, type PanelPlacement, placePanel, viewportSize } from "@/lib/panel-placement";
 import { EllipsisGlyph } from "./icons/nav-icons.js";
 import { Spinner } from "./spinner";
 
@@ -146,25 +147,36 @@ export function PopoverMenu({
     wasBusy.current = anyBusy;
   }, [anyBusy]);
 
-  // Read at render (the trigger is already mounted when `open` flips true), as
-  // in tooltip.tsx — a menu is transient, so no scroll/resize tracking is kept.
-  // Offsets resolve against the layout viewport (documentElement.client*), not
-  // window.inner* — the latter includes a classic scrollbar and would shift
-  // right-aligned panels by its width.
-  const rect = open ? triggerRef.current?.getBoundingClientRect() : undefined;
-  let position: React.CSSProperties | undefined;
-  if (rect) {
-    const viewportW = document.documentElement.clientWidth;
-    const viewportH = document.documentElement.clientHeight;
-    const estHeight = items.length * 32 + 12;
-    const flipUp = rect.bottom + GAP + estHeight > viewportH && rect.top > viewportH - rect.bottom;
-    position = {
-      position: "fixed",
-      ...(flipUp ? { bottom: viewportH - rect.top + GAP } : { top: rect.bottom + GAP }),
-      ...(align === "right" ? { right: viewportW - rect.right } : { left: rect.left }),
-      width: "max-content",
-    };
-  }
+  // Placed once the panel has rendered and can be measured, before it paints:
+  // hung from the trigger's edge, flipped above when it does not fit below,
+  // and shifted to stay inside the viewport. A menu is transient (any scroll
+  // or resize closes it), so it is not tracked afterwards.
+  const [placed, setPlaced] = useState<PanelPlacement | null>(null);
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    const panel = panelRef.current;
+    if (!open || !trigger || !panel) return;
+    setPlaced(
+      placePanel(
+        trigger.getBoundingClientRect(),
+        { width: panel.offsetWidth, height: panel.offsetHeight },
+        viewportSize(),
+        { align: align === "right" ? "end" : "start", gap: GAP },
+      ),
+    );
+    return () => setPlaced(null);
+  }, [open, align]);
+  // The first render hangs under the trigger unmeasured; it is corrected
+  // before paint, and stays visible so the focus moved in on open lands.
+  const rect = open && !placed ? triggerRef.current?.getBoundingClientRect() : undefined;
+  const position: React.CSSProperties = {
+    position: "fixed",
+    width: "max-content",
+    maxWidth: `calc(100vw - ${PANEL_MARGIN * 2}px)`,
+    ...(placed
+      ? { left: placed.left, top: placed.top, maxHeight: placed.maxHeight, overflowY: "auto" }
+      : { left: rect?.left ?? 0, top: (rect?.bottom ?? 0) + GAP }),
+  };
 
   return (
     <>
@@ -181,7 +193,7 @@ export function PopoverMenu({
           <EllipsisGlyph />
         )}
       </button>
-      {open && position
+      {open
         ? createPortal(
             <div
               ref={panelRef}
