@@ -13,6 +13,8 @@ import { makeClickToken, makeOpenToken } from "./tracking.js";
  */
 export interface RewriteOptions {
   emailId: string;
+  /** The sending team, signed into every click token. */
+  teamId: string;
   /** Origin of the tracking endpoints (app host or the domain's CNAME'd subdomain). */
   trackingBaseUrl: string;
   click: boolean;
@@ -74,7 +76,12 @@ export function rewriteForTracking(html: string, opts: RewriteOptions): string {
       const url = unescapeHtml(value);
       if (!isTrackableHref(url)) return match;
       if (opts.skipHrefPrefix && url.startsWith(opts.skipHrefPrefix)) return match;
-      const token = makeClickToken({ emailId: opts.emailId, url, secretKey: opts.secretKey });
+      const token = makeClickToken({
+        emailId: opts.emailId,
+        teamId: opts.teamId,
+        url,
+        secretKey: opts.secretKey,
+      });
       return `${prefix}${quote}${base}/t/c/${token}${quote}`;
     });
   }

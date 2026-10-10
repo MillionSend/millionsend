@@ -632,6 +632,7 @@ export async function sendEmail(
           : undefined;
       html = rewriteForTracking(html, {
         emailId: email.id,
+        teamId: email.teamId,
         trackingBaseUrl,
         click,
         open,

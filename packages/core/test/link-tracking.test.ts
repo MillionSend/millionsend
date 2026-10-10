@@ -1,17 +1,18 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { rewriteForTracking } from "../src/link-tracking.js";
 import { verifyClickToken, verifyOpenToken } from "../src/tracking.js";
 
 const key = randomBytes(32);
-const emailId = "b7f9c9a2-1234-4cde-9f00-0123456789ab";
+const emailId = randomUUID();
+const teamId = randomUUID();
 const trackingBaseUrl = "https://track.example.com";
 const html =
   '<html><body><p>Hi</p><a href="https://acme.example/welcome">Welcome</a>' +
   '<a href="https://acme.example/docs?x=1&amp;y=2">Docs</a></body></html>';
 
 function opts(over: Partial<Parameters<typeof rewriteForTracking>[1]> = {}) {
-  return { emailId, trackingBaseUrl, click: false, open: false, secretKey: key, ...over };
+  return { emailId, teamId, trackingBaseUrl, click: false, open: false, secretKey: key, ...over };
 }
 
 describe("rewriteForTracking — clean-links guarantee", () => {
@@ -29,12 +30,14 @@ describe("rewriteForTracking — click", () => {
     expect(tokens).toHaveLength(2);
     expect(verifyClickToken(tokens[0] as string, key)).toEqual({
       emailId,
+      teamId,
       url: "https://acme.example/welcome",
     });
     // The signed destination is the URL a browser would follow: the
     // attribute's "&amp;" is one "&", not a second query parameter named "amp;y".
     expect(verifyClickToken(tokens[1] as string, key)).toEqual({
       emailId,
+      teamId,
       url: "https://acme.example/docs?x=1&y=2",
     });
     // The raw destination is gone from the body — the redirect owns it now.
@@ -82,6 +85,7 @@ describe("rewriteForTracking — click", () => {
     const token = out.match(/t\/c\/([^"']+)/)?.[1];
     expect(verifyClickToken(token as string, key)).toEqual({
       emailId,
+      teamId,
       url: "https://acme.example/go?a=1&b=2'",
     });
   });

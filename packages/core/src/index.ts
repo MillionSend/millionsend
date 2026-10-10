@@ -602,6 +602,7 @@ export {
   fetchTeamStanding,
   isSilentlySuspended,
   isTeamSuspended,
+  linksDisabled,
   SILENT_SUSPENSIONS,
   STANDING_COLUMNS,
   SUSPENSION_REASONS,

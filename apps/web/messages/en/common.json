@@ -95,6 +95,13 @@
     "retry": "Try again",
     "cta": "Go to the dashboard"
   },
+  "trackedLink": {
+    "disabledTitle": "This link was disabled.",
+    "disabledBody": "It came in an email sent through MillionSend, and it no longer leads anywhere.",
+    "confirmTitle": "Check where this link goes.",
+    "confirmBody": "It came in an email sent through MillionSend and leads to {host}. Its sender can no longer be confirmed, so continue only if you trust that site.",
+    "confirmCta": "Continue to {host}"
+  },
   "confirmWord": "DELETE",
   "typeToConfirm": "Type {word} to confirm",
   "loadError": {
