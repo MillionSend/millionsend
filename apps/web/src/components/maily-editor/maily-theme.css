@@ -534,9 +534,11 @@
   .ms-maily [class~="mly:w-max"][class~="mly:rounded-lg"] > [class~="mly:items-stretch"] {
     flex-wrap: wrap;
   }
-  /* The block handle hangs left of the block, in a gutter a phone does not
-     have: without its "+" (the slash menu adds blocks too) it fits on
-     screen, keeping the ⠿ menu. */
+}
+/* The block handle hangs left of the block, in a gutter that the 16px
+   content padding below 900px does not leave: without its "+" (the slash
+   menu adds blocks too) it fits on screen, keeping the ⠿ menu. */
+@media (max-width: 899px) {
   .ms-maily .tippy-box[data-placement^="left"] [class~="mly:pr-1.5"] > :first-child {
     display: none;
   }
