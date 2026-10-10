@@ -1066,6 +1066,47 @@ it("drain releases nothing of a team past the deliverability pause line until it
   expect(enqueued.sort()).toEqual([plain, bulk].sort());
 });
 
+it("drain holds a young domain's warm-up mail while its team is past the pause line", async () => {
+  await db.insert(schema.instanceSettings).values({ id: 1, warmupEnabled: true });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId,
+      name: "news.paused-warmup.com",
+      region: "us-east-1",
+      status: "verified",
+      registeredAt: new Date("2026-10-09T09:00:00Z"),
+    })
+    .returning({ id: schema.domains.id });
+  if (!domain) throw new Error("domain insert failed");
+  const held = await insertParked(new Date("2026-10-09T10:00:00Z"), "warming", {
+    domainId: domain.id,
+    parkReason: "warmup",
+  });
+  // 10% hard bounces over 200 sends: past the volume floor and the event minimum.
+  await db
+    .insert(schema.usageCounters)
+    .values({ teamId, day: today(), sent: 200, hardBounced: 20 });
+  const enqueued: string[] = [];
+  const deps = {
+    isCloud: false,
+    now: new Date("2026-10-10T00:15:00Z"),
+    enqueueSends: async (batch: readonly { emailId: string }[]) => {
+      enqueued.push(...batch.map((j) => j.emailId));
+    },
+  };
+  // The warm-up has room on its second day; the pause alone holds the row.
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 0, stillParked: 1 });
+  expect(await statusOf(held)).toBe("queued_quota");
+
+  await db
+    .update(schema.usageCounters)
+    .set({ hardBounced: 0 })
+    .where(eq(schema.usageCounters.teamId, teamId));
+  expect(await drainQuotaParked(db, deps)).toEqual({ drained: 1, stillParked: 0 });
+  expect(enqueued).toEqual([held]);
+});
+
 it("drain holds a paused team's broadcast rows and releases its transactional ones", async () => {
   const [bc] = await db
     .insert(schema.broadcasts)
