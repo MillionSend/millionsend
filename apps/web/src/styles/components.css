@@ -3511,7 +3511,9 @@ summary:focus-visible,
   font-size: 13px;
   line-height: 1.55;
 }
-@media (max-width: 899px) {
+/* Beside the sidebar below 1200px the note's column would be under 100px
+   wide, one word per line: it goes under the steps instead. */
+@media (max-width: 1199px) {
   .ms-pacing {
     grid-template-columns: minmax(0, 1fr);
   }
