@@ -90,7 +90,9 @@ lines.
 the text keeps 18rem, and otherwise takes its own line under it; the support
 strip's two buttons share the full width on a phone. Dialog footers are
 **not sticky**: the footer is the last thing in a dialog and scrolls with
-its content; nothing renders after it.
+its content; nothing renders after it. A dialog title, like the meta line,
+breaks only between its " · " parts ("Ajustar limites · <team>"), and a
+dialog's text wraps a long URL or address rather than widen the dialog.
 
 **Floating panels** — menus, selects, pickers, anchored panels, tooltips,
 chart hover tips — measure themselves after rendering and stay inside the
