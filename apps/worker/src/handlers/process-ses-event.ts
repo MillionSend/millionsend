@@ -6,6 +6,7 @@ import {
   enqueueWebhookDeliveries,
   hashRecipient,
   isWebhookEventType,
+  noteConsoleCodeUndelivered,
   type QueuedWebhookDelivery,
   type SuppressionEventRow,
   utcDay,
@@ -97,6 +98,7 @@ export async function processSesEvent(
       cc: schema.emails.cc,
       bcc: schema.emails.bcc,
       subject: schema.emails.subject,
+      tags: schema.emails.tags,
       matchedByTag: sql<boolean>`false`,
     })
     .from(schema.emails)
@@ -111,6 +113,7 @@ export async function processSesEvent(
         cc: schema.emails.cc,
         bcc: schema.emails.bcc,
         subject: schema.emails.subject,
+        tags: schema.emails.tags,
         matchedByTag: sql<boolean>`true`,
       })
       .from(schema.emails)
@@ -167,6 +170,9 @@ export async function processSesEvent(
     if (!inserted) return false;
 
     await applyStatusCas(txDb, email.id, status);
+    if (status === "bounced" || status === "failed") {
+      await noteConsoleCodeUndelivered(txDb, email);
+    }
 
     // Fan the now-recorded event out to the team's webhook endpoints —
     // delivery rows join the transaction; the queue enqueue happens after

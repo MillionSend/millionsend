@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
+import { CopyChip } from "@/components/copy-chip";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
@@ -154,10 +155,14 @@ export function ReviewView({ teamId }: { teamId: string }) {
     domains: team.domains,
     owner,
   };
-  const subtitle =
-    flag?.status === "open"
-      ? t("proof", { ...proofValues, since: formatRelative(flag.openedAt, locale) })
-      : t("proofNoFlag", proofValues);
+  const subtitle = (
+    <>
+      {flag?.status === "open"
+        ? t("proof", { ...proofValues, since: formatRelative(flag.openedAt, locale) })
+        : t("proofNoFlag", proofValues)}{" "}
+      · <CopyChip value={team.id} wrap />
+    </>
+  );
   const flagOpen = flag?.status === "open";
   const submitFlag = () => {
     if (!note.trim() || open.isPending) return;

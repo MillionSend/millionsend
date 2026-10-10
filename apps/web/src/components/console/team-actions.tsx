@@ -94,13 +94,31 @@ export function useTeamActions(onChanged: () => void): TeamActions {
   );
   const suspend = useMutation(trpc.console.teams.suspend.mutationOptions({ onError: failed }));
   const reinstate = useMutation(trpc.console.teams.reinstate.mutationOptions({ onError: failed }));
-  // A refusal stays in the dialog (the code is one it can explain); success
-  // leaves for the dashboard in this tab, so the layout reads the new cookie.
+  // Asked each time the dialog opens: a code this session confirmed may
+  // have lapsed since, or been confirmed in another tab.
+  const verified = useQuery(
+    trpc.console.teams.supportViewVerified.queryOptions(undefined, {
+      enabled: dialog?.kind === "view",
+      staleTime: 0,
+    }),
+  );
+  // A refusal stays in the dialog (the code is one it can explain) and asks
+  // again after the confirmed code: a start that failed after its code
+  // checked out needs no second one, and a lapsed mark must stop offering a
+  // start without one. Success leaves for the dashboard in this tab, so the
+  // layout reads the new cookie.
   const view = useMutation(
     trpc.console.teams.startSupportView.mutationOptions({
       onSuccess: () => window.location.assign("/"),
+      onError: () => void verified.refetch(),
     }),
   );
+  const viewCode = useMutation(trpc.console.teams.sendSupportViewCode.mutationOptions());
+  const openView = (target: TeamActionTarget) => {
+    view.reset();
+    viewCode.reset();
+    setDialog({ kind: "view", team: target });
+  };
 
   const team = dialog?.team;
   const loaded = detail.data?.id === team?.id ? detail.data : undefined;
@@ -109,22 +127,26 @@ export function useTeamActions(onChanged: () => void): TeamActions {
     <>
       {dialog?.kind === "team" ? (
         <TeamDialog
+          id={team.id}
           name={team.name}
           detail={loaded}
           onClose={close}
           onAdjustLimits={() => setDialog({ kind: "limits", team })}
-          onViewAsOwner={() => {
-            view.reset();
-            setDialog({ kind: "view", team });
-          }}
+          onViewAsOwner={() => openView(team)}
         />
       ) : null}
       {dialog?.kind === "view" ? (
         <ViewDialog
           name={team.name}
-          pending={view.isPending || view.isSuccess}
-          error={view.error?.message ?? null}
+          pending={view.isPending || view.isSuccess || viewCode.isPending}
+          error={(view.error ?? viewCode.error)?.message ?? null}
+          step={viewCode.data ?? null}
+          verifiedUntil={verified.data?.until ?? null}
           onClose={close}
+          onSendCode={() => {
+            view.reset();
+            viewCode.mutate();
+          }}
           onSubmit={(input) => view.mutate({ id: team.id, ...input })}
         />
       ) : null}
@@ -249,10 +271,7 @@ export function useTeamActions(onChanged: () => void): TeamActions {
     pauseBroadcasts: open("pause"),
     suspend: open("suspend"),
     reinstate: open("reinstate"),
-    viewAsOwner: (target) => {
-      view.reset();
-      setDialog({ kind: "view", team: target });
-    },
+    viewAsOwner: openView,
     resumeBroadcasts: (target) =>
       resume.mutate(
         { id: target.id },
@@ -264,17 +283,18 @@ export function useTeamActions(onChanged: () => void): TeamActions {
 
 /**
  * The Teams list's "…" items for one team, from the shared actions: Open
- * team, View as owner (when `options` are given: disabled with the reason
- * while the feature is off or the team is silently suspended), Adjust
- * limits, Change plan, separator, Pause/Resume broadcasts, Suspend/Reinstate
- * team. `labels` come from console.teams.menu.
+ * team, Copy ID (when `copyId` is given), View as owner (when `options` are
+ * given: disabled with the reason while the feature is off or the team is
+ * silently suspended), Adjust limits, Change plan, separator, Pause/Resume
+ * broadcasts, Suspend/Reinstate team. `labels` come from console.teams.menu.
  */
 export function teamMenuItems(
   team: TeamActionTarget,
   actions: TeamActions,
   labels: (key: string) => string,
-  options?: { supportView: boolean; silentlySuspended: boolean },
+  options?: { supportView: boolean; silentlySuspended: boolean; copyId?: (id: string) => void },
 ): (PopoverMenuItem | null)[] {
+  const copyId = options?.copyId;
   const viewOff = !options?.supportView
     ? "viewOff"
     : options.silentlySuspended
@@ -282,6 +302,7 @@ export function teamMenuItems(
       : null;
   return [
     { label: labels("open"), onSelect: () => actions.openTeam(team) },
+    ...(copyId ? [{ label: labels("copyId"), onSelect: () => copyId(team.id) }] : []),
     options
       ? {
           label: labels("view"),

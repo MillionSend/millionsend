@@ -1,0 +1,6 @@
+{
+  "subject": "Seu código do console MillionSend",
+  "body": "Digite este código no console do MillionSend para iniciar um modo de suporte.",
+  "expiry": "Ele vale uma vez, por {minutes} minutos.",
+  "ignore": "Não pediu este código? Outra pessoa pode estar conectada à sua conta: redefina sua senha, o que encerra todas as sessões."
+}

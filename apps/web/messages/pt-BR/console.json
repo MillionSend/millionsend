@@ -430,6 +430,7 @@
     "empty": "0 equipes encontradas.",
     "menu": {
       "open": "Abrir equipe",
+      "copyId": "Copiar ID",
       "view": "Ver como proprietário",
       "viewOff": "Desligado nesta instância: SUPPORT_VIEW=on liga",
       "viewSilent": "Indisponível enquanto a equipe está suspensa por phishing ou retida para revisão",
@@ -453,6 +454,7 @@
       "error": "A ação falhou: {message}"
     },
     "detail": {
+      "id": "ID da equipe",
       "lead": "Tudo o que o console sabe sobre a equipe. Corpos de e-mail não estão aqui.",
       "sent30d": "Enviados 30d",
       "contacts": "Contatos",
@@ -534,7 +536,7 @@
     },
     "viewDialog": {
       "title": "Ver {team} como proprietário",
-      "lead": "Abre o painel da equipe em modo somente leitura sob uma faixa, por 30 minutos. Cada procedimento lido é contado na sessão, e a sessão aparece na auditoria da própria equipe na hora.",
+      "lead": "Abre o painel da equipe em modo somente leitura sob uma faixa, por 30 minutos, depois que um código de uso único enviado ao seu e-mail confirma que é você. Um modo que você ainda tenha aberto é encerrado antes. Cada procedimento lido é contado na sessão, e a sessão aparece na auditoria da própria equipe na hora.",
       "reasons": {
         "support_ticket": "Chamado de suporte",
         "billing_dispute": "Disputa de cobrança",
@@ -544,14 +546,28 @@
       "referencePlaceholder": "#4812",
       "hiddenTitle": "Conteúdo já enviado fica oculto aqui também.",
       "hiddenBody": "O conteúdo de uma transmissão que já saiu, e de todo e-mail enviado, segue a regra de revelação de Trust & safety, não o modo de suporte. Um rascunho ou transmissão agendada continua legível.",
+      "sendCode": "Enviar código por e-mail",
+      "code": "Código do seu e-mail",
+      "codeSent": "Enviado para {email}. Vale uma vez, por {minutes} minutos.",
+      "codeResend": "Enviar outro código",
+      "verified": "O código que você confirmou nesta sessão ainda vale para iniciar um modo de suporte (restam {left}).",
+      "fallback": {
+        "no_mail": "Esta instância não envia e-mail (precisa de AUTH_EMAIL_FROM e de credenciais do SES), então nenhum código sai: um login feito nos últimos {minutes} minutos vale no lugar dele.",
+        "send_failed": "O e-mail com o código não pôde ser enviado, então um login feito nos últimos {minutes} minutos vale no lugar dele.",
+        "fresh": "O seu é recente o bastante: inicie a sessão.",
+        "stale": "O seu é mais antigo: saia e entre de novo, depois inicie outra vez."
+      },
       "confirm": "Iniciar sessão · 30 min",
       "errors": {
         "support_view_off": "O modo de suporte está desligado nesta instância (SUPPORT_VIEW=on liga).",
-        "support_view_live": "Já existe um modo de suporte ativo. Abra o painel e encerre-o pela faixa antes de iniciar outro.",
-        "sign_in_again": "Iniciar um modo de suporte exige um login recente. Saia e entre de novo, depois inicie outra vez.",
+        "sign_in_again": "Sem um código por e-mail, iniciar um modo de suporte exige um login recente. Saia e entre de novo, depois inicie outra vez.",
         "own_team": "Você é membro desta equipe; abra-a pelo seletor de equipes.",
         "silent_suspension": "Esta equipe está suspensa por phishing ou retida para revisão, então nenhum modo de suporte pode começar.",
-        "reference_required": "Uma referência de chamado é obrigatória."
+        "reference_required": "Uma referência de chamado é obrigatória.",
+        "code_required": "Agora é preciso um código: envie um para o seu e-mail.",
+        "code_invalid": "Esse código não confere. Confira o e-mail e tente de novo.",
+        "code_void": "Esse código não vale mais: expirou, já foi usado ou recebeu tentativas erradas demais. Envie outro.",
+        "code_limit": "Códigos demais nesta hora. Tente de novo mais tarde."
       }
     },
     "ownerTip": "Proprietário: {email}"

@@ -377,10 +377,10 @@ read in the language of the owner's contact in the team below, else English; eac
 which notices they get under **Settings → Notifications** (account mail and security receipts are
 always sent). Verify the sender's domain under
 **Domains** in a team and those emails are logged and measured there, tagged
-`millionsend_system`. Password-reset, verification, invitation and subscription-confirm
-emails lose their body once SES accepts them, since the link inside is a live credential;
-the other notices keep theirs for the usual retention window. Until a team holds the
-domain they go straight through SES and leave no trace.
+`millionsend_system`. Password-reset, verification, invitation, subscription-confirm and
+console-code emails lose their body once SES accepts them, since the link or code inside is
+a live credential; the other notices keep theirs for the usual retention window. Until a
+team holds the domain they go straight through SES and leave no trace.
 
 What a customer typed (team, person, domain, key and broadcast names, webhook URLs,
 addresses) never appears in a subject, and the body prints it as text no mail client turns
@@ -1007,11 +1007,22 @@ no session is ever minted for the owner.
   `FORBIDDEN` to every mutation while the view is live, whatever the
   screen shows; the console's own actions keep working.
 - **How long:** 30 minutes, enforced on every request; one live view per
-  operator, starting another ends the previous, and a view cannot start
-  another. The operator ends it from the banner, the owner from Settings →
-  Support access, and expiry ends it on the next request. Starting one
-  needs a sign-in from the last 15 minutes, so a stolen long-lived session
-  cannot open a view.
+  operator. Starting another, from the console or from under a view, ends
+  the live one first exactly as End session does, which is how a view left
+  open in a closed tab ends. The operator ends it from the banner, the owner
+  from Settings → Support access, and expiry ends it on the next request.
+- **Starting one:** the dialog emails a 6-digit code to the operator's own
+  address, from `AUTH_EMAIL_FROM`. It works once, for 10 minutes; five
+  wrong tries void it, a new code replaces the old one, and one operator is
+  sent at most five an hour. Only a hash keyed by `BETTER_AUTH_SECRET` is
+  stored. A code that checks out covers that browser session's starts for
+  15 minutes, so opening several views takes one code; signing out ends it.
+  When the instance cannot send the code (no `AUTH_EMAIL_FROM` or no SES
+  credentials) or its email fails, whether the send itself or, when a team
+  holds the sender's domain, the queued email later (refused, failed,
+  bounced, or held back from SES), the dialog says so and for 10 minutes a
+  sign-in from the last 15 minutes stands in for the code. Either way a
+  stolen long-lived session cannot open a view.
 - **What is logged:** `support.view_started` and `support.view_ended` in
   the instance audit and, at once, in the team's own Settings → Audit log
   (who, the reason, the reference, how it ended, the minutes, how many
