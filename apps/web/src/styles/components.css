@@ -583,6 +583,104 @@ table.ms-table {
   font-size: inherit;
 }
 
+/* Page header (page-header.tsx). The title block grows from its natural
+   width; the actions share its row only while both fit at that width, and
+   otherwise wrap whole onto the row under the meta line, at any viewport. */
+.ms-page-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 14px 16px;
+}
+.ms-page-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Inline flow, so the badges follow the title's last word and wrap under it
+   as a group; the space before them is set at the title's size. */
+.ms-page-heading {
+  font-size: var(--ms-fs-h1);
+  line-height: 1.15;
+}
+.ms-page-heading > h1 {
+  display: inline;
+}
+/* Status badges right after a title (page header, card title), on its line. */
+.ms-title-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+.ms-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+/* A wrapper kept for an absolutely placed note lines its button up with the rest. */
+.ms-page-actions > div {
+  display: flex;
+}
+/* The trailing "…" or "</>" never starts a row alone: the action before it
+   holds the icon's room (30px + the 10px gap) as a margin that the icon's
+   negative margin takes back, so a row can only break before the pair. */
+.ms-page-menu {
+  display: inline-flex;
+  position: relative;
+  flex: none;
+}
+.ms-page-actions > :has(+ .ms-page-menu) {
+  margin-right: 40px;
+}
+.ms-page-menu:not(:first-child) {
+  margin-left: -40px;
+}
+/* When the icon is the only action, the title block gives way instead (it
+   wraps, the icon stays beside it). */
+.ms-page-row:has(> .ms-page-actions > .ms-page-menu:only-child) > .ms-page-title {
+  flex-basis: 0;
+}
+
+/* A dot-joined value's part (dot-parts.tsx): lines break between parts, and
+   inside one only when it is longer than a whole line. */
+.ms-part {
+  display: inline-block;
+  max-width: 100%;
+}
+
+/* Breadcrumb row: segments wrap whole; the current page, which the H1
+   repeats, is cut with an ellipsis rather than wrapped. */
+.ms-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 13px;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+.ms-crumb-seg {
+  display: inline-flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+.ms-crumb-end {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ms-muted);
+  /* Room for descenders inside the clip, without growing the row. */
+  padding: 2px 0;
+  margin: -2px 0;
+}
+
 /* Breadcrumb link — quiet until hover, when the shared dotted underline appears. */
 .ms-crumb {
   color: var(--ms-muted);
@@ -1963,45 +2061,61 @@ summary:focus-visible,
   .ms-main {
     padding: 16px !important;
   }
+  /* An in-page jump (the health pill, a DNS group) lands below the sticky
+     topbar and the support strip instead of under them. */
+  .ms-main [id] {
+    scroll-margin-top: calc(var(--ms-support-strip-h, 0px) + 64px);
+  }
 
   /* Page header: the title keeps the first line to itself; the actions take
      the next line at full width, and a button that does not fit beside its
      neighbours drops to a line of its own. */
-  .ms-page-row {
-    flex-wrap: wrap;
-    row-gap: 14px;
-  }
-  .ms-page-title {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
   .ms-page-actions {
     flex: 1 1 100%;
-    flex-wrap: wrap;
   }
   .ms-page-actions > *,
-  .ms-page-actions > .ms-tooltip-trigger > .ms-btn {
+  .ms-page-actions > .ms-tooltip-trigger > .ms-btn,
+  .ms-page-actions > div > .ms-btn:not(.ms-btn-icon) {
     flex: 1 1 auto;
     justify-content: center;
   }
-  .ms-page-actions > .ms-badge,
-  .ms-page-actions > .ms-page-badge {
-    flex: 0 0 auto;
-  }
+  .ms-page-actions > .ms-page-menu,
   .ms-page-actions > .ms-btn-icon,
   .ms-page-actions > .ms-menu-trigger-bare {
     flex: 0 0 auto;
   }
-  /* A note hung under a header action (the composer's "test sent to …") reads
-     from the action's left edge: right-anchored and nowrap, a long one ran off
-     the viewport. !important beats the inline anchoring. */
+  /* A lone icon action ("</>" on a detail page) stays on the title's line
+     instead of taking a row of its own. */
+  .ms-page-row {
+    position: relative;
+  }
+  .ms-page-actions:has(> .ms-page-menu:only-child) {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+  .ms-page-row:has(> .ms-page-actions > .ms-page-menu:only-child) > .ms-page-title {
+    padding-right: 40px;
+  }
+  /* An address or URL title at the display size runs three to six lines
+     here; it takes the card-title size instead, line box included.
+     !important beats the inline page-title size. */
+  .ms-page-heading:has(> .ms-data-title),
+  .ms-data-title {
+    font-size: var(--ms-fs-h2) !important;
+  }
+  /* A note hung under a header action (the composer's "test sent to …")
+     joins the flow on the line under its button: hung there it covered the
+     step bar below the header, and a long one ran off the viewport.
+     !important beats the inline anchoring. */
+  .ms-page-actions > div:has(> .ms-action-note) {
+    flex-wrap: wrap;
+  }
   .ms-action-note {
-    left: 0;
-    right: auto !important;
+    position: static !important;
+    flex-basis: 100%;
+    margin-top: 6px;
     white-space: normal !important;
-    width: max-content;
-    max-width: calc(100vw - 32px);
   }
   /* A split (primary button + menu root) grows like any action; the button
      inside must take that width too, or it floats centered in empty space. */

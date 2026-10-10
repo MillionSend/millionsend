@@ -59,7 +59,7 @@ export function OverviewView() {
       <PageHeader
         title={t("title")}
         {...(proof ? { subtitle: proof } : {})}
-        actions={s ? <HealthPill summary={s} /> : null}
+        badges={s ? <HealthPill summary={s} /> : null}
       />
       {summary.isError ? (
         <div className="ms-card ms-state">
