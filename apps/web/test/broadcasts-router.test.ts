@@ -29,6 +29,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await close();
 });
 
@@ -675,6 +676,33 @@ describe("broadcasts.sendTest", () => {
         text: null,
       }),
     ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+});
+
+describe("the instance's onboarding sender", () => {
+  it("is refused by send and sendTest, even for a team holding its domain", async () => {
+    vi.stubEnv("ONBOARDING_EMAIL_FROM", "MillionSend <hello@ms.example>");
+    const teamId = await createTeam(db, "team-a");
+    await seedVerifiedDomain(teamId, "ms.example");
+    const caller = callerFor(teamId);
+    const reserved = {
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("hello@ms.example is reserved for MillionSend's own"),
+    };
+    const { id } = await caller.broadcasts.create({ ...DRAFT_INPUT, from: "Hello@MS.example" });
+    await expect(caller.broadcasts.send({ id })).rejects.toMatchObject(reserved);
+    expect((await broadcastRow(id))?.status).toBe("draft");
+    await expect(
+      caller.broadcasts.sendTest({
+        from: "MillionSend <hello@ms.example>",
+        subject: "s",
+        html: "<p>x</p>",
+        text: null,
+      }),
+    ).rejects.toMatchObject(reserved);
+    expect(await db.select().from(schema.emails).where(eq(schema.emails.teamId, teamId))).toEqual(
+      [],
+    );
   });
 });
 

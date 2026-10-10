@@ -105,6 +105,10 @@ export const teams = pgTable(
     // Public URL of the uploaded team logo (S3-compatible storage), including a
     // ?v= cache-buster stamped at upload. Null = the initial-letter tile.
     logoUrl: text("logo_url"),
+    // When the dashboard sent the team's one onboarding email from
+    // ONBOARDING_EMAIL_FROM. Kept here, not read from emails: those rows
+    // expire with retention, and the email must never go out twice.
+    onboardingEmailSentAt: timestamp("onboarding_email_sent_at", { withTimezone: true }),
     // Operator overrides (instance console). A ceiling caps the team's UTC
     // day under its plan's limit (min of the two), on monthly plans too.
     dailySendCeiling: integer("daily_send_ceiling"),

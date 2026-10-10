@@ -14,6 +14,7 @@ import {
   PAUSE_COMPLAINT_RATE,
   parseSingleSender,
   regionPause,
+  reservedSenderRefusal,
   splitPersonName,
   substituteUnsubscribeUrl,
   verifySenderDomain,
@@ -551,6 +552,8 @@ export const broadcastsRouter = router({
       // verified team domain may appear as the sender. The worker re-checks
       // at fan-out, but failing there leaves the broadcast stuck in
       // "scheduled" with no user-visible reason.
+      const reserved = reservedSenderRefusal(row.from, env.ONBOARDING_EMAIL_FROM);
+      if (reserved) throw new TRPCError({ code: "PRECONDITION_FAILED", message: reserved.message });
       const sender = await verifySenderDomain(ctx.db, ctx.teamId, row.from);
       if (!sender.ok) {
         throw new TRPCError({
@@ -628,6 +631,8 @@ export const broadcastsRouter = router({
       if (!input.html && !input.text) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Write some content first." });
       }
+      const reserved = reservedSenderRefusal(input.from, env.ONBOARDING_EMAIL_FROM);
+      if (reserved) throw new TRPCError({ code: "PRECONDITION_FAILED", message: reserved.message });
       const sender = await verifySenderDomain(ctx.db, ctx.teamId, input.from);
       if (!sender.ok) {
         throw new TRPCError({

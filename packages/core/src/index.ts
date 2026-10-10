@@ -89,13 +89,10 @@ export {
   countDistinctRecipients,
   enforceDomainWarmup,
   estimateAttachmentBytes,
-  isOnboardingSender,
   MAX_ATTACHMENT_BYTES,
-  type OnboardingSenderVerdict,
   QUOTA_BACKLOG_DAYS,
   type SenderDomainVerdict,
   senderDomain,
-  verifyOnboardingSender,
   verifySenderDomain,
 } from "./accept-email.js";
 export {
@@ -396,6 +393,7 @@ export {
   type McpScope,
   mcpResourceUrl,
 } from "./oauth-scopes.js";
+export { isOnboardingSender, reservedSenderRefusal } from "./onboarding-sender.js";
 export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-classifier.js";
 export { isRootDomainSend, registrableDomain } from "./org-domain.js";
 export { splitPersonName } from "./person-name.js";

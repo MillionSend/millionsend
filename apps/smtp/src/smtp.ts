@@ -7,6 +7,7 @@ import {
   formatMailbox,
   monthlyQuotaMessage,
   parseMailbox,
+  reservedSenderRefusal,
   suspendedSendRefusal,
   verifySenderDomain,
 } from "@millionsend/core";
@@ -33,6 +34,8 @@ export interface SmtpDeps extends AcceptEmailDeps {
   allowInsecureAuth?: boolean | undefined;
   /** Defaults to MAX_MESSAGE_BYTES; lowered only by tests. */
   maxMessageBytes?: number | undefined;
+  /** ONBOARDING_EMAIL_FROM: refused as a From like on the HTTP API. */
+  onboardingEmailFrom?: string | undefined;
 }
 
 function smtpError(responseCode: number, message: string): Error {
@@ -119,6 +122,8 @@ async function handleMessage(
   if (suspended) throw smtpError(550, suspendedSendRefusal(suspended.reason).message);
   // The authenticated key's team decides which senders are allowed — the
   // MAIL FROM envelope identity is never trusted.
+  const reserved = reservedSenderRefusal(from, deps.onboardingEmailFrom);
+  if (reserved) throw smtpError(550, reserved.message);
   const domain = await verifySenderDomain(deps.db, auth.teamId, from);
   if (!domain.ok) {
     throw smtpError(

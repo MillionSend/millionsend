@@ -54,6 +54,7 @@ import {
   recountSegment,
   regionPause,
   releaseIdempotent,
+  reservedSenderRefusal,
   reserveQuota,
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
@@ -63,7 +64,6 @@ import {
   sendingBroadcasts,
   suspendedSendRefusal,
   teamQuota,
-  verifyOnboardingSender,
   verifySenderDomain,
   type WebhookEnqueue,
 } from "@millionsend/core";
@@ -187,12 +187,10 @@ export interface ApiDeps {
   keyring: Keyring;
   /** Cloud enforces plan quotas; self-host sends without caps. */
   isCloud: boolean;
-  /** ONBOARDING_EMAIL_FROM: the shared first-email sender (core verifyOnboardingSender). */
+  /** ONBOARDING_EMAIL_FROM: no customer send may use it (core reservedSenderRefusal). */
   onboardingEmailFrom?: string | undefined;
   /** OPENAI_APPS_CHALLENGE_TOKEN: served at /.well-known/openai-apps-challenge. */
   openaiAppsChallengeToken?: string | undefined;
-  /** Whether the shared sender reaches only members who verified their address (the instance verifies). */
-  requireVerifiedMembers?: boolean | undefined;
   /**
    * Hands an accepted email to the send queue. REQUIRED: accepting mail
    * without a producer would strand it in "queued" forever.
@@ -2681,6 +2679,8 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     if (paused) return { ok: false as const, status: 403 as const, body: paused };
     // Same boundary as /emails: only a verified team domain may appear as
     // the sender.
+    const reserved = reservedSenderRefusal(broadcast.from, deps.onboardingEmailFrom);
+    if (reserved) return fail(422, reserved.name, reserved.message);
     const domain = await verifySenderDomain(db, auth.teamId, broadcast.from);
     if (!domain.ok) {
       return fail(
@@ -3539,32 +3539,9 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
       return c.json(errorBody(404, "not_found", "Topic not found"), 404);
     }
 
-    // The shared onboarding sender needs no verified domain but may only
-    // reach the team's own inboxes; anything else is the verified-domain rule.
-    const onboarding = await verifyOnboardingSender(
-      deps.db,
-      auth.teamId,
-      body.from,
-      [...body.to, ...(body.cc ?? []), ...(body.bcc ?? [])],
-      deps.onboardingEmailFrom,
-      { requireVerified: deps.requireVerifiedMembers ?? true },
-    );
-    if (onboarding && !onboarding.ok) {
-      return c.json(
-        errorBody(
-          422,
-          "validation_error",
-          onboarding.reason === "recipient_not_verified"
-            ? "The onboarding sender can only send to members who verified their email"
-            : "The onboarding sender can only send to your team's own members",
-        ),
-        422,
-      );
-    }
-    // The shared sender goes out exactly as configured: a caller's display
-    // name on the instance's own address would let it pose as the platform.
-    const from = onboarding ? (deps.onboardingEmailFrom ?? body.from) : body.from;
-    const domain = onboarding ?? (await verifySenderDomain(deps.db, auth.teamId, body.from));
+    const reserved = reservedSenderRefusal(body.from, deps.onboardingEmailFrom);
+    if (reserved) return c.json(errorBody(422, reserved.name, reserved.message), 422);
+    const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
     if (!domain.ok) {
       return c.json(
         errorBody(
@@ -3577,12 +3554,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         422,
       );
     }
-    // A domain-restricted key is confined to its domain, the shared sender included.
-    if (
-      domain.domainId === null
-        ? auth.domainId !== null
-        : keyForbidsSendingDomain(auth, domain.domainId)
-    ) {
+    if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return c.json(errorBody(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE), 403);
     }
 
@@ -3631,25 +3603,20 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         return c.json(paused, 403);
       }
-      const result = await acceptEmail(
-        deps,
-        auth,
-        toAcceptPayload({ ...body, from }, domain.domainId),
-        {
-          completeInTx: idemKey
-            ? async (tx, emailId) => {
-                const recorded = await completeIdempotent(tx, {
-                  teamId: auth.teamId,
-                  key: idemKey,
-                  emailIds: [emailId],
-                });
-                // Another owner took over and recorded its own response:
-                // abort so this branch produces no second email.
-                if (!recorded) throw new IdempotencyTakeoverError();
-              }
-            : undefined,
-        },
-      );
+      const result = await acceptEmail(deps, auth, toAcceptPayload(body, domain.domainId), {
+        completeInTx: idemKey
+          ? async (tx, emailId) => {
+              const recorded = await completeIdempotent(tx, {
+                teamId: auth.teamId,
+                key: idemKey,
+                emailIds: [emailId],
+              });
+              // Another owner took over and recorded its own response:
+              // abort so this branch produces no second email.
+              if (!recorded) throw new IdempotencyTakeoverError();
+            }
+          : undefined,
+      });
       if (!result.ok) {
         if (idemKey) await releaseIdempotent(deps.db, { teamId: auth.teamId, key: idemKey });
         const rejection = acceptRejection(result);
@@ -3719,6 +3686,8 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
     if (body.topic_id != null && !(await findTeamTopic(deps.db, auth.teamId, body.topic_id))) {
       return { status: 404, name: "not_found", message: "Topic not found" };
     }
+    const reserved = reservedSenderRefusal(body.from, deps.onboardingEmailFrom);
+    if (reserved) return { status: 422, ...reserved };
     const domain = await verifySenderDomain(deps.db, auth.teamId, body.from);
     if (!domain.ok) {
       return {
