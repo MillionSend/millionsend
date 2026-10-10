@@ -32,7 +32,6 @@ export function SettingsTabsNav({
   const t = useTranslations("settings.tabs");
   const router = useRouter();
   const pathname = usePathname();
-  const tabsRef = useActiveTabInView(pathname);
   const role = useTeamRole();
   // Unlisted keys are always shown; each page gates itself too, so a hidden
   // tab is a missing route rather than a hidden link.
@@ -42,6 +41,9 @@ export function SettingsTabsNav({
     smtp: showSmtp,
     audit: role === "owner" || role === "admin",
   };
+  // The audit tab joins the row only once the role is known, after the first
+  // render; keying on it reveals the active tab again when it arrives.
+  const tabsRef = useActiveTabInView(`${pathname} ${visible.audit}`);
   return (
     <div ref={tabsRef} className="ms-tabs bleed" style={{ marginBottom: 24 }}>
       {TABS.filter((tab) => visible[tab.key] ?? true).map(({ key, href }) => (
