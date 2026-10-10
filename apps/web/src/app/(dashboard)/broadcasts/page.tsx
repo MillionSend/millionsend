@@ -33,13 +33,15 @@ function BroadcastsHead() {
   return (
     <thead>
       <tr>
-        <th style={{ width: "30%" }}>{t("list.name")}</th>
+        <th className="ms-col-lead" style={{ width: "30%" }}>
+          {t("list.name")}
+        </th>
         <th style={{ width: "13%" }}>{t("list.status")}</th>
         <th style={{ width: "20%" }}>{t("list.targeting")}</th>
         <th className="right" style={{ width: "13%" }}>
           {t("list.recipients")}
         </th>
-        <th className="right">{t("list.created")}</th>
+        <th className="right ms-col-date">{t("list.created")}</th>
         <th className="right" style={{ width: 44 }} />
       </tr>
     </thead>
@@ -155,12 +157,8 @@ export default function BroadcastsPage() {
     <>
       <PageHeader
         title={t("list.title")}
-        actions={
-          <>
-            <NewBroadcastButton />
-            <ResourceApiButton resource="broadcasts" />
-          </>
-        }
+        actions={<NewBroadcastButton />}
+        menu={<ResourceApiButton resource="broadcasts" />}
       />
 
       {query.isPending ? (
@@ -253,7 +251,7 @@ export default function BroadcastsPage() {
                         <StatusPill status={status} />
                       )}
                     </td>
-                    <td>{row.segmentName ?? t("composer.segmentNone")}</td>
+                    <td className="ms-cell-clip">{row.segmentName ?? t("composer.segmentNone")}</td>
                     <td className="right ms-digits">
                       {status === "sending" && row.sentCount !== null ? (
                         <>

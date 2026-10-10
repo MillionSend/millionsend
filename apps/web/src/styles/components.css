@@ -275,6 +275,28 @@
   grid-row: span 2;
   min-width: 0;
 }
+/* Generic flex rows that may not fit their column (a phone, a narrow
+   desktop): they wrap at every width rather than squeeze or overflow. */
+.ms-wrap-row {
+  flex-wrap: wrap;
+}
+/* Steppers (add domain): the preview column wraps under the form card
+   instead of being crushed beside it, on a narrow desktop too. */
+.ms-stepper {
+  flex-wrap: wrap;
+}
+/* A row of buttons under a form or a section: they wrap, and on a phone the
+   wrapped ones share each line's width (see the 639px block). */
+.ms-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+/* List filter rows wrap at every width: a select that does not fit beside
+   the search drops to the next line rather than pushing the page sideways. */
+.ms-filter-row {
+  flex-wrap: wrap;
+}
 /* Pill tabs on code panels (SDK sheets, the onboarding snippet). */
 .ms-code-tab {
   border: 0;
@@ -1393,6 +1415,28 @@ button.ms-notice-strip-action {
   right: 0;
   bottom: 0;
 }
+/* Fixed-layout lists (broadcasts, contacts): on a wide desktop the lead
+   column holds its share and the date column takes the rest. Narrower, the
+   shares plus cell padding would leave the date no width at all (it drew
+   under the row menu), so the date gets a fixed width and the lead column
+   takes what is left; !important beats the share set inline. */
+@media (max-width: 1199px) {
+  .ms-table th.ms-col-lead {
+    width: auto !important;
+  }
+  .ms-table th.ms-col-date {
+    width: 104px;
+  }
+}
+/* A cell that takes what the other columns leave and ellipsizes inside it
+   (the emails list's subject): with max-width 0 its text no longer sets the
+   table's minimum width, so a long subject never pushes the time column off
+   a desktop. Phones keep the full-width table that scrolls. */
+@media (min-width: 900px) {
+  .ms-table td.ms-cell-fill {
+    max-width: 0;
+  }
+}
 /* Console lists keep every cell on one line (the wrapper scrolls sideways
    instead) on slightly tighter cells, and print their figures in mono at
    12.5px — a dense operator list, not a KPI. */
@@ -2069,14 +2113,43 @@ summary:focus-visible,
 
 /* ============================================================================
    RESPONSIVE — mobile pass (breakpoint 900px; DESIGN.md Layout).
-   Media queries only: desktop ≥900px keeps every rule above pixel-identical.
-   !important is required only where a rule overrides an inline style. */
+   Media queries only: narrow desktops (900–1199px) get the first blocks, and
+   from 1200px every rule above holds as written. !important is required only
+   where a rule overrides an inline style. */
 
 /* Side sheets: a fixed panel on wide screens; the phone rule below widens it
    to the viewport, and must come after this one to win. */
 .ms-sheet {
   width: 440px;
   max-width: calc(100vw - 24px);
+}
+
+/* Narrow desktops: beside the sidebar the content column is under 880px,
+   where a console KPI card would get under 210px and the 1fr side of a 2/1
+   split under 290px. The 4-up rows go 2-up and the splits stack. */
+@media (max-width: 1199px) {
+  .ms-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ms-grid-21,
+  .ms-grid-12 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* There too, a detail page's meta grid lays out as many columns as keep each
+   value 11rem wide, instead of its fixed three or four (!important beats the
+   page's inline template; stat strips keep theirs), and from here down no
+   value widens its column past its share: a long chip ellipsizes instead of
+   pushing the page sideways. */
+@media (min-width: 900px) and (max-width: 1199px) {
+  .ms-meta-grid:not(.ms-stat-strip) {
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)) !important;
+  }
+}
+@media (max-width: 1199px) {
+  .ms-meta-grid > :where(*) {
+    min-width: 0;
+  }
 }
 
 @media (max-width: 899px) {
@@ -2200,60 +2273,52 @@ summary:focus-visible,
   .ms-table {
     white-space: nowrap;
   }
+  /* Chrome breaks at a <wbr> even under nowrap: an address's break points
+     (breakable.tsx) would undo the one-line cells. */
+  .ms-table wbr {
+    display: none;
+  }
+  /* In a fixed-layout list a nowrap cell would run over its neighbours. */
+  .ms-table td.ms-cell-clip {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .ms-table td > span {
     flex-wrap: nowrap !important;
   }
 
-  /* Filter rows wrap; the search field takes the full first line. */
-  .ms-filter-row {
-    flex-wrap: wrap;
-  }
+  /* The search field takes the full first line. */
   .ms-filter-row > :first-child {
     flex: 1 1 100% !important;
     min-width: 0 !important;
     max-width: none !important;
   }
-  /* Each select takes a full line too; a fixed 160px pill on a phone is a
-     clipped label. The root carries an inline width, hence the override. */
+  /* The selects share the lines under it, at least 200px each (a fixed
+     160px pill clips its label); the root carries an inline width, hence
+     the override. Phones give each its own line (below). */
   .ms-filter-row > div {
-    flex: 1 1 100%;
-    width: 100% !important;
+    flex: 1 1 200px;
+    width: auto !important;
   }
 
-  /* Console grids: 4-up and 3-up collapse to 2-up; the 2/1 splits stack. */
-  .ms-grid-4,
+  /* Console grids: 3-up collapses to 2-up (4-up and the 2/1 splits already
+     did, in the block above). */
   .ms-grid-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .ms-grid-21,
-  .ms-grid-12 {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  /* Generic flex rows that may not fit a phone width. */
-  .ms-wrap-row {
-    flex-wrap: wrap;
   }
 
   /* Meta/stat grids: 4-up (or 3-up) collapses to 2-up, then 1-up below. */
   .ms-meta-grid {
-    grid-template-columns: repeat(2, 1fr) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
   .ms-meta-tall {
     grid-row: auto;
   }
 
-  /* Steppers: the add-domain preview column wraps under the form card
-     instead of being crushed beside it; step content can always shrink. */
-  .ms-stepper {
-    flex-wrap: wrap;
-  }
+  /* Steppers: the form card takes the line; step content can always shrink. */
   .ms-stepper > form {
     width: 100% !important;
     max-width: 520px;
-  }
-  .ms-stepper-side {
-    flex: 1 1 260px !important;
   }
   .ms-step > * {
     min-width: 0;
@@ -2352,8 +2417,13 @@ summary:focus-visible,
   .ms-meta-grid {
     grid-template-columns: minmax(0, 1fr) !important;
   }
-  .ms-meta-grid > .ms-kpi-metrics {
-    min-width: 0;
+  /* Stat strips (big figures) stay two-up: one per line, the broadcast's
+     seven figures would fill two screens. Their chart takes a full row. */
+  .ms-meta-grid.ms-stat-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .ms-stat-strip > .ms-kpi-metrics {
+    grid-column: 1 / -1;
   }
   .ms-sparkline {
     max-width: none !important;
@@ -3156,7 +3226,9 @@ summary:focus-visible,
   margin-top: 3px;
   color: var(--ms-success);
 }
-@media (max-width: 899px) {
+/* Four cards need about 980px of dialog: below that the ladder goes 2×2 so
+   a card's nowrap button stays inside it. */
+@media (max-width: 1119px) {
   .ms-plans {
     grid-template-columns: 1fr 1fr;
   }
@@ -3261,6 +3333,8 @@ summary:focus-visible,
 .ms-plan-strip-price {
   font-size: 13px;
   color: var(--ms-muted);
+  /* "from $20 /" over "month" reads as a broken price; balanced lines keep the amount whole. */
+  text-wrap: balance;
 }
 /* Sized with its padding inside the box, leaving a rim of the page around it. */
 .ms-modal-full {

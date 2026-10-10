@@ -52,7 +52,7 @@ export function ConnectedAppsView() {
         </p>
       ) : null}
       {grants && grants.length > 0 ? (
-        <Table>
+        <Table style={{ whiteSpace: "nowrap" }}>
           <thead>
             <tr>
               <th>{t("table.app")}</th>

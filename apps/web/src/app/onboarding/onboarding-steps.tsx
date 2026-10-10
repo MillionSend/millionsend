@@ -112,21 +112,37 @@ function StepCard({
 function StampRow({ children, at }: { children: React.ReactNode; at?: Date | string | undefined }) {
   const locale = useLocale();
   return (
+    // The time drops under the sentence when the two do not share a line;
+    // an address in the sentence breaks rather than run past the card.
     <div
       style={{
         display: "flex",
+        flexWrap: "wrap",
         justifyContent: "space-between",
         alignItems: "baseline",
-        gap: 12,
+        gap: "2px 12px",
         padding: "8px 2px",
         borderBottom: "1px solid var(--ms-line)",
         fontSize: 13.5,
         color: "var(--ms-muted)",
       }}
     >
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>{children}</span>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          minWidth: 0,
+          overflowWrap: "anywhere",
+        }}
+      >
+        {children}
+      </span>
       {at ? (
-        <span style={{ fontSize: 11, color: "var(--ms-faint)" }} title={formatUtcTimestamp(at)}>
+        <span
+          style={{ fontSize: 11, color: "var(--ms-faint)", whiteSpace: "nowrap" }}
+          title={formatUtcTimestamp(at)}
+        >
           {formatDayTime(at, locale)}
         </span>
       ) : null}
@@ -246,7 +262,8 @@ export function OnboardingSteps({
     from: verifiedDomain ? `onboarding@${verifiedDomain}` : t("step2.fromPlaceholder"),
     to: userEmail,
     subject: t("step2.subject"),
-    html: t("step2.html"),
+    // Literal markup for the snippet: t() would parse its tags as rich-text placeholders.
+    html: t.raw("step2.html") as string,
   };
   // Honest key handling: only while the real token is in memory may the
   // snippet promise (and deliver) the real key on copy. Otherwise both the

@@ -68,24 +68,63 @@ the canvas overrides: `.ms-btn` 6px 12px, `.ms-input` 6px 10px / line-height
 contacts or emails fits a laptop viewport; the shared `ListFooter` holds the
 page-size chooser and then "Load more" at the right, both drawn as secondary
 buttons, and any secondary action under a table or section is right-aligned.
-Modals
-are **centered in the viewport** (both axes), overlay `rgba(0,0,0,.72)`, no
-blur.
+Modals are **centered in the viewport** (both axes), overlay
+`rgba(0,0,0,.72)`, no blur.
+
+**Page header** (`PageHeader`). The H1 carries its **status badges** in the
+`badges` slot, right after the title's last word on its line; they wrap
+under it as a group and never sit among the actions. The mono meta line
+under it is " · "-joined parts and breaks only between them. The actions
+share the title's row only while the title block keeps its natural width;
+otherwise they take their own row under the meta line, at any viewport
+width. The trailing icon action ("…" overflow, `</>` API) goes in the
+`menu` slot and never starts a row alone.
+
+**Label/value lists** (`.ms-kv` with `KvRow`: region cards, the team
+dialog, settings). A value sits right-aligned on its label's line when the
+whole of it fits there, and otherwise takes the line under the label at full
+width; a " · "-joined value breaks only between its parts, in balanced
+lines.
+
+**Strips and dialogs.** A notice strip's action stays beside the text while
+the text keeps 18rem, and otherwise takes its own line under it; the support
+strip's two buttons share the full width on a phone. Dialog footers are
+**not sticky**: the footer is the last thing in a dialog and scrolls with
+its content; nothing renders after it.
+
+**Floating panels** — menus, selects, pickers, anchored panels, tooltips,
+chart hover tips — measure themselves after rendering and stay inside the
+viewport with a 12px margin: they flip above or below, shift sideways, and
+cap their size (`src/lib/panel-placement.ts`). A **chart tip** never covers
+the pointer or the hovered point: it sits above the plot, centred on the
+pointer, or below the plot when the viewport has no room above, and keeps a
+fingertip clear of a touch.
+
+**Narrow desktop (900–1199px).** Beside the sidebar the content column is
+under 880px: the console's 4-up grids go 2-up and its 2/1 splits stack, a
+detail page's meta grid lays out as many columns as keep each value 11rem
+wide, and no meta value widens its column (a long chip ellipsizes). Filter
+rows, wrap rows and steppers wrap at every width rather than overflow.
 
 **Mobile (breakpoint 900px).** Below 900px the sidebar becomes an off-canvas
 drawer behind a 48px sticky topbar (hamburger `.ms-btn-icon` + wordmark on
 panel bg, hairline bottom); the drawer slides over content with the modal
 scrim, closes on nav/scrim/Esc, and locks body scroll while open. Content
-padding collapses to 16px. Page headers and filter rows wrap (search takes
-the full first line); meta/stat grids drop to 2-up then 1-up (<480px);
-side-by-side KPI cards stack; the console's 6-up stat tile strip drops to
-3-up then 2-up (<640px); stepper rails hide or shrink under 640px. Modals go
-`calc(100vw - 24px)` under 480px and their footers wrap — buttons share the
-width, keycaps hidden under 640px; `.ms-menu` popovers clamp to the
-viewport. Tables scroll horizontally **inside their own wrapper** (the shared
-`<Table>`) — the page itself never scrolls horizontally. All rules live in
-the delimited responsive section at the end of `components.css` (media
-queries only; desktop ≥900px is untouched).
+padding collapses to 16px. Header actions take the full width under the
+title, each button sharing its row; the search takes the full first line of
+a filter row and the selects share the lines under it (one per line under
+480px); meta grids drop to 2-up then 1-up (<640px), while stat strips stay
+2-up; side-by-side KPI cards stack; the console's 6-up stat tile strip drops
+to 3-up then 2-up (<640px); stepper rails hide or shrink under 640px. Modals
+go `calc(100vw - 24px)` under 480px and their footer buttons share the width.
+Toasts drop from under the topbar (<640px) so they never cover a dialog's
+footer. Tables scroll horizontally **inside their own wrapper** (the shared
+`<Table>`) — the page itself never scrolls horizontally. On touch screens
+keycaps are hidden, small glyph controls (✕, ⓘ, a chip's copy button) get a
+finger-sized hit area, and bulk-select checkboxes show in a column of their
+own. The phone rules live in the delimited responsive section at the end of
+`components.css`; the rules above that hold at every width sit with their
+components.
 
 ## Controls
 

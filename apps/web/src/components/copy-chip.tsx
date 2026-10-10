@@ -125,3 +125,38 @@ export function CopyGlyph({ value }: { value: string }) {
     </button>
   );
 }
+
+/**
+ * Mono code block with a copy glyph in its top-right corner (SMTP responses,
+ * bounce diagnostics). The right padding keeps the first line clear of it.
+ */
+export function CopyBlock({ value }: { value: string }) {
+  return (
+    <div
+      style={{
+        position: "relative",
+        background: "var(--ms-inset)",
+        border: "1px solid var(--ms-line)",
+        borderRadius: 10,
+        padding: "14px 40px 14px 16px",
+      }}
+    >
+      <pre
+        className="ms-mono"
+        style={{
+          margin: 0,
+          fontSize: 12,
+          lineHeight: 1.7,
+          color: "var(--ms-bone)",
+          whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
+        }}
+      >
+        {value}
+      </pre>
+      <span style={{ position: "absolute", top: 10, right: 12 }}>
+        <CopyGlyph value={value} />
+      </span>
+    </div>
+  );
+}

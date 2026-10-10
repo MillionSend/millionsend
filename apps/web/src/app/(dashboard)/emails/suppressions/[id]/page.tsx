@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { confirmDialog } from "@/components/confirm-dialog";
-import { CopyGlyph } from "@/components/copy-chip";
+import { CopyBlock } from "@/components/copy-chip";
 import { GuidanceBlock } from "@/components/guidance-block";
 import { Crumb, CrumbEnd, PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/skeleton";
@@ -232,32 +232,7 @@ export default function SuppressionDetailPage() {
           <div className="ms-microlabel" style={{ margin: "20px 0 8px" }}>
             {t("suppressions.detail.details")}
           </div>
-          <div
-            style={{
-              position: "relative",
-              background: "var(--ms-inset)",
-              border: "1px solid var(--ms-line)",
-              borderRadius: 10,
-              padding: "14px 16px",
-            }}
-          >
-            <pre
-              className="ms-mono"
-              style={{
-                margin: 0,
-                fontSize: 12,
-                lineHeight: 1.7,
-                color: "var(--ms-bone)",
-                whiteSpace: "pre-wrap",
-                overflowWrap: "anywhere",
-              }}
-            >
-              {diagnostic}
-            </pre>
-            <span style={{ position: "absolute", top: 10, right: 12 }}>
-              <CopyGlyph value={diagnostic} />
-            </span>
-          </div>
+          <CopyBlock value={diagnostic} />
         </>
       ) : null}
 

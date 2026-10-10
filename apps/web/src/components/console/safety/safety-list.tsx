@@ -136,7 +136,7 @@ export function SafetyList() {
         className="ms-filter-row"
         style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18 }}
       >
-        <div style={{ flex: 1, minWidth: 160 }}>
+        <div style={{ flex: "1 1 200px", minWidth: 0 }}>
           <input
             type="text"
             className="ms-input"
