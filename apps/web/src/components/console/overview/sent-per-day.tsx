@@ -110,7 +110,7 @@ export function SentPerDay() {
       <div
         style={{
           display: "flex",
-          gap: 18,
+          gap: "6px 18px",
           flexWrap: "wrap",
           marginTop: 12,
           fontSize: 12,

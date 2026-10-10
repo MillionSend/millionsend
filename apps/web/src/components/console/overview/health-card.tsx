@@ -71,7 +71,7 @@ export function HealthPill({ summary }: { summary: Summary }) {
           ? ["warn", t("warnings", { count: warnings, total })]
           : ["success", t("allOk", { count: total })];
   return (
-    <Tooltip inline text={t("pillTip")} triggerClassName="ms-page-badge">
+    <Tooltip inline text={t("pillTip")}>
       <button
         type="button"
         className={`ms-badge ms-badge-${tone}`}

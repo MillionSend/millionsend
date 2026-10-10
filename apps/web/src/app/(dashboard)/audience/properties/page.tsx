@@ -230,14 +230,12 @@ export default function PropertiesPage() {
       <PageHeader
         title={t("title")}
         actions={
-          <>
-            <button type="button" className="ms-btn ms-btn-primary" onClick={() => openAdd()}>
-              <PlusGlyph size={14} />
-              {t("add")}
-            </button>
-            <ResourceApiButton resource="contactProperties" />
-          </>
+          <button type="button" className="ms-btn ms-btn-primary" onClick={() => openAdd()}>
+            <PlusGlyph size={14} />
+            {t("add")}
+          </button>
         }
+        menu={<ResourceApiButton resource="contactProperties" />}
       />
       <AudienceTabs />
 

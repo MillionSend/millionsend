@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/skeleton";
 import { CircleInfoGlyph } from "@/components/tooltip";
 import { codeRichTags } from "@/lib/code-rich-tags";
 import { formatDayUtc } from "@/lib/format";
+import { type ChartPointer, trackedPointer } from "@/lib/panel-placement";
 import { BAND_TONE, formatScoreTenths } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { useUrlState } from "@/lib/url-state";
@@ -148,7 +149,7 @@ function RateCard(props: {
   secondary?: { label: string; note: string; hint: string; count: string; pct: string } | undefined;
 }) {
   const areaRef = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null);
+  const [hover, setHover] = useState<{ index: number; pointer: ChartPointer } | null>(null);
   const hoveredBar = hover ? props.bars[hover.index] : undefined;
 
   // Same mechanics as the line chart: track the pointer over the whole bar
@@ -156,19 +157,21 @@ function RateCard(props: {
   // bars flex to fill the card, so the pitch comes from the measured width.
   function track(event: React.PointerEvent<HTMLDivElement>) {
     if (props.bars.length === 0) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const pitch = rect.width / props.bars.length;
-    const index = Math.min(props.bars.length - 1, Math.max(0, Math.floor(x / pitch)));
-    setHover({ index, x, y: event.clientY - rect.top });
+    const pointer = trackedPointer(event);
+    const pitch = pointer.width / props.bars.length;
+    const index = Math.min(props.bars.length - 1, Math.max(0, Math.floor(pointer.x / pitch)));
+    setHover({ index, pointer });
   }
 
   return (
     <div className="ms-kpi-card" style={{ flex: 1 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "2px 8px" }}>
         <div className="ms-microlabel">{props.label}</div>
         {props.note ? (
-          <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
+          <span
+            className="ms-mono"
+            style={{ fontSize: 10, color: "var(--ms-faint)", whiteSpace: "nowrap" }}
+          >
             {props.note}
           </span>
         ) : null}
@@ -237,12 +240,7 @@ function RateCard(props: {
           ))}
         </div>
         {hover && hoveredBar ? (
-          <ChartTip
-            x={hover.x}
-            y={hover.y}
-            width={areaRef.current?.clientWidth ?? 0}
-            height={BAR_AREA}
-          >
+          <ChartTip plot={areaRef} pointer={hover.pointer}>
             <div className="ms-mono" style={{ fontSize: 11, color: "var(--ms-muted)" }}>
               {hoveredBar.dayLabel}
               {hoveredBar.partial ? ` · ${props.partialNote}` : ""}
@@ -581,13 +579,30 @@ export default function MetricsPage() {
             <AccountScoreSkeleton />
           ) : (
             <div className="ms-kpi-card" style={{ marginTop: 18 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "baseline",
+                  gap: "2px 8px",
+                }}
+              >
                 <div className="ms-microlabel">{t("score.title")}</div>
-                <span className="ms-mono" style={{ fontSize: 10, color: "var(--ms-faint)" }}>
+                <span
+                  className="ms-mono"
+                  style={{ fontSize: 10, color: "var(--ms-faint)", whiteSpace: "nowrap" }}
+                >
                   {t("score.window")}
                 </span>
               </div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "baseline",
+                  gap: "4px 10px",
+                }}
+              >
                 <div
                   className="ms-digits"
                   style={{ fontSize: "var(--ms-fs-kpi)", lineHeight: 1.1, marginTop: 6 }}
@@ -598,7 +613,10 @@ export default function MetricsPage() {
                     "—"
                   )}
                 </div>
-                <span className="ms-digits" style={{ fontSize: 15, color: "var(--ms-muted)" }}>
+                <span
+                  className="ms-digits"
+                  style={{ fontSize: 15, color: "var(--ms-muted)", whiteSpace: "nowrap" }}
+                >
                   {t("score.outOfTen")}
                 </span>
                 {scoreQuery.data.band ? (

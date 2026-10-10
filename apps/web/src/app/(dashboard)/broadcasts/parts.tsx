@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
+import { DotParts } from "@/components/dot-parts";
 import { PreviewSchemePills } from "@/components/preview-scheme-pills";
 import type { TONE_COLOR } from "@/components/status-tile";
 import { emulateEmailScheme } from "@/lib/email-preview";
@@ -393,7 +394,9 @@ export function SendingStatus({
         <StatusPill status={status} hold={hold} />
       </div>
       {line ? (
-        <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 6 }}>{line}</div>
+        <div style={{ fontSize: 12.5, color: "var(--ms-muted)", marginTop: 6 }}>
+          <DotParts text={line} />
+        </div>
       ) : null}
     </>
   );

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
+import { Breakable } from "@/components/breakable";
 import { EmailStatusIcon } from "@/components/email-status-icon";
 import { RelativeTime } from "@/components/relative-time";
 import { type BadgeStatus, StatusBadge } from "@/components/status-badge";
@@ -80,11 +81,13 @@ export function EmailsTable({
       <tbody>
         {items.map((row) => (
           <tr key={row.id} className="hoverable" onClick={() => router.push(`/emails/${row.id}`)}>
-            <td className="ms-mono">
+            {/* A long address wraps inside its column on a desktop, at its dots first,
+                rather than push the time column off it (phone lists stay one line). */}
+            <td className="ms-mono" style={{ overflowWrap: "anywhere" }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
                 <EmailStatusIcon status={row.latestStatus} />
                 <Link href={`/emails/${row.id}`} onClick={(event) => event.stopPropagation()}>
-                  {row.to[0] ?? row.subject}
+                  <Breakable text={row.to[0] ?? row.subject} />
                 </Link>
               </span>
               {row.to.length > 1 ? (
@@ -109,7 +112,7 @@ export function EmailsTable({
                 />
               )}
             </td>
-            <td>
+            <td className="ms-cell-fill">
               <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                 {broadcastChip && row.broadcastId ? (
                   <span
@@ -122,6 +125,7 @@ export function EmailsTable({
                 <span
                   style={{
                     display: "block",
+                    minWidth: 0,
                     maxWidth: 480,
                     overflow: "hidden",
                     textOverflow: "ellipsis",

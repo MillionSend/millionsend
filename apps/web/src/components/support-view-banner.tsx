@@ -103,12 +103,14 @@ export function SupportViewBanner({
       className="ms-notice-strip ms-notice-strip-warn ms-support-strip"
       style={{ margin: 0, borderRadius: 0, borderWidth: "0 0 1px" }}
     >
-      <span>
+      <span className="ms-notice-strip-text">
         {t("banner", { team: teamName })} ·{" "}
         {/* The clock runs on the client: the server's second and the browser's differ. */}
-        <span suppressHydrationWarning>{t("endsIn", { left: formatMmSs(leftMs) })}</span>
+        <span suppressHydrationWarning style={{ whiteSpace: "nowrap" }}>
+          {t("endsIn", { left: formatMmSs(leftMs) })}
+        </span>
       </span>
-      <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8, alignItems: "center" }}>
+      <span className="ms-notice-strip-actions">
         <Link href={back} className="ms-btn ms-btn-secondary">
           {t("back")}
         </Link>

@@ -9,9 +9,10 @@ import { EnvKeyring } from "../src/crypto/keyring.js";
 import { hashRecipient } from "../src/suppressions.js";
 import {
   findSenderDomainOwner,
-  MUTED_WHILE_SUSPENDED,
+  SENT_WHILE_SUSPENDED,
   type SenderDomainOwner,
   SYSTEM_MAIL_TAG,
+  type SystemMailKind,
   type SystemMailMessage,
   SystemMailRefused,
   sendSystemMail,
@@ -211,78 +212,81 @@ describe("sendSystemMail", () => {
 });
 
 describe("suspended teams", () => {
-  it("lists the automated notices a suspended team does not get", () => {
-    expect([...MUTED_WHILE_SUSPENDED].sort()).toEqual([
-      "broadcast.held",
-      "broadcast.held_quota",
-      "deliverability.paused",
-      "deliverability.warning",
-      "quota.paused",
-      "quota.reached",
-      "quota.warning",
+  const suspend = (team: string, reason: SuspensionReason | null) =>
+    db
+      .update(schema.teams)
+      .set({ suspendedAt: reason ? new Date() : null, suspensionReason: reason })
+      .where(eq(schema.teams.id, team));
+
+  it("lists the notices a suspended team still gets", () => {
+    expect([...SENT_WHILE_SUSPENDED].sort()).toEqual([
+      "api_key.created",
+      "billing.cancel_reminder",
+      "billing.cancel_scheduled",
+      "billing.downgraded",
+      "billing.payment_failed",
+      "billing.plan_activated",
+      "billing.plan_changed",
+      "member.joined",
+      "team.reinstated",
+      "team.suspended",
+      "webhook.secret_rotated",
     ]);
   });
 
-  it("mutes those notices for any suspension reason, and only those", async () => {
+  it("mutes every other notice about the team, and all of them under a silent suspension", async () => {
     const team = await createTeam(db, "suspended");
-    const suspend = (reason: SuspensionReason | null) =>
-      db
-        .update(schema.teams)
-        .set({ suspendedAt: reason ? new Date() : null, suspensionReason: reason })
-        .where(eq(schema.teams.id, team));
-    const d = deps();
-    for (const reason of SUSPENSION_REASONS) {
-      await suspend(reason);
-      for (const kind of MUTED_WHILE_SUSPENDED) {
-        expect(await sendSystemMail(d.deps, message({ kind, aboutTeamId: team })), kind).toBe(
-          "muted",
-        );
-      }
-    }
-    expect(d.enqueued).toEqual([]);
-    expect(d.raw).toEqual([]);
-
-    // The console's own notices, the operator's and account mail keep going out.
-    for (const kind of [
-      "team.suspended",
-      "team.reinstated",
-      "monitor.alert",
-      "monitor.broadcasts_paused",
-      "password_reset",
-    ] as const) {
-      expect(await sendSystemMail(d.deps, message({ kind, aboutTeamId: team })), kind).toBe(
-        "pipeline",
-      );
-    }
-    // A notice that names no team, or another team, is not the suspended team's.
-    expect(await sendSystemMail(d.deps, message({ kind: "quota.paused" }))).toBe("pipeline");
-    expect(
-      await sendSystemMail(d.deps, message({ kind: "quota.paused", aboutTeamId: otherTeam })),
-    ).toBe("pipeline");
-
-    await suspend(null);
-    expect(await sendSystemMail(d.deps, message({ kind: "quota.paused", aboutTeamId: team }))).toBe(
-      "pipeline",
-    );
-  });
-
-  it("mutes billing mail only while the team is suspended for phishing or held for review", async () => {
-    const team = await createTeam(db, "billing-suspended");
+    const kinds: SystemMailKind[] = [
+      ...ACCOUNT_MAIL_KINDS,
+      "invitation",
+      "quota.warning",
+      "quota.reached",
+      "quota.paused",
+      "deliverability.warning",
+      "deliverability.paused",
+      "region.paused",
+      "region.resumed",
+      "webhook.failing",
+      "webhook.auto_disabled",
+      "webhook.backlog",
+    ];
     const silent: readonly string[] = ["phishing", "review"];
     expect(SILENT_SUSPENSIONS).toEqual(silent);
-    const billing = ACCOUNT_MAIL_KINDS.filter((kind) => kind.startsWith("billing."));
     const d = deps();
     for (const reason of SUSPENSION_REASONS) {
-      await db
-        .update(schema.teams)
-        .set({ suspendedAt: new Date(), suspensionReason: reason })
-        .where(eq(schema.teams.id, team));
-      for (const kind of billing) {
+      await suspend(team, reason);
+      for (const kind of kinds) {
         expect(
           await sendSystemMail(d.deps, message({ kind, aboutTeamId: team })),
           `${reason} ${kind}`,
-        ).toBe(silent.includes(reason) ? "muted" : "pipeline");
+        ).toBe(!silent.includes(reason) && SENT_WHILE_SUSPENDED.has(kind) ? "pipeline" : "muted");
       }
     }
+  });
+
+  it("never mutes mail that names no team, or another team", async () => {
+    const team = await createTeam(db, "silenced");
+    await suspend(team, "phishing");
+    const d = deps();
+    for (const kind of [
+      "password_reset",
+      "email_verification",
+      "updates.confirm",
+      "welcome",
+      "password_changed",
+      "monitor.alert",
+      "monitor.team_held",
+      "quota.paused",
+    ] as const) {
+      expect(await sendSystemMail(d.deps, message({ kind })), kind).toBe("pipeline");
+    }
+    expect(
+      await sendSystemMail(d.deps, message({ kind: "domain.verified", aboutTeamId: otherTeam })),
+    ).toBe("pipeline");
+
+    await suspend(team, null);
+    expect(
+      await sendSystemMail(d.deps, message({ kind: "domain.verified", aboutTeamId: team })),
+    ).toBe("pipeline");
   });
 });

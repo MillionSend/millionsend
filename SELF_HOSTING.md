@@ -377,10 +377,10 @@ read in the language of the owner's contact in the team below, else English; eac
 which notices they get under **Settings → Notifications** (account mail and security receipts are
 always sent). Verify the sender's domain under
 **Domains** in a team and those emails are logged and measured there, tagged
-`millionsend_system`. Password-reset, verification, invitation and subscription-confirm
-emails lose their body once SES accepts them, since the link inside is a live credential;
-the other notices keep theirs for the usual retention window. Until a team holds the
-domain they go straight through SES and leave no trace.
+`millionsend_system`. Password-reset, verification, invitation, subscription-confirm and
+console-code emails lose their body once SES accepts them, since the link or code inside is
+a live credential; the other notices keep theirs for the usual retention window. Until a
+team holds the domain they go straight through SES and leave no trace.
 
 What a customer typed (team, person, domain, key and broadcast names, webhook URLs,
 addresses) never appears in a subject, and the body prints it as text no mail client turns
@@ -395,7 +395,9 @@ revoked ones and those of deleted teams included), one pending per address.
 
 That team is the instance's own, and an operator can mark it as such: on the `system` plan
 it is never capped or billed and its badge reads System. On a self-hosted instance plans
-carry no limits, so the mark only labels the team.
+carry no limits, but the mark does more than label the team: the content monitor never
+holds it, the new-domain warm-up never caps its domains, and its contacts are the list a
+suspension unsubscribes a team's members from.
 
 On an instance with `ALLOW_SIGNUP=true`, every new account becomes a contact of that team
 (`source: signup`) once its address is verified; the sign-up screen says so, and deleting the
@@ -692,11 +694,20 @@ content insights (never email bodies), and an instance-wide audit log.
 - **Operator actions and the team:** a suspended team's API keys still
   authenticate but every send answers `403 team_suspended` (`403 sending_paused`
   under a review hold; SMTP `550`),
-  broadcasts in flight park, webhooks keep delivering and data stays; its
-  quota, deliverability, broadcast-hold and broadcast-pause notices stop, and
-  so does its billing mail when the reason is phishing or a review hold
-  (Stripe still sends its own receipts), while mail to the operator, such as
-  the content monitor's alerts, still goes out; nobody on it can
+  broadcasts in flight park, webhooks keep delivering and data stays; of the
+  mail about the team, only the suspension and reinstatement notices, billing
+  mail and the security receipts (a new API key, a rotated webhook secret, a
+  member joining) still reach its owners, and none of it under a phishing
+  suspension or a review hold (Stripe still sends its own receipts), while
+  mail about a person's own account and mail to the operator, such as the
+  content monitor's alerts, still go out; a suspension for any reason but a
+  review hold or non-payment also unsubscribes every member from the
+  instance's own contact list (the contacts of the team on the `system` plan,
+  where product announcements go), with the reason on each contact's timeline
+  and no webhook, and reinstating does not subscribe them again, only their
+  own opt-in does (upgrading to this release unsubscribes, once, the members
+  of teams already suspended for those reasons, except a contact changed
+  since its team's suspension); nobody on it can
   delete it, remove its domains (the API answers `403 team_suspended` there
   too) or invite anyone, and a member of a team suspended for phishing or
   held for review cannot create new teams (under either reason each of these
@@ -763,8 +774,9 @@ no pause, so a release leaves no monitor pause behind. A team is held once, by e
 rule: after a release its later verdicts only alert, so the released mail,
 judged again on its way out, neither holds it a second time nor pauses its
 broadcasts. A team already
-suspended keeps its suspension, and Probation, Established, Trusted and
-system teams are never held: they stay alert-only. The judge reads a message
+suspended keeps its suspension, and Probation, Established and Trusted teams
+are never held: they stay alert-only. The system team is exempt: the monitor
+never samples it. The judge reads a message
 after SES has taken it, so the message that triggers the hold has already
 gone out; the hold stops what follows. `MONITOR_AUTO_HOLD=false` switches it
 off.
@@ -996,11 +1008,22 @@ no session is ever minted for the owner.
   `FORBIDDEN` to every mutation while the view is live, whatever the
   screen shows; the console's own actions keep working.
 - **How long:** 30 minutes, enforced on every request; one live view per
-  operator, starting another ends the previous, and a view cannot start
-  another. The operator ends it from the banner, the owner from Settings →
-  Support access, and expiry ends it on the next request. Starting one
-  needs a sign-in from the last 15 minutes, so a stolen long-lived session
-  cannot open a view.
+  operator. Starting another, from the console or from under a view, ends
+  the live one first exactly as End session does, which is how a view left
+  open in a closed tab ends. The operator ends it from the banner, the owner
+  from Settings → Support access, and expiry ends it on the next request.
+- **Starting one:** the dialog emails a 6-digit code to the operator's own
+  address, from `AUTH_EMAIL_FROM`. It works once, for 10 minutes; five
+  wrong tries void it, a new code replaces the old one, and one operator is
+  sent at most five an hour. Only a hash keyed by `BETTER_AUTH_SECRET` is
+  stored. A code that checks out covers that browser session's starts for
+  15 minutes, so opening several views takes one code; signing out ends it.
+  When the instance cannot send the code (no `AUTH_EMAIL_FROM` or no SES
+  credentials) or its email fails, whether the send itself or, when a team
+  holds the sender's domain, the queued email later (refused, failed,
+  bounced, or held back from SES), the dialog says so and for 10 minutes a
+  sign-in from the last 15 minutes stands in for the code. Either way a
+  stolen long-lived session cannot open a view.
 - **What is logged:** `support.view_started` and `support.view_ended` in
   the instance audit and, at once, in the team's own Settings → Audit log
   (who, the reason, the reference, how it ended, the minutes, how many

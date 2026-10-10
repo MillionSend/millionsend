@@ -2,6 +2,7 @@
 
 import { useLocale, useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { DotParts } from "@/components/dot-parts";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Skeleton } from "@/components/skeleton";
@@ -115,7 +116,9 @@ function LimitsForm({
               />
               <span>
                 {t("limitsDialog.paused")}
-                <div className="sub">{t("limitsDialog.pausedSub")}</div>
+                <div className="sub">
+                  <DotParts text={t("limitsDialog.pausedSub")} />
+                </div>
               </span>
             </label>
           </div>

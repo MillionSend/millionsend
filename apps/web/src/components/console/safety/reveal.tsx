@@ -11,6 +11,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useId, useState } from "react";
+import { DotParts } from "@/components/dot-parts";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
@@ -218,14 +219,18 @@ function RevealDialog({
         }}
       >
         <p style={{ margin: "6px 0 16px", color: "var(--ms-muted)", fontSize: 13.5 }}>
-          {email
-            ? t("lead", {
+          {email ? (
+            <DotParts
+              text={t("lead", {
                 team: request.team.name,
                 from: email.from,
                 sent: email.sentAt ? formatDayTime(email.sentAt, locale) : common("none"),
                 recipients: email.recipients,
-              })
-            : t("leadTeam", { team: request.team.name })}
+              })}
+            />
+          ) : (
+            t("leadTeam", { team: request.team.name })
+          )}
         </p>
         <div className="ms-field" style={{ marginBottom: 14 }}>
           <label htmlFor={`${id}-reason`}>{t("reason")}</label>
@@ -316,7 +321,7 @@ function RevealDialog({
           </div>
           <div>
             <div className="ms-microlabel">{t("recorded")}</div>
-            {t("recordedValue")}
+            <DotParts text={t("recordedValue")} />
           </div>
         </div>
         <p style={{ margin: 0, fontSize: 12.5, color: "var(--ms-muted)" }}>{t("note")}</p>

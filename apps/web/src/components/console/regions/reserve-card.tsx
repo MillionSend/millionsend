@@ -3,7 +3,8 @@
 import { useMutation } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useTranslations } from "next-intl";
-import { Fragment, useState } from "react";
+import { useState } from "react";
+import { KvRow } from "@/components/kv-row";
 import { BtnSpinner } from "@/components/spinner";
 import { toast } from "@/components/toast";
 import { useTRPC } from "@/lib/trpc";
@@ -100,19 +101,24 @@ export function ReserveCard({ list, onChanged }: { list: RegionList; onChanged: 
         </p>
         <dl className="ms-kv" style={{ marginTop: 14 }}>
           {list.served.map((r) => (
-            <Fragment key={r.region}>
-              <dt>{r.region}</dt>
-              <dd>
-                {r.share !== null && r.usableReserve !== null
-                  ? t("regionRow", { share: f.n(r.share), usable: f.n(r.usableReserve) })
-                  : r.account
-                    ? t("regionUnlimited")
-                    : t("regionUnreachable")}
-              </dd>
-            </Fragment>
+            <KvRow key={r.region} label={r.region}>
+              {r.share !== null && r.usableReserve !== null
+                ? t("regionRow", { share: f.n(r.share), usable: f.n(r.usableReserve) })
+                : r.account
+                  ? t("regionUnlimited")
+                  : t("regionUnreachable")}
+            </KvRow>
           ))}
         </dl>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+            gap: 10,
+            marginTop: 18,
+          }}
+        >
           <button
             type="button"
             className="ms-btn ms-btn-secondary"

@@ -615,11 +615,13 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                   padding: "12px 16px",
                   boxSizing: "border-box",
                   display: "flex",
+                  flexWrap: "wrap",
                   alignItems: "center",
                   gap: 12,
                 }}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
+                {/* "Change" drops under the recap before the recap gets narrower than this. */}
+                <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <div
                     style={{
                       fontSize: 14,
@@ -648,6 +650,7 @@ export function BroadcastComposer({ initial }: { initial?: ComposerInitial }) {
                 <button
                   type="button"
                   className="ms-btn ms-btn-secondary"
+                  style={{ marginLeft: "auto" }}
                   onClick={() => setStep(1)}
                 >
                   {t("composer.stepChange")}

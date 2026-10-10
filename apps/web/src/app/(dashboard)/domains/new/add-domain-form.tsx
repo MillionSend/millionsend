@@ -414,7 +414,7 @@ export function AddDomainForm({ userEmail }: { userEmail: string }) {
           </button>
         </form>
 
-        <div className="ms-stepper-side" style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: "1 1 260px", minWidth: 0 }}>
           <p className="ms-microlabel" style={{ margin: "0 0 10px" }}>
             {t("new.preview.title")}
           </p>
