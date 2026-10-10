@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
+import { Breakable } from "@/components/breakable";
 import { CopyChip } from "@/components/copy-chip";
 import { EmailContentPanel } from "@/components/email-content-panel";
 import { EmailsTable } from "@/components/emails-table";
@@ -141,7 +142,9 @@ export default function BroadcastDetailPage() {
         className="ms-meta-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          // Targeting and From get the room; a long From wraps at its address's
+          // break points inside its share instead of widening its column.
+          gridTemplateColumns: "minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2fr)",
           gap: "22px 28px",
           padding: "22px 0",
           borderTop: "1px solid var(--ms-line)",
@@ -212,7 +215,11 @@ export default function BroadcastDetailPage() {
         <div>
           <Microlabel>{t("detail.from")}</Microlabel>
           <div style={{ marginTop: 5 }}>
-            {broadcast ? <CopyChip value={broadcast.from} /> : <SkeletonChip width={180} />}
+            {broadcast ? (
+              <CopyChip value={broadcast.from} display={<Breakable text={broadcast.from} />} wrap />
+            ) : (
+              <SkeletonChip width={180} />
+            )}
           </div>
         </div>
       </div>

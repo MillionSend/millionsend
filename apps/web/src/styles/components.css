@@ -382,6 +382,11 @@ table.ms-table {
   /* Lists run at label size with tight rows (~40px with a row menu): a page
      of contacts or emails should fit a laptop viewport without scrolling. */
   font-size: var(--ms-fs-label);
+  /* What the list sits on, for a cell that must paint it (the menu column). */
+  --ms-table-ground: var(--ms-void);
+}
+.ms-card .ms-table {
+  --ms-table-ground: var(--ms-panel);
 }
 .ms-table thead th {
   background: var(--ms-panel-raised);
@@ -426,6 +431,19 @@ table.ms-table {
 .ms-table tbody tr:hover a {
   text-decoration: underline dotted var(--ms-faint);
   text-underline-offset: 3px;
+}
+/* A list that scrolls sideways keeps its row menus ("…") in reach: the menu
+   column sticks to the scroller's right edge and paints the list's ground
+   over the cells scrolled under it. */
+.ms-table:has(td:last-child .ms-menu-trigger-bare) :is(th, td):last-child {
+  position: sticky;
+  right: 0;
+}
+.ms-table:has(td:last-child .ms-menu-trigger-bare) td:last-child {
+  background: var(--ms-table-ground);
+}
+.ms-table:has(td:last-child .ms-menu-trigger-bare) tr.row-selected td:last-child {
+  background: color-mix(in srgb, var(--ms-panel-raised) 60%, var(--ms-table-ground));
 }
 
 /* Inputs */
@@ -2073,6 +2091,83 @@ summary:focus-visible,
   padding: 1px 5px;
 }
 
+/* Unsubscribe page settings (settings/unsubscribe): the form (capped at 480px)
+   and the preview side by side while both keep their basis, the preview
+   wrapping under the form below that (RESPONSIVE). */
+.ms-unsub-layout {
+  container-type: inline-size;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 24px;
+}
+.ms-unsub-form {
+  flex: 1 1 360px;
+  max-width: 480px;
+}
+
+/* A logged JSON body (logs/[id]): long strings wrap inside the block; a phone
+   scrolls it instead (RESPONSIVE). */
+.ms-json {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Email events strip (emails/[id]/page.tsx): event nodes left to right, joined
+   by connectors; it scrolls sideways when they outrun the column. Phones read
+   it top to bottom (rules below). */
+.ms-events {
+  margin-top: 12px;
+  border: 1px solid var(--ms-line);
+  border-radius: 14px;
+  padding: 30px 26px;
+  background-image: radial-gradient(var(--ms-line) 1px, transparent 1px);
+  background-size: 18px 18px;
+  background-position: center;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  overflow-x: auto;
+}
+/* A node: its tile, then pill, time and detail centred under it. A button
+   node (one with a drawer) sheds the button chrome. */
+.ms-events-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+  max-width: 240px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: center;
+}
+/* Between two events: the time it took, over a line. */
+.ms-events-gap {
+  flex: none;
+  min-width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+}
+.ms-events-line {
+  align-self: stretch;
+  border-top: 1px solid var(--ms-line-strong);
+}
+/* A pending email's connector: a line at the tiles' middle that takes the
+   free width; dashed toward an estimate. */
+.ms-events-link {
+  flex: 1 0 40px;
+  margin-top: 17px;
+  border-top: 1px solid var(--ms-line-strong);
+}
+.ms-events-line.dashed,
+.ms-events-link.dashed {
+  border-top-style: dashed;
+}
+
 /* Add-domain horizontal step bar: the vertical StepRail is a desktop affordance;
    this labelled horizontal sequence takes over on narrow screens (rules below).
    Hidden by default so desktop keeps the rail. */
@@ -2124,13 +2219,41 @@ summary:focus-visible,
    column holds its share and the date column takes the rest. Narrower, the
    shares plus cell padding would leave the date no width at all, drawn under
    the row menu, so the date gets a fixed width and the lead column takes
-   what is left; !important beats the share set inline. */
+   what is left; !important beats the share set inline. The suppression list's
+   address column drops its share the same way, so an address wraps only as
+   far as the narrow desktop needs. */
 @media (max-width: 1199px) {
   .ms-table th.ms-col-lead {
     width: auto !important;
   }
   .ms-table th.ms-col-date {
     width: 104px;
+  }
+}
+/* A badge holding a long value (an API key's domain) ellipsizes rather than
+   push its list past a narrow desktop; the value rides in its title. */
+@media (min-width: 900px) and (max-width: 1199px) {
+  .ms-table .ms-badge {
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+/* The account score's four figures go two by two where a row of four would
+   fold each label onto two or three lines; !important beats the inline row. */
+@media (min-width: 640px) and (max-width: 1199px) {
+  .ms-score-row {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 32px !important;
+  }
+}
+/* Unsubscribe page settings: under 764px (the form's 360px basis, the gap and
+   the preview's 380px) the preview wraps under the form, which then takes the
+   whole line instead of leaving the rest of it empty beside its cap. */
+@container (max-width: 763px) {
+  .ms-unsub-form {
+    max-width: none;
   }
 }
 
@@ -2276,6 +2399,55 @@ summary:focus-visible,
   }
   .ms-table td > span {
     flex-wrap: nowrap !important;
+  }
+
+  /* An email's events read top to bottom: across, the latest event (the one
+     the page was opened for) would sit past the screen edge. A node's tile
+     stands beside its pill, time and detail; a connector becomes a short line
+     under the tiles' middle, its time beside it. */
+  .ms-events {
+    flex-direction: column;
+    gap: 0;
+    padding: 20px;
+  }
+  .ms-events-node {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    column-gap: 12px;
+    justify-items: start;
+    max-width: none;
+    text-align: left;
+  }
+  .ms-events-node > * {
+    grid-column: 2;
+  }
+  .ms-events-node > :first-child {
+    grid-column: 1;
+    grid-row: 1 / span 4;
+    align-self: start;
+  }
+  .ms-events-gap {
+    flex-direction: row;
+    gap: 14px;
+    min-width: 0;
+    padding: 6px 0 6px 16px;
+  }
+  .ms-events-line,
+  .ms-events-link {
+    flex: none;
+    border-top: 0;
+    border-left: 1px solid var(--ms-line-strong);
+  }
+  .ms-events-link {
+    height: 20px;
+    margin: 6px 0 6px 16px;
+  }
+  .ms-events-line.dashed,
+  .ms-events-link.dashed {
+    border-left-style: dashed;
+  }
+  .ms-events-gap > .ms-events-line {
+    order: -1;
   }
 
   /* The search field takes the full first line. */
@@ -2505,6 +2677,13 @@ summary:focus-visible,
     width: 100%;
     max-width: none;
   }
+  /* A logged JSON body keeps its lines and indentation and scrolls inside its
+     block: wrapped at phone width, every long string breaks mid-token. */
+  .ms-json {
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+  }
 }
 
 @media (max-width: 479px) {
@@ -2585,6 +2764,20 @@ summary:focus-visible,
   }
 }
 
+/* Touch: iOS Safari zooms the page into a text field under 16px when it takes
+   focus, so on touch screens every text field (and the Select trigger, which
+   reads as one) runs at the touch input size; a code editor's highlight layers
+   follow its textarea so the glyphs stay aligned. Desktop keeps 14px.
+   !important beats the inline sizes some fields carry. */
+@media (pointer: coarse) {
+  .ms-input,
+  textarea,
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
+  .ms-code-editor-hl {
+    font-size: var(--ms-fs-input-touch) !important;
+  }
+}
+
 /* Touch screens of any width (a tablet too): keyboard hints mean nothing
    without a keyboard. */
 @media (hover: none) and (pointer: coarse) {
@@ -2611,6 +2804,13 @@ summary:focus-visible,
      a desktop. Phones keep the full-width table that scrolls. */
   .ms-table td.ms-cell-fill {
     max-width: 0;
+  }
+  /* A long address or URL wraps inside its column, at its "@", dots and
+     slashes first (breakable.tsx), instead of widening the list past the
+     screen. Phones keep the one-line list that scrolls. */
+  .ms-table td.ms-cell-wrap {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 

@@ -81,9 +81,7 @@ export function EmailsTable({
       <tbody>
         {items.map((row) => (
           <tr key={row.id} className="hoverable" onClick={() => router.push(`/emails/${row.id}`)}>
-            {/* A long address wraps inside its column on a desktop, at its dots first,
-                rather than push the time column off it (phone lists stay one line). */}
-            <td className="ms-mono" style={{ overflowWrap: "anywhere" }}>
+            <td className="ms-mono ms-cell-wrap">
               <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
                 <EmailStatusIcon status={row.latestStatus} />
                 <Link href={`/emails/${row.id}`} onClick={(event) => event.stopPropagation()}>

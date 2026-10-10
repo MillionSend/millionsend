@@ -436,7 +436,7 @@ function AccountScoreSkeleton() {
         <Skeleton width={110} height="1lh" />
       </div>
       <div
-        className="ms-kpi-row"
+        className="ms-kpi-row ms-score-row"
         style={{
           display: "flex",
           gap: 56,
@@ -631,7 +631,7 @@ export default function MetricsPage() {
                 ) : null}
               </div>
               <div
-                className="ms-kpi-row"
+                className="ms-kpi-row ms-score-row"
                 style={{
                   display: "flex",
                   gap: 56,

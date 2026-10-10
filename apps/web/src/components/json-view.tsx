@@ -77,7 +77,8 @@ function render(value: unknown, keyPath: string[], depth: number, requestPath: s
  * A logged JSON body rendered as hljs-classed spans (the .ms-hl palette in
  * components.css), with every UUID the request path and key attribute to a
  * dashboard resource turned into a link chip. Meant to sit inside a
- * pre.ms-mono.ms-hl with pre-wrap so long strings wrap.
+ * pre.ms-mono.ms-hl.ms-json (components.css: long strings wrap on a desktop,
+ * the block scrolls sideways on a phone).
  */
 export function JsonView({ value, requestPath }: { value: unknown; requestPath: string }) {
   return <>{render(value, [], 0, requestPath)}</>;

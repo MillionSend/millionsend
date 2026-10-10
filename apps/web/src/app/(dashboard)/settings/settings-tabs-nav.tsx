@@ -1,10 +1,9 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useTRPC } from "@/lib/trpc";
 import { useActiveTabInView } from "@/lib/use-active-tab-in-view";
+import { useTeamRole } from "@/lib/use-team-role";
 
 const TABS = [
   { key: "settings", href: "/settings" },
@@ -34,9 +33,7 @@ export function SettingsTabsNav({
   const router = useRouter();
   const pathname = usePathname();
   const tabsRef = useActiveTabInView(pathname);
-  const trpc = useTRPC();
-  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
-  const role = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
+  const role = useTeamRole();
   // Unlisted keys are always shown; each page gates itself too, so a hidden
   // tab is a missing route rather than a hidden link.
   const visible: Partial<Record<TabKey, boolean>> = {

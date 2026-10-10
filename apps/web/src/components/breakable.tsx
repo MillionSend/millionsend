@@ -27,3 +27,23 @@ export function Breakable({ text }: { text: string }) {
     ),
   );
 }
+
+/**
+ * Display text whose hyphenated words ("e-mail", "sexta-feira") never break
+ * at their hyphen: each stays on one line, so a heading that must wrap breaks
+ * between words. The characters are unchanged, so a copy keeps the plain
+ * hyphen. Not for data: a domain must still break when longer than a line.
+ */
+export function KeepHyphenated({ text }: { text: string }) {
+  if (!/\p{L}-\p{L}/u.test(text)) return text;
+  return text.split(/(\S*\p{L}-\p{L}\S*)/u).map((part, i) =>
+    i % 2 === 1 ? (
+      // biome-ignore lint/suspicious/noArrayIndexKey: parts are positional and may repeat
+      <span key={i} style={{ whiteSpace: "nowrap" }}>
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  );
+}

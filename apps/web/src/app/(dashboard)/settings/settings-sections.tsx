@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
+import { Breakable } from "@/components/breakable";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
 import { ChevronGlyph } from "@/components/icons/nav-icons";
@@ -41,7 +42,7 @@ function TeamSection({ billing }: { billing: boolean }) {
   const queryClient = useQueryClient();
   const { data: team } = useQuery(trpc.settings.team.get.queryOptions());
   const { data: teamList } = useQuery(trpc.team.list.queryOptions());
-  const activeRole = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
+  const activeRole = useTeamRole();
   const activeTeamId = teamList?.activeTeamId;
   const canManageLogo = activeRole === "owner" || activeRole === "admin";
   const [logoBusy, setLogoBusy] = useState(false);
@@ -512,7 +513,9 @@ function PendingInvitations() {
         <tbody>
           {invitations.map((invite) => (
             <tr key={invite.id}>
-              <td className="ms-mono">{invite.email}</td>
+              <td className="ms-mono ms-cell-wrap">
+                <Breakable text={invite.email} />
+              </td>
               <td>{t(`members.roles.${invite.role}`)}</td>
               <td>
                 {new Date(invite.expiresAt).getTime() <= Date.now() ? (
@@ -572,8 +575,7 @@ function MembersSection() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { data: members } = useQuery(trpc.settings.members.list.queryOptions());
-  const { data: teamList } = useQuery(trpc.team.list.queryOptions());
-  const role = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId)?.role;
+  const role = useTeamRole();
   const canManage = role === "owner" || role === "admin";
   const [inviteOpen, setInviteOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -677,8 +679,10 @@ function MembersSection() {
               const editable = canManage && !m.self && (role === "owner" || m.role !== "owner");
               return (
                 <tr key={m.userId}>
-                  <td>{m.name}</td>
-                  <td className="ms-mono">{m.email}</td>
+                  <td className="ms-cell-wrap">{m.name}</td>
+                  <td className="ms-mono ms-cell-wrap">
+                    <Breakable text={m.email} />
+                  </td>
                   <td>
                     {editable ? (
                       <Select
@@ -1036,6 +1040,7 @@ function DangerSection() {
   const trpc = useTRPC();
   const { data: teamList } = useQuery(trpc.team.list.queryOptions());
   const active = teamList?.teams.find((m) => m.teamId === teamList.activeTeamId);
+  const role = useTeamRole();
   const [error, setError] = useState<string | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
 
@@ -1105,7 +1110,7 @@ function DangerSection() {
         </span>
       </summary>
       <div className="ms-actions" style={{ marginTop: 18 }}>
-        {active?.role === "owner" ? (
+        {role === "owner" ? (
           <button
             type="button"
             className="ms-btn ms-btn-destructive"

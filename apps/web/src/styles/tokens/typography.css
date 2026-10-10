@@ -9,6 +9,7 @@
   --ms-fs-label: 13px; /* table headers and cells, form labels, timestamps */
   --ms-fs-ui: 14px; /* nav, buttons */
   --ms-fs-body: 15px; /* body copy, input values */
+  --ms-fs-input-touch: 16px; /* text fields on touch screens only (DESIGN.md Controls) */
   --ms-fs-section: 17px; /* card section headings */
   --ms-fs-h2: 22px; /* card titles, drawer titles */
   --ms-fs-h1: 30px; /* page titles */

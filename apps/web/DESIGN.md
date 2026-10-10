@@ -3,7 +3,8 @@
 Scale stated as numbers that keep counting. Black void, bone type, one steel
 accent per view. **Dark theme only.** All values live in `src/styles/` as
 `--ms-*` custom properties; components apply the `ms-*` classes from
-`components.css`. Do not invent new colors, radii, or font sizes.
+`components.css`. Do not invent new colors, radii, or font sizes; the one
+sanctioned exception is the touch text-field size (Controls).
 
 ## The five rules
 
@@ -106,8 +107,10 @@ beside the touched column.
 **Narrow desktop (900–1199px).** Beside the sidebar the content column is
 under 880px: the console's 4-up grids go 2-up and its 2/1 splits stack, a
 detail page's meta grid lays out as many columns as keep each value 11rem
-wide, and no meta value widens its column (a long chip ellipsizes). Filter
-rows, wrap rows and steppers wrap at every width rather than overflow.
+wide, and no meta value widens its column (a long chip ellipsizes). In a
+list a long address wraps at its "@" and dots (`Breakable`) rather than push
+the list sideways. Filter rows, wrap rows and steppers wrap at every width
+rather than overflow.
 
 **Mobile (breakpoint 900px).** Below 900px the sidebar becomes an off-canvas
 drawer behind a 48px sticky topbar (hamburger `.ms-btn-icon` + wordmark on
@@ -122,7 +125,9 @@ to 3-up then 2-up (<640px); stepper rails hide or shrink under 640px. Modals
 go `calc(100vw - 24px)` under 480px and their footer buttons share the width.
 Toasts drop from under the topbar (<640px) so they never cover a dialog's
 footer. Tables scroll horizontally **inside their own wrapper** (the shared
-`<Table>`) — the page itself never scrolls horizontally. On touch screens
+`<Table>`) — the page itself never scrolls horizontally — and a list's row
+menu ("…") column sticks to the wrapper's right edge at any width. An email's
+events strip reads top to bottom. On touch screens
 keycaps are hidden, small glyph controls (✕, ⓘ, a chip's copy button) get a
 finger-sized hit area, and bulk-select checkboxes show in a column of their
 own. The narrow-desktop and phone rules live in the delimited responsive
@@ -138,6 +143,11 @@ section of `components.css`; every rule above it holds at every width.
   only — a11y non-negotiable. Everything else — dialog panels, chart/svg
   containers, anything focused programmatically via `tabindex="-1"` — gets
   `outline: none`. No browser-blue outline anywhere, ever.
+- **Text fields on touch screens:** under `(pointer: coarse)` every text
+  input, textarea and the `<Select>` trigger runs at 16px
+  (`--ms-fs-input-touch`), the only size outside the type scale: iOS Safari
+  zooms the page into any field under 16px when it takes focus. Desktop
+  keeps 14px.
 - **Select:** never render native `<select>`. Use `<Select>` from
   `src/components/select.tsx` — compact `.ms-input` trigger with a `.ms-chev`
   chevron, `.ms-menu` listbox popover, built-in search when there are more
