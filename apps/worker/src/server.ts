@@ -414,7 +414,7 @@ await queue.scheduleCrons({
     }
   },
   "safety.reveal_notices": async () => {
-    const result = await runRevealNotices(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+    const result = await runRevealNotices(db);
     if (result.disclosed > 0 || result.withheld > 0) {
       console.log(
         `safety.reveal_notices: disclosed=${result.disclosed} withheld=${result.withheld}`,
@@ -607,6 +607,9 @@ await queue.work(
         timeoutMs: judgeConfig?.timeoutMs,
         mailer,
         appBaseUrl: env.APP_BASE_URL,
+        syncTenant: async (teamId) => {
+          await queue.send("tenant.status", { teamId }, { dedupeKey: teamId });
+        },
       },
       { sampleId },
     );

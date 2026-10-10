@@ -154,6 +154,7 @@ export default function BroadcastDetailPage() {
               status={status}
               progress={progress}
               planHold={broadcast.planHold?.resumesAt ?? null}
+              held={broadcast.held}
               locale={locale}
             />
           ) : (

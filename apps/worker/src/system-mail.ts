@@ -118,14 +118,19 @@ export async function mailOperator(
   mailer: SystemMailer,
   kind: AccountMailKind,
   path: string,
-  values: Record<string, string>,
+  values: Record<string, string> | ((locale: MailLocale) => Record<string, string>),
   appBaseUrl: string | undefined,
 ): Promise<boolean> {
   const operator = await findInstanceOperator(db);
   if (!operator) return false;
   const locale = await accountLocale(db, accountEmailFrom(), operator.email);
   await mailer.send(operator.email, {
-    ...buildAccountMail({ kind, locale, url: `${appBaseUrl ?? ""}${path}`, values }),
+    ...buildAccountMail({
+      kind,
+      locale,
+      url: `${appBaseUrl ?? ""}${path}`,
+      values: typeof values === "function" ? values(locale) : values,
+    }),
     kind,
   });
   return true;

@@ -61,6 +61,9 @@ export const teamMonitor = pgTable("team_monitor", {
   // When an operator last lifted the policy's pause: only verdicts after it
   // can pause the team again, so a reviewed episode is not re-litigated.
   broadcastsResumedAt: timestamp("broadcasts_resumed_at", { withTimezone: true }),
+  // Set when the review hold suspended the team. It holds a team once: after
+  // a person released it, the drained campaign's next verdicts only alert.
+  heldAt: timestamp("held_at", { withTimezone: true }),
   alertedAt: timestamp("alerted_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -128,6 +131,10 @@ export const monitorSettingColumns = {
   monitorPauseRisk: doublePrecision("monitor_pause_risk"),
   monitorAutoPause: boolean("monitor_auto_pause"),
   monitorFlagScore: smallint("monitor_flag_score"),
+  monitorAutoHold: boolean("monitor_auto_hold"),
+  monitorHoldScore: smallint("monitor_hold_score"),
+  monitorHoldRepeatCount: integer("monitor_hold_repeat_count"),
+  monitorHoldRepeatScore: smallint("monitor_hold_repeat_score"),
   // The new-domain warm-up shares the trust & safety settings page.
   warmupEnabled: boolean("warmup_enabled"),
   warmupCapFirstDay: integer("warmup_cap_first_day"),

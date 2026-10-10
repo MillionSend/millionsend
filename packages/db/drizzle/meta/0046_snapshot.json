@@ -1,6 +1,6 @@
 {
-  "id": "e8e9b472-b30b-4a8c-bd1a-d3a07ea6c4d7",
-  "prevId": "df234c44-efe3-4bd3-8a03-fc99dee4ae16",
+  "id": "568bc3e4-266c-4a94-b770-8b97fb6ddcd2",
+  "prevId": "e8e9b472-b30b-4a8c-bd1a-d3a07ea6c4d7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2968,6 +2968,43 @@
           "primaryKey": false,
           "notNull": false
         },
+        "registered_at": {
+          "name": "registered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "age_source": {
+          "name": "age_source",
+          "type": "domain_age_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "age_checked_at": {
+          "name": "age_checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "warmup_tier": {
+          "name": "warmup_tier",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "warmup_tier_at": {
+          "name": "warmup_tier_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "warmup_trusted_at": {
+          "name": "warmup_trusted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3435,6 +3472,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'queued'"
+        },
+        "park_reason": {
+          "name": "park_reason",
+          "type": "email_park_reason",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
         },
         "body_ciphertext": {
           "name": "body_ciphertext",
@@ -4120,6 +4164,30 @@
         "monitor_hold_repeat_score": {
           "name": "monitor_hold_repeat_score",
           "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "warmup_enabled": {
+          "name": "warmup_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "warmup_cap_first_day": {
+          "name": "warmup_cap_first_day",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "warmup_cap_first_week": {
+          "name": "warmup_cap_first_week",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "warmup_cap_first_month": {
+          "name": "warmup_cap_first_month",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -5642,6 +5710,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "warmup_trusted_at": {
+          "name": "warmup_trusted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -5991,6 +6065,100 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.domain_warmup_usage": {
+      "name": "domain_warmup_usage",
+      "schema": "",
+      "columns": {
+        "registrable_domain": {
+          "name": "registrable_domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day": {
+          "name": "day",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accepted": {
+          "name": "accepted",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "domain_warmup_usage_registrable_domain_day_pk": {
+          "name": "domain_warmup_usage_registrable_domain_day_pk",
+          "columns": [
+            "registrable_domain",
+            "day"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.team_warmup_usage": {
+      "name": "team_warmup_usage",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day": {
+          "name": "day",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accepted": {
+          "name": "accepted",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "team_warmup_usage_team_id_teams_id_fk": {
+          "name": "team_warmup_usage_team_id_teams_id_fk",
+          "tableFrom": "team_warmup_usage",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "team_warmup_usage_team_id_day_pk": {
+          "name": "team_warmup_usage_team_id_day_pk",
+          "columns": [
+            "team_id",
+            "day"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -6740,6 +6908,16 @@
         "flagged_window"
       ]
     },
+    "public.domain_age_source": {
+      "name": "domain_age_source",
+      "schema": "public",
+      "values": [
+        "rdap",
+        "whois",
+        "ct",
+        "unknown"
+      ]
+    },
     "public.domain_status": {
       "name": "domain_status",
       "schema": "public",
@@ -6776,6 +6954,13 @@
         "failed",
         "prefetched",
         "unsubscribed"
+      ]
+    },
+    "public.email_park_reason": {
+      "name": "email_park_reason",
+      "schema": "public",
+      "values": [
+        "warmup"
       ]
     },
     "public.email_status": {

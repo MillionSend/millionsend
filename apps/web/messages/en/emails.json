@@ -1,4 +1,8 @@
 {
+  "held": {
+    "label": "Delayed",
+    "body": "Delivery is paused for now and resumes automatically. You don't need to do anything."
+  },
   "list": {
     "title": "Emails",
     "suppressionList": "Suppression list",

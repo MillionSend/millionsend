@@ -14,6 +14,7 @@ import {
   asc,
   desc,
   eq,
+  getTableColumns,
   gt,
   gte,
   ilike,
@@ -109,6 +110,14 @@ async function firstPageTotal(
 }
 
 /**
+ * A broadcast copy the provider has not seen whose sender region holds
+ * broadcasts: the list and the detail show it as delayed, never why.
+ * Spelled out because a single-table select leaves column names
+ * unqualified, and the subquery's own tables would capture them.
+ */
+const HELD_SQL = sql<boolean>`(emails.broadcast_id is not null and emails.latest_status in ('queued', 'queued_quota') and exists (select 1 from domains d join region_breakers rb on rb.region = d.region and rb.paused where d.id = emails.domain_id))`;
+
+/**
  * What a row not yet handed to the provider is waiting for, for the detail's
  * estimated nodes. Never stored: it is the planner's view at read time.
  */
@@ -118,6 +127,7 @@ type PendingSend =
   | { kind: "plan"; resumesAt: Date }
   | { kind: "waiting" }
   | { kind: "warmup" }
+  | { kind: "held" }
   | { kind: "paced"; from: Date | null; to: Date | null };
 
 async function pendingSend(
@@ -129,9 +139,11 @@ async function pendingSend(
     scheduledAt: Date | null;
     broadcastId: string | null;
     parkReason: string | null;
+    held: boolean;
   },
 ): Promise<PendingSend | null> {
   if (email.sentAt) return null;
+  if (email.held) return { kind: "held" };
   const now = new Date();
   if (email.latestStatus === "queued") {
     return email.scheduledAt && email.scheduledAt > now
@@ -222,6 +234,7 @@ export const emailsRouter = router({
           scheduledAt: t.scheduledAt,
           sentAt: t.sentAt,
           broadcastId: t.broadcastId,
+          held: HELD_SQL,
         })
         .from(t)
         .where(and(...filters))
@@ -300,7 +313,7 @@ export const emailsRouter = router({
   get: teamProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
     const t = schema.emails;
     const [email] = await ctx.db
-      .select()
+      .select({ ...getTableColumns(t), held: HELD_SQL })
       .from(t)
       .where(and(eq(t.id, input.id), eq(t.teamId, ctx.teamId)))
       .limit(1);

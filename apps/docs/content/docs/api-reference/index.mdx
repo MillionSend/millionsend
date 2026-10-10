@@ -59,7 +59,8 @@ remaining deltas are deliberate and loud:
 - Broadcasts support `canceled`, a status outside Resend's union, and
   broadcast sends, `POST /emails` and `POST /emails/batch` can return
   `403 sending_paused` when your bounce or complaint rate crosses the SES
-  enforcement thresholds. Broadcast sends alone can also return
+  enforcement thresholds, or while the team's sending is paused pending
+  review. Broadcast sends alone can also return
   `403 broadcasts_paused` while the platform's aggregate rate in the sender's
   SES region is recovering; it is per region, leaves transactional email
   untouched, and clears on its own.

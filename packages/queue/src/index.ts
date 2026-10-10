@@ -203,8 +203,8 @@ export const CRON_JOBS = {
   // Every 10 min: the content monitor's sample count and unjudged share as
   // probes, and the operator's notice when the judge keeps failing.
   "monitor.health": "*/10 * * * *",
-  // Daily: the seven-day disclosure of break-glass content access — the
-  // team's audit row and its owners' notice. No-op with none due.
+  // Daily: the seven-day disclosure of break-glass content access, the
+  // team's audit row. No-op with none due.
   "safety.reveal_notices": "40 4 * * *",
 } as const;
 

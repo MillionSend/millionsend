@@ -255,6 +255,10 @@ export const env = createEnv({
     MONITOR_PAUSE_RISK: z.coerce.number().min(0).max(1).optional(),
     MONITOR_AUTO_PAUSE: z.enum(["true", "false", "1", "0"]).optional(),
     MONITOR_FLAG_SCORE: z.coerce.number().int().min(0).max(100).optional(),
+    MONITOR_AUTO_HOLD: z.enum(["true", "false", "1", "0"]).optional(),
+    MONITOR_HOLD_SCORE: z.coerce.number().int().min(0).max(100).optional(),
+    MONITOR_HOLD_REPEAT_COUNT: z.coerce.number().int().min(0).optional(),
+    MONITOR_HOLD_REPEAT_SCORE: z.coerce.number().int().min(0).max(100).optional(),
     // New-domain warm-up: a daily cap per sending domain by registration age
     // (unset follows IS_CLOUD). Instance settings in the same console page
     // override these, like the MONITOR_* values above.

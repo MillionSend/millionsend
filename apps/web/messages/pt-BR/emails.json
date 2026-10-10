@@ -1,4 +1,8 @@
 {
+  "held": {
+    "label": "Atrasado",
+    "body": "O envio está pausado por enquanto e retoma automaticamente. Você não precisa fazer nada."
+  },
   "list": {
     "title": "E-mails",
     "suppressionList": "Lista de supressão",

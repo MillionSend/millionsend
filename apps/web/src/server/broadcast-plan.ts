@@ -16,6 +16,7 @@ import {
   type PlanCap,
   type PlanInput,
   pacingHorizonDays,
+  pausedRegions,
   planBulkWaves,
   planCaps,
   planLabel,
@@ -25,6 +26,7 @@ import {
   type SendingBroadcast,
   sendingBroadcasts,
   transactionalSent24h,
+  verifySenderDomain,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { and, inArray, isNotNull, sql } from "drizzle-orm";
@@ -222,6 +224,32 @@ export async function sendingProgress(
     });
   }
   return out;
+}
+
+/**
+ * The broadcasts among `rows` that are due or going out but wait on a hold
+ * of their sender domain's region (the platform breaker or an operator's).
+ * Customers see them as delayed and are never told why: a region's hold is
+ * about the platform, not anything of theirs.
+ */
+export async function heldBroadcastIds(
+  db: Db,
+  teamId: string,
+  rows: readonly { id: string; from: string; status: string; scheduledAt: Date | null }[],
+  now: Date = new Date(),
+): Promise<Set<string>> {
+  const held = new Set<string>();
+  const due = rows.filter(
+    (r) => r.status === "sending" || (r.status === "scheduled" && (r.scheduledAt ?? now) <= now),
+  );
+  if (due.length === 0) return held;
+  const paused = new Set((await pausedRegions(db)).map((p) => p.region));
+  if (paused.size === 0) return held;
+  for (const row of due) {
+    const sender = await verifySenderDomain(db, teamId, row.from);
+    if (sender.ok && paused.has(sender.region)) held.add(row.id);
+  }
+  return held;
 }
 
 /** When the team's own cap, not capacity, holds a broadcast's parked rows: the next reset, or null. */
