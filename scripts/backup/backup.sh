@@ -4,8 +4,10 @@
 # Configured entirely from the shared S3_* credentials plus the S3_BACKUP_* /
 # BACKUP_* env (see .env.example); reuses the stack's DATABASE_URL. With
 # BACKUP_AGE_RECIPIENT set (an age public key, age1...) the dump is encrypted
-# before upload; restore with `age --decrypt -i <key file>` first. Invoked
-# with arguments it instead runs them with the rclone env prepared — the
+# before upload; restore with `age --decrypt -i <key file>` first. With a
+# leading --skip-if-recent (the entrypoint's start-up run) the cycle is skipped
+# when the bucket already holds a dump from the last 26 hours. Invoked with
+# other arguments it instead runs them with the rclone env prepared — the
 # documented restore path (`... backup.sh sh -c 'rclone ...'`).
 # shellcheck disable=SC3040 # BusyBox ash does support pipefail
 set -euo pipefail
@@ -24,6 +26,25 @@ export RCLONE_S3_REGION="${S3_REGION:-auto}"
 export RCLONE_S3_NO_CHECK_BUCKET=true
 
 remote=":s3:${S3_BACKUP_BUCKET}/${S3_BACKUP_PREFIX:-backups}"
+
+# Only this job's own dumps, directly under the prefix: anything else that
+# shares the bucket path is left alone.
+own_dumps() {
+  rclone "$@" --max-depth 1 --include 'millionsend-*.dump' --include 'millionsend-*.dump.age' "$remote"
+}
+
+# A dump holds a lock on every table until it ends, so one on every restart or
+# upgrade would hold the app's migrations behind it. 26h is one daily interval
+# plus a margin for the nightly dump's own run time. A listing that fails
+# (outage, bad credentials) counts as no recent dump.
+if [ "${1:-}" = --skip-if-recent ]; then
+  shift
+  recent=$(own_dumps lsf --files-only --max-age 26h | tail -n 1) || recent=""
+  if [ -n "$recent" ]; then
+    echo "backup: start-up dump skipped, ${recent} is less than 26 hours old"
+    exit 0
+  fi
+fi
 
 # Escape hatch for restore/inspection: any arguments run as a command with
 # the rclone env above already in place.
@@ -56,10 +77,7 @@ if [ "${remote_size:-0}" != "$local_size" ] || [ "$local_size" -eq 0 ]; then
   exit 1
 fi
 
-# Only this job's own dumps, directly under the prefix: anything else that
-# shares the bucket path is left alone.
 echo "backup: pruning dumps older than ${BACKUP_RETENTION_DAYS:-14} days"
-rclone delete --min-age "${BACKUP_RETENTION_DAYS:-14}d" --max-depth 1 \
-  --include 'millionsend-*.dump' --include 'millionsend-*.dump.age' "$remote"
+own_dumps delete --min-age "${BACKUP_RETENTION_DAYS:-14}d"
 
 echo "backup: done (${name})"

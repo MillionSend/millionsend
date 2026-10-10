@@ -631,7 +631,10 @@ S3_BACKUP_BUCKET=millionsend-backups
 
 Then add `backup` to `COMPOSE_PROFILES` in `.env` and `docker compose up -d`:
 the service dumps once immediately, and after that daily on `BACKUP_CRON`
-(default `0 3 * * *`, UTC). Only the daily form `<minute> <hour> * * *` is
+(default `0 3 * * *`, UTC). That first dump is skipped when the bucket already
+holds one from the last 26 hours, so restarts and upgrades don't take another:
+a dump holds a lock on every table until it ends, and the app's migrations
+would wait behind it. Only the daily form `<minute> <hour> * * *` is
 honoured — the sidecar runs unprivileged as `postgres` with every capability
 dropped, so the schedule is a sleep loop rather than crond, and any other
 shape makes the service exit 1. Each dump is `pg_dump -Fc`
@@ -655,6 +658,13 @@ The standalone `deploy/docker-compose.yml` runs the published
 `ghcr.io/millionsend/backup` image (`MILLIONSEND_BACKUP_IMAGE` pins it, the way
 `MILLIONSEND_IMAGE` pins the app); a repository clone builds it from
 `scripts/backup`. Restores use the same container either way.
+
+For a one-off dump (before a big upgrade, say), run one cycle by hand; it
+dumps even when the bucket already holds a recent one:
+
+```sh
+docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup
+```
 
 ### Restore
 

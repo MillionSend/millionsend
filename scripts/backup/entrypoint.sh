@@ -31,8 +31,11 @@ minute=${1#0}
 hour=${2#0}
 at=$(( ${minute:-0} * 60 + ${hour:-0} * 3600 ))
 
-# Baseline dump right away so a fresh deploy is protected before the first tick.
-/usr/local/bin/backup.sh
+# Baseline dump right away so a fresh deploy is protected before the first
+# tick, unless the bucket already holds a recent one (see backup.sh). A failure
+# must fall through to the schedule: with restart "no", exiting here would stop
+# backups until the next deploy.
+/usr/local/bin/backup.sh --skip-if-recent || echo "backup: start-up dump failed, next attempt at the scheduled time" >&2
 
 echo "backup schedule installed: $cron (UTC)"
 while :; do
