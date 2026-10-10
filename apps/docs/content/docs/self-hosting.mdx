@@ -780,11 +780,31 @@ read per region; no paid AWS API is called, and the per-region cost is a
 local estimate.
 
 A suspended team keeps its data and its keys authenticate, but every send
-answers `403 team_suspended` (SMTP `550`); a broadcast pause holds
+answers `403 team_suspended` (`403 sending_paused` under a review hold; SMTP
+`550`); a broadcast pause holds
 broadcasts while transactional mail flows; a daily ceiling caps the team's
 day under its plan. Owners are emailed about each action (except a phishing
 suspension or a review hold), and every action lands in the audit log with
 its reason.
+
+While a team is suspended, its quota, deliverability, broadcast-hold and
+broadcast-pause notices stop. Its billing mail stops too when the suspension
+is for phishing or a review hold (Stripe still sends its own receipts), and
+keeps coming under any other reason. Mail to the operator, such as the
+content monitor's alerts about the team, still goes out. Nobody on a
+suspended team can delete it, remove its domains (the API answers
+`403 team_suspended` there too) or invite anyone, and a member of a team
+suspended for phishing or held for review cannot create new teams. Under
+those two reasons each of these refusals is one neutral line that never says
+suspended ("This isn't available for this team right now. Contact support if
+you need help."; the API's domain delete answers `403 forbidden`), and the
+team's own audit log shows the suspension without the operator's note.
+
+A team's own audit log never lists trust & safety flags (opened, cleared or
+reopened) or the content monitor's actions (its broadcast pause, the resume
+and a sampling override), which stay in the console. It shows a broadcast
+pause the owner was not emailed about without its reason or note, and every
+operator action as MillionSend, never the operator's name or email.
 
 ## Content monitoring (optional)
 
@@ -1051,8 +1071,9 @@ read-only, for 30 minutes, after the operator names a reason (support
 ticket, billing dispute, other) and the ticket reference. Every reason is a
 request the customer made; an operator checking an abuse report works from
 the console's own Trust & safety pages instead, and from the content reveal
-when the message text itself is needed. The session rides on the operator's
-own login; no session is ever minted for the owner.
+when the message text itself is needed. No view starts on a team suspended
+for phishing or held for review. The session rides on the operator's own
+login; no session is ever minted for the owner.
 
 **What the operator sees.** The dashboard under a banner ("Support view of
 &lt;team&gt; · read-only · ends in mm:ss"): emails and their events (a
@@ -1086,7 +1107,8 @@ anything a procedure returned.
 
 **What the owner sees.** No email. The session is in the team's Settings →
 Audit log at once, and the Support access card under Settings shows it while
-it is live, with an "End session" button.
+it is live, with an "End session" button. Both name MillionSend, never the
+operator: no name, email or user id reaches the team.
 
 ```sh
 SUPPORT_VIEW=on

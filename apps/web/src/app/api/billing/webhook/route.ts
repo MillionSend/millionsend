@@ -195,6 +195,7 @@ async function mailOwners(db: Db, event: BillingEvent, before: PlanRow, after: P
           path: BILLING_PATH,
           url,
           values: values(owner.locale),
+          aboutTeamId: after.id,
         }),
       );
     }

@@ -134,7 +134,7 @@ export const ptBR = {
     subject: "Pagamento recusado no plano {plan} de {team}",
     body: [
       "Não conseguimos cobrar o cartão cadastrado do plano {plan} de {team}.",
-      "{retry} Por enquanto nada muda: {team} continua enviando {cap}. Se a fatura continuar em aberto, a Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
+      "{retry} Por enquanto {team} mantém o plano {plan} ({cap}). Se a fatura continuar em aberto, a Stripe cancela a assinatura e {team} volta ao Free ({freeCap} e-mails por dia).",
     ],
     button: "Pagar fatura",
     muted: ["Ou atualize o cartão em Cobrança: {billingUrl}"],
@@ -146,7 +146,7 @@ export const ptBR = {
   "billing.plan_activated": {
     subject: "{team} está no plano {plan}",
     body: [
-      "Sua assinatura está ativa: {team} agora envia {cap}, e o que estava retido acima do limite antigo é liberado em minutos.",
+      "Sua assinatura está ativa: o {plan} permite {cap}, e o que ficou retido acima do limite antigo deixa de esperar por ele.",
       "Recibos e faturas vêm da Stripe; a assinatura é gerenciada em Cobrança.",
     ],
     button: "Abrir cobrança",
@@ -154,7 +154,7 @@ export const ptBR = {
   "billing.plan_changed": {
     subject: "{team} mudou de {old} para {new}",
     body: [
-      "A partir de agora {team} envia {cap}. Num limite menor, os envios já aceitos não mudam; o que passar do novo limite, em planos diários espera o próximo dia UTC e, em planos mensais, cobra excedente (quando ativado) ou é recusado pela API até o período renovar.",
+      "{team} agora está no {new}, que permite {cap}. Num limite menor, os envios já aceitos não mudam; o que passar do novo limite, em planos diários espera o próximo dia UTC e, em planos mensais, cobra excedente (quando ativado) ou é recusado pela API até o período renovar.",
       "O rateio aparece na próxima fatura da Stripe.",
     ],
     button: "Abrir cobrança",
@@ -171,14 +171,14 @@ export const ptBR = {
     subject: "Lembrete: o plano {plan} de {team} termina em {date}",
     body: [
       "Em {date} {team} volta ao Free: {freeCap} e-mails por dia, e o que passar do limite espera o dia seguinte.",
-      "Retome o plano em Cobrança para continuar enviando {cap}.",
+      "Retome o plano em Cobrança para continuar no {plan} ({cap}).",
     ],
     button: "Abrir cobrança",
   },
   "billing.downgraded": {
     subject: "{team} agora está no Free",
     body: [
-      "O plano {plan} terminou em {date}. A partir de hoje {team} envia até {freeCap} e-mails por dia; o que passar espera o próximo dia UTC, e broadcasts acima do limite saem em partes.",
+      "O plano {plan} terminou em {date}. A partir de hoje {team} está no Free: até {freeCap} e-mails por dia, o que passar espera o próximo dia UTC, e broadcasts acima do limite saem em partes.",
       "Domínios verificados, contatos e chaves de API continuam iguais. Escolha um plano de novo em Cobrança quando precisar de mais.",
     ],
     button: "Abrir cobrança",

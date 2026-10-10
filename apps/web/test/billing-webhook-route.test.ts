@@ -247,7 +247,7 @@ describe("owner mail", () => {
     await failed("evt_1", 1, Date.UTC(2026, 9, 3) / 1000);
     expect(kinds()).toEqual(["billing.payment_failed"]);
     expect(h.sent[0]?.subject).toBe("Payment failed for upgrader's Pro 100K plan");
-    expect(h.sent[0]?.text).toContain("keeps sending up to 100,000 emails a month");
+    expect(h.sent[0]?.text).toContain("keeps its Pro 100K plan (up to 100,000 emails a month)");
     expect(h.sent[0]?.text).toContain("Stripe retries on October 3, 2026.");
     expect(h.sent[0]?.text).toContain("Pay the invoice: https://invoice.stripe.com/i/in_1");
     expect(h.sent[0]?.text).toContain("https://app.example.com/settings/billing");
@@ -329,6 +329,8 @@ describe("owner mail", () => {
     await send("evt_1", "customer.subscription.deleted");
     await send("evt_1", "customer.subscription.deleted");
     expect(kinds()).toEqual(["billing.downgraded"]);
+    // Named, so the send path can hold it back while the team is suspended.
+    expect(h.sent[0]?.aboutTeamId).toBe(teamId);
     expect(
       await h.db
         .select({ kind: schema.teamNotifications.kind, key: schema.teamNotifications.periodKey })

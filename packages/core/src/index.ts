@@ -554,6 +554,7 @@ export {
 export {
   CREDENTIAL_MAIL_KINDS,
   findSenderDomainOwner,
+  MUTED_WHILE_SUSPENDED,
   type SenderDomainOwner,
   SYSTEM_MAIL_TAG,
   type SystemMailKind,
@@ -599,7 +600,9 @@ export {
 } from "./team-plan.js";
 export {
   fetchTeamStanding,
+  isSilentlySuspended,
   isTeamSuspended,
+  SILENT_SUSPENSIONS,
   STANDING_COLUMNS,
   SUSPENSION_REASONS,
   type SuspensionReason,

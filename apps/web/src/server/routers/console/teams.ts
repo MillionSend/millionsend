@@ -4,12 +4,14 @@ import {
   accountMailPhrase,
   fetchAccountScore,
   fetchDeliverabilityHealth,
+  isSilentlySuspended,
   liveSupportViewForTeam,
   PLAN_RUNGS,
   type Plan,
   raisesQuota,
   recordTenantStatus,
   resumeMonitorPause,
+  SILENT_SUSPENSIONS,
   SUPPORT_VIEW_REASONS,
   SUPPORT_VIEW_SIGN_IN_MINUTES,
   SUSPENSION_REASONS,
@@ -48,8 +50,6 @@ const SORT_KEYS = [
   "created",
 ] as const;
 const PAUSE_REASONS = ["complaints", "report", "manual"] as const;
-/** Suspensions the owner never hears about, on the way in or out. */
-const SILENT_SUSPENSIONS: readonly string[] = ["phishing", "review"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const t = schema.teams;
@@ -238,7 +238,9 @@ export const consoleTeamsRouter = router({
           .leftJoin(st, eq(st.teamId, t.id))
           .where(where),
       ]);
-      const items = rows.slice(0, input.limit);
+      const items = rows
+        .slice(0, input.limit)
+        .map((row) => ({ ...row, silentlySuspended: isSilentlySuspended(row) }));
       return {
         items,
         total: count?.total ?? 0,
@@ -270,6 +272,7 @@ export const consoleTeamsRouter = router({
     ]);
     return {
       ...row,
+      silentlySuspended: isSilentlySuspended(row),
       stripeSubscriptionUrl: row.stripeSubscriptionId
         ? `https://dashboard.stripe.com/${isLiveKey(env.STRIPE_SECRET_KEY ?? "") ? "" : "test/"}subscriptions/${row.stripeSubscriptionId}`
         : null,
@@ -318,6 +321,9 @@ export const consoleTeamsRouter = router({
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "sign_in_again" });
       }
       const team = await loadTeam(ctx.db, input.id);
+      if (isSilentlySuspended(team)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "silent_suspension" });
+      }
       const [own] = await ctx.db
         .select({ id: schema.teamMembers.id })
         .from(schema.teamMembers)
@@ -455,7 +461,9 @@ export const consoleTeamsRouter = router({
           target: { type: "team", id: team.id },
           metadata: { name: team.name, reason: "manual" },
         });
-        if (input.broadcastsPaused) {
+        // A suspended team is not told: the notice says transactional mail
+        // keeps flowing, which the suspension stops, and phishing stays silent.
+        if (input.broadcastsPaused && !team.suspendedAt) {
           await mailTeamOwners(ctx.db, team, "team.broadcasts_paused", "/broadcasts", (locale) => ({
             reason: reasonText(locale, "team.broadcasts_paused", "manual", undefined),
           }));
@@ -495,6 +503,8 @@ export const consoleTeamsRouter = router({
         .update(t)
         .set({ broadcastsPausedByOperatorAt: new Date() })
         .where(eq(t.id, team.id));
+      // Same rule as adjustLimits: a suspended team is not told.
+      const notify = input.notify && !team.suspendedAt;
       await auditOperator(ctx, {
         teamId: team.id,
         action: "team.broadcasts_paused",
@@ -503,10 +513,10 @@ export const consoleTeamsRouter = router({
           name: team.name,
           reason: input.reason,
           note: input.note ?? null,
-          notified: input.notify,
+          notified: notify,
         },
       });
-      if (input.notify) {
+      if (notify) {
         await mailTeamOwners(ctx.db, team, "team.broadcasts_paused", "/broadcasts", (locale) => ({
           reason: reasonText(locale, "team.broadcasts_paused", input.reason, input.note),
         }));
@@ -623,7 +633,7 @@ export const consoleTeamsRouter = router({
         target: { type: "team", id: team.id },
         metadata: { name: team.name, reason: team.suspensionReason },
       });
-      if (team.suspendedAt && !SILENT_SUSPENSIONS.includes(team.suspensionReason ?? "")) {
+      if (team.suspendedAt && !isSilentlySuspended(team)) {
         await mailTeamOwners(ctx.db, team, "team.reinstated", "/emails", () => ({}));
       }
       if (team.suspensionReason === "review") {

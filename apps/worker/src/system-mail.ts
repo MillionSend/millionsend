@@ -18,10 +18,7 @@ import { EMAIL_SEND_PRIORITY, type EmailSendPriority } from "@millionsend/queue"
 import { createSesSendClient, sendSimpleEmail } from "@millionsend/ses";
 
 export interface SystemMailer {
-  send(
-    to: string,
-    message: { subject: string; html: string; text: string; kind: SystemMailKind },
-  ): Promise<void>;
+  send(to: string, message: Omit<SystemMailMessage, "from" | "to">): Promise<void>;
 }
 
 /**
@@ -99,7 +96,7 @@ export async function mailOwners(
   let sent = 0;
   for (const recipient of recipients) {
     try {
-      await mailer.send(recipient.email, { ...build(recipient.locale), kind });
+      await mailer.send(recipient.email, { ...build(recipient.locale), kind, aboutTeamId: teamId });
       sent += 1;
     } catch (err) {
       console.error(`system mail: ${kind} to ${recipient.email} failed`, err);
@@ -111,6 +108,7 @@ export async function mailOwners(
 /**
  * One catalog notice to the instance operator, in their own language when
  * their contact row says which; nothing goes out when no operator exists.
+ * It names no team, so no suspension mutes it.
  * Returns whether it was sent; a failing send is the caller's to log.
  */
 export async function mailOperator(

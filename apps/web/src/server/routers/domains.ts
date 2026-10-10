@@ -46,6 +46,7 @@ import { isUniqueViolation } from "@/lib/db-errors";
 import { recordAudit } from "../audit";
 import { resolveBaseUrl } from "../auth";
 import { enqueueDomainAge } from "../queue";
+import { assertTeamNotSuspended } from "../suspension-lock";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
 // Lowercase registrable hostname with at least two labels; SES identities are
@@ -540,6 +541,9 @@ export function createDomainsRouter(deps: DomainsSesDeps = defaultSesDeps) {
       }),
 
     delete: adminProcedure.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+      // While a suspended team holds a domain, cloud refuses the name to any
+      // other team, so the domain cannot move to a fresh team and keep sending.
+      await assertTeamNotSuspended(ctx.db, ctx.teamId, "deleteDomain");
       const domain = await requireDomain(ctx.db, ctx.teamId, input.id);
       // The SES identity is shared by every row with the same (name, region):
       // it goes only with the last of them.
